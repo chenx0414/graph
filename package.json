@@ -19,6 +19,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:m0": "vitest run tests/m0",
+    "test:m1": "vitest run tests/m1",
+    "demo:m1": "node examples/m1-demo.ts",
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {

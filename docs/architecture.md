@@ -1,6 +1,6 @@
 # Graph 实现架构
 
-日期：2026-09-10。基于使用者已确认的 [首版设计](graph-mvp.md)。本文为完整工程方案；M0 已验证固定版本 Pi 的受控接入及当前 macOS 执行限制，见 [验证报告](planning/m0-results.md)。完整任务状态机、故障恢复和 Web 仍按 [实施计划](implementation-plan.md) 实现。
+日期：2026-09-11。基于使用者已确认的 [首版设计](graph-mvp.md)。本文为完整工程方案；M0 已验证固定版本 Pi 的受控接入及当前 macOS 执行限制，见 [M0 报告](planning/m0-results.md)。M1 已实现任务入口、固定 DAG、操作结算和恢复核对，见 [M1 报告](planning/m1-results.md)。完整动态图、生产 Pi 和 Web 仍按 [实施计划](implementation-plan.md) 实现。
 
 ## 架构选择
 
@@ -62,7 +62,7 @@ flowchart TB
 
 ## 外部任务 interface
 
-设计用类型，尚非可调用 SDK：
+完整设计用类型。M1 可调用入口为 `openTaskRuntime(...).user`，具体行为和当前支持范围见 M1 报告：
 
 ```ts
 interface TaskRuntime {

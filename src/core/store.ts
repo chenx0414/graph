@@ -1,0 +1,123 @@
+import { DatabaseSync } from 'node:sqlite';
+import { EventEmitter } from 'node:events';
+import { RuntimeError } from './types.ts';
+
+export function canonicalJson(value: unknown): string {
+  const normalize = (item: unknown): unknown => {
+    if (item === null || typeof item === 'string' || typeof item === 'boolean') return item;
+    if (typeof item === 'number' && Number.isFinite(item)) return item;
+    if (Array.isArray(item)) return item.map(normalize);
+    if (typeof item === 'object' && item) {
+      return Object.fromEntries(Object.keys(item).sort().filter(key => (item as Record<string, unknown>)[key] !== undefined)
+        .map(key => [key, normalize((item as Record<string, unknown>)[key])]));
+    }
+    throw new RuntimeError('invalid_input', 'Expected JSON data');
+  };
+  return JSON.stringify(normalize(value));
+}
+
+export interface TaskRow {
+  id: string; project_id: string; request: string; requirement_version: number;
+  latest_proposal: number; accepted_proposal: number | null; target_branch: string | null;
+  phase: string; paused: number; created_seq: number;
+}
+
+/** SQLite and transaction details stay private to the Task Runtime module. */
+export class TaskStore {
+  readonly db: DatabaseSync;
+  private readonly changes = new EventEmitter();
+  constructor(path: string) {
+    this.db = new DatabaseSync(path);
+    this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
+    const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+    if (version > 4) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version === 0) this.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
+        CREATE TABLE tasks(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), request TEXT NOT NULL,
+          requirement_version INTEGER NOT NULL DEFAULT 1, latest_proposal INTEGER NOT NULL DEFAULT 0,
+          accepted_proposal INTEGER, target_branch TEXT, phase TEXT NOT NULL DEFAULT 'discussing',
+          paused INTEGER NOT NULL DEFAULT 0, created_seq INTEGER NOT NULL);
+        CREATE TABLE proposals(task_id TEXT NOT NULL REFERENCES tasks(id), version INTEGER NOT NULL,
+          requirement_version INTEGER NOT NULL, spec TEXT NOT NULL, PRIMARY KEY(task_id,version));
+        CREATE TABLE nodes(task_id TEXT NOT NULL REFERENCES tasks(id), id TEXT NOT NULL, spec TEXT NOT NULL,
+          instance_id TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY(task_id,id));
+        CREATE TABLE instances(id TEXT PRIMARY KEY, task_id TEXT NOT NULL, node_id TEXT NOT NULL,
+          budget INTEGER NOT NULL DEFAULT 20000000, used INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY(task_id,node_id) REFERENCES nodes(task_id,id), UNIQUE(task_id,node_id));
+        CREATE TABLE commands(scope TEXT NOT NULL, request_id TEXT NOT NULL, payload TEXT NOT NULL, receipt TEXT NOT NULL,
+          PRIMARY KEY(scope,request_id));
+        CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT REFERENCES tasks(id),
+          type TEXT NOT NULL, data TEXT NOT NULL, timestamp INTEGER NOT NULL);
+        CREATE TABLE runtime(singleton INTEGER PRIMARY KEY CHECK(singleton=1), active_task TEXT REFERENCES tasks(id), generation INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO runtime(singleton) VALUES(1);
+        PRAGMA user_version=1;
+      `);
+    });
+    if (version < 2) this.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE nodes ADD COLUMN output TEXT;
+        CREATE TABLE operations(id TEXT PRIMARY KEY, task_id TEXT NOT NULL, node_id TEXT NOT NULL,
+          instance_id TEXT REFERENCES instances(id), generation INTEGER NOT NULL, spec TEXT NOT NULL,
+          state TEXT NOT NULL, reserved INTEGER NOT NULL, worker_active INTEGER NOT NULL DEFAULT 0,
+          result TEXT, usage TEXT, FOREIGN KEY(task_id,node_id) REFERENCES nodes(task_id,id));
+        CREATE TABLE evidence(id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+          node_id TEXT NOT NULL, operation_id TEXT NOT NULL REFERENCES operations(id),
+          acceptance_id TEXT NOT NULL, proposal_version INTEGER NOT NULL, requirement_version INTEGER NOT NULL,
+          data TEXT NOT NULL, UNIQUE(operation_id,acceptance_id));
+        PRAGMA user_version=2;
+      `);
+    });
+    if (version < 3) this.transaction(() => {
+      this.db.exec(`CREATE TABLE questions(id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+        node_id TEXT NOT NULL, operation_id TEXT REFERENCES operations(id), kind TEXT NOT NULL,
+        data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', answer TEXT);
+        PRAGMA user_version=3;`);
+    });
+    if (version < 4) this.transaction(() => {
+      this.db.exec(`CREATE TABLE task_grants(task_id TEXT NOT NULL REFERENCES tasks(id), grant TEXT NOT NULL,
+        PRIMARY KEY(task_id,grant)); PRAGMA user_version=4;`);
+    });
+  }
+  transaction<T>(action: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    let result: T;
+    try { result = action(); this.db.exec('COMMIT'); }
+    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    this.changes.emit('change'); return result;
+  }
+  command<T>(scope: string, requestId: string, payload: unknown, apply: () => T): T {
+    if (!requestId || requestId.length > 200) throw new RuntimeError('invalid_input', 'A bounded requestId is required');
+    const encoded = canonicalJson(payload);
+    return this.transaction(() => {
+      const previous = this.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get(scope, requestId) as { payload: string; receipt: string } | undefined;
+      if (previous) {
+        if (previous.payload !== encoded) throw new RuntimeError('idempotency_conflict', 'requestId was already used with different content');
+        return JSON.parse(previous.receipt) as T;
+      }
+      const result = apply();
+      this.db.prepare('INSERT INTO commands VALUES(?,?,?,?)').run(scope, requestId, encoded, canonicalJson(result));
+      return result;
+    });
+  }
+  event(taskId: string, type: string, data: unknown) {
+    return Number(this.db.prepare('INSERT INTO events(task_id,type,data,timestamp) VALUES(?,?,?,?)')
+      .run(taskId, type, canonicalJson(data), Date.now()).lastInsertRowid);
+  }
+  task(id: string): TaskRow {
+    const row = this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id) as TaskRow | undefined;
+    if (!row) throw new RuntimeError('not_found', 'Task not found');
+    return row;
+  }
+  waitForChange(signal: AbortSignal) {
+    let finish!: () => void;
+    const promise = new Promise<void>(resolve => {
+      finish = () => { this.changes.off('change', finish); signal.removeEventListener('abort', finish); resolve(); };
+      this.changes.once('change', finish);
+      signal.addEventListener('abort', finish, { once: true });
+      if (signal.aborted) finish();
+    });
+    return { promise, cancel: finish };
+  }
+  close() { this.db.close(); this.changes.emit('change'); }
+}
