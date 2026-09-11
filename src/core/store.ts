@@ -19,7 +19,7 @@ export function canonicalJson(value: unknown): string {
 export interface TaskRow {
   id: string; project_id: string; request: string; requirement_version: number;
   latest_proposal: number; accepted_proposal: number | null; target_branch: string | null;
-  phase: string; paused: number; created_seq: number;
+  phase: string; paused: number; created_seq: number; graph_version: number;
 }
 
 /** SQLite and transaction details stay private to the Task Runtime module. */
@@ -30,7 +30,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 4) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 7) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -77,6 +77,41 @@ export class TaskStore {
     if (version < 4) this.transaction(() => {
       this.db.exec(`CREATE TABLE task_grants(task_id TEXT NOT NULL REFERENCES tasks(id), grant TEXT NOT NULL,
         PRIMARY KEY(task_id,grant)); PRAGMA user_version=4;`);
+    });
+    if (version < 5) this.transaction(() => { this.db.exec('ALTER TABLE nodes ADD COLUMN route TEXT; PRAGMA user_version=5;'); });
+    if (version < 6) this.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE tasks ADD COLUMN graph_version INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE nodes ADD COLUMN activation_id TEXT;
+        ALTER TABLE nodes ADD COLUMN output_version INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE nodes ADD COLUMN output_operation TEXT REFERENCES operations(id);
+        ALTER TABLE operations ADD COLUMN activation_id TEXT;
+        ALTER TABLE evidence ADD COLUMN activation_id TEXT;
+        ALTER TABLE evidence ADD COLUMN valid INTEGER NOT NULL DEFAULT 1;
+        CREATE TABLE graph_revisions(task_id TEXT NOT NULL REFERENCES tasks(id), version INTEGER NOT NULL,
+          spec TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(task_id,version));
+        CREATE TABLE activations(id TEXT PRIMARY KEY, task_id TEXT NOT NULL, node_id TEXT NOT NULL,
+          graph_version INTEGER NOT NULL, round INTEGER NOT NULL, state TEXT NOT NULL, input_versions TEXT NOT NULL,
+          FOREIGN KEY(task_id,node_id) REFERENCES nodes(task_id,id));
+        INSERT INTO graph_revisions SELECT t.id,1,p.spec,'M1 confirmation' FROM tasks t JOIN proposals p
+          ON p.task_id=t.id AND p.version=t.accepted_proposal;
+        UPDATE tasks SET graph_version=1 WHERE accepted_proposal IS NOT NULL;
+        INSERT INTO activations SELECT lower(hex(randomblob(16))),task_id,id,1,1,status,'{}' FROM nodes;
+        UPDATE nodes SET activation_id=(SELECT a.id FROM activations a WHERE a.task_id=nodes.task_id AND a.node_id=nodes.id),
+          output_operation=(SELECT o.id FROM operations o WHERE o.task_id=nodes.task_id AND o.node_id=nodes.id AND o.state='succeeded' ORDER BY o.rowid DESC LIMIT 1),
+          output_version=(SELECT COUNT(*) FROM operations o WHERE o.task_id=nodes.task_id AND o.node_id=nodes.id AND o.state='succeeded');
+        UPDATE operations SET activation_id=(SELECT n.activation_id FROM nodes n WHERE n.task_id=operations.task_id AND n.id=operations.node_id);
+        UPDATE operations SET spec=json_set(spec,'$.activationId',activation_id,'$.graphVersion',1,'$.dependencySources',json('{}'),'$.inputVersions',json('{}'));
+        UPDATE evidence SET activation_id=(SELECT o.activation_id FROM operations o WHERE o.id=evidence.operation_id);
+        PRAGMA user_version=6;
+      `);
+    });
+    if (version < 7) this.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE nodes ADD COLUMN stall_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE graph_revisions ADD COLUMN base_version INTEGER NOT NULL DEFAULT 0;
+        PRAGMA user_version=7;
+      `);
     });
   }
   transaction<T>(action: () => T): T {

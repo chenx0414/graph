@@ -1,3 +1,5 @@
+import type { VerifierConfig } from './verification.ts';
+
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 export interface ProjectConfig { id: string; root: string; grants?: string[] }
@@ -10,12 +12,22 @@ export interface NodeSpec {
   definitionVersion?: string;
   model?: string;
   role?: 'master' | 'worker';
+  container?: string;
+  routes?: string[];
+  when?: { node: string; case: string };
+  optional?: boolean;
+  verifier?: VerifierConfig;
+  replaces?: string;
 }
+export interface ContainerSpec { id: string; parent?: string; dependsOn?: string[]; when?: { node: string; case: string }; outputs: string[] }
+export interface LoopSpec { from: string; to: string }
 export interface Proposal {
   requirementVersion: number;
   summary: string;
   acceptance: { id: string; description: string; checkNode: string }[];
   nodes: NodeSpec[];
+  containers?: ContainerSpec[];
+  loops?: LoopSpec[];
 }
 export interface Receipt { taskId: string; cursor: number }
 export interface ProposalReceipt extends Receipt { proposalVersion: number }
@@ -25,16 +37,24 @@ export interface TaskWatch extends AsyncIterableIterator<TaskUpdate> { return():
 export type { TokenUsage } from '../runtime/call-broker.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
 export interface EvidenceInput { acceptanceId: string; summary: string; artifact: { path: string; digest: string } }
+export interface ArtifactInput { id: string; path: string; digest: string }
+export interface ArtifactVersion extends ArtifactInput { nodeId: string; operationId: string; activationId: string }
+export interface DependencySource { nodeId: string; operationId: string; activationId: string; outputVersion: number; artifacts: ArtifactVersion[] }
 export interface Operation {
   id: string; taskId: string; nodeId: string; instanceId: string | null; generation: number;
   attempt: number; kind: NodeSpec['kind']; action: string; input: Json; dependencies: Record<string, Json>;
   proposalVersion: number; requirementVersion: number;
   context: { previousOutput: Json; answers: { questionId: string; value: Json }[] };
   grants: string[];
+  activationId: string; graphVersion: number;
+  dependencySources: Record<string, DependencySource[]>;
+  inputVersions: Record<string, { activationId: string; outputVersion: number }[]>;
 }
 export interface OperationResult {
-  outcome: 'completed' | 'continue' | 'waiting'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
+  outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
   question?: { prompt: string };
+  route?: string;
+  artifacts?: ArtifactInput[];
 }
 export type Answer = { type: 'add_budget'; tokens: number } | { type: 'respond'; value: Json } | { type: 'retry' } | { type: 'grant'; grant: string } | { type: 'acknowledge' }
   | { type: 'usage'; usage: TokenUsage; proof: string };

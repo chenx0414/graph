@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
+import { loadGraph, reactivate } from './graph.ts';
+import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
 
-type NodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null };
-export type OperationRow = { id: string; task_id: string; node_id: string; instance_id: string | null; generation: number; spec: string; state: string; reserved: number; worker_active: number; result: string | null; usage: string | null };
+type NodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
+export type OperationRow = { id: string; task_id: string; node_id: string; instance_id: string | null; generation: number; spec: string; state: string; reserved: number; worker_active: number; result: string | null; usage: string | null; activation_id: string };
 
 /** Private execution state machine. Every mutation shares the task command/event transaction. */
 export class Execution {
   private readonly pending = new Set<Promise<unknown>>();
   private stopping = false;
+  private readonly driveWaiters: (() => void)[] = [];
   private readonly store: TaskStore;
   private readonly actions: Record<string, ActionAdapter>;
   private readonly generation: number;
@@ -91,33 +94,33 @@ export class Execution {
     } else if (question.kind === 'permission' && answer.type === 'grant') {
       if (answer.grant !== (JSON.parse(question.data) as { grant: string }).grant) throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
       this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);
-    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(question.kind === 'adapter_error' && answer.type === 'retry') && !(question.kind === 'reservation_exceeded' && answer.type === 'acknowledge')) {
+    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(['adapter_error', 'execution_failed'].includes(question.kind) && answer.type === 'retry') && !(question.kind === 'reservation_exceeded' && answer.type === 'acknowledge') && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
       throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
     }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
     if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, question.node_id)) {
       const last = this.store.db.prepare("SELECT result FROM operations WHERE task_id=? AND node_id=? AND state='succeeded' ORDER BY rowid DESC LIMIT 1").get(taskId, question.node_id) as { result: string } | undefined;
       const completed = last && (JSON.parse(last.result) as OperationResult).outcome === 'completed';
-      this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?').run(completed ? 'succeeded' : 'pending', taskId, question.node_id);
+      if (!['rework', 'stalled'].includes(question.kind)) this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?').run(completed ? 'succeeded' : 'pending', taskId, question.node_id);
+    }
+    if (['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond')) {
+      const resume = (JSON.parse(question.data) as { resume?: string[] }).resume ?? [];
+      for (const id of [question.node_id, ...resume]) this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(taskId, id);
+      if (resume.length) reactivate(this.store, taskId, resume);
     }
     this.advance(taskId);
   }
 
   private block(node: NodeRow, kind: string, data: Json, operationId: string | null = null) {
     this.store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?").run(node.task_id, node.id);
+    this.store.db.prepare("UPDATE activations SET state='blocked' WHERE id=?").run(node.activation_id);
     this.store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
       .run(randomUUID(), node.task_id, node.id, operationId, kind, canonicalJson(data));
     this.store.event(node.task_id, 'question.opened', { nodeId: node.id, kind, data, operationId });
   }
 
   async runReady() {
-    const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
-    if (!active_task || this.stopping || this.store.task(active_task).paused) return { dispatched: 0 };
-    const nodes = this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(active_task) as NodeRow[];
-    const executions = nodes.filter(node => {
-      const spec = JSON.parse(node.spec) as NodeSpec;
-      return (spec.dependsOn ?? []).every(id => (this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(active_task, id) as { status: string }).status === 'succeeded');
-    }).map(node => this.run(node));
+    const executions = this.readyNodes().map(node => this.run(node));
     const result = Promise.allSettled(executions);
     this.pending.add(result);
     try {
@@ -129,11 +132,91 @@ export class Execution {
     finally { this.pending.delete(result); }
   }
 
+  /** Dispatch newly ready work as completions land, without waiting for a slow sibling in the same batch. */
+  async drive() {
+    const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+    if (!active_task || this.stopping || this.store.task(active_task).paused) return { dispatched: 0 };
+    let dispatched = 0;
+    const running = new Set<Promise<boolean>>();
+    while (!this.stopping && !this.store.task(active_task).paused) {
+      const started: Promise<boolean>[] = [];
+      for (const node of this.readyNodes()) {
+        const spec = JSON.parse(node.spec) as NodeSpec;
+        if (this.remainingSlots(spec.kind) <= 0) continue;
+        const work = this.run(node);
+        started.push(work);
+        running.add(work);
+        work.finally(() => running.delete(work));
+      }
+      dispatched += started.length;
+      if (running.size === 0) break;
+      await Promise.race([...running, new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
+    }
+    return { dispatched };
+  }
+
+  private remainingSlots(kind: NodeSpec['kind']) {
+    const { occupied } = this.store.db.prepare(`SELECT COUNT(*) AS occupied FROM operations
+      WHERE (state='intent' OR worker_active=1) AND (instance_id IS NOT NULL)=?`).get(Number(kind === 'agent')) as { occupied: number };
+    return (kind === 'agent' ? 10 : 4) - occupied;
+  }
+
+  private wakeDrive() {
+    const waiters = this.driveWaiters.splice(0);
+    for (const waiter of waiters) waiter();
+  }
+
+  private readyNodes(): NodeRow[] {
+    const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+    if (!active_task || this.stopping || this.store.task(active_task).paused) return [];
+    let nodes: NodeRow[];
+    let graph: ReturnType<typeof loadGraph>;
+    while (true) {
+      nodes = this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(active_task) as NodeRow[];
+      graph = loadGraph(this.store, active_task);
+      const skipped = nodes.filter(node => graph.readiness(node.id) === 'skip');
+      if (!skipped.length) break;
+      this.store.transaction(() => {
+        for (const node of skipped) {
+          this.store.db.prepare("UPDATE nodes SET status='skipped',output=NULL WHERE task_id=? AND id=?").run(active_task, node.id);
+          this.store.db.prepare("UPDATE activations SET state='skipped' WHERE id=?").run(node.activation_id);
+          this.store.event(active_task, 'node.skipped', { nodeId: node.id, reason: 'inactive_route' });
+        }
+      });
+    }
+    return nodes.filter(node => graph.readiness(node.id) === 'ready');
+  }
+
+  private graphVerify(spec: NodeSpec): ActionAdapter {
+    return {
+      kind: 'program',
+      prepare: async operation => async () => {
+        if (!spec.verifier) throw new RuntimeError('invalid_adapter', 'graph.verify requires a verifier config');
+        const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(operation.taskId, operation.proposalVersion) as { spec: string }).spec) as Proposal;
+        const acceptanceIds = proposal.acceptance.filter(item => item.checkNode === operation.nodeId).map(item => item.id);
+        try {
+          return evaluateVerifier(spec.verifier, { dependencies: operation.dependencies, dependencySources: operation.dependencySources, acceptanceIds });
+        } catch (error) {
+          if (error instanceof RuntimeError && error.code === 'invalid_evidence') {
+            return { outcome: 'completed', output: { kind: 'verification', outcome: 'rework', subjects: [], reports: [], blockers: [{ id: 'invalid_evidence', reason: error.message, evidence: [] }] } };
+          }
+          throw error;
+        }
+      },
+    };
+  }
+
   private async run(node: NodeRow): Promise<boolean> {
+    const work = this.execute(node);
+    this.pending.add(work);
+    try { return await work; } finally { this.pending.delete(work); this.wakeDrive(); }
+  }
+
+  private async execute(node: NodeRow): Promise<boolean> {
     if (this.stopping || this.store.task(node.task_id).paused) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
     const spec = JSON.parse(node.spec) as NodeSpec;
-    const adapter = Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : undefined;
+    const adapter = spec.action === 'graph.verify' ? this.graphVerify(spec) : Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : undefined;
     if (!adapter || adapter.kind !== spec.kind) {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: `No ${spec.kind} adapter for ${spec.action}` }));
       return false;
@@ -161,18 +244,20 @@ export class Execution {
     const operation = this.store.transaction(() => {
       const task = this.store.task(node.task_id);
       const attempt = (this.store.db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=? AND node_id=?').get(node.task_id, node.id) as { count: number }).count + 1;
-      const dependencies = Object.fromEntries((spec.dependsOn ?? []).map(id => {
-        const dependency = this.store.db.prepare('SELECT output FROM nodes WHERE task_id=? AND id=?').get(node.task_id, id) as { output: string };
-        return [id, JSON.parse(dependency.output) as Json];
-      }));
+      const graph = loadGraph(this.store, node.task_id);
+      const dependencies = graph.inputs(node.id);
+      const dependencySources = graph.sources(node.id);
+      const inputVersions = Object.fromEntries(Object.entries(dependencySources).map(([id, sources]) => [id, sources.map(source => ({ activationId: source.activationId, outputVersion: source.outputVersion }))]));
       const answers = (this.store.db.prepare("SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind='waiting' AND status='resolved' ORDER BY rowid").all(node.task_id, node.id) as { id: string; answer: string }[])
         .map(row => ({ questionId: row.id, value: (JSON.parse(row.answer) as { value: Json }).value }));
       const operation: Operation = { id: randomUUID(), taskId: node.task_id, nodeId: node.id, instanceId: node.instance_id,
         generation: this.generation, attempt, kind: spec.kind, action: spec.action, input: spec.input ?? null, dependencies,
         proposalVersion: task.accepted_proposal!, requirementVersion: task.requirement_version,
-        context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers }, grants };
-      this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved) VALUES(?,?,?,?,?,?,'intent',?)")
-        .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation);
+        context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers }, grants,
+        activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions };
+      this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
+        .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
+      this.store.db.prepare("UPDATE activations SET input_versions=?,state='preparing' WHERE id=?").run(canonicalJson(inputVersions), node.activation_id);
       this.store.db.prepare("UPDATE nodes SET status='preparing' WHERE task_id=? AND id=?").run(node.task_id, node.id);
       this.store.event(node.task_id, 'operation.intent', operation);
       return operation;
@@ -199,6 +284,7 @@ export class Execution {
     this.store.transaction(() => {
       this.store.db.prepare("UPDATE operations SET state='dispatched',worker_active=1 WHERE id=?").run(operation.id);
       this.store.db.prepare("UPDATE nodes SET status='running' WHERE task_id=? AND id=?").run(node.task_id, node.id);
+      this.store.db.prepare("UPDATE activations SET state='running' WHERE id=?").run(node.activation_id);
       this.store.event(node.task_id, 'operation.dispatched', { operationId: operation.id });
     });
     let quiescent = false;
@@ -221,7 +307,7 @@ export class Execution {
   }
 
   private settle(operation: Operation, result: OperationResult) {
-    if (!result || !['completed', 'continue', 'waiting'].includes(result.outcome)) throw new RuntimeError('invalid_result', 'Unexpected operation outcome');
+    if (!result || !['completed', 'continue', 'waiting', 'failed', 'skipped'].includes(result.outcome)) throw new RuntimeError('invalid_result', 'Unexpected operation outcome');
     canonicalJson(result);
     const row = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(operation.id) as OperationRow;
     if (row.state === 'succeeded') {
@@ -229,6 +315,8 @@ export class Execution {
       return;
     }
     if (!['dispatched', 'unknown'].includes(row.state)) throw new RuntimeError('invalid_operation', 'Operation was not dispatched');
+    const currentNode = this.store.db.prepare('SELECT activation_id FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { activation_id: string };
+    if (currentNode.activation_id !== operation.activationId) throw new RuntimeError('stale_activation', 'Operation belongs to a replaced activation');
     if (row.result) {
       const previous = JSON.parse(row.result) as OperationResult;
       if (canonicalJson({ ...previous, usage: undefined }) !== canonicalJson({ ...result, usage: undefined })) throw new RuntimeError('result_conflict', 'Known result cannot change during usage reconciliation');
@@ -249,12 +337,18 @@ export class Execution {
     const total = values.reduce((a, b) => a + b, 0);
     if (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total)) throw new RuntimeError('invalid_usage', 'Invalid disjoint token counts');
     const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(operation.taskId, operation.proposalVersion) as { spec: string }).spec) as Proposal;
-    if (result.outcome === 'completed' && proposal.acceptance.some(item => item.checkNode === operation.nodeId && !result.evidence?.some(evidence => evidence.acceptanceId === item.id))) throw new RuntimeError('invalid_evidence', 'Completed check is missing required acceptance evidence');
+    const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+    if (new Set(result.artifacts?.map(artifact => artifact.id)).size !== (result.artifacts?.length ?? 0) || result.artifacts?.some(artifact => !artifact.id.trim() || !isAbsolute(artifact.path) || !/^[a-f0-9]{64}$/.test(artifact.digest))) throw new RuntimeError('invalid_evidence', 'Artifacts require unique IDs, absolute paths and SHA-256 digests');
+    if (result.outcome === 'skipped' && !nodeSpec.optional) throw new RuntimeError('invalid_result', 'Only a predeclared optional node may skip work');
+    if ((nodeSpec.routes && result.outcome === 'completed' && !nodeSpec.routes.includes(result.route!)) || (result.route !== undefined && !nodeSpec.routes?.includes(result.route))) throw new RuntimeError('invalid_result', 'Router must return a declared case');
+    const rework = result.outcome === 'completed' && isReworkDecision(result.output);
+    if (result.outcome === 'completed' && !rework && proposal.acceptance.some(item => item.checkNode === operation.nodeId && !result.evidence?.some(evidence => evidence.acceptanceId === item.id))) throw new RuntimeError('invalid_evidence', 'Completed check is missing required acceptance evidence');
+    if (rework && result.evidence?.length) throw new RuntimeError('invalid_evidence', 'Rework cannot carry acceptance evidence');
     if (result.evidence?.length && result.outcome !== 'completed') throw new RuntimeError('invalid_evidence', 'Only a completed check may produce acceptance evidence');
     for (const evidence of result.evidence ?? []) {
       if (operation.kind !== 'program' || !proposal.acceptance.some(item => item.id === evidence.acceptanceId && item.checkNode === operation.nodeId)) throw new RuntimeError('invalid_evidence', 'Evidence must come from the assigned program check');
       if (!evidence.summary.trim() || !isAbsolute(evidence.artifact.path) || !/^[a-f0-9]{64}$/.test(evidence.artifact.digest)) throw new RuntimeError('invalid_evidence', 'Evidence requires a summary, absolute artifact path and SHA-256 digest');
-      this.store.db.prepare('INSERT INTO evidence VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(), operation.taskId, operation.nodeId, operation.id, evidence.acceptanceId, operation.proposalVersion, operation.requirementVersion, canonicalJson(evidence));
+      this.store.db.prepare('INSERT INTO evidence(id,task_id,node_id,operation_id,acceptance_id,proposal_version,requirement_version,data,activation_id) VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(), operation.taskId, operation.nodeId, operation.id, evidence.acceptanceId, operation.proposalVersion, operation.requirementVersion, canonicalJson(evidence), operation.activationId);
     }
     this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0,result=?,usage=? WHERE id=?")
       .run(canonicalJson(result), canonicalJson(usage), operation.id);
@@ -265,24 +359,69 @@ export class Execution {
       const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as NodeRow;
       this.block(node, 'waiting', { prompt: result.question.prompt }, operation.id);
     }
-    this.store.db.prepare('UPDATE nodes SET status=?,output=? WHERE task_id=? AND id=?')
-      .run(result.outcome === 'completed' ? 'succeeded' : result.outcome === 'waiting' ? 'waiting' : 'pending', canonicalJson(result.output), operation.taskId, operation.nodeId);
+    this.store.db.prepare('UPDATE nodes SET status=?,output=?,route=?,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?')
+      .run(result.outcome === 'completed' ? 'succeeded' : result.outcome === 'continue' ? 'pending' : result.outcome, canonicalJson(result.output), result.route ?? null, operation.id, operation.taskId, operation.nodeId);
+    if (result.outcome === 'failed' && !nodeSpec.optional) {
+      const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as NodeRow;
+      this.block(node, 'execution_failed', { output: result.output }, operation.id);
+    }
     if (total > row.reserved) {
       const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as NodeRow;
       this.block(node, 'reservation_exceeded', { reserved: row.reserved, actual: total }, operation.id);
     }
     this.store.event(operation.taskId, 'operation.result', { operationId: operation.id, result });
+    this.store.db.prepare('UPDATE activations SET state=(SELECT status FROM nodes WHERE task_id=? AND id=?) WHERE id=?').run(operation.taskId, operation.nodeId, operation.activationId);
+    if (rework) this.handleRework(operation, result);
+    else if (result.outcome === 'completed' && proposal.acceptance.some(item => item.checkNode === operation.nodeId)) {
+      for (const loop of loadGraph(this.store, operation.taskId).plan.loops.filter(item => item.from === operation.nodeId)) {
+        this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(operation.taskId, loop.to);
+      }
+    }
     this.advance(operation.taskId);
+  }
+
+  private handleRework(operation: Operation, result: OperationResult) {
+    const graph = loadGraph(this.store, operation.taskId);
+    const loops = graph.plan.loops.filter(loop => loop.from === operation.nodeId);
+    const decision = result.output as unknown as VerificationDecision;
+    const targets = loops.length ? loops.map(loop => loop.to) : decision.subjects.map(subject => subject.nodeId);
+    let halt = false;
+    for (const target of new Set(targets.length ? targets : [operation.nodeId])) {
+      const previous = this.store.db.prepare("SELECT result FROM operations WHERE task_id=? AND node_id=? AND state='succeeded' AND id!=? ORDER BY rowid DESC LIMIT 1")
+        .get(operation.taskId, operation.nodeId, operation.id) as { result: string } | undefined;
+      const previousOutput = previous ? JSON.parse(previous.result) as OperationResult : undefined;
+      const previousIds = new Set(isReworkDecision(previousOutput?.output ?? null) ? (previousOutput!.output as unknown as VerificationDecision).blockers.map(item => item.id) : []);
+      const currentIds = new Set(decision.blockers.map(item => item.id));
+      const progress = !currentIds.has('invalid_evidence') && [...previousIds].some(id => !currentIds.has(id));
+      if (progress) this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(operation.taskId, target);
+      else this.store.db.prepare('UPDATE nodes SET stall_count=stall_count+1 WHERE task_id=? AND id=?').run(operation.taskId, target);
+      const { stall_count } = this.store.db.prepare('SELECT stall_count FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, target) as { stall_count: number };
+      if (stall_count >= 3) halt = true;
+    }
+    const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as NodeRow;
+    if (halt) {
+      const attempts = this.store.db.prepare('SELECT node_id,round,state FROM activations WHERE task_id=? AND node_id IN (' + targets.map(() => '?').join(',') + ') ORDER BY round,rowid')
+        .all(operation.taskId, ...(targets.length ? targets : [operation.nodeId])) as { node_id: string; round: number; state: string }[];
+      this.block(node, 'stalled', { reason: 'Three consecutive rounds made no substantial progress', resume: targets, blockers: decision.blockers, attempts, evidence: decision.blockers.flatMap(item => item.evidence) }, operation.id);
+      return;
+    }
+    if (!loops.length) {
+      this.block(node, 'rework', { output: result.output, resume: targets }, operation.id);
+      return;
+    }
+    reactivate(this.store, operation.taskId, loops.map(loop => loop.to));
+    this.store.event(operation.taskId, 'graph.rework', { from: operation.nodeId, to: loops.map(loop => loop.to) });
   }
 
   private advance(taskId: string) {
     const task = this.store.task(taskId);
     if (task.phase !== 'running') return;
-    const incomplete = this.store.db.prepare("SELECT id FROM nodes WHERE task_id=? AND status!='succeeded'").get(taskId);
+    const graph = loadGraph(this.store, taskId);
+    const incomplete = [...graph.plan.nodes.keys()].some(id => !['succeeded', 'skipped'].includes(graph.status(id)));
     const blocked = this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId);
     if (incomplete || blocked) return;
     const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
-    const evidence = this.store.db.prepare('SELECT acceptance_id FROM evidence WHERE task_id=? AND proposal_version=? AND requirement_version=?').all(taskId, task.accepted_proposal!, task.requirement_version) as { acceptance_id: string }[];
+    const evidence = this.store.db.prepare('SELECT acceptance_id FROM evidence WHERE task_id=? AND proposal_version=? AND requirement_version=? AND valid=1').all(taskId, task.accepted_proposal!, task.requirement_version) as { acceptance_id: string }[];
     if (proposal.acceptance.every(item => evidence.some(row => row.acceptance_id === item.id))) {
       this.store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
       const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;

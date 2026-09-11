@@ -5,6 +5,8 @@ import { TaskStore, canonicalJson } from './store.ts';
 import { Execution } from './execution.ts';
 import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
+import { createActivation, loadGraph } from './graph.ts';
+import { applyRevision } from './revision.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { OperationRow } from './execution.ts';
 import { RuntimeError, type ProjectConfig, type Proposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
@@ -87,13 +89,15 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
             if (task.accepted_proposal !== null) throw new RuntimeError('already_accepted', 'Task already has confirmed requirements');
             if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
             const proposal = JSON.parse(row.spec) as Proposal;
+            store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,?,?,?,?)').run(taskId, 1, row.spec, 'Confirmed task graph', 0);
             for (const node of proposal.nodes) {
               const instanceId = node.kind === 'agent' ? randomUUID() : null;
               store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
               if (instanceId) store.db.prepare('INSERT INTO instances(id,task_id,node_id) VALUES(?,?,?)').run(instanceId, taskId, node.id);
+              createActivation(store, taskId, node.id, 1);
             }
             const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
-            store.db.prepare('UPDATE tasks SET accepted_proposal=?,target_branch=?,phase=? WHERE id=?')
+            store.db.prepare('UPDATE tasks SET accepted_proposal=?,target_branch=?,phase=?,graph_version=1 WHERE id=?')
               .run(input.proposalVersion, input.targetBranch, active_task ? 'queued' : 'running', taskId);
             if (!active_task) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
             return { taskId, cursor: store.event(taskId, 'task.accepted', { proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
@@ -102,8 +106,8 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
         async view() {
           ensureOpen();
           const task = store.task(taskId);
-          const rows = store.db.prepare('SELECT n.id,n.spec,n.instance_id,n.status,i.used,i.budget FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(taskId) as { id: string; spec: string; instance_id: string | null; status: string; used: number | null; budget: number | null }[];
-          const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as { node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string }[];
+          const rows = store.db.prepare('SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,i.used,i.budget FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(taskId) as { id: string; spec: string; instance_id: string | null; status: string; used: number | null; budget: number | null; activation_id: string; output_version: number; stall_count: number }[];
+          const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data,activation_id,valid FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as { node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string; activation_id: string; valid: number }[];
           const operations = store.db.prepare('SELECT * FROM operations WHERE task_id=? ORDER BY rowid').all(taskId) as OperationRow[];
           const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null }[];
           const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
@@ -114,14 +118,16 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
           return {
             id: task.id, projectId: task.project_id, request: task.request, requirementVersion: task.requirement_version,
             proposalVersion: task.latest_proposal, acceptedProposalVersion: task.accepted_proposal,
+            graphVersion: task.graph_version,
             proposal: proposal ? JSON.parse(proposal.spec) as Proposal : null, messages,
+            containers: task.accepted_proposal ? loadGraph(store, taskId).containers() : [],
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused),
             status: task.paused ? (operations.some(op => op.worker_active) ? 'pausing' : 'paused') : questions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operations: operations.map(row => ({ ...JSON.parse(row.spec) as Operation, state: row.state, reserved: row.reserved, workerActive: Boolean(row.worker_active), result: row.result ? JSON.parse(row.result) as OperationResult : null })),
             questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
-            nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, status: row.status, used: row.used, budget: row.budget,
+            nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, budget: row.budget,
               reserved: operations.filter(op => op.node_id === row.id).reduce((sum, op) => sum + op.reserved, 0) })),
-            evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version })),
+            evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid) })),
             cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
           };
         },
@@ -160,6 +166,7 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
     user,
     host: {
       async runReady() { ensureOpen(); return execution.runReady(); },
+      async drive() { ensureOpen(); return execution.drive(); },
       async report(id: string, generation: number, result: OperationResult) { ensureOpen(); execution.report(id, generation, result); },
       async reconcile(id: string) { ensureOpen(); await execution.reconcile(id); },
     },
@@ -178,6 +185,13 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
             store.db.prepare('INSERT INTO proposals VALUES(?,?,?,?)').run(taskId, version, proposal.requirementVersion, canonicalJson(proposal));
             store.db.prepare('UPDATE tasks SET latest_proposal=? WHERE id=?').run(version, taskId);
             return { taskId, proposalVersion: version, cursor: store.event(taskId, 'proposal.created', { proposalVersion: version }) };
+          });
+        },
+        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string }) {
+          ensureOpen();
+          return store.command(`supervisor:${taskId}`, input.requestId, { type: 'revise', baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, containers: input.containers, loops: input.loops }, () => {
+            const revised = applyRevision(store, taskId, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
+            return { taskId, graphVersion: revised.version, cursor: revised.cursor };
           });
         },
       };
