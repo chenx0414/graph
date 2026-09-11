@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, type AssistantMessage, type Model } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
-import { CallBroker, type TokenUsage } from './call-broker.ts';
+import type { TokenUsage } from './call-broker.ts';
+
+/** Pause and usage gate around one actual provider send. CallBroker satisfies this. */
+export interface SendGate {
+  dispatch<T>(id: string, reservation: number, send: () => T): T;
+  settle(id: string, usage: TokenUsage | null): void;
+}
 
 function parseUsage(value: unknown): TokenUsage | null {
   if (!value || typeof value !== 'object') return null;
@@ -44,7 +50,7 @@ async function readUsage(response: Response): Promise<TokenUsage | null> {
 }
 
 /** Controlled lower-level adapter, currently verified for OpenAI chat-completions SSE. */
-export function controlledOpenAIStream(broker: CallBroker, apiKey: string): StreamFn {
+export function controlledOpenAIStream(broker: SendGate, apiKey: string): StreamFn {
   return (model, context, options) => {
     const output = createAssistantMessageEventStream();
     void (async () => {

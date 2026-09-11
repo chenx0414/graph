@@ -7,11 +7,24 @@ import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
 import { createActivation, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
+import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
+import type { ModelEntry } from '../catalog/models.ts';
+import { createPiAdapter } from '../runtime/pi-adapter.ts';
+import { invocationRows } from '../runtime/task-gate.ts';
+import { CallBroker } from '../runtime/call-broker.ts';
+import { openRestrictedExecutor } from '../runtime/restricted-process.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { OperationRow } from './execution.ts';
+import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError, type ProjectConfig, type Proposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
 
-export async function openTaskRuntime(options: { stateDir: string; projects?: ProjectConfig[]; actions?: Record<string, ActionAdapter> }) {
+export async function openTaskRuntime(options: {
+  stateDir: string;
+  projects?: ProjectConfig[];
+  actions?: Record<string, ActionAdapter>;
+  models?: { entries: ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; apiKey: string; modelRuntime: ModelRuntime };
+  master?: { action: string; definitionVersion: string; model: string };
+}) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
   const releaseOwner = acquireOwner(join(stateDir, 'owner.sqlite'));
@@ -20,6 +33,7 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
   catch (error) { releaseOwner(); throw error; }
   let closed = false;
   let execution: Execution;
+  let catalog: Catalog;
   const ensureOpen = () => { if (closed) throw new RuntimeError('closed', 'Runtime is closed'); };
   try {
     store.transaction(() => {
@@ -32,7 +46,22 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
         store.db.prepare('INSERT OR IGNORE INTO projects VALUES(?,?,?)').run(project.id, root, grants);
       }
     });
-    execution = new Execution(store, options.actions ?? {});
+    catalog = new Catalog(store);
+    if (options.models) {
+      store.transaction(() => {
+        for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
+      });
+    }
+    const fallback = options.models ? createPiAdapter({
+      store, instancesDir: join(stateDir, 'instances'), catalog, directory: () => options.models!.entries,
+      apiKey: options.models.apiKey, modelRuntime: options.models.modelRuntime,
+    }) : undefined;
+    execution = new Execution(store, options.actions ?? {}, {
+      ...(fallback ? { fallback } : {}),
+      catalog,
+      ...(options.models ? { models: () => options.models!.entries } : {}),
+      ...(options.models?.preferences ? { preferences: options.models.preferences } : {}),
+    });
   } catch (error) {
     try { store.close(); } finally { releaseOwner(); }
     throw error;
@@ -47,6 +76,15 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
         const taskId = randomUUID();
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         store.db.prepare('INSERT INTO tasks(id,project_id,request,created_seq) VALUES(?,?,?,?)').run(taskId, input.projectId, input.request, sequence);
+        if (options.master) {
+          const spec: NodeSpec = { id: 'master', kind: 'agent', action: options.master.action, definitionVersion: options.master.definitionVersion, model: options.master.model, role: 'master' };
+          const instanceId = randomUUID();
+          store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, spec.id, canonicalJson(spec), instanceId);
+          store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,?,?)').run(instanceId, taskId, spec.id, spec.definitionVersion ?? null, spec.model ?? null);
+          createActivation(store, taskId, spec.id, 0);
+          const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+          if (!active_task) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
+        }
         return { taskId, cursor: store.event(taskId, 'task.created', { request: input.request }) };
       });
     },
@@ -91,22 +129,34 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
             const proposal = JSON.parse(row.spec) as Proposal;
             store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,?,?,?,?)').run(taskId, 1, row.spec, 'Confirmed task graph', 0);
             for (const node of proposal.nodes) {
+              const existing = store.db.prepare('SELECT instance_id FROM nodes WHERE task_id=? AND id=?').get(taskId, node.id) as { instance_id: string | null } | undefined;
+              if (existing) {
+                store.db.prepare('UPDATE nodes SET spec=?,status=? WHERE task_id=? AND id=?').run(canonicalJson(node), node.kind === 'agent' ? 'pending' : 'pending', taskId, node.id);
+                continue;
+              }
               const instanceId = node.kind === 'agent' ? randomUUID() : null;
               store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
-              if (instanceId) store.db.prepare('INSERT INTO instances(id,task_id,node_id) VALUES(?,?,?)').run(instanceId, taskId, node.id);
+              if (instanceId) store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,?,?)').run(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
               createActivation(store, taskId, node.id, 1);
             }
             const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+            const phase = !active_task || active_task === taskId ? 'running' : 'queued';
             store.db.prepare('UPDATE tasks SET accepted_proposal=?,target_branch=?,phase=?,graph_version=1 WHERE id=?')
-              .run(input.proposalVersion, input.targetBranch, active_task ? 'queued' : 'running', taskId);
-            if (!active_task) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
+              .run(input.proposalVersion, input.targetBranch, phase, taskId);
+            if (!active_task || active_task === taskId) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
             return { taskId, cursor: store.event(taskId, 'task.accepted', { proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
           });
         },
         async view() {
           ensureOpen();
           const task = store.task(taskId);
-          const rows = store.db.prepare('SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,i.used,i.budget FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(taskId) as { id: string; spec: string; instance_id: string | null; status: string; used: number | null; budget: number | null; activation_id: string; output_version: number; stall_count: number }[];
+          const rows = store.db.prepare('SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,i.used,i.budget,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(taskId) as { id: string; spec: string; instance_id: string | null; status: string; used: number | null; budget: number | null; activation_id: string; output_version: number; stall_count: number; model: string | null; definition_version: string | null }[];
+          const invocations = invocationRows(store, taskId);
+          const unknownCost = invocations.some(item => item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && item.cost.unknown === true);
+          const cost = unknownCost ? { unknown: true as const } : { amount: invocations.reduce((sum, item) => {
+            const value = item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && typeof item.cost.amount === 'number' ? item.cost.amount : 0;
+            return sum + value;
+          }, 0) };
           const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data,activation_id,valid FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as { node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string; activation_id: string; valid: number }[];
           const operations = store.db.prepare('SELECT * FROM operations WHERE task_id=? ORDER BY rowid').all(taskId) as OperationRow[];
           const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null }[];
@@ -126,8 +176,10 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
             operations: operations.map(row => ({ ...JSON.parse(row.spec) as Operation, state: row.state, reserved: row.reserved, workerActive: Boolean(row.worker_active), result: row.result ? JSON.parse(row.result) as OperationResult : null })),
             questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
             nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, budget: row.budget,
+              ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
               reserved: operations.filter(op => op.node_id === row.id).reduce((sum, op) => sum + op.reserved, 0) })),
             evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid) })),
+            invocations, cost,
             cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
           };
         },
@@ -195,6 +247,64 @@ export async function openTaskRuntime(options: { stateDir: string; projects?: Pr
           });
         },
       };
+    },
+    catalog: {
+      publishDefinition(id: string, spec: DefinitionSpec, requestId: string) {
+        ensureOpen();
+        return store.command('catalog', requestId, { type: 'publish', id, spec }, () => catalog.publishDefinition(id, spec));
+      },
+      definitions() { ensureOpen(); return catalog.listDefinitions(); },
+      capability(id: string) { ensureOpen(); return catalog.capability(id); },
+      async install(input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) {
+        ensureOpen();
+        const payload = { type: 'install', id: input.id, kind: input.kind, source: input.source, version: input.version };
+        const encoded = canonicalJson(payload);
+        const previous = store.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get('catalog', input.requestId) as { payload: string; receipt: string } | undefined;
+        if (previous) {
+          if (previous.payload !== encoded) throw new RuntimeError('idempotency_conflict', 'requestId was already used with different content');
+          return JSON.parse(previous.receipt) as { id: string; version: string; path: string };
+        }
+        const installationId = randomUUID();
+        const dest = join(stateDir, 'capabilities', input.id, input.version);
+        store.transaction(() => store.db.prepare('INSERT INTO installations VALUES(?,?,?,?,?)').run(installationId, input.id, 'intent', canonicalJson(input), null));
+        const broker = new CallBroker(join(stateDir, 'install-calls.sqlite'), 'installer');
+        try {
+          const parent = join(stateDir, 'capabilities', input.id);
+          await mkdir(parent, { recursive: true, mode: 0o700 });
+          const source = await realpath(input.source);
+          const grant = await realpath(parent);
+          store.db.prepare("UPDATE installations SET state='dispatched' WHERE id=?").run(installationId);
+          try { await realpath(dest); }
+          catch {
+            const executor = await openRestrictedExecutor();
+            try {
+              const result = await executor.run({
+                broker, cwd: source, scratchDir: grant, executable: '/bin/cp', args: ['-R', source, dest],
+                readPaths: [source], writePaths: [grant],
+              });
+              if (result.code !== 0) throw new RuntimeError('install_failed', result.stderr || 'Capability install failed');
+            } finally { await executor.close(); }
+          }
+          const snapshot = { path: dest, copied: true };
+          const receipt = { id: input.id, version: input.version, path: dest };
+          store.transaction(() => {
+            catalog.recordInstall({ id: input.id, kind: input.kind, source: input.source, version: input.version, snapshot, status: 'installed' });
+            store.db.prepare("UPDATE installations SET state='succeeded',result=? WHERE id=?").run(canonicalJson(snapshot), installationId);
+            store.db.prepare('INSERT INTO commands VALUES(?,?,?,?)').run('catalog', input.requestId, encoded, canonicalJson(receipt));
+          });
+          return receipt;
+        } catch (error) {
+          store.db.prepare("UPDATE installations SET state='unknown',result=? WHERE id=?").run(String(error), installationId);
+          throw error;
+        } finally { broker.close(); }
+      },
+      async reconcileInstall(id: string) {
+        ensureOpen();
+        const row = store.db.prepare('SELECT * FROM installations WHERE capability_id=? ORDER BY rowid DESC LIMIT 1').get(id) as { id: string; state: string; spec: string } | undefined;
+        if (!row || row.state === 'succeeded') return catalog.capability(id);
+        const spec = JSON.parse(row.spec) as { source: string; version: string; kind: 'skill' | 'mcp' | 'extension' };
+        return this.install({ id, kind: spec.kind, source: spec.source, version: spec.version, requestId: `reconcile-${row.id}` });
+      },
     },
     close() {
       if (!closing) {

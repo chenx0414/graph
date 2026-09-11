@@ -9,3 +9,5 @@ M0 按已确认的架构与实施计划验证三个入口：Pi 实例会话 adap
 M1 沿用实施计划约定的 Task Runtime interface：从用户任务入口、受限主管提案入口和可信执行宿主观察确认、队列、事件、调用、问题与交付证据。使用真实磁盘 SQLite 和新进程恢复；scripted 外部动作模拟模型/工具结果，不 mock 内核或直接查询私有表。
 
 M2 继续同一接口：容器、路由、回环、图修订、连续调度、三类验证器和八种模板都通过用户句柄、主管提案/`revise` 与 `host.runReady`/`drive` 观察。`graph.verify` 是保留的内建程序动作，调用方注册的普通 adapter 不能覆盖它。
+
+M3 在同一 Task Runtime 上接入生产 Pi adapter、模型目录和 Agent 库。Agent 节点在没有同名 scripted adapter 时走 Pi；模型请求记为 invocation。能力安装走已验证的 macOS 受限进程，不给任务加授权。主管可在确认前讨论并提交仍由程序校验的提案。

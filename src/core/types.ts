@@ -44,7 +44,7 @@ export interface Operation {
   id: string; taskId: string; nodeId: string; instanceId: string | null; generation: number;
   attempt: number; kind: NodeSpec['kind']; action: string; input: Json; dependencies: Record<string, Json>;
   proposalVersion: number; requirementVersion: number;
-  context: { previousOutput: Json; answers: { questionId: string; value: Json }[] };
+  context: { previousOutput: Json; answers: { questionId: string; value: Json }[]; messages?: { text: string; requirementVersion: number }[]; briefing?: string };
   grants: string[];
   activationId: string; graphVersion: number;
   dependencySources: Record<string, DependencySource[]>;

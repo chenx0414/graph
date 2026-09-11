@@ -3,6 +3,9 @@ import { isAbsolute } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
+import { briefing } from '../catalog/briefing.ts';
+import type { Catalog } from '../catalog/catalog.ts';
+import { selectModel, type ModelEntry } from '../catalog/models.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
 
 type NodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
@@ -15,9 +18,17 @@ export class Execution {
   private readonly driveWaiters: (() => void)[] = [];
   private readonly store: TaskStore;
   private readonly actions: Record<string, ActionAdapter>;
+  private readonly fallback?: ActionAdapter;
+  private readonly catalog?: Catalog;
+  private readonly models?: () => ModelEntry[];
+  private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> } = {}) {
     this.store = store; this.actions = actions;
+    if (extras.fallback) this.fallback = extras.fallback;
+    if (extras.catalog) this.catalog = extras.catalog;
+    if (extras.models) this.models = extras.models;
+    if (extras.preferences) this.preferences = extras.preferences;
     this.generation = store.transaction(() => {
       store.db.prepare('UPDATE runtime SET generation=generation+1').run();
       const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
@@ -94,7 +105,7 @@ export class Execution {
     } else if (question.kind === 'permission' && answer.type === 'grant') {
       if (answer.grant !== (JSON.parse(question.data) as { grant: string }).grant) throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
       this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);
-    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(['adapter_error', 'execution_failed'].includes(question.kind) && answer.type === 'retry') && !(question.kind === 'reservation_exceeded' && answer.type === 'acknowledge') && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
+    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(['adapter_error', 'execution_failed', 'model_unavailable'].includes(question.kind) && answer.type === 'retry') && !(question.kind === 'reservation_exceeded' && answer.type === 'acknowledge') && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
       throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
     }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
@@ -169,6 +180,9 @@ export class Execution {
   private readyNodes(): NodeRow[] {
     const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
     if (!active_task || this.stopping || this.store.task(active_task).paused) return [];
+    const task = this.store.task(active_task);
+    if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(active_task) as NodeRow[];
+    if (task.phase !== 'running') return [];
     let nodes: NodeRow[];
     let graph: ReturnType<typeof loadGraph>;
     while (true) {
@@ -185,6 +199,20 @@ export class Execution {
       });
     }
     return nodes.filter(node => graph.readiness(node.id) === 'ready');
+  }
+
+  private pickModel(spec: NodeSpec, node: NodeRow) {
+    if (!this.models) return;
+    const directory = this.models();
+    let definition: { recommendedGrade: ModelEntry['grade']; review?: boolean } = { recommendedGrade: 'medium' };
+    if (spec.definitionVersion && this.catalog) {
+      try { definition = this.catalog.definition(spec.definitionVersion); } catch { /* unpublished keys still select by requested model */ }
+    }
+    const exclude = definition.review ? (spec.dependsOn ?? []).flatMap(id => {
+      const row = this.store.db.prepare('SELECT models_used FROM instances WHERE task_id=? AND node_id=?').get(node.task_id, id) as { models_used: string } | undefined;
+      return row ? JSON.parse(row.models_used) as string[] : [];
+    }) : [];
+    return selectModel({ ...(spec.model ? { requested: spec.model } : {}), grade: definition.recommendedGrade, directory, ...(this.preferences ? { preferences: this.preferences } : {}), ...(exclude.length ? { exclude } : {}) });
   }
 
   private graphVerify(spec: NodeSpec): ActionAdapter {
@@ -216,10 +244,19 @@ export class Execution {
     if (this.stopping || this.store.task(node.task_id).paused) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
     const spec = JSON.parse(node.spec) as NodeSpec;
-    const adapter = spec.action === 'graph.verify' ? this.graphVerify(spec) : Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : undefined;
+    const adapter = spec.action === 'graph.verify' ? this.graphVerify(spec) : Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : spec.kind === 'agent' ? this.fallback : undefined;
     if (!adapter || adapter.kind !== spec.kind) {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: `No ${spec.kind} adapter for ${spec.action}` }));
       return false;
+    }
+    if (spec.kind === 'agent' && this.models && node.instance_id) {
+      const selected = this.pickModel(spec, node);
+      if (!selected) {
+        this.store.transaction(() => this.block(node, 'model_unavailable', { requested: spec.model ?? null }));
+        return false;
+      }
+      this.store.db.prepare('UPDATE instances SET model=?,definition_version=? WHERE id=?').run(selected.id, spec.definitionVersion ?? null, node.instance_id);
+      if (spec.model && spec.model !== selected.id) this.store.event(node.task_id, 'model.switched', { nodeId: node.id, from: spec.model, to: selected.id, instanceId: node.instance_id });
     }
     const baseGrants = JSON.parse((this.store.db.prepare('SELECT grants FROM projects WHERE id=?').get(this.store.task(node.task_id).project_id) as { grants: string }).grants) as string[];
     const grants = [...new Set([...baseGrants, ...(this.store.db.prepare('SELECT grant FROM task_grants WHERE task_id=?').all(node.task_id) as { grant: string }[]).map(row => row.grant)])];
@@ -244,17 +281,23 @@ export class Execution {
     const operation = this.store.transaction(() => {
       const task = this.store.task(node.task_id);
       const attempt = (this.store.db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=? AND node_id=?').get(node.task_id, node.id) as { count: number }).count + 1;
-      const graph = loadGraph(this.store, node.task_id);
-      const dependencies = graph.inputs(node.id);
-      const dependencySources = graph.sources(node.id);
+      const graph = task.phase === 'discussing' ? undefined : loadGraph(this.store, node.task_id);
+      const dependencies = graph ? graph.inputs(node.id) : {};
+      const dependencySources = graph ? graph.sources(node.id) : {};
       const inputVersions = Object.fromEntries(Object.entries(dependencySources).map(([id, sources]) => [id, sources.map(source => ({ activationId: source.activationId, outputVersion: source.outputVersion }))]));
       const answers = (this.store.db.prepare("SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind='waiting' AND status='resolved' ORDER BY rowid").all(node.task_id, node.id) as { id: string; answer: string }[])
         .map(row => ({ questionId: row.id, value: (JSON.parse(row.answer) as { value: Json }).value }));
+      const messages = (this.store.db.prepare("SELECT data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor").all(node.task_id) as { data: string }[])
+        .map(row => JSON.parse(row.data) as { text?: string; request?: string; requirementVersion?: number })
+        .map(message => ({ text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 }));
+      const latest = this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(node.task_id, task.latest_proposal) as { spec: string } | undefined;
+      const proposal = latest ? JSON.parse(latest.spec) as Proposal : undefined;
       const operation: Operation = { id: randomUUID(), taskId: node.task_id, nodeId: node.id, instanceId: node.instance_id,
         generation: this.generation, attempt, kind: spec.kind, action: spec.action, input: spec.input ?? null, dependencies,
-        proposalVersion: task.accepted_proposal!, requirementVersion: task.requirement_version,
-        context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers }, grants,
+        proposalVersion: task.accepted_proposal ?? 0, requirementVersion: task.requirement_version,
+        context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers, ...(messages.length ? { messages } : {}) }, grants,
         activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions };
+      if (this.catalog) operation.context.briefing = briefing(operation, { request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}), acceptance: proposal?.acceptance ?? [] });
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
         .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
       this.store.db.prepare("UPDATE activations SET input_versions=?,state='preparing' WHERE id=?").run(canonicalJson(inputVersions), node.activation_id);
@@ -336,7 +379,8 @@ export class Execution {
     const values = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
     const total = values.reduce((a, b) => a + b, 0);
     if (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total)) throw new RuntimeError('invalid_usage', 'Invalid disjoint token counts');
-    const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(operation.taskId, operation.proposalVersion) as { spec: string }).spec) as Proposal;
+    const proposalRow = this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(operation.taskId, operation.proposalVersion) as { spec: string } | undefined;
+    const proposal = proposalRow ? JSON.parse(proposalRow.spec) as Proposal : { requirementVersion: 1, summary: '', acceptance: [] as Proposal['acceptance'], nodes: [] as Proposal['nodes'] };
     const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
     if (new Set(result.artifacts?.map(artifact => artifact.id)).size !== (result.artifacts?.length ?? 0) || result.artifacts?.some(artifact => !artifact.id.trim() || !isAbsolute(artifact.path) || !/^[a-f0-9]{64}$/.test(artifact.digest))) throw new RuntimeError('invalid_evidence', 'Artifacts require unique IDs, absolute paths and SHA-256 digests');
     if (result.outcome === 'skipped' && !nodeSpec.optional) throw new RuntimeError('invalid_result', 'Only a predeclared optional node may skip work');
@@ -352,7 +396,12 @@ export class Execution {
     }
     this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0,result=?,usage=? WHERE id=?")
       .run(canonicalJson(result), canonicalJson(usage), operation.id);
-    if (operation.instanceId) this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instanceId);
+    if (operation.instanceId) {
+      this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instanceId);
+      const account = this.store.db.prepare('SELECT model,models_used FROM instances WHERE id=?').get(operation.instanceId) as { model: string | null; models_used: string };
+      const used = JSON.parse(account.models_used) as string[];
+      if (account.model && !used.includes(account.model)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...used, account.model]), operation.instanceId);
+    }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'").run(canonicalJson({ result }), operation.id);
     if (result.outcome === 'waiting') {
       if (!result.question?.prompt.trim()) throw new RuntimeError('invalid_result', 'Waiting requires a question');
