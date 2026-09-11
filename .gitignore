@@ -1,0 +1,33 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+*.tsbuildinfo
+
+# packages/*/node_modules/
+packages/*/dist/
+packages/*/dist-chrome/
+packages/*/dist-firefox/
+*.cpuprofile
+
+# Environment
+.env
+
+# Editor files
+.vscode/
+.zed/
+.idea/
+.codex/
+*.swp
+*.swo
+*~
+
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.coverage
+*.egg-info/
+.playwright-mcp/
+skills-lock.json
+.worktrees/

@@ -1,0 +1,8 @@
+# Root package only; this file configures pnpm, not a multi-package layout.
+saveExact: true
+allowBuilds:
+  '@google/genai': false
+  esbuild: true
+  protobufjs: false
+minimumReleaseAgeExclude:
+  - '@types/node@24.13.4'
