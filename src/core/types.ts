@@ -49,6 +49,7 @@ export interface Operation {
   activationId: string; graphVersion: number;
   dependencySources: Record<string, DependencySource[]>;
   inputVersions: Record<string, { activationId: string; outputVersion: number }[]>;
+  workspace?: string;
 }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];

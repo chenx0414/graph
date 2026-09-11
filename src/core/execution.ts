@@ -1,11 +1,13 @@
-import { randomUUID } from 'node:crypto';
-import { isAbsolute } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import { selectModel, type ModelEntry } from '../catalog/models.ts';
+import type { GitIntegration } from '../git/integration.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
 
 type NodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
@@ -22,13 +24,15 @@ export class Execution {
   private readonly catalog?: Catalog;
   private readonly models?: () => ModelEntry[];
   private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
+  private readonly git?: GitIntegration;
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; git?: GitIntegration } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
     if (extras.models) this.models = extras.models;
     if (extras.preferences) this.preferences = extras.preferences;
+    if (extras.git) this.git = extras.git;
     this.generation = store.transaction(() => {
       store.db.prepare('UPDATE runtime SET generation=generation+1').run();
       const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
@@ -45,17 +49,26 @@ export class Execution {
       }
       return generation;
     });
+    const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+    if (active_task && this.git) {
+      this.git.restore(active_task);
+      this.deliver(active_task);
+    }
   }
 
   async drain() { this.stopping = true; await Promise.allSettled([...this.pending]); }
 
   report(id: string, generation: number, result: OperationResult) {
+    let taskId: string | undefined;
     this.store.transaction(() => {
       const row = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(id) as OperationRow | undefined;
       if (!row) throw new RuntimeError('not_found', 'Operation not found');
       if (row.generation !== generation || generation !== this.generation) throw new RuntimeError('stale_generation', 'Worker generation is stale');
-      this.settle(JSON.parse(row.spec) as Operation, result);
+      const operation = JSON.parse(row.spec) as Operation;
+      taskId = operation.taskId;
+      this.settle(operation, result);
     });
+    if (taskId) this.deliver(taskId);
   }
 
   async reconcile(id: string) {
@@ -105,7 +118,7 @@ export class Execution {
     } else if (question.kind === 'permission' && answer.type === 'grant') {
       if (answer.grant !== (JSON.parse(question.data) as { grant: string }).grant) throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
       this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);
-    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(['adapter_error', 'execution_failed', 'model_unavailable'].includes(question.kind) && answer.type === 'retry') && !(question.kind === 'reservation_exceeded' && answer.type === 'acknowledge') && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
+    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind) && answer.type === 'retry') && !(['reservation_exceeded', 'human_check', 'git_dirty'].includes(question.kind) && answer.type === 'acknowledge') && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
       throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
     }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
@@ -121,6 +134,8 @@ export class Execution {
     }
     this.advance(taskId);
   }
+
+  finish(taskId: string) { this.deliver(taskId); }
 
   private block(node: NodeRow, kind: string, data: Json, operationId: string | null = null) {
     this.store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?").run(node.task_id, node.id);
@@ -244,9 +259,13 @@ export class Execution {
     if (this.stopping || this.store.task(node.task_id).paused) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
     const spec = JSON.parse(node.spec) as NodeSpec;
-    const adapter = spec.action === 'graph.verify' ? this.graphVerify(spec) : Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : spec.kind === 'agent' ? this.fallback : undefined;
+    const adapter = spec.action === 'graph.verify' ? this.graphVerify(spec) : spec.action === 'graph.human_check' ? this.humanCheck() : Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : spec.kind === 'agent' ? this.fallback : undefined;
     if (!adapter || adapter.kind !== spec.kind) {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: `No ${spec.kind} adapter for ${spec.action}` }));
+      return false;
+    }
+    if (spec.action === 'graph.human_check' && !this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='human_check' AND status='resolved'").get(node.task_id, node.id)) {
+      this.store.transaction(() => this.block(node, 'human_check', { prompt: 'A human acceptance check is required' }));
       return false;
     }
     if (spec.kind === 'agent' && this.models && node.instance_id) {
@@ -278,6 +297,12 @@ export class Execution {
         return false;
       }
     }
+    let workspace: string | undefined;
+    try { workspace = this.git?.workspace(node.task_id, node.instance_id, node.id, spec.kind); }
+    catch (error) {
+      this.store.transaction(() => this.block(node, 'adapter_error', { reason: String(error) }));
+      return false;
+    }
     const operation = this.store.transaction(() => {
       const task = this.store.task(node.task_id);
       const attempt = (this.store.db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=? AND node_id=?').get(node.task_id, node.id) as { count: number }).count + 1;
@@ -296,7 +321,7 @@ export class Execution {
         generation: this.generation, attempt, kind: spec.kind, action: spec.action, input: spec.input ?? null, dependencies,
         proposalVersion: task.accepted_proposal ?? 0, requirementVersion: task.requirement_version,
         context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers, ...(messages.length ? { messages } : {}) }, grants,
-        activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions };
+        activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions, ...(workspace ? { workspace } : {}) };
       if (this.catalog) operation.context.briefing = briefing(operation, { request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}), acceptance: proposal?.acceptance ?? [] });
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
         .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
@@ -332,8 +357,19 @@ export class Execution {
     });
     let quiescent = false;
     try {
-      const result = await dispatch();
-      quiescent = true;
+      const usesGit = Boolean(this.git && this.store.task(node.task_id).integration_branch);
+      let result: OperationResult;
+      if (usesGit && this.git && this.locksIntegration(spec, node.task_id)) {
+        result = await this.git.exclusive(node.task_id, dispatch);
+        quiescent = true;
+      } else {
+        result = await dispatch();
+        quiescent = true;
+      }
+      if (usesGit && this.git && spec.kind === 'agent' && result.outcome === 'completed') {
+        const merged = await this.git.exclusive(node.task_id, () => this.git!.integrate(operation));
+        if (merged && !merged.ok) result = { ...result, outcome: 'failed', output: { conflicts: merged.conflicts } };
+      }
       this.report(operation.id, operation.generation, result);
     } catch (error) {
       this.store.transaction(() => {
@@ -392,7 +428,7 @@ export class Execution {
     for (const evidence of result.evidence ?? []) {
       if (operation.kind !== 'program' || !proposal.acceptance.some(item => item.id === evidence.acceptanceId && item.checkNode === operation.nodeId)) throw new RuntimeError('invalid_evidence', 'Evidence must come from the assigned program check');
       if (!evidence.summary.trim() || !isAbsolute(evidence.artifact.path) || !/^[a-f0-9]{64}$/.test(evidence.artifact.digest)) throw new RuntimeError('invalid_evidence', 'Evidence requires a summary, absolute artifact path and SHA-256 digest');
-      this.store.db.prepare('INSERT INTO evidence(id,task_id,node_id,operation_id,acceptance_id,proposal_version,requirement_version,data,activation_id) VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(), operation.taskId, operation.nodeId, operation.id, evidence.acceptanceId, operation.proposalVersion, operation.requirementVersion, canonicalJson(evidence), operation.activationId);
+      this.store.db.prepare('INSERT INTO evidence(id,task_id,node_id,operation_id,acceptance_id,proposal_version,requirement_version,data,activation_id,commit_sha) VALUES(?,?,?,?,?,?,?,?,?,?)').run(randomUUID(), operation.taskId, operation.nodeId, operation.id, evidence.acceptanceId, operation.proposalVersion, operation.requirementVersion, canonicalJson(evidence), operation.activationId, this.store.task(operation.taskId).integration_sha);
     }
     this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0,result=?,usage=? WHERE id=?")
       .run(canonicalJson(result), canonicalJson(usage), operation.id);
@@ -462,24 +498,80 @@ export class Execution {
     this.store.event(operation.taskId, 'graph.rework', { from: operation.nodeId, to: loops.map(loop => loop.to) });
   }
 
-  private advance(taskId: string) {
+  private humanCheck(): ActionAdapter {
+    return {
+      kind: 'program',
+      prepare: async operation => async () => {
+        const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(operation.taskId, operation.proposalVersion) as { spec: string }).spec) as Proposal;
+        const root = operation.workspace ?? (this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(this.store.task(operation.taskId).project_id) as { root: string }).root;
+        const dir = join(root, '.graph');
+        mkdirSync(dir, { recursive: true });
+        const path = join(dir, `${operation.nodeId}.txt`);
+        writeFileSync(path, 'acknowledged');
+        const digest = createHash('sha256').update('acknowledged').digest('hex');
+        return {
+          outcome: 'completed' as const, output: { acknowledged: true },
+          evidence: proposal.acceptance.filter(item => item.checkNode === operation.nodeId).map(item => ({ acceptanceId: item.id, summary: 'Human check acknowledged', artifact: { path, digest } })),
+        };
+      },
+    };
+  }
+
+  private locksIntegration(spec: NodeSpec, taskId: string) {
+    if (spec.kind === 'program') return true;
+    return (spec.dependsOn ?? []).some(id => {
+      const row = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(taskId, id) as { spec: string } | undefined;
+      return !!row && (JSON.parse(row.spec) as NodeSpec).kind === 'program';
+    });
+  }
+
+  private readyToComplete(taskId: string) {
     const task = this.store.task(taskId);
-    if (task.phase !== 'running') return;
+    if (task.phase !== 'running' || !task.accepted_proposal) return false;
     const graph = loadGraph(this.store, taskId);
-    const incomplete = [...graph.plan.nodes.keys()].some(id => !['succeeded', 'skipped'].includes(graph.status(id)));
-    const blocked = this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId);
-    if (incomplete || blocked) return;
-    const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
-    const evidence = this.store.db.prepare('SELECT acceptance_id FROM evidence WHERE task_id=? AND proposal_version=? AND requirement_version=? AND valid=1').all(taskId, task.accepted_proposal!, task.requirement_version) as { acceptance_id: string }[];
-    if (proposal.acceptance.every(item => evidence.some(row => row.acceptance_id === item.id))) {
-      this.store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
-      const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;
-      this.store.db.prepare('UPDATE runtime SET active_task=?').run(next?.id ?? null);
-      this.store.event(taskId, 'task.completed', { proposalVersion: task.accepted_proposal });
-      if (next) {
-        this.store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(next.id);
-        this.store.event(next.id, 'task.started', {});
+    if ([...graph.plan.nodes.keys()].some(id => !['succeeded', 'skipped'].includes(graph.status(id)))) return false;
+    if (this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId)) return false;
+    const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal) as { spec: string }).spec) as Proposal;
+    const evidence = this.store.db.prepare('SELECT acceptance_id,commit_sha FROM evidence WHERE task_id=? AND proposal_version=? AND requirement_version=? AND valid=1').all(taskId, task.accepted_proposal, task.requirement_version) as { acceptance_id: string; commit_sha: string | null }[];
+    const sha = task.integration_sha;
+    return proposal.acceptance.every(item => evidence.some(row => row.acceptance_id === item.id && (!sha || row.commit_sha === sha)));
+  }
+
+  private completeTask(taskId: string) {
+    const task = this.store.task(taskId);
+    this.store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
+    const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;
+    this.store.db.prepare('UPDATE runtime SET active_task=?').run(next?.id ?? null);
+    this.store.event(taskId, 'task.completed', { proposalVersion: task.accepted_proposal });
+    if (next) {
+      this.store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(next.id);
+      this.store.event(next.id, 'task.started', {});
+    }
+  }
+
+  private deliver(taskId: string) {
+    if (!this.readyToComplete(taskId)) return;
+    if (this.git) {
+      const recovered = this.git.restore(taskId);
+      if (this.store.task(taskId).integration_branch) {
+        const result = recovered?.status === 'merged' ? recovered : this.git.tryDeliver(taskId);
+        if (result.status === 'recheck') return;
+        if (result.status === 'blocked') {
+          const task = this.store.task(taskId);
+          const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
+          const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(taskId, proposal.acceptance[0]!.checkNode) as NodeRow;
+          this.store.transaction(() => this.block(node, String((result.data as { kind?: string })?.kind ?? 'git_conflict'), result.data ?? { reason: 'Git delivery blocked' }));
+          return;
+        }
+        if (result.status !== 'merged' && result.status !== 'skip') return;
       }
     }
+    this.store.transaction(() => this.completeTask(taskId));
+  }
+
+  private advance(taskId: string) {
+    if (this.store.task(taskId).integration_branch) return;
+    if (!this.readyToComplete(taskId)) return;
+    this.completeTask(taskId);
   }
 }

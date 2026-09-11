@@ -61,4 +61,4 @@ schema 升级到版本 7：`graph_revisions.base_version`、`nodes.stall_count`�
 
 ## 本轮边界
 
-M2 使用 scripted adapter 验证机制。生产 Pi/模型目录、自动 Git 集成和 Web 分别在 M3–M5。主管规划对话、真实模型切换和代码合入仍待后续工作包。
+M2 使用 scripted adapter 验证机制。生产 Pi/模型目录见 [M3 报告](m3-results.md)，自动 Git 集成见 [M4 报告](m4-results.md)，Web 仍待 M5。

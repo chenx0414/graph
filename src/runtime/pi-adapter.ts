@@ -50,7 +50,7 @@ export function createPiAdapter(options: {
         const gate = taskGate(options.store, { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId! }, entry);
         const session = await openPiInstance({
           binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
-          workspace: project.root, stateDir: join(options.instancesDir, operation.instanceId!),
+          workspace: operation.workspace ?? project.root, stateDir: join(options.instancesDir, operation.instanceId!),
           model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(gate, options.apiKey),
         });
         try {

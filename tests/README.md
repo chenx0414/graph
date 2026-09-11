@@ -11,3 +11,5 @@ M1 沿用实施计划约定的 Task Runtime interface：从用户任务入口、
 M2 继续同一接口：容器、路由、回环、图修订、连续调度、三类验证器和八种模板都通过用户句柄、主管提案/`revise` 与 `host.runReady`/`drive` 观察。`graph.verify` 是保留的内建程序动作，调用方注册的普通 adapter 不能覆盖它。
 
 M3 在同一 Task Runtime 上接入生产 Pi adapter、模型目录和 Agent 库。Agent 节点在没有同名 scripted adapter 时走 Pi；模型请求记为 invocation。能力安装走已验证的 macOS 受限进程，不给任务加授权。主管可在确认前讨论并提交仍由程序校验的提案。
+
+M4 继续同一接口：真实临时 Git 仓库上的实例 worktree、任务集成分支、冲突现场、目标脏工作区、目标前移重检、人工检查、独立审查和崩溃后核对。从 `view()`、问题列表和目标分支文件观察，不 mock Git 模块。

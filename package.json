@@ -22,6 +22,7 @@
     "test:m1": "vitest run tests/m1",
     "test:m2": "vitest run tests/m2",
     "test:m3": "vitest run tests/m3",
+    "test:m4": "vitest run tests/m4",
     "demo:m1": "node examples/m1-demo.ts",
     "check": "pnpm typecheck && pnpm test"
   },

@@ -56,4 +56,4 @@ schema 8：`definitions`、`capabilities`、`installations`、`invocations`、`m
 
 ## 本轮边界
 
-未对使用者配置的真实供应商做收费契约请求；其他 transport 仍须沿用 M0 规则复验。Pi 会话目前在宿主进程内打开，模型 HTTP 仍过调用门；完整 MCP client 与扩展在受限 worker 内加载仍待后续。Git 工作副本与自动合并是 M4；Web 是 M5。
+未对使用者配置的真实供应商做收费契约请求；其他 transport 仍须沿用 M0 规则复验。Pi 会话目前在宿主进程内打开，模型 HTTP 仍过调用门；完整 MCP client 与扩展在受限 worker 内加载仍待后续。Git 工作副本与自动合并见 [M4 报告](m4-results.md)；Web 是 M5。

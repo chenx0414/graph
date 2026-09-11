@@ -1,6 +1,6 @@
 # Graph 实现架构
 
-日期：2026-09-11。基于使用者已确认的 [首版设计](graph-mvp.md)。本文为完整工程方案；M0 已验证固定版本 Pi 的受控接入及当前 macOS 执行限制，见 [M0 报告](planning/m0-results.md)。M1 已实现任务入口、固定 DAG、操作结算和恢复核对，见 [M1 报告](planning/m1-results.md)。M2 已实现版本化图、容器、回环、主管修订、连续调度与三类验证器，见 [M2 报告](planning/m2-results.md)。M3 已实现生产 Pi adapter、模型目录、Agent 库与主管规划，见 [M3 报告](planning/m3-results.md)。Git 集成和 Web 仍按 [实施计划](implementation-plan.md) 实现。
+日期：2026-09-12。基于使用者已确认的 [首版设计](graph-mvp.md)。本文为完整工程方案；M0 已验证固定版本 Pi 的受控接入及当前 macOS 执行限制，见 [M0 报告](planning/m0-results.md)。M1 已实现任务入口、固定 DAG、操作结算和恢复核对，见 [M1 报告](planning/m1-results.md)。M2 已实现版本化图、容器、回环、主管修订、连续调度与三类验证器，见 [M2 报告](planning/m2-results.md)。M3 已实现生产 Pi adapter、模型目录、Agent 库与主管规划，见 [M3 报告](planning/m3-results.md)。M4 已实现实例工作副本、任务集成分支与自动合入，见 [M4 报告](planning/m4-results.md)。Web 仍按 [实施计划](implementation-plan.md) 实现。
 
 ## 架构选择
 
@@ -136,7 +136,7 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 
 ## Git 与最终验收
 
-Graph 管理任务集成分支和每实例工作副本；实现、审查与程序检查均记录精确输入提交。共同 Git 元数据由 Git 模块管理，普通工具对其写入也需受控，防止独立 worktree 被误当成隔离整个仓库。
+Graph 管理任务集成分支和每实例工作副本；实现、审查与程序检查均记录精确输入提交。共同 Git 元数据由 Git 模块管理，普通工具对其写入也需受控，防止独立 worktree 被误当成隔离整个仓库。M4 已在 Task Runtime 上落实该流程，见 [M4 报告](planning/m4-results.md)。
 
 整体测试和独立审查绑定集成提交。目标分支有变化先纳入集成分支并重检；最终合入经验证的提交。目标未检出时可用带旧值条件的引用更新；已检出时必须同步处理 index/worktree，采用干净工作区上的快进合并，不裸更新 ref 或重置人工修改。竞争变化回到核查，脏工作区等待处理。
 

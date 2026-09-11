@@ -10,6 +10,7 @@ import { applyRevision } from './revision.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import { createPiAdapter } from '../runtime/pi-adapter.ts';
+import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
 import { CallBroker } from '../runtime/call-broker.ts';
 import { openRestrictedExecutor } from '../runtime/restricted-process.ts';
@@ -34,6 +35,7 @@ export async function openTaskRuntime(options: {
   let closed = false;
   let execution: Execution;
   let catalog: Catalog;
+  let git: GitIntegration;
   const ensureOpen = () => { if (closed) throw new RuntimeError('closed', 'Runtime is closed'); };
   try {
     store.transaction(() => {
@@ -47,6 +49,7 @@ export async function openTaskRuntime(options: {
       }
     });
     catalog = new Catalog(store);
+    git = new GitIntegration(store, stateDir);
     if (options.models) {
       store.transaction(() => {
         for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
@@ -59,6 +62,7 @@ export async function openTaskRuntime(options: {
     execution = new Execution(store, options.actions ?? {}, {
       ...(fallback ? { fallback } : {}),
       catalog,
+      git,
       ...(options.models ? { models: () => options.models!.entries } : {}),
       ...(options.models?.preferences ? { preferences: options.models.preferences } : {}),
     });
@@ -102,10 +106,12 @@ export async function openTaskRuntime(options: {
         async resume(requestId: string) { return setPaused(false, requestId); },
         async answer(questionId: string, answer: Answer, requestId: string): Promise<Receipt> {
           ensureOpen();
-          return store.command('user', requestId, { type: 'answer', taskId, questionId, answer }, () => {
+          const receipt = store.command('user', requestId, { type: 'answer', taskId, questionId, answer }, () => {
             execution.answer(taskId, questionId, answer);
             return { taskId, cursor: store.event(taskId, 'question.answered', { questionId, answer }) };
           });
+          execution.finish(taskId);
+          return receipt;
         },
         async say(text: string, requestId: string): Promise<Receipt> {
           ensureOpen();
@@ -119,7 +125,7 @@ export async function openTaskRuntime(options: {
         },
         async accept(input: { proposalVersion: number; targetBranch: string; requestId: string }): Promise<Receipt> {
           ensureOpen();
-          return store.command('user', input.requestId, { type: 'accept', taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }, () => {
+          const receipt = store.command('user', input.requestId, { type: 'accept', taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }, () => {
             const task = store.task(taskId);
             const row = store.db.prepare('SELECT requirement_version,spec FROM proposals WHERE task_id=? AND version=?')
               .get(taskId, input.proposalVersion) as { requirement_version: number; spec: string } | undefined;
@@ -146,6 +152,8 @@ export async function openTaskRuntime(options: {
             if (!active_task || active_task === taskId) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
             return { taskId, cursor: store.event(taskId, 'task.accepted', { proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
           });
+          git.prepareTask(taskId, input.targetBranch);
+          return receipt;
         },
         async view() {
           ensureOpen();
@@ -157,7 +165,7 @@ export async function openTaskRuntime(options: {
             const value = item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && typeof item.cost.amount === 'number' ? item.cost.amount : 0;
             return sum + value;
           }, 0) };
-          const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data,activation_id,valid FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as { node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string; activation_id: string; valid: number }[];
+          const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data,activation_id,valid,commit_sha FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as { node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string; activation_id: string; valid: number; commit_sha: string | null }[];
           const operations = store.db.prepare('SELECT * FROM operations WHERE task_id=? ORDER BY rowid').all(taskId) as OperationRow[];
           const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null }[];
           const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
@@ -175,10 +183,13 @@ export async function openTaskRuntime(options: {
             status: task.paused ? (operations.some(op => op.worker_active) ? 'pausing' : 'paused') : questions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operations: operations.map(row => ({ ...JSON.parse(row.spec) as Operation, state: row.state, reserved: row.reserved, workerActive: Boolean(row.worker_active), result: row.result ? JSON.parse(row.result) as OperationResult : null })),
             questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
+            worktrees: (store.db.prepare('SELECT instance_id,node_id,path,branch FROM worktrees WHERE task_id=?').all(taskId) as { instance_id: string; node_id: string; path: string; branch: string }[])
+              .map(row => ({ instanceId: row.instance_id, nodeId: row.node_id, path: row.path, branch: row.branch })),
+            integrationSha: task.integration_sha,
             nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, budget: row.budget,
               ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
               reserved: operations.filter(op => op.node_id === row.id).reduce((sum, op) => sum + op.reserved, 0) })),
-            evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid) })),
+            evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid), ...(row.commit_sha ? { commitSha: row.commit_sha } : {}) })),
             invocations, cost,
             cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
           };

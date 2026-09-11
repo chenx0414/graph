@@ -20,6 +20,7 @@ export interface TaskRow {
   id: string; project_id: string; request: string; requirement_version: number;
   latest_proposal: number; accepted_proposal: number | null; target_branch: string | null;
   phase: string; paused: number; created_seq: number; graph_version: number;
+  integration_branch: string | null; integration_sha: string | null; target_sha: string | null;
 }
 
 /** SQLite and transaction details stay private to the Task Runtime module. */
@@ -30,7 +31,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 8) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 9) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -124,6 +125,18 @@ export class TaskStore {
         CREATE TABLE invocations(id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, instance_id TEXT NOT NULL, model TEXT NOT NULL, usage TEXT, cost TEXT);
         CREATE TABLE models(id TEXT PRIMARY KEY, spec TEXT NOT NULL);
         PRAGMA user_version=8;
+      `);
+    });
+    if (version < 9) this.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE tasks ADD COLUMN integration_branch TEXT;
+        ALTER TABLE tasks ADD COLUMN integration_sha TEXT;
+        ALTER TABLE tasks ADD COLUMN target_sha TEXT;
+        ALTER TABLE evidence ADD COLUMN commit_sha TEXT;
+        CREATE TABLE worktrees(instance_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, node_id TEXT NOT NULL, path TEXT NOT NULL, branch TEXT NOT NULL);
+        CREATE TABLE git_ops(id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, spec TEXT NOT NULL, result TEXT);
+        CREATE TABLE git_commits(sha TEXT NOT NULL, task_id TEXT NOT NULL, node_id TEXT, operation_id TEXT, kind TEXT NOT NULL);
+        PRAGMA user_version=9;
       `);
     });
   }
