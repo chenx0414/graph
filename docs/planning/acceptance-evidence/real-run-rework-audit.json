@@ -1,0 +1,88 @@
+{
+  "source": "graph-m7-acceptance-8/acceptance-report.json",
+  "taskId": "0e3c3c4d-52ed-48fe-935c-7d568be9679d",
+  "phase": "completed",
+  "integrationSha": "b1754facb338fef460b70caa5982c570c0ffad6b",
+  "invocationCount": 487,
+  "nodes": [
+    {
+      "node": "master",
+      "instanceId": "3c9ab52b-324f-4521-8f4a-68229704bb3e",
+      "calls": 84,
+      "knownTokens": 1027538,
+      "unknownInvocations": 0,
+      "nodeUsed": 1027538,
+      "outputVersion": 1
+    },
+    {
+      "node": "work-errors",
+      "instanceId": "8560a995-1501-400f-af5e-6525c15b3391",
+      "calls": 175,
+      "knownTokens": 5661736,
+      "unknownInvocations": 1,
+      "nodeUsed": 0,
+      "outputVersion": 0
+    },
+    {
+      "node": "work-web",
+      "instanceId": "d8d3860a-629f-400d-8207-99ab3222eb27",
+      "calls": 115,
+      "knownTokens": 1635829,
+      "unknownInvocations": 0,
+      "nodeUsed": 1635829,
+      "outputVersion": 1
+    },
+    {
+      "node": "review",
+      "instanceId": "dbaf0473-42bb-4514-8ca9-7ce9cef1a986",
+      "calls": 113,
+      "knownTokens": 2097811,
+      "unknownInvocations": 0,
+      "nodeUsed": 2097811,
+      "outputVersion": 1
+    }
+  ],
+  "validEvidence": [
+    {
+      "acceptanceId": "a2",
+      "commitSha": "b1754facb338fef460b70caa5982c570c0ffad6b",
+      "exists": true,
+      "digestMatch": true
+    },
+    {
+      "acceptanceId": "a3",
+      "commitSha": "b1754facb338fef460b70caa5982c570c0ffad6b",
+      "exists": true,
+      "digestMatch": true
+    },
+    {
+      "acceptanceId": "a1",
+      "commitSha": "b1754facb338fef460b70caa5982c570c0ffad6b",
+      "exists": true,
+      "digestMatch": true
+    },
+    {
+      "acceptanceId": "a4",
+      "commitSha": "b1754facb338fef460b70caa5982c570c0ffad6b",
+      "exists": true,
+      "digestMatch": true
+    }
+  ],
+  "questions": [
+    {
+      "kind": "unknown_usage",
+      "status": "resolved",
+      "answerType": "reconcile_usage"
+    },
+    {
+      "kind": "reservation_exceeded",
+      "status": "resolved",
+      "answerType": "acknowledge"
+    },
+    {
+      "kind": "human_check",
+      "status": "resolved",
+      "answerType": "acknowledge"
+    }
+  ]
+}

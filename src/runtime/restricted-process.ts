@@ -1,12 +1,52 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readdir, realpath } from 'node:fs/promises';
+import { readdir, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import type { TokenUsage } from './call-broker.ts';
+
+/**
+ * Seatbelt cannot express a loopback-only bind (`localhost` also matches
+ * wildcard binds), so every local-network program check gets this host-owned
+ * preload: it rejects any listen address that is not explicit loopback before
+ * the socket reaches the OS. The sandbox still blocks non-loopback outbound
+ * traffic and the profile grants bind/inbound only for local addresses.
+ */
+const LOOPBACK_LISTEN_GUARD = String.raw`'use strict';
+const net = require('node:net');
+const dgram = require('node:dgram');
+const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
+function deny() {
+  const error = new Error('EPERM: sandboxed checks may only listen on loopback');
+  error.code = 'EPERM';
+  throw error;
+}
+function serverHost(args) {
+  const first = args[0];
+  if (first && typeof first === 'object') return first.host;
+  return typeof args[1] === 'string' ? args[1] : undefined;
+}
+function socketHost(args) {
+  const first = args[0];
+  if (first && typeof first === 'object') return first.address;
+  return typeof args[1] === 'string' ? args[1] : undefined;
+}
+const listen = net.Server.prototype.listen;
+net.Server.prototype.listen = function (...args) {
+  const host = serverHost(args);
+  if (!host || !LOOPBACK.has(host)) deny();
+  return listen.apply(this, args);
+};
+const bind = dgram.Socket.prototype.bind;
+dgram.Socket.prototype.bind = function (...args) {
+  const host = socketHost(args);
+  if (!host || !LOOPBACK.has(host)) deny();
+  return bind.apply(this, args);
+};
+`;
 
 export interface RestrictedGate {
   dispatch<T>(id: string, reservation: number, send: () => T): T;
@@ -141,11 +181,12 @@ export async function openRestrictedExecutor() {
       const gitPaths = await gitMetadataPaths(writePaths, scratchDir);
       const profile = pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths], gitPaths);
       // SRT reads allowLocalBinding from its initialized config, so a per-run
-      // custom config cannot widen it. Confirmed program checks get the exact
-      // loopback rules plus the Chromium rendezvous services appended here;
-      // every other restricted run keeps the no-network profile.
+      // custom config cannot widen it. Confirmed program checks get loopback
+      // listen/inbound/outbound plus the Chromium rendezvous services appended
+      // here; every other restricted run keeps the no-network profile. Bind and
+      // inbound stay limited to loopback addresses, never "*:*".
       const localNetworkProfile = command.localNetwork
-        ? '\n(allow network-bind (local ip "*:*"))\n(allow network-inbound (local ip "*:*"))\n(allow network-outbound (remote ip "localhost:*"))'
+        ? '\n(allow network-bind (local ip "localhost:*"))\n(allow network-inbound (local ip "localhost:*"))\n(allow network-outbound (remote ip "localhost:*"))'
           + '\n(allow mach-register (global-name-regex #"^org\\.chromium\\."))\n(allow mach-lookup (global-name-regex #"^org\\.chromium\\."))'
         : '';
       const commandText = [command.executable, ...command.args].map(quote).join(' ');
@@ -164,10 +205,16 @@ export async function openRestrictedExecutor() {
         },
       );
       const boundedProfile = extractProfile(wrapped, launch) + '\n' + profile + localNetworkProfile;
+      let listenGuard: string | undefined;
+      if (command.localNetwork) {
+        listenGuard = join(scratchDir, '.graph-listen-guard.cjs');
+        await writeFile(listenGuard, LOOPBACK_LISTEN_GUARD, { mode: 0o600 });
+      }
+      const nodeOptions = [command.env?.NODE_OPTIONS, listenGuard ? `--require=${listenGuard}` : undefined].filter(Boolean).join(' ');
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
         const child = command.broker.dispatch(invocationId, 0, () => spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
-          cwd, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}) },
+          cwd, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}), ...(listenGuard ? { NODE_OPTIONS: nodeOptions } : {}) },
           stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
         }));
         let stdout = '', stderr = '';

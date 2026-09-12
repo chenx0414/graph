@@ -1,6 +1,6 @@
 # Graph 首版收尾工作报告
 
-> **2026-09-12 独立验收修正与返工结果：**本报告的第一版“首版完成”结论曾被独立复核推翻：1 项 Standards P1（传输重试绕过暂停门并丢失未知用量）、3 项 Spec P1（远程 MCP 缺操作授权、握手后暂停仍发送、缺少规定的本机 Web 应用）与 2 项 P2 交付缺陷，A06/A08/A10/A13 未通过（见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)）。返工已完成：Graph 修复传输重试、远程 MCP 授权与逐请求暂停（提交 `8c17e26`、`edbf124`、`9efd856`），并在隔离副本上由 Graph 交付本机 Web 应用（`b1754fac`，交付测试 38/38，含真实无头 Chromium E2E）；A13 最终通过。运行事实与新边界见 [M7 报告](m7-results.md#web-返工运行2026-09-12) 与 [后续计划第九轮](next-steps-after-r3.md#第九轮最终验收返工2026-09-12)。
+> **2026-09-12 第二轮独立复验：原六项发现可关闭，但 S2/S3/R6/R7 未通过。**S2（核对放行丢失同一 operation 的已知用量）与 S3（跳过结果结算）已修复并核对真实任务投影；R6（本地联网例外允许非 loopback 监听）已改为宿主 listen 守卫；R7（交付导出接口 500 仍显示成功）待在交付副本修复并重新绑定测试、审查与验收证据。A13 最终结论暂缓，见 [rework-acceptance-2026-09-12.md](rework-acceptance-2026-09-12.md)。
 
 日期：2026-09-12（Asia/Shanghai）。基线 `f1ddaaa`，收尾提交 `60fb185`。本报告汇总从第三轮复验接手到首版完成的全部工作、证据与边界；详细过程见各 `mN-results.md`、[acceptance-followup.md](acceptance-followup.md)、[next-steps-after-r3.md](next-steps-after-r3.md) 与 `git log`。
 

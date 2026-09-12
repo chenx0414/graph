@@ -169,6 +169,46 @@ test('unknown usage on a production request blocks the next provider call', asyn
   expect(view.nodes.find(node => node.id === 'work')?.status).toBe('blocked');
 });
 
+test('reconciling unknown usage accumulates the known calls and applies the result once', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-reconcile-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const provider = await openaiServer([
+    { tools: [{ id: 'read-1', name: 'read', arguments: '{"path":"package.json"}' }], usage: { prompt_tokens: 40, completion_tokens: 10 } },
+    { text: 'Implementation done.', usage: null },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) } },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Work',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.runReady();
+  const blocked = await runtime.user.task(taskId).view();
+  expect(blocked.questions.map(question => question.kind)).toContain('unknown_usage');
+  await runtime.user.task(taskId).answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no usage for the failed call' }, 'reconcile');
+  const after = await runtime.user.task(taskId).view();
+  const work = after.nodes.find(node => node.id === 'work')!;
+  expect(work).toMatchObject({ status: 'succeeded', used: 50, outputVersion: 1 });
+  const unknown = after.invocations.filter(invocation => invocation.usage === null);
+  expect(unknown).toHaveLength(1);
+  expect(unknown[0]!.cost).toEqual({ unknown: true });
+  // A second reconcile cannot double count: the question is already resolved.
+  await expect(runtime.user.task(taskId).answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'again' }, 'again')).rejects.toMatchObject({ code: 'invalid_question' });
+  expect((await runtime.user.task(taskId).view()).nodes.find(node => node.id === 'work')!.used).toBe(50);
+});
+
 test('a production request that exceeds the budget cannot send a follow-up call', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-budget-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

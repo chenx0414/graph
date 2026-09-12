@@ -1,6 +1,6 @@
 # M7 MediaBookmarks 真实任务验收
 
-> **2026-09-12 最终结果：返工完成，A13 通过。**独立验收发现的 1 项 Standards P1 与 3 项 Spec P1（另有 2 项 P2 交付缺陷）已全部修复并由新一轮真实运行验证：Graph 侧修复见提交 `8c17e26`、`edbf124`、`9efd856`，Web 交付在隔离副本上完成，`main` 到 `b1754fac`。逐项复验见 [最终验收报告](final-acceptance-2026-09-12.md) 与 [验收证据](acceptance-evidence/README.md)；本轮真实运行的记录见下文“Web 返工运行”。
+> **2026-09-12 第二轮独立复验：原六项发现可关闭，但 S2/S3/R6/R7 未通过。**S2（核对放行丢失已知用量）与 S3（跳过结果结算）已修复并核对真实任务投影；R6（本地联网例外允许非 loopback 监听）已改为宿主 listen 守卫；R7（交付导出接口 500 却显示成功）待在交付副本修复并重新绑定测试、审查与证据。见 [rework-acceptance-2026-09-12.md](rework-acceptance-2026-09-12.md)。A13 最终结论暂缓。
 
 日期：2026-09-12。对应 [实施计划 G17–G18](../implementation-plan.md#m7-mediabookmarks-真实任务验收) 与验收矩阵 A13。基于 M6 的提交 `b1ec02c`。本轮在 Graph 内讨论并冻结 B站本机 Web 验收，并在 MediaBookmarks 的 git 克隆上拆解、分配工作副本、实现、检查、独立审查、记录人工登录项并合入目标分支。scripted 工人覆盖全图编排；生产 Pi 经工作区工具写入同一载荷。页面含登录准入、异步采集进度与笔记阅读。不调用收费模型。
 

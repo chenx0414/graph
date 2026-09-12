@@ -11,7 +11,7 @@ import { selectModel, type ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
 import type { RestrictedGate } from '../runtime/restricted-process.ts';
-import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
+import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal, type TokenUsage } from './types.ts';
 
 type NodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
 export type OperationRow = { id: string; task_id: string; node_id: string; instance_id: string | null; generation: number; spec: string; state: string; reserved: number; worker_active: number; result: string | null; usage: string | null; activation_id: string };
@@ -132,12 +132,19 @@ export class Execution {
       this.settle(JSON.parse(operation.spec) as Operation, { ...JSON.parse(operation.result) as OperationResult, usage: answer.usage });
     } else if (question.kind === 'unknown_usage' && answer.type === 'reconcile_usage') {
       // The host reviewed the failed call and the provider exposes no usage for
-      // it. The invocation stays recorded as unknown with unknown cost; it is
-      // never converted to zero. Only the node's result is allowed to proceed.
+      // it. The unknown invocation keeps its unknown record, while every known
+      // invocation of the same operation is accumulated and the stored result
+      // goes through the normal settlement path (output, route, waiting
+      // question, budget) exactly once.
       const operation = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(question.operation_id!) as OperationRow;
       if (!answer.proof.trim() || !operation.result || operation.worker_active) throw new RuntimeError('invalid_answer', 'Reconciliation requires a known result, quiescent worker and proof');
-      this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0 WHERE id=?").run(operation.id);
-      this.store.event(taskId, 'operation.usage_reconciled', { operationId: operation.id, decision: 'usage_unavailable', proof: answer.proof });
+      const known = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL').all(operation.id) as { usage: string }[])
+        .reduce<TokenUsage>((sum, row) => {
+          const usage = JSON.parse(row.usage) as TokenUsage;
+          return { input: sum.input + usage.input, output: sum.output + usage.output, cacheRead: sum.cacheRead + usage.cacheRead, cacheWrite: sum.cacheWrite + usage.cacheWrite };
+        }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+      this.settle(JSON.parse(operation.spec) as Operation, { ...JSON.parse(operation.result) as OperationResult, usage: known });
+      this.store.event(taskId, 'operation.usage_reconciled', { operationId: operation.id, decision: 'usage_unavailable', known, proof: answer.proof });
     } else if (question.kind === 'permission' && answer.type === 'grant') {
       if (answer.grant !== (JSON.parse(question.data) as { grant: string }).grant) throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
       this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);

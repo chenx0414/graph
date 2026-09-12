@@ -120,6 +120,35 @@ test('a graph.command check can bind loopback for a local application test', asy
   expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
 });
 
+test('a graph.command check may bind loopback but not a non-loopback interface', async () => {
+  const root = await repo();
+  const networkAction: ActionAdapter = {
+    kind: 'agent', reserveTokens: 100,
+    prepare: async operation => async () => {
+      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
+      await writeFile(join(operation.workspace!, 'test', 'network.test.js'), [
+        "import { test } from 'node:test';",
+        "import assert from 'node:assert';",
+        "import { createServer } from 'node:http';",
+        "test('loopback binds, any-interface does not', async () => {",
+        "  const loopback = createServer(() => {});",
+        "  await new Promise((resolve, reject) => { loopback.on('error', reject); loopback.listen(0, '127.0.0.1', resolve); });",
+        "  await new Promise(resolve => loopback.close(resolve));",
+        "  const anyInterface = createServer(() => {});",
+        "  await assert.rejects(new Promise((resolve, reject) => { anyInterface.on('error', reject); anyInterface.listen(0, '0.0.0.0', resolve); }), error => error.code === 'EPERM');",
+        "  anyInterface.close();",
+        "});",
+      ].join('\n'));
+      return { outcome: 'completed', output: null, usage };
+    },
+  };
+  const { runtime, task } = await start(root, { work: networkAction }, nodes, { command: 'node', args: ['--test'] });
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+});
+
 test('a graph.command check resolves host-provided dependencies and environment', async () => {
   const root = await repo();
   const modules = join(root, 'deps');

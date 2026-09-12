@@ -109,6 +109,18 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
 - 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
 
+## 第十轮：返工复验（2026-09-12，第二轮）
+
+[第二轮复验](rework-acceptance-2026-09-12.md) 保留原六项修复，但新增 S2/S3/R6/R7。Graph 侧已修复：
+
+- S2（`execution.ts` 核对路径）：`reconcile_usage` 不再直接改状态，而是按 invocation 去重累计同一 operation 的全部已知用量，写入 `operations.usage` 与 `instances.used`，再走正常结算；未知调用保持 unknown。
+- S3：核对放行走完整结果结算（output、route、outputVersion、waiting 问题、额度与证据校验）；后继拿得到输出，等待问题不丢失，重复答复因问题已解决被拒。
+- R6：本地网络检查的监听限定为显式 loopback；因 Seatbelt 无法区分通配绑定，宿主为每次 `localNetwork` 运行写入 listen/bind 守卫（非 `127.0.0.1`/`::1`/`localhost` 直接 EPERM），真实无头浏览器检查仍通过。
+- 真实任务投影修复：对 `graph-m7-acceptance-8` 的 `work-errors` 补记已知用量 5,661,736 与输出（`usage-repair.json`），未知记录保留，费用仍 unknown；完成态任务不重开，超预留缺口在修复记录中说明。
+- 复验：`reconcile-usage-rework.mts`（累计已知用量、后继拿到 `{work:{answer:42}}`、waiting 保留、超预算被阻）、`local-network-rework.mts`（非 loopback 监听被拒）；Graph 测试 38 文件 / 177 项。
+
+R7（交付 `page.js` 的导出失败误报成功）需在交付副本修复并重新绑定最终提交的测试、审查与验收证据；见[复验报告 R7](rework-acceptance-2026-09-12.md#r7--p2--web-导出接口失败页面仍显示成功)。
+
 ## 第九轮：最终验收返工（2026-09-12）
 
 [独立验收](final-acceptance-2026-09-12.md) 判定 S1 与 R1–R5 未通过后：

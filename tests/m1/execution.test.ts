@@ -135,10 +135,51 @@ test('a host can reconcile unavailable unknown usage without recording it as zer
   await expect(task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: '   ' }, 'no-proof')).rejects.toMatchObject({ code: 'invalid_answer' });
   await task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no per-request usage for the failed call' }, 'reconcile');
   const after = await task.view();
-  // The result proceeds, but the unaccounted call is not counted: used stays
-  // unchanged and no authoritative usage is invented for it.
+  // The result proceeds through the normal settlement path: output and version
+  // are recorded for successors, while the unaccounted call is not counted.
   expect(after).toMatchObject({ status: 'running', nodes: [{ used: 0, reserved: 0, status: 'pending' }, {}], questions: [{ status: 'resolved' }], operations: [{ state: 'succeeded' }] });
+  expect(after.nodes[0]).toMatchObject({ outputVersion: 1 });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+});
+
+test('a reconciled result is delivered to successors', async () => {
+  const seen: unknown[] = [];
+  const { runtime, task } = await singleAgent({
+    work: { kind: 'agent', reserveTokens: 100,
+      prepare: async () => async () => ({ outcome: 'completed', output: { answer: 42 } }),
+    },
+    check: { kind: 'program',
+      prepare: async operation => async () => {
+        seen.push(operation.dependencies.work);
+        return { outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: operation.workspace ?? '/', digest: 'a'.repeat(64) } }] };
+      },
+    },
+  });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  const blocked = await task.view();
+  await task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no usage for the failed call' }, 'reconcile');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(seen).toEqual([{ answer: 42 }]);
+  expect((await task.view()).evidence.some(item => item.acceptanceId === 'works' && item.valid)).toBe(true);
+});
+
+test('a reconciled waiting result keeps its waiting question instead of re-running', async () => {
+  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
+    prepare: async () => async () => ({ outcome: 'waiting', output: null, question: { prompt: 'Provide the missing source' } }),
+  } });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  const blocked = await task.view();
+  expect(blocked.questions.map(question => question.kind)).toEqual(['unknown_usage']);
+  await task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no usage for the failed call' }, 'reconcile');
+  const after = await task.view();
+  expect(after.questions).toMatchObject([
+    { kind: 'unknown_usage', status: 'resolved' },
+    { kind: 'waiting', status: 'open', data: { prompt: 'Provide the missing source' } },
+  ]);
+  expect(after.nodes[0]).toMatchObject({ status: 'waiting' });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  await task.answer(after.questions[1]!.id, { type: 'respond', value: 'done' }, 'respond');
+  expect((await task.view()).nodes[0]).toMatchObject({ status: 'pending' });
 });
 
 test('the cumulative instance budget survives restart and only a scoped user answer permits more work', async () => {

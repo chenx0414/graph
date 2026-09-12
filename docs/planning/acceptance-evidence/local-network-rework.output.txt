@@ -1,0 +1,20 @@
+{
+  "localNetwork": false,
+  "bind": null,
+  "destinationIsNonLoopback": true,
+  "run": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "node:events:505\n    throw er; // Unhandled 'error' event\n    ^\n\nError: listen EPERM: operation not permitted 0.0.0.0\n    at Server.setupListenHandle [as _listen2] (node:net:2302:21)\n    at listenInCluster (node:net:2433:12)\n    at node:net:2662:7\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)\nEmitted 'error' event on Server instance at:\n    at emitErrorNT (node:net:2412:8)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {\n  code: 'EPERM',\n  errno: -1,\n  syscall: 'listen',\n  address: '0.0.0.0'\n}\n\nNode.js v24.20.0\n"
+  }
+}
+{
+  "localNetwork": true,
+  "bind": null,
+  "destinationIsNonLoopback": true,
+  "run": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-bFbq7Z/scratch/.graph-listen-guard.cjs:6\n  const error = new Error('EPERM: sandboxed checks may only listen on loopback');\n                ^\n\nError: EPERM: sandboxed checks may only listen on loopback\n    at deny (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-bFbq7Z/scratch/.graph-listen-guard.cjs:6:17)\n    at net.Server.listen (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-bFbq7Z/scratch/.graph-listen-guard.cjs:23:37)\n    at file:///private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-bFbq7Z/listen.mjs:1:168\n    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)\n    at async node:internal/modules/esm/loader:647:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\n  code: 'EPERM'\n}\n\nNode.js v24.20.0\n"
+  }
+}
