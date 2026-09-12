@@ -121,6 +121,12 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 
 R7（交付 `page.js` 的导出失败误报成功）已由新的小型 Graph 任务在交付副本修复并重绑证据：工作目录 `graph-m7-acceptance-9`，任务 `834a5a88-c5f7-45a7-9b52-a6e0e95b0e4a`（提案由操作方脚本化，work=flash、review=pro），交付 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`；a1–a5 全部有效，交付测试 40/40（含新增 HTTP 500/网络拒绝的真实页面回归），独立审查 `docs/review-web-v3.md` 通过；`web-export-error-rework.mjs` 复验输出：HTTP 500 时页面显示“导出失败：原因”并提示可重试，`falselyClaimsSuccess:false`。206 次 invocation / 3,481,777 tokens；work 超预留已显式确认。
 
+### 第十轮两轴审查（2026-09-12）
+
+**Standards**：无硬性违反。`reconcile_usage` 改为复用正常结算路径（单一真相来源），不再手写状态转移；listen/bind 守卫由宿主写入 scratch 并以 `NODE_OPTIONS` 注入；回归覆盖已知用量累计、后继输出、waiting 保留、重复答复拒绝与非 loopback 监听拒绝；提交约定式、注释英文。判断性说明：SBPL 的 `local ip` 只能写 `*`/`localhost`，守卫是对该表达力缺口的显式补充；`graph-m7-acceptance-8/usage-repair.json` 是仓库外的历史投影修复记录。
+
+**Spec**：S2（核对后按 invocation 去重累计已知用量，真实任务补记 5,661,736）、S3（output/route/版本/waiting/额度校验走正常结算）、R6（非 loopback 监听 EPERM、loopback 与真实无头浏览器检查通过、Agent/MCP/扩展仍禁网）、R7（HTTP 500 与网络拒绝显示失败原因并可重试，a1–a5 绑定 `001f288`）均按复验条件关闭。边界：第三轮任务提案由操作方脚本化（按“无需重跑昂贵任务”）；交付树含两个工作节点留下的 1 行 `scratch-*.mjs` 占位文件（未使用，不影响验收）；费用仍为 `unknown`。
+
 ## 第九轮：最终验收返工（2026-09-12）
 
 [独立验收](final-acceptance-2026-09-12.md) 判定 S1 与 R1–R5 未通过后：
