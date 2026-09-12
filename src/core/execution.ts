@@ -383,7 +383,7 @@ export class Execution {
         proposalVersion: task.accepted_proposal ?? 0, requirementVersion: task.requirement_version,
         context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers, ...(messages.length ? { messages } : {}) }, grants,
         activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions, ...(workspace ? { workspace } : {}) };
-      const graphBriefing = spec.role === 'master' && task.accepted_proposal !== null
+      const graphBriefing = task.accepted_proposal !== null && spec.kind === 'agent'
         ? [...loadGraph(this.store, node.task_id).plan.nodes.values()]
         : undefined;
       if (this.catalog) {

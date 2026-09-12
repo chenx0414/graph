@@ -198,6 +198,38 @@ test('a production request that exceeds the budget cannot send a follow-up call'
   expect(provider.requests).toHaveLength(1);
 });
 
+test('a production worker receives the task graph with the check commands', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-graph-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, 'README.md'), 'project\n');
+  const provider = await openaiServer([{ text: 'Inspected the checks.' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: { kind: 'program', prepare: async () => async () => ({
+      outcome: 'completed', output: null,
+      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
+    }) } },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Work',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--test', 'test/specific.test.js'] } },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+  const prompt = JSON.stringify(provider.requests[0]);
+  expect(prompt).toContain('test/specific.test.js');
+  expect(prompt).toContain('ok (check check)');
+});
+
 test('a production worker writes the workspace through tools', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-write-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
