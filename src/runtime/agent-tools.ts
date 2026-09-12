@@ -74,7 +74,7 @@ export function agentTools(input: {
   if (input.run) {
     const run = input.run;
     tools.push(externallyGated({
-      name: 'run_command', label: 'Run command', description: 'Run an allowed build or test command inside the work copy.',
+      name: 'run_command', label: 'Run command', description: 'Run an allowed command inside the work copy: command is a bare executable name (node or git) and args is a string array, for example {command:"node",args:["--test","test/x.test.js"]}. It is not a shell; git only supports read-only status/diff/log/show.',
       parameters: Type.Object({ command: Type.String(), args: Type.Optional(Type.Array(Type.String())) }),
       execute: async (_id, params) => {
         const body = fields(params);
