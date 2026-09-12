@@ -85,3 +85,5 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - **网络检索**：`src/runtime/retrieval.ts` 是受控读取 broker；只放行 `network.retrievalDomains` 中的域名，拒绝内嵌凭据与重定向，只接受文本类响应并限制大小。`fetch` 工具只在授予域名时出现在 Agent 工具列表。`tests/m3/retrieval.test.ts` 覆盖允许、未授予域名在请求前被拒、非文本拒绝、重定向拒绝与暂停不发请求。
 - 公开入口观测：`capabilities.mts` 输出 `granted-capabilities-callable`（三项真实可调用、`questions:[]`）与 `retrieval-domain-denied`。
 - 本仓库定义的扩展工具协议不是官方 Pi 扩展 API 的完整实现；其他平台与远程 MCP 的其他 transport 仍未验证。
+
+本轮修复提交 `8e3cd9f`（`feat: load bound extensions in a restricted worker and add remote MCP and retrieval`）；其后的 docs 提交只记录该哈希。
