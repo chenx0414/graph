@@ -2,7 +2,7 @@
 
 快照：2026-09-12（Asia/Shanghai）。使用者要求把本轮 R1–R4 修复整理成 handoff，供其他 Agent 接手。
 
-**状态：首版实施计划 M0–M7 已提交；独立验收反例的早期修复见 [acceptance-rework.md](acceptance-rework.md)，第三位 Agent 的 R1–R4 复验见 [acceptance-followup.md](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)，第四轮 S1 与两项 Spec P1 修复见 [next-steps-after-r3.md](next-steps-after-r3.md#第四轮修复结果2026-09-12)。最近一次功能修复提交见该节末尾；其后的 docs 提交只记录哈希。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：首版实施计划 M0–M7 已提交；独立验收反例的早期修复见 [acceptance-rework.md](acceptance-rework.md)，第三位 Agent 的 R1–R4 复验见 [acceptance-followup.md](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)，第四轮 S1 与两项 Spec P1 修复、第五轮受限扩展/远程 MCP/网络检索见 [next-steps-after-r3.md](next-steps-after-r3.md#第四轮修复结果2026-09-12)。最近一次功能修复提交见该节末尾；其后的 docs 提交只记录哈希。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 
@@ -17,7 +17,7 @@
    node -v                                  # v24.20.0
    tsc --noEmit
    tsc -p tsconfig.web.json --noEmit
-   vitest run                               # 35 files, 145 tests
+   vitest run                               # 36 files, 153 tests
    vite build
    git diff --check
    ```
@@ -44,14 +44,24 @@
 | S1 命令/MCP 可写 Git 元数据 | 已关闭 | `restricted-process.ts` 在每次派发前扫描并拒绝写授权内已存在的 `.git` 条目（相对/嵌套/绝对/硬链接均覆盖）；只读 Git 改以具体 CLT 二进制运行；`tests/m3/workspace-command.test.ts`、`tests/m3/capabilities.test.ts`；`command-git-boundary.mts` 输出 `protected:true` |
 | Spec P1 修订可削弱验收命令 | 已关闭 | `revision.ts` 固定已确认检查项的 input；`tests/m4/command-check.test.ts`；`command-input-revision.mts` 输出 `revisionRejected:true` 且无有效证据 |
 | Spec P1 真实验收入口不可靠续跑 | 已关闭 | `examples/m7-acceptance.ts` 固定运行目录 + `run.json`，只确认当前提案版本与当前 open 问题，目标前移重新呈现；`tests/m7/harness.test.ts` 多进程覆盖；未配置费率时保留 `cost: unknown` |
-| 受限 worker 内扩展/网络检索/远程 MCP | 仍未实现 | 绑定扩展仍以具体原因阻塞；报告不列为能力已实现 |
+| 受限 worker 内扩展/网络检索/远程 MCP | 第五轮已关闭 | 见下方第五轮表 |
+
+## 第五轮完成范围（2026-09-12）
+
+原范围遗留的受限执行能力已补齐，均按定义版本加载并真实可调用：
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 受限 worker 扩展加载 | 已关闭 | `src/runtime/extension-worker.mjs` 在受限 executor 内加载扩展最小 `register(api)` 接口；`tests/m3/capabilities.test.ts` 验证可调用、越权写入被拒、零用量计量 |
+| 远程 MCP 域名白名单 | 已关闭 | `capability.json` `transport:http` + `network.mcpDomains`；未授予域名时节点以具体原因停止；`tests/m3/capabilities.test.ts` |
+| 授权范围内网络检索 | 已关闭 | `src/runtime/retrieval.ts` 受控读取 broker；`fetch` 工具仅在有授予域名时暴露；`tests/m3/retrieval.test.ts` 覆盖允许与拒绝路径及暂停 |
 
 ## 准确边界
 
 这些是已验证范围，不是待办：
 
 - 机制矩阵 A01–A12 有可重复测试。A13 的 scripted 与生产 Pi 机制测试保留；真实模型运行未执行，不标完成。
-- Skill 与本地 stdio MCP 按定义版本加载；MCP 每次调用一个受限进程并经 send gate。远程 MCP 域名白名单、扩展在受限 worker 内加载、网络检索入口仍未实现。
+- Skill、本地 stdio MCP、受限 worker 扩展与远程 MCP（运行时域名白名单）按定义版本加载并可调用；网络检索只放行授予域名、拒绝重定向与二进制、限制大小。扩展 worker 只实现本仓库定义的最小工具协议，官方 Pi 扩展 API 的完整语义、远程 MCP 的其他 transport 与其他平台仍未验证。
 - `run_command` 与 `graph.command` 只允许 `node`（禁内联求值）与只读 `git`，都在 macOS 沙箱内运行；受限边界在每次派发前拒绝写授权内已存在的 `.git` 条目（命令与 MCP 共用），已确认验收检查项的 input 在修订中固定；其他平台未验证。
 - 原项目 `/Users/macmini/workspace/12-MediaBookmarks` 未被修改，未把 Web 合入原仓库，未发布。
 - 未读取 `.env`，未调用收费模型，未使用真实 B站 登录或真实收藏数据。
@@ -65,9 +75,9 @@
 
 | 使用者可能说的话 | 要做的事 | 完成时可见 |
 | --- | --- | --- |
-| 用真实模型跑 M7 / 完成 A13 | 按 `examples/m7-acceptance.ts` 配置模型（两个不同模型 ID）：先运行看提案，再用 `GRAPH_M7_ACCEPT=<proposalVersion>` 确认该准确版本；每次登录检查用其打印的 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>`；真实登录走 CLI + 独立 profile。目标前移会重新呈现检查 | `acceptance-report.json`、目标分支合并提交、真实 invocation 记录；A13 才可标通过 |
+| 用真实模型跑 M7 / 完成 A13 | 先跑 `npm run accept:m7:contract` 核对两个模型的真实响应与 usage；再按 `examples/m7-acceptance.ts` 运行看提案，用 `GRAPH_M7_ACCEPT=<proposalVersion>` 确认该准确版本；每次登录检查用其打印的 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>`；真实登录走 CLI + 独立 profile。可用 `GRAPH_M7_RETRIEVAL_DOMAINS` / `GRAPH_M7_MCP_DOMAINS` 授权检索与远程 MCP 域名。目标前移会重新呈现检查 | `contract-report.json`、`acceptance-report.json`、目标分支合并提交、真实 invocation 记录；A13 才可标通过 |
 | 合入原仓库 / 真用 B站 Web | 把克隆上的 `src/web-server.js`、`src/web/index.html`、`test/web-server.test.js` 与 `package.json` 的 `web` 脚本合进 MediaBookmarks `main`。目标保持 JavaScript。登录仍走独立 `.browser-profile` 的 CLI | 原仓库有这些文件；`GRAPH_FIXTURE=1 node --test test/web-server.test.js` 通过；未改 Graph 的 TS 约束；未提交 `.env` / profile / `output/` |
-| 让扩展真正可加载 | 在受限 worker 内加载扩展并保持调用计量与暂停；不得在后台进程直接加载第三方扩展代码 | 绑定扩展的定义可运行；越权与凭据测试仍通过；更新 ADR 0008 与该范围报告 |
+| 让扩展真正可加载 | 已在第五轮完成（见上）；若需官方 Pi 扩展 API 全量语义，另行评估受限 worker 的接口扩展 | — |
 | 指定 GitHub 仓库 | 按 [issue-tracker](../agents/issue-tracker.md) 设 remote；需要时再发 G01–G18 的 Issue | `git remote -v` 有目标；未另起一套任务平台 |
 
 其他平台 Web、把 Graph 标成「已发布」都要使用者先说。返工循环不必在 MediaBookmarks 任务上再演示一遍，机制证据在 M4。
@@ -86,4 +96,4 @@
 
 分里程碑：`vitest run tests/m7` 或 package.json 里的 `test:m0` … `test:m7`。
 公开入口诊断：`docs/planning/acceptance-evidence/README.md`（10 个 `node *.mts`，浏览器场景先 `vite build`）。
-真实模型验收：`npm run accept:m7`（需要模型配置，见上）。
+真实模型验收：`npm run accept:m7`（需要模型配置，见上）；调用授权契约预检：`npm run accept:m7:contract`。

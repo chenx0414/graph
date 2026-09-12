@@ -1,14 +1,15 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
-import { readBounded } from './bounded-path.ts';
-import { callMcpTool, listMcpTools, resolveMcpArg, type McpEndpoint } from './mcp-client.ts';
+import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
+import { allowedDomain, normalizeDomains } from './domains.ts';
 import { externallyGated } from './pi-instance.ts';
-import { acquireRestrictedExecutor, openRestrictedExecutor } from './restricted-process.ts';
+import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface LoadedCapabilities {
@@ -18,7 +19,9 @@ export interface LoadedCapabilities {
   close(): Promise<void>;
 }
 
-interface McpManifest { command?: unknown; args?: unknown }
+interface McpManifest { command?: unknown; args?: unknown; entry?: unknown; url?: unknown; headers?: unknown; headersEnv?: unknown }
+
+const extensionWorker = fileURLToPath(new URL('./extension-worker.mjs', import.meta.url));
 
 function snapshotPath(record: { snapshot: Json }) {
   const snapshot = record.snapshot;
@@ -34,34 +37,111 @@ function mcpToolName(capabilityId: string, tool: string) {
   return `mcp_${clean(capabilityId)}_${clean(tool)}`;
 }
 
-async function mcpEndpoint(input: {
-  executor: Awaited<ReturnType<typeof openRestrictedExecutor>>; gate: SendGate;
-  snapshot: string; workspace: string; scratchDir: string;
-}): Promise<McpEndpoint> {
-  const manifest = JSON.parse(await readFile(join(input.snapshot, 'capability.json'), 'utf8')) as McpManifest;
-  if (typeof manifest.command !== 'string' || !isAbsolute(manifest.command)) {
-    throw new RuntimeError('capability_unavailable', 'An MCP capability requires capability.json with an absolute command');
-  }
-  const args = Array.isArray(manifest.args) && manifest.args.every(value => typeof value === 'string') ? manifest.args as string[] : [];
-  // The verified OS sandbox requires canonical, already-existing grants.
-  const workspace = await realpath(input.workspace);
-  await mkdir(input.scratchDir, { recursive: true, mode: 0o700 });
-  const scratchDir = await realpath(input.scratchDir);
-  return {
-    executor: input.executor, gate: input.gate, cwd: workspace, scratchDir,
-    command: manifest.command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
-    readPaths: [input.snapshot, dirname(process.execPath)],
-    writePaths: [workspace, scratchDir],
+async function manifestOf(snapshot: string) {
+  try { return JSON.parse(await readFile(join(snapshot, 'capability.json'), 'utf8')) as McpManifest; }
+  catch (error) { throw new RuntimeError('capability_unavailable', `Capability manifest is unreadable: ${String(error)}`); }
+}
+
+function headerValues(headers: unknown, headersEnv: unknown) {
+  const values: Record<string, string> = {};
+  const merge = (source: unknown, resolveValue: (value: string) => string, label: string) => {
+    if (source === undefined) return;
+    if (!source || typeof source !== 'object' || Array.isArray(source) || Object.values(source).some(value => typeof value !== 'string')) {
+      throw new RuntimeError('capability_unavailable', `${label} must be a string map`);
+    }
+    for (const [header, value] of Object.entries(source as Record<string, string>)) values[header] = resolveValue(value);
   };
+  merge(headers, value => value, 'MCP manifest headers');
+  merge(headersEnv, name => {
+    const value = process.env[name];
+    if (!value) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
+    return value;
+  }, 'MCP manifest headersEnv');
+  return values;
+}
+
+/** A granted remote MCP endpoint; the runtime allowlist is checked before any request. */
+function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: string[]): McpExchange {
+  if (typeof manifest.url !== 'string' || !manifest.url.trim()) {
+    throw new RuntimeError('capability_unavailable', 'An MCP capability requires capability.json with an absolute command or a remote url');
+  }
+  let url: URL;
+  try { url = new URL(manifest.url); }
+  catch { throw new RuntimeError('capability_unavailable', `Remote MCP url is invalid: ${manifest.url}`); }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new RuntimeError('capability_unavailable', `Remote MCP supports http and https, not ${url.protocol}`);
+  if (url.username || url.password) throw new RuntimeError('capability_unavailable', 'Remote MCP urls cannot embed credentials');
+  const domains = normalizeDomains(mcpDomains);
+  if (!allowedDomain(domains, url.hostname)) {
+    throw new RuntimeError('capability_unavailable', `Remote MCP host ${url.hostname} is not in the granted MCP domains`);
+  }
+  return httpExchange({ gate, url: url.href, headers: headerValues(manifest.headers, manifest.headersEnv), timeoutMs: 30_000 });
+}
+
+async function runGrants(workspace: string, scratchDir: string) {
+  // The verified OS sandbox requires canonical, already-existing grants.
+  const canonicalWorkspace = await realpath(workspace);
+  await mkdir(scratchDir, { recursive: true, mode: 0o700 });
+  return { workspace: canonicalWorkspace, scratchDir: await realpath(scratchDir) };
+}
+
+async function localConnection(input: {
+  executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
+  manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string;
+}): Promise<McpExchange> {
+  if (typeof input.manifest.command !== 'string' || !isAbsolute(input.manifest.command)) {
+    throw new RuntimeError('capability_unavailable', 'A local MCP capability requires capability.json with an absolute command');
+  }
+  const args = Array.isArray(input.manifest.args) && input.manifest.args.every(value => typeof value === 'string') ? input.manifest.args as string[] : [];
+  const grants = await runGrants(input.workspace, input.scratchDir);
+  return stdioExchange({
+    executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
+    command: input.manifest.command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
+    readPaths: [input.snapshot, dirname(process.execPath)],
+    writePaths: [grants.workspace, grants.scratchDir],
+  });
+}
+
+/** Extensions load only inside the restricted worker, never in the background process. */
+async function extensionConnection(input: {
+  executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
+  manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string;
+}): Promise<McpExchange> {
+  const entryValue = typeof input.manifest.entry === 'string' && input.manifest.entry.trim() ? input.manifest.entry : './index.mjs';
+  const entry = isAbsolute(entryValue) ? entryValue : resolve(input.snapshot, entryValue);
+  if (entry !== input.snapshot && !entry.startsWith(`${input.snapshot}/`)) {
+    throw new RuntimeError('capability_unavailable', `Extension entry ${entryValue} must stay inside the snapshot`);
+  }
+  if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Extension entry ${entryValue} does not exist`);
+  const grants = await runGrants(input.workspace, input.scratchDir);
+  return stdioExchange({
+    executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
+    command: process.execPath, args: [extensionWorker, await realpath(entry)],
+    readPaths: [input.snapshot, dirname(process.execPath), dirname(extensionWorker)],
+    writePaths: [grants.workspace, grants.scratchDir],
+  });
+}
+
+function capabilityTools(connection: McpExchange, tools: McpTool[], capability: { id: string; version: string }): ToolDefinition[] {
+  return tools.map(tool => externallyGated({
+    name: mcpToolName(capability.id, tool.name), label: `${tool.name} (${capability.id})`,
+    description: tool.description ?? `MCP tool ${tool.name} from ${capability.id}@${capability.version}`,
+    parameters: Type.Unsafe(tool.inputSchema ?? { type: 'object', properties: {} }),
+    execute: async (_id, params) => {
+      const result = await callMcpTool(connection, tool.name, params as Json);
+      const content = result.content.length ? result.content : [{ type: 'text' as const, text: 'MCP tool returned no content' }];
+      if (result.isError) throw new Error(content.map(part => part.text).join('\n'));
+      return { content, details: {} };
+    },
+  }));
 }
 
 /**
  * Load the capabilities bound by an Agent definition version.
  *
- * Skills become Pi resources and a read-only tool; MCP tools become callable
- * tools whose every call runs one restricted server process through the same
- * send gate as model calls. Extensions are refused here: the architecture does
- * not load third-party extension code in the formal background process.
+ * Skills become Pi resources and a read-only tool; local MCP servers and
+ * extensions run one restricted process per call; remote MCP talks to a host in
+ * the runtime's granted domains. Every tool call passes the same send gate as
+ * model calls.
  */
 export async function loadCapabilities(input: {
   catalog: Catalog;
@@ -69,6 +149,7 @@ export async function loadCapabilities(input: {
   workspace: string;
   scratchDir: string;
   gate: SendGate;
+  mcpDomains?: string[];
 }): Promise<LoadedCapabilities> {
   const skillPaths: string[] = [];
   const readRoots: string[] = [];
@@ -90,26 +171,25 @@ export async function loadCapabilities(input: {
         if (!existsSync(join(snapshot, 'SKILL.md'))) throw new RuntimeError('capability_unavailable', `Skill ${bound.id}@${bound.version} has no SKILL.md`);
         skillPaths.push(snapshot);
         readRoots.push(snapshot);
-      } else if (record.kind === 'mcp') {
+        continue;
+      }
+      if (record.kind !== 'mcp' && record.kind !== 'extension') {
+        throw new RuntimeError('capability_unsupported', `Capability kind ${record.kind} is not loadable`);
+      }
+      const manifest = await manifestOf(snapshot);
+      let connection: McpExchange;
+      if (record.kind === 'extension') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
-        const endpoint = await mcpEndpoint({ executor: acquired.executor, gate: input.gate, snapshot, workspace: input.workspace, scratchDir: input.scratchDir });
-        for (const tool of await listMcpTools(endpoint)) {
-          tools.push(externallyGated({
-            name: mcpToolName(bound.id, tool.name), label: `${tool.name} (${bound.id})`,
-            description: tool.description ?? `MCP tool ${tool.name} from ${bound.id}@${bound.version}`,
-            parameters: Type.Unsafe(tool.inputSchema ?? { type: 'object', properties: {} }),
-            execute: async (_id, params) => {
-              const result = await callMcpTool(endpoint, tool.name, params as Json);
-              const content = result.content.length ? result.content : [{ type: 'text' as const, text: 'MCP tool returned no content' }];
-              if (result.isError) throw new Error(content.map(part => part.text).join('\n'));
-              return { content, details: {} };
-            },
-          }));
-        }
+        connection = await extensionConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir });
+      } else if (typeof manifest.command === 'string') {
+        const acquired = await acquireRestrictedExecutor();
+        releases.push(acquired.release);
+        connection = await localConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir });
       } else {
-        throw new RuntimeError('capability_unsupported', `Extension ${bound.id}@${bound.version} requires the restricted worker and is not loaded in the background process`);
+        connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? []);
       }
+      tools.push(...capabilityTools(connection, await listMcpTools(connection), bound));
     }
   } catch (error) {
     await close();

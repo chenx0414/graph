@@ -44,6 +44,8 @@ import { git } from '../src/git/git.ts';
  *   GRAPH_M7_MODEL_INPUT_COST, GRAPH_M7_MODEL_OUTPUT_COST,
  *   GRAPH_M7_MODEL_CACHE_READ_COST, GRAPH_M7_MODEL_CACHE_WRITE_COST
  *   (USD per million tokens; without them the report keeps `cost: unknown`)
+ *   GRAPH_M7_RETRIEVAL_DOMAINS, GRAPH_M7_MCP_DOMAINS (comma-separated;
+ *   without them no retrieval tool or remote MCP host is granted)
  *
  * Exit codes: 0 completed/no-op, 1 waiting for the next user confirmation or
  * host answer, 2 invalid configuration or unexpected failure.
@@ -72,6 +74,7 @@ interface HarnessPaths {
   runFile: string;
   reportPath: string;
   rates?: ModelCost;
+  network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
 }
 
 function required(name: string) {
@@ -166,6 +169,7 @@ async function runSession(runtime: Runtime, task: Task, state: RunState, paths: 
       cost: view.cost,
       costSource: paths.rates ? 'configured-rates' : 'model-rates-not-configured',
       costRates: paths.rates ?? null,
+      network: paths.network ?? null,
       ...(detail.note ? { note: detail.note } : {}),
       ...(detail.resume ? { resume: detail.resume } : {}),
     };
@@ -293,11 +297,19 @@ async function main() {
   const maxTokens = Number(process.env.GRAPH_M7_MODEL_MAX_TOKENS ?? 16_384);
 
   const workDir = resolve(process.env.GRAPH_M7_WORKDIR?.trim() || process.argv[2] || join(process.cwd(), '..', 'graph-m7-acceptance'));
+  const domainList = (name: string) => (process.env[name] ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  const retrievalDomains = domainList('GRAPH_M7_RETRIEVAL_DOMAINS');
+  const mcpDomains = domainList('GRAPH_M7_MCP_DOMAINS');
+  const network = {
+    ...(retrievalDomains.length ? { retrievalDomains } : {}),
+    ...(mcpDomains.length ? { mcpDomains } : {}),
+  };
   const paths: HarnessPaths = {
     workDir,
     runFile: join(workDir, 'run.json'),
     reportPath: process.env.GRAPH_M7_REPORT?.trim() || join(workDir, 'acceptance-report.json'),
     ...(rates ? { rates } : {}),
+    ...(retrievalDomains.length || mcpDomains.length ? { network } : {}),
   };
   await mkdir(workDir, { recursive: true });
   console.log(`Run directory: ${workDir}`);
@@ -322,6 +334,7 @@ async function main() {
     projects: [{ id: projectId, root: project }],
     models: { entries, apiKey, modelRuntime },
     master: { action: 'master', definitionVersion: 'master@1', model: implementationId },
+    ...(retrievalDomains.length || mcpDomains.length ? { network } : {}),
   });
   try {
     runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');

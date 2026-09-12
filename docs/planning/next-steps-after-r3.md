@@ -75,3 +75,13 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 第 4–6 项：真实模型预检、A13 真实运行与最终收尾待使用者提供模型配置与登录；A13 不标通过。
 
 本轮修复提交 `81016a1`（`fix: close fourth-round acceptance findings`）；其后的 docs 提交只记录该哈希。
+
+## 第五轮修复结果（2026-09-12）
+
+上表第 3 项已实现：受限 worker 扩展加载、授权范围内的网络检索与远程 MCP。
+
+- **受限 worker 扩展**：`src/runtime/extension-worker.mjs` 在受限 executor 内加载扩展快照，扩展只看到最小 `register(api)` 接口；后台进程不 import 第三方代码。工具每次 exchange 一个受限进程，写入限工作副本与 Graph scratch，经同一 send gate。`tests/m3/capabilities.test.ts` 验证扩展工具真实可调用、越权写入被拒、零用量 invocation 与暂停不启动进程。
+- **远程 MCP**：`capability.json` 支持 `transport: http` + `url`（可选 `headers`/`headersEnv`）；运行时需用 `network.mcpDomains` 授予域名，未授予时节点以具体原因停止。Streamable HTTP 客户端拒绝重定向、限制响应大小，每次 exchange 一条 invocation。
+- **网络检索**：`src/runtime/retrieval.ts` 是受控读取 broker；只放行 `network.retrievalDomains` 中的域名，拒绝内嵌凭据与重定向，只接受文本类响应并限制大小。`fetch` 工具只在授予域名时出现在 Agent 工具列表。`tests/m3/retrieval.test.ts` 覆盖允许、未授予域名在请求前被拒、非文本拒绝、重定向拒绝与暂停不发请求。
+- 公开入口观测：`capabilities.mts` 输出 `granted-capabilities-callable`（三项真实可调用、`questions:[]`）与 `retrieval-domain-denied`。
+- 本仓库定义的扩展工具协议不是官方 Pi 扩展 API 的完整实现；其他平台与远程 MCP 的其他 transport 仍未验证。

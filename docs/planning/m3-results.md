@@ -39,7 +39,7 @@ pnpm check
 | 定义升级不改变运行实例 | 发布 `coder@2` 后运行中节点仍绑定 `@1` |
 | 受限安装 | `catalog.install` 经 sandbox 复制技能目录；任务问题列表不加权限 |
 | 安装不扩张权限 | 安装后 `view().questions` 为空，无新 grant；MCP 调用在 OS 沙箱内被拒绝越权写入 |
-| 定义绑定能力真实可调用 | `tests/m3/capabilities.test.ts`：Skill 进入系统提示且正文可读；MCP 工具调用写入工作副本且外部写入被拒；每次调用记一条 invocation，暂停时进程不启动；扩展绑定以具体原因阻塞 |
+| 定义绑定能力真实可调用 | `tests/m3/capabilities.test.ts`：Skill 进入系统提示且正文可读；本地 MCP、受限 worker 扩展与远程 MCP（运行时域名白名单）的工具真实可调用且写入范围受限；每次 exchange 记一条零用量 invocation，暂停时进程不启动；`tests/m3/retrieval.test.ts`：受控读取 broker 只访问授予域名，拒绝非文本与重定向，暂停时不发请求 |
 | 构建测试入口 | `tests/m3/workspace-command.test.ts`：`run_command` 允许 `node`/只读 `git`（以具体 CLT 二进制运行），拒绝白名单外命令与内联求值；写授权内已存在的 `.git` 条目在相对、嵌套、绝对与硬链接路径下均被拒绝；`tests/m4/command-check.test.ts`：`graph.command` 程序节点在集成提交上运行检查并产生验收证据，且修订不能改写验收检查的 input |
 
 中断的安装保留 `installations` 记录，`reconcileInstall` 可再执行。主管通过发布引用新能力的定义版本来复用，不能靠安装改写任务授权。能力加载与权限边界的决定见 [ADR 0008](../adr/0008-definition-bound-capability-loading.md)。
@@ -58,4 +58,4 @@ schema 8：`definitions`、`capabilities`、`installations`、`invocations`、`m
 
 ## 本轮边界
 
-未对使用者配置的真实供应商做收费契约请求；其他 transport 仍须沿用 M0 规则复验。Pi 会话目前在宿主进程内打开，模型 HTTP 仍过调用门。本地 stdio MCP 已按定义版本加载并通过受限进程调用；受限执行边界在每次命令与 MCP 派发前拒绝写授权内已存在的 `.git` 条目（含 worktree 链接文件），命令与 MCP 共用；远程 MCP 的域名白名单、扩展在受限 worker 内的加载，以及网络资料检索入口仍待后续，报告不把这几项列为完成。Git 工作副本与自动合并见 [M4 报告](m4-results.md)；Web 是 M5。第三位 Agent 的复验见 [验收跟进](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)。
+未对使用者配置的真实供应商做收费契约请求；其他 transport 仍须沿用 M0 规则复验。Pi 会话目前在宿主进程内打开，模型 HTTP 仍过调用门。Skill、本地 stdio MCP、受限 worker 扩展与远程 MCP（运行时域名白名单）均按定义版本加载并真实可调用；网络资料检索由受控读取 broker 提供，只放行授予域名、拒绝重定向与二进制、限制大小，并过暂停与额度门。扩展 worker 只实现本仓库定义的最小 `register(api)` 工具协议，官方 Pi 扩展 API 的完整语义与其他平台仍未验证。Git 工作副本与自动合并见 [M4 报告](m4-results.md)；Web 是 M5。第三位 Agent 的复验与后续修复见 [验收跟进](acceptance-followup.md)。

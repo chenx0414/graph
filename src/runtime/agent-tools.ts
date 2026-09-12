@@ -20,12 +20,13 @@ function fields(params: unknown) {
   return params as Record<string, unknown>;
 }
 
-/** Workspace, result, and supervisor tools for a production Pi instance. */
+/** Workspace, result, supervisor, and granted retrieval tools for a production Pi instance. */
 export function agentTools(input: {
   workspace: string;
   role?: NodeSpec['role'];
   readRoots?: string[];
   run?: (command: string, args: string[]) => Promise<{ code: number | null; stdout: string; stderr: string }>;
+  fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
   catalog?: Catalog;
   install?: (input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) => Promise<unknown>;
@@ -80,6 +81,14 @@ export function agentTools(input: {
         const result = await run(String(body.command), Array.isArray(body.args) ? body.args.map(String) : []);
         return text(`exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`);
       },
+    }));
+  }
+  if (input.fetch) {
+    const fetchUrl = input.fetch;
+    tools.push(externallyGated({
+      name: 'fetch', label: 'Fetch URL', description: 'Fetch a text document from a granted domain and return its body.',
+      parameters: Type.Object({ url: Type.String() }),
+      execute: async (_id, params) => text(JSON.stringify(await fetchUrl(String(fields(params).url)))),
     }));
   }
   if (input.role === 'master' && input.supervisor) {

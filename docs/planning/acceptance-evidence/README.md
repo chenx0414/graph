@@ -15,6 +15,7 @@
 ./node_modules/.bin/node docs/planning/acceptance-evidence/followup-message.mts
 ./node_modules/.bin/node docs/planning/acceptance-evidence/command-git-boundary.mts
 ./node_modules/.bin/node docs/planning/acceptance-evidence/command-input-revision.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/capabilities.mts
 ```
 
 这些是验收诊断程序，打印实际观察值，退出码 0 只表示诊断运行完成。以报告中的预期行为判断通过与否；它们没有加入现有 Vitest 套件，不能把运行数量加入通过测试数。
@@ -28,5 +29,6 @@
 - `followup-message.mts`：`begin → runReady → say → runReady` 后，补充需求是否到达生产主管 provider。
 - `command-git-boundary.mts`：`graph.command`/`run_command` 执行 `node` 脚本改写工作副本 `.git/HEAD` 时是否被受限边界拒绝并保持元数据不变。
 - `command-input-revision.mts`：主管把已确认的失败检查命令改为 `node --version` 的修订是否被拒绝，以及原检查与证据是否保持。
+- `capabilities.mts`：按定义版本加载的受限 worker 扩展、远程 MCP（授予域名）与受控网络检索是否真实可调用并可计量，以及未授予域名是否在请求前被拒。
 
 全部程序创建并清理临时数据，没有真实供应商请求。浏览器场景需要已安装的 Playwright Chromium。`.output.txt` 是最近一次实际输出；临时 UUID、路径和 commit SHA 随运行变化。

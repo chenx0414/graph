@@ -29,6 +29,7 @@
     "build:web": "vite build",
     "demo:m1": "node examples/m1-demo.ts",
     "accept:m7": "node examples/m7-acceptance.ts",
+    "accept:m7:contract": "node examples/m7-contract.ts",
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {

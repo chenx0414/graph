@@ -1,2 +1,2 @@
 {"case":"graph_stale_after_completion","before":"work pending","after":"work succeeded","runtimePhase":"completed"}
-{"case":"budget_reply","httpStatus":200,"body":{"taskId":"b2ae55b1-0376-498c-9d8c-a9c4a459a751","cursor":15},"openQuestions":[]}
+{"case":"budget_reply","httpStatus":200,"body":{"taskId":"d923281a-d132-4c3e-816c-c464faa6378c","cursor":15},"openQuestions":[]}

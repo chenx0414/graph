@@ -1,4 +1,6 @@
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +12,41 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 const fixtureDir = fileURLToPath(new URL('../fixtures/', import.meta.url));
+
+/** Minimal Streamable HTTP MCP server for the remote capability tests. */
+async function remoteMcp() {
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const request = JSON.parse(Buffer.concat(chunks).toString()) as { id?: number; method?: string; params?: { arguments?: { text?: string } } };
+    if (request.method === 'notifications/initialized') { res.writeHead(202); res.end(); return; }
+    if (request.method === 'initialize') {
+      res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'session-1' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'remote-fixture', version: '1.0.0' } } }));
+      return;
+    }
+    if (request.method === 'tools/list') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { tools: [{ name: 'echo', description: 'Echo text', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } }] } }));
+      return;
+    }
+    if (request.method === 'tools/call') {
+      calls += 1;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: `remote:${request.params?.arguments?.text ?? ''}` }], isError: false } }));
+      return;
+    }
+    res.writeHead(500); res.end();
+  });
+  await new Promise<void>(resolvePromise => server.listen(0, '127.0.0.1', resolvePromise));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    url: `http://127.0.0.1:${port}/mcp`,
+    calls: () => calls,
+    close: () => new Promise<void>((resolvePromise, reject) => { server.closeAllConnections(); server.close(error => error ? reject(error) : resolvePromise()); }),
+  };
+}
 
 function git(cwd: string, args: string[]) {
   const result = runGit(cwd, args);
@@ -190,12 +227,18 @@ test('a bound MCP tool cannot rewrite Git metadata through relative paths', asyn
   expect((await task.view()).questions).toEqual([]);
 });
 
-test('binding an extension capability fails the node with a concrete reason', async () => {
+test('a definition-bound extension loads in the restricted worker and its tool is callable and metered', async () => {
   const { root, workspace } = await project();
+  const outside = join(root, 'outside.txt');
+  await writeFile(outside, 'formal');
   const extension = join(root, 'extension');
   await mkdir(extension);
-  await writeFile(join(extension, 'index.ts'), 'export default () => {};\n');
-  const provider = await openaiServer([{ text: 'Should not be reached.' }]);
+  await copyFile(join(fixtureDir, 'extension-capability.mjs'), join(extension, 'extension.mjs'));
+  await writeFile(join(extension, 'capability.json'), JSON.stringify({ kind: 'extension', entry: './extension.mjs' }));
+  const provider = await openaiServer([
+    { tools: [{ id: 'e1', name: 'mcp_ext_write_proof', arguments: JSON.stringify({ outside }) }] },
+    { text: 'Called the bound extension.' },
+  ]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
@@ -208,9 +251,73 @@ test('binding an extension capability fails the node with a concrete reason', as
 
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
+
+  expect(await readFile(join(workspace, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
+  expect(await readFile(outside, 'utf8')).toBe('formal');
+  expect(JSON.stringify(provider.requests[1])).toContain('outsideDenied');
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  const measurements = view.invocations.filter(row => row.usage && row.usage.input === 0 && row.usage.output === 0);
+  expect(measurements.length).toBeGreaterThanOrEqual(2); // one tools/list plus one tools/call
+});
+
+test('a definition-bound remote MCP tool is callable through the granted domain allowlist and metered', async () => {
+  const { root, workspace } = await project();
+  const mcp = join(root, 'remote');
+  await mkdir(mcp);
+  const server = await remoteMcp();
+  cleanup.push(() => server.close());
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify({ kind: 'mcp', transport: 'http', url: server.url }));
+  const provider = await openaiServer([
+    { tools: [{ id: 'm1', name: 'mcp_remote_echo', arguments: JSON.stringify({ text: 'hello' }) }] },
+    { text: 'Called the remote MCP capability.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    network: { mcpDomains: ['127.0.0.1'] },
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: checkAction(workspace) },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'coder');
+  await runtime.catalog.install({ id: 'remote', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+
+  const task = await checkedTask(runtime, workspace);
+  await runtime.host.drive();
+
+  expect(JSON.stringify(provider.requests[1])).toContain('remote:hello');
+  expect(server.calls()).toBe(1);
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  const measurements = view.invocations.filter(row => row.usage && row.usage.input === 0 && row.usage.output === 0);
+  expect(measurements.length).toBeGreaterThanOrEqual(2); // one tools/list plus one tools/call
+});
+
+test('a remote MCP host outside the granted domains stops the node with a concrete reason', async () => {
+  const { root, workspace } = await project();
+  const mcp = join(root, 'remote');
+  await mkdir(mcp);
+  const server = await remoteMcp();
+  cleanup.push(() => server.close());
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify({ kind: 'mcp', transport: 'http', url: server.url }));
+  const provider = await openaiServer([{ text: 'Should not be reached.' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: checkAction(workspace) },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'coder');
+  await runtime.catalog.install({ id: 'remote', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+
+  const task = await checkedTask(runtime, workspace);
+  await runtime.host.drive();
   const view = await task.view();
   const question = view.questions.find(item => item.kind === 'execution_failed');
   expect(question).toBeTruthy();
-  expect(JSON.stringify(question!.data)).toContain('Extension ext@1.0.0');
+  expect(JSON.stringify(question!.data)).toContain('not in the granted MCP domains');
   expect(provider.requests).toHaveLength(0);
+  expect(server.calls()).toBe(0);
 });

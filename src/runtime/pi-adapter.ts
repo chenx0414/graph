@@ -10,6 +10,7 @@ import { agentTools } from './agent-tools.ts';
 import { loadCapabilities } from './capabilities.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import { openPiInstance } from './pi-instance.ts';
+import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
 
@@ -47,6 +48,7 @@ export function createPiAdapter(options: {
   directory: () => ModelEntry[];
   apiKey: string;
   modelRuntime: ModelRuntime;
+  network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   channels?: PiAdapterChannels;
 }): ActionAdapter {
   return {
@@ -68,11 +70,15 @@ export function createPiAdapter(options: {
         const channels = options.channels;
         let capabilities: Awaited<ReturnType<typeof loadCapabilities>>;
         let commands: Awaited<ReturnType<typeof openWorkspaceCommandRunner>>;
+        const retrieval = options.network?.retrievalDomains?.length
+          ? createRetrievalBroker({ domains: options.network.retrievalDomains, gate })
+          : undefined;
         try {
           capabilities = await loadCapabilities({
             catalog: options.catalog,
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
             workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'), gate,
+            ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
           });
           commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
         } catch (error) {
@@ -85,6 +91,7 @@ export function createPiAdapter(options: {
             workspace, ...(spec.role ? { role: spec.role } : {}),
             ...(capabilities.readRoots.length ? { readRoots: capabilities.readRoots } : {}),
             run: (command, args) => commands.run(command, args),
+            ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
             ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog, install: channels.install } : {}),
             onSubmit: output => { submitted = output; },
           }),
@@ -101,7 +108,7 @@ export function createPiAdapter(options: {
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
             const hint = spec.role === 'master'
               ? '\nUse propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands, graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.'
-              : '\nUse workspace tools to read and edit files. Submit structured output with submit_result when required.';
+              : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             await session.prompt(`${briefing}${hint}`);
             const text = assistantText(session.inspect().messages);
             return { outcome: 'completed', output: (submitted ?? { text }) as Json, usage: gate.total() };

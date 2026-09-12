@@ -123,7 +123,7 @@ M2 已用 scripted adapter 在 Task Runtime 接口上验证 G06–G08；生产 P
 - 产物：需求讨论、验收说明、图提案、Agent 创建、局部返工、证据汇总和人工问题处理。
 - 出口：通过一个临时项目任务，自主拆解并并行执行；不需要用户复制上下文；主管提案仍接受程序校验；新增功能进入队列、原任务继续原范围。
 
-M3 已用可控本地 OpenAI chat-completions 服务验证生产 Pi 的工作工具、主管提案通道与逐请求用量门；scripted 主管仍用于规划测试。第三轮复验按定义版本加载 Skill 与本地 MCP，并加入构建测试入口（`run_command`、`graph.command`），见 [验收跟进](planning/acceptance-followup.md#第三位-agent-的复验结果2026-09-12)。第四轮把受限执行边界扩展到 Git 元数据：写授权内已存在的 `.git` 条目在命令与 MCP 派发前被拒绝，只读 Git 子命令以具体 CLT 二进制运行；修订通道不能再改写已确认检查的 input。未读取 `.env`、未调用收费模型。准确范围见 [M3 报告](planning/m3-results.md)。
+M3 已用可控本地 OpenAI chat-completions 服务验证生产 Pi 的工作工具、主管提案通道与逐请求用量门；scripted 主管仍用于规划测试。第三轮复验按定义版本加载 Skill 与本地 MCP，并加入构建测试入口（`run_command`、`graph.command`），见 [验收跟进](planning/acceptance-followup.md#第三位-agent-的复验结果2026-09-12)。第四轮把受限执行边界扩展到 Git 元数据：写授权内已存在的 `.git` 条目在命令与 MCP 派发前被拒绝，只读 Git 子命令以具体 CLT 二进制运行；修订通道不能再改写已确认检查的 input。第五轮补齐定义绑定的扩展受限 worker、远程 MCP 域名白名单与受控网络检索，均经同一调用门，见 [验收跟进](planning/acceptance-followup.md)。未读取 `.env`、未调用收费模型。准确范围见 [M3 报告](planning/m3-results.md)。
 
 ## M4 代码集成与自动合并
 

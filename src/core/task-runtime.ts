@@ -25,6 +25,7 @@ export async function openTaskRuntime(options: {
   actions?: Record<string, ActionAdapter>;
   models?: { entries: ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; apiKey: string; modelRuntime: ModelRuntime };
   master?: { action: string; definitionVersion: string; model: string };
+  network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
 }) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
@@ -59,6 +60,7 @@ export async function openTaskRuntime(options: {
     const fallback = options.models ? createPiAdapter({
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: () => options.models!.entries,
       apiKey: options.models.apiKey, modelRuntime: options.models.modelRuntime,
+      ...(options.network ? { network: options.network } : {}),
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
