@@ -91,12 +91,12 @@ Standards：1 项 P1；Spec：3 项 P1。没有因现有 124 项测试通过而�
 
 - 保留原 scripted 机制测试 `tests/m7/delivery.test.ts` 与 `tests/m7/production.test.ts`。
 - 新增 `graph.command` 程序节点后，真实自主图不再依赖宿主预置的 `check` adapter：验收证据可以由真实命令在集成提交上产生（`tests/m4/command-check.test.ts`）。
-- 新增 `examples/m7-acceptance.ts` 真实模型验收 harness（`npm run accept:m7`）：主管模型从冻结需求提案，工人模型在克隆上实现，检查由 `graph.command` 运行，审查由不同模型完成，人工登录项绑定 activation 与集成提交。harness 在需求确认前停下（除非 `GRAPH_M7_ACCEPT=1`），并在登录确认前停下（除非 `GRAPH_M7_LOGIN_CONFIRMED=1`）。
+- 新增 `examples/m7-acceptance.ts` 真实模型验收 harness（`npm run accept:m7`）：主管模型从冻结需求提案，工人模型在克隆上实现，检查由 `graph.command` 运行，审查由不同模型完成，人工登录项绑定 activation 与集成提交。第四轮起 harness 使用固定运行目录并在 `run.json` 保存同一任务：在需求确认前停下（除非 `GRAPH_M7_ACCEPT=<proposalVersion>` 指定了本次打印的准确版本），并在每个 open 人工检查前停下（除非 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>` 指定该当前问题），见 [第四轮修复结果](next-steps-after-r3.md#第四轮修复结果2026-09-12)。
 - **本轮没有可用的真实模型**（本机 Ollama 无模型；既有授权不允许调用收费模型），也没有真实 B站 登录，因此没有执行真实自主运行，**A13 不标通过**。
 - 所需使用者介入（准确步骤）：
   1. 配置一个 OpenAI-compatible 端点与两个不同模型 ID（实现、审查），设置 `GRAPH_M7_MODEL_ID`、`GRAPH_M7_MODEL_BASE_URL`、`GRAPH_M7_MODEL_API_KEY`、`GRAPH_M7_REVIEW_MODEL_ID`。
-  2. 运行 `npm run accept:m7`，审阅提案后用 `GRAPH_M7_ACCEPT=1` 重跑以确认需求。
-  3. 用 CLI 在项目 `.browser-profile` 完成 B站登录；确认后以 `GRAPH_M7_LOGIN_CONFIRMED=1` 重跑，让 `human_check` 回答绑定当前 activation 与集成提交。
+  2. 运行 `npm run accept:m7`，审阅提案后用 `GRAPH_M7_ACCEPT=<proposalVersion>` 重跑以确认该准确版本（固定目录，同一任务继续）。
+  3. 用 CLI 在项目 `.browser-profile` 完成 B站登录；按当前 open 检查打印的 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>` 重跑，让 `human_check` 回答绑定当前 activation 与集成提交；目标前移后旧 id 会被拒并重新呈现。
   4. 检查 `acceptance-report.json`、目标分支提交和 `view().invocations` 的真实调用记录。
 
 harness 只支持已验证的 `openai-completions` transport；其他 transport 仍须按 M0 规则先复验。

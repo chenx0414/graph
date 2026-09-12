@@ -34,12 +34,16 @@ export function applyRevision(store: TaskStore, taskId: string, input: GraphRevi
   for (const item of accepted.acceptance) {
     const prior = current.nodes.find(node => node.id === item.checkNode);
     const nextNode = next.nodes.find(node => node.id === item.checkNode);
-    if (!prior || !nextNode) throw new RuntimeError('invalid_proposal', 'Revision cannot remove a confirmed acceptance check');
+    const confirmed = accepted.nodes.find(node => node.id === item.checkNode);
+    if (!prior || !nextNode || !confirmed) throw new RuntimeError('invalid_proposal', 'Revision cannot remove a confirmed acceptance check');
     if (prior.kind !== nextNode.kind || prior.action !== nextNode.action || Boolean(prior.optional) !== Boolean(nextNode.optional)) {
       throw new RuntimeError('invalid_proposal', 'Revision cannot change a confirmed check action');
     }
     if (canonicalJson(prior.verifier ?? null) !== canonicalJson(nextNode.verifier ?? null)) {
       throw new RuntimeError('invalid_proposal', 'Revision cannot change confirmed verification rules');
+    }
+    if (canonicalJson(nextNode.input ?? null) !== canonicalJson(confirmed.input ?? null)) {
+      throw new RuntimeError('invalid_proposal', 'Revision cannot change the confirmed input of an acceptance check');
     }
     for (const dependency of prior.dependsOn ?? []) {
       if (!(nextNode.dependsOn ?? []).includes(dependency)) throw new RuntimeError('invalid_proposal', 'Revision cannot remove a confirmed check dependency');

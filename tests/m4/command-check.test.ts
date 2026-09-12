@@ -91,3 +91,37 @@ test('a graph.command node refuses an unallowed command instead of running it', 
   const hash = createHash('sha256').update('absent').digest('hex');
   expect(view.evidence.every(item => item.artifact.digest !== hash)).toBe(true);
 });
+
+test('a graph revision cannot weaken the confirmed command of an acceptance check', async () => {
+  const root = await repo();
+  const { runtime, task } = await start(root, { work: workAction }, nodes, { command: 'node', args: ['--test'] });
+  await runtime.host.drive();
+  const before = await task.view();
+  expect(before.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  const weakened = nodes.map(node => node.id === 'check' ? { ...node, input: { command: 'node', args: ['--version'] } } : node);
+  await expect(runtime.supervisor(before.id).revise({
+    baseVersion: before.graphVersion, reason: 'Skip the required test', nodes: weakened, requestId: 'weaken',
+  })).rejects.toMatchObject({ code: 'invalid_proposal' });
+  const after = await task.view();
+  expect(after.graphVersion).toBe(before.graphVersion);
+  expect(after.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  expect(after.nodes.find(node => node.id === 'check')?.input).toEqual({ command: 'node', args: ['--test'] });
+  expect(after.evidence.find(item => item.acceptanceId === 'tests')?.valid).toBe(true);
+});
+
+test('a graph revision that keeps confirmed check inputs intact still applies', async () => {
+  const root = await repo();
+  const { runtime, task } = await start(root, { work: workAction }, nodes, { command: 'node', args: ['--test'] });
+  await runtime.host.drive();
+  const before = await task.view();
+  const extra: NodeSpec = { id: 'extra', kind: 'program', action: 'graph.command', dependsOn: ['check'], input: { command: 'node', args: ['--version'] } };
+  const confirmed = nodes.map(node => node.id === 'check' ? { ...node, input: { command: 'node', args: ['--test'] } } : node);
+  const revised = await runtime.supervisor(before.id).revise({
+    baseVersion: before.graphVersion, reason: 'Add an environment probe', nodes: [...confirmed, extra], requestId: 'add-probe',
+  });
+  expect(revised.graphVersion).toBe(before.graphVersion + 1);
+  await runtime.host.drive();
+  const after = await task.view();
+  expect(after.nodes.find(node => node.id === 'extra')?.status).toBe('succeeded');
+  expect(after.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+});

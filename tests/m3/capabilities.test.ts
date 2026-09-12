@@ -4,11 +4,18 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { git as runGit } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 const fixtureDir = fileURLToPath(new URL('../fixtures/', import.meta.url));
+
+function git(cwd: string, args: string[]) {
+  const result = runGit(cwd, args);
+  if (result.code !== 0) throw new Error(result.stderr);
+  return result.stdout;
+}
 
 function entry(baseUrl: string) {
   return {
@@ -147,6 +154,40 @@ test('a paused task cannot start a bound MCP capability process', async () => {
   expect((await task.view()).paused).toBe(true);
   await expect(readFile(join(workspace, 'mcp-capability.txt'), 'utf8')).rejects.toThrow();
   expect(await readFile(outside, 'utf8')).toBe('formal');
+});
+
+test('a bound MCP tool cannot rewrite Git metadata through relative paths', async () => {
+  const { root, workspace } = await project();
+  git(workspace, ['init', '-b', 'main']);
+  await writeFile(join(workspace, 'README.md'), 'project\n');
+  git(workspace, ['add', 'README.md']);
+  git(workspace, ['commit', '-m', 'init']);
+  const head = await readFile(join(workspace, '.git', 'HEAD'), 'utf8');
+  const mcp = join(root, 'mcp');
+  await mkdir(mcp);
+  await copyFile(join(fixtureDir, 'mcp-capability-server.mjs'), join(mcp, 'server.mjs'));
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify({ kind: 'mcp', command: process.execPath, args: ['./server.mjs'] }));
+  const provider = await openaiServer([
+    { tools: [{ id: 'm1', name: 'mcp_proof_write_git', arguments: JSON.stringify({}) }] },
+    { text: 'Tried to rewrite Git metadata.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: checkAction(workspace) },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'proof', version: '1.0.0' }] }, 'coder');
+  await runtime.catalog.install({ id: 'proof', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+
+  const task = await checkedTask(runtime, workspace);
+  await runtime.host.drive();
+
+  expect(JSON.stringify(provider.requests[1])).toContain('gitDenied');
+  expect(JSON.stringify(provider.requests[1])).toContain('true');
+  expect(await readFile(join(workspace, '.git', 'HEAD'), 'utf8')).toBe(head);
+  expect((await task.view()).questions).toEqual([]);
 });
 
 test('binding an extension capability fails the node with a concrete reason', async () => {

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readdir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
@@ -35,14 +36,46 @@ async function canonicalGrant(path: string) {
   return requested;
 }
 
-function pinnedFilesystemProfile(readPaths: string[], writePaths: string[]) {
+function pinnedFilesystemProfile(readPaths: string[], writePaths: string[], gitPaths: string[]) {
   const filters = (paths: string[]) => `(require-any ${paths.map(path => `(subpath ${JSON.stringify(path)})`).join(' ')})`;
+  // Commands and MCP capabilities may inspect Git through the read-only
+  // subcommands, but refs, the index and worktree link files stay owned by the
+  // Git module. The literal filters below are built from existing directories and
+  // resolved vnode paths, so a relative path cannot spell around them.
+  const gitFilters = gitPaths.flatMap(path => [`(literal ${JSON.stringify(path)})`, `(subpath ${JSON.stringify(path)})`]).join(' ');
   // Intersect SRT with literal, already-approved paths. SRT normalizes paths
   // again while building its profile; that must not turn a concurrent symlink
   // replacement into a grant to a different directory.
   return `(deny file-read* (require-not (require-any (literal "/") ${filters(readPaths)})))
     (allow file-read-metadata (vnode-type DIRECTORY))
-    (deny file-write* (require-not ${filters(writePaths)}))`;
+    (deny file-write* (require-not ${filters(writePaths)}))\n    ${gitFilters ? `(deny file-write* ${gitFilters})` : ''}`;
+}
+
+/** Every existing Git metadata entry under the write grants, without following symlinks. */
+async function gitMetadataPaths(roots: string[], scratchDir: string) {
+  const insideScratch = (path: string) => path === scratchDir || path.startsWith(`${scratchDir}/`);
+  const found = new Set<string>();
+  let entriesSeen = 0;
+  for (const root of roots) {
+    if (roots.some(other => other !== root && (root === other || root.startsWith(`${other}/`)))) continue; // A parent grant covers this root.
+    const stack = [root];
+    while (stack.length) {
+      const dir = stack.pop()!;
+      if (insideScratch(dir)) continue;
+      let entries;
+      try { entries = await readdir(dir, { withFileTypes: true }); }
+      catch { continue; } // File roots, device nodes and vanished directories have nothing to scan.
+      entriesSeen += entries.length;
+      if (entriesSeen > 50_000) throw new Error('Workspace is too large to verify the Git metadata boundary');
+      for (const entry of entries) {
+        const path = join(dir, entry.name);
+        if (entry.name === '.git') { found.add(path); continue; }
+        if (!entry.isDirectory() || entry.name === 'node_modules') continue;
+        stack.push(path);
+      }
+    }
+  }
+  return [...found];
 }
 
 function extractProfile(wrapped: string, command: string) {
@@ -92,9 +125,14 @@ export async function openRestrictedExecutor() {
       }
       const homeDir = join(scratchDir, '.worker-home');
       const tempDir = join(scratchDir, '.worker-tmp');
-      const allowedReads = ['/System', '/usr', '/bin', '/sbin', '/Library/Apple', '/dev', cwd, scratchDir, ...readPaths];
+      // The macOS Git shim resolves its developer directory through
+      // /private/var/select and then executes the Command Line Tools binaries.
+      const systemReads = ['/System', '/usr', '/bin', '/sbin', '/Library/Apple', '/dev'];
+      for (const shim of ['/private/var/select', '/Library/Developer/CommandLineTools']) if (existsSync(shim)) systemReads.push(shim);
+      const allowedReads = [...systemReads, cwd, scratchDir, ...readPaths];
       const deviceWrites = ['/dev/stdout', '/dev/stderr', '/dev/null', '/dev/tty', '/dev/dtracehelper', '/dev/autofs_nowait'];
-      const profile = pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths]);
+      const gitPaths = await gitMetadataPaths(writePaths, scratchDir);
+      const profile = pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths], gitPaths);
       const commandText = [command.executable, ...command.args].map(quote).join(' ');
       // Even setup writes happen after confinement. A mutable cwd must never
       // cause the host to create directories outside the original grant.
@@ -114,7 +152,7 @@ export async function openRestrictedExecutor() {
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
         const child = command.broker.dispatch(invocationId, 0, () => spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
-          cwd, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8' },
+          cwd, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1' },
           stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
         }));
         let stdout = '', stderr = '';

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { git as runGit } from '../../src/git/git.ts';
+import { openWorkspaceCommandRunner } from '../../src/runtime/workspace-command.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -72,4 +74,63 @@ test('a worker cannot run commands outside the allowlist or inline evaluation', 
   expect(second).toContain('not allowed');
   expect(second).toContain('Inline node evaluation');
   await expect(readFile(join(workspace, 'inline.txt'), 'utf8')).rejects.toThrow();
+});
+
+function git(cwd: string, args: string[]) {
+  const result = runGit(cwd, args);
+  if (result.code !== 0) throw new Error(result.stderr);
+  return result.stdout;
+}
+
+async function commandWorkspace() {
+  const root = await mkdtemp(join(tmpdir(), 'graph-command-git-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  git(workspace, ['init', '-b', 'main']);
+  await writeFile(join(workspace, 'README.md'), 'project\n');
+  git(workspace, ['add', 'README.md']);
+  git(workspace, ['commit', '-m', 'init']);
+  const runner = await openWorkspaceCommandRunner({ workspace, scratchDir: join(root, 'scratch'), gate: { dispatch: (_id, _reservation, send) => send(), settle: () => {} } });
+  cleanup.push(() => runner.close());
+  return { workspace, runner };
+}
+
+test('a command cannot rewrite the repository Git metadata through any path form', async () => {
+  const { workspace, runner } = await commandWorkspace();
+  const nested = join(workspace, 'sub');
+  await mkdir(nested);
+  git(nested, ['init', '-b', 'main']);
+  await writeFile(join(nested, '.git', 'HEAD'), 'ref: refs/heads/nested\n');
+  const before = await readFile(join(workspace, '.git', 'HEAD'), 'utf8');
+  const nestedBefore = await readFile(join(nested, '.git', 'HEAD'), 'utf8');
+  await writeFile(join(workspace, 'attempt.mjs'), [
+    "import { writeFileSync, linkSync } from 'node:fs';",
+    "const results = {};",
+    "for (const [name, path] of [['relative', '.git/HEAD'], ['nested', 'sub/.git/HEAD'], ['absolute', process.cwd() + '/.git/HEAD']]) {",
+    "  try { writeFileSync(path, 'ref: refs/heads/changed\\n'); results[name] = 'wrote'; } catch (error) { results[name] = error.code; }",
+    "}",
+    "try { linkSync('.git/HEAD', 'linked-head'); results.hardlink = 'linked'; } catch (error) { results.hardlink = error.code; }",
+    "writeFileSync('allowed.txt', 'allowed');",
+    'console.log(JSON.stringify(results));',
+  ].join('\n'));
+  const result = await runner.run('node', ['attempt.mjs']);
+  expect(result.code).toBe(0);
+  const attempted = JSON.parse(result.stdout.trim()) as Record<string, string>;
+  expect(Object.entries(attempted).filter(([name]) => ['relative', 'nested', 'absolute', 'hardlink'].includes(name)).map(([, outcome]) => outcome)).toEqual(['EPERM', 'EPERM', 'EPERM', 'EPERM']);
+  expect(await readFile(join(workspace, '.git', 'HEAD'), 'utf8')).toBe(before);
+  expect(await readFile(join(nested, '.git', 'HEAD'), 'utf8')).toBe(nestedBefore);
+  expect(await readFile(join(workspace, 'allowed.txt'), 'utf8')).toBe('allowed');
+});
+
+test('read-only Git commands still run inside the sandbox', async () => {
+  const { workspace, runner } = await commandWorkspace();
+  const status = await runner.run('git', ['status']);
+  expect(status.code).toBe(0);
+  expect(status.stderr).not.toContain('not permitted');
+  const log = await runner.run('git', ['log', '--oneline']);
+  expect(log.code).toBe(0);
+  expect(log.stdout).toContain('init');
+  await expect(runner.run('git', ['commit', '-m', 'changed'])).rejects.toMatchObject({ code: 'permission' });
+  expect(await readFile(join(workspace, 'README.md'), 'utf8')).toBe('project\n');
 });

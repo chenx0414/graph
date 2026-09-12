@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { RuntimeError } from '../core/types.ts';
@@ -5,6 +6,9 @@ import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-pro
 
 const READ_ONLY_GIT = new Set(['status', 'diff', 'log', 'show']);
 const INLINE_NODE = new Set(['-e', '--eval', '-p', '--print', '--input-type']);
+// `/usr/bin/git` is a shim that resolves the developer directory at runtime; the
+// sandbox cannot follow it. Prefer the concrete Command Line Tools binary.
+const GIT = ['/Library/Developer/CommandLineTools/usr/bin/git', '/usr/bin/git'].find(existsSync) ?? '/usr/bin/git';
 
 export interface CommandResult {
   code: number | null;
@@ -22,7 +26,7 @@ export function validateWorkspaceCommand(command: string, args: string[]) {
   }
   if (command === 'git') {
     if (!READ_ONLY_GIT.has(args[0] ?? '')) throw new RuntimeError('permission', 'Only read-only Git commands are allowed');
-    return { executable: '/usr/bin/git', args };
+    return { executable: GIT, args };
   }
   throw new RuntimeError('permission', `Command ${command} is not allowed in a work copy`);
 }

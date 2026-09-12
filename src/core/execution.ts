@@ -383,6 +383,9 @@ export class Execution {
         proposalVersion: task.accepted_proposal ?? 0, requirementVersion: task.requirement_version,
         context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers, ...(messages.length ? { messages } : {}) }, grants,
         activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions, ...(workspace ? { workspace } : {}) };
+      const graphBriefing = spec.role === 'master' && task.accepted_proposal !== null
+        ? [...loadGraph(this.store, node.task_id).plan.nodes.values()]
+        : undefined;
       if (this.catalog) {
         let capabilities: { id: string; version: string }[] | undefined;
         if (spec.definitionVersion) {
@@ -393,6 +396,7 @@ export class Execution {
           request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}),
           acceptance: proposal?.acceptance ?? [],
           ...(capabilities?.length ? { capabilities } : {}),
+          ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
           ...(spec.role === 'master' ? { catalog: {
             definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
             capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
@@ -402,6 +406,7 @@ export class Execution {
         operation.context.briefing = briefing(operation, {
           request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}),
           acceptance: proposal?.acceptance ?? [],
+          ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
         });
       }
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
