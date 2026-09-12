@@ -114,11 +114,12 @@ export function createPiAdapter(options: {
           });
           try {
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
-            const models = options.directory().map(entry => `${entry.id} (${entry.grade})`).join(', ');
+            // Order matches the harness directory: implementation first, independent review second.
+            const models = options.directory().map((entry, index) => `${index === 0 ? 'implementation' : 'review'}=${entry.id} (${entry.grade})`).join(', ');
             const hint = spec.role === 'master'
               ? [
-                  '\nUse propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands, graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.',
-                  `Configured models: ${models || '(none)'}. Use definition ids and versions from the briefing catalog (for example coder@1, reviewer@1).`,
+                  '\nUse propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands (including a headless browser test), graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.',
+                  `Configured models: ${models || '(none)'}. Implementation nodes must use the implementation model and review nodes must use the review model, both from the briefing catalog (for example coder@1, reviewer@1).`,
                   'proposalJson schema:',
                   `{"requirementVersion": ${operation.requirementVersion}, "summary": "<one line>",`,
                   ' "acceptance": [{"id":"a1","description":"...","checkNode":"<mandatory program node id>"}],',
