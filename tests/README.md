@@ -15,3 +15,5 @@ M3 在同一 Task Runtime 上接入生产 Pi adapter、模型目录和 Agent 库
 M4 继续同一接口：真实临时 Git 仓库上的实例 worktree、任务集成分支、冲突现场、目标脏工作区、目标前移重检、人工检查、独立审查和崩溃后核对。从 `view()`、问题列表和目标分支文件观察，不 mock Git 模块。
 
 M5 在 Task Runtime 外包一层本机 HTTP/SSE。命令与查询走 Fastify inject；任务图布局用 elkjs；界面用 Playwright Chromium 打开真实页面。不把主管提案暴露为 HTTP 用户路由。
+
+M6 把 A01–A12 映射到既有测试，并增加跨 SQLite/Git/sandbox/HTTP 的故障注入：进程被杀后的旧 worker、重复命令、未知用量副作用、目标分支竞态和后台停开。证据是测试断言，不是截图。

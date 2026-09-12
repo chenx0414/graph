@@ -81,6 +81,13 @@ export class Execution {
     const work = (async () => {
       const evidence = await adapter.reconcile!(operation);
       if (!evidence.proof.trim()) throw new RuntimeError('invalid_reconciliation', 'Reconciliation requires evidence');
+      if (evidence.state === 'completed' && this.git && operation.kind === 'agent' && evidence.result.outcome === 'completed') {
+        const current = this.store.db.prepare('SELECT state FROM operations WHERE id=?').get(id) as { state: string };
+        if (current.state === 'unknown') {
+          const merged = await this.git.exclusive(operation.taskId, () => this.git!.integrate(operation));
+          if (merged && !merged.ok) throw new RuntimeError('git_conflict', merged.conflicts.join(', '));
+        }
+      }
       this.store.transaction(() => {
         const current = this.store.db.prepare('SELECT state,result FROM operations WHERE id=?').get(id) as { state: string; result: string | null };
         if (current.state !== 'unknown') return;
@@ -97,6 +104,7 @@ export class Execution {
         }
         this.store.event(operation.taskId, 'operation.reconciled', { operationId: id, evidence });
       });
+      this.deliver(operation.taskId);
     })();
     this.pending.add(work);
     try { await work; } finally { this.pending.delete(work); }

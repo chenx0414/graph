@@ -45,4 +45,4 @@ pnpm check
 
 ## 本轮边界
 
-未做收费模型请求。本机 Web 绑定 `127.0.0.1`/`localhost`，不是可部署的多用户服务。后台 `autoDrive` 为短轮询 `host.drive()`。elkjs 在服务端布局，浏览器只渲染。对话页展示用户消息与提案摘要；主管完整会话正文仍在实例记录中按需展开。Playwright 需要本机 Chromium。机制故障注入仍是 M6。
+未做收费模型请求。本机 Web 绑定 `127.0.0.1`/`localhost`，不是可部署的多用户服务。后台 `autoDrive` 为短轮询 `host.drive()`。elkjs 在服务端布局，浏览器只渲染。对话页展示用户消息与提案摘要；主管完整会话正文仍在实例记录中按需展开。Playwright 需要本机 Chromium。机制故障注入见 [M6 报告](m6-results.md)。
