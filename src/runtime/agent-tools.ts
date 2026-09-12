@@ -94,7 +94,7 @@ export function agentTools(input: {
   if (input.role === 'master' && input.supervisor) {
     tools.push(
       {
-        name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm.',
+        name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson must use the schema shown in the briefing.',
         parameters: Type.Object({ proposalJson: Type.String(), requestId: Type.String() }),
         execute: async (_id, params) => {
           const body = fields(params);
@@ -104,7 +104,7 @@ export function agentTools(input: {
         },
       },
       {
-        name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items.',
+        name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson uses the same node schema shown in the briefing.',
         parameters: Type.Object({ baseVersion: Type.Number(), reason: Type.String(), nodesJson: Type.String(), requestId: Type.String() }),
         execute: async (_id, params) => {
           const body = fields(params);

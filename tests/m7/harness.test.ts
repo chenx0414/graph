@@ -205,3 +205,36 @@ test('the acceptance harness reuses one task, refuses stale confirmations, and c
   expect(provider.requests.length).toBe(10);
   expect(JSON.stringify(repeated.answeredChecks)).toBe(JSON.stringify(completed.answeredChecks));
 }, 240_000);
+
+test('the harness can acknowledge a recorded reservation overrun without re-planning', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'graph-m7-overrun-'));
+  cleanup.push(() => rm(parent, { recursive: true, force: true }));
+  const source = await fixtureRepo(parent);
+  const workDir = join(parent, 'run');
+  const provider = await openaiServer([
+    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'm7-plan' }) }], usage: { prompt_tokens: 2_100_000, completion_tokens: 5 } },
+    { text: 'Proposed the Bilibili web graph.', usage: { prompt_tokens: 1_000, completion_tokens: 5 } },
+  ]);
+  cleanup.push(() => provider.close());
+  const env = {
+    GRAPH_M7_MODEL_BASE_URL: provider.model.baseUrl,
+    GRAPH_M7_MODEL_API_KEY: 'scripted-local-key',
+    GRAPH_M7_MODEL_ID: 'local',
+    GRAPH_M7_REVIEW_MODEL_ID: 'reader',
+    GRAPH_M7_WORKDIR: workDir,
+    GRAPH_MEDIABOOKMARKS_ROOT: source,
+  };
+  const first = await runHarness(env);
+  expect(first.code).toBe(1);
+  const proposed = await summary(workDir);
+  expect(proposed.step).toBe('awaiting-confirmation');
+  expect(proposed.questions.some(question => question.kind === 'reservation_exceeded' && question.status === 'open')).toBe(true);
+
+  const acknowledged = await runHarness({ ...env, GRAPH_M7_ACKNOWLEDGE_OVERRUN: '1' });
+  expect(acknowledged.code).toBe(1);
+  const after = await summary(workDir);
+  expect(after.step).toBe('awaiting-confirmation');
+  expect(after.questions.some(question => question.kind === 'reservation_exceeded' && question.status === 'open')).toBe(false);
+  expect(after.acceptedProposalVersion).toBeNull();
+  expect(provider.requests.length).toBe(2);
+}, 120_000);

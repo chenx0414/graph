@@ -56,6 +56,28 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   expect(provider.requests.length).toBeGreaterThanOrEqual(3);
 });
 
+test('a production master receives the proposal schema, requirement version and configured models', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-schema-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const provider = await openaiServer([{ text: 'Proposed later.' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'def');
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  await runtime.user.begin({ projectId: 'p', request: 'Implement title search.', requestId: 'begin' });
+  await runtime.host.runReady();
+  const prompt = JSON.stringify(provider.requests[0]);
+  expect(prompt).toContain('Requirement version: 1');
+  expect(prompt).toContain('proposalJson schema');
+  expect(prompt).toContain('Configured models: local (high)');
+  expect(prompt).toContain('checkNode');
+});
+
 test('a later user message is delivered to the production master provider', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-followup-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -78,6 +100,41 @@ test('a later user message is delivered to the production master provider', asyn
   expect(provider.requests).toHaveLength(2);
   expect(JSON.stringify(provider.requests[0])).not.toContain('FOLLOWUP_SENTINEL_97531');
   expect(JSON.stringify(provider.requests[1])).toContain('FOLLOWUP_SENTINEL_97531');
+});
+
+test('a production Pi session may exceed a single-call reservation without blocking', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-reserve-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const provider = await openaiServer([
+    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }], usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
+    { text: 'Wrote the feature.', usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: { kind: 'program', prepare: async () => async () => ({
+      outcome: 'completed', output: null,
+      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
+    }) } },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Work',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  const task = runtime.user.task(taskId);
+  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.runReady();
+  const view = await task.view();
+  expect(view.questions.map(question => question.kind)).not.toContain('reservation_exceeded');
+  expect(view.nodes.find(node => node.id === 'work')?.status).toBe('succeeded');
 });
 
 test('unknown usage on a production request blocks the next provider call', async () => {

@@ -40,6 +40,11 @@ function assistantText(messages: unknown[]) {
   return '';
 }
 
+// One Pi operation is a whole session of provider calls, not a single request.
+// This bound covers a long planning or coding session while still stopping a
+// runaway loop for user acknowledgement inside the 20M instance budget.
+const PI_SESSION_RESERVE = 2_000_000;
+
 /** Production Agent adapter: one Task Runtime operation opens a restored Pi instance and sends one prompt. */
 export function createPiAdapter(options: {
   store: TaskStore;
@@ -53,7 +58,7 @@ export function createPiAdapter(options: {
 }): ActionAdapter {
   return {
     kind: 'agent',
-    reserveTokens: 40_000,
+    reserveTokens: PI_SESSION_RESERVE,
     prepare: async operation => {
       if (!operation.instanceId) throw new RuntimeError('invalid_adapter', 'Agents require an instance');
       const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
@@ -106,8 +111,22 @@ export function createPiAdapter(options: {
           });
           try {
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
+            const models = options.directory().map(entry => `${entry.id} (${entry.grade})`).join(', ');
             const hint = spec.role === 'master'
-              ? '\nUse propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands, graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.'
+              ? [
+                  '\nUse propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands, graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.',
+                  `Configured models: ${models || '(none)'}. Use definition ids and versions from the briefing catalog (for example coder@1, reviewer@1).`,
+                  'proposalJson schema:',
+                  `{"requirementVersion": ${operation.requirementVersion}, "summary": "<one line>",`,
+                  ' "acceptance": [{"id":"a1","description":"...","checkNode":"<mandatory program node id>"}],',
+                  ' "nodes": [',
+                  '  {"id":"work","kind":"agent","action":"work","definitionVersion":"coder@1","model":"<one of the configured models>"},',
+                  '  {"id":"check","kind":"program","action":"graph.command","dependsOn":["work"],"input":{"command":"node","args":["--test","test/example.test.js"]}},',
+                  '  {"id":"review","kind":"agent","action":"review","definitionVersion":"reviewer@1","model":"<a different configured model>"},',
+                  '  {"id":"review-gate","kind":"program","action":"graph.verify","dependsOn":["review"],"verifier":{"kind":"independent","reportNodes":["review"]}},',
+                  '  {"id":"login","kind":"program","action":"graph.human_check","dependsOn":["review-gate"]}],',
+                  ' "loops": [{"from":"check","to":"work"}]}',
+                ].join('\n')
               : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             await session.prompt(`${briefing}${hint}`);
             const text = assistantText(session.inspect().messages);

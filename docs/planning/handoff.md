@@ -2,7 +2,7 @@
 
 快照：2026-09-12（Asia/Shanghai）。使用者要求把本轮 R1–R4 修复整理成 handoff，供其他 Agent 接手。
 
-**状态：首版实施计划 M0–M7 已提交；独立验收反例的早期修复见 [acceptance-rework.md](acceptance-rework.md)，第三位 Agent 的 R1–R4 复验见 [acceptance-followup.md](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)，第四轮 S1 与两项 Spec P1 修复、第五轮受限扩展/远程 MCP/网络检索见 [next-steps-after-r3.md](next-steps-after-r3.md#第五轮修复结果2026-09-12)。最近一次功能修复提交见该节末尾；其后的 docs 提交只记录哈希。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：首版实施计划 M0–M7 已提交；独立验收反例的早期修复见 [acceptance-rework.md](acceptance-rework.md)，第三位 Agent 的 R1–R4 复验见 [acceptance-followup.md](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)，第四、五轮修复与第六轮真实运行准备见 [next-steps-after-r3.md](next-steps-after-r3.md#第六轮真实运行准备2026-09-12)。最近一次功能修复提交见该节末尾；其后的 docs 提交只记录哈希。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 
@@ -75,7 +75,7 @@
 
 | 使用者可能说的话 | 要做的事 | 完成时可见 |
 | --- | --- | --- |
-| 用真实模型跑 M7 / 完成 A13 | 先跑 `npm run accept:m7:contract` 核对两个模型的真实响应与 usage；再按 `examples/m7-acceptance.ts` 运行看提案，用 `GRAPH_M7_ACCEPT=<proposalVersion>` 确认该准确版本；每次登录检查用其打印的 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>`；真实登录走 CLI + 独立 profile。可用 `GRAPH_M7_RETRIEVAL_DOMAINS` / `GRAPH_M7_MCP_DOMAINS` 授权检索与远程 MCP 域名。目标前移会重新呈现检查 | `contract-report.json`、`acceptance-report.json`、目标分支合并提交、真实 invocation 记录；A13 才可标通过 |
+| 用真实模型跑 M7 / 完成 A13 | 先跑 `npm run accept:m7:contract` 核对两个模型的真实响应、工具调用与 usage；再按 `examples/m7-acceptance.ts` 运行看提案，用 `GRAPH_M7_ACCEPT=<proposalVersion>` 确认该准确版本；每次登录检查用其打印的 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>`；若出现 `reservation_exceeded`，用 `GRAPH_M7_ACKNOWLEDGE_OVERRUN=1` 显式确认后继续（用量仍完整保留）。真实登录走 CLI + 独立 profile；可用 `GRAPH_M7_RETRIEVAL_DOMAINS` / `GRAPH_M7_MCP_DOMAINS` 授权检索与远程 MCP 域名。目标前移会重新呈现检查 | `contract-report.json`、`acceptance-report.json`、目标分支合并提交、真实 invocation 记录；A13 才可标通过 |
 | 合入原仓库 / 真用 B站 Web | 把克隆上的 `src/web-server.js`、`src/web/index.html`、`test/web-server.test.js` 与 `package.json` 的 `web` 脚本合进 MediaBookmarks `main`。目标保持 JavaScript。登录仍走独立 `.browser-profile` 的 CLI | 原仓库有这些文件；`GRAPH_FIXTURE=1 node --test test/web-server.test.js` 通过；未改 Graph 的 TS 约束；未提交 `.env` / profile / `output/` |
 | 让扩展真正可加载 | 已在第五轮完成（见上）；若需官方 Pi 扩展 API 全量语义，另行评估受限 worker 的接口扩展 | — |
 | 指定 GitHub 仓库 | 按 [issue-tracker](../agents/issue-tracker.md) 设 remote；需要时再发 G01–G18 的 Issue | `git remote -v` 有目标；未另起一套任务平台 |

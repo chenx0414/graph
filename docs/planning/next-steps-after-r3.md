@@ -87,3 +87,18 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 本仓库定义的扩展工具协议不是官方 Pi 扩展 API 的完整实现；其他平台与远程 MCP 的其他 transport 仍未验证。
 
 本轮修复提交 `8e3cd9f`（`feat: load bound extensions in a restricted worker and add remote MCP and retrieval`）；其后的 docs 提交只记录该哈希。
+
+## 第六轮真实运行准备（2026-09-12）
+
+使用者提供 commandcode 端点配置：实现模型 `deepseek/deepseek-v4-flash`，审查模型选同系列 `deepseek/deepseek-v4-pro`；密钥只在运行环境变量中使用，未写入仓库。
+
+- **契约预检**：`accept:m7:contract` 改为每个模型 2 次小请求（普通回答 + `emit_token` 工具调用），记录 reportedModel、reasoning、finishReason、tool calls 与 usage。两个模型四项全部通过，reportedModel 可区分；推理模型需要足够的输出上限（`v4-pro` 在 16 token 下会耗尽推理预算，脚本改为 256）。
+- **主管提示修复**：真实运行暴露主管无法猜到 proposal schema（首次 72 次提案被拒）与需求版本错误。现在主管提示包含 requirement version、配置模型列表与完整 `proposalJson` schema（含 `graph.command` / `graph.verify` / `graph.human_check` 与 loops），briefing 也带上需求版本；回归 `tests/m3/production.test.ts`。
+- **Pi 会话预留修复**：主管一次会话实际消耗约 116k token，超过适配器 40k 预留而触发 `reservation_exceeded`。`createPiAdapter` 预留改为 2,000,000（覆盖多轮会话，仍受实例 20M 预算与逐调用门约束）；回归 `tests/m3/production.test.ts`。
+- **续跑支持**：`GRAPH_M7_ACKNOWLEDGE_OVERRUN=1` 显式确认已记录的 `reservation_exceeded`（问题与用量仍完整保留在报告中），不重跑已完成节点；回归 `tests/m7/harness.test.ts`。
+
+真实运行记录（工作目录均在仓库外）：
+
+- `graph-m7-acceptance`：主管循环 144 次无效提案后 provider 断流，任务保持 `unknown_usage` 待核对，作为审计保留。
+- `graph-m7-acceptance-2`：主管 45 次调用内产出有效提案，随后 provider 断流，任务保持 `unknown_usage` 待核对，作为审计保留。
+- `graph-m7-acceptance-3`：主管产出提案版本 1；确认超额后 master 标记成功，当前停在需求确认，等待使用者 `GRAPH_M7_ACCEPT=1`。
