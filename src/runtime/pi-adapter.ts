@@ -127,7 +127,7 @@ export function createPiAdapter(options: {
                   '  {"id":"login","kind":"program","action":"graph.human_check","dependsOn":["review-gate"]}],',
                   ' "loops": [{"from":"check","to":"work"}]}',
                 ].join('\n')
-              : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
+              : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             await session.prompt(`${briefing}${hint}`);
             const text = assistantText(session.inspect().messages);
             return { outcome: 'completed', output: (submitted ?? { text }) as Json, usage: gate.total() };
