@@ -28,6 +28,7 @@
     "test:m7": "vitest run tests/m7",
     "build:web": "vite build",
     "demo:m1": "node examples/m1-demo.ts",
+    "accept:m7": "node examples/m7-acceptance.ts",
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {

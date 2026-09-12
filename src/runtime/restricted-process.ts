@@ -5,10 +5,15 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
-import type { CallBroker } from './call-broker.ts';
+import type { TokenUsage } from './call-broker.ts';
+
+export interface RestrictedGate {
+  dispatch<T>(id: string, reservation: number, send: () => T): T;
+  settle(id: string, usage: TokenUsage | null): void;
+}
 
 export interface RestrictedCommand {
-  broker: CallBroker;
+  broker: RestrictedGate;
   cwd: string;
   scratchDir?: string;
   executable: string;
@@ -17,6 +22,7 @@ export interface RestrictedCommand {
   readPaths: string[];
   writePaths: string[];
   denyWrite?: string[];
+  timeoutMs?: number;
   onRequest?: (request: unknown) => Promise<unknown>;
 }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -112,6 +118,8 @@ export async function openRestrictedExecutor() {
           stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
         }));
         let stdout = '', stderr = '';
+        const timer = command.timeoutMs ? setTimeout(() => child.kill('SIGKILL'), command.timeoutMs) : undefined;
+        timer?.unref?.();
         const channel = child.stdio[3] as Duplex;
         let pending = '', requests = Promise.resolve();
         channel.on('error', () => {}); // A worker may exit after an in-flight request.
@@ -135,6 +143,7 @@ export async function openRestrictedExecutor() {
         child.stderr.on('data', data => { stderr += String(data); });
         child.on('error', reject);
         child.on('close', (code, signal) => {
+          if (timer) clearTimeout(timer);
           if (signal) stderr += `Process terminated by ${signal}\n`;
           command.broker.settle(invocationId, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
           void requests.then(() => resolve({ code, stdout, stderr }), reject);
@@ -143,5 +152,24 @@ export async function openRestrictedExecutor() {
       });
     },
     async close() { await SandboxManager.reset(); },
+  };
+}
+
+let shared: { executor: Awaited<ReturnType<typeof openRestrictedExecutor>>; refs: number } | undefined;
+
+/** Share one verified OS sandbox across capabilities and command tools; reset it only when idle. */
+export async function acquireRestrictedExecutor() {
+  if (!shared) shared = { executor: await openRestrictedExecutor(), refs: 0 };
+  shared.refs += 1;
+  const acquired = shared;
+  return {
+    executor: acquired.executor,
+    async release() {
+      acquired.refs -= 1;
+      if (acquired.refs === 0 && shared === acquired) {
+        shared = undefined;
+        await acquired.executor.close();
+      }
+    },
   };
 }

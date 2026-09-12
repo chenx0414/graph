@@ -1,0 +1,1 @@
+{"outcome":"rejected: Error: Refusing to follow the symbolic link linked","outsideValue":null}

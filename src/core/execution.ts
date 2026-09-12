@@ -8,6 +8,8 @@ import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import { selectModel, type ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
+import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
+import type { RestrictedGate } from '../runtime/restricted-process.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
 
 type NodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
@@ -25,14 +27,16 @@ export class Execution {
   private readonly models?: () => ModelEntry[];
   private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
   private readonly git?: GitIntegration;
+  private readonly scratchRoot?: string;
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; git?: GitIntegration } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; git?: GitIntegration; scratchRoot?: string } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
     if (extras.models) this.models = extras.models;
     if (extras.preferences) this.preferences = extras.preferences;
     if (extras.git) this.git = extras.git;
+    if (extras.scratchRoot) this.scratchRoot = extras.scratchRoot;
     this.generation = store.transaction(() => {
       store.db.prepare('UPDATE runtime SET generation=generation+1').run();
       const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
@@ -308,7 +312,7 @@ export class Execution {
     if (this.stopping || this.store.task(node.task_id).paused) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
     const spec = JSON.parse(node.spec) as NodeSpec;
-    const adapter = spec.action === 'graph.verify' ? this.graphVerify(spec) : spec.action === 'graph.human_check' ? this.humanCheck() : Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : spec.kind === 'agent' ? this.fallback : undefined;
+    const adapter = spec.action === 'graph.verify' ? this.graphVerify(spec) : spec.action === 'graph.human_check' ? this.humanCheck() : spec.action === 'graph.command' ? this.commandNode(spec) : Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : spec.kind === 'agent' ? this.fallback : undefined;
     if (!adapter || adapter.kind !== spec.kind) {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: `No ${spec.kind} adapter for ${spec.action}` }));
       return false;
@@ -393,6 +397,11 @@ export class Execution {
             definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
             capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
           } } : {}),
+        });
+      } else {
+        operation.context.briefing = briefing(operation, {
+          request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}),
+          acceptance: proposal?.acceptance ?? [],
         });
       }
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
@@ -568,6 +577,49 @@ export class Execution {
     }
     reactivate(this.store, operation.taskId, loops.map(loop => loop.to));
     this.store.event(operation.taskId, 'graph.rework', { from: operation.nodeId, to: loops.map(loop => loop.to) });
+  }
+
+  private commandNode(spec: NodeSpec): ActionAdapter {
+    return {
+      kind: 'program',
+      prepare: async operation => {
+        const input = spec.input as { command?: unknown; args?: unknown } | null;
+        if (!input || typeof input.command !== 'string' || !Array.isArray(input.args) || input.args.some(arg => typeof arg !== 'string')) {
+          throw new RuntimeError('invalid_adapter', 'graph.command requires input {command, args}');
+        }
+        validateWorkspaceCommand(input.command, input.args);
+        if (!operation.workspace) throw new RuntimeError('invalid_adapter', 'graph.command requires a work copy');
+        return async () => {
+          const workspace = operation.workspace!;
+          const gate: RestrictedGate = {
+            dispatch: (_id, _reservation, send) => {
+              if (this.stopping || this.store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Task paused');
+              return send();
+            },
+            settle: () => {},
+          };
+          const runner = await openWorkspaceCommandRunner({
+            workspace, scratchDir: join(this.scratchRoot ?? workspace, 'checks', operation.id), gate,
+          });
+          try {
+            const result = await runner.run(input.command as string, input.args as string[]);
+            const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(operation.taskId, operation.proposalVersion) as { spec: string }).spec) as Proposal;
+            const acceptanceIds = proposal.acceptance.filter(item => item.checkNode === operation.nodeId).map(item => item.id);
+            const body = `${JSON.stringify({ command: input.command, args: input.args, code: result.code, stdout: result.stdout, stderr: result.stderr }, null, 2)}\n`;
+            const dir = join(this.scratchRoot ?? workspace, 'checks');
+            mkdirSync(dir, { recursive: true });
+            const path = join(dir, `${operation.nodeId}.json`);
+            writeFileSync(path, body);
+            const digest = createHash('sha256').update(body).digest('hex');
+            if (result.code !== 0) return { outcome: 'failed', output: { code: result.code, stderr: result.stderr.slice(-4_000) } };
+            return {
+              outcome: 'completed', output: { code: result.code },
+              evidence: acceptanceIds.map(id => ({ acceptanceId: id, summary: `Command exited 0: ${input.command}`, artifact: { path, digest } })),
+            };
+          } finally { await runner.close(); }
+        };
+      },
+    };
   }
 
   private humanCheck(): ActionAdapter {

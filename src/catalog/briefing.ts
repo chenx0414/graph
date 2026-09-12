@@ -5,6 +5,9 @@ export function briefing(operation: Operation, extra: { request: string; summary
   const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact => `${artifact.path} (${artifact.digest})`)));
   return [
     `Request: ${extra.request}`,
+    operation.context.messages?.length
+      ? `User messages:\n${operation.context.messages.map(message => `- (v${message.requirementVersion}) ${message.text}`).join('\n')}`
+      : '',
     extra.summary ? `Summary: ${extra.summary}` : '',
     extra.acceptance.length ? `Acceptance:\n${extra.acceptance.map(item => `- ${item.id}: ${item.description}`).join('\n')}` : '',
     extra.capabilities?.length ? `Bound capabilities:\n${extra.capabilities.map(item => `- ${item.id}@${item.version}`).join('\n')}` : '',

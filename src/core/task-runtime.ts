@@ -69,6 +69,7 @@ export async function openTaskRuntime(options: {
       ...(fallback ? { fallback } : {}),
       catalog,
       git,
+      scratchRoot: stateDir,
       ...(options.models ? { models: () => options.models!.entries } : {}),
       ...(options.models?.preferences ? { preferences: options.models.preferences } : {}),
     });

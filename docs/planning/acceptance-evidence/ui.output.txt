@@ -1,2 +1,2 @@
-{"case":"graph_stale_after_completion","before":"work pending","after":"work pending","runtimePhase":"completed"}
-{"case":"budget_reply","httpStatus":400,"body":{"code":"invalid_answer","message":"Answer type does not match the open question"},"openQuestions":["budget"]}
+{"case":"graph_stale_after_completion","before":"work pending","after":"work succeeded","runtimePhase":"completed"}
+{"case":"budget_reply","httpStatus":200,"body":{"taskId":"3a486963-743d-4715-9bf8-cf5b83fb8371","cursor":15},"openQuestions":[]}

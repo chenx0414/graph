@@ -56,6 +56,30 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   expect(provider.requests.length).toBeGreaterThanOrEqual(3);
 });
 
+test('a later user message is delivered to the production master provider', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-followup-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const provider = await openaiServer([
+    { text: 'Please clarify the matching rule.' },
+    { text: 'Acknowledged, matching will ignore case.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'def');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement title search.', requestId: 'begin' });
+  await runtime.host.runReady();
+  await runtime.user.task(taskId).say('FOLLOWUP_SENTINEL_97531: titles must ignore case.', 'say');
+  await runtime.host.runReady();
+  expect(provider.requests).toHaveLength(2);
+  expect(JSON.stringify(provider.requests[0])).not.toContain('FOLLOWUP_SENTINEL_97531');
+  expect(JSON.stringify(provider.requests[1])).toContain('FOLLOWUP_SENTINEL_97531');
+});
+
 test('unknown usage on a production request blocks the next provider call', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-usage-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

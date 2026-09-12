@@ -60,3 +60,5 @@ A01–A12 仍见 [M6 报告](m6-results.md)。两组验收现均有可运行证�
 ## 本轮边界
 
 未在使用者原仓库合入，未发布。未使用真实 B站登录、日常 Chrome 或真实收藏夹数据。未读取 `.env` / `.env.bm`，未调用收费模型。生产 Pi 在克隆上通过工作区工具写入 JavaScript 载荷，请求打到受控本地 chat-completions，不是收费编码模型。Graph 任务图里的 `human_check` 是合入前的登录确认；页面在采集前检查登录态并展示进度与笔记正文。目标项目保留原有 JavaScript/Python CLI，其他平台不接入本机 Web。
+
+第三轮复验新增 `graph.command` 程序检查与真实模型验收 harness（`examples/m7-acceptance.ts`），使真实自主图不再依赖宿主预置的 `check` adapter；但本机没有可用模型配置与真实 B站 登录，真实自主运行尚未执行，**A13 不标通过**，所需使用者介入见 [验收跟进](acceptance-followup.md#r4--spec-p1--机制已补齐真实运行待使用者介入)。

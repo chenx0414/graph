@@ -42,8 +42,10 @@ export class Catalog {
       .run(record.id, record.kind, record.source, record.version, canonicalJson(record.snapshot), record.status);
   }
 
-  capability(id: string): CapabilityRecord | undefined {
-    const row = this.store.db.prepare('SELECT * FROM capabilities WHERE id=? ORDER BY rowid DESC LIMIT 1').get(id) as { id: string; kind: CapabilityRecord['kind']; source: string; version: string; snapshot: string; status: CapabilityRecord['status'] } | undefined;
+  capability(id: string, version?: string): CapabilityRecord | undefined {
+    const row = (version
+      ? this.store.db.prepare('SELECT * FROM capabilities WHERE id=? AND version=? ORDER BY rowid DESC LIMIT 1').get(id, version)
+      : this.store.db.prepare('SELECT * FROM capabilities WHERE id=? ORDER BY rowid DESC LIMIT 1').get(id)) as { id: string; kind: CapabilityRecord['kind']; source: string; version: string; snapshot: string; status: CapabilityRecord['status'] } | undefined;
     if (!row) return;
     return { ...row, snapshot: JSON.parse(row.snapshot) as Json };
   }

@@ -1,2 +1,3 @@
-{"case":"collect_without_login_and_no_live_progress","loggedIn":false,"backendStatus":"running","pageJob":"{\n  \"status\": \"idle\",\n  \"progress\": {\n    \"current\": 0,\n    \"total\": 0\n  },\n  \"failures\": []\n}"}
-{"case":"notes_not_browsable","listed":"fixture.md","links":0,"notePathStatus":404}
+{"case":"collect_requires_login","loggedIn":false,"backendStatus":"idle","visibleError":"B站未登录"}
+{"case":"live_progress_and_done","backendProgress":[1,1,1,2,2,2,3,3],"pageShowsRunning":true}
+{"case":"notes_browsable","listed":["fixture.md"],"contentStatus":200,"contentHasBody":true,"readerText":"# Existing note\nReview this note content."}

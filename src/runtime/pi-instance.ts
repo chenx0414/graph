@@ -15,6 +15,13 @@ export interface InstanceBinding {
   definitionVersion: string;
 }
 
+const EXTERNALLY_GATED = Symbol.for('graph.externally-gated');
+
+/** Mark a tool whose execute already passes the send gate at its own effect boundary. */
+export function externallyGated<T extends ToolDefinition>(tool: T): T {
+  return Object.assign(tool, { [EXTERNALLY_GATED]: true });
+}
+
 export interface PiInstanceOptions {
   binding: InstanceBinding;
   workspace: string;
@@ -23,6 +30,7 @@ export interface PiInstanceOptions {
   modelRuntime: ModelRuntime;
   stream: StreamFn;
   tools?: ToolDefinition[];
+  skillPaths?: string[];
   broker?: SendGate;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
   onEvent?: (event: AgentSessionEvent) => void;
@@ -86,12 +94,13 @@ export async function openPiInstance(options: PiInstanceOptions) {
   });
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
+    ...(options.skillPaths?.length ? { additionalSkillPaths: options.skillPaths } : {}),
     noExtensions: true, noSkills: true, noPromptTemplates: true,
     noThemes: true, noContextFiles: true,
   });
   await loader.reload();
   if (options.tools?.length && !options.broker) throw new Error('Tools require a call broker');
-  const customTools = options.tools?.map(tool => ({
+  const customTools = options.tools?.map(tool => (tool as { [EXTERNALLY_GATED]?: boolean })[EXTERNALLY_GATED] ? tool : {
     ...tool,
     execute: async (...args: Parameters<ToolDefinition['execute']>) => {
       const id = randomUUID();
@@ -99,7 +108,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
       try { return await result; }
       finally { options.broker!.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }); }
     },
-  })) ?? [];
+  }) ?? [];
   const { session } = await createAgentSession({
     cwd: workspace, agentDir: stateDir, model: options.model,
     modelRuntime: options.modelRuntime, resourceLoader: loader,
