@@ -62,6 +62,24 @@ test('a supervisor revision keeps instances, rejects a stale base, and cannot we
   expect((await task.view()).evidence.filter(item => item.valid)).toHaveLength(1);
 });
 
+test('a revision cannot weaken a confirmed required verification dimension', async () => {
+  const verifier = { kind: 'multiview' as const, subjectNode: 'work', reportNodes: ['review'], dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }] };
+  const nodes: NodeSpec[] = [
+    { id: 'work', kind: 'agent', action: 'work', ...coder },
+    { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'scripted', dependsOn: ['work'] },
+    { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['work', 'review'], verifier },
+  ];
+  const { supervisor } = await setup({
+    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
+    review: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
+  }, nodes, { acceptance: [{ id: 'works', description: 'Required correctness passes', checkNode: 'gate' }] });
+  const weakened = nodes.map(node => node.id === 'gate'
+    ? { ...node, verifier: { ...verifier, dimensions: [{ id: 'correctness', required: false, reportNode: 'review' }] } }
+    : node);
+  await expect(supervisor.revise({ baseVersion: 1, reason: 'Treat correctness as a suggestion', nodes: weakened, requestId: 'weaken' }))
+    .rejects.toMatchObject({ code: 'invalid_proposal' });
+});
+
 test('exhausted incomplete work cannot disappear by deletion or a new instance', async () => {
   const { runtime, task, supervisor } = await setup({
     work: { kind: 'agent', reserveTokens: 20_000_000, prepare: async () => async () => ({ outcome: 'continue', output: null, usage: { input: 19_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 } }) },

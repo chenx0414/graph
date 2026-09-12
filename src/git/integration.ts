@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json, type NodeSpec, type Operation } from '../core/types.ts';
-import { createActivation, loadGraph } from '../core/graph.ts';
+import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
-  abortMerge, checkedOutBranch, commitAll, detectRepo, ensureWorktree, fastForwardCheckout,
-  isClean, mergeRef, pathInside, resetHard, revParse, updateRef,
+  abortMerge, commitAll, detectRepo, ensureWorktree, fastForwardCheckout,
+  isClean, mergeRef, pathInside, resetHard, revParse, updateRef, worktreeList,
 } from './git.ts';
 
 /** Task integration branch and per-instance work copies. Git effects stay outside SQLite transactions. */
@@ -109,17 +109,21 @@ export class GitIntegration {
     const opId = randomUUID();
     this.store.db.prepare('INSERT INTO git_ops VALUES(?,?,?,?,?,?)')
       .run(opId, taskId, 'deliver', 'dispatched', canonicalJson({ integrationSha, targetSha }), null);
-    const checkout = checkedOutBranch(repo);
-    if (checkout === task.target_branch) {
-      const ignore = pathInside(repo, this.stateDir) ? [this.stateDir] : [];
-      if (!isClean(repo, ignore)) {
-        this.store.db.prepare("UPDATE git_ops SET state='blocked',result=? WHERE id=?").run(canonicalJson({ kind: 'git_dirty' }), opId);
-        return { status: 'blocked', data: { kind: 'git_dirty', reason: 'Target worktree is dirty' } };
+    const checkouts = worktreeList(repo).filter(tree => tree.branch === task.target_branch);
+    if (checkouts.length) {
+      for (const target of checkouts) {
+        const ignore = pathInside(target.path, this.stateDir) ? [this.stateDir] : [];
+        if (!isClean(target.path, ignore)) {
+          this.store.db.prepare("UPDATE git_ops SET state='blocked',result=? WHERE id=?").run(canonicalJson({ kind: 'git_dirty' }), opId);
+          return { status: 'blocked', data: { kind: 'git_dirty', reason: 'Target worktree is dirty' } };
+        }
       }
-      const forwarded = fastForwardCheckout(repo, integrationSha);
-      if (!forwarded.ok) {
-        this.store.db.prepare("UPDATE git_ops SET state='failed',result=? WHERE id=?").run(canonicalJson({ stderr: forwarded.stderr }), opId);
-        return this.recheckAgainstTarget(taskId, integration.path, task.target_branch, revParse(repo, task.target_branch) ?? targetSha);
+      for (const target of checkouts) {
+        const forwarded = fastForwardCheckout(target.path, integrationSha);
+        if (!forwarded.ok) {
+          this.store.db.prepare("UPDATE git_ops SET state='failed',result=? WHERE id=?").run(canonicalJson({ stderr: forwarded.stderr }), opId);
+          return this.recheckAgainstTarget(taskId, integration.path, task.target_branch, revParse(repo, task.target_branch) ?? targetSha);
+        }
       }
     } else {
       const updated = updateRef(repo, `refs/heads/${task.target_branch}`, integrationSha, targetSha);
@@ -184,13 +188,10 @@ export class GitIntegration {
     const task = this.store.task(taskId);
     const rebases: { path: string; sha: string }[] = [];
     for (const id of reset) {
-      const node = this.store.db.prepare('SELECT instance_id,activation_id,status FROM nodes WHERE task_id=? AND id=?').get(taskId, id) as { instance_id: string | null; activation_id: string; status: string };
-      if (['preparing', 'running'].includes(node.status)) continue;
-      this.store.db.prepare("UPDATE activations SET state='invalidated' WHERE id=?").run(node.activation_id);
-      createActivation(this.store, taskId, id, task.graph_version);
-      this.store.db.prepare("UPDATE nodes SET status='pending',output=NULL,output_operation=NULL,route=NULL WHERE task_id=? AND id=?").run(taskId, id);
-      if (node.instance_id && task.integration_sha) {
-        const tree = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(node.instance_id) as { path: string } | undefined;
+      const result = resetIdleNode(this.store, taskId, id, task.graph_version);
+      if (!result.reset) continue;
+      if (result.instanceId && task.integration_sha) {
+        const tree = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(result.instanceId) as { path: string } | undefined;
         if (tree) rebases.push({ path: tree.path, sha: task.integration_sha });
       }
     }

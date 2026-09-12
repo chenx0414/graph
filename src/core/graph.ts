@@ -156,6 +156,25 @@ export function createActivation(store: TaskStore, taskId: string, nodeId: strin
   return id;
 }
 
+const lockedQuestion = "kind IN ('budget','unknown_usage','reservation_exceeded','permission')";
+
+export function hasLockedQuestion(store: TaskStore, taskId: string, nodeId: string) {
+  return Boolean(store.db.prepare(`SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND ${lockedQuestion}`).get(taskId, nodeId));
+}
+
+/** Invalidate an idle node for recheck. Locked budget/usage/permission questions stay blocking. */
+export function resetIdleNode(store: TaskStore, taskId: string, nodeId: string, graphVersion: number, round = 1, skipStatuses: string[] = []) {
+  const node = store.db.prepare('SELECT instance_id,activation_id,status FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as { instance_id: string | null; activation_id: string; status: string };
+  if (['preparing', 'running', ...skipStatuses].includes(node.status) || hasLockedQuestion(store, taskId, nodeId)) {
+    return { reset: false, instanceId: node.instance_id };
+  }
+  store.db.prepare("UPDATE activations SET state='invalidated' WHERE id=?").run(node.activation_id);
+  store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND node_id=? AND valid=1').run(taskId, nodeId);
+  createActivation(store, taskId, nodeId, graphVersion, round);
+  store.db.prepare("UPDATE nodes SET status='pending',output=NULL,route=NULL,output_operation=NULL WHERE task_id=? AND id=?").run(taskId, nodeId);
+  return { reset: true, instanceId: node.instance_id };
+}
+
 /** Rework returns to the original node with a new activation; successful siblings are left untouched. */
 export function reactivate(store: TaskStore, taskId: string, targetIds: string | string[]) {
   const task = store.task(taskId);

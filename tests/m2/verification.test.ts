@@ -295,6 +295,45 @@ test('a jury with no eligible candidate returns rework instead of picking a majo
   expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).not.toHaveProperty('winner');
 });
 
+test('a jury keeps an eligible winner when another candidate fails a hard criterion', async () => {
+  const config: VerifierConfig = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['builds'],
+    ranking: [{ id: 'quality', weight: 1, min: 0, max: 10 }], tieOrder: ['quality'],
+    candidates: [{ id: 'a', node: 'candidate-a' }, { id: 'b', node: 'candidate-b' }] };
+  const { runtime, task, root } = await setup(root => {
+    const artifactA = { id: 'a', path: join(root, 'a.txt'), digest: digest('a') };
+    const artifactB = { id: 'b', path: join(root, 'b.txt'), digest: digest('b') };
+    return {
+      actions: {
+        candidate: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
+          const artifact = operation.nodeId === 'candidate-a' ? artifactA : artifactB;
+          await writeFile(artifact.path, operation.nodeId === 'candidate-a' ? 'a' : 'b');
+          return { outcome: 'completed', output: null, artifacts: [artifact], usage };
+        } },
+        jury: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
+          const a = operation.dependencySources['candidate-a']![0]!.artifacts[0]!;
+          const b = operation.dependencySources['candidate-b']![0]!.artifacts[0]!;
+          const report: ReviewReport = { schemaVersion: 1, body: { kind: 'jury', candidates: [
+            { id: 'a', artifact: a, hard: { builds: { verdict: 'pass', reason: 'Builds', evidence: [a] } }, scores: { quality: { value: 9, reason: 'quality', evidence: [a] } } },
+            { id: 'b', artifact: b, hard: { builds: { verdict: 'fail', reason: 'Does not build', evidence: [b] } }, scores: { quality: { value: 9, reason: 'quality', evidence: [b] } } },
+          ] } };
+          return { outcome: 'completed', output: json(report), usage };
+        } },
+      },
+      nodes: [
+        { id: 'candidate-a', kind: 'agent', action: 'candidate', ...coder },
+        { id: 'candidate-b', kind: 'agent', action: 'candidate', ...coder },
+        { id: 'jury', kind: 'agent', action: 'jury', ...coder, dependsOn: ['candidate-a', 'candidate-b'] },
+        { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['candidate-a', 'candidate-b', 'jury'], verifier: config },
+      ],
+    };
+  });
+  for (let i = 0; i < 3; i++) await runtime.host.runReady();
+  const view = await task.view();
+  expect(view.phase).toBe('completed');
+  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'pass', winner: 'a' });
+  expect(view.evidence[0]?.artifact).toMatchObject({ path: join(root, 'a.txt'), digest: digest('a') });
+});
+
 test('revalidation cannot accept a pre-absorption candidate artifact as the current winner', async () => {
   const ranking = [{ id: 'quality', weight: 1, min: 0, max: 10 }];
   const select: Extract<VerifierConfig, { kind: 'jury' }> = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['compiles'], ranking, tieOrder: ['quality'],

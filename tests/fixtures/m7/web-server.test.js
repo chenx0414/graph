@@ -63,6 +63,24 @@ test('bilibili web shows login, collect progress, notes and export', async (t) =
   assert.ok(favorites.count >= 1);
   const notes = await (await fetch(`${base}/api/notes`)).json();
   assert.ok(notes.notes.length >= 1 || notes.index);
+  assert.ok(notes.notes[0].href);
+  const note = await (await fetch(`${base}${notes.notes[0].href}`)).json();
+  assert.match(note.content, /Fixture note/);
   const exported = await (await fetch(`${base}/api/export`, { method: 'POST' })).json();
   assert.ok(exported.count >= 1);
+});
+
+test('collect is refused when B站 is not logged in', async (t) => {
+  process.env.GRAPH_FIXTURE = '1';
+  seed();
+  fs.writeFileSync(path.join(process.cwd(), 'output', 'login-state.json'), JSON.stringify({
+    bilibili: { hasKeyCookie: false, cookieCount: 0 },
+  }));
+  const server = createWebServer();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const port = await listen(server);
+  const res = await fetch(`http://127.0.0.1:${port}/api/collect`, { method: 'POST' });
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.code, 'not_logged_in');
 });

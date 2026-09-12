@@ -20,6 +20,7 @@
   <section data-testid="collect">
     <h2>采集</h2>
     <button type="button" id="collect-btn">发起采集</button>
+    <p id="collect-error" class="fail"></p>
     <pre id="job">空闲</pre>
   </section>
   <section data-testid="favorites">
@@ -29,6 +30,7 @@
   <section data-testid="notes">
     <h2>已有笔记</h2>
     <ul id="notes"></ul>
+    <pre id="note-body"></pre>
   </section>
   <section data-testid="export">
     <h2>导出 Markdown</h2>
@@ -40,17 +42,33 @@
       const res = await fetch(path, init);
       return res.json();
     }
+    let poll = null;
     async function refresh() {
       const login = await api('/api/login-status');
       document.getElementById('login-status').textContent = JSON.stringify(login, null, 2);
       const job = await api('/api/job');
       document.getElementById('job').textContent = JSON.stringify(job, null, 2);
+      if (job.status === 'running' && !poll) poll = setInterval(refresh, 400);
+      if (job.status !== 'running' && poll) { clearInterval(poll); poll = null; }
       const fav = await api('/api/favorites');
       document.getElementById('favorites').innerHTML = (fav.items || []).map((item) => '<li>' + item.title + '</li>').join('');
       const notes = await api('/api/notes');
-      document.getElementById('notes').innerHTML = (notes.notes || []).map((item) => '<li>' + item.name + '</li>').join('');
+      document.getElementById('notes').innerHTML = (notes.notes || []).map((item) => '<li><a href="' + item.href + '" data-note="' + item.name + '">' + item.name + '</a></li>').join('');
     }
-    document.getElementById('collect-btn').onclick = async () => { await api('/api/collect', { method: 'POST' }); await refresh(); };
+    document.getElementById('notes').onclick = async (event) => {
+      const link = event.target.closest('a[data-note]');
+      if (!link) return;
+      event.preventDefault();
+      const note = await api(link.getAttribute('href'));
+      document.getElementById('note-body').textContent = note.content || '';
+    };
+    document.getElementById('collect-btn').onclick = async () => {
+      const res = await fetch('/api/collect', { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) document.getElementById('collect-error').textContent = body.error || '采集失败';
+      else document.getElementById('collect-error').textContent = '';
+      await refresh();
+    };
     document.getElementById('export-btn').onclick = async () => {
       document.getElementById('export-result').textContent = JSON.stringify(await api('/api/export', { method: 'POST' }), null, 2);
       await refresh();

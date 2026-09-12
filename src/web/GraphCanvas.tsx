@@ -29,6 +29,7 @@ export function GraphCanvas({ graph, collapsed, onSelect }: { graph: GraphPayloa
       return {
         id: node.id, position: { x: position.x, y: position.y },
         data: { label: `${node.id} ${node.status}` },
+        style: { width: position.width, height: position.height, minWidth: 120, minHeight: 36 },
         ...(node.container ? { parentId: node.container } : {}),
       };
     }),

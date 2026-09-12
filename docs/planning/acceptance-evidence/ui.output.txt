@@ -1,0 +1,2 @@
+{"case":"graph_stale_after_completion","before":"work pending","after":"work pending","runtimePhase":"completed"}
+{"case":"budget_reply","httpStatus":400,"body":{"code":"invalid_answer","message":"Answer type does not match the open question"},"openQuestions":["budget"]}

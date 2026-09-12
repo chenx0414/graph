@@ -16,8 +16,8 @@ pnpm check
 - 确认任务时，若项目根目录是 Git 仓库，则创建 `graph/task/<taskId>` 集成分支及对应 worktree；否则跳过 Git。
 - Agent 在 `operation.workspace` 中写入；程序检查和人工检查使用集成分支工作树。
 - 实例完成后由 Git 模块串行提交并合入集成分支；冲突保留双方副本，打开 `execution_failed`。
-- 全部节点成功且验收证据有效后合入目标分支：已检出且工作区干净则快进；未检出则带旧值 `update-ref`。
-- 内建程序动作 `graph.human_check`：打开 `human_check`，用户 `acknowledge` 后才产生验收证据并允许合入。
+- 全部节点成功、验收证据有效、且程序拥有的独立审查门通过后合入目标分支：目标在任一 worktree 检出时检查该工作区并快进；未检出则带旧值 `update-ref`。
+- 内建程序动作 `graph.human_check`：打开 `human_check`，确认绑定当前 activation 与集成提交；用户 `acknowledge` 后才产生验收证据。
 
 ## G12
 
@@ -36,7 +36,7 @@ Git 写入在 SQLite 事务外执行；实例分支使用 `graph/copy/<taskId>/<
 | --- | --- |
 | 目标脏工作区等待 | 未跟踪文件使合入打开 `git_dirty`；清除后 acknowledge 再合入，用户文件不被覆盖 |
 | 目标分支变化先重检 | 检查后目标新增提交，先并入集成分支，旧证据作废，检查再跑一次再合入 |
-| 独立审查后才合入 | 审查节点成功后目标才有实现与审查产物 |
+| 独立审查后才合入 | `graph.verify` 消费 reviewer 的结构化报告后才合入；Agent JSON `verdict` 不是通过门 |
 | 人工检查等待用户 | `graph.human_check` 在 acknowledge 前不完成任务 |
 | 未检出目标用条件更新 | 当前检出其他分支时更新 `main` 引用，工作区仍停在其他分支 |
 | 代码变化使证据失效 | 晚到的并行提交更新集成 SHA 后，已通过的程序检查作废并重跑 |

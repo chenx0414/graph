@@ -19,7 +19,8 @@ export function mediaBookmarksProposal(requirementVersion: number): Proposal {
       { id: 'web-test', kind: 'agent', action: 'web-test', role: 'worker', definitionVersion: 'coder@1', model: 'scripted', dependsOn: ['web-api', 'web-ui'] },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['web-test'] },
       { id: 'review', kind: 'agent', action: 'review', role: 'worker', definitionVersion: 'reviewer@1', model: 'scripted', dependsOn: ['check'] },
-      { id: 'login', kind: 'program', action: 'graph.human_check', dependsOn: ['review'] },
+      { id: 'review-gate', kind: 'program', action: 'graph.verify', dependsOn: ['review'], verifier: { kind: 'independent', reportNodes: ['review'] } },
+      { id: 'login', kind: 'program', action: 'graph.human_check', dependsOn: ['review-gate'] },
     ],
   };
 }

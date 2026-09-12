@@ -2,7 +2,7 @@
 
 快照：2026-09-12 09:49（Asia/Shanghai）。使用者要求把本轮工作整理成 handoff，供其他 Agent 接手。
 
-**状态：首版实施计划 M0–M7（G01–G18）已在 `main` 提交。没有未完成的里程碑代码。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：首版实施计划 M0–M7 已提交；独立验收反例的修复见 [acceptance-rework.md](acceptance-rework.md)。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md` 和 `git log` 为准。
 
@@ -10,7 +10,7 @@
 
 1. 工作区 `/Users/macmini/workspace/13-Graph`，分支 `main`，HEAD `751e5da`（`feat: deliver MediaBookmarks Bilibili web through Graph`）。运行 `git status --short`：允许残留 `M .gitignore`（只多了 `.agents/`）和未跟踪的 `docs/planning/m2-handoff.md`。这两项按使用者约定不要并进产品提交，除非使用者明确要求。
 2. 读取 [AGENTS.md](../../AGENTS.md)、[领域文档](../agents/domain.md)、[CONTEXT.md](../../CONTEXT.md)，再读 [产品规则](../graph-mvp.md)、[架构](../architecture.md)、[实施计划](../implementation-plan.md)。里程碑证据读对应 [mN-results](.)，不要凭本文件复述出口表。
-3. 用项目 Node 24.20.0 复验：`export PATH="$PWD/node_modules/.bin:$PATH"` 后 `node -v` 应为 `v24.20.0`，再 `tsc --noEmit` 与 `vitest run`。宿主 PATH 上的 Node 可能是 26，`pnpm` 可能不在 PATH。通过标准：26 个测试文件、107 项测试，`git diff --check` 干净。
+3. 用项目 Node 24.20.0 复验：`export PATH="$PWD/node_modules/.bin:$PATH"` 后 `node -v` 应为 `v24.20.0`，再 `tsc --noEmit`、`tsc -p tsconfig.web.json --noEmit` 与 `vitest run`。宿主 PATH 上的 Node 可能是 26，`pnpm` 可能不在 PATH。通过标准见 [验收复验](acceptance-rework.md)。
 4. 未指定下一步之前，不要开新里程碑、不要改 MediaBookmarks 原仓库、不要读 `.env`、不要调用收费模型。
 
 ## 本轮完成的提交

@@ -52,6 +52,61 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   await page.getByTestId('graph').waitFor();
   expect(await page.getByTestId('graph').getAttribute('data-editable')).toBe('false');
   await page.getByTestId('flow').waitFor();
-  await page.locator('.react-flow__node').filter({ hasText: 'implement' }).first().click();
+  const implement = page.locator('.react-flow__node').filter({ hasText: 'implement' }).first();
+  await implement.waitFor({ state: 'visible' });
+  await implement.click();
   expect(await page.getByTestId('node-detail').innerText()).toContain('implement');
+}, 60_000);
+
+test('the graph follows runtime events and a budget question accepts a token increment', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m5-live-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error' });
+  const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir: join(process.cwd(), 'dist/web'),
+    actions: {
+      work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
+      expensive: { kind: 'agent', reserveTokens: 20_000_001, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
+      check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) },
+    },
+  });
+  cleanup.push(() => server.close());
+  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'UI live state', requestId: 'one' });
+  await server.runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Live',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'plan-one');
+  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-one' });
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
+  await page.locator('.react-flow__node').filter({ hasText: 'work' }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('work pending')));
+  await server.runtime.host.drive();
+  await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('work succeeded')));
+  const next = await server.runtime.user.begin({ projectId: 'p', request: 'Budget question', requestId: 'two' });
+  await server.runtime.supervisor(next.taskId).propose({
+    requirementVersion: 1, summary: 'Budget',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'expensive', kind: 'agent', action: 'expensive', definitionVersion: 'coder@1', model: 'scripted' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['expensive'] },
+    ],
+  }, 'plan-two');
+  await server.runtime.user.task(next.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-two' });
+  await server.runtime.host.drive();
+  await page.goto(`${server.url}/#/tasks/${next.taskId}`);
+  await page.getByTestId('questions').getByRole('button', { name: '答复' }).waitFor();
+  await page.getByTestId('budget-tokens').fill('20000000');
+  const response = page.waitForResponse(r => r.url().endsWith('/answer'));
+  await page.getByTestId('questions').getByRole('button', { name: '答复' }).click();
+  const res = await response;
+  expect(res.status()).toBe(200);
+  expect((await server.runtime.user.task(next.taskId).view()).questions.filter(question => question.status === 'open')).toEqual([]);
 }, 60_000);

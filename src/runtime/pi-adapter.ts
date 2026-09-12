@@ -3,11 +3,21 @@ import type { Model } from '@earendil-works/pi-ai';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
-import { RuntimeError, type ActionAdapter, type Json } from '../core/types.ts';
+import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
+import { agentTools } from './agent-tools.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import { openPiInstance } from './pi-instance.ts';
 import { taskGate } from './task-gate.ts';
+
+export interface PiAdapterChannels {
+  supervisor: (taskId: string) => {
+    propose(proposal: Proposal, requestId: string): Promise<unknown>;
+    revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+  };
+  catalog: Catalog;
+  install: (input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) => Promise<unknown>;
+}
 
 function toPiModel(entry: ModelEntry): Model<'openai-completions'> {
   return {
@@ -34,6 +44,7 @@ export function createPiAdapter(options: {
   directory: () => ModelEntry[];
   apiKey: string;
   modelRuntime: ModelRuntime;
+  channels?: PiAdapterChannels;
 }): ActionAdapter {
   return {
     kind: 'agent',
@@ -47,16 +58,30 @@ export function createPiAdapter(options: {
       const project = options.store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string };
       const definitionVersion = instance.definition_version ?? 'unknown@1';
       return async () => {
-        const gate = taskGate(options.store, { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId! }, entry);
+        const gate = taskGate(options.store, { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId }, entry);
+        const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+        const workspace = operation.workspace ?? project.root;
+        let submitted: Json | undefined;
+        const channels = options.channels;
+        const tools = agentTools({
+          workspace, ...(spec.role ? { role: spec.role } : {}),
+          ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog, install: channels.install } : {}),
+          onSubmit: output => { submitted = output; },
+        });
         const session = await openPiInstance({
           binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
-          workspace: operation.workspace ?? project.root, stateDir: join(options.instancesDir, operation.instanceId!),
+          workspace, stateDir: join(options.instancesDir, operation.instanceId!),
           model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(gate, options.apiKey),
+          tools, broker: gate,
         });
         try {
-          await session.prompt(operation.context.briefing ?? `Continue work for ${operation.nodeId}`);
+          const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
+          const hint = spec.role === 'master'
+            ? '\nUse propose_graph to submit a validated task graph. Use workspace tools to inspect the project.'
+            : '\nUse workspace tools to read and edit files. Submit structured output with submit_result when required.';
+          await session.prompt(`${briefing}${hint}`);
           const text = assistantText(session.inspect().messages);
-          return { outcome: 'completed', output: { text } as Json, usage: gate.total() };
+          return { outcome: 'completed', output: (submitted ?? { text }) as Json, usage: gate.total() };
         } finally { await session.close(); }
       };
     },

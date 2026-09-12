@@ -7,7 +7,7 @@ import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
   type ModelRuntime, type ToolDefinition, type AgentSessionEvent,
 } from '@earendil-works/pi-coding-agent';
-import type { CallBroker } from './call-broker.ts';
+import type { SendGate } from './controlled-openai.ts';
 
 export interface InstanceBinding {
   instanceId: string;
@@ -23,7 +23,7 @@ export interface PiInstanceOptions {
   modelRuntime: ModelRuntime;
   stream: StreamFn;
   tools?: ToolDefinition[];
-  broker?: CallBroker;
+  broker?: SendGate;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
   onEvent?: (event: AgentSessionEvent) => void;
 }

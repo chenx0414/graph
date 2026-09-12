@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from './store.ts';
-import { createActivation, GraphPlan } from './graph.ts';
+import { createActivation, GraphPlan, resetIdleNode } from './graph.ts';
 import { validateProposal } from './proposal.ts';
 import { RuntimeError, type ContainerSpec, type LoopSpec, type NodeSpec, type Proposal } from './types.ts';
 
@@ -31,6 +31,20 @@ export function applyRevision(store: TaskStore, taskId: string, input: GraphRevi
   };
   if (canonicalJson(next.acceptance) !== canonicalJson(accepted.acceptance)) throw new RuntimeError('invalid_proposal', 'Revision cannot change confirmed acceptance');
   validateProposal(next);
+  for (const item of accepted.acceptance) {
+    const prior = current.nodes.find(node => node.id === item.checkNode);
+    const nextNode = next.nodes.find(node => node.id === item.checkNode);
+    if (!prior || !nextNode) throw new RuntimeError('invalid_proposal', 'Revision cannot remove a confirmed acceptance check');
+    if (prior.kind !== nextNode.kind || prior.action !== nextNode.action || Boolean(prior.optional) !== Boolean(nextNode.optional)) {
+      throw new RuntimeError('invalid_proposal', 'Revision cannot change a confirmed check action');
+    }
+    if (canonicalJson(prior.verifier ?? null) !== canonicalJson(nextNode.verifier ?? null)) {
+      throw new RuntimeError('invalid_proposal', 'Revision cannot change confirmed verification rules');
+    }
+    for (const dependency of prior.dependsOn ?? []) {
+      if (!(nextNode.dependsOn ?? []).includes(dependency)) throw new RuntimeError('invalid_proposal', 'Revision cannot remove a confirmed check dependency');
+    }
+  }
   const previous = new GraphPlan(current);
   const replacements = new Map<string, string[]>();
   for (const node of next.nodes) {
@@ -84,16 +98,7 @@ export function applyRevision(store: TaskStore, taskId: string, input: GraphRevi
     const existing = store.db.prepare('SELECT instance_id FROM nodes WHERE task_id=? AND id=?').get(taskId, node.id) as { instance_id: string | null } | undefined;
     if (existing) {
       store.db.prepare('UPDATE nodes SET spec=? WHERE task_id=? AND id=?').run(canonicalJson(node), taskId, node.id);
-      if (affected.has(node.id)) {
-        const row = store.db.prepare('SELECT status,activation_id FROM nodes WHERE task_id=? AND id=?').get(taskId, node.id) as { status: string; activation_id: string };
-        const locked = store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND kind IN ('budget','unknown_usage','reservation_exceeded','permission')").get(taskId, node.id);
-        if (!locked && row.status !== 'pending' && row.status !== 'retired') {
-          store.db.prepare("UPDATE activations SET state='invalidated' WHERE id=?").run(row.activation_id);
-          store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND node_id=? AND valid=1').run(taskId, node.id);
-          createActivation(store, taskId, node.id, version);
-          store.db.prepare("UPDATE nodes SET status='pending',output=NULL,route=NULL,output_operation=NULL WHERE task_id=? AND id=?").run(taskId, node.id);
-        }
-      }
+      if (affected.has(node.id)) resetIdleNode(store, taskId, node.id, version, 1, ['pending', 'retired']);
       continue;
     }
     if (node.replaces) {

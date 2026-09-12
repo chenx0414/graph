@@ -9,6 +9,7 @@ type CommonConfig = { reportNodes: string[] };
 export type VerifierConfig = CommonConfig & (
   | { kind: 'adversarial'; subjectNode: string; acceptanceCriteria: string[] }
   | { kind: 'multiview'; subjectNode: string; dimensions: { id: string; required: boolean; reportNode: string }[] }
+  | { kind: 'independent' }
   | { kind: 'jury'; candidates: { id: string; node: string }[]; hardCriteria: string[];
       ranking: { id: string; weight: number; min: number; max: number }[]; tieOrder: string[];
       revalidate?: { selectionNode: string; subjectNode: string } }
@@ -18,6 +19,7 @@ export type ReviewReport = { schemaVersion: 1 } & (
   | { subject: ArtifactVersion; body: { kind: 'adversarial'; checks: Record<string, Judgment>;
       counterexamples: { id: string; acceptanceId: string; validity: 'valid' | 'invalid' | 'unresolved'; impactsAcceptance: boolean;
         resolution: 'open' | 'resolved'; judgment: Judgment }[] } }
+  | { body: { kind: 'independent'; verdict: Judgment['verdict']; reason: string; evidence: Proof[] } }
   | { body: { kind: 'jury'; candidates: { id: string; artifact: ArtifactVersion; hard: Record<string, Judgment>;
       scores: Record<string, { value: number; reason: string; evidence: Proof[] }> }[] } }
 );
@@ -81,7 +83,11 @@ export function validateVerifierConfig(proposal: Proposal) {
     for (const report of config.reportNodes) {
       if (!plan.nodes.has(report) || !reachable(plan, node.id, report)) invalidProposal('Verifier reports must be current dependencies');
     }
-    if (config.kind === 'multiview') {
+    if (config.kind === 'independent') {
+      for (const report of config.reportNodes) {
+        if (plan.nodes.get(report)?.kind !== 'agent') invalidProposal('Independent review reports must come from Agent nodes');
+      }
+    } else if (config.kind === 'multiview') {
       unique(config.dimensions.map(dimension => dimension.id), 'Dimensions');
       if (!plan.nodes.has(config.subjectNode) || !reachable(plan, node.id, config.subjectNode)) invalidProposal('Verifier subject must be a dependency');
       for (const dimension of config.dimensions) {
@@ -201,10 +207,7 @@ function evaluateJury(config: Extract<VerifierConfig, { kind: 'jury' }>, context
       let eligible = true;
       for (const criterion of config.hardCriteria) {
         const judged = judgment(item.hard[criterion]);
-        if (judged.verdict !== 'pass') {
-          eligible = false;
-          decision.blockers.push({ id: `${item.id}:${criterion}`, reason: judged.reason, evidence: judged.evidence });
-        }
+        if (judged.verdict !== 'pass') eligible = false;
       }
       const scores: Record<string, number> = {};
       for (const criterion of config.ranking) {
@@ -242,12 +245,26 @@ function evaluateJury(config: Extract<VerifierConfig, { kind: 'jury' }>, context
   remember(decision, winner.artifact);
 }
 
+function evaluateIndependent(_config: Extract<VerifierConfig, { kind: 'independent' }>, context: VerificationContext, reports: ReturnType<typeof collectReports>, decision: VerificationDecision) {
+  for (const report of reports) {
+    const current = source(context, report.node);
+    const checked = judgment(report.body);
+    if (checked.verdict !== 'pass') {
+      decision.blockers.push({ id: report.node, reason: checked.reason, evidence: checked.evidence });
+      continue;
+    }
+    const proof = checked.evidence[0]!;
+    remember(decision, { id: `${report.node}-subject`, path: proof.path, digest: proof.digest, nodeId: current.nodeId, operationId: current.operationId, activationId: current.activationId });
+  }
+}
+
 /** Program-owned rules consume the current operation's persisted dependency snapshot. */
 export function evaluateVerifier(config: VerifierConfig, context: VerificationContext): OperationResult {
   const decision: VerificationDecision = { kind: 'verification', outcome: 'pass', subjects: [], reports: [], blockers: [] };
   const reports = collectReports(config, context, decision);
   if (config.kind === 'multiview') evaluateMultiview(config, context, reports, decision);
   else if (config.kind === 'adversarial') evaluateAdversarial(config, context, reports, decision);
+  else if (config.kind === 'independent') evaluateIndependent(config, context, reports, decision);
   else evaluateJury(config, context, reports, decision);
   decision.outcome = decision.blockers.length ? 'rework' : 'pass';
   const artifact = decision.subjects[0];

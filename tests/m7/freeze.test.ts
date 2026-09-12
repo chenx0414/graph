@@ -41,6 +41,9 @@ test('G17 freezes Bilibili web acceptance, exclusive profile, and a human login 
     },
   });
   cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
 
   const { taskId } = await runtime.user.begin({
     projectId: 'media-bookmarks',

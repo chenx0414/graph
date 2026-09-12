@@ -231,11 +231,52 @@ export class Execution {
     if (spec.definitionVersion && this.catalog) {
       try { definition = this.catalog.definition(spec.definitionVersion); } catch { /* unpublished keys still select by requested model */ }
     }
-    const exclude = definition.review ? (spec.dependsOn ?? []).flatMap(id => {
-      const row = this.store.db.prepare('SELECT models_used FROM instances WHERE task_id=? AND node_id=?').get(node.task_id, id) as { models_used: string } | undefined;
-      return row ? JSON.parse(row.models_used) as string[] : [];
-    }) : [];
+    const exclude = definition.review ? this.implementerModels(spec, node) : [];
     return selectModel({ ...(spec.model ? { requested: spec.model } : {}), grade: definition.recommendedGrade, directory, ...(this.preferences ? { preferences: this.preferences } : {}), ...(exclude.length ? { exclude } : {}) });
+  }
+
+  private implementerModels(spec: NodeSpec, node: NodeRow) {
+    const graph = loadGraph(this.store, node.task_id);
+    const models: string[] = [];
+    const seen = new Set<string>();
+    const walk = (id: string) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      if (graph.plan.containers.has(id)) {
+        for (const leaf of graph.plan.leaves(id)) walk(leaf);
+        return;
+      }
+      const target = graph.plan.nodes.get(id);
+      if (!target) return;
+      if (target.kind === 'agent') {
+        const row = this.store.db.prepare('SELECT models_used FROM instances WHERE task_id=? AND node_id=?').get(node.task_id, id) as { models_used: string } | undefined;
+        if (row) models.push(...JSON.parse(row.models_used) as string[]);
+        return;
+      }
+      for (const dependency of graph.plan.dependencies.get(id) ?? []) walk(dependency);
+    };
+    for (const dependency of spec.dependsOn ?? []) walk(dependency);
+    return [...new Set(models)];
+  }
+
+  private isReviewer(spec: NodeSpec) {
+    if (!spec.definitionVersion || !this.catalog) return false;
+    try { return this.catalog.definition(spec.definitionVersion).review === true; }
+    catch { return false; }
+  }
+
+  private independentReviewReady(taskId: string) {
+    const graph = loadGraph(this.store, taskId);
+    const reviewers = [...graph.plan.nodes.values()].filter(spec => spec.kind === 'agent' && this.isReviewer(spec));
+    if (!reviewers.length) return false;
+    for (const spec of graph.plan.nodes.values()) {
+      if (spec.action !== 'graph.verify' || !spec.verifier) continue;
+      if (!spec.verifier.reportNodes.some(id => reviewers.some(reviewer => reviewer.id === id))) continue;
+      if (graph.status(spec.id) !== 'succeeded') continue;
+      const output = graph.output(spec.id);
+      if (output && typeof output === 'object' && !Array.isArray(output) && output.kind === 'verification' && output.outcome === 'pass') return true;
+    }
+    return false;
   }
 
   private graphVerify(spec: NodeSpec): ActionAdapter {
@@ -272,9 +313,17 @@ export class Execution {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: `No ${spec.kind} adapter for ${spec.action}` }));
       return false;
     }
-    if (spec.action === 'graph.human_check' && !this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='human_check' AND status='resolved'").get(node.task_id, node.id)) {
-      this.store.transaction(() => this.block(node, 'human_check', { prompt: 'A human acceptance check is required' }));
-      return false;
+    if (spec.action === 'graph.human_check') {
+      const task = this.store.task(node.task_id);
+      const resolved = this.store.db.prepare("SELECT data FROM questions WHERE task_id=? AND node_id=? AND kind='human_check' AND status='resolved'").all(node.task_id, node.id) as { data: string }[];
+      const bound = resolved.some(row => {
+        const data = JSON.parse(row.data) as { activationId?: string; commitSha?: string | null };
+        return data.activationId === node.activation_id && (data.commitSha ?? null) === (task.integration_sha ?? null);
+      });
+      if (!bound) {
+        this.store.transaction(() => this.block(node, 'human_check', { prompt: 'A human acceptance check is required', activationId: node.activation_id, commitSha: task.integration_sha ?? null }));
+        return false;
+      }
     }
     if (spec.kind === 'agent' && this.models && node.instance_id) {
       const selected = this.pickModel(spec, node);
@@ -330,7 +379,22 @@ export class Execution {
         proposalVersion: task.accepted_proposal ?? 0, requirementVersion: task.requirement_version,
         context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers, ...(messages.length ? { messages } : {}) }, grants,
         activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions, ...(workspace ? { workspace } : {}) };
-      if (this.catalog) operation.context.briefing = briefing(operation, { request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}), acceptance: proposal?.acceptance ?? [] });
+      if (this.catalog) {
+        let capabilities: { id: string; version: string }[] | undefined;
+        if (spec.definitionVersion) {
+          try { capabilities = this.catalog.definition(spec.definitionVersion).capabilities; }
+          catch { /* unpublished definitions still get a request briefing */ }
+        }
+        operation.context.briefing = briefing(operation, {
+          request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}),
+          acceptance: proposal?.acceptance ?? [],
+          ...(capabilities?.length ? { capabilities } : {}),
+          ...(spec.role === 'master' ? { catalog: {
+            definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
+            capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
+          } } : {}),
+        });
+      }
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
         .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
       this.store.db.prepare("UPDATE activations SET input_versions=?,state='preparing' WHERE id=?").run(canonicalJson(inputVersions), node.activation_id);
@@ -542,7 +606,9 @@ export class Execution {
     const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal) as { spec: string }).spec) as Proposal;
     const evidence = this.store.db.prepare('SELECT acceptance_id,commit_sha FROM evidence WHERE task_id=? AND proposal_version=? AND requirement_version=? AND valid=1').all(taskId, task.accepted_proposal, task.requirement_version) as { acceptance_id: string; commit_sha: string | null }[];
     const sha = task.integration_sha;
-    return proposal.acceptance.every(item => evidence.some(row => row.acceptance_id === item.id && (!sha || row.commit_sha === sha)));
+    if (!proposal.acceptance.every(item => evidence.some(row => row.acceptance_id === item.id && (!sha || row.commit_sha === sha)))) return false;
+    if (task.integration_branch && !this.independentReviewReady(taskId)) return false;
+    return true;
   }
 
   private completeTask(taskId: string) {

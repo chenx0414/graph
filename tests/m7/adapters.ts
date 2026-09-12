@@ -127,7 +127,13 @@ export function mediaBookmarksActions(runtime: () => Runtime): Record<string, Ac
         await mkdir(join(workspace, 'docs'), { recursive: true });
         await writeFile(join(workspace, 'docs/bilibili-web-review.md'), body);
         if (blockers.length) return { outcome: 'failed', output: { verdict, blockers }, usage };
-        return { outcome: 'completed', output: { verdict }, usage };
+        const digest = createHash('sha256').update(body).digest('hex');
+        const proof = { path: join(workspace, 'docs/bilibili-web-review.md'), digest };
+        return {
+          outcome: 'completed',
+          output: { schemaVersion: 1, body: { kind: 'independent', verdict: 'pass', reason: 'Independent review of the Bilibili web', evidence: [proof] } },
+          usage,
+        };
       },
     },
   };

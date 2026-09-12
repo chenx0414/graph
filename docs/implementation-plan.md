@@ -1,6 +1,6 @@
 # Graph 首版实施计划
 
-日期：2026-09-12。产品规则已经使用者确认。M0–M7（G01–G18）已形成可运行验证，见 [M0 报告](planning/m0-results.md)、[M1 报告](planning/m1-results.md)、[M2 报告](planning/m2-results.md)、[M3 报告](planning/m3-results.md)、[M4 报告](planning/m4-results.md)、[M5 报告](planning/m5-results.md)、[M6 报告](planning/m6-results.md)、[M7 报告](planning/m7-results.md)；尚未运行真实收费模型请求。
+日期：2026-09-12。产品规则已经使用者确认。M0–M7（G01–G18）的可运行验证见各 `planning/mN-results.md`；独立验收反例的修复见 [验收复验](planning/acceptance-rework.md)。尚未运行真实收费模型请求。
 
 依据：[产品设计](graph-mvp.md)、[实现架构](architecture.md)、[术语表](../CONTEXT.md)。首版必须完成全部图模式、三类验证器和两组验收；中间里程碑用于验证进度，不作为缩减后的首版交付。
 
@@ -123,7 +123,7 @@ M2 已用 scripted adapter 在 Task Runtime 接口上验证 G06–G08；生产 P
 - 产物：需求讨论、验收说明、图提案、Agent 创建、局部返工、证据汇总和人工问题处理。
 - 出口：通过一个临时项目任务，自主拆解并并行执行；不需要用户复制上下文；主管提案仍接受程序校验；新增功能进入队列、原任务继续原范围。
 
-M3 已用可控本地 OpenAI chat-completions 服务与 scripted 主管验证 G09–G11；未读取 `.env`、未调用收费模型。准确范围见 [M3 报告](planning/m3-results.md)。
+M3 已用可控本地 OpenAI chat-completions 服务验证生产 Pi 的工作工具、主管提案通道与逐请求用量门；scripted 主管仍用于规划测试。未读取 `.env`、未调用收费模型。准确范围见 [M3 报告](planning/m3-results.md)。
 
 ## M4 代码集成与自动合并
 
@@ -185,7 +185,7 @@ M6 已用真实磁盘 SQLite、临时 Git、macOS 受限进程和 scripted 响�
 - 出口：可运行的已确认 B站流程、测试结果、独立审查结论、合并提交、任务图与完整用量/费用记录；用户未人工拆任务或转发上下文。需要用户确认的需求、登录和明确人工介入按规则记录。
 - 用户决定发布；真实任务成功与 M6 机制通过共同构成 Graph 首版完成，缺一不可。
 
-M7 已用 MediaBookmarks 的 git 克隆与 scripted adapter 验证 G17–G18；未读取 `.env`、未调用收费模型、未改写原仓库。准确范围见 [M7 报告](planning/m7-results.md)。
+M7 在 MediaBookmarks 的 git 克隆上冻结验收并交付：scripted 全图编排保留；生产 Pi 经工作区工具写入同一 B站 Web；页面含登录准入、采集进度与笔记阅读。未读取 `.env`、未调用收费模型、未改写原仓库。准确范围见 [M7 报告](planning/m7-results.md)。
 
 ## 验收覆盖矩阵
 

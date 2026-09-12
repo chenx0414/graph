@@ -18,4 +18,4 @@ M5 在 Task Runtime 外包一层本机 HTTP/SSE。命令与查询走 Fastify inj
 
 M6 把 A01–A12 映射到既有测试，并增加跨 SQLite/Git/sandbox/HTTP 的故障注入：进程被杀后的旧 worker、重复命令、未知用量副作用、目标分支竞态和后台停开。证据是测试断言，不是截图。
 
-M7 在同一 Task Runtime 上冻结 MediaBookmarks B站 Web 验收，并在该项目的 git 克隆上由 scripted Agent 实现、检查、独立审查、记录人工登录后合入 `main`。测试数据为 `GRAPH_FIXTURE` 合成条目；不读取 `.env`，不调用收费模型，不改写原仓库。
+M7 在同一 Task Runtime 上冻结 MediaBookmarks B站 Web 验收。scripted 全图编排仍覆盖拆解、副本、检查、审查与合入；生产 Pi 用工作区工具在克隆上写入同一载荷。页面测试覆盖登录准入、采集进度与笔记阅读。`GRAPH_FIXTURE` 合成条目；不读取 `.env`，不调用收费模型，不改写原仓库。

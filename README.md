@@ -2,7 +2,7 @@
 
 为已有项目的功能开发编排 Agent：先与主管讨论并确认需求，再自主拆解、并行执行、交接上下文、审查返工和合并。
 
-当前状态：M0–M7 已落地。机制验收矩阵 A01–A12 与 MediaBookmarks 任务 A13 均有可重复测试证据。A13 是 Graph 在项目克隆上的交付；合成数据与 scripted adapter，不是真实 B站登录或收费模型。Graph 为当前工作名称。
+当前状态：M0–M7 已落地。机制矩阵与 MediaBookmarks 克隆交付见各里程碑报告；独立验收反例的修复见 [验收复验](docs/planning/acceptance-rework.md)。A13 使用克隆、受控本地模型与 `GRAPH_FIXTURE` 合成数据，不是真实 B站登录或收费模型。Graph 为当前工作名称。
 
 ## 从这里开始
 

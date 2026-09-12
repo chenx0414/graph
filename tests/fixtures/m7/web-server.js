@@ -42,14 +42,40 @@ function latestRaw() {
   return { file, count: (data.items || []).length, items: data.items || [] };
 }
 
+function notesDir() {
+  return path.join(config.outputDir, 'bilibili-notes');
+}
+
 function listNotes() {
-  const dir = path.join(config.outputDir, 'bilibili-notes');
+  const dir = notesDir();
   const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => name.endsWith('.md')) : [];
   const index = path.join(config.outputDir, 'bilibili.md');
   return {
-    notes: files.map((name) => ({ name, path: path.join('output', 'bilibili-notes', name) })),
+    notes: files.map((name) => ({ name, path: path.join('output', 'bilibili-notes', name), href: `/api/notes/content?name=${encodeURIComponent(name)}` })),
     index: fs.existsSync(index) ? 'output/bilibili.md' : null,
   };
+}
+
+function readNote(name) {
+  const base = path.basename(String(name || ''));
+  if (!base || base !== name || !base.endsWith('.md')) {
+    const error = new Error('Invalid note name');
+    error.code = 'invalid_note';
+    throw error;
+  }
+  const dir = path.resolve(notesDir());
+  const file = path.resolve(dir, base);
+  if (file !== dir && !file.startsWith(`${dir}${path.sep}`)) {
+    const error = new Error('Invalid note name');
+    error.code = 'invalid_note';
+    throw error;
+  }
+  if (!fs.existsSync(file)) {
+    const error = new Error('Note not found');
+    error.code = 'not_found';
+    throw error;
+  }
+  return { name: base, content: fs.readFileSync(file, 'utf8') };
 }
 
 function readJob() {
@@ -61,7 +87,39 @@ function writeJob(job) {
   writeJson(JOB_FILE, job);
 }
 
+function startLiveCollect() {
+  const args = ['src/cli.js', 'collect', 'bilibili'];
+  if (config.targets.bilibiliUid) args.push(`--uid=${config.targets.bilibiliUid}`);
+  const child = spawn(process.execPath, args, { cwd: ROOT, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stdout.on('data', (chunk) => {
+    const text = String(chunk);
+    const match = /(\d+)\s*\/\s*(\d+)/.exec(text);
+    const job = readJob();
+    if (job.status !== 'running') return;
+    if (match) writeJob({ ...job, progress: { current: Number(match[1]), total: Number(match[2]) } });
+    else {
+      const current = (job.progress && job.progress.current) || 0;
+      writeJob({ ...job, progress: { current: current + 1, total: Math.max((job.progress && job.progress.total) || 1, current + 1) } });
+    }
+  });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => {
+    if (code === 0) {
+      const job = readJob();
+      writeJob({ status: 'done', progress: job.progress || { current: 1, total: 1 }, failures: [], finishedAt: new Date().toISOString() });
+    } else {
+      writeJob({ status: 'failed', progress: { current: 0, total: 1 }, failures: [{ id: 'collect', reason: stderr.trim() || `exit ${code}` }] });
+    }
+  });
+}
+
 async function startCollect() {
+  if (!loginStatus().loggedIn) {
+    const error = new Error('B站未登录');
+    error.code = 'not_logged_in';
+    throw error;
+  }
   const current = readJob();
   if (current.status === 'running') {
     const error = new Error('A collect job is already running');
@@ -83,22 +141,7 @@ async function startCollect() {
     });
     return readJob();
   }
-  await new Promise((resolve, reject) => {
-    const args = ['src/cli.js', 'collect', 'bilibili'];
-    if (config.targets.bilibiliUid) args.push(`--uid=${config.targets.bilibiliUid}`);
-    const child = spawn(process.execPath, args, { cwd: ROOT, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('close', (code) => {
-      if (code === 0) {
-        writeJob({ status: 'done', progress: { current: 1, total: 1 }, failures: [], finishedAt: new Date().toISOString() });
-        resolve();
-      } else {
-        writeJob({ status: 'failed', progress: { current: 0, total: 1 }, failures: [{ id: 'collect', reason: stderr.trim() || `exit ${code}` }] });
-        reject(new Error(stderr || `collect exited ${code}`));
-      }
-    });
-  });
+  startLiveCollect();
   return readJob();
 }
 
@@ -118,9 +161,19 @@ export function createWebServer() {
       if (req.method === 'GET' && url.pathname === '/api/job') return send(res, 200, readJob());
       if (req.method === 'GET' && url.pathname === '/api/favorites') return send(res, 200, latestRaw());
       if (req.method === 'GET' && url.pathname === '/api/notes') return send(res, 200, listNotes());
+      if (req.method === 'GET' && url.pathname === '/api/notes/content') {
+        try { return send(res, 200, readNote(url.searchParams.get('name'))); }
+        catch (error) { return send(res, error.code === 'not_found' ? 404 : 400, { error: error.message }); }
+      }
       if (req.method === 'POST' && url.pathname === '/api/collect') {
-        try { return send(res, 200, await startCollect()); }
-        catch (error) { return send(res, error.code === 'collect_busy' ? 409 : 500, { error: error.message }); }
+        try {
+          const job = await startCollect();
+          return send(res, job.status === 'running' ? 202 : 200, job);
+        }
+        catch (error) {
+          const status = error.code === 'collect_busy' || error.code === 'not_logged_in' ? 409 : 500;
+          return send(res, status, { error: error.message, code: error.code });
+        }
       }
       if (req.method === 'POST' && url.pathname === '/api/export') return send(res, 200, await runExport());
       send(res, 404, { error: 'not found' });

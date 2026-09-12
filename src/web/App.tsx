@@ -5,7 +5,7 @@ import { GraphCanvas } from './GraphCanvas.tsx';
 type TaskList = { id: string; phase: string }[];
 type TaskView = {
   id: string; request: string; phase: string; status: string; proposalVersion: number;
-  messages: { text: string }[]; questions: { id: string; kind: string; status: string; data: { prompt?: string } }[];
+  messages: { text: string }[]; questions: { id: string; kind: string; status: string; data: { prompt?: string; grant?: string } }[];
   nodes: { id: string; status: string; used?: number | null; selectedModel?: string; boundDefinition?: string }[];
   cost: { unknown?: boolean; amount?: number }; proposal: { summary?: string } | null;
 };
@@ -88,10 +88,49 @@ function Catalog({ settings }: { settings: Settings | null }) {
   );
 }
 
-function answerFor(kind: string) {
-  if (kind === 'waiting') return { type: 'respond' as const, value: 'ok' };
-  if (['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(kind)) return { type: 'retry' as const };
-  return { type: 'acknowledge' as const };
+function QuestionReply({ taskId, question, onDone }: {
+  taskId: string;
+  question: { id: string; kind: string; data: { prompt?: string; grant?: string } };
+  onDone: () => void;
+}) {
+  const [tokens, setTokens] = useState('100000');
+  const [inputTokens, setInputTokens] = useState('0');
+  const [outputTokens, setOutputTokens] = useState('0');
+  const [value, setValue] = useState('');
+  const [proof, setProof] = useState('');
+  const [error, setError] = useState('');
+  async function submit(answer: unknown) {
+    try {
+      await api(`/api/tasks/${taskId}/answer`, { method: 'POST', body: JSON.stringify({ questionId: question.id, answer, requestId: `ans-${question.id}-${crypto.randomUUID()}` }) });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return (
+    <li>
+      {question.kind} {question.data.prompt}
+      {question.kind === 'budget' && <input data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
+      {question.kind === 'waiting' && <input data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} />}
+      {question.kind === 'unknown_usage' && <>
+        <input data-testid="usage-input" type="number" min={0} value={inputTokens} onChange={event => setInputTokens(event.target.value)} placeholder="输入 token" />
+        <input data-testid="usage-output" type="number" min={0} value={outputTokens} onChange={event => setOutputTokens(event.target.value)} placeholder="输出 token" />
+        <input data-testid="usage-proof" value={proof} onChange={event => setProof(event.target.value)} placeholder="证据" />
+      </>}
+      {question.kind === 'rework' || question.kind === 'stalled' ? <>
+        <button type="button" onClick={() => void submit({ type: 'retry' })}>重试</button>
+        <button type="button" onClick={() => void submit({ type: 'respond', value })}>答复</button>
+      </> : <button type="button" onClick={() => {
+        if (question.kind === 'budget') return void submit({ type: 'add_budget', tokens: Number(tokens) });
+        if (question.kind === 'waiting') return void submit({ type: 'respond', value });
+        if (question.kind === 'unknown_usage') return void submit({ type: 'usage', usage: { input: Number(inputTokens), output: Number(outputTokens), cacheRead: 0, cacheWrite: 0 }, proof });
+        if (question.kind === 'permission') return void submit({ type: 'grant', grant: question.data.grant });
+        if (['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind)) return void submit({ type: 'retry' });
+        return void submit({ type: 'acknowledge' });
+      }}>答复</button>}
+      {error && <p data-testid="answer-error">{error}</p>}
+    </li>
+  );
 }
 
 function TaskPanel({ id }: { id: string }) {
@@ -123,9 +162,7 @@ function TaskPanel({ id }: { id: string }) {
       <button type="button" data-testid="resume" onClick={() => void api(`/api/tasks/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }).then(reload)}>继续</button>
       <a href={`#/tasks/${id}/graph`}>任务图</a>
       <ul data-testid="questions">{open.map(question => (
-        <li key={question.id}>{question.kind} {question.data.prompt}
-          <button type="button" onClick={() => void api(`/api/tasks/${id}/answer`, { method: 'POST', body: JSON.stringify({ questionId: question.id, answer: answerFor(question.kind), requestId: `ans-${question.id}` }) }).then(reload)}>答复</button>
-        </li>
+        <QuestionReply key={question.id} taskId={id} question={question} onDone={() => void reload()} />
       ))}</ul>
     </section>
   );
@@ -136,8 +173,20 @@ function GraphPanel({ id }: { id: string }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [ops, setOps] = useState<{ nodeId: string; durationMs?: number; result?: { output?: unknown } | null }[]>([]);
-  useEffect(() => { void api<GraphPayload>(`/api/tasks/${id}/graph`).then(setGraph); }, [id]);
-  useEffect(() => { void api<typeof ops>(`/api/tasks/${id}/operations?limit=100`).then(setOps); }, [id]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reload = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        void api<GraphPayload>(`/api/tasks/${id}/graph`).then(setGraph);
+        void api<typeof ops>(`/api/tasks/${id}/operations?limit=100`).then(setOps);
+      }, 150);
+    };
+    reload();
+    const stream = new EventSource(`/api/tasks/${id}/events/stream`);
+    stream.onmessage = () => { reload(); };
+    return () => { clearTimeout(timer); stream.close(); };
+  }, [id]);
   if (!graph) return <p>加载中</p>;
   const selectedNode = graph.nodes.find(node => node.id === selected);
   const selectedOps = ops.filter(item => item.nodeId === selected);

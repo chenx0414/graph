@@ -9,7 +9,7 @@ pnpm test:m3
 pnpm check
 ```
 
-最终复验中 `pnpm check` 通过：TypeScript 检查及 17 个文件、84 项测试，其中 M0 27 项、M1 22 项、M2 27 项、M3 8 项。`git diff --check` 无格式错误。Pi 请求打到临时本地 chat-completions 服务；能力安装使用真实 macOS sandbox。不读取项目 `.env`，不调用收费模型。
+最终复验中 `pnpm check` 通过。Pi 请求打到临时本地 chat-completions 服务；能力安装使用真实 macOS sandbox。生产 adapter 注入工作区工具与主管提案工具，逐请求检查额度与未知用量，见 `tests/m3/production.test.ts`。不读取项目 `.env`，不调用收费模型。
 
 ## 入口
 
@@ -24,7 +24,7 @@ pnpm check
 | --- | --- |
 | 请求归属实例和 invocation | `tests/m3/models.test.ts` 一次 Pi prompt 一条 invocation，用量 50 |
 | 模型切换保留身份 | 请求不存在的模型时从同级候选替换，`instanceId` 不变 |
-| 审查排除本轮实现模型 | reviewer 定义 `review: true` 时不选用 implementer 的模型 |
+| 审查排除本轮实现模型 | reviewer 定义 `review: true` 时不选用 implementer 的模型；排除集穿过程序节点，见 `tests/m4/acceptance.test.ts` |
 | 无合格候选进入问题 | 仅剩被排除模型时打开 `model_unavailable` |
 | 未知价格不记零 | 无 `cost` 的模型在 view 中为 `{ unknown: true }` |
 | 会话恢复 | 关闭重开后同一 `instanceId` 继续，检查节点仍收到 briefing |

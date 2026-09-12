@@ -10,7 +10,7 @@ pnpm build:web
 pnpm check
 ```
 
-最终复验中 `pnpm check` 通过：TypeScript 检查及 22 个文件、101 项测试，其中 M0 27 项、M1 22 项、M2 27 项、M3 8 项、M4 9 项、M5 8 项。`git diff --check` 无格式错误。HTTP 测试使用 Fastify inject；界面测试用 Playwright Chromium 打开真实本机页面。不读取项目 `.env`，不调用收费模型。
+最终复验中 `pnpm check` 包含主配置与 `tsconfig.web.json`。HTTP 测试使用 Fastify inject；界面测试用 Playwright Chromium 打开真实本机页面，覆盖额度 `add_budget` 与图状态随 SSE 更新。不读取项目 `.env`，不调用收费模型。
 
 ## 入口
 

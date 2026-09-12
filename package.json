@@ -16,7 +16,7 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run",
     "test:m0": "vitest run tests/m0",
     "test:m1": "vitest run tests/m1",

@@ -6,6 +6,7 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, NodeSpec } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
+import { passingReviewAction, withIndependentReview } from '../fixtures/review-gate.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -25,12 +26,15 @@ async function repo() {
   return root;
 }
 async function start(root: string, actions: Record<string, ActionAdapter>, nodes: NodeSpec[]) {
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions });
+  const reviewed = withIndependentReview(actions, nodes);
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: reviewed.actions });
   cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Merge', requestId: 'begin' });
   const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Merge',
-    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes,
+    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: reviewed.nodes,
   }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
@@ -100,7 +104,7 @@ test('a target-branch change invalidates prior evidence and re-runs the check be
 
 test('a merge already present on the target is treated as complete after restore', async () => {
   const root = await repo();
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: {
+  const reviewed = withIndependentReview({
     work: { kind: 'agent' as const, reserveTokens: 100, prepare: async (operation: { workspace?: string }) => async () => {
       await writeFile(join(operation.workspace!, 'feature.txt'), 'done');
       return { outcome: 'completed' as const, output: null, usage };
@@ -109,17 +113,20 @@ test('a merge already present on the target is treated as complete after restore
       const path = join(operation.workspace!, 'feature.txt');
       return { outcome: 'completed' as const, output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path, digest: digest('done') } }] };
     } },
-  } };
+  }, [
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+  ]);
+  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: reviewed.actions };
   let runtime = await openTaskRuntime(options);
   cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Restore merge', requestId: 'begin' });
   const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Restore merge',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
+    nodes: reviewed.nodes,
   }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
@@ -164,10 +171,13 @@ test('an independent review must succeed before the target branch is updated', a
       const path = join(operation.workspace!, 'feature.txt');
       return { outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path, digest: digest('done') } }] };
     } },
-    review: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-      reviewed = true;
-      await writeFile(join(operation.workspace!, 'review.txt'), 'ok');
-      return { outcome: 'completed', output: { verdict: 'pass' }, usage };
+    review: { kind: 'agent', reserveTokens: 100, prepare: async operation => {
+      const inner = await passingReviewAction.prepare(operation);
+      return async () => {
+        reviewed = true;
+        await writeFile(join(operation.workspace!, 'review.txt'), 'ok');
+        return inner();
+      };
     } },
   }, [
     { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
@@ -179,6 +189,7 @@ test('an independent review must succeed before the target branch is updated', a
   expect(view.phase).toBe('completed');
   expect(reviewed).toBe(true);
   expect(view.nodes.find(node => node.id === 'review')?.status).toBe('succeeded');
+  expect(view.nodes.find(node => node.id === 'review-gate')?.status).toBe('succeeded');
   expect(await readFile(join(root, 'feature.txt'), 'utf8')).toBe('done');
   expect(await readFile(join(root, 'review.txt'), 'utf8')).toBe('ok');
 });

@@ -5,11 +5,11 @@ import { TaskStore, canonicalJson } from './store.ts';
 import { Execution } from './execution.ts';
 import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
-import { createActivation, loadGraph } from './graph.ts';
+import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
-import { createPiAdapter } from '../runtime/pi-adapter.ts';
+import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
 import { CallBroker } from '../runtime/call-broker.ts';
@@ -36,6 +36,7 @@ export async function openTaskRuntime(options: {
   let execution: Execution;
   let catalog: Catalog;
   let git: GitIntegration;
+  const channels: Partial<PiAdapterChannels> = {};
   const ensureOpen = () => { if (closed) throw new RuntimeError('closed', 'Runtime is closed'); };
   try {
     store.transaction(() => {
@@ -58,6 +59,11 @@ export async function openTaskRuntime(options: {
     const fallback = options.models ? createPiAdapter({
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: () => options.models!.entries,
       apiKey: options.models.apiKey, modelRuntime: options.models.modelRuntime,
+      channels: {
+        supervisor: taskId => channels.supervisor!(taskId),
+        catalog,
+        install: input => channels.install!(input),
+      },
     }) : undefined;
     execution = new Execution(store, options.actions ?? {}, {
       ...(fallback ? { fallback } : {}),
@@ -120,6 +126,14 @@ export async function openTaskRuntime(options: {
             if (!text.trim()) throw new RuntimeError('invalid_input', 'A nonempty message is required');
             if (task.accepted_proposal !== null) throw new RuntimeError('requirements_locked', 'Confirmed requirements need an explicit impact review');
             store.db.prepare('UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?').run(taskId);
+            if (task.accepted_proposal === null) {
+              const rows = store.db.prepare('SELECT id,status,spec FROM nodes WHERE task_id=?').all(taskId) as { id: string; status: string; spec: string }[];
+              for (const row of rows) {
+                if ((JSON.parse(row.spec) as NodeSpec).role !== 'master') continue;
+                if (['preparing', 'running'].includes(row.status) || hasLockedQuestion(store, taskId, row.id)) continue;
+                store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(taskId, row.id);
+              }
+            }
             return { taskId, cursor: store.event(taskId, 'requirement.changed', { text, requirementVersion: task.requirement_version + 1 }) };
           });
         },
@@ -234,7 +248,7 @@ export async function openTaskRuntime(options: {
     },
   };
 
-  return {
+  const runtime = {
     user,
     host: {
       async runReady() { ensureOpen(); return execution.runReady(); },
@@ -372,4 +386,7 @@ export async function openTaskRuntime(options: {
       return closing;
     },
   };
+  channels.supervisor = runtime.supervisor;
+  channels.install = input => runtime.catalog.install(input);
+  return runtime;
 }

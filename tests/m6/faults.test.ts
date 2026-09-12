@@ -11,6 +11,7 @@ import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { openRestrictedExecutor } from '../../src/runtime/restricted-process.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import type { ActionAdapter, Operation } from '../../src/core/types.ts';
+import { withIndependentReview } from '../fixtures/review-gate.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -52,27 +53,30 @@ function sandboxedCheck(root: string): ActionAdapter {
 
 test('duplicate commands and reports do not double-merge or change a settled result', async () => {
   const root = await repo();
+  const reviewed = withIndependentReview({
+    work: { kind: 'agent' as const, reserveTokens: 100, prepare: async (operation: { workspace?: string }) => async () => {
+      await writeFile(join(operation.workspace!, 'feature.txt'), 'done');
+      return { outcome: 'completed' as const, output: { file: 'feature.txt' }, usage };
+    } },
+    check: sandboxedCheck(root),
+  }, [
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+  ]);
   const options = {
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }],
-    actions: {
-      work: { kind: 'agent' as const, reserveTokens: 100, prepare: async (operation: { workspace?: string }) => async () => {
-        await writeFile(join(operation.workspace!, 'feature.txt'), 'done');
-        return { outcome: 'completed' as const, output: { file: 'feature.txt' }, usage };
-      } },
-      check: sandboxedCheck(root),
-    },
+    actions: reviewed.actions,
   };
   const runtime = await openTaskRuntime(options);
   cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const first = await runtime.user.begin({ projectId: 'project', request: 'Idempotent merge', requestId: 'begin' });
   expect(await runtime.user.begin({ projectId: 'project', request: 'Idempotent merge', requestId: 'begin' })).toEqual(first);
   const proposed = await runtime.supervisor(first.taskId).propose({
     requirementVersion: 1, summary: 'Idempotent merge',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
+    nodes: reviewed.nodes,
   }, 'proposal');
   const task = runtime.user.task(first.taskId);
   const accepted = await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
@@ -90,27 +94,30 @@ test('duplicate commands and reports do not double-merge or change a settled res
 test('unknown usage after a git write waits for the user and does not replay the write', async () => {
   const root = await repo();
   let writes = 0;
+  const reviewed = withIndependentReview({
+    work: { kind: 'agent' as const, reserveTokens: 100, prepare: async (operation: { workspace?: string }) => async () => {
+      writes++;
+      await writeFile(join(operation.workspace!, 'feature.txt'), 'done');
+      return { outcome: 'completed' as const, output: { file: 'feature.txt' } };
+    } },
+    check: sandboxedCheck(root),
+  }, [
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+  ]);
   const options = {
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }],
-    actions: {
-      work: { kind: 'agent' as const, reserveTokens: 100, prepare: async (operation: { workspace?: string }) => async () => {
-        writes++;
-        await writeFile(join(operation.workspace!, 'feature.txt'), 'done');
-        return { outcome: 'completed' as const, output: { file: 'feature.txt' } };
-      } },
-      check: sandboxedCheck(root),
-    },
+    actions: reviewed.actions,
   };
   let runtime = await openTaskRuntime(options);
   cleanup.push(async () => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Unknown usage', requestId: 'begin' });
   const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Unknown usage',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
+    nodes: reviewed.nodes,
   }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
@@ -144,20 +151,24 @@ test('a killed worker after a git write is stale, recovery integrates the copy, 
   await once(child, 'exit');
   let checks = 0;
   const result = { outcome: 'completed' as const, output: { file: 'feature.txt' }, usage };
+  const reviewed = withIndependentReview({
+    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => result,
+      reconcile: async () => ({ state: 'completed' as const, result, quiescent: true as const, proof: 'Worktree contains feature.txt' }) },
+    check: { kind: 'program', prepare: async operation => {
+      const inner = await sandboxedCheck(root).prepare(operation);
+      return async () => {
+        checks++;
+        const result = await inner();
+        return { ...result, output: { checks } };
+      };
+    } },
+  }, [
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+  ]);
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }],
-    actions: {
-      work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => result,
-        reconcile: async () => ({ state: 'completed' as const, result, quiescent: true as const, proof: 'Worktree contains feature.txt' }) },
-      check: { kind: 'program', prepare: async operation => {
-        const inner = await sandboxedCheck(root).prepare(operation);
-        return async () => {
-          checks++;
-          const result = await inner();
-          return { ...result, output: { checks } };
-        };
-      } },
-    },
+    actions: reviewed.actions,
   });
   cleanup.push(() => runtime.close());
   const task = runtime.user.task(message.taskId);
