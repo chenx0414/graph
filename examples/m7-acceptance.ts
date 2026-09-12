@@ -60,7 +60,7 @@ import { git } from '../src/git/git.ts';
  * Exit codes: 0 completed/no-op, 1 waiting for the next user confirmation or
  * host answer, 2 invalid configuration or unexpected failure.
  */
-const request = '在现有 MediaBookmarks B站 CLI（登录确认、采集、进度与失败原因、浏览收藏与笔记、Markdown 导出）的基础上，增加可启动的本机 Web 应用：从页面完成 确认登录状态 → 发起采集 → 查看进度与失败原因 → 浏览收藏及已有笔记 → 导出 Markdown 的完整闭环，复用已有 CLI 能力，不重复平台逻辑。同时修复现有交付的错误处理：所有非零业务码（不只 -101）都保留错误码与原因并进入失败处理（覆盖首屏与后续分页）；采集过程中捕获的异常必须进入统一进度和最终失败汇总，保留已采集结果并明确显示未完成范围、失败次数和原因。提供离线浏览器端到端检查与单元测试：端到端检查在检查环境内使用真实无头浏览器（Playwright Chromium，环境已提供）执行真实页面操作，覆盖异步进度、失败原因、笔记正文与 Markdown 导出落盘。模型分配：work 实现节点使用 deepseek/deepseek-v4-flash，review 独立审查节点使用 deepseek/deepseek-v4-pro。';
+const request = '在现有本机 B站 Web 应用中修复导出失败反馈，并重跑既有验收检查：导出接口返回非 2xx（含 HTTP 500 与网络拒绝）时，页面调用的 API 必须保留并传播服务端错误原因，导出区域显示失败原因并允许重试，不得显示空成功汇总；补充真实页面的 HTTP 500 与网络拒绝端到端回归 test/e2e/bilibili-web-export-error.e2e.test.js；重新绑定登录确认、采集进度与失败原因、收藏与笔记浏览、导出 Markdown 的测试证据。模型分配：work 使用 deepseek/deepseek-v4-flash，review 使用 deepseek/deepseek-v4-pro。';
 const targetBranch = 'main';
 const projectId = 'media-bookmarks';
 
