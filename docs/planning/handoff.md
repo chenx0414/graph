@@ -2,7 +2,7 @@
 
 快照：2026-09-12（Asia/Shanghai）。使用者要求把本轮 R1–R4 修复整理成 handoff，供其他 Agent 接手。
 
-**状态：首版实施计划 M0–M7 已提交；独立验收反例的早期修复见 [acceptance-rework.md](acceptance-rework.md)，第三位 Agent 的 R1–R4 复验见 [acceptance-followup.md](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：首版实施计划 M0–M7 已提交；独立验收反例的早期修复见 [acceptance-rework.md](acceptance-rework.md)，第三位 Agent 的 R1–R4 复验见 [acceptance-followup.md](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)。本轮修复提交 `31ce71a`；其后的 docs 提交只记录该哈希。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 
