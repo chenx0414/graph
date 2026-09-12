@@ -46,13 +46,17 @@ import { git } from '../src/git/git.ts';
  *   (USD per million tokens; without them the report keeps `cost: unknown`)
  *   GRAPH_M7_RETRIEVAL_DOMAINS, GRAPH_M7_MCP_DOMAINS (comma-separated;
  *   without them no retrieval tool or remote MCP host is granted)
+ *   GRAPH_M7_PROGRAM_READ_PATHS (colon-separated), GRAPH_M7_PROGRAM_NODE_MODULES,
+ *   GRAPH_M7_PROGRAM_ENV (JSON map): host-selected read grants, dependency link
+ *   and environment for confirmed graph.command checks (for example a
+ *   Playwright browser test); never taken from a worker or the proposal.
  *   GRAPH_M7_ACKNOWLEDGE_OVERRUN=1 records an explicit acknowledgement for
  *   every open reservation_exceeded question; the overrun stays in the report.
  *
  * Exit codes: 0 completed/no-op, 1 waiting for the next user confirmation or
  * host answer, 2 invalid configuration or unexpected failure.
  */
-const request = '为本机 MediaBookmarks 增加 B站 Web：确认登录、采集、进度与失败原因、浏览收藏和笔记、导出 Markdown。';
+const request = '在现有 MediaBookmarks B站 CLI（登录确认、采集、进度与失败原因、浏览收藏与笔记、Markdown 导出）的基础上，增加可启动的本机 Web 应用：从页面完成 确认登录状态 → 发起采集 → 查看进度与失败原因 → 浏览收藏及已有笔记 → 导出 Markdown 的完整闭环，复用已有 CLI 能力，不重复平台逻辑。同时修复现有交付的错误处理：所有非零业务码（不只 -101）都保留错误码与原因并进入失败处理（覆盖首屏与后续分页）；采集过程中捕获的异常必须进入统一进度和最终失败汇总，保留已采集结果并明确显示未完成范围、失败次数和原因。提供离线浏览器端到端检查（真实页面操作、异步进度、失败原因、笔记正文与 Markdown 导出落盘）和单元测试。';
 const targetBranch = 'main';
 const projectId = 'media-bookmarks';
 
