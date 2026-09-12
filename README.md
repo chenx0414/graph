@@ -2,13 +2,13 @@
 
 为已有项目的功能开发编排 Agent：先与主管讨论并确认需求，再自主拆解、并行执行、交接上下文、审查返工和合并。
 
-当前状态：M0–M6 已落地。机制验收矩阵 A01–A12 有可重复测试证据；真实 MediaBookmarks 任务仍按计划实施。Graph 为当前工作名称。
+当前状态：M0–M7 已落地。机制验收矩阵 A01–A12 与 MediaBookmarks 任务 A13 均有可重复测试证据。A13 是 Graph 在项目克隆上的交付；合成数据与 scripted adapter，不是真实 B站登录或收费模型。Graph 为当前工作名称。
 
 ## 从这里开始
 
 - [首版产品设计](docs/graph-mvp.md)：范围、执行规则与首个真实任务。
 - [实现架构](docs/architecture.md)：模块 interface、持久化、Pi 接入与恢复方式。
-- [实施计划](docs/implementation-plan.md)：M0–M7、18 个工作包和验收矩阵。下一里程碑为 M7。
+- [实施计划](docs/implementation-plan.md)：M0–M7、18 个工作包和验收矩阵。首版两组验收均已完成。
 - [M0 验证报告](docs/planning/m0-results.md)：准确依赖、可运行证据、适配方式与生产接入边界。
 - [M1 验证报告](docs/planning/m1-results.md)：任务入口、所有权、调用恢复、名额额度和跨进程示例。
 - [M2 验证报告](docs/planning/m2-results.md)：全部图模式、容器、回环、图修订、三类验证器与八种模板。
@@ -16,6 +16,7 @@
 - [M4 验证报告](docs/planning/m4-results.md)：实例工作副本、任务集成分支、验收证据与自动合入。
 - [M5 验证报告](docs/planning/m5-results.md)：本机 HTTP/SSE、React 任务图、问题列表与人才库。
 - [M6 验证报告](docs/planning/m6-results.md)：故障注入与 A01–A12 机制验收矩阵。
+- [M7 验证报告](docs/planning/m7-results.md)：Graph 交付 MediaBookmarks B站本机 Web 并合入克隆目标分支。
 - [领域术语](CONTEXT.md)：Agent 定义、实例、节点、任务与额度的准确含义。
 - [决策记录](docs/adr/)：已作选择的理由与权衡。
 

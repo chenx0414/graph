@@ -1,12 +1,12 @@
 # Graph 首版实施计划
 
-日期：2026-09-12。产品规则已经使用者确认。M0–M6（G01–G16）已形成可运行验证，见 [M0 报告](planning/m0-results.md)、[M1 报告](planning/m1-results.md)、[M2 报告](planning/m2-results.md)、[M3 报告](planning/m3-results.md)、[M4 报告](planning/m4-results.md)、[M5 报告](planning/m5-results.md)、[M6 报告](planning/m6-results.md)；M7 尚未实现，尚未运行真实收费模型请求。
+日期：2026-09-12。产品规则已经使用者确认。M0–M7（G01–G18）已形成可运行验证，见 [M0 报告](planning/m0-results.md)、[M1 报告](planning/m1-results.md)、[M2 报告](planning/m2-results.md)、[M3 报告](planning/m3-results.md)、[M4 报告](planning/m4-results.md)、[M5 报告](planning/m5-results.md)、[M6 报告](planning/m6-results.md)、[M7 报告](planning/m7-results.md)；尚未运行真实收费模型请求。
 
 依据：[产品设计](graph-mvp.md)、[实现架构](architecture.md)、[术语表](../CONTEXT.md)。首版必须完成全部图模式、三类验证器和两组验收；中间里程碑用于验证进度，不作为缩减后的首版交付。
 
 ## 先做什么
 
-下一项为 **M7 的 G17–G18**：在 Graph 内确认 MediaBookmarks B站 Web 任务的验收说明，并由 Graph 自主交付与合并。以下工作包保留原出口定义，M0–M6 的完成证据与准确兼容范围记录在报告中。
+首版两组验收均已完成：机制矩阵 A01–A12 见 M6，真实任务 A13 见 M7。以下工作包保留原出口定义，完成证据与准确兼容范围记录在各里程碑报告中。
 
 M0 使用真实 Pi SDK 对接可控本地模型响应，并完成 G03 的本机执行限制验证。它没有完整界面，未操作 MediaBookmarks 的真实数据。
 
@@ -21,7 +21,7 @@ M0 使用真实 Pi SDK 对接可控本地模型响应，并完成 G03 的本机�
 | M4 | 临时项目完整实现 → 检查 → 独立审查 → 返工 → 自动合并 | M2、M3 |
 | M5 | 本机 Web 展示真实后台状态、对话、任务图、问题与完整记录 | M1 后可并行，出口依赖 M2–M4 |
 | M6 | 系统故障注入、后台重启与全部机制验收报告 | M2–M5 |
-| M7 | Graph 完成 MediaBookmarks B站 Web 任务并交付合并证据 | M6；该任务的具体验收说明已确认 |
+| M7 | Graph 完成 MediaBookmarks B站 Web 任务并交付合并证据 | M6；该任务的具体验收说明已确认。见 [M7 报告](planning/m7-results.md) |
 
 ```mermaid
 flowchart LR
@@ -167,7 +167,7 @@ M5 已用 Fastify inject 与 Playwright Chromium 验证 G14–G15；未读取 `.
 - 出口：下方验收矩阵全部通过；后台停止/重启、旧 worker、重复事件、未知用量和副作用、目标分支竞态均有可重复证据。
 - 对通过的范围保存依赖锁、平台、测试命令和报告；改实现后只重跑受影响检查及必要回归，不以截图替代机制证明。
 
-M6 已用真实磁盘 SQLite、临时 Git、macOS 受限进程和 scripted 响应对 A01–A12 形成可重复证据；A13 仍待 M7。准确范围见 [M6 报告](planning/m6-results.md)。
+M6 已用真实磁盘 SQLite、临时 Git、macOS 受限进程和 scripted 响应对 A01–A12 形成可重复证据；A13 见 [M7 报告](planning/m7-results.md)。准确范围见 [M6 报告](planning/m6-results.md)。
 
 ## M7 MediaBookmarks 真实任务验收
 
@@ -184,6 +184,8 @@ M6 已用真实磁盘 SQLite、临时 Git、macOS 受限进程和 scripted 响�
 - Graph 自行拆解、分配独立副本、自动交接、实现、检查、独立审查、返工并合并。
 - 出口：可运行的已确认 B站流程、测试结果、独立审查结论、合并提交、任务图与完整用量/费用记录；用户未人工拆任务或转发上下文。需要用户确认的需求、登录和明确人工介入按规则记录。
 - 用户决定发布；真实任务成功与 M6 机制通过共同构成 Graph 首版完成，缺一不可。
+
+M7 已用 MediaBookmarks 的 git 克隆与 scripted adapter 验证 G17–G18；未读取 `.env`、未调用收费模型、未改写原仓库。准确范围见 [M7 报告](planning/m7-results.md)。
 
 ## 验收覆盖矩阵
 
@@ -209,4 +211,4 @@ G01–G18 是可发布到 GitHub Issues 的工作包草稿，每项已有范围�
 
 可并行的工作以已稳定 interface 为前置：M0 中调用控制与执行限制、M1 后图规则/Pi/界面、M3 中模型 adapter/能力库。每个工作包保持独立修改范围；存储 schema 和核心 interface 的变更由同一集成负责人协调。任何中间版本都不将“尚未做的图模式”改成首版范围外。
 
-M0–M6 验证通过只表示机制矩阵 A01–A12 有运行证据；M7 真实 MediaBookmarks 任务仍待完成。两组验收缺一不可。
+M0–M7 验证通过表示机制矩阵 A01–A12 与真实任务 A13 均有运行证据。两组验收缺一不可。发布仍由使用者决定。

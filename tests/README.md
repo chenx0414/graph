@@ -17,3 +17,5 @@ M4 继续同一接口：真实临时 Git 仓库上的实例 worktree、任务集
 M5 在 Task Runtime 外包一层本机 HTTP/SSE。命令与查询走 Fastify inject；任务图布局用 elkjs；界面用 Playwright Chromium 打开真实页面。不把主管提案暴露为 HTTP 用户路由。
 
 M6 把 A01–A12 映射到既有测试，并增加跨 SQLite/Git/sandbox/HTTP 的故障注入：进程被杀后的旧 worker、重复命令、未知用量副作用、目标分支竞态和后台停开。证据是测试断言，不是截图。
+
+M7 在同一 Task Runtime 上冻结 MediaBookmarks B站 Web 验收，并在该项目的 git 克隆上由 scripted Agent 实现、检查、独立审查、记录人工登录后合入 `main`。测试数据为 `GRAPH_FIXTURE` 合成条目；不读取 `.env`，不调用收费模型，不改写原仓库。

@@ -25,6 +25,7 @@
     "test:m4": "vitest run tests/m4",
     "test:m5": "vitest run tests/m5",
     "test:m6": "vitest run tests/m6",
+    "test:m7": "vitest run tests/m7",
     "build:web": "vite build",
     "demo:m1": "node examples/m1-demo.ts",
     "check": "pnpm typecheck && pnpm test"

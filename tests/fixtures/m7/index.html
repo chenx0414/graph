@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>MediaBookmarks B站</title>
+  <style>
+    body { font-family: sans-serif; margin: 1.5rem; max-width: 960px; }
+    section { margin-bottom: 1.5rem; }
+    button { margin-right: .5rem; }
+    .fail { color: #a00; }
+  </style>
+</head>
+<body>
+  <h1>B站收藏本机 Web</h1>
+  <p>独立 profile：<code>.browser-profile</code>。不复用日常 Chrome。同一时刻只允许一个采集任务。登录请先运行 CLI <code>login</code>，再回到本页确认。</p>
+  <section data-testid="login">
+    <h2>登录状态</h2>
+    <pre id="login-status">加载中</pre>
+  </section>
+  <section data-testid="collect">
+    <h2>采集</h2>
+    <button type="button" id="collect-btn">发起采集</button>
+    <pre id="job">空闲</pre>
+  </section>
+  <section data-testid="favorites">
+    <h2>收藏</h2>
+    <ul id="favorites"></ul>
+  </section>
+  <section data-testid="notes">
+    <h2>已有笔记</h2>
+    <ul id="notes"></ul>
+  </section>
+  <section data-testid="export">
+    <h2>导出 Markdown</h2>
+    <button type="button" id="export-btn">导出</button>
+    <pre id="export-result"></pre>
+  </section>
+  <script>
+    async function api(path, init) {
+      const res = await fetch(path, init);
+      return res.json();
+    }
+    async function refresh() {
+      const login = await api('/api/login-status');
+      document.getElementById('login-status').textContent = JSON.stringify(login, null, 2);
+      const job = await api('/api/job');
+      document.getElementById('job').textContent = JSON.stringify(job, null, 2);
+      const fav = await api('/api/favorites');
+      document.getElementById('favorites').innerHTML = (fav.items || []).map((item) => '<li>' + item.title + '</li>').join('');
+      const notes = await api('/api/notes');
+      document.getElementById('notes').innerHTML = (notes.notes || []).map((item) => '<li>' + item.name + '</li>').join('');
+    }
+    document.getElementById('collect-btn').onclick = async () => { await api('/api/collect', { method: 'POST' }); await refresh(); };
+    document.getElementById('export-btn').onclick = async () => {
+      document.getElementById('export-result').textContent = JSON.stringify(await api('/api/export', { method: 'POST' }), null, 2);
+      await refresh();
+    };
+    refresh();
+  </script>
+</body>
+</html>
