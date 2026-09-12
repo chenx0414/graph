@@ -2,7 +2,7 @@
 
 快照：2026-09-12（Asia/Shanghai）。使用者要求把本轮 R1–R4 修复整理成 handoff，供其他 Agent 接手。
 
-**状态：首版实施计划 M0–M7 已提交；独立验收反例的早期修复见 [acceptance-rework.md](acceptance-rework.md)，第三位 Agent 的 R1–R4 复验见 [acceptance-followup.md](acceptance-followup.md#第三位-agent-的复验结果2026-09-12)，第四、五轮修复与第六轮真实运行准备见 [next-steps-after-r3.md](next-steps-after-r3.md#第六轮真实运行准备2026-09-12)。最近一次功能修复提交见该节末尾；其后的 docs 提交只记录哈希。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：首版完成。M0–M7 已提交；独立验收反例的修复见 [acceptance-rework.md](acceptance-rework.md)、[acceptance-followup.md](acceptance-followup.md) 与 [next-steps-after-r3.md](next-steps-after-r3.md#第八轮真实-a13-执行结果2026-09-12)。2026-09-12 真实 A13 已在隔离副本上完成并合入目标分支（提交 `725cb1be`），机制矩阵 A01–A12 通过；详见 [M7 报告](m7-results.md#真实-a13-运行2026-09-12)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 
@@ -17,7 +17,7 @@
    node -v                                  # v24.20.0
    tsc --noEmit
    tsc -p tsconfig.web.json --noEmit
-   vitest run                               # 36 files, 153 tests
+   vitest run                               # 37 files, 162 tests
    vite build
    git diff --check
    ```
@@ -60,12 +60,11 @@
 
 这些是已验证范围，不是待办：
 
-- 机制矩阵 A01–A12 有可重复测试。A13 的 scripted 与生产 Pi 机制测试保留；真实模型运行未执行，不标完成。
+- 机制矩阵 A01–A12 有可重复测试；A13 真实运行已于 2026-09-12 在隔离副本上通过（真实采集 60 条 0 失败、独立审查通过、`main` 合入 `725cb1be`）。
 - Skill、本地 stdio MCP、受限 worker 扩展与远程 MCP（运行时域名白名单）按定义版本加载并可调用；网络检索只放行授予域名、拒绝重定向与二进制、限制大小。扩展 worker 只实现本仓库定义的最小工具协议，官方 Pi 扩展 API 的完整语义、远程 MCP 的其他 transport 与其他平台仍未验证。
 - `run_command` 与 `graph.command` 只允许 `node`（禁内联求值）与只读 `git`，都在 macOS 沙箱内运行；受限边界在每次派发前拒绝写授权内已存在的 `.git` 条目（命令与 MCP 共用），已确认验收检查项的 input 在修订中固定；其他平台未验证。
-- 原项目 `/Users/macmini/workspace/12-MediaBookmarks` 未被修改，未把 Web 合入原仓库，未发布。
-- 未读取 `.env`，未调用收费模型，未使用真实 B站 登录或真实收藏数据。
-- 生产 Pi 在克隆上写 JavaScript 载荷时使用受控本地 chat-completions，不是收费编码模型。
+- 原项目 `/Users/macmini/workspace/12-MediaBookmarks` 未被修改；真实运行在隔离副本 `/Users/macmini/workspace/graph-m7-acceptance-7` 完成，未把 Web 合入原仓库，未发布。
+- 未读取 `.env`；真实模型费用未配置费率，报告按规则保持 `cost: unknown`。真实运行确实使用了使用者的 B站 登录与真实收藏数据，但只写入隔离副本的 profile/raw/output，Graph 仓库不保存这些内容。
 
 实施计划没有 M8。使用者已听到：下一步是其决定，不是自动开新包。
 
@@ -75,8 +74,8 @@
 
 | 使用者可能说的话 | 要做的事 | 完成时可见 |
 | --- | --- | --- |
-| 用真实模型跑 M7 / 完成 A13 | 先跑 `npm run accept:m7:contract` 核对两个模型的真实响应、工具调用与 usage；再按 `examples/m7-acceptance.ts` 运行看提案，用 `GRAPH_M7_ACCEPT=<proposalVersion>` 确认该准确版本；每次登录检查用其打印的 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>`；若出现 `reservation_exceeded`，用 `GRAPH_M7_ACKNOWLEDGE_OVERRUN=1` 显式确认后继续（用量仍完整保留）。真实登录走 CLI + 独立 profile；可用 `GRAPH_M7_RETRIEVAL_DOMAINS` / `GRAPH_M7_MCP_DOMAINS` 授权检索与远程 MCP 域名。目标前移会重新呈现检查 | `contract-report.json`、`acceptance-report.json`、目标分支合并提交、真实 invocation 记录；A13 才可标通过 |
-| 合入原仓库 / 真用 B站 Web | 把克隆上的 `src/web-server.js`、`src/web/index.html`、`test/web-server.test.js` 与 `package.json` 的 `web` 脚本合进 MediaBookmarks `main`。目标保持 JavaScript。登录仍走独立 `.browser-profile` 的 CLI | 原仓库有这些文件；`GRAPH_FIXTURE=1 node --test test/web-server.test.js` 通过；未改 Graph 的 TS 约束；未提交 `.env` / profile / `output/` |
+| 用真实模型跑 M7 / 完成 A13 | 已于 2026-09-12 完成；重新运行的方法、确认协议与真实记录见 [第八轮](next-steps-after-r3.md#第八轮真实-a13-执行结果2026-09-12) | 隔离副本 `graph-m7-acceptance-7`；`acceptance-report.json`、`contract-report.json`、`main` 提交 `725cb1be` |
+| 合入原仓库 / 真用 B站 Web | 按使用者决定把交付的 `src/commands/bili-web.js`、`src/platforms/bilibili-web.js`、`src/progress.js`、`scripts/sha256.mjs`、四个 `test/bilibili-web-*.test.js`、`src/cli.js`/`src/pipeline.js` 接线与审查报告合进 MediaBookmarks `main`；目标保持 JavaScript，登录走独立 `.browser-profile` | 原仓库有这些文件；`node --test test/bilibili-web-*.test.js` 通过；未提交 `.env` / profile / `output/` |
 | 让扩展真正可加载 | 已在第五轮完成（见上）；若需官方 Pi 扩展 API 全量语义，另行评估受限 worker 的接口扩展 | — |
 | 指定 GitHub 仓库 | 按 [issue-tracker](../agents/issue-tracker.md) 设 remote；需要时再发 G01–G18 的 Issue | `git remote -v` 有目标；未另起一套任务平台 |
 
@@ -97,3 +96,4 @@
 分里程碑：`vitest run tests/m7` 或 package.json 里的 `test:m0` … `test:m7`。
 公开入口诊断：`docs/planning/acceptance-evidence/README.md`（10 个 `node *.mts`，浏览器场景先 `vite build`）。
 真实模型验收：`npm run accept:m7`（需要模型配置，见上）；调用授权契约预检：`npm run accept:m7:contract`。
+真实 A13 记录（仓库外，含个人收藏数据）：`/Users/macmini/workspace/graph-m7-acceptance-7/`。

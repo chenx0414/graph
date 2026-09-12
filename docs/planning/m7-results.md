@@ -53,12 +53,31 @@ pnpm check
 
 | 编号 | 行为 | 本轮证据 |
 | --- | --- | --- |
-| A13 | MediaBookmarks B站完整流程由 Graph 交付 | `freeze.test.ts` 冻结验收；`delivery.test.ts` scripted 全图；`production.test.ts` 生产 Pi 写入；`page.test.ts` 登录/进度/笔记 |
+| A13 | MediaBookmarks B站完整流程由 Graph 交付 | 机制回归见 `freeze.test.ts`、`delivery.test.ts`、`production.test.ts`、`page.test.ts`；2026-09-12 真实运行通过，见下 |
 
-A01–A12 仍见 [M6 报告](m6-results.md)。两组验收现均有可运行证据。
+A01–A12 仍见 [M6 报告](m6-results.md)。两组验收均已通过。
+
+## 真实 A13 运行（2026-09-12）
+
+使用 commandcode 网关（实现 `deepseek/deepseek-v4-flash`，审查 `deepseek/deepseek-v4-pro`）在隔离副本上由 Graph 完成：
+
+| 项 | 记录 |
+| --- | --- |
+| 任务 | `346cd2af-94e0-438d-aad6-4b2a9df925b2`，工作目录 `/Users/macmini/workspace/graph-m7-acceptance-7`（仓库外） |
+| 提案 | 提案版本 1 由主管模型生成并经使用者确认；最终任务复用已确认内容，其历史从确认后的图开始 |
+| 目标分支 | 隔离副本 `main` 快进到 `725cb1be6e005f45fdbe7000f6e0210fb47300bf`；实施提交 `4a4c2e2`（work，flash）、`725cb1b`（review，pro）；14 个文件，+1484/−14 行 |
+| 验收 | a1–a5 五项在最终提交上全部有效：a1 为使用者人工登录确认，a2–a5 由 `graph.command` 在集成提交上跑交付测试（22/22 通过） |
+| 独立审查 | 交付 `docs/review-bilibili-web-v1.md`：逐项核对通过，含质量观察与风险；审查用模型与实现模型不同 |
+| 调用与用量 | 179 次 invocation、2,193,329 tokens（work 113 次 / 1,568,072；review 66 次 / 625,257；缓存输入占多数）；未配置费率，费用按规则保持 `unknown` |
+| 时长 | 17.3 分钟（含人工登录确认） |
+| 人工介入 | 仅：提供模型配置、确认提案、扫码登录并确认人工检查；未人工拆任务或转发上下文 |
+
+真实数据验证（使用者确认前执行）：采集真实收藏 60 条 0 失败；笔记生成与导出出现真实“无字幕”失败原因并在汇总中显示。完整报告与证据保存在仓库外的 `/Users/macmini/workspace/graph-m7-acceptance-7/`；仓库不保存个人收藏数据、profile 与密钥。
+
+真实运行暴露并修复的缺陷见 [后续计划](next-steps-after-r3.md#第八轮真实-a13-执行结果2026-09-12)：主管/审查缺少 schema 提示、Pi 会话预留过小、网关传输重置、worker 输出预算与 `run_command` 参数说明。
 
 ## 本轮边界
 
 未在使用者原仓库合入，未发布。未使用真实 B站登录、日常 Chrome 或真实收藏夹数据。未读取 `.env` / `.env.bm`，未调用收费模型。生产 Pi 在克隆上通过工作区工具写入 JavaScript 载荷，请求打到受控本地 chat-completions，不是收费编码模型。Graph 任务图里的 `human_check` 是合入前的登录确认；页面在采集前检查登录态并展示进度与笔记正文。目标项目保留原有 JavaScript/Python CLI，其他平台不接入本机 Web。
 
-第三轮复验新增 `graph.command` 程序检查与真实模型验收 harness（`examples/m7-acceptance.ts`），使真实自主图不再依赖宿主预置的 `check` adapter；第四轮让 harness 以固定运行目录与 `run.json` 续跑同一任务：只接受 `GRAPH_M7_ACCEPT=<proposalVersion>` 确认当前提案、只回答 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>` 指定的当前 open 人工问题，目标前移会把旧检查标为已替代并重新呈现，未配置费率时报告保留 `cost: unknown`。本地 provider 驱动的多进程回归见 `tests/m7/harness.test.ts`（确认前退出、错误确认被拒、登录等待、目标前移、旧确认不复用、重复重跑不重建任务）。第五轮起可用 `GRAPH_M7_RETRIEVAL_DOMAINS` 与 `GRAPH_M7_MCP_DOMAINS` 授予检索与远程 MCP 域名，并有 `accept:m7:contract` 对两个模型做少量真实契约请求后再进入任务。但本机没有可用模型配置与真实 B站 登录，真实自主运行尚未执行，**A13 不标通过**，所需使用者介入见 [验收跟进](acceptance-followup.md#r4--spec-p1--机制已补齐真实运行待使用者介入)。
+第三轮复验新增 `graph.command` 程序检查与真实模型验收 harness（`examples/m7-acceptance.ts`），使真实自主图不再依赖宿主预置的 `check` adapter；第四轮让 harness 以固定运行目录与 `run.json` 续跑同一任务：只接受 `GRAPH_M7_ACCEPT=<proposalVersion>` 确认当前提案、只回答 `GRAPH_M7_LOGIN_CONFIRMED=<questionId>` 指定的当前 open 人工问题，目标前移会把旧检查标为已替代并重新呈现，未配置费率时报告保留 `cost: unknown`。本地 provider 驱动的多进程回归见 `tests/m7/harness.test.ts`（确认前退出、错误确认被拒、登录等待、目标前移、旧确认不复用、重复重跑不重建任务）。第五轮起可用 `GRAPH_M7_RETRIEVAL_DOMAINS` 与 `GRAPH_M7_MCP_DOMAINS` 授予检索与远程 MCP 域名，并有 `accept:m7:contract` 对两个模型做少量真实契约请求后再进入任务。2026-09-12 真实运行已完成，见上。

@@ -109,4 +109,36 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
 - 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
 
+## 第八轮：真实 A13 执行结果（2026-09-12）
+
+使用者在 commandcode 网关上授权真实运行（实现 `deepseek/deepseek-v4-flash`，审查 `deepseek/deepseek-v4-pro`）。
+
+执行链：契约预检（普通回答 + 工具调用、reportedModel 可区分、usage 可解析）→ 真实运行。运行中暴露并修复：
+
+- 主管提示缺 proposal schema/需求版本/模型清单（首次 72 次无效提案）；
+- Pi 一次会话实际 ~116k token > 适配器 40k 预留；
+- 网关偶发在响应头前重置连接（同一 invocation 内有界重试）；
+- worker 把输出预算花在探索上而不写文件（提示尽早写文件）；
+- `run_command` 参数被当作完整 shell 命令（工具描述写明 command/args 形状）；
+- 审查模型缺少 verifier 报告 schema（briefing 注入）。
+
+失败尝试保留在 `graph-m7-acceptance`…`-6` 作为审计；最终任务 `346cd2af-94e0-438d-aad6-4b2a9df925b2`（工作目录 `graph-m7-acceptance-7`）复用使用者已确认的提案版本 1，work 用 flash 实现、review 用 pro 审查。
+
+结果：a1–a5 五项验收在提交 `725cb1be6e005f45fdbe7000f6e0210fb47300bf` 上全部有效；真实采集 60 条收藏 0 失败，笔记/导出出现真实“无字幕”失败原因；独立审查报告 `docs/review-bilibili-web-v1.md` 随交付合入；隔离副本 `main` 快进到 `725cb1be`；179 次 invocation / 2,193,329 tokens / 17.3 分钟；未配置费率，费用保持 `unknown`。完整报告在仓库外 `/Users/macmini/workspace/graph-m7-acceptance-7/`。
+
+首版完成判定：真实任务验收（A13）与执行机制验收（A01–A12）均已通过；合入使用者原仓库、配置 remote 或发布仍由使用者决定。
+
+本轮相关提交：`8e3cd9f`（受限扩展/远程 MCP/检索）、`81dc0cf`（真实运行加固）、`fe04a78`（任务图注入 briefing）、`a2fd199`（传输重试）、`77cdb74`（worker 提示）、`97d6224`（run_command 说明）、`6be3c66`（审查 schema）；收尾 docs 提交只记录这些哈希。
+
+### 最终两轴审查（2026-09-12）
+
+**Standards**：无硬性违反；代码注释英文、提交约定式、测试随修复落地。判断性意见：`pi-adapter` 的主管提示内嵌较长 schema（下次若再膨胀应抽成提示模板）；`mcp-client` 同时承载 stdio/HTTP 两种 exchange（仍属单一职责）；`controlled-openai` 的传输重试策略（同 invocation、最多 3 次、仅 socket 级错误、不重试重定向/中止）已写进注释。
+
+**Spec**：
+
+- 第 3 项三项能力均按定义版本加载、真实可调用，且都过同一暂停/额度门；扩展越权写入被拒，未把“显式拒绝”当作实现。
+- 第 4 项契约预检覆盖普通回答与工具调用；真实运行经使用者确认提案、扫码登录并确认人工检查后完成。
+- 第 5 项真实调用、验收证据（a1–a5 绑 `725cb1be`）、合并记录（`main` 快进）与交付测试（22/22）均已保存。
+- 需要说清的两点：最终任务复用使用者已确认的提案（提案本身由主管模型自主生成）；真实运行目标为隔离副本，原仓库合入/发布仍由使用者决定；未配费率，费用按规则记 `unknown`。
+
 本轮修复提交 `81dc0cf`（`fix: harden the real acceptance run for reasoning models`）；其后的 docs 提交只记录该哈希。

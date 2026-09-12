@@ -185,7 +185,7 @@ M6 已用真实磁盘 SQLite、临时 Git、macOS 受限进程和 scripted 响�
 - 出口：可运行的已确认 B站流程、测试结果、独立审查结论、合并提交、任务图与完整用量/费用记录；用户未人工拆任务或转发上下文。需要用户确认的需求、登录和明确人工介入按规则记录。
 - 用户决定发布；真实任务成功与 M6 机制通过共同构成 Graph 首版完成，缺一不可。
 
-M7 在 MediaBookmarks 的 git 克隆上冻结验收并交付：scripted 全图编排保留；生产 Pi 经工作区工具写入同一 B站 Web；页面含登录准入、采集进度与笔记阅读。第三轮复验加入 `graph.command` 程序检查与 `examples/m7-acceptance.ts` 真实模型 harness；第四轮让 harness 以固定运行目录与 `run.json` 续跑同一任务，只确认当前提案版本与当前 open 人工问题，目标前移会重新呈现检查，并在多进程本地 provider 回归中覆盖。真实自主运行仍待使用者配置模型与完成登录，**A13 不标通过**。未读取 `.env`、未调用收费模型、未改写原仓库。准确范围见 [M7 报告](planning/m7-results.md)。
+M7 在 MediaBookmarks 的 git 克隆上冻结验收并交付：scripted 全图编排保留；生产 Pi 经工作区工具写入同一 B站 Web；页面含登录准入、采集进度与笔记阅读。第三轮复验加入 `graph.command` 程序检查与 `examples/m7-acceptance.ts` 真实模型 harness；第四轮让 harness 以固定运行目录与 `run.json` 续跑同一任务，只确认当前提案版本与当前 open 人工问题，目标前移会重新呈现检查，并在多进程本地 provider 回归中覆盖。2026-09-12 真实 A13 已在隔离副本上完成：真实采集 60 条收藏 0 失败，独立审查通过，`main` 快进到 `725cb1be`；是否合入原仓库由使用者决定。准确范围见 [M7 报告](planning/m7-results.md)。
 
 ## 验收覆盖矩阵
 

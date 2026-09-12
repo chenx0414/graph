@@ -1,6 +1,6 @@
 # Graph 首版设计
 
-状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成，尚未进入代码实现。
+状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成；M0–M7 已实施，真实任务 A13 已于 2026-09-12 在隔离副本上由 Graph 自行拆解、实现、检查、独立审查并合入目标分支，见 [M7 报告](planning/m7-results.md#真实-a13-运行2026-09-12)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。
 
 本文件汇总已确认的产品与执行规则。原始设想见 [draft.md](draft.md)，访谈记录见 [design-discussion.md](design-discussion.md)，术语以 [CONTEXT.md](../CONTEXT.md) 为准。
 
