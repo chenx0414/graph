@@ -102,3 +102,5 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - `graph-m7-acceptance`：主管循环 144 次无效提案后 provider 断流，任务保持 `unknown_usage` 待核对，作为审计保留。
 - `graph-m7-acceptance-2`：主管 45 次调用内产出有效提案，随后 provider 断流，任务保持 `unknown_usage` 待核对，作为审计保留。
 - `graph-m7-acceptance-3`：主管产出提案版本 1；确认超额后 master 标记成功，当前停在需求确认，等待使用者 `GRAPH_M7_ACCEPT=1`。
+
+本轮修复提交 `81dc0cf`（`fix: harden the real acceptance run for reasoning models`）；其后的 docs 提交只记录该哈希。
