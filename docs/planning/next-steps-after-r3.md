@@ -119,7 +119,7 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 真实任务投影修复：对 `graph-m7-acceptance-8` 的 `work-errors` 补记已知用量 5,661,736 与输出（`usage-repair.json`），未知记录保留，费用仍 unknown；完成态任务不重开，超预留缺口在修复记录中说明。
 - 复验：`reconcile-usage-rework.mts`（累计已知用量、后继拿到 `{work:{answer:42}}`、waiting 保留、超预算被阻）、`local-network-rework.mts`（非 loopback 监听被拒）；Graph 测试 38 文件 / 177 项。
 
-R7（交付 `page.js` 的导出失败误报成功）需在交付副本修复并重新绑定最终提交的测试、审查与验收证据；见[复验报告 R7](rework-acceptance-2026-09-12.md#r7--p2--web-导出接口失败页面仍显示成功)。
+R7（交付 `page.js` 的导出失败误报成功）已由新的小型 Graph 任务在交付副本修复并重绑证据：工作目录 `graph-m7-acceptance-9`，任务 `834a5a88-c5f7-45a7-9b52-a6e0e95b0e4a`（提案由操作方脚本化，work=flash、review=pro），交付 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`；a1–a5 全部有效，交付测试 40/40（含新增 HTTP 500/网络拒绝的真实页面回归），独立审查 `docs/review-web-v3.md` 通过；`web-export-error-rework.mjs` 复验输出：HTTP 500 时页面显示“导出失败：原因”并提示可重试，`falselyClaimsSuccess:false`。206 次 invocation / 3,481,777 tokens；work 超预留已显式确认。
 
 ## 第九轮：最终验收返工（2026-09-12）
 

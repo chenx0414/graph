@@ -85,3 +85,11 @@
 - `local-network-rework.mts`：`localNetwork:true` 时 `0.0.0.0` 监听被宿主的 listen/bind 守卫以 EPERM 拒绝；`127.0.0.1` 监听与真实无头浏览器检查仍通过。
 - 真实任务投影：`graph-m7-acceptance-8/usage-repair.json` 补记 `work-errors` 已知 5,661,736 tokens 与输出，未知调用保留、费用仍 unknown；完成态任务不重开，超预留缺口在修复记录中说明。
 - R7 待交付修复：`web-export-error-rework.mjs` 当前仍指向交付版本的缺陷行为（HTTP 500 显示成功）；修复后应在真实页面显示失败原因并允许重试。
+
+R7 已由小型 Graph 任务修复并重绑证据（`graph-m7-acceptance-9`，`main` → `001f288`，a1–a5 有效、交付测试 40/40、审查 `docs/review-web-v3.md`）。`web-export-error-rework.mjs` 的 `.output.txt` 已更新为修复后的实际观察：
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/web-export-error-rework.mjs /Users/macmini/workspace/graph-m7-acceptance-9/project
+```
+
+输出：HTTP 500、`error:"synthetic browser unavailable"`，页面显示“导出失败：synthetic browser unavailable / 可重试”，`falselyClaimsSuccess:false`、`displaysFailureReason:true`。

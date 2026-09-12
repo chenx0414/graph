@@ -1,9 +1,11 @@
 {
   "httpStatus": 500,
   "response": {
-    "error": "synthetic browser unavailable"
+    "error": "synthetic browser unavailable",
+    "reason": "synthetic browser unavailable",
+    "code": null
   },
-  "displayed": "导出完成：索引导出 —；笔记 成功 0 / 失败 0\n落盘文件：\n",
-  "falselyClaimsSuccess": true,
-  "displaysFailureReason": false
+  "displayed": "导出失败：synthetic browser unavailable\n可重试：点击「导出 Markdown」重新导出",
+  "falselyClaimsSuccess": false,
+  "displaysFailureReason": true
 }

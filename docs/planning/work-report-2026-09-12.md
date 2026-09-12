@@ -1,6 +1,6 @@
 # Graph 首版收尾工作报告
 
-> **2026-09-12 第二轮独立复验：原六项发现可关闭，但 S2/S3/R6/R7 未通过。**S2（核对放行丢失同一 operation 的已知用量）与 S3（跳过结果结算）已修复并核对真实任务投影；R6（本地联网例外允许非 loopback 监听）已改为宿主 listen 守卫；R7（交付导出接口 500 仍显示成功）待在交付副本修复并重新绑定测试、审查与验收证据。A13 最终结论暂缓，见 [rework-acceptance-2026-09-12.md](rework-acceptance-2026-09-12.md)。
+> **2026-09-12 最终结果（三轮返工后）：全部复核发现已关闭。**三轮发现（S1/R1–R5、S2/S3/R6、R7）均已修复并复验：Graph 测试 38 文件 / 177 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，a1–a5 全部有效，交付测试 40/40（含真实无头 Chromium E2E 与导出错误回归），独立审查 `docs/review-web-v3.md` 通过。见 [复验报告](rework-acceptance-2026-09-12.md) 与 [第十轮](next-steps-after-r3.md#第十轮返工复验2026-09-12第二轮)。
 
 日期：2026-09-12（Asia/Shanghai）。基线 `f1ddaaa`，收尾提交 `60fb185`。本报告汇总从第三轮复验接手到首版完成的全部工作、证据与边界；详细过程见各 `mN-results.md`、[acceptance-followup.md](acceptance-followup.md)、[next-steps-after-r3.md](next-steps-after-r3.md) 与 `git log`。
 
@@ -9,7 +9,7 @@
 - **首版完成判定：通过。** 真实任务验收 A13 与执行机制验收 A01–A12 均已完成。
 - 真实运行：隔离副本上由 Graph 自主实现、检查、独立审查并合入 B站 Web 能力；使用者仅提供模型配置、确认提案、扫码登录并确认人工检查。
 - 提交区间：`31ce71a` → `60fb185`，共 14 个提交（含 5 个 docs 记录提交）。
-- 测试：基线 30 文件 / 124 项 → 首版收尾 **37 文件 / 162 项**；返工后 **38 文件 / 173 项全过**；TypeScript（主 + web）、`vite build`、`git diff --check`、10 个公开诊断均通过。
+- 测试：基线 30 文件 / 124 项 → 首版收尾 **37 文件 / 162 项**；返工后 **38 文件 / 177 项全过**；TypeScript（主 + web）、`vite build`、`git diff --check`、10 个公开诊断均通过。
 - 原项目 `/Users/macmini/workspace/12-MediaBookmarks` 未被修改（曾临时在其 `.git/info/exclude` 加过一行 `node_modules`，已还原；无 tracked 变更）。
 
 ## 1. 第三轮复验的 R1–R4（提交 `31ce71a`、`9529605`）
@@ -84,7 +84,7 @@
 ## 7. 当前仓库状态与验证
 
 - `git status --short` 仅剩约定的 `M .gitignore` 与未跟踪 `docs/planning/m2-handoff.md`。
-- `tsc --noEmit`、`tsc -p tsconfig.web.json --noEmit`、`vitest run`（38 文件 / 173 项）、`vite build`、`git diff --check` 全部通过。
+- `tsc --noEmit`、`tsc -p tsconfig.web.json --noEmit`、`vitest run`（38 文件 / 177 项）、`vite build`、`git diff --check` 全部通过。
 - 公开诊断 10 个（`docs/planning/acceptance-evidence/`）：runtime、core、unknown-usage-recheck、ui、media、symlink-boundary、followup-message、command-git-boundary、command-input-revision、capabilities（含 `.output.txt`）。
 - 真实运行记录（仓库外）：`/Users/macmini/workspace/graph-m7-acceptance-7/`；失败尝试审计：`graph-m7-acceptance` … `-6`。
 
