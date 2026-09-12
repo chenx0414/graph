@@ -1,6 +1,6 @@
 # Graph 首版设计
 
-状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成；M0–M7 已实施。**2026-09-12 独立复核推翻了此前的首版完成结论：A13 缺少规定的本机 Web 应用，执行边界还有 1 项 Standards P1 与 2 项 Spec P1，首版仍在返工中，见 [最终验收报告](planning/final-acceptance-2026-09-12.md)。**是否合入使用者原仓库、配置 remote 或发布由使用者决定。
+状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成；M0–M7 已实施。2026-09-12 独立复核发现的边界与 Web 交付缺陷已完成返工：本机 Web 应用在隔离副本上由 Graph 交付并通过独立审查与验收（提交 `b1754fac`，交付测试 38/38 含真实无头 Chromium E2E），见 [最终验收报告](planning/final-acceptance-2026-09-12.md) 与 [M7 报告](planning/m7-results.md#web-返工运行2026-09-12)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。
 
 本文件汇总已确认的产品与执行规则。原始设想见 [draft.md](draft.md)，访谈记录见 [design-discussion.md](design-discussion.md)，术语以 [CONTEXT.md](../CONTEXT.md) 为准。
 

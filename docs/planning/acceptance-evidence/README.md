@@ -49,3 +49,20 @@
 - `a13-delivery-tests.output.txt`：从精确交付提交导出 `src`、`test`、`package.json` 到临时目录后，独立运行四个 `bilibili-web-*.test.js` 的 22 项测试结果。
 
 这些诊断只使用合成数据及本地服务，不读取真实收藏、登录配置或 profile；没有增加正式测试套件的测试计数。
+
+## 2026-09-12 返工复验（最终）
+
+对应 [首版独立验收](../final-acceptance-2026-09-12.md) 的返工条件。Graph 侧修复提交 `8c17e26`（传输重试/远程 MCP 授权/逐请求暂停/浏览器检查边界）、`edbf124`（宿主核对未知用量）、`9efd856`（harness 续跑）；真实 Web 返工在隔离副本 `graph-m7-acceptance-8` 完成，交付提交 `b1754fac`。
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/provider-transport-retry.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/remote-mcp-boundary.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/remote-mcp-granted.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/a13-delivery-fixed.mjs /Users/macmini/workspace/graph-m7-acceptance-8/project
+```
+
+- `provider-transport-retry.mts`：返工后只发送 1 次请求，暂停后不再重发，调用保持 `unknown usage`、未记账不归零。
+- `remote-mcp-boundary.mts`：无操作授权时 `effects=0` 并产生 `permission` 问题；原脚本的暂停场景会先被授权拒绝，不再发送 `tools/call`。
+- `remote-mcp-granted.mts`：同一探针的授权变体；授权匹配时 `tools/call` 正常执行，握手期间暂停则后续 `notifications/initialized` 与 `tools/call` 均不发送（`effects=0`）。
+- `a13-delivery-fixed.mjs`：对交付仓库断言抛错与 `code=-352` 都进入 `failures`/`errors`/`incomplete`、进度事件与日志，退出 0；原 `a13-delivery-errors.mjs` 保留为返工输入。
+- 相关自动回归：`tests/m0/pi-calls.test.ts`、`tests/m3/mcp-boundary.test.ts`、`tests/m4/command-check.test.ts`、`tests/m1/execution.test.ts`；交付仓库测试 38/38（含真实无头 Chromium E2E）。

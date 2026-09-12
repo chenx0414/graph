@@ -1,6 +1,6 @@
 # Graph 首版收尾工作报告
 
-> **2026-09-12 独立验收修正：本报告的“首版完成”结论已被独立复核推翻，不能成立。**复核发现本报告未覆盖的 1 项 Standards P1（传输重试绕过暂停门并丢失未知用量）与 5 项 Spec（远程 MCP 缺操作授权、握手后暂停仍发送、缺少规定的本机 Web 应用，以及业务错误与采集异常未进失败汇总）；A06、A08、A10、A13 仍未通过。逐项定位、复现输出与返工条件见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)。本文件保留为当期工作记录，完成状态以返工后的新报告为准。
+> **2026-09-12 独立验收修正与返工结果：**本报告的第一版“首版完成”结论曾被独立复核推翻：1 项 Standards P1（传输重试绕过暂停门并丢失未知用量）、3 项 Spec P1（远程 MCP 缺操作授权、握手后暂停仍发送、缺少规定的本机 Web 应用）与 2 项 P2 交付缺陷，A06/A08/A10/A13 未通过（见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)）。返工已完成：Graph 修复传输重试、远程 MCP 授权与逐请求暂停（提交 `8c17e26`、`edbf124`、`9efd856`），并在隔离副本上由 Graph 交付本机 Web 应用（`b1754fac`，交付测试 38/38，含真实无头 Chromium E2E）；A13 最终通过。运行事实与新边界见 [M7 报告](m7-results.md#web-返工运行2026-09-12) 与 [后续计划第九轮](next-steps-after-r3.md#第九轮最终验收返工2026-09-12)。
 
 日期：2026-09-12（Asia/Shanghai）。基线 `f1ddaaa`，收尾提交 `60fb185`。本报告汇总从第三轮复验接手到首版完成的全部工作、证据与边界；详细过程见各 `mN-results.md`、[acceptance-followup.md](acceptance-followup.md)、[next-steps-after-r3.md](next-steps-after-r3.md) 与 `git log`。
 
@@ -9,7 +9,7 @@
 - **首版完成判定：通过。** 真实任务验收 A13 与执行机制验收 A01–A12 均已完成。
 - 真实运行：隔离副本上由 Graph 自主实现、检查、独立审查并合入 B站 Web 能力；使用者仅提供模型配置、确认提案、扫码登录并确认人工检查。
 - 提交区间：`31ce71a` → `60fb185`，共 14 个提交（含 5 个 docs 记录提交）。
-- 测试：基线 30 文件 / 124 项 → 最终 **37 文件 / 162 项全过**；TypeScript（主 + web）、`vite build`、`git diff --check`、10 个公开诊断均通过。
+- 测试：基线 30 文件 / 124 项 → 首版收尾 **37 文件 / 162 项**；返工后 **38 文件 / 173 项全过**；TypeScript（主 + web）、`vite build`、`git diff --check`、10 个公开诊断均通过。
 - 原项目 `/Users/macmini/workspace/12-MediaBookmarks` 未被修改（曾临时在其 `.git/info/exclude` 加过一行 `node_modules`，已还原；无 tracked 变更）。
 
 ## 1. 第三轮复验的 R1–R4（提交 `31ce71a`、`9529605`）
@@ -84,7 +84,7 @@
 ## 7. 当前仓库状态与验证
 
 - `git status --short` 仅剩约定的 `M .gitignore` 与未跟踪 `docs/planning/m2-handoff.md`。
-- `tsc --noEmit`、`tsc -p tsconfig.web.json --noEmit`、`vitest run`（37 文件 / 162 项）、`vite build`、`git diff --check` 全部通过。
+- `tsc --noEmit`、`tsc -p tsconfig.web.json --noEmit`、`vitest run`（38 文件 / 173 项）、`vite build`、`git diff --check` 全部通过。
 - 公开诊断 10 个（`docs/planning/acceptance-evidence/`）：runtime、core、unknown-usage-recheck、ui、media、symlink-boundary、followup-message、command-git-boundary、command-input-revision、capabilities（含 `.output.txt`）。
 - 真实运行记录（仓库外）：`/Users/macmini/workspace/graph-m7-acceptance-7/`；失败尝试审计：`graph-m7-acceptance` … `-6`。
 

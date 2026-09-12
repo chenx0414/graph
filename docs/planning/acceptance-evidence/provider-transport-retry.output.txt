@@ -1,2 +1,2 @@
-{"pauseOnReset":true,"acceptedRequests":2,"afterPause":1,"identicalBodies":true,"stopReason":"stop","status":"paused","hold":null,"used":50,"invocationCount":1,"invocationStates":["complete"]}
-{"pauseOnReset":false,"acceptedRequests":2,"afterPause":0,"identicalBodies":true,"stopReason":"stop","status":"ready","hold":null,"used":50,"invocationCount":1,"invocationStates":["complete"]}
+{"pauseOnReset":true,"acceptedRequests":1,"afterPause":0,"identicalBodies":false,"stopReason":"error","status":"paused","hold":"unknown usage","used":0,"invocationCount":1,"invocationStates":["unknown"]}
+{"pauseOnReset":false,"acceptedRequests":1,"afterPause":0,"identicalBodies":false,"stopReason":"error","status":"blocked","hold":"unknown usage","used":0,"invocationCount":1,"invocationStates":["unknown"]}

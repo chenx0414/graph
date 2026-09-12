@@ -1,0 +1,176 @@
+{
+  "scenario": "no-service-grant",
+  "effects": 1,
+  "grants": [],
+  "projectGrants": [
+    {
+      "grants": "[\"mcp:remote:delete_records\"]"
+    }
+  ],
+  "received": [
+    {
+      "method": "initialize",
+      "paused": false
+    },
+    {
+      "method": "notifications/initialized",
+      "paused": false
+    },
+    {
+      "method": "tools/list",
+      "paused": false
+    },
+    {
+      "method": "initialize",
+      "paused": false
+    },
+    {
+      "method": "notifications/initialized",
+      "paused": false
+    },
+    {
+      "method": "tools/call",
+      "paused": false
+    }
+  ],
+  "questions": [],
+  "phase": "completed",
+  "invocations": [
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 15,
+        "cacheWrite": 0,
+        "input": 25,
+        "output": 10
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 15,
+        "cacheWrite": 0,
+        "input": 25,
+        "output": 10
+      }
+    }
+  ]
+}
+{
+  "scenario": "pause-during-call-handshake",
+  "effects": 0,
+  "grants": [],
+  "projectGrants": [
+    {
+      "grants": "[\"mcp:remote:delete_records\"]"
+    }
+  ],
+  "received": [
+    {
+      "method": "initialize",
+      "paused": false
+    },
+    {
+      "method": "notifications/initialized",
+      "paused": false
+    },
+    {
+      "method": "tools/list",
+      "paused": false
+    },
+    {
+      "method": "initialize",
+      "paused": false
+    }
+  ],
+  "questions": [],
+  "phase": "running",
+  "invocations": [
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 15,
+        "cacheWrite": 0,
+        "input": 25,
+        "output": 10
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    }
+  ]
+}

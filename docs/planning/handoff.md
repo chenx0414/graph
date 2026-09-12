@@ -2,7 +2,7 @@
 
 快照：2026-09-12（Asia/Shanghai）。使用者要求把本轮 R1–R4 修复整理成 handoff，供其他 Agent 接手。
 
-**状态：首版返工中。M0–M7 已提交，但 2026-09-12 独立复核推翻了“首版完成”：A06（未知用量/重试）、A08（逐调用暂停）、A10（远程 MCP 授权）、A13（缺少本机 Web 应用）未通过，另有两项 P2 交付错误。见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)。已修复传输重试与远程 MCP 授权/暂停边界；Web 应用与交付错误由后续真实任务返工。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：首版完成（返工后）。M0–M7 已提交；2026-09-12 独立复核发现的 1 项 Standards P1 与 3 项 Spec P1 已修复，Web 返工已在隔离副本上交付并通过独立审查与验收：`main` 到 `b1754fac`，交付测试 38/38（含真实无头 Chromium E2E）。A06、A08、A10 的修复复验见 [最终验收报告](final-acceptance-2026-09-12.md) 与 [验收证据](acceptance-evidence/README.md)；运行记录见 [M7 报告](m7-results.md#web-返工运行2026-09-12)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 
@@ -17,7 +17,7 @@
    node -v                                  # v24.20.0
    tsc --noEmit
    tsc -p tsconfig.web.json --noEmit
-   vitest run                               # 37 files, 162 tests
+   vitest run                               # 38 files, 173 tests
    vite build
    git diff --check
    ```
@@ -60,11 +60,11 @@
 
 这些是已验证范围，不是待办：
 
-- 机制矩阵 A01–A12 有可重复测试；A13 真实运行已于 2026-09-12 在隔离副本上通过（真实采集 60 条 0 失败、独立审查通过、`main` 合入 `725cb1be`）。
+- 机制矩阵 A01–A12 有可重复测试；A13 在 2026-09-12 的两轮真实运行中完成：CLI 交付（`725cb1be`）+ 返工后的本机 Web 应用（`b1754fac`，交付测试 38/38 含真实无头 Chromium E2E，独立审查通过）。
 - Skill、本地 stdio MCP、受限 worker 扩展与远程 MCP（运行时域名白名单）按定义版本加载并可调用；网络检索只放行授予域名、拒绝重定向与二进制、限制大小。扩展 worker 只实现本仓库定义的最小工具协议，官方 Pi 扩展 API 的完整语义、远程 MCP 的其他 transport 与其他平台仍未验证。
 - `run_command` 与 `graph.command` 只允许 `node`（禁内联求值）与只读 `git`，都在 macOS 沙箱内运行；受限边界在每次派发前拒绝写授权内已存在的 `.git` 条目（命令与 MCP 共用），已确认验收检查项的 input 在修订中固定；其他平台未验证。
-- 原项目 `/Users/macmini/workspace/12-MediaBookmarks` 未被修改；真实运行在隔离副本 `/Users/macmini/workspace/graph-m7-acceptance-7` 完成，未把 Web 合入原仓库，未发布。
-- 未读取 `.env`；真实模型费用未配置费率，报告按规则保持 `cost: unknown`。真实运行确实使用了使用者的 B站 登录与真实收藏数据，但只写入隔离副本的 profile/raw/output，Graph 仓库不保存这些内容。
+- 原项目 `/Users/macmini/workspace/12-MediaBookmarks` 未被修改；真实运行在隔离副本 `/Users/macmini/workspace/graph-m7-acceptance-7`（CLI）与 `-8`（Web 返工）完成，未把交付合入原仓库，未发布。
+- 未读取 `.env`；真实模型费用未配置费率，报告按规则保持 `cost: unknown`；返工运行有 1 次网关连接重置未被供应商暴露用量，经宿主显式 `reconcile_usage` 继续，该调用仍记为 unknown，另有 1 次审查超额被显式确认——缺口均在报告中可见。真实运行确实使用了使用者的 B站 登录与真实收藏数据，但只写入隔离副本的 profile/raw/output，Graph 仓库不保存这些内容。
 
 实施计划没有 M8。使用者已听到：下一步是其决定，不是自动开新包。
 
@@ -74,8 +74,8 @@
 
 | 使用者可能说的话 | 要做的事 | 完成时可见 |
 | --- | --- | --- |
-| 用真实模型跑 M7 / 完成 A13 | 已于 2026-09-12 完成；重新运行的方法、确认协议与真实记录见 [第八轮](next-steps-after-r3.md#第八轮真实-a13-执行结果2026-09-12) | 隔离副本 `graph-m7-acceptance-7`；`acceptance-report.json`、`contract-report.json`、`main` 提交 `725cb1be` |
-| 合入原仓库 / 真用 B站 Web | 按使用者决定把交付的 `src/commands/bili-web.js`、`src/platforms/bilibili-web.js`、`src/progress.js`、`scripts/sha256.mjs`、四个 `test/bilibili-web-*.test.js`、`src/cli.js`/`src/pipeline.js` 接线与审查报告合进 MediaBookmarks `main`；目标保持 JavaScript，登录走独立 `.browser-profile` | 原仓库有这些文件；`node --test test/bilibili-web-*.test.js` 通过；未提交 `.env` / profile / `output/` |
+| 用真实模型跑 M7 / 完成 A13 | 已于 2026-09-12 完成两轮（CLI + 返工后的 Web）；重新运行的方法、确认协议与真实记录见 [第八轮](next-steps-after-r3.md#第八轮真实-a13-执行结果2026-09-12) 与 [第九轮](next-steps-after-r3.md#第九轮最终验收返工2026-09-12) | 隔离副本 `graph-m7-acceptance-8`；`acceptance-report.json`、`run-summary.json`、`main` 提交 `b1754fac` |
+| 合入原仓库 / 真用 B站 Web | 按使用者决定把交付的 `src/commands/bili-web.js`、`src/platforms/bilibili-web.js`、`src/progress.js`、`src/web/{server,page,main}.js`、`scripts/sha256.mjs`、`test/*.test.js`、`test/e2e/bilibili-web.e2e.test.js`、`src/cli.js`/`src/pipeline.js` 接线与两份审查报告合进 MediaBookmarks `main`；目标保持 JavaScript，登录走独立 `.browser-profile` | 原仓库有这些文件；`node --test test/*.test.js test/e2e/*.test.js` 38/38 通过；未提交 `.env` / profile / `output/` |
 | 让扩展真正可加载 | 已在第五轮完成（见上）；若需官方 Pi 扩展 API 全量语义，另行评估受限 worker 的接口扩展 | — |
 | 指定 GitHub 仓库 | 按 [issue-tracker](../agents/issue-tracker.md) 设 remote；需要时再发 G01–G18 的 Issue | `git remote -v` 有目标；未另起一套任务平台 |
 

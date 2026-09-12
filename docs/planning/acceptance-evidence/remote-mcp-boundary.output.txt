@@ -1,6 +1,6 @@
 {
   "scenario": "no-service-grant",
-  "effects": 1,
+  "effects": 0,
   "grants": [],
   "projectGrants": [
     {
@@ -19,23 +19,39 @@
     {
       "method": "tools/list",
       "paused": false
-    },
-    {
-      "method": "initialize",
-      "paused": false
-    },
-    {
-      "method": "notifications/initialized",
-      "paused": false
-    },
-    {
-      "method": "tools/call",
-      "paused": false
     }
   ],
-  "questions": [],
-  "phase": "completed",
+  "questions": [
+    {
+      "id": "484f9d46-b641-4493-bbda-66755356bc2a",
+      "nodeId": "work",
+      "operationId": "20ba8815-887a-4d9f-988a-a9f54fec9187",
+      "kind": "permission",
+      "status": "open",
+      "data": {
+        "grant": "mcp:remote:delete_records"
+      },
+      "answer": null
+    }
+  ],
+  "phase": "running",
   "invocations": [
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
     {
       "usage": {
         "cacheRead": 0,
@@ -50,14 +66,6 @@
         "cacheWrite": 0,
         "input": 25,
         "output": 10
-      }
-    },
-    {
-      "usage": {
-        "cacheRead": 0,
-        "cacheWrite": 0,
-        "input": 0,
-        "output": 0
       }
     },
     {
@@ -72,7 +80,7 @@
 }
 {
   "scenario": "pause-during-call-handshake",
-  "effects": 1,
+  "effects": 0,
   "grants": [],
   "projectGrants": [
     {
@@ -91,23 +99,39 @@
     {
       "method": "tools/list",
       "paused": false
-    },
-    {
-      "method": "initialize",
-      "paused": false
-    },
-    {
-      "method": "notifications/initialized",
-      "paused": true
-    },
-    {
-      "method": "tools/call",
-      "paused": true
     }
   ],
-  "questions": [],
+  "questions": [
+    {
+      "id": "89387c63-0d96-4ddf-aa49-93e474241cf4",
+      "nodeId": "work",
+      "operationId": "c8a19133-3e38-4c50-bf4b-a6e1a3d1b576",
+      "kind": "permission",
+      "status": "open",
+      "data": {
+        "grant": "mcp:remote:delete_records"
+      },
+      "answer": null
+    }
+  ],
   "phase": "running",
   "invocations": [
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    {
+      "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
     {
       "usage": {
         "cacheRead": 0,
@@ -126,10 +150,10 @@
     },
     {
       "usage": {
-        "cacheRead": 0,
+        "cacheRead": 15,
         "cacheWrite": 0,
-        "input": 0,
-        "output": 0
+        "input": 25,
+        "output": 10
       }
     }
   ]
