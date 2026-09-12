@@ -194,6 +194,19 @@ async function runSession(runtime: Runtime, task: Task, state: RunState, paths: 
   };
 
   let view = await task.view();
+  const reconcileUnknownUsage = async (current: View) => {
+    if (process.env.GRAPH_M7_ACKNOWLEDGE_UNKNOWN_USAGE !== '1') return current;
+    const unknown = current.questions.filter(question => question.status === 'open' && question.kind === 'unknown_usage');
+    if (!unknown.length) return current;
+    for (const question of unknown) {
+      console.log(`Reconciling unaccounted usage on ${question.nodeId} (${question.id}); the invocation stays unknown.`);
+      await task.answer(question.id, {
+        type: 'reconcile_usage',
+        proof: 'Provider exposes no per-request usage for the failed call; host reviewed the record and accepts the unaccounted invocation without recording it as zero.',
+      }, `m7-unknown-usage-${question.id}`);
+    }
+    return task.view();
+  };
   const acknowledgeOverruns = async (current: View) => {
     if (process.env.GRAPH_M7_ACKNOWLEDGE_OVERRUN !== '1') return current;
     const overruns = current.questions.filter(question => question.status === 'open' && question.kind === 'reservation_exceeded');
@@ -204,18 +217,7 @@ async function runSession(runtime: Runtime, task: Task, state: RunState, paths: 
     }
     return task.view();
   };
-  view = await acknowledgeOverruns(view);
-  if (process.env.GRAPH_M7_ACKNOWLEDGE_UNKNOWN_USAGE === '1') {
-    const unknownUsage = view.questions.filter(question => question.status === 'open' && question.kind === 'unknown_usage');
-    for (const question of unknownUsage) {
-      console.log(`Reconciling unaccounted usage on ${question.nodeId} (${question.id}); the invocation stays unknown.`);
-      await task.answer(question.id, {
-        type: 'reconcile_usage',
-        proof: 'Provider exposes no per-request usage for the failed call; host reviewed the record and accepts the unaccounted invocation without recording it as zero.',
-      }, `m7-unknown-usage-${question.id}`);
-    }
-    if (unknownUsage.length) view = await task.view();
-  }
+  view = await reconcileUnknownUsage(await acknowledgeOverruns(view));
   if (view.phase === 'completed') return finish(view, { step: 'completed', resume: 'This run is already complete; nothing was rebuilt or reconfirmed.' }, 0);
 
   if (view.acceptedProposalVersion !== null && state.acceptedProposalVersion === null) {
@@ -282,8 +284,13 @@ async function runSession(runtime: Runtime, task: Task, state: RunState, paths: 
       continue;
     }
     if (others.length) {
-      const acknowledged = await acknowledgeOverruns(view);
-      if (acknowledged !== view) { view = acknowledged; continue; }
+      const answered = await reconcileUnknownUsage(await acknowledgeOverruns(view));
+      if (answered !== view) {
+        view = answered;
+        await runtime.host.drive();
+        view = await task.view();
+        continue;
+      }
       return finish(view, { step: 'questions', note: 'Non-human questions need an explicit host or user answer before this harness can continue.' }, 1);
     }
     const confirmed = process.env.GRAPH_M7_LOGIN_CONFIRMED?.trim();
