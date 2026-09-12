@@ -119,6 +119,12 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 真实 Web 返工：工作目录 `graph-m7-acceptance-8`，任务 `0e3c3c4d-52ed-48fe-935c-7d568be9679d`，交付 `main` → `b1754fac`；a1–a4 全部有效；交付测试 38/38（含真实无头 Chromium E2E）；独立审查 `docs/review-web-v2.md` 通过；人工检查由使用者完成。487 次 invocation / 10,422,914 tokens；1 次未知用量与 1 次审查超额均已显式记录。A13 最终通过。
 - harness 修复（提交 `9efd856`）：非人工问题在确认循环内被回答后会重新驱动，不会停在无 open 问题却仍有 pending 节点的状态。
 
+### 返工两轴审查（2026-09-12）
+
+**Standards**：无硬性违反；提交约定式、注释英文、每项修复均带回归。判断性说明：`localNetwork` 只由 `graph.command` 检查传入（`execution.ts` 首处），Agent 工具、本地 MCP 与扩展保持禁网；新增 Seatbelt 规则集中在受限 executor 并有注释；`reconcile_usage` 只存在于已认证的 `user.answer` 路径，未记账调用保持 `unknown`。
+
+**Spec**：S1（断线不重发、仅可证明未发送才以新 invocation 重过门、暂停期间不发送、未知用量阻塞）、R1（逐次工具授权、未授权产生 permission 问题、回答后放行、注解不构成授权）、R2（每次实际 HTTP 发送重新过门）、R3（Web 五步闭环 + 真实无头 Chromium E2E + 绑定 `b1754fac` 的证据与独立审查）、R4/R5（非零业务码与采集异常进入 `errors`/`incomplete`/进度与日志）均按返工条件复验。新增边界：宿主 `reconcile_usage` 放行需带说明且不折算为零；交付目标仍是隔离副本，原仓库合入/发布由使用者决定；费用保持 `unknown`。
+
 ## 第八轮：真实 A13 执行结果（2026-09-12）
 
 > **2026-09-12 独立验收修正：本轮的“首版完成”结论作废。**复核发现传输重试绕过暂停门、远程 MCP 缺操作授权、握手暂停后仍发送请求，以及 A13 未交付规定的本机 Web 应用与两项交付错误；A06/A08/A10/A13 返工中。见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)。
