@@ -49,6 +49,33 @@ async function readUsage(response: Response): Promise<TokenUsage | null> {
   finally { reader.releaseLock(); }
 }
 
+/**
+ * A transport failure before any response header means the provider reported no
+ * usage at all. Retrying it inside the same gated invocation keeps pause and
+ * budget checks once per logical request while a random connection reset no
+ * longer costs an entire Agent session. Anything that resolved a response is
+ * never retried here; mid-stream failures still hold unknown usage for review.
+ */
+function retryableTransportError(error: unknown) {
+  if (!(error instanceof Error) || error.name === 'AbortError') return false;
+  const cause = (error as { cause?: unknown }).cause;
+  const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
+  // A refused redirect is a policy result, not a transport reset; socket-level
+  // failures are the only ones worth resending.
+  return typeof code === 'string' && ['UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND'].includes(code);
+}
+
+async function fetchWithTransportRetry(input: RequestInfo | URL, init: RequestInit | undefined) {
+  const replayable = init?.body === undefined || typeof init.body === 'string';
+  for (let attempt = 1; ; attempt++) {
+    try { return await fetch(input, init); }
+    catch (error) {
+      if (!replayable || attempt >= 3 || !retryableTransportError(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+    }
+  }
+}
+
 /** Controlled lower-level adapter, currently verified for OpenAI chat-completions SSE. */
 export function controlledOpenAIStream(broker: SendGate, apiKey: string): StreamFn {
   return (model, context, options) => {
@@ -66,7 +93,7 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string): Stream
             if (sent) throw new Error('Unexpected provider retry; use a new controlled invocation');
             sent = true;
             const id = randomUUID();
-            const response = broker.dispatch(id, model.contextWindow + model.maxTokens, () => fetch(input, { ...init, redirect: 'error' }));
+            const response = broker.dispatch(id, model.contextWindow + model.maxTokens, () => fetchWithTransportRetry(input, { ...init, redirect: 'error' }));
             evidence = response.then(async result => { broker.settle(id, await readUsage(result.clone())); }, () => { broker.settle(id, null); });
             return response;
           },

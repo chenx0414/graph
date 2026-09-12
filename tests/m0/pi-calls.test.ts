@@ -1,4 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -158,4 +160,50 @@ test.each(['threshold', 'overflow'] as const)('automatic %s compaction cannot se
   expect(seen).toEqual([reason]);
   expect(provider.requests).toHaveLength(reason === 'threshold' ? 1 : 2);
   expect(broker.inspect().status).toBe('paused');
+});
+
+test('a transport failure before any response is retried inside one gated invocation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-pi-retry-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  let destroyed = 0;
+  const server = createServer((req, res) => {
+    if (destroyed < 2) { destroyed += 1; req.socket.destroy(); return; }
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(`data: ${JSON.stringify({ id: 'r', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'ready' }, finish_reason: null }] })}\n\n`);
+    res.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 10 } })}\n\n`);
+    res.end('data: [DONE]\n\n');
+  });
+  cleanup.push(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1'); cleanup.push(() => broker.close());
+  const model = {
+    id: 'local', name: 'local', provider: 'graph-openai', api: 'openai-completions' as const,
+    baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+    reasoning: false, input: ['text' as const], contextWindow: 32_000, maxTokens: 256,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+  const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] });
+  expect((await stream.result()).stopReason).toBe('stop');
+  expect(destroyed).toBe(2);
+  expect(broker.inspect()).toMatchObject({ used: 50, reserved: 0, status: 'ready' });
+});
+
+test('a transport failure that survives the bounded retries still holds unknown usage', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-pi-retry-fail-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  let attempts = 0;
+  const server = createServer(req => { attempts += 1; req.socket.destroy(); });
+  cleanup.push(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1'); cleanup.push(() => broker.close());
+  const model = {
+    id: 'local', name: 'local', provider: 'graph-openai', api: 'openai-completions' as const,
+    baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+    reasoning: false, input: ['text' as const], contextWindow: 32_000, maxTokens: 256,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+  const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] });
+  expect((await stream.result()).stopReason).toBe('error');
+  expect(attempts).toBe(3);
+  expect(broker.inspect()).toMatchObject({ used: 0, hold: 'unknown usage', status: 'blocked' });
 });

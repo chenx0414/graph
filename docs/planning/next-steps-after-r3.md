@@ -103,4 +103,10 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - `graph-m7-acceptance-2`：主管 45 次调用内产出有效提案，随后 provider 断流，任务保持 `unknown_usage` 待核对，作为审计保留。
 - `graph-m7-acceptance-3`：主管产出提案版本 1；确认超额后 master 标记成功，当前停在需求确认，等待使用者 `GRAPH_M7_ACCEPT=1`。
 
+## 第七轮网关传输加固（2026-09-12）
+
+- provider 网关偶发在响应头到达前重置连接（Pi 显示 `Connection error.`），旧行为按未知用量阻塞整个 Agent，长任务几乎无法完成。`src/runtime/controlled-openai.ts` 现在只对**未收到任何响应头**的 socket 级失败做有界重试（最多 3 次、500ms/1s 退避），重试仍在同一 invocation 与同一 send gate 内；重定向（`redirect:'error'`）与中止不重试；全部失败仍记未知并停下。回归 `tests/m0/pi-calls.test.ts`。
+- 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
+- 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
+
 本轮修复提交 `81dc0cf`（`fix: harden the real acceptance run for reasoning models`）；其后的 docs 提交只记录该哈希。
