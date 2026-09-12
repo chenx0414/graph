@@ -125,6 +125,22 @@ test('unknown usage retains the reservation and blocks replay until a deduplicat
   await expect(runtime.host.report(operation.id, operation.generation, { ...result, usage: { ...result.usage, output: 11 } })).rejects.toMatchObject({ code: 'result_conflict' });
 });
 
+test('a host can reconcile unavailable unknown usage without recording it as zero', async () => {
+  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
+    prepare: async () => async () => ({ outcome: 'continue', output: { draft: true } }),
+  } });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  const blocked = await task.view();
+  expect(blocked).toMatchObject({ status: 'blocked', nodes: [{ used: 0, reserved: 100, status: 'blocked' }, {}], questions: [{ kind: 'unknown_usage', status: 'open' }] });
+  await expect(task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: '   ' }, 'no-proof')).rejects.toMatchObject({ code: 'invalid_answer' });
+  await task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no per-request usage for the failed call' }, 'reconcile');
+  const after = await task.view();
+  // The result proceeds, but the unaccounted call is not counted: used stays
+  // unchanged and no authoritative usage is invented for it.
+  expect(after).toMatchObject({ status: 'running', nodes: [{ used: 0, reserved: 0, status: 'pending' }, {}], questions: [{ status: 'resolved' }], operations: [{ state: 'succeeded' }] });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+});
+
 test('the cumulative instance budget survives restart and only a scoped user answer permits more work', async () => {
   let sends = 0;
   const { runtime, task, options, taskId } = await singleAgent({ work: { kind: 'agent', reserveTokens: 20_000_000,

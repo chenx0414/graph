@@ -52,6 +52,10 @@ import { git } from '../src/git/git.ts';
  *   Playwright browser test); never taken from a worker or the proposal.
  *   GRAPH_M7_ACKNOWLEDGE_OVERRUN=1 records an explicit acknowledgement for
  *   every open reservation_exceeded question; the overrun stays in the report.
+ *   GRAPH_M7_ACKNOWLEDGE_UNKNOWN_USAGE=1 lets the host reconcile an open
+ *   unknown_usage question when the provider exposes no usage for the failed
+ *   call: the invocation stays recorded as unknown with unknown cost, the
+ *   submitted result proceeds, and the gap remains visible in the report.
  *
  * Exit codes: 0 completed/no-op, 1 waiting for the next user confirmation or
  * host answer, 2 invalid configuration or unexpected failure.
@@ -201,6 +205,17 @@ async function runSession(runtime: Runtime, task: Task, state: RunState, paths: 
     return task.view();
   };
   view = await acknowledgeOverruns(view);
+  if (process.env.GRAPH_M7_ACKNOWLEDGE_UNKNOWN_USAGE === '1') {
+    const unknownUsage = view.questions.filter(question => question.status === 'open' && question.kind === 'unknown_usage');
+    for (const question of unknownUsage) {
+      console.log(`Reconciling unaccounted usage on ${question.nodeId} (${question.id}); the invocation stays unknown.`);
+      await task.answer(question.id, {
+        type: 'reconcile_usage',
+        proof: 'Provider exposes no per-request usage for the failed call; host reviewed the record and accepts the unaccounted invocation without recording it as zero.',
+      }, `m7-unknown-usage-${question.id}`);
+    }
+    if (unknownUsage.length) view = await task.view();
+  }
   if (view.phase === 'completed') return finish(view, { step: 'completed', resume: 'This run is already complete; nothing was rebuilt or reconfirmed.' }, 0);
 
   if (view.acceptedProposalVersion !== null && state.acceptedProposalVersion === null) {

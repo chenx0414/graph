@@ -58,7 +58,8 @@ export interface OperationResult {
   artifacts?: ArtifactInput[];
 }
 export type Answer = { type: 'add_budget'; tokens: number } | { type: 'respond'; value: Json } | { type: 'retry' } | { type: 'grant'; grant: string } | { type: 'acknowledge' }
-  | { type: 'usage'; usage: TokenUsage; proof: string };
+  | { type: 'usage'; usage: TokenUsage; proof: string }
+  | { type: 'reconcile_usage'; proof: string };
 export type Reconciliation =
   | { state: 'completed'; result: OperationResult; quiescent: true; proof: string }
   | { state: 'unknown'; quiescent: boolean; proof: string }

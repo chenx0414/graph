@@ -74,7 +74,7 @@ test('a production master receives the proposal schema, requirement version and 
   const prompt = JSON.stringify(provider.requests[0]);
   expect(prompt).toContain('Requirement version: 1');
   expect(prompt).toContain('proposalJson schema');
-  expect(prompt).toContain('Configured models: local (high)');
+  expect(prompt).toContain('implementation=local (high)');
   expect(prompt).toContain('checkNode');
 });
 

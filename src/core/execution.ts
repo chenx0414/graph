@@ -130,6 +130,14 @@ export class Execution {
       const operation = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(question.operation_id!) as OperationRow;
       if (!answer.proof.trim() || !operation.result || operation.worker_active) throw new RuntimeError('invalid_answer', 'Usage requires a known result, quiescent worker and evidence');
       this.settle(JSON.parse(operation.spec) as Operation, { ...JSON.parse(operation.result) as OperationResult, usage: answer.usage });
+    } else if (question.kind === 'unknown_usage' && answer.type === 'reconcile_usage') {
+      // The host reviewed the failed call and the provider exposes no usage for
+      // it. The invocation stays recorded as unknown with unknown cost; it is
+      // never converted to zero. Only the node's result is allowed to proceed.
+      const operation = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(question.operation_id!) as OperationRow;
+      if (!answer.proof.trim() || !operation.result || operation.worker_active) throw new RuntimeError('invalid_answer', 'Reconciliation requires a known result, quiescent worker and proof');
+      this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0 WHERE id=?").run(operation.id);
+      this.store.event(taskId, 'operation.usage_reconciled', { operationId: operation.id, decision: 'usage_unavailable', proof: answer.proof });
     } else if (question.kind === 'permission' && answer.type === 'grant') {
       if (answer.grant !== (JSON.parse(question.data) as { grant: string }).grant) throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
       this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);
