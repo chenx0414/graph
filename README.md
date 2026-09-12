@@ -17,6 +17,7 @@
 - [M5 验证报告](docs/planning/m5-results.md)：本机 HTTP/SSE、React 任务图、问题列表与人才库。
 - [M6 验证报告](docs/planning/m6-results.md)：故障注入与 A01–A12 机制验收矩阵。
 - [M7 验证报告](docs/planning/m7-results.md)：Graph 交付 MediaBookmarks B站本机 Web 并合入克隆目标分支。
+- [接手说明](docs/planning/handoff.md)：M0–M7 完成后的工作区状态、边界与后续入口。
 - [领域术语](CONTEXT.md)：Agent 定义、实例、节点、任务与额度的准确含义。
 - [决策记录](docs/adr/)：已作选择的理由与权衡。
 
