@@ -7,8 +7,8 @@ import { afterEach, expect, test } from 'vitest';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from '../../src/runtime/pi-instance.ts';
-import { CallBroker } from '../../src/runtime/call-broker.ts';
-import { controlledOpenAIStream } from '../../src/runtime/controlled-openai.ts';
+import { CallBroker, type TokenUsage } from '../../src/runtime/call-broker.ts';
+import { controlledOpenAIStream, gatedProviderFetch } from '../../src/runtime/controlled-openai.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -162,34 +162,8 @@ test.each(['threshold', 'overflow'] as const)('automatic %s compaction cannot se
   expect(broker.inspect().status).toBe('paused');
 });
 
-test('a transport failure before any response is retried inside one gated invocation', async () => {
+test('a connection reset after the request was sent is not resent and holds unknown usage', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pi-retry-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  let destroyed = 0;
-  const server = createServer((req, res) => {
-    if (destroyed < 2) { destroyed += 1; req.socket.destroy(); return; }
-    res.writeHead(200, { 'content-type': 'text/event-stream' });
-    res.write(`data: ${JSON.stringify({ id: 'r', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'ready' }, finish_reason: null }] })}\n\n`);
-    res.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 10 } })}\n\n`);
-    res.end('data: [DONE]\n\n');
-  });
-  cleanup.push(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1'); cleanup.push(() => broker.close());
-  const model = {
-    id: 'local', name: 'local', provider: 'graph-openai', api: 'openai-completions' as const,
-    baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
-    reasoning: false, input: ['text' as const], contextWindow: 32_000, maxTokens: 256,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  };
-  const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] });
-  expect((await stream.result()).stopReason).toBe('stop');
-  expect(destroyed).toBe(2);
-  expect(broker.inspect()).toMatchObject({ used: 50, reserved: 0, status: 'ready' });
-});
-
-test('a transport failure that survives the bounded retries still holds unknown usage', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-pi-retry-fail-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   let attempts = 0;
   const server = createServer(req => { attempts += 1; req.socket.destroy(); });
@@ -204,6 +178,57 @@ test('a transport failure that survives the bounded retries still holds unknown 
   };
   const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] });
   expect((await stream.result()).stopReason).toBe('error');
-  expect(attempts).toBe(3);
-  expect(broker.inspect()).toMatchObject({ used: 0, hold: 'unknown usage', status: 'blocked' });
+  expect(attempts).toBe(1);
+  expect(broker.inspect()).toMatchObject({ used: 0, hold: 'unknown usage', status: 'blocked', calls: [{ state: 'unknown' }] });
+});
+
+function fakeGate(pausedOnCall?: number) {
+  const dispatches: string[] = [];
+  const settled: { id: string; usage: TokenUsage | null }[] = [];
+  return {
+    dispatches, settled,
+    dispatch<T>(id: string, _reservation: number, send: () => T): T {
+      if (pausedOnCall !== undefined && dispatches.length + 1 === pausedOnCall) throw new Error('paused');
+      dispatches.push(id);
+      return send();
+    },
+    settle(id: string, usage: TokenUsage | null) { settled.push({ id, usage }); },
+  };
+}
+
+const REFUSED = Object.assign(new Error('connect ECONNREFUSED'), { cause: { code: 'ECONNREFUSED' } });
+const RESET = Object.assign(new Error('socket hang up'), { cause: { code: 'ECONNRESET' } });
+
+test('a provably unsent request is retried as a new gated invocation', async () => {
+  const gate = fakeGate();
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    if (calls === 1) throw REFUSED;
+    return new Response('ok', { status: 200 });
+  };
+  const response = await gatedProviderFetch(gate, 'http://provider.invalid/v1/chat', {}, { reservation: 10, fetchImpl, delay: async () => {} });
+  expect(await response.text()).toBe('ok');
+  expect(calls).toBe(2);
+  expect(gate.dispatches).toHaveLength(2);
+  expect(new Set(gate.dispatches).size).toBe(2);
+  expect(gate.settled).toEqual([{ id: gate.dispatches[0], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }]);
+});
+
+test('a pause during retry backoff stops the resend', async () => {
+  const gate = fakeGate(2);
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => { calls += 1; throw REFUSED; };
+  await expect(gatedProviderFetch(gate, 'http://provider.invalid/v1/chat', {}, { reservation: 10, fetchImpl, delay: async () => {} })).rejects.toThrow('paused');
+  expect(calls).toBe(1);
+  expect(gate.dispatches).toHaveLength(1);
+});
+
+test('an ambiguous transport failure is recorded as unknown usage without a resend', async () => {
+  const gate = fakeGate();
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => { calls += 1; throw RESET; };
+  await expect(gatedProviderFetch(gate, 'http://provider.invalid/v1/chat', {}, { reservation: 10, fetchImpl, delay: async () => {} })).rejects.toThrow('socket hang up');
+  expect(calls).toBe(1);
+  expect(gate.settled).toEqual([{ id: gate.dispatches[0], usage: null }]);
 });

@@ -58,6 +58,21 @@ function usageSettled<T>(gate: RestrictedGate, run: () => Promise<T>) {
   });
 }
 
+/**
+ * One actual HTTP send. The pause and budget check runs in the same turn as the
+ * send, so a pause between two requests of one logical exchange stops the next
+ * request instead of letting the whole exchange through under its first check.
+ */
+async function gatedRequest<T>(gate: RestrictedGate, send: () => Promise<T>): Promise<T> {
+  const invocationId = randomUUID();
+  let sent = false;
+  try {
+    return await gate.dispatch(invocationId, 0, () => { sent = true; return send(); });
+  } finally {
+    if (sent) gate.settle(invocationId, ZERO);
+  }
+}
+
 /** One OS-restricted process per exchange keeps every local server call inside the verified sandbox. */
 export function stdioExchange(endpoint: StdioEndpoint): McpExchange {
   return {
@@ -112,18 +127,18 @@ function parseHttpBody(body: string, contentType: string): Reply[] {
 export function httpExchange(endpoint: HttpEndpoint): McpExchange {
   return {
     exchange(requests, expect) {
-      return usageSettled(endpoint.gate, async () => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), endpoint.timeoutMs ?? 30_000);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), endpoint.timeoutMs ?? 30_000);
+      return (async () => {
         try {
           const session: Record<string, string> = {};
           let reply: Reply | undefined;
           for (const request of requests) {
-            const response = await fetch(endpoint.url, {
+            const response = await gatedRequest(endpoint.gate, () => fetch(endpoint.url, {
               method: 'POST', redirect: 'error', signal: controller.signal,
               headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(endpoint.headers ?? {}), ...session },
               body: JSON.stringify(request),
-            });
+            }));
             const sessionId = response.headers.get('mcp-session-id');
             if (sessionId) session['mcp-session-id'] = sessionId;
             if (response.status === 202 || response.status === 204) continue;
@@ -140,7 +155,7 @@ export function httpExchange(endpoint: HttpEndpoint): McpExchange {
           if (reply.result === undefined) throw new RuntimeError('capability_failed', `Remote MCP returned no result for request ${expect}`);
           return reply;
         } finally { clearTimeout(timer); }
-      });
+      })();
     },
   };
 }

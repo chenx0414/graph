@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { realpath, symlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { loadGraph, reactivate } from './graph.ts';
@@ -28,8 +29,9 @@ export class Execution {
   private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
   private readonly git?: GitIntegration;
   private readonly scratchRoot?: string;
+  private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; git?: GitIntegration; scratchRoot?: string } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string } } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -37,6 +39,7 @@ export class Execution {
     if (extras.preferences) this.preferences = extras.preferences;
     if (extras.git) this.git = extras.git;
     if (extras.scratchRoot) this.scratchRoot = extras.scratchRoot;
+    if (extras.program) this.program = extras.program;
     this.generation = store.transaction(() => {
       store.db.prepare('UPDATE runtime SET generation=generation+1').run();
       const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
@@ -532,7 +535,10 @@ export class Execution {
     if (result.outcome === 'waiting') {
       if (!result.question?.prompt.trim()) throw new RuntimeError('invalid_result', 'Waiting requires a question');
       const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as NodeRow;
-      this.block(node, 'waiting', { prompt: result.question.prompt }, operation.id);
+      // A remote capability that needs an operation grant blocks as a permission
+      // question, so answering it persists the exact grant for the next attempt.
+      if (result.question.grant) this.block(node, 'permission', { grant: result.question.grant }, operation.id);
+      else this.block(node, 'waiting', { prompt: result.question.prompt }, operation.id);
     }
     this.store.db.prepare('UPDATE nodes SET status=?,output=?,route=?,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?')
       .run(result.outcome === 'completed' ? 'succeeded' : result.outcome === 'continue' ? 'pending' : result.outcome, canonicalJson(result.output), result.route ?? null, operation.id, operation.taskId, operation.nodeId);
@@ -600,6 +606,15 @@ export class Execution {
         if (!operation.workspace) throw new RuntimeError('invalid_adapter', 'graph.command requires a work copy');
         return async () => {
           const workspace = operation.workspace!;
+          // The host may provide the project's dependency directory so a
+          // confirmed browser check can resolve Playwright from the work copy.
+          if (this.program?.nodeModulesPath) {
+            const link = join(workspace, 'node_modules');
+            if (!existsSync(link)) {
+              try { await symlink(await realpath(this.program.nodeModulesPath), link, 'dir'); }
+              catch { /* Without the link the check fails with its own resolution error. */ }
+            }
+          }
           const gate: RestrictedGate = {
             dispatch: (_id, _reservation, send) => {
               if (this.stopping || this.store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Task paused');
@@ -607,8 +622,14 @@ export class Execution {
             },
             settle: () => {},
           };
+          const extraReads = this.program?.readPaths
+            ? (await Promise.all(this.program.readPaths.map(path => realpath(path).catch(() => undefined)))).filter((path): path is string => path !== undefined)
+            : [];
           const runner = await openWorkspaceCommandRunner({
             workspace, scratchDir: join(this.scratchRoot ?? workspace, 'checks', operation.id), gate,
+            localNetwork: true,
+            ...(extraReads.length ? { readPaths: extraReads } : {}),
+            ...(this.program?.env ? { env: this.program.env } : {}),
           });
           try {
             const result = await runner.run(input.command as string, input.args as string[]);

@@ -21,6 +21,18 @@ export interface LoadedCapabilities {
 
 interface McpManifest { command?: unknown; args?: unknown; entry?: unknown; url?: unknown; headers?: unknown; headersEnv?: unknown }
 
+/** A remote MCP operation the task has not pre-authorized; the user answers with this exact grant. */
+export interface CapabilityPermissionRequest {
+  grant: string;
+  capabilityId: string;
+  tool: string;
+  description: string;
+}
+
+export function mcpGrant(capabilityId: string, tool: string) {
+  return `mcp:${capabilityId}:${tool}`;
+}
+
 const extensionWorker = fileURLToPath(new URL('./extension-worker.mjs', import.meta.url));
 
 function snapshotPath(record: { snapshot: Json }) {
@@ -121,12 +133,25 @@ async function extensionConnection(input: {
   });
 }
 
-function capabilityTools(connection: McpExchange, tools: McpTool[], capability: { id: string; version: string }): ToolDefinition[] {
+function capabilityTools(
+  connection: McpExchange, tools: McpTool[], capability: { id: string; version: string },
+  authorization?: { grants: string[]; onPermissionRequired?: (request: CapabilityPermissionRequest) => void },
+): ToolDefinition[] {
   return tools.map(tool => externallyGated({
     name: mcpToolName(capability.id, tool.name), label: `${tool.name} (${capability.id})`,
     description: tool.description ?? `MCP tool ${tool.name} from ${capability.id}@${capability.version}`,
     parameters: Type.Unsafe(tool.inputSchema ?? { type: 'object', properties: {} }),
     execute: async (_id, params) => {
+      // A granted domain only allows reaching the service. Every remote tool
+      // execution needs its own scoped task grant; tool names, descriptions and
+      // MCP annotations are never treated as authorization.
+      if (authorization) {
+        const grant = mcpGrant(capability.id, tool.name);
+        if (!authorization.grants.includes(grant)) {
+          authorization.onPermissionRequired?.({ grant, capabilityId: capability.id, tool: tool.name, description: tool.description ?? '' });
+          throw new Error(`Permission required: remote MCP tool ${tool.name} needs the task grant ${grant}`);
+        }
+      }
       const result = await callMcpTool(connection, tool.name, params as Json);
       const content = result.content.length ? result.content : [{ type: 'text' as const, text: 'MCP tool returned no content' }];
       if (result.isError) throw new Error(content.map(part => part.text).join('\n'));
@@ -150,6 +175,8 @@ export async function loadCapabilities(input: {
   scratchDir: string;
   gate: SendGate;
   mcpDomains?: string[];
+  grants?: string[];
+  onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
 }): Promise<LoadedCapabilities> {
   const skillPaths: string[] = [];
   const readRoots: string[] = [];
@@ -178,6 +205,7 @@ export async function loadCapabilities(input: {
       }
       const manifest = await manifestOf(snapshot);
       let connection: McpExchange;
+      let authorization: { grants: string[]; onPermissionRequired?: (request: CapabilityPermissionRequest) => void } | undefined;
       if (record.kind === 'extension') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
@@ -187,9 +215,11 @@ export async function loadCapabilities(input: {
         releases.push(acquired.release);
         connection = await localConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir });
       } else {
+        const grants = input.grants ?? [];
+        authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };
         connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? []);
       }
-      tools.push(...capabilityTools(connection, await listMcpTools(connection), bound));
+      tools.push(...capabilityTools(connection, await listMcpTools(connection), bound, authorization));
     }
   } catch (error) {
     await close();

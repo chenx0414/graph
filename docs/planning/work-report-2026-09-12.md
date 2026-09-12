@@ -1,5 +1,7 @@
 # Graph 首版收尾工作报告
 
+> **2026-09-12 独立验收修正：本报告的“首版完成”结论已被独立复核推翻，不能成立。**复核发现本报告未覆盖的 1 项 Standards P1（传输重试绕过暂停门并丢失未知用量）与 5 项 Spec（远程 MCP 缺操作授权、握手后暂停仍发送、缺少规定的本机 Web 应用，以及业务错误与采集异常未进失败汇总）；A06、A08、A10、A13 仍未通过。逐项定位、复现输出与返工条件见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)。本文件保留为当期工作记录，完成状态以返工后的新报告为准。
+
 日期：2026-09-12（Asia/Shanghai）。基线 `f1ddaaa`，收尾提交 `60fb185`。本报告汇总从第三轮复验接手到首版完成的全部工作、证据与边界；详细过程见各 `mN-results.md`、[acceptance-followup.md](acceptance-followup.md)、[next-steps-after-r3.md](next-steps-after-r3.md) 与 `git log`。
 
 ## 摘要

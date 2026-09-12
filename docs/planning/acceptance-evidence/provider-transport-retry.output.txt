@@ -1,0 +1,2 @@
+{"pauseOnReset":true,"acceptedRequests":2,"afterPause":1,"identicalBodies":true,"stopReason":"stop","status":"paused","hold":null,"used":50,"invocationCount":1,"invocationStates":["complete"]}
+{"pauseOnReset":false,"acceptedRequests":2,"afterPause":0,"identicalBodies":true,"stopReason":"stop","status":"ready","hold":null,"used":50,"invocationCount":1,"invocationStates":["complete"]}

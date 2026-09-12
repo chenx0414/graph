@@ -50,28 +50,51 @@ async function readUsage(response: Response): Promise<TokenUsage | null> {
 }
 
 /**
- * A transport failure before any response header means the provider reported no
- * usage at all. Retrying it inside the same gated invocation keeps pause and
- * budget checks once per logical request while a random connection reset no
- * longer costs an entire Agent session. Anything that resolved a response is
- * never retried here; mid-stream failures still hold unknown usage for review.
+ * One logical provider request. A transport failure before any response header
+ * cannot prove the provider did not receive or bill the request, so it is
+ * recorded as unknown usage and never resent silently. Only failures that prove
+ * nothing was sent (DNS failure, refused connection, connect timeout) are
+ * resent, and each resend is a new invocation that passes the gate again.
  */
-function retryableTransportError(error: unknown) {
-  if (!(error instanceof Error) || error.name === 'AbortError') return false;
-  const cause = (error as { cause?: unknown }).cause;
-  const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
-  // A refused redirect is a policy result, not a transport reset; socket-level
-  // failures are the only ones worth resending.
-  return typeof code === 'string' && ['UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND'].includes(code);
+export interface GatedProviderFetchOptions {
+  reservation: number;
+  fetchImpl?: typeof fetch;
+  delay?: (milliseconds: number) => Promise<void>;
+  maxAttempts?: number;
+  /** Called once for the successful attempt so the caller can settle its usage. */
+  onResponse?: (id: string, response: Response) => Promise<void> | void;
 }
 
-async function fetchWithTransportRetry(input: RequestInfo | URL, init: RequestInit | undefined) {
-  const replayable = init?.body === undefined || typeof init.body === 'string';
+const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+const RETRYABLE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT']);
+
+function transportCode(error: unknown) {
+  if (!(error instanceof Error) || error.name === 'AbortError') return undefined;
+  const cause = (error as { cause?: unknown }).cause;
+  return typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
+}
+
+export async function gatedProviderFetch(
+  broker: SendGate, input: RequestInfo | URL, init: RequestInit | undefined, options: GatedProviderFetchOptions,
+): Promise<Response> {
+  const maxAttempts = options.maxAttempts ?? 3;
   for (let attempt = 1; ; attempt++) {
-    try { return await fetch(input, init); }
-    catch (error) {
-      if (!replayable || attempt >= 3 || !retryableTransportError(error)) throw error;
-      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+    const id = randomUUID();
+    let sent = false;
+    try {
+      const response = await broker.dispatch(id, options.reservation, () => {
+        sent = true;
+        return (options.fetchImpl ?? fetch)(input, init);
+      });
+      void options.onResponse?.(id, response);
+      return response;
+    } catch (error) {
+      if (!sent) throw error; // The gate refused before anything was sent.
+      const code = transportCode(error);
+      const notSent = typeof code === 'string' && RETRYABLE_TRANSPORT_CODES.has(code);
+      broker.settle(id, notSent ? ZERO_USAGE : null);
+      if (!notSent || attempt >= maxAttempts) throw error;
+      await (options.delay ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))))(500 * attempt);
     }
   }
 }
@@ -92,10 +115,12 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string): Stream
           fetch: (input, init) => {
             if (sent) throw new Error('Unexpected provider retry; use a new controlled invocation');
             sent = true;
-            const id = randomUUID();
-            const response = broker.dispatch(id, model.contextWindow + model.maxTokens, () => fetchWithTransportRetry(input, { ...init, redirect: 'error' }));
-            evidence = response.then(async result => { broker.settle(id, await readUsage(result.clone())); }, () => { broker.settle(id, null); });
-            return response;
+            return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
+              reservation: model.contextWindow + model.maxTokens,
+              onResponse: (id, response) => {
+                evidence = readUsage(response.clone()).then(usage => broker.settle(id, usage), () => broker.settle(id, null));
+              },
+            });
           },
         });
         for await (const event of stream) {

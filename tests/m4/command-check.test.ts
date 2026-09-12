@@ -27,8 +27,8 @@ async function repo() {
   return root;
 }
 
-async function start(root: string, actions: Record<string, ActionAdapter>, nodes: NodeSpec[], input: unknown) {
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions });
+async function start(root: string, actions: Record<string, ActionAdapter>, nodes: NodeSpec[], input: unknown, options: { program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string } } = {}) {
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions, ...options });
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
   const proposed = await runtime.supervisor(taskId).propose({
@@ -90,6 +90,67 @@ test('a graph.command node refuses an unallowed command instead of running it', 
   expect(view.questions.map(question => question.kind)).toContain('adapter_error');
   const hash = createHash('sha256').update('absent').digest('hex');
   expect(view.evidence.every(item => item.artifact.digest !== hash)).toBe(true);
+});
+
+test('a graph.command check can bind loopback for a local application test', async () => {
+  const root = await repo();
+  const localAction: ActionAdapter = {
+    kind: 'agent', reserveTokens: 100,
+    prepare: async operation => async () => {
+      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
+      await writeFile(join(operation.workspace!, 'test', 'local.test.js'), [
+        "import { test } from 'node:test';",
+        "import assert from 'node:assert';",
+        "import { createServer } from 'node:http';",
+        "test('loopback', async () => {",
+        "  const server = createServer((req, res) => { res.end('local-ok'); });",
+        "  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));",
+        "  const response = await fetch(`http://127.0.0.1:${server.address().port}/`);",
+        "  assert.equal(await response.text(), 'local-ok');",
+        "  await new Promise(resolve => server.close(resolve));",
+        "});",
+      ].join('\n'));
+      return { outcome: 'completed', output: null, usage };
+    },
+  };
+  const { runtime, task } = await start(root, { work: localAction }, nodes, { command: 'node', args: ['--test'] });
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+});
+
+test('a graph.command check resolves host-provided dependencies and environment', async () => {
+  const root = await repo();
+  const modules = join(root, 'deps');
+  await mkdir(join(modules, 'probe'), { recursive: true });
+  await writeFile(join(modules, 'probe', 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', type: 'module', exports: './index.js' }));
+  await writeFile(join(modules, 'probe', 'index.js'), 'export const value = "probe-dependency";\n');
+  const env = { GRAPH_CHECK_PROBE: 'host-env' };
+  const dependencyAction: ActionAdapter = {
+    kind: 'agent', reserveTokens: 100,
+    prepare: async operation => async () => {
+      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
+      await writeFile(join(operation.workspace!, 'test', 'deps.test.js'), [
+        "import { test } from 'node:test';",
+        "import assert from 'node:assert';",
+        "import { value } from 'probe';",
+        "test('dependencies and environment', () => {",
+        "  assert.equal(value, 'probe-dependency');",
+        "  assert.equal(process.env.GRAPH_CHECK_PROBE, 'host-env');",
+        "});",
+      ].join('\n'));
+      return { outcome: 'completed', output: null, usage };
+    },
+  };
+  const { runtime, task } = await start(root, { work: dependencyAction }, nodes, { command: 'node', args: ['--test'] }, { program: { readPaths: [modules], env, nodeModulesPath: modules } });
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
+  const body = JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { code: number; stdout: string };
+  expect(body.stdout).toContain('pass');
 });
 
 test('a graph revision cannot weaken the confirmed command of an acceptance check', async () => {

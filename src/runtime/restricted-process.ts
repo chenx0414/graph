@@ -25,6 +25,10 @@ export interface RestrictedCommand {
   denyWrite?: string[];
   timeoutMs?: number;
   onRequest?: (request: unknown) => Promise<unknown>;
+  /** Confirmed program checks may bind and reach loopback for local app/browser tests. */
+  localNetwork?: boolean;
+  /** Host-selected environment for the restricted process; worker input must never populate this. */
+  env?: Record<string, string>;
 }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
@@ -111,14 +115,17 @@ function extractProfile(wrapped: string, command: string) {
 /** Trusted host owns grants. Worker-supplied paths must never populate this interface. */
 export async function openRestrictedExecutor() {
   if (process.platform !== 'darwin') throw new Error('Restricted execution has only been verified on macOS');
-  const network = { allowedDomains: [], deniedDomains: [], allowLocalBinding: false, allowUnixSockets: [] };
-  await SandboxManager.initialize({ network, filesystem: { denyRead: ['/'], allowWrite: [], denyWrite: [] } }, undefined, false);
+  const noNetwork = { allowedDomains: [], deniedDomains: [], allowLocalBinding: false, allowUnixSockets: [] };
+  await SandboxManager.initialize({ network: noNetwork, filesystem: { denyRead: ['/'], allowWrite: [], denyWrite: [] } }, undefined, false);
   if (!SandboxManager.isSandboxingEnabled()) throw new Error('OS sandbox unavailable');
   return {
     async run(command: RestrictedCommand): Promise<{ code: number | null; stdout: string; stderr: string }> {
       const cwd = await canonicalGrant(command.cwd);
       const readPaths = await Promise.all(command.readPaths.map(canonicalGrant));
       const writePaths = await Promise.all(command.writePaths.map(canonicalGrant));
+      const network = command.localNetwork
+        ? { allowedDomains: [], deniedDomains: [], allowLocalBinding: true, allowUnixSockets: [] }
+        : noNetwork;
       const scratchDir = command.scratchDir ? await canonicalGrant(command.scratchDir) : cwd;
       if (!writePaths.some(root => scratchDir === root || scratchDir.startsWith(root === '/' ? '/' : root + '/'))) {
         throw new Error('Worker scratch directory requires a write grant');
@@ -133,6 +140,14 @@ export async function openRestrictedExecutor() {
       const deviceWrites = ['/dev/stdout', '/dev/stderr', '/dev/null', '/dev/tty', '/dev/dtracehelper', '/dev/autofs_nowait'];
       const gitPaths = await gitMetadataPaths(writePaths, scratchDir);
       const profile = pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths], gitPaths);
+      // SRT reads allowLocalBinding from its initialized config, so a per-run
+      // custom config cannot widen it. Confirmed program checks get the exact
+      // loopback rules plus the Chromium rendezvous services appended here;
+      // every other restricted run keeps the no-network profile.
+      const localNetworkProfile = command.localNetwork
+        ? '\n(allow network-bind (local ip "*:*"))\n(allow network-inbound (local ip "*:*"))\n(allow network-outbound (remote ip "localhost:*"))'
+          + '\n(allow mach-register (global-name-regex #"^org\\.chromium\\."))\n(allow mach-lookup (global-name-regex #"^org\\.chromium\\."))'
+        : '';
       const commandText = [command.executable, ...command.args].map(quote).join(' ');
       // Even setup writes happen after confinement. A mutable cwd must never
       // cause the host to create directories outside the original grant.
@@ -148,11 +163,11 @@ export async function openRestrictedExecutor() {
           },
         },
       );
-      const boundedProfile = extractProfile(wrapped, launch) + '\n' + profile;
+      const boundedProfile = extractProfile(wrapped, launch) + '\n' + profile + localNetworkProfile;
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
         const child = command.broker.dispatch(invocationId, 0, () => spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
-          cwd, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1' },
+          cwd, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}) },
           stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
         }));
         let stdout = '', stderr = '';

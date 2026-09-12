@@ -32,3 +32,20 @@
 - `capabilities.mts`：按定义版本加载的受限 worker 扩展、远程 MCP（授予域名）与受控网络检索是否真实可调用并可计量，以及未授予域名是否在请求前被拒。
 
 全部程序创建并清理临时数据，没有真实供应商请求。浏览器场景需要已安装的 Playwright Chromium。`.output.txt` 是最近一次实际输出；临时 UUID、路径和 commit SHA 随运行变化。
+
+## 2026-09-12 首版报告复验
+
+对应 [首版独立验收](../final-acceptance-2026-09-12.md)，Graph 被验收提交 `2841c4d`，真实交付提交 `725cb1be`。新增证据：
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/provider-transport-retry.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/remote-mcp-boundary.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/a13-delivery-errors.mjs /Users/macmini/workspace/graph-m7-acceptance-7/project
+```
+
+- `provider-transport-retry.mts`：本地服务收到完整模型 POST 后断线，观察是否重发、是否绕过暂停，以及未知用量是否被保留。
+- `remote-mcp-boundary.mts`：生产 Runtime 对接本地模拟 MCP；观察无外部操作授权时工具是否执行，以及握手期间暂停后是否继续发送工具请求。所谓删除效果只是内存计数器。
+- `a13-delivery-errors.mjs`：从参数指定的交付仓库加载采集模块，以合成输入复现 API 非零错误码与采集异常的失败显示；断言被验收版本的缺陷行为，修复后应按新的预期复验。
+- `a13-delivery-tests.output.txt`：从精确交付提交导出 `src`、`test`、`package.json` 到临时目录后，独立运行四个 `bilibili-web-*.test.js` 的 22 项测试结果。
+
+这些诊断只使用合成数据及本地服务，不读取真实收藏、登录配置或 profile；没有增加正式测试套件的测试计数。

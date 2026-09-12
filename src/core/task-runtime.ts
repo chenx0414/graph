@@ -26,6 +26,8 @@ export async function openTaskRuntime(options: {
   models?: { entries: ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; apiKey: string; modelRuntime: ModelRuntime };
   master?: { action: string; definitionVersion: string; model: string };
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
+  /** Host-selected grants and environment for confirmed program checks only. */
+  program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
 }) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
@@ -74,6 +76,7 @@ export async function openTaskRuntime(options: {
       scratchRoot: stateDir,
       ...(options.models ? { models: () => options.models!.entries } : {}),
       ...(options.models?.preferences ? { preferences: options.models.preferences } : {}),
+      ...(options.program ? { program: options.program } : {}),
     });
   } catch (error) {
     try { store.close(); } finally { releaseOwner(); }

@@ -53,7 +53,7 @@ export interface Operation {
 }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
-  question?: { prompt: string };
+  question?: { prompt: string; grant?: string };
   route?: string;
   artifacts?: ArtifactInput[];
 }

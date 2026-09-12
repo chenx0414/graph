@@ -41,6 +41,9 @@ export async function openWorkspaceCommandRunner(input: {
   workspace: string;
   scratchDir: string;
   gate: RestrictedGate;
+  readPaths?: string[];
+  env?: Record<string, string>;
+  localNetwork?: boolean;
 }) {
   const workspace = await realpath(input.workspace);
   let acquired: Awaited<ReturnType<typeof acquireRestrictedExecutor>> | undefined;
@@ -54,9 +57,11 @@ export async function openWorkspaceCommandRunner(input: {
       return acquired.executor.run({
         broker: input.gate, cwd: workspace, scratchDir,
         executable: resolved.executable, args: resolved.args,
-        readPaths: [workspace, dirname(resolved.executable)],
+        readPaths: [workspace, dirname(resolved.executable), ...(input.readPaths ?? [])],
         writePaths: [workspace, scratchDir],
         timeoutMs: 120_000,
+        ...(input.env ? { env: input.env } : {}),
+        ...(input.localNetwork ? { localNetwork: true } : {}),
       });
     },
     async close() {

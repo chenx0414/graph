@@ -7,7 +7,7 @@ import type { ModelEntry } from '../catalog/models.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
-import { loadCapabilities } from './capabilities.ts';
+import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import { openPiInstance } from './pi-instance.ts';
 import { createRetrievalBroker } from './retrieval.ts';
@@ -72,6 +72,7 @@ export function createPiAdapter(options: {
         const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
+        let permissionRequest: CapabilityPermissionRequest | undefined;
         const channels = options.channels;
         let capabilities: Awaited<ReturnType<typeof loadCapabilities>>;
         let commands: Awaited<ReturnType<typeof openWorkspaceCommandRunner>>;
@@ -84,6 +85,8 @@ export function createPiAdapter(options: {
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
             workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'), gate,
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
+            grants: operation.grants,
+            onPermissionRequired: request => { permissionRequest ??= request; },
           });
           commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
         } catch (error) {
@@ -129,6 +132,13 @@ export function createPiAdapter(options: {
                 ].join('\n')
               : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             await session.prompt(`${briefing}${hint}`);
+            if (permissionRequest) {
+              return {
+                outcome: 'waiting', output: { permission: { grant: permissionRequest.grant, capabilityId: permissionRequest.capabilityId, tool: permissionRequest.tool } },
+                question: { prompt: `Remote MCP tool ${permissionRequest.tool} requires the user grant ${permissionRequest.grant} in this task`, grant: permissionRequest.grant },
+                usage: gate.total(),
+              };
+            }
             const text = assistantText(session.inspect().messages);
             return { outcome: 'completed', output: (submitted ?? { text }) as Json, usage: gate.total() };
           } finally { await session.close(); }

@@ -2,7 +2,7 @@
 
 快照：2026-09-12（Asia/Shanghai）。使用者要求把本轮 R1–R4 修复整理成 handoff，供其他 Agent 接手。
 
-**状态：首版完成。M0–M7 已提交；独立验收反例的修复见 [acceptance-rework.md](acceptance-rework.md)、[acceptance-followup.md](acceptance-followup.md) 与 [next-steps-after-r3.md](next-steps-after-r3.md#第八轮真实-a13-执行结果2026-09-12)。2026-09-12 真实 A13 已在隔离副本上完成并合入目标分支（提交 `725cb1be`），机制矩阵 A01–A12 通过；详见 [M7 报告](m7-results.md#真实-a13-运行2026-09-12)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：首版返工中。M0–M7 已提交，但 2026-09-12 独立复核推翻了“首版完成”：A06（未知用量/重试）、A08（逐调用暂停）、A10（远程 MCP 授权）、A13（缺少本机 Web 应用）未通过，另有两项 P2 交付错误。见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)。已修复传输重试与远程 MCP 授权/暂停边界；Web 应用与交付错误由后续真实任务返工。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 

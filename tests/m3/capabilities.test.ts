@@ -274,7 +274,7 @@ test('a definition-bound remote MCP tool is callable through the granted domain 
   ]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace, grants: ['mcp:remote:echo'] }],
     network: { mcpDomains: ['127.0.0.1'] },
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },

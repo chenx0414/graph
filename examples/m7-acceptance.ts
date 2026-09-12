@@ -319,6 +319,18 @@ async function main() {
     ...(retrievalDomains.length ? { retrievalDomains } : {}),
     ...(mcpDomains.length ? { mcpDomains } : {}),
   };
+  // Program checks may resolve dependencies and run a local browser test from
+  // host-selected paths; none of this comes from a worker or the proposal.
+  const programReadPaths = (process.env.GRAPH_M7_PROGRAM_READ_PATHS ?? '').split(':').map(value => value.trim()).filter(Boolean);
+  const programNodeModules = process.env.GRAPH_M7_PROGRAM_NODE_MODULES?.trim();
+  const programEnv = process.env.GRAPH_M7_PROGRAM_ENV?.trim()
+    ? JSON.parse(process.env.GRAPH_M7_PROGRAM_ENV) as Record<string, string>
+    : undefined;
+  const program = {
+    ...(programReadPaths.length ? { readPaths: programReadPaths } : {}),
+    ...(programNodeModules ? { nodeModulesPath: programNodeModules } : {}),
+    ...(programEnv ? { env: programEnv } : {}),
+  };
   const paths: HarnessPaths = {
     workDir,
     runFile: join(workDir, 'run.json'),
@@ -350,6 +362,7 @@ async function main() {
     models: { entries, apiKey, modelRuntime },
     master: { action: 'master', definitionVersion: 'master@1', model: implementationId },
     ...(retrievalDomains.length || mcpDomains.length ? { network } : {}),
+    ...(Object.keys(program).length ? { program } : {}),
   });
   try {
     runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');

@@ -111,6 +111,8 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 
 ## 第八轮：真实 A13 执行结果（2026-09-12）
 
+> **2026-09-12 独立验收修正：本轮的“首版完成”结论作废。**复核发现传输重试绕过暂停门、远程 MCP 缺操作授权、握手暂停后仍发送请求，以及 A13 未交付规定的本机 Web 应用与两项交付错误；A06/A08/A10/A13 返工中。见 [final-acceptance-2026-09-12.md](final-acceptance-2026-09-12.md)。
+
 使用者在 commandcode 网关上授权真实运行（实现 `deepseek/deepseek-v4-flash`，审查 `deepseek/deepseek-v4-pro`）。
 
 执行链：契约预检（普通回答 + 工具调用、reportedModel 可区分、usage 可解析）→ 真实运行。运行中暴露并修复：
