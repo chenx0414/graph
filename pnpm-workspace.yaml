@@ -6,3 +6,4 @@ allowBuilds:
   protobufjs: false
 minimumReleaseAgeExclude:
   - '@types/node@24.13.4'
+  - fastify@5.12.4

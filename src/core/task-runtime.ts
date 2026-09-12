@@ -178,7 +178,11 @@ export async function openTaskRuntime(options: {
             proposalVersion: task.latest_proposal, acceptedProposalVersion: task.accepted_proposal,
             graphVersion: task.graph_version,
             proposal: proposal ? JSON.parse(proposal.spec) as Proposal : null, messages,
-            containers: task.accepted_proposal ? loadGraph(store, taskId).containers() : [],
+            ...(() => {
+              const graph = task.accepted_proposal ? loadGraph(store, taskId) : undefined;
+              return { containers: graph ? graph.containers() : [], loops: graph ? graph.plan.loops : [] };
+            })(),
+            revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused),
             status: task.paused ? (operations.some(op => op.worker_active) ? 'pausing' : 'paused') : questions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operations: operations.map(row => ({ ...JSON.parse(row.spec) as Operation, state: row.state, reserved: row.reserved, workerActive: Boolean(row.worker_active), result: row.result ? JSON.parse(row.result) as OperationResult : null })),
@@ -223,6 +227,11 @@ export async function openTaskRuntime(options: {
       };
     },
     async list() { ensureOpen(); return store.db.prepare('SELECT id,phase FROM tasks ORDER BY created_seq').all() as { id: string; phase: string }[]; },
+    async projects() {
+      ensureOpen();
+      return (store.db.prepare('SELECT id,root,grants FROM projects ORDER BY id').all() as { id: string; root: string; grants: string }[])
+        .map(row => ({ id: row.id, root: row.root, grants: JSON.parse(row.grants) as string[] }));
+    },
   };
 
   return {
@@ -259,12 +268,50 @@ export async function openTaskRuntime(options: {
         },
       };
     },
+    events(taskId: string, after = 0, limit = 200) {
+      ensureOpen(); store.task(taskId);
+      const cap = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 200;
+      return (store.db.prepare('SELECT cursor,type,data,timestamp FROM events WHERE task_id=? AND cursor>? ORDER BY cursor LIMIT ?').all(taskId, after, cap) as { cursor: number; type: string; data: string; timestamp: number }[])
+        .map(row => ({ cursor: row.cursor, type: row.type, data: JSON.parse(row.data) as Json, timestamp: row.timestamp, taskId }));
+    },
+    operations(taskId: string, query: { after?: string; limit?: number } = {}) {
+      ensureOpen(); store.task(taskId);
+      const limit = Number.isSafeInteger(query.limit) && query.limit! > 0 ? Math.min(query.limit!, 100) : 50;
+      const rows = store.db.prepare('SELECT * FROM operations WHERE task_id=? AND rowid>COALESCE((SELECT rowid FROM operations WHERE id=?),0) ORDER BY rowid LIMIT ?')
+        .all(taskId, query.after ?? '', limit) as OperationRow[];
+      const ids = rows.map(row => row.id);
+      const times = ids.length ? store.db.prepare(`SELECT type,data,timestamp FROM events WHERE task_id=? AND type IN ('operation.dispatched','operation.result') AND json_extract(data,'$.operationId') IN (${ids.map(() => '?').join(',')}) ORDER BY cursor`).all(taskId, ...ids) as { type: string; data: string; timestamp: number }[] : [];
+      const started = new Map<string, number>();
+      const ended = new Map<string, number>();
+      for (const row of times) {
+        const data = JSON.parse(row.data) as { operationId?: string };
+        if (!data.operationId) continue;
+        if (row.type === 'operation.dispatched') started.set(data.operationId, row.timestamp);
+        if (row.type === 'operation.result') ended.set(data.operationId, row.timestamp);
+      }
+      return rows.map(row => {
+        const spec = JSON.parse(row.spec) as Operation;
+        const start = started.get(row.id);
+        const stop = ended.get(row.id);
+        return {
+          ...spec, state: row.state, reserved: row.reserved, workerActive: Boolean(row.worker_active),
+          result: row.result ? JSON.parse(row.result) as OperationResult : null,
+          ...(start ? { startedAt: start } : {}), ...(stop ? { endedAt: stop, durationMs: stop - (start ?? stop) } : {}),
+        };
+      });
+    },
+    models() {
+      ensureOpen();
+      return (store.db.prepare('SELECT id,spec FROM models ORDER BY id').all() as { id: string; spec: string }[])
+        .map(row => ({ id: row.id, ...JSON.parse(row.spec) as { provider: string; grade: string } }));
+    },
     catalog: {
       publishDefinition(id: string, spec: DefinitionSpec, requestId: string) {
         ensureOpen();
         return store.command('catalog', requestId, { type: 'publish', id, spec }, () => catalog.publishDefinition(id, spec));
       },
       definitions() { ensureOpen(); return catalog.listDefinitions(); },
+      capabilities() { ensureOpen(); return catalog.capabilities(); },
       capability(id: string) { ensureOpen(); return catalog.capability(id); },
       async install(input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) {
         ensureOpen();

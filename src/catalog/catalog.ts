@@ -51,4 +51,9 @@ export class Catalog {
   listDefinitions() {
     return this.store.db.prepare('SELECT id,MAX(version) AS version FROM definitions GROUP BY id').all() as { id: string; version: number }[];
   }
+
+  capabilities() {
+    const rows = this.store.db.prepare('SELECT id,kind,source,version,snapshot,status FROM capabilities ORDER BY rowid').all() as { id: string; kind: CapabilityRecord['kind']; source: string; version: string; snapshot: string; status: CapabilityRecord['status'] }[];
+    return rows.map(row => ({ ...row, snapshot: JSON.parse(row.snapshot) as Json }));
+  }
 }
