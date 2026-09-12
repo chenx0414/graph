@@ -230,6 +230,47 @@ test('a production worker receives the task graph with the check commands', asyn
   expect(prompt).toContain('ok (check check)');
 });
 
+test('a production reviewer receives the independent review report schema', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-review-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, 'package.json'), '{}\n');
+  const provider = await openaiServer([
+    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'x' }) }] },
+    { text: 'Wrote the feature.' },
+    { text: 'Review submitted.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const reader = { ...provider.model, id: 'reader' };
+  provider.runtime.registerProvider('graph-openai-reader', { baseUrl: provider.model.baseUrl, api: 'openai-completions', apiKey: 'scripted-local-key', models: [reader] });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl), { id: 'reader', provider: 'graph-openai-reader', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: { kind: 'program', prepare: async () => async () => ({
+      outcome: 'completed', output: null,
+      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
+    }) } },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Work',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+      { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'reader', dependsOn: ['check'] },
+      { id: 'review-gate', kind: 'program', action: 'graph.verify', dependsOn: ['review'], verifier: { kind: 'independent', reportNodes: ['review'] } },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+  const reviewRequest = provider.requests.map(request => JSON.stringify(request)).find(text => text.includes('graph.verify independent gate'));
+  expect(reviewRequest).toBeDefined();
+  expect(reviewRequest).toContain('sha256');
+});
+
 test('a production worker writes the workspace through tools', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-write-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

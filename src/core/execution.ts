@@ -386,6 +386,8 @@ export class Execution {
       const graphBriefing = task.accepted_proposal !== null && spec.kind === 'agent'
         ? [...loadGraph(this.store, node.task_id).plan.nodes.values()]
         : undefined;
+      const verifier = graphBriefing?.find(candidate => candidate.action === 'graph.verify' && candidate.verifier?.reportNodes.includes(spec.id));
+      const review = verifier?.verifier ? [{ kind: verifier.verifier.kind }] : undefined;
       if (this.catalog) {
         let capabilities: { id: string; version: string }[] | undefined;
         if (spec.definitionVersion) {
@@ -397,6 +399,7 @@ export class Execution {
           acceptance: proposal?.acceptance ?? [],
           ...(capabilities?.length ? { capabilities } : {}),
           ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
+          ...(review ? { review } : {}),
           ...(spec.role === 'master' ? { catalog: {
             definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
             capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
@@ -407,6 +410,7 @@ export class Execution {
           request: task.request, ...(proposal?.summary ? { summary: proposal.summary } : {}),
           acceptance: proposal?.acceptance ?? [],
           ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
+          ...(review ? { review } : {}),
         });
       }
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
