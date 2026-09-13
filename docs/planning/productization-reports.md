@@ -362,3 +362,23 @@
 - 新增回归 `tests/m8/rework.test.ts`：首轮工具调用写入 `partial.txt` 并消耗 50 tokens，第二次发送前暂停；暂停态断言 `interrupted / workerActive:false / reserved:0 / used:50 / 无问题 / work pending / 检查 pending`，文件已写入；恢复后 2 次请求、全部成功、`used=100`（两次调用各计一次）、文件未被重复覆盖。
 - 验收方探针复跑：`partial-pause`、`after-tool-pause` 均 `interrupted` → 恢复后 `completed`、`reconcile` 接受；`pause-resume-verified --pause` 阶段断言通过（暂停 0 请求 0 成功、恢复 20 请求全部成功且并发 ≤10）；`graph-rework3-model-error` 保持失败结算。
 - 项目 Node 24.20.0：全量 **47 文件 / 219 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针全部 `rc=0`。证据见 `acceptance-evidence/rework4-independent.output.txt`、`rework4-graph-full.output.txt`。未调用付费供应商；是否关闭由独立复验决定。
+
+## 返工轮 5 · PA02-R4（interrupted 的未知用量可核对后继续）
+
+基线：`c8a6816`。第五次独立验收确认已知用量的部分执行恢复通过，保留 PA02-R4：部分执行后操作进入 `interrupted` 且 `result=null`，其 `unknown_usage` 问题无论“补记用量”还是“保留未知并放行”都因既有入口要求 `operation.result` 而返回 `invalid_answer`，用户无法解除阻塞。
+
+### 修复
+
+- `answer()` 对 `state='interrupted'` 的 `unknown_usage` 问题走新的核对路径，不再要求已存在的结果：
+  - **补记用量**：把提供的权威用量写入该操作**唯一**的未知 invocation（多个未知调用时明确拒绝，不猜测拆分），按模型目录估算费用；
+  - **保留未知并放行**：未知 invocation 保持 `usage=null`、费用保持 unknown，不折零；
+  - 两种路径都把该操作已结算 invocation 的已知用量**一次性**累计到 `instances.used` 并同步 `models_used`，写入 `operation.usage_reconciled` 事件；操作保持 `interrupted`（它是未完成工作的真实状态），问题解答后节点回到 `pending`，恢复时继续原实例会话。
+- 重复答复由既有问题状态检查拒绝（`invalid_question`），不会重复计费；`result` 非空或 worker 仍活跃时不会进入该路径，仍使用原有结算规则。
+
+### 复验
+
+- 新增回归 `tests/m8/rework.test.ts`：
+  - 纯未知：首轮工具调用无 usage → 暂停门拒绝 → `interrupted`；两种答复均成功、重复答复 `invalid_question`；恢复后原实例继续，用量分别为 100（补记 50 + 恢复调用 50）与 50（未知保留 + 恢复调用）；
+  - 混合已知/未知：首轮已知 50 并写入文件，第二轮无 usage，第三轮发送被门拒绝 → `interrupted`，文件保留；两种答复后已知部分分别累计为 100 / 50，恢复后最终为 150 / 100，文件未被重复覆盖。
+- 你方探针 `interrupted-unknown`：`usage` 答复 `accepted:true`、随后的第二个答复按已解决拒绝；节点恢复完成。
+- 项目 Node 24.20.0（main 工作树）：全量 **47 文件 / 221 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针全部 `rc=0`；其余各轮探针（零发送暂停、20 并发上限、部分执行已知用量、模型错误、别名、配置版本、实时记录、PA05）保持通过。证据：`acceptance-evidence/rework5-independent.output.txt`、`rework5-graph-full.output.txt`、`t08-probes.output.txt`。未调用付费供应商；是否关闭由独立复验决定。

@@ -1,0 +1,9 @@
+
+ RUN  v5.0.0 /Users/macmini/workspace/graph-main-pa02r4
+
+
+ Test Files  47 passed (47)
+      Tests  221 passed (221)
+   Start at  23:08:24
+   Duration  15.03s (tests 73%, import 25%, transform 1%)
+

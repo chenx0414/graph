@@ -1,0 +1,1 @@
+{"probe":"config-save-alias-group-conflict","saveStatus":400,"saved":{"code":"invalid_config","message":"credentials.a.sharedLimitGroupId: aliases resolving to one key must share one sharedLimitGroupId (a, b)","field":"credentials.a.sharedLimitGroupId"},"persistedGroups":[null,null],"restart":{"started":true}}

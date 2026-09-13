@@ -1,0 +1,23 @@
+save 200 { revision: 1, restartRequired: true }
+activeProjects [
+  {
+    id: 'old',
+    root: '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-review-config-yF6Ngz',
+    grants: []
+  }
+] created [
+  {
+    cursor: 1,
+    type: 'task.created',
+    data: { configRevision: 0, request: 'old active config' },
+    timestamp: 1789299928236,
+    taskId: '8a260920-daca-4824-ad04-aabf86d002bf'
+  }
+]
+afterRestartProjects [
+  {
+    id: 'new',
+    root: '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-review-config-yF6Ngz',
+    grants: []
+  }
+]
