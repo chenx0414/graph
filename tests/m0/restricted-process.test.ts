@@ -13,6 +13,9 @@ import { controlledOpenAIStream } from '../../src/runtime/controlled-openai.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const dirs: string[] = [];
+const activeServerHandles = () =>
+  (process as unknown as { _getActiveHandles(): { constructor: { name: string } }[] })._getActiveHandles()
+    .filter(handle => handle.constructor.name === 'Server');
 let executor: Awaited<ReturnType<typeof openRestrictedExecutor>>;
 beforeAll(async () => { executor = await openRestrictedExecutor(); });
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -54,9 +57,14 @@ test('real macOS workers allow granted writes and block host state, credentials,
   expect(await readFile(protectedFile, 'utf8')).toBe('formal-state');
   expect(await readFile(join(workspace, 'allowed.txt'), 'utf8')).toBe('ok');
   expect(networkHits).toBe(0);
-  const pendingRun = executor.run({ broker, cwd: workspace, executable: process.execPath, args: ['probe.mjs'], readPaths: [dirname(process.execPath)], writePaths: [workspace] });
+  const beforePause = activeServerHandles().length;
+  const pendingRun = executor.run({ broker, cwd: workspace, executable: process.execPath, args: ['probe.mjs'], readPaths: [dirname(process.execPath)], writePaths: [workspace], localNetwork: true });
   broker.pause(); // Pause during asynchronous sandbox preparation, before OS spawn.
   await expect(pendingRun).rejects.toThrow('paused');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  // A denied dispatch must not leave a host listener behind; the old fixed
+  // pool created eight of them before the gate ran.
+  expect(activeServerHandles()).toHaveLength(beforePause);
   expect(broker.inspect().calls).toHaveLength(1);
   broker.close();
 });

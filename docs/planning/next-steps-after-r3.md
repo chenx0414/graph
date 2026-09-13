@@ -109,6 +109,17 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
 - 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
 
+## 第十二轮：S4/R8 收尾（2026-09-13）
+
+[R6 收尾验收](r6-acceptance-2026-09-13.md) 关闭了原权限绕过，但指出两项 P2：旧实现会在 `broker.dispatch` 之前预创建 4+4 个宿主监听器且不回收（S4），预分配 fd 会忽略 `listen()` 的请求端口并在第五次监听时耗尽（R8）。
+
+改为按请求提供监听能力：
+
+- 检查每次调用 loopback `listen(port, host)`，预载通过 IPC 向宿主请求；宿主按**请求的端口与主机**绑定，把已绑定 socket 经 `child.send` 句柄交给检查后立即关闭宿主副本。检查持有唯一的 accept 描述符：宿主不残留监听器，端口占用原样返回 `EADDRINUSE`，固定端口不被静默替换，监听次数不受固定 fd 数量限制。
+- 预载只负责转发与采纳宿主句柄，无宿主任可时直接 EPERM；沙箱 `(deny network-bind)` 不变，清除 `NODE_OPTIONS` 的子进程与非 Node 进程仍由 OS 拒绝任何新 bind。
+- IPC 通道在无挂起监听请求时 `unref`，检查处理完脚本即退出；通道不会吊住检查进程。
+- 复验：`host-listener-contract.mts` 固定端口 `requested == actual`、同进程 5 次启停全部成功、IPv4/IPv6 正常、清环境子进程与非 Node 进程全部 EPERM；`host-listener-paused-gate.mts` 拒绝后与 `close()` 后监听器均为 0；Graph 测试 38 文件 / 178 项；交付浏览器 E2E 3/3。是否关闭 S4/R8 由独立复验决定。
+
 ## 第十一轮：R6 收尾（2026-09-12）
 
 第三轮复验指出 listen 守卫可被子进程清除 `NODE_OPTIONS` 绕过。改为宿主持有的监听边界：

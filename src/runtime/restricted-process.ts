@@ -17,51 +17,103 @@ import type { TokenUsage } from './call-broker.ts';
  * and every non-loopback or unresolved call is refused before the socket API.
  */
 const LOOPBACK_LISTEN_GUARD = String.raw`'use strict';
+// Routing shim only: the sandbox denies every bind and the host owns the only
+// loopback listeners. The host binds the exact requested port, duplicates the
+// bound socket over the IPC channel and drops its own copy, so the check holds
+// the only accepting descriptor. Removing this preload only removes the route;
+// it can never grant a bind, and a busy port keeps its original error instead
+// of being silently replaced by another one.
 const net = require('node:net');
 const dgram = require('node:dgram');
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
-function deny() {
-  const error = new Error('EPERM: sandboxed checks may only listen on loopback');
+function denied(message) {
+  const error = new Error(message || 'EPERM: sandboxed checks may only listen on an explicit loopback host');
   error.code = 'EPERM';
-  throw error;
+  return error;
 }
-function queue(name) {
-  return String(process.env[name] || '').split(',').map(Number).filter(value => Number.isInteger(value) && value > 0);
+function deny() { throw denied(); }
+function boundedPort(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 65535 ? value : undefined;
 }
-const ipv4 = queue('GRAPH_CHECK_LISTEN_FD_V4');
-const ipv6 = queue('GRAPH_CHECK_LISTEN_FD_V6');
-function serverHost(args) {
+function listenRequest(args) {
   const first = args[0];
-  if (first && typeof first === 'object') return first.host;
-  return typeof args[1] === 'string' ? args[1] : undefined;
+  if (first && typeof first === 'object') {
+    if (first.path !== undefined || first.fd !== undefined) return undefined;
+    const port = boundedPort(first.port === undefined ? 0 : first.port);
+    return port === undefined ? undefined : { port, host: typeof first.host === 'string' ? first.host : undefined };
+  }
+  if (typeof first === 'string') return undefined; // Unix socket paths are not host-provided.
+  const port = boundedPort(first === undefined ? 0 : first);
+  return port === undefined ? undefined : { port, host: typeof args[1] === 'string' ? args[1] : undefined };
+}
+function lastCallback(args) {
+  const last = args[args.length - 1];
+  return typeof last === 'function' ? last : undefined;
+}
+function hostHandle(value) {
+  // Node's IPC handle conversion hands the raw TCP handle of a received
+  // net.Server to listen(), and check code may pass an already listening
+  // host-bound server back in. Both are internal handle objects that own a
+  // socket descriptor, unlike a check-supplied options object. Pass them to
+  // the original implementation; the sandbox still denies bind() itself.
+  if (value === null || typeof value !== 'object') return false;
+  if (value instanceof net.Server) return true;
+  return typeof value.fd === 'number' && typeof value.bind === 'function' &&
+    typeof value.listen === 'function' && typeof value.getsockname === 'function';
 }
 const listen = net.Server.prototype.listen;
+const close = net.Server.prototype.close;
+const waiting = new Map();
+const granted = new WeakMap();
+let nextId = 1;
+// The IPC channel must not keep a finished check alive, but a pending listen
+// request needs it until its reply arrives. Ref only while one is in flight.
+function channelRef() {
+  if (process.channel && typeof process.channel.ref === 'function') process.channel.ref();
+}
+function channelIdle() {
+  if (waiting.size === 0 && process.channel && typeof process.channel.unref === 'function') process.channel.unref();
+}
+channelIdle();
 net.Server.prototype.listen = function (...args) {
-  const host = serverHost(args);
-  if (host !== undefined && !LOOPBACK.has(host)) deny();
-  const fd = (host === '::1' ? ipv6 : ipv4).shift();
-  if (!fd) deny();
-  const callback = args.length && typeof args[args.length - 1] === 'function' ? args[args.length - 1] : undefined;
-  return callback ? listen.call(this, { fd }, callback) : listen.call(this, { fd });
+  if (hostHandle(args[0])) return listen.apply(this, args);
+  const request = listenRequest(args);
+  if (!request || request.host === undefined || !LOOPBACK.has(request.host)) deny();
+  if (typeof process.send !== 'function' || process.connected === false) deny();
+  const id = nextId++;
+  waiting.set(id, { server: this, callback: lastCallback(args) });
+  granted.set(this, id);
+  channelRef();
+  process.send({ type: 'graph-check-listener', id, port: request.port, host: request.host });
+  return this;
 };
+net.Server.prototype.close = function (...args) {
+  const id = granted.get(this);
+  if (id !== undefined) {
+    granted.delete(this);
+    if (typeof process.send === 'function' && process.connected !== false) {
+      try { process.send({ type: 'graph-check-listener-close', id }); } catch { /* channel closed */ }
+    }
+  }
+  return close.apply(this, args);
+};
+process.on('message', (message, handle) => {
+  if (!message || message.type !== 'graph-check-listener-result') return;
+  const entry = waiting.get(message.id);
+  if (!entry) {
+    if (handle && typeof handle.close === 'function') { try { handle.close(); } catch { /* already closed */ } }
+    return;
+  }
+  waiting.delete(message.id);
+  if (message.ok && handle) { listen.call(entry.server, handle, entry.callback); channelIdle(); return; }
+  const error = new Error(message.message || 'EPERM: the host refused the loopback listener');
+  error.code = message.code || 'EPERM';
+  channelIdle();
+  process.nextTick(() => entry.server.emit('error', error));
+});
 // No UDP listener is host-provided; the profile denies the bind as well.
 dgram.Socket.prototype.bind = function () { deny(); };
 `;
-
-interface HostListener { fd: number; close(): void }
-
-/** A trusted host-side loopback listener whose duplicated fd is handed to one check run. */
-async function loopbackListener(host: string): Promise<HostListener | undefined> {
-  return new Promise(resolve => {
-    const server: TcpServer = createTcpServer(() => {});
-    server.once('error', () => resolve(undefined));
-    server.listen(0, host, () => {
-      const fd = (server as unknown as { _handle?: { fd?: number } })._handle?.fd;
-      if (!fd) { server.close(); resolve(undefined); return; }
-      resolve({ fd, close: () => { try { server.close(); } catch { /* already closed */ } } });
-    });
-  });
-}
 
 export interface RestrictedGate {
   dispatch<T>(id: string, reservation: number, send: () => T): T;
@@ -227,23 +279,16 @@ export async function openRestrictedExecutor() {
       );
       const boundedProfile = extractProfile(wrapped, launch) + '\n' + profile + localNetworkProfile;
       let listenGuard: string | undefined;
-      const stdio: ('pipe' | number)[] = ['pipe', 'pipe', 'pipe', 'pipe'];
-      const listeners: HostListener[] = [];
-      const ipv4Fds: number[] = [];
-      const ipv6Fds: number[] = [];
+      // An IPC channel carries each host-bound loopback listener to the check.
+      const stdio: ('pipe' | 'ipc')[] = command.localNetwork ? ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe', 'pipe'];
       if (command.localNetwork) {
         listenGuard = join(scratchDir, '.graph-listen-guard.cjs');
         await writeFile(listenGuard, LOOPBACK_LISTEN_GUARD, { mode: 0o600 });
-        // Distinct listeners per family keep later listens in one check process
-        // alive after an earlier server closed its descriptor.
-        const ipv4 = await Promise.all(Array.from({ length: 4 }, () => loopbackListener('127.0.0.1')));
-        const ipv6 = await Promise.all(Array.from({ length: 4 }, () => loopbackListener('::1')));
-        for (const listener of [...ipv4, ...ipv6]) if (listener) listeners.push(listener);
-        for (const listener of ipv4) if (listener) { ipv4Fds.push(stdio.length); stdio.push(listener.fd); }
-        for (const listener of ipv6) if (listener) { ipv6Fds.push(stdio.length); stdio.push(listener.fd); }
       }
+      // --test-isolation=none keeps node --test files in the process that owns
+      // the IPC channel; an isolation child would have no route to the host.
       const guardEnv = listenGuard
-        ? { NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', `--require=${listenGuard}`].filter(Boolean).join(' '), GRAPH_CHECK_LISTEN_FD_V4: ipv4Fds.join(','), GRAPH_CHECK_LISTEN_FD_V6: ipv6Fds.join(',') }
+        ? { NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', `--require=${listenGuard}`].filter(Boolean).join(' ') }
         : {};
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
@@ -252,8 +297,43 @@ export async function openRestrictedExecutor() {
             cwd, detached: true, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}), ...guardEnv },
             stdio,
           });
-          // The child holds duplicated descriptors, so the host can stop accepting now.
-          for (const listener of listeners) listener.close();
+          if (command.localNetwork) {
+            // The host owns every listener: it binds the exact loopback port a
+            // check asks for, duplicates the bound socket over the IPC channel
+            // and immediately drops its own descriptor. The check therefore
+            // holds the only accepting copy, a busy port keeps its original
+            // error instead of being replaced, and no descriptor survives a
+            // denied dispatch, a failed spawn or an executor close.
+            spawned.on('message', (raw: unknown) => {
+              if (!raw || typeof raw !== 'object') return;
+              const request = raw as { type?: unknown; id?: unknown; port?: unknown; host?: unknown };
+              if (request.type !== 'graph-check-listener') return;
+              const id = Number.isInteger(request.id) ? request.id as number : undefined;
+              const port = Number.isInteger(request.port) && (request.port as number) >= 0 && (request.port as number) <= 65_535 ? request.port as number : undefined;
+              const host = request.host === '127.0.0.1' || request.host === '::1' || request.host === 'localhost' ? request.host : undefined;
+              const reply = (payload: Record<string, unknown>, handle?: TcpServer) => {
+                try {
+                  if (handle === undefined) spawned.send(payload);
+                  else spawned.send(payload, handle, error => { if (error) handle.close(); });
+                } catch { /* The channel is gone; the check guard denies its listen. */ }
+              };
+              if (id === undefined || port === undefined || host === undefined) {
+                if (id !== undefined) reply({ type: 'graph-check-listener-result', id, ok: false, code: 'EINVAL', message: 'Invalid listener request' });
+                return;
+              }
+              const listener: TcpServer = createTcpServer();
+              listener.once('error', (error: NodeJS.ErrnoException) => {
+                reply({ type: 'graph-check-listener-result', id, ok: false, code: error.code ?? 'EPERM', message: String(error) });
+                listener.close();
+              });
+              listener.listen(port, host, () => {
+                const address = listener.address();
+                reply({ type: 'graph-check-listener-result', id, ok: true, port: typeof address === 'object' && address ? address.port : port }, listener);
+                // The check holds the duplicated descriptor; the host stops accepting.
+                listener.close();
+              });
+            });
+          }
           return spawned;
         });
         let stdout = '', stderr = '';

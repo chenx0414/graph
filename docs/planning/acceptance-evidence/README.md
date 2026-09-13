@@ -1,5 +1,7 @@
 # M2–M7 验收证据
 
+2026-09-13 最新独立结论见 [7476f1c R6 收尾验收](../r6-acceptance-2026-09-13.md)：原 R6 权限绕过关闭，新增宿主监听生命周期的两项 P2。`host-listener-contract.mts` 验证 OS bind 拒绝、IPv4/IPv6 HTTP、固定端口与第五次监听；`host-listener-paused-gate.mts` 验证暂停拒绝后的资源回收。两者从 Graph 根目录使用项目 Node 24.20.0 执行，只使用临时资源和本机合成请求，并清理自身资源。`host-listener-browser.output.txt` 记录本次新沙箱内的 3 项浏览器 E2E 与全部 40 项交付测试结果。
+
 第三轮复验见 [283ffbb 独立验收](../third-round-acceptance-2026-09-12.md)。新增 `listen-guard-child-rework.mts` 与对应输出验证受限检查子进程清除 `NODE_OPTIONS` 后的实际监听和入站边界；使用项目 Node 24.20.0，从 Graph 根目录执行，仅连接本机 Ethernet/Wi-Fi 地址。`third-round-delivery-tests.output.txt` 为精确交付 `001f288` 的 40 项独立测试结果（包含真实 Chromium）。
 
 最新复验：[6004a2a 返工独立复验](../rework-acceptance-2026-09-12.md)。本轮新增诊断从 Graph 根目录运行：
@@ -108,3 +110,19 @@ R7 已由小型 Graph 任务修复并重绑证据（`graph-m7-acceptance-9`，`m
 - `local-network-rework.mts`：`localNetwork` 两种模式下 `0.0.0.0` 监听均为 EPERM。
 - `listen-guard-child-rework.mts`：直接监听被拒；清 `NODE_OPTIONS` 的子进程对 `0.0.0.0` 与 `127.0.0.1` 的新 bind 都由操作系统 `(deny network-bind)` 拒绝（`bind: undefined`、`listen EPERM`）。
 - 有界验证脚本另行确认 IPv4/IPv6 loopback 监听与自取回正常；真实交付的两个浏览器 E2E（1+2 项）通过；Graph 回归 `tests/m4/command-check.test.ts` 覆盖清环境子进程。
+
+## 2026-09-13 第十二轮：S4/R8 收尾
+
+R6 收尾验收的两项 P2（暂停拒绝泄漏宿主监听器、固定端口被替换且四次后耗尽）修复后，重跑以下探针：
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/host-listener-contract.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/host-listener-paused-gate.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/local-network-rework.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/listen-guard-child-rework.mts
+```
+
+- `host-listener-contract`：固定端口 `requested == actual` 且正文正确；同进程 5 次启停全部成功；IPv4/IPv6 正常；清 `NODE_OPTIONS` 的 Node 子进程与 CLT Python 对 `0.0.0.0`/`127.0.0.1`/`::`/`::1` 的 bind 全部 EPERM；283ffbb 基线行为不变。
+- `host-listener-paused-gate`：gate 拒绝后 `listeners: []`，`executor.close()` 后 0。
+- `local-network-rework`、`listen-guard-child-rework`：OS 层拒绝行为保持。
+- Graph 回归：`tests/m0/restricted-process.test.ts` 断言暂停拒绝不新增监听句柄；`tests/m4/command-check.test.ts` 覆盖固定端口、6 次启停与 `EADDRINUSE` 原样返回；全套 38 文件 / 178 项通过。

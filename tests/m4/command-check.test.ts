@@ -160,6 +160,54 @@ test('a graph.command check may bind loopback but not a non-loopback interface',
   expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
 });
 
+test('a graph.command check keeps its fixed loopback port and recycles listeners', async () => {
+  const root = await repo();
+  const listenAction: ActionAdapter = {
+    kind: 'agent', reserveTokens: 100,
+    prepare: async operation => async () => {
+      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
+      await writeFile(join(operation.workspace!, 'test', 'listen.test.js'), [
+        "import { test } from 'node:test';",
+        "import assert from 'node:assert';",
+        "import { createServer } from 'node:http';",
+        "const serve = async port => {",
+        "  const server = createServer((request, response) => response.end('ok-' + port));",
+        "  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });",
+        "  return server;",
+        "};",
+        "test('a fixed port stays fixed and repeated start/stop stays alive', async () => {",
+        "  const probe = createServer();",
+        "  await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, '127.0.0.1', resolve); });",
+        "  const fixed = probe.address().port;",
+        "  await new Promise(resolve => probe.close(resolve));",
+        "  const fixedServer = await serve(fixed);",
+        "  assert.equal(fixedServer.address().port, fixed);",
+        "  assert.equal(await (await fetch('http://127.0.0.1:' + fixed + '/')).text(), 'ok-' + fixed);",
+        "  await new Promise(resolve => fixedServer.close(resolve));",
+        "  for (let round = 1; round <= 6; round += 1) {",
+        "    const server = await serve(0);",
+        "    const port = server.address().port;",
+        "    assert.equal(await (await fetch('http://127.0.0.1:' + port + '/')).text(), 'ok-0');",
+        "    await new Promise(resolve => server.close(resolve));",
+        "  }",
+        "  const held = await serve(0);",
+        "  const busy = createServer();",
+        "  const conflict = await new Promise(resolve => { busy.once('error', resolve); busy.listen(held.address().port, '127.0.0.1', () => resolve(undefined)); });",
+        "  assert.equal(conflict && conflict.code, 'EADDRINUSE');",
+        "  if (!conflict) await new Promise(resolve => busy.close(resolve));",
+        "  await new Promise(resolve => held.close(resolve));",
+        "});",
+      ].join('\n'));
+      return { outcome: 'completed', output: null, usage };
+    },
+  };
+  const { runtime, task } = await start(root, { work: listenAction }, nodes, { command: 'node', args: ['--test'] });
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+});
+
 test('a graph.command check resolves host-provided dependencies and environment', async () => {
   const root = await repo();
   const modules = join(root, 'deps');
