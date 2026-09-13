@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
   daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
-  resolveDaemonMode, saveSecrets, tailText, type AppPaths, type SecretCodec,
+  resolveDaemonMode, saveSecrets, tailText, taskNotifications,
+  type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
 
 const codec: SecretCodec = {
@@ -99,5 +100,40 @@ describe('keychain secrets file', () => {
 
   test('tails logs for bounded dialogs', () => {
     expect(tailText('a\n\nb\nc\n', 2)).toBe('b\nc');
+  });
+});
+
+describe('desktop task notifications', () => {
+  test('primes on the first snapshot and reports new questions and terminal states', () => {
+    const first = taskNotifications({ primed: false, questions: {}, status: {} }, [
+      { id: 'a', request: 'first task', status: 'running', openQuestions: 1 },
+    ]);
+    expect(first.notifications).toEqual([]);
+    expect(first.openTotal).toBe(1);
+    expect(first.state).toMatchObject({ primed: true, questions: { a: 1 }, status: { a: 'running' } });
+
+    const second = taskNotifications(first.state, [
+      { id: 'a', request: 'first task', status: 'running', openQuestions: 2 },
+      { id: 'b', request: 'second task', status: 'completed' },
+    ]);
+    expect(second.notifications.map(item => item.title)).toEqual(['任务需要处理']);
+    expect(second.notifications[0]?.taskId).toBe('a');
+    expect(second.openTotal).toBe(2);
+
+    const third = taskNotifications(second.state, [
+      { id: 'a', request: 'first task', status: 'completed', openQuestions: 0 },
+      { id: 'b', request: 'second task', status: 'completed' },
+    ]);
+    expect(third.notifications.map(item => item.title)).toEqual(['任务已完成']);
+    expect(third.notifications[0]?.body).toBe('first task');
+  });
+
+  test('does not notify for answered questions or unchanged terminal tasks', () => {
+    const state = { primed: true, questions: { a: 0 }, status: { a: 'completed' } };
+    const result = taskNotifications(state, [
+      { id: 'a', request: 'done', status: 'completed', openQuestions: 0 },
+    ]);
+    expect(result.notifications).toEqual([]);
+    expect(result.openTotal).toBe(0);
   });
 });

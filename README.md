@@ -77,7 +77,7 @@ export PATH="$PWD/node_modules/.bin:$PATH"
 npx --yes electron@44.3.0 .        # 或安装 devDependencies 后：node --run app:dev
 ```
 
-当前为 A2（桌面壳 + 首次运行向导 + 钥匙串）：托盘与通知在 A3，打包与签名在 A4。
+当前为 A3（桌面壳 + 向导 + 可视化增强：运行时间线、用量面板、问题收件箱、系统通知与 Dock 角标）：托盘图标、打包与签名在 A4。
 
 ## 运行验证
 

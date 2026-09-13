@@ -286,6 +286,7 @@ export async function openTaskRuntime(options: {
         id: row.id, projectId: row.projectId, request: row.request, phase: row.phase,
         status: row.paused ? 'paused' : row.openQuestions > 0 ? 'blocked' : row.phase,
         acceptedProposalVersion: row.acceptedProposalVersion, updatedAt: row.updatedAt,
+        openQuestions: row.openQuestions,
       }));
     },
     async projects() {

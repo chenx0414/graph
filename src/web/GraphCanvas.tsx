@@ -1,4 +1,5 @@
-import { ReactFlow, Background, Controls, MarkerType } from '@xyflow/react';
+import { ReactFlow, Background, Controls, MarkerType, MiniMap } from '@xyflow/react';
+import { NODE_TONE_COLOR, nodeTone } from './insights.ts';
 
 type GraphPayload = {
   nodes: { id: string; kind: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null }[];
@@ -32,13 +33,14 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
     ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => {
       const position = graph.layout.positions[node.id] ?? { x: 0, y: 0, width: 180, height: 48 };
       const selectedStyle = selected === node.id ? { border: '2px solid #2563eb', boxShadow: '0 0 0 2px rgba(37,99,235,0.2)' } : {};
+      const tone = NODE_TONE_COLOR[nodeTone(node.status)];
       return {
         id: node.id, position: { x: position.x, y: position.y },
         data: { label: `${node.id} ${node.status}` },
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
-        style: { width: position.width, height: position.height, minWidth: 120, minHeight: 36, ...selectedStyle },
+        style: { width: position.width, height: position.height, minWidth: 120, minHeight: 36, border: `2px solid ${tone}`, ...selectedStyle },
         ...(node.container ? { parentId: node.container } : {}),
       };
     }),
@@ -57,6 +59,14 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
         onNodeClick={(_event, node) => onSelect(node.id)} fitView>
         <Background />
         <Controls />
+        <MiniMap
+          pannable
+          zoomable
+          nodeColor={node => {
+            const status = (node.data as { label?: string }).label?.split(' ').pop();
+            return status ? NODE_TONE_COLOR[nodeTone(status)] : 'transparent';
+          }}
+        />
       </ReactFlow>
     </div>
   );

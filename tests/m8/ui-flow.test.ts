@@ -47,7 +47,9 @@ async function launch() {
 }
 
 test('cursor helpers ignore duplicates and out-of-order frames', () => {
-  expect(nextEventCursor(0, { cursor: 3, type: 'task.created' })).toEqual({ cursor: 3, type: 'task.created' });
+  expect(nextEventCursor(0, { cursor: 3, type: 'task.created' })).toMatchObject({ cursor: 3, type: 'task.created', data: {} });
+  // The full payload survives so the timeline can label the event.
+  expect(nextEventCursor(0, { cursor: 5, type: 'x', data: { nodeId: 'work' }, timestamp: 123 })).toEqual({ cursor: 5, type: 'x', data: { nodeId: 'work' }, timestamp: 123 });
   expect(nextEventCursor(3, { cursor: 3, type: 'task.created' })).toBeNull();
   expect(nextEventCursor(3, { cursor: 2, type: 'task.created' })).toBeNull();
   expect(nextEventCursor(3, { cursor: 4.5, type: 'x' })).toBeNull();

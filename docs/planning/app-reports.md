@@ -59,3 +59,24 @@ node_modules/.bin/vitest run tests/app    # 20 项
 
 - 桌面壳先播种最小配置（`{"version":1,"projects":[]}`），使守护进程始终绑定配置路径，`/api/config` 才可用；浏览器直连无配置的守护进程时向导仍提示先建配置文件。
 - 钥匙串写入路径未做 GUI 自动化（safeStorage 首次使用可能弹系统授权）；A4 打包后在真机手工验收一次密钥写入与任务派发。
+
+## A3 · 可视化增强（2026-09-13）
+
+**起始提交**：`b4aabc0`（A2 向导与钥匙串）。
+**完成提交**：本次提交。
+**实际修改范围**：`src/web/insights.ts`（时间线投影、用量汇总、状态色、问题计数）、`src/web/GraphCanvas.tsx`（MiniMap、状态色边框）、`src/web/App.tsx`（运行时间线、用量面板、问题收件箱路由与导航徽标、任务列表轮询、事件刷新合并）、`src/web/event-cursor.ts`（保留完整事件负载）、`src/core/task-runtime.ts`（任务列表带开放问题数）、桌面通知（`desktop/lib.ts` 决策函数 + `desktop/main.mjs` 轮询/系统通知/Dock 角标/点击跳任务）、`tests/app/insights.test.ts`（8）、`tests/app/insights-ui.test.ts`（3）、`tests/app/desktop.test.ts`（+2）、`tests/m8/ui-flow.test.ts`（游标负载断言）、证据探针 `acceptance-evidence/app-a3-flow.mts`。
+
+**验收清单**
+
+- [x] 事件重放与实时一致：时间线只由 `/api/tasks/:id/events` 与同一 `nextEventCursor` 去重后的 SSE 帧驱动，UI 测试在真实事件流后断言含“创建任务 / 调用完成 / 任务完成”；实时刷新走 150ms 合并，与图页一致。
+- [x] 未知用量显示“未知”：`summarizeUsage` 单独计数未知节点；证据中检查节点显示“1 个节点用量未知”，单测覆盖 null/undefined 不折零（`已计量 20 tokens · 1 个节点 · 1 个节点用量未知`）。
+- [x] 图增强：MiniMap 可见、成功节点边框实测 `rgb(22, 163, 74)`、100 节点首屏绘制 **32ms**（证据探针内拦截图接口合成 100 节点；UI 测试同样断言 < 3000ms）；截图 `app-a3-graph.png`。
+- [x] 问题收件箱：导航显示 `问题 (1)` 徽标，`#/inbox` 聚合待处理问题可直接答复；UI 测试点击“答复”后收件箱清空且服务端问题关闭。
+- [x] 桌面通知：主进程每 4s 轮询任务列表，新增开放问题或到达完成/失败发系统通知，点击聚焦并跳到任务；Dock 角标显示开放问题总数；决策函数单测覆盖首帧只预热、已回答不重复通知；APP 实跑 9s 无异常、退出无孤儿。
+- [x] 既有 UI 断言适配：`tests/m8` 全部通过（游标测试改为断言完整负载保留）。
+- [x] 纯逻辑与全量：51 文件 / 249 项、双 tsc、vite build 通过；证据 `acceptance-evidence/app-a3-flow.output.txt` 与三张截图。
+
+**边界**
+
+- 托盘常驻并入 A4（需要应用图标与打包资源）；当前关闭窗口仍保留 Dock 图标与菜单，通知与角标已在 A3 生效。
+- 100 节点测量只覆盖前端渲染（图布局仍由服务端 ELK 计算）；真实大规模图的服务端布局耗时未在本次测量范围内。

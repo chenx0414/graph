@@ -45,6 +45,8 @@ export PATH="$PWD/node_modules/.bin:$PATH"
 npx --yes electron@44.3.0 .        # 开发预览；已安装 devDependencies 时 node --run app:dev
 ```
 
+A3 起控制台内置：任务页运行时间线与用量面板、图页 MiniMap 与状态色、`#/inbox` 问题收件箱（导航显示待处理数）；桌面 APP 在新增待处理问题或任务完成/失败时发系统通知，Dock 角标显示开放问题总数，点击通知跳到对应任务。
+
 首次打开且未配置时，从横幅或导航进入 `#/setup` 向导：选择项目目录（原生对话框）、选模型模板、填密钥。桌面 APP 会把密钥写入系统钥匙串（不进入配置文件），保存后自动重启守护进程；未填密钥则保持仅查看模式。数据目录与配置默认在系统用户数据目录下（macOS 为 `~/Library/Application Support/Graph`），与 CLI 版的状态目录相互独立。
 
 ## 配置

@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { nextEventCursor } from './event-cursor.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
+import { buildTimeline, openQuestionTotal, summarizeUsage, usageText, type EventRow } from './insights.ts';
 import { Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
-  acceptedProposalVersion: number | null; updatedAt: number | null;
+  acceptedProposalVersion: number | null; updatedAt: number | null; openQuestions?: number;
 };
 type Startup = { mode: 'view' | 'execute'; configured: boolean; modelCount: number; enabledModelCount: number; effectiveRevision?: number; limitAliases?: Record<string, string> };
 type TaskView = {
@@ -177,8 +178,11 @@ export function App() {
     void api<Settings>('/api/settings').then(setSettings);
     void api<Startup>('/api/startup').then(setStartup);
     void api<TaskSummary[]>('/api/tasks').then(setTasks);
-    return () => window.removeEventListener('hashchange', onHash);
+    // The inbox badge must reflect new questions from any page.
+    const poll = setInterval(() => { void api<TaskSummary[]>('/api/tasks').then(setTasks).catch(() => undefined); }, 4_000);
+    return () => { window.removeEventListener('hashchange', onHash); clearInterval(poll); };
   }, []);
+  const questionTotal = openQuestionTotal(tasks);
   const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(path);
   return (
     <div>
@@ -196,11 +200,13 @@ export function App() {
       )}
       <nav>
         <a href="#/">概览</a>
+        <a href="#/inbox">问题{questionTotal ? ` (${questionTotal})` : ''}</a>
         <a href="#/catalog">人才库</a>
         <a href="#/setup">向导</a>
         <a href="#/settings">设置</a>
       </nav>
       {path === '/' && <Overview settings={settings} tasks={tasks} onTasks={setTasks} />}
+      {path === '/inbox' && <Inbox tasks={tasks} />}
       {path === '/catalog' && <Catalog settings={settings} />}
       {path === '/setup' && <Setup />}
       {path === '/settings' && <Settings />}
@@ -335,13 +341,55 @@ function QuestionReply({ taskId, question, onDone }: {
   );
 }
 
+function Inbox({ tasks }: { tasks: TaskSummary[] }) {
+  const pending = tasks.filter(task => (task.openQuestions ?? 0) > 0);
+  const [views, setViews] = useState<Record<string, TaskView>>({});
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    const next: Record<string, TaskView> = {};
+    for (const task of pending.slice(0, 5)) {
+      try {
+        next[task.id] = await api<TaskView>(`/api/tasks/${task.id}`);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    }
+    setViews(next);
+  }, [tasks]);
+  useEffect(() => { void load(); }, [load]);
+  return (
+    <section data-testid="inbox">
+      <h2>问题收件箱</h2>
+      {error && <ErrorBox message={error} />}
+      {!pending.length && <p data-testid="inbox-empty">当前没有待处理问题。</p>}
+      {pending.map(task => (
+        <section key={task.id} data-testid={`inbox-${task.id}`}>
+          <h3><a href={`#/tasks/${task.id}`}>{task.request.slice(0, 60)}</a> · {task.projectId} · {task.openQuestions} 个待处理问题</h3>
+          <ul>{(views[task.id]?.questions ?? []).filter(question => question.status === 'open').map(question => (
+            <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => void load()} />
+          ))}</ul>
+        </section>
+      ))}
+      {pending.length > 5 && <p>其余 {pending.length - 5} 个任务请进入任务页处理。</p>}
+    </section>
+  );
+}
+
 function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (tasks: TaskSummary[]) => void; settings: Settings | null; startup: Startup | null }) {
   const { data: view, error, loading, reload } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
+  const { data: events, reload: reloadEvents } = useAsync(() => api<EventRow[]>(`/api/tasks/${id}/events?limit=200`), [id]);
   const limits = useLimits();
   const [text, setText] = useState('');
   const [branch, setBranch] = useState('main');
   const [actionError, setActionError] = useState('');
-  const connected = useTaskStream(id, () => reload());
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const refreshAll = useCallback(() => {
+    // A task action writes several records; coalesce the refetches.
+    clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => { reload(); reloadEvents(); }, 150);
+  }, [reload, reloadEvents]);
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+  const connected = useTaskStream(id, refreshAll);
   useEffect(() => {
     if (view?.targetBranch) setBranch(view.targetBranch);
   }, [view?.targetBranch]);
@@ -362,6 +410,27 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
       <h2 data-testid="request">{view.request}</h2>
       <p>项目 {view.projectId} · <span data-testid="status">{statusText(view)}</span> · 更新于 {when(view.updatedAt)}</p>
       <p data-testid="cost">{view.cost.unknown ? '费用未知' : `费用 ${view.cost.amount ?? 0}`}</p>
+      <section data-testid="usage-summary">
+        <h3>用量</h3>
+        <p>{usageText(summarizeUsage(view.nodes, view.cost))}</p>
+      </section>
+      <section data-testid="timeline">
+        <h3>运行时间线</h3>
+        {(() => {
+          const entries = events ? buildTimeline(events) : [];
+          if (!entries.length) return <p data-testid="timeline-empty">暂无事件。</p>;
+          return (
+            <ol style={{ maxHeight: 320, overflow: 'auto' }}>
+              {entries.slice(-50).reverse().map(entry => (
+                <li key={entry.cursor} data-tone={entry.tone}>
+                  <span style={{ color: '#666' }}>{when(entry.timestamp)}</span>
+                  {' · '}{entry.label}{entry.nodeId ? ` · ${entry.nodeId}` : ''}{entry.detail ? ` · ${entry.detail}` : ''}
+                </li>
+              ))}
+            </ol>
+          );
+        })()}
+      </section>
       {error && <ErrorBox message={error} onRetry={reload} />}
       <div data-testid="conversation">
         {view.messages.map(message => <p key={message.cursor}>需求（v{message.requirementVersion}）：{message.text}</p>)}

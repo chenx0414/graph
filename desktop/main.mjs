@@ -7,7 +7,7 @@
  * Secrets never enter the config file: they are decrypted from the keychain
  * into the child process environment only.
  */
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, Notification, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   absolutePaths, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
   parseBannerAddress, resolveAppPaths, resolveDaemonMode, saveSecrets, tailText,
+  taskNotifications,
 } from './lib.ts';
 
 app.setName('Graph');
@@ -38,6 +39,8 @@ if (!app.requestSingleInstanceLock()) {
   let stdout = '';
   let stderr = '';
   let smokeLogged = false;
+  let notificationState = { primed: false, questions: {}, status: {} };
+  let taskPoll = null;
 
   const readJson = path => {
     try {
@@ -228,6 +231,36 @@ if (!app.requestSingleInstanceLock()) {
     });
   }
 
+  function focusTask(taskId) {
+    if (!/^[A-Za-z0-9_-]+$/.test(taskId)) return;
+    if (!window && readyUrl) openWindow(readyUrl);
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.focus();
+    void window.webContents.executeJavaScript(`location.hash = ${JSON.stringify(`#/tasks/${taskId}`)}`).catch(() => undefined);
+  }
+
+  function notifyDecision(decision) {
+    if (!Notification.isSupported()) return;
+    const notification = new Notification({ title: decision.title, body: decision.body });
+    notification.on('click', () => focusTask(decision.taskId));
+    notification.show();
+  }
+
+  function pollTasks() {
+    if (!readyUrl) return;
+    void fetch(`${readyUrl}/api/tasks`, { headers: { origin: readyUrl } })
+      .then(async response => (response.ok ? response.json() : []))
+      .then(tasks => {
+        if (!Array.isArray(tasks)) return;
+        const result = taskNotifications(notificationState, tasks);
+        notificationState = result.state;
+        for (const decision of result.notifications) notifyDecision(decision);
+        if (app.dock) app.dock.setBadge(result.openTotal ? String(result.openTotal) : '');
+      })
+      .catch(() => undefined);
+  }
+
   function stopDaemon() {
     return new Promise(resolveStop => {
       if (!child || child.exitCode !== null) return resolveStop();
@@ -261,11 +294,13 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
+    clearInterval(taskPoll);
     void Promise.race([stopDaemon(), new Promise(resolveStop => setTimeout(resolveStop, 7_000))]).then(() => app.exit(0));
   });
 
   void app.whenReady().then(() => {
     registerBridge();
     startDaemon();
+    taskPoll = setInterval(pollTasks, 4_000);
   });
 }

@@ -129,6 +129,54 @@ export function saveSecrets(
   return true;
 }
 
+export interface TaskSummaryLite {
+  id: string;
+  request: string;
+  status: string;
+  openQuestions?: number;
+}
+
+export interface NotificationDecision {
+  taskId: string;
+  title: string;
+  body: string;
+}
+
+export interface NotificationState {
+  primed: boolean;
+  questions: Record<string, number>;
+  status: Record<string, string>;
+}
+
+/** Diff two task snapshots into macOS notifications: new open questions and
+ * terminal transitions. The first snapshot only primes state. */
+export function taskNotifications(
+  state: NotificationState,
+  tasks: TaskSummaryLite[],
+): { state: NotificationState; notifications: NotificationDecision[]; openTotal: number } {
+  const notifications: NotificationDecision[] = [];
+  const questions: Record<string, number> = {};
+  const status: Record<string, string> = {};
+  let openTotal = 0;
+  for (const task of tasks) {
+    const open = Number.isFinite(task.openQuestions) ? Math.max(0, Number(task.openQuestions)) : 0;
+    openTotal += open;
+    if (state.primed) {
+      const previous = state.questions[task.id] ?? 0;
+      if (open > previous) {
+        notifications.push({ taskId: task.id, title: '任务需要处理', body: task.request.slice(0, 80) });
+      }
+      const was = state.status[task.id];
+      if (was && was !== task.status && (task.status === 'completed' || task.status === 'failed')) {
+        notifications.push({ taskId: task.id, title: task.status === 'completed' ? '任务已完成' : '任务失败', body: task.request.slice(0, 80) });
+      }
+    }
+    questions[task.id] = open;
+    status[task.id] = task.status;
+  }
+  return { state: { primed: true, questions, status }, notifications, openTotal };
+}
+
 /** Last non-empty lines, for bounded error dialogs. */
 export function tailText(text: string, lines: number): string {
   return text.split('\n').filter(line => line.trim().length > 0).slice(-lines).join('\n');
