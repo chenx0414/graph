@@ -213,6 +213,23 @@ export async function loadGraphConfig(configPath: string): Promise<GraphConfig> 
   return parseGraphConfig(raw, configPath);
 }
 
+/** Aliases that resolve to one actual key must not declare conflicting shared
+ * groups; used by both config saving and daemon startup. */
+export function assertCredentialGroups(config: GraphConfig, env: Record<string, string | undefined>) {
+  const byValue = new Map<string, string[]>();
+  for (const id of Object.keys(config.credentials)) {
+    const secret = resolveCredentialSecret(config, id, env);
+    if (!secret.configured || !secret.value) continue;
+    byValue.set(secret.value, [...(byValue.get(secret.value) ?? []), id]);
+  }
+  for (const aliases of byValue.values()) {
+    if (aliases.length < 2) continue;
+    const sorted = [...aliases].sort();
+    const groups = [...new Set(sorted.map(id => config.credentials[id]?.sharedLimitGroupId).filter((value): value is string => Boolean(value)))];
+    if (groups.length > 1) invalid(`credentials.${sorted[0]}.sharedLimitGroupId: aliases resolving to one key must share one sharedLimitGroupId (${sorted.join(', ')})`);
+  }
+}
+
 /** Resolve the environment variable named by a credential, if the credential exists. */
 export function resolveCredentialSecret(config: GraphConfig, credentialId: string, env: Record<string, string | undefined>): { configured: boolean; secretRef: string | null; value?: string } {
   const credential = config.credentials[credentialId];

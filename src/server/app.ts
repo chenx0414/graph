@@ -54,7 +54,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       const nextIds = new Set(Array.isArray(nextModels) ? nextModels.map(entry => String(entry?.id ?? '')) : []);
       const removed = runtime.modelsInUse().filter(id => !nextIds.has(id));
       if (removed.length) throw new RuntimeError('config_in_use', `Models in use by unfinished tasks cannot be removed: ${removed.join(', ')}`);
-      const saved = await options.config!.store.save(body.document, body.expectedRevision);
+      const saved = await options.config!.store.save(body.document, body.expectedRevision, options.config!.env);
       return { revision: saved.revision, restartRequired: current.revision !== saved.revision };
     });
     if (options.configTest) {

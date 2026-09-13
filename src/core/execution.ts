@@ -10,6 +10,7 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { selectModel, type ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
+import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
 import type { RestrictedGate } from '../runtime/restricted-process.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal, type TokenUsage } from './types.ts';
 
@@ -219,15 +220,8 @@ export class Execution {
     return { dispatched };
   }
 
-  /** An operation parked on a credential slot consumes no local execution capacity. */
-  private occupiedSlots(kind: NodeSpec['kind']) {
-    const { occupied } = this.store.db.prepare(`SELECT COUNT(*) AS occupied FROM operations
-      WHERE (state='intent' OR (worker_active=1 AND waiting_slot=0)) AND (instance_id IS NOT NULL)=?`).get(Number(kind === 'agent')) as { occupied: number };
-    return occupied;
-  }
-
   private remainingSlots(kind: NodeSpec['kind']) {
-    return (kind === 'agent' ? 10 : 4) - this.occupiedSlots(kind);
+    return executionLimit(kind === 'agent' ? 'agent' : 'program') - occupiedSlots(this.store, kind === 'agent' ? 'agent' : 'program');
   }
 
   private wakeDrive() {
@@ -380,7 +374,7 @@ export class Execution {
       this.store.transaction(() => this.block(node, 'permission', { grant: requiredGrant }));
       return false;
     }
-    if (this.occupiedSlots(spec.kind) >= (spec.kind === 'agent' ? 10 : 4)) return false;
+    if (occupiedSlots(this.store, spec.kind === 'agent' ? 'agent' : 'program') >= executionLimit(spec.kind === 'agent' ? 'agent' : 'program')) return false;
     const reservation = spec.kind === 'agent' ? adapter.reserveTokens : 0;
     if (reservation === undefined || !Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_adapter', 'A bounded token reservation is required');
     if (node.instance_id) {

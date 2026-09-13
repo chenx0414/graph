@@ -275,3 +275,105 @@ test('a retry re-acquires the slot only after releasing it for the backoff', asy
   expect(dispatches).toBe(3);
   expect(scheduler.active('cred')).toBe(0);
 }, 30_000);
+
+test('resumed waiters re-acquire the global Agent execution slot', async () => {
+  const root = await temp('resume-cap');
+  const provider = await trackingProvider({ delayMs: 1_000 });
+  const scheduler = createModelScheduler();
+  const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false, refreshOnCreate: false });
+  const piModel = { id: 'a', name: 'p-a', provider: 'p-a', api: 'openai-completions' as const, baseUrl: provider.baseUrl, reasoning: false, input: ['text' as const], contextWindow: 32_000, maxTokens: 256, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  modelRuntime.registerProvider('p-a', { baseUrl: provider.baseUrl, api: 'openai-completions', apiKey: 'key-a', models: [piModel] });
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: {
+      entries: [{ id: 'a', provider: 'p-a', grade: 'high', api: 'openai-completions', baseUrl: provider.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'cred-a' }],
+      apiKey: 'unused', modelRuntime, modelScheduler: scheduler,
+      credentialFor: () => ({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 }),
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'd'.repeat(64) } }] }),
+      },
+    },
+  });
+  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'resume cap', requestId: 'begin' });
+  const nodes: NodeSpec[] = [
+    ...Array.from({ length: 20 }, (_unused, index) => ({ id: `a${index}`, kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'a' })),
+    checkNode(Array.from({ length: 20 }, (_unused, index) => `a${index}`)),
+  ];
+  await server.runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'resume cap',
+    acceptance: [{ id: 'works', description: 'works', checkNode: 'check' }],
+    nodes,
+  }, 'proposal');
+  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+
+  const holds = await Promise.all(Array.from({ length: 20 }, () => scheduler.acquire({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 })));
+  const driving = server.runtime.host.drive();
+  await waitFor(() => scheduler.queued() === 20, 30_000);
+  expect(provider.state.requests).toHaveLength(0);
+  for (const release of holds) release();
+  await waitFor(() => provider.state.requests.length === 20, 90_000);
+  // The key may run 20 in flight, but the global Agent limit is independent.
+  expect(provider.state.maxInFlight).toBeLessThanOrEqual(10);
+  await driving;
+  const view = await server.runtime.user.task(taskId).view();
+  expect(view.nodes.filter(node => node.id.startsWith('a')).every(node => node.status === 'succeeded')).toBe(true);
+  expect(scheduler.active()).toBe(0);
+}, 180_000);
+
+test('conflicting alias groups are refused at save time and a hand-edited conflict still starts view-only', async () => {
+  const root = await temp('alias-conflict');
+  const web = join(root, 'web');
+  await mkdir(web, { recursive: true });
+  await writeFile(join(web, 'index.html'), '<!doctype html><html><body><div id="root">Graph</div></body></html>');
+  const configPath = join(root, 'graph.config.json');
+  const model = (id: string, credentialId: string) => ({ id, provider: `p-${id}`, grade: 'high', api: 'openai-completions', baseUrl: 'http://127.0.0.1:9/v1', contextWindow: 32_000, maxTokens: 256, credentialId });
+  const valid = {
+    version: 1,
+    projects: [{ id: 'p', root }],
+    models: { entries: [model('alpha', 'cred-a'), model('beta', 'cred-b')] },
+    credentials: { 'cred-a': { secretRef: 'KEY_A', sharedLimitGroupId: 'g1' }, 'cred-b': { secretRef: 'KEY_B', sharedLimitGroupId: 'g1' } },
+    limits: { credentials: { 'cred-a': 1, 'cred-b': 1 }, sharedGroups: { g1: 2 } },
+  };
+  await writeFile(configPath, JSON.stringify(valid, null, 2));
+  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'view', env: { KEY_A: 'same-key', KEY_B: 'same-key' }, log: () => undefined });
+  cleanup.push(() => daemon.close().catch(() => undefined));
+  const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
+  const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
+  const beforeBytes = await readFile(configPath, 'utf8');
+  const conflicts = [
+    { ...valid, credentials: { 'cred-a': { secretRef: 'KEY_A', sharedLimitGroupId: 'g1' }, 'cred-b': { secretRef: 'KEY_B', sharedLimitGroupId: 'g2' } }, limits: { credentials: { 'cred-a': 1, 'cred-b': 1 }, sharedGroups: { g1: 2, g2: 3 } } },
+    { ...valid, credentials: { 'cred-a': { secretRef: 'KEY_A', sharedLimitGroupId: 'g1' }, 'cred-b': { secretRef: 'KEY_A', sharedLimitGroupId: 'g2' } }, limits: { credentials: { 'cred-a': 1, 'cred-b': 1 }, sharedGroups: { g1: 2, g2: 3 } } },
+  ];
+  for (const document of conflicts) {
+    const refused = await fetch(`${daemon.url}/api/config`, { method: 'POST', headers, body: JSON.stringify({ expectedRevision: 0, document }) });
+    expect(refused.status).toBe(400);
+    const body = await refused.json() as { code: string; field?: string };
+    expect(body.code).toBe('invalid_config');
+    expect(body.field).toContain('sharedLimitGroupId');
+    expect(await readFile(configPath, 'utf8')).toBe(beforeBytes);
+    expect((await (await fetch(`${daemon.url}/api/config`, { headers })).json() as { revision: number }).revision).toBe(0);
+  }
+  // A fixed document saves and restarts cleanly.
+  const fixed = await fetch(`${daemon.url}/api/config`, { method: 'POST', headers, body: JSON.stringify({ expectedRevision: 0, document: valid }) });
+  expect(fixed.status).toBe(200);
+  await daemon.close();
+
+  // A hand-edited conflict must not stop the console; execute mode still refuses it.
+  const handEdited = JSON.stringify(conflicts[0], null, 2);
+  await writeFile(configPath, handEdited);
+  const viewOnly = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'view', env: { KEY_A: 'same-key', KEY_B: 'same-key' }, log: () => undefined });
+  cleanup.push(() => viewOnly.close().catch(() => undefined));
+  const home2 = await fetch(viewOnly.url, { headers: { origin: viewOnly.url } });
+  const startup = await (await fetch(`${viewOnly.url}/api/startup`, { headers: { origin: viewOnly.url, cookie: home2.headers.get('set-cookie') ?? '' } })).json() as { configured: boolean; enabledModelCount: number };
+  expect(startup.configured).toBe(false);
+  expect(startup.enabledModelCount).toBe(0);
+  await viewOnly.close();
+  await expect(startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'execute', env: { KEY_A: 'same-key', KEY_B: 'same-key' }, log: () => undefined }))
+    .rejects.toMatchObject({ code: 'invalid_config' });
+  expect(await readFile(configPath, 'utf8')).toBe(handEdited);
+}, 60_000);

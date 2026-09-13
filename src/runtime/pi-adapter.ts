@@ -10,6 +10,7 @@ import { agentTools } from './agent-tools.ts';
 import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
+import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { openPiInstance } from './pi-instance.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
@@ -82,17 +83,26 @@ export function createPiAdapter(options: {
       const slot = binding && scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)
         ? {
             acquire: async (signal?: AbortSignal) => {
+              // Waiting on a credential releases the execution slot; after the
+              // credential slot is granted the operation must take an execution
+              // slot back before it may send, or many waiters resuming at once
+              // would exceed the global Agent limit.
               setWaitingSlot(true);
+              let releaseCredential: (() => void) | undefined;
               try {
-                return await scheduler.acquire({
+                releaseCredential = await scheduler.acquire({
                   credentialId: binding.credentialId,
                   apiKey,
                   ...(binding.limit !== undefined ? { limit: binding.limit } : {}),
                   ...(binding.sharedGroupId ? { sharedGroupId: binding.sharedGroupId } : {}),
                   ...(binding.groupLimit !== undefined ? { groupLimit: binding.groupLimit } : {}),
                 }, signal);
-              } finally {
+                await waitForAgentExecutionSlot(options.store, operation.id, signal);
+                return releaseCredential;
+              } catch (error) {
+                releaseCredential?.();
                 setWaitingSlot(false);
+                throw error;
               }
             },
           }

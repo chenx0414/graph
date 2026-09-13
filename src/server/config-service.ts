@@ -1,7 +1,7 @@
 import { open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { RuntimeError } from '../core/types.ts';
-import { loadGraphConfig, parseGraphConfig, type GraphConfig } from './config.ts';
+import { assertCredentialGroups, loadGraphConfig, parseGraphConfig, type GraphConfig } from './config.ts';
 
 export interface ConfigSnapshot {
   revision: number;
@@ -48,7 +48,7 @@ export async function openConfigStore(path: string) {
       revision = current.revision;
       return { revision, config: await loadGraphConfig(path) };
     },
-    async save(document: unknown, expectedRevision: number) {
+    async save(document: unknown, expectedRevision: number, env?: Record<string, string | undefined>) {
       let lock;
       for (let attempt = 0; attempt < 40; attempt += 1) {
         try {
@@ -67,6 +67,9 @@ export async function openConfigStore(path: string) {
         }
         const next = { ...(document && typeof document === 'object' && !Array.isArray(document) ? document as Record<string, unknown> : {}), version: 1, revision: current.revision + 1 };
         const parsed = parseGraphConfig(next, path);
+        // Resolvable credential conflicts must fail before the atomic replace,
+        // so a bad save never leaves a config the daemon cannot start from.
+        if (env) assertCredentialGroups(parsed, env);
         const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
         await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
         await rename(temporary, path);

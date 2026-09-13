@@ -305,3 +305,26 @@
 
 - 项目 Node 24.20.0：全量 **47 文件 / 215 项**连续 2 次通过；双 tsc、`vite build`、`git diff --check` 通过；八个历史探针全部 `rc=0`；验收方四个探针复跑结果见 `acceptance-evidence/rework-probes.output.txt`。
 - 未运行新的真实供应商任务；A13 历史结论不变。是否关闭 T01–T08 由独立复验决定。
+
+## 返工轮 2 · PA02-R1 与 PA05（2026-09-13，响应 [第二次独立验收](productization-rework-acceptance-2026-09-13.md)）
+
+基线：`071e21b`。PA01/PA03/PA04 关闭；本轮修复恢复时的执行名额与保存期凭据组冲突。
+
+### PA02-R1 · 等待恢复时重新获取全局 Agent 名额
+
+- 新增 `src/runtime/execution-slots.ts`：统一的 Agent（10）/程序（4）执行名额判断与 `waitForAgentExecutionSlot()`——在事务内原子地检查名额并把 `waiting_slot` 置 0；名额满时每 20ms 重试，支持取消。
+- `execution.ts` 的 `remainingSlots()` 与 `run()` 准入共用该模块，避免两处计数分叉。
+- `pi-adapter` 的发送前衔接改为：等待凭据时置 `waiting_slot=1`（不占执行名额）→ 取得凭据名额 → **重新取得执行名额** → 才调用发送门；取消/失败时归还凭据名额并保持等待释放状态。
+- 效果：20 个同 key 等待者同时恢复时，实际在途模型调用始终 ≤10，其余仍处于等待（`waiting_slot=1`），最终能全部完成且不死锁；key 自身上限不受影响，不通过提高全局上限规避。
+- 证据：`tests/m8/rework.test.ts` 的 20 等待者恢复测试（20 个请求、`maxInFlight ≤ 10`、全部完成）；验收方 `product-resume-execution-cap.mts` 复跑 `providerRequests:10、maxProviderInFlight:10`（修复前 20）。
+
+### PA05 · 冲突的凭据共享组在保存前校验
+
+- `src/server/config.ts` 新增 `assertCredentialGroups()`：解析宿主可用的凭据身份后，同一实际 key 的别名若声明多个不同共享组即抛 `invalid_config`，并带字段路径。
+- `openConfigStore.save(document, revision, env)` 在**原子替换前**执行该校验；`POST /api/config` 传入 daemon 环境。冲突保存返回 400、文件字节与 revision 不变，用户可在页面上继续修复。
+- `startGraphDaemon` 改用同一校验：执行模式拒绝冲突；查看模式记日志并禁用模型派发而不是整体启动失败，手改的冲突文件仍可打开控制台。
+- 证据：`tests/m8/rework.test.ts` 覆盖同 `secretRef` 与不同 `secretRef` 同值两种冲突（保存 400、字段错误、文件/revision 不变、修复后可保存重启、view 模式可启动、execute 模式拒绝）；验收方 `product-config-alias-conflict.mts` 复跑 `saveStatus:400、restart.started:true`。
+
+### 复验
+
+- 项目 Node 24.20.0：全量 **47 文件 / 217 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针 `rc=0`；独立探针输出见 `acceptance-evidence/rework2-independent.output.txt`、`t08-probes.output.txt`。未调用付费供应商；是否关闭由独立复验决定。

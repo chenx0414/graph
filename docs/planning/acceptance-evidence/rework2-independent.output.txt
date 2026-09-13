@@ -1,0 +1,34 @@
+# 返工轮 2 独立探针复跑（2026-09-13T10:47:00Z，项目 Node v24.20.0）
+=== product-resume-execution-cap ===
+{"phase":"parked","queued":20,"providerRequests":0}
+{"phase":"resumed","providerRequests":10,"providerInFlight":10,"maxProviderInFlight":10,"activeWorkers":20,"limit":10}
+=== product-config-alias-conflict ===
+{"probe":"config-save-alias-group-conflict","saveStatus":400,"saved":{"code":"invalid_config","message":"credentials.a.sharedLimitGroupId: aliases resolving to one key must share one sharedLimitGroupId (a, b)","field":"credentials.a.sharedLimitGroupId"},"persistedGroups":[null,null],"restart":{"started":true}}
+=== product-independent-key ===
+{"scenario":"ten-A-waiters-independent-B","queuedA":10,"providerRequests":1,"activeWorkers":10,"nodes":[{"id":"a0","status":"running"},{"id":"a1","status":"running"},{"id":"a2","status":"running"},{"id":"a3","status":"running"},{"id":"a4","status":"running"},{"id":"a5","status":"running"},{"id":"a6","status":"running"},{"id":"a7","status":"running"},{"id":"a8","status":"running"},{"id":"a9","status":"running"},{"id":"b","status":"succeeded"},{"id":"check","status":"pending"}]}
+=== product-config-revision ===
+save 200 { revision: 1, restartRequired: true }
+activeProjects [
+  {
+    id: 'old',
+    root: '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-review-config-20k5sD',
+    grants: []
+  }
+] created [
+  {
+    cursor: 1,
+    type: 'task.created',
+    data: { configRevision: 0, request: 'old active config' },
+    timestamp: 1789296423437,
+    taskId: 'bb45509e-03b6-4452-b500-f90920a85d7a'
+  }
+]
+afterRestartProjects [
+  {
+    id: 'new',
+    root: '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-review-config-20k5sD',
+    grants: []
+  }
+]
+=== product-live-records ===
+{"initial":{"graph":2,"view":2,"operations":2},"afterCounts":{"graph":3,"view":3,"operations":3},"before":"check 待执行（pending）\n\n实例 未知\n模型 未知 · 定义 未知\n用量 未知（无权威计量） · 预留 0\n尝试次数 0 · 输出版本 0\n验收证据 无\n操作记录（0）\n加载更多操作记录","after":"check 已完成（succeeded）\n\n实例 未知\n模型 未知 · 定义 未知\n用量 未知（无权威计量） · 预留 0\n尝试次数 0 · 输出版本 1\n验收证据 ok:有效 passed\n操作记录（1）\nsucceeded · 1ms · 预留 0\n{\n  \"answer\": 42\n}\n加载更多操作记录","actualOperations":["succeeded"],"actualEvidence":[{"acceptanceId":"ok","artifact":{"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","path":"/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-live-records-u8v3WN/ok"},"summary":"passed","nodeId":"check","operationId":"a53cf693-1916-41eb-810e-d44482a9babf","proposalVersion":1,"requirementVersion":1,"activationId":"db6980c3-9838-4ada-b5be-f1bb526ebbcf","valid":true}]}

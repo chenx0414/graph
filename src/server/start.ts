@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
-import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
+import { assertCredentialGroups, emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
 import { openConfigStore } from './config-service.ts';
 import { openGraphServer } from './host.ts';
 import type { ModelEntry } from '../catalog/models.ts';
@@ -92,7 +92,14 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   if (missing.size && options.mode === 'execute') {
     throw new RuntimeError('credentials_missing', `Execution mode requires configured credentials; set: ${[...missing].join(', ')}`);
   }
-  const enabled = entries.length > 0 && missing.size === 0;
+  // A conflicting hand-edited config must not prevent the console from
+  // starting; execute mode still refuses it instead of guessing limits.
+  let groupConflict: RuntimeError | undefined;
+  try { assertCredentialGroups(config, options.env); }
+  catch (error) { groupConflict = error as RuntimeError; }
+  if (groupConflict && options.mode === 'execute') throw groupConflict;
+  if (groupConflict) log(`Config problem (${groupConflict.message}); model dispatch stays disabled.`);
+  const enabled = entries.length > 0 && missing.size === 0 && !groupConflict;
   if (entries.length && missing.size) log(`Credentials not configured (${[...missing].join(', ')}); model dispatch stays disabled.`);
   const configStore = options.configPath ? await openConfigStore(options.configPath) : null;
   // The running daemon keeps the bindings it was started with; a saved file
@@ -108,12 +115,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     bySecretValue.set(secret.value, [...(bySecretValue.get(secret.value) ?? []), id]);
   }
   const identities = new Map<string, { canonical: string; limit?: number; sharedGroupId?: string; groupLimit?: number }>();
-  for (const aliases of bySecretValue.values()) {
+  for (const aliases of groupConflict ? [] : bySecretValue.values()) {
     const sorted = [...aliases].sort();
     const canonical = sorted[0]!;
     const caps = sorted.map(id => config.limits.credentials[id]).filter((value): value is number => value !== undefined);
     const groups = [...new Set(sorted.map(id => config.credentials[id]?.sharedLimitGroupId).filter((value): value is string => Boolean(value)))];
-    if (groups.length > 1) throw new RuntimeError('invalid_config', `Credential aliases resolving to one key must share one sharedLimitGroupId: ${sorted.join(', ')}`);
     const groupId = groups[0];
     const identity = {
       canonical,
