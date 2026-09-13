@@ -1,0 +1,209 @@
+import { readFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { RuntimeError } from '../core/types.ts';
+import type { ModelCost, ModelEntry, ModelGrade } from '../catalog/models.ts';
+
+/** Versioned on-disk configuration. Secrets are never stored here; a credential
+ * keeps a `secretRef` naming the environment variable that holds the key. */
+export interface CredentialConfig {
+  displayName?: string;
+  secretRef: string;
+  sharedLimitGroupId?: string;
+}
+
+export interface LimitsConfig {
+  credentials: Record<string, number>;
+  sharedGroups: Record<string, number>;
+}
+
+export interface ConfiguredModel extends ModelEntry {
+  credentialId: string;
+}
+
+export interface GraphConfig {
+  path: string | null;
+  configured: boolean;
+  projects: { id: string; root: string; grants?: string[] }[];
+  models: { entries: ConfiguredModel[]; preferences: Partial<Record<ModelGrade, string[]>> } | null;
+  credentials: Record<string, CredentialConfig>;
+  limits: LimitsConfig;
+}
+
+const GRADES: ModelGrade[] = ['low', 'medium', 'high', 'highest'];
+const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function emptyGraphConfig(): GraphConfig {
+  return { path: null, configured: false, projects: [], models: null, credentials: {}, limits: { credentials: {}, sharedGroups: {} } };
+}
+
+export function defaultConfigPath(cwd: string) {
+  return join(cwd, 'graph.config.json');
+}
+
+export function defaultStateDir(env: Record<string, string | undefined>) {
+  const home = env.HOME?.trim() || homedir();
+  const base = env.XDG_STATE_HOME?.trim() || join(home, '.local', 'state');
+  return join(base, 'graph');
+}
+
+function invalid(message: string): never {
+  throw new RuntimeError('invalid_config', message);
+}
+
+function asObject(value: unknown, path: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(`${path} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function asArray(value: unknown, path: string): unknown[] {
+  if (!Array.isArray(value)) invalid(`${path} must be an array`);
+  return value;
+}
+
+function asString(value: unknown, path: string): string {
+  if (typeof value !== 'string' || !value.trim()) invalid(`${path} must be a nonempty string`);
+  return value.trim();
+}
+
+function optionalString(value: unknown, path: string): string | undefined {
+  if (value === undefined) return undefined;
+  return asString(value, path);
+}
+
+function positiveInt(value: unknown, path: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) invalid(`${path} must be a positive integer`);
+  return value;
+}
+
+function asCost(value: unknown, path: string): ModelCost {
+  const raw = asObject(value, path);
+  const field = (name: keyof ModelCost) => {
+    const current = raw[name];
+    if (typeof current !== 'number' || !Number.isFinite(current) || current < 0) invalid(`${path}.${name} must be a nonnegative number`);
+    return current;
+  };
+  return { input: field('input'), output: field('output'), cacheRead: field('cacheRead'), cacheWrite: field('cacheWrite') };
+}
+
+function parseModel(raw: unknown, path: string, credentials: Record<string, CredentialConfig>): ConfiguredModel {
+  const entry = asObject(raw, path);
+  const grade = asString(entry.grade, `${path}.grade`);
+  if (!GRADES.includes(grade as ModelGrade)) invalid(`${path}.grade must be one of ${GRADES.join(', ')}`);
+  if (entry.api !== 'openai-completions') invalid(`${path}.api must be "openai-completions"`);
+  const credentialId = asString(entry.credentialId, `${path}.credentialId`);
+  if (!credentials[credentialId]) invalid(`${path}.credentialId references unknown credential "${credentialId}"`);
+  return {
+    id: asString(entry.id, `${path}.id`),
+    provider: asString(entry.provider, `${path}.provider`),
+    grade: grade as ModelGrade,
+    api: 'openai-completions',
+    baseUrl: asString(entry.baseUrl, `${path}.baseUrl`),
+    contextWindow: positiveInt(entry.contextWindow, `${path}.contextWindow`),
+    maxTokens: positiveInt(entry.maxTokens, `${path}.maxTokens`),
+    credentialId,
+    ...(entry.cost !== undefined ? { cost: asCost(entry.cost, `${path}.cost`) } : {}),
+  };
+}
+
+/** Parse a version 1 config document. Relative project roots resolve against
+ * the config file directory so the same file means the same projects from any cwd. */
+export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig {
+  const root = asObject(raw, configPath);
+  if (root.version !== 1) invalid(`${configPath}: version must be 1`);
+  const dir = dirname(configPath);
+
+  const credentials: Record<string, CredentialConfig> = {};
+  if (root.credentials !== undefined) {
+    for (const [id, value] of Object.entries(asObject(root.credentials, 'credentials'))) {
+      const path = `credentials.${id}`;
+      const entry = asObject(value, path);
+      const secretRef = asString(entry.secretRef, `${path}.secretRef`);
+      if (!SECRET_REF.test(secretRef)) invalid(`${path}.secretRef must be an environment variable name`);
+      credentials[id] = {
+        secretRef,
+        ...(entry.displayName !== undefined ? { displayName: asString(entry.displayName, `${path}.displayName`) } : {}),
+        ...(entry.sharedLimitGroupId !== undefined ? { sharedLimitGroupId: asString(entry.sharedLimitGroupId, `${path}.sharedLimitGroupId`) } : {}),
+      };
+    }
+  }
+
+  const limits: LimitsConfig = { credentials: {}, sharedGroups: {} };
+  if (root.limits !== undefined) {
+    const rawLimits = asObject(root.limits, 'limits');
+    for (const [id, value] of Object.entries(rawLimits.credentials !== undefined ? asObject(rawLimits.credentials, 'limits.credentials') : {})) {
+      if (!credentials[id]) invalid(`limits.credentials.${id} references unknown credential "${id}"`);
+      limits.credentials[id] = positiveInt(value, `limits.credentials.${id}`);
+    }
+    for (const [id, value] of Object.entries(rawLimits.sharedGroups !== undefined ? asObject(rawLimits.sharedGroups, 'limits.sharedGroups') : {})) {
+      limits.sharedGroups[id] = positiveInt(value, `limits.sharedGroups.${id}`);
+    }
+  }
+
+  const projects: GraphConfig['projects'] = [];
+  if (root.projects !== undefined) {
+    const seen = new Set<string>();
+    for (const [index, value] of asArray(root.projects, 'projects').entries()) {
+      const path = `projects[${index}]`;
+      const entry = asObject(value, path);
+      const id = asString(entry.id, `${path}.id`);
+      if (seen.has(id)) invalid(`duplicate project id "${id}"`);
+      seen.add(id);
+      const rawRoot = asString(entry.root, `${path}.root`);
+      const grants = entry.grants === undefined ? undefined : asArray(entry.grants, `${path}.grants`).map((grant, position) => asString(grant, `${path}.grants[${position}]`));
+      projects.push({ id, root: isAbsolute(rawRoot) ? resolve(rawRoot) : resolve(dir, rawRoot), ...(grants ? { grants } : {}) });
+    }
+  }
+
+  let models: GraphConfig['models'] = null;
+  if (root.models !== undefined) {
+    const rawModels = asObject(root.models, 'models');
+    const seen = new Set<string>();
+    const entries = asArray(rawModels.entries, 'models.entries').map((value, index) => {
+      const parsed = parseModel(value, `models.entries[${index}]`, credentials);
+      if (seen.has(parsed.id)) invalid(`duplicate model id "${parsed.id}"`);
+      seen.add(parsed.id);
+      return parsed;
+    });
+    if (!entries.length) invalid('models.entries must not be empty');
+    const preferences: Partial<Record<ModelGrade, string[]>> = {};
+    if (rawModels.preferences !== undefined) {
+      for (const [grade, ids] of Object.entries(asObject(rawModels.preferences, 'models.preferences'))) {
+        if (!GRADES.includes(grade as ModelGrade)) invalid(`models.preferences.${grade} is not a model grade`);
+        preferences[grade as ModelGrade] = asArray(ids, `models.preferences.${grade}`).map((id, index) => {
+          const value = asString(id, `models.preferences.${grade}[${index}]`);
+          if (!seen.has(value)) invalid(`models.preferences.${grade} references unknown model "${value}"`);
+          return value;
+        });
+      }
+    }
+    models = { entries, preferences };
+  }
+
+  return { path: configPath, configured: true, projects, models, credentials, limits };
+}
+
+export async function loadGraphConfig(configPath: string): Promise<GraphConfig> {
+  let text: string;
+  try {
+    text = await readFile(configPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') invalid(`Config file not found: ${configPath}`);
+    throw error;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    invalid(`${configPath} is not valid JSON: ${(error as Error).message}`);
+  }
+  return parseGraphConfig(raw, configPath);
+}
+
+/** Resolve the environment variable named by a credential, if the credential exists. */
+export function resolveCredentialSecret(config: GraphConfig, credentialId: string, env: Record<string, string | undefined>): { configured: boolean; secretRef: string | null; value?: string } {
+  const credential = config.credentials[credentialId];
+  if (!credential) return { configured: false, secretRef: null };
+  const value = env[credential.secretRef]?.trim();
+  return { configured: Boolean(value), secretRef: credential.secretRef, ...(value ? { value } : {}) };
+}

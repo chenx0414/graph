@@ -1,10 +1,27 @@
 import { createApp } from './app.ts';
 import { openTaskRuntime } from '../core/task-runtime.ts';
+import { RuntimeError } from '../core/types.ts';
 
-export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string }) {
+export interface StartupInfo {
+  mode: 'view' | 'execute';
+  configured: boolean;
+  modelCount: number;
+  enabledModelCount: number;
+}
+
+export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo }) {
   const runtime = await openTaskRuntime(options);
-  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}) });
-  const address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });
+  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}) });
+  let address: string;
+  try {
+    address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });
+  } catch (error) {
+    await app.close().catch(() => undefined);
+    await runtime.close().catch(() => undefined);
+    const port = options.port ?? 0;
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new RuntimeError('port_in_use', `Port ${port} is already in use on 127.0.0.1; choose another port with --port`);
+    throw error;
+  }
   const url = typeof address === 'string' ? address : `http://127.0.0.1:${(app.addresses()[0] as { port: number }).port}`;
   let stopped = false;
   const loop = options.autoDrive ? (async () => {

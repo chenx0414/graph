@@ -6,9 +6,11 @@ import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
 import { layoutGraph } from './layout.ts';
 
+import type { StartupInfo } from './host.ts';
+
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 
-export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string }) {
+export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo }) {
   const app = Fastify({ logger: false });
   const session = createSession();
   const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
@@ -33,6 +35,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     reply.type('text/html').send(html);
   });
   app.get('/api/health', async () => ({ ok: true }));
+  app.get('/api/startup', async () => options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
   app.get('/api/settings', async () => {
     const projects = await runtime.user.projects();
     const models = runtime.models();

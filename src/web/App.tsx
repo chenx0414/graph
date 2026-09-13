@@ -10,6 +10,7 @@ type TaskView = {
   cost: { unknown?: boolean; amount?: number }; proposal: { summary?: string } | null;
 };
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string }[]; definitions: { id: string; version: number }[]; capabilities: { id: string; version: string }[] };
+type Startup = { mode: 'view' | 'execute'; configured: boolean; modelCount: number; enabledModelCount: number };
 type GraphPayload = {
   nodes: { id: string; kind: string; status: string; container?: string; used?: number | null }[];
   containers: { id: string; parent?: string; nodes: string[] }[];
@@ -27,17 +28,31 @@ function route() {
 export function App() {
   const [path, setPath] = useState(route);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [startup, setStartup] = useState<Startup | null>(null);
   const [tasks, setTasks] = useState<TaskList>([]);
   useEffect(() => {
     const onHash = () => setPath(route());
     window.addEventListener('hashchange', onHash);
     void api<Settings>('/api/settings').then(setSettings);
+    void api<Startup>('/api/startup').then(setStartup);
     void api<TaskList>('/api/tasks').then(setTasks);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(path);
   return (
     <div>
+      {startup && !startup.configured && (
+        <div style={{ background: '#fff4d6', borderBottom: '1px solid #e7c66b', padding: '8px 12px' }}>
+          {startup.modelCount === 0
+            ? '首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请在 graph.config.json 中添加模型与凭据后重启。'
+            : '模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请设置凭据引用的环境变量后重启。'}
+        </div>
+      )}
+      {startup?.mode === 'view' && startup.configured && (
+        <div style={{ background: '#eef3fb', borderBottom: '1px solid #b9cbe8', padding: '8px 12px' }}>
+          仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。
+        </div>
+      )}
       <nav>
         <a href="#/">概览</a>
         <a href="#/catalog">人才库</a>
