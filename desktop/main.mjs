@@ -54,7 +54,10 @@ if (!app.requestSingleInstanceLock()) {
 
   function openWindow(url) {
     window = new BrowserWindow({
-      width: 1280, height: 860, show: false, title: 'Graph',
+      width: 1320, height: 880, show: false, title: 'Graph',
+      backgroundColor: '#0b1020',
+      titleBarStyle: 'hiddenInset',
+      trafficLightPosition: { x: 14, y: 16 },
       webPreferences: {
         contextIsolation: true, nodeIntegration: false, sandbox: true,
         preload: join(devRoot, 'desktop/preload.cjs'),

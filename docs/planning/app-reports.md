@@ -107,3 +107,24 @@ node_modules/.bin/vitest run tests/app    # 20 项
 - `.app` 体积 489MB：`@earendil-works/pi-ai` 带入了完整 AWS SDK；本机开发可接受，后续可按需裁剪或在 A5 前做依赖瘦身。
 - 构建未签名/未公证：本机直接运行正常；对外分发需要 Apple Developer ID 与公证（`identity`、`@electron/notarize`），操作手册在 A5 之前以 wizard 形式提供。
 - 目前只产出 mac arm64；Intel 与 Windows/Linux 目标未配置。
+
+## A5 · 界面视觉与交互重塑（2026-09-13）
+
+**起始提交**：`d34ad3d`（A4 打包）。
+**完成提交**：本次提交。
+**实际修改范围**：新增 `src/web/styles.css`（设计 token、外壳布局、卡片/按钮/输入/标签/统计/时间线/收件箱/图样式、动效、响应式与 `prefers-reduced-motion`）与 `src/web/ui.tsx`（`Icon`、`Button`、`Card`、`Pill`、`StatusDot`、`Stat`、`Field`、`Empty`、`Spinner`、`Toaster`、`useTheme`）；重写 `App.tsx`/`Setup.tsx`/`Settings.tsx`/`GraphCanvas.tsx` 的呈现层；`src/web/index.html` 首屏主题、`main.tsx` 引入样式与桌面标记；`desktop/main.mjs` 窗口背景色与 `hiddenInset` 标题栏；`tests/app/insights-ui.test.ts` 断言适配。
+
+**验收清单**
+
+- [x] 设计系统与组件库：token（浅/深色）、统一圆角/阴影/间距；按钮 4 变体、输入校验态、状态标签、统计卡、空状态、加载、Toast；页面全部改用组件而非内联样式。
+- [x] 导航与外壳：左侧栏（图标、活跃态、问题徽标、模式状态点、主题切换）、顶栏（标题、模式与项目/模型摘要）、首启/仅查看横幅；响应式在窄屏折叠为顶部导航。
+- [x] 主题：默认跟随系统，可手动切换并记忆（localStorage），首屏脚本避免闪烁；Electron 窗口背景色与隐藏标题栏（含拖拽区与红绿灯留白）。
+- [x] 动效：页面入场与列表 stagger、时间线条目滑入、按钮 hover/active、活跃节点脉冲、Toast 弹出；`prefers-reduced-motion` 时全部降级。
+- [x] 可视化增强：图节点改为状态色卡片（状态点 + 原始 `id status` 文本保留），MiniMap 与控件皮肤化，图例改为色块 chips。
+- [x] 兼容既有验收：全部 `data-testid` 与断言文案保留；T08 集成测试的问答循环改为确定性逐条处理（原实现存在列表收缩竞态，界面加速后暴露）；51 文件 / 250 项测试连续通过，双 tsc 与构建通过。
+- [x] 证据：`acceptance-evidence/app-ui-{overview,overview-dark,task,graph,inbox,settings,setup}.png`、桌面窗口 `app-ui-desktop.png`、探针输出 `app-ui-restyle.output.txt`（含时间线条目数、状态文案、图节点数、收件箱文本、revision、向导按钮文案）；打包版重建后 `reparse` 警告为 0、启动退出无残留。
+
+**边界**
+
+- 只做前端呈现层与桌面窗口外观；未引入任何新前端依赖（动效为 CSS 实现）。
+- 打包体积、签名与公证仍按 A4/A6 记录；`/Applications/Graph.app` 中若有用户先前安装的旧实例，不会被本次构建改动。

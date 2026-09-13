@@ -105,8 +105,12 @@ test('the task page shows a run timeline, usage summary and a toned graph with a
   expect(await page.locator('.react-flow__node').count()).toBeGreaterThanOrEqual(2);
   await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('work succeeded')));
   const border = await page.locator('.react-flow__node').filter({ hasText: 'work succeeded' }).first()
-    .evaluate(element => getComputedStyle(element).borderColor);
+    .locator('.node-card').evaluate(element => getComputedStyle(element).borderColor);
   expect(border).toBe('rgb(22, 163, 74)');
+  // The status dot mirrors the border tone.
+  const dot = await page.locator('.react-flow__node').filter({ hasText: 'work succeeded' }).first()
+    .locator('.node-dot').evaluate(element => getComputedStyle(element).backgroundColor);
+  expect(dot).toBe('rgb(22, 163, 74)');
 }, 90_000);
 
 test('the inbox aggregates open questions, shows a nav badge and can answer them', async () => {

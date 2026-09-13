@@ -60,7 +60,12 @@ Graph.app
 - `electron-builder` 配置、应用图标与托盘常驻、`app:build`；`docs/usage.md` 增补 APP 安装、卸载与排障；`README.md` 增补 APP 入口。
 - 验收：本机产出可双击启动的 `.app`；无 Node/终端环境也能完成 A2 验收流程；卸载说明与数据目录位置准确。
 
-### A5 · 签名、公证与自动更新（可选，独立确认）
+### A5 · 界面视觉与交互重塑（已交付）
+
+- 设计系统与组件库（`styles.css` + `ui.tsx`）、侧边栏外壳、明暗主题、状态标签/统计卡/时间线/空状态/Toast、CSS 动效与 reduced-motion 降级；保留全部既有 `data-testid` 与文案。
+- 证据：`app-reports.md` A5 节与 `acceptance-evidence/app-ui-*` 截图。
+
+### A6 · 签名、公证与自动更新（可选，独立确认）
 
 - 需要 Apple Developer ID 与更新服务器；先产出配置与操作手册（`wizard` 技能），拿到证书后再执行。
 

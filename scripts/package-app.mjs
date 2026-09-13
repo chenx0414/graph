@@ -30,6 +30,7 @@ await writeFile(join(stage, 'package.json'), `${JSON.stringify({
   version: repo.version,
   main: 'desktop/main.mjs',
   private: true,
+  type: 'module',
   dependencies: repo.dependencies,
 }, null, 2)}\n`);
 

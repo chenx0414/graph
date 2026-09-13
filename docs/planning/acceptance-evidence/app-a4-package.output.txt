@@ -38,3 +38,8 @@ tray_ready 1
 orphans=0
 === 截图 ===
 app-a4-window.png：打包版窗口（标题 Graph，地址 loopback，仅查看首启）
+
+## 重建（界面重塑后，2026-09-13T15:05:12Z）
+app bundle: dist/app/mac-arm64/Graph.app
+reparse-warning-lines: 0
+app-log:        0 lines, errors: 0

@@ -172,11 +172,14 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.getByTestId('resume').click();
   await page.waitForFunction(() => !(document.querySelector('[data-testid="status"]')?.textContent ?? '').includes('暂停'));
 
-  for (const index of [0, 1]) {
-    const row = page.getByTestId('questions').locator('li').nth(index);
+  // Answer one question at a time: the list shrinks after each answer, so a
+  // fixed nth() locator would race the refresh.
+  for (let answered = 0; answered < 2; answered += 1) {
+    const row = page.getByTestId('questions').locator('li').first();
     await row.getByTestId('usage-mode').selectOption('reconcile');
     await row.getByTestId('usage-proof').fill('受控供应商未返回 usage，保留未知');
     await row.getByRole('button', { name: '答复' }).click();
+    await page.waitForFunction(expected => document.querySelectorAll('[data-testid="questions"] li').length === expected, 1 - answered, { timeout: 30_000 });
   }
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="questions"] li').length === 0);
 
