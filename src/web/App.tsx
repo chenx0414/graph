@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { nextEventCursor } from './event-cursor.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
+import { Settings } from './Settings.tsx';
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
@@ -164,9 +165,11 @@ export function App() {
       <nav>
         <a href="#/">概览</a>
         <a href="#/catalog">人才库</a>
+        <a href="#/settings">设置</a>
       </nav>
       {path === '/' && <Overview settings={settings} tasks={tasks} onTasks={setTasks} />}
       {path === '/catalog' && <Catalog settings={settings} />}
+      {path === '/settings' && <Settings />}
       {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} />}
       {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} />}
     </div>

@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeAll, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
@@ -10,11 +10,16 @@ import type { NodeSpec } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
-beforeAll(async () => { await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error' }); }, 60_000);
+let webDir: string;
+beforeAll(async () => {
+  webDir = await mkdtemp(join(tmpdir(), 'graph-m8-flow-web-'));
+  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
+}, 60_000);
 afterEach(async () => {
   for (const action of cleanup.reverse()) await action();
   cleanup.length = 0;
 });
+afterAll(() => rm(webDir, { recursive: true, force: true }));
 
 async function temp(name: string) {
   const dir = await mkdtemp(join(tmpdir(), `graph-m8-ui-${name}-`));
@@ -58,7 +63,7 @@ test('the console completes the main flow, keeps projects separate, and restores
     projects: [{ id: 'project-a', root: rootA }, { id: 'project-b', root: rootB }],
     actions: actions(rootA),
     autoDrive: true,
-    webDir: join(process.cwd(), 'dist/web'),
+    webDir,
     startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
   });
   cleanup.push(() => server.close());
@@ -127,7 +132,7 @@ test('parallel branches, subgraphs and rework back-edges render and errors are e
   const root = await temp('complex');
   const server = await openGraphServer({
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: actions(root),
-    autoDrive: false, webDir: join(process.cwd(), 'dist/web'),
+    autoDrive: false, webDir,
     startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
   });
   cleanup.push(() => server.close());

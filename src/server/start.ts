@@ -127,6 +127,32 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }
   }
 
+  // Explicit connectivity check. Only runs when the settings page asks for it;
+  // ordinary config reads and saves never touch a provider.
+  const testConnection = async (modelId: string) => {
+    const entry = config.models?.entries.find(model => model.id === modelId);
+    if (!entry) throw new RuntimeError('not_found', `Unknown model ${modelId}`);
+    const secret = resolveCredentialSecret(config, entry.credentialId, options.env);
+    if (!secret.configured) return { ok: false, model: entry.id, credentialId: entry.credentialId, message: `Credential not configured: ${secret.secretRef}` };
+    const started = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch(`${entry.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret.value}` },
+        body: JSON.stringify({ model: entry.id, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
+        signal: controller.signal,
+      });
+      const ok = response.status >= 200 && response.status < 300;
+      await response.body?.cancel();
+      return { ok, model: entry.id, credentialId: entry.credentialId, status: response.status, latencyMs: Date.now() - started, ...(ok ? {} : { message: `HTTP ${response.status}` }) };
+    } catch (error) {
+      return { ok: false, model: entry.id, credentialId: entry.credentialId, latencyMs: Date.now() - started, message: error instanceof Error ? error.message : String(error) };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
   const first = enabled ? entries[0]! : null;
@@ -148,7 +174,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     port: options.port,
     webDir: options.webDir,
     startup: { mode: options.mode, configured: enabled, modelCount: entries.length, enabledModelCount: enabled ? entries.length : 0 },
-    ...(configStore ? { configStore, configEnv: options.env } : {}),
+    ...(configStore ? { configStore, configEnv: options.env, configTest: testConnection } : {}),
   });
   if (enabled) {
     server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');

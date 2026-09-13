@@ -283,6 +283,12 @@ export async function openTaskRuntime(options: {
   };
 
   const runtime = {
+    /** Model ids bound to tasks that have not finished, for config deletion guards. */
+    modelsInUse(): string[] {
+      ensureOpen();
+      return (store.db.prepare(`SELECT DISTINCT i.model AS model FROM nodes n JOIN instances i ON i.id=n.instance_id JOIN tasks t ON t.id=n.task_id
+        WHERE t.phase IN ('discussing','running','queued') AND n.status NOT IN ('succeeded','skipped') AND i.model IS NOT NULL`).all() as { model: string }[]).map(row => row.model);
+    },
     user,
     host: {
       async runReady() { ensureOpen(); return execution.runReady(); },

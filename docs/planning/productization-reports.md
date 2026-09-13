@@ -136,3 +136,36 @@
 ### 已知限制
 
 - 本版仅并发；RPM/TPM、429 与冷却为 T09。等待名额目前不产生独立 UI 事件，T06 负责呈现。
+
+## T05 · 可编辑设置与配置检查
+
+- 起始提交：`bc8c52f`
+- 完成提交：本次提交
+- 修改范围：
+  - 新增 `src/web/Settings.tsx`：`#/settings` 可编辑项目、模型、凭据引用、共享组与并发上限、价格与等级偏好；显示 revision、已配置/缺失、待生效；保存走 T02 版本检查与原子写入。
+  - `src/web/App.tsx`：新增设置入口；`src/web/api.ts`：错误携带 `code/field`。
+  - `src/server/app.ts`：配置保存前拒绝删除未完成任务在用的模型（`config_in_use`）；错误响应带 `field`；新增显式 `POST /api/config/test`。
+  - `src/server/start.ts`：连通性测试实现（5s 超时、只发一次最小请求、不记录用量、不回显密钥；凭据缺失时不联网）。
+  - `src/server/config.ts`：同一 provider 标签必须共享端点与凭据的校验（保存即报字段错误）；错误附带字段路径。
+  - `src/core/task-runtime.ts`：`modelsInUse()` 供删除守卫使用。
+  - `src/server/host.ts`：`close()` 幂等。
+  - `tests/m5/ui.test.ts`、`tests/m8/ui-flow.test.ts`：各浏览器套件构建到独立临时目录，消除并发重建 `dist/web` 的资源竞态。
+  - 新增 `tests/m8/settings-ui.test.ts`。
+- 新增接口：`POST /api/config/test` → `{ ok, model, credentialId, status?, latencyMs, message? }`（仅显式调用；可能产生供应商用量）。
+- 生效规则：保存后 `restartRequired`，运行中的绑定与历史不变；删除未完成任务在用的模型被 `config_in_use` 拒绝。
+
+### 验收清单
+
+- [x] 浏览器创建/编辑项目与两个模型、绑定不同凭据引用、设置共享组与并发，刷新及重启后保持：`settings-ui.test.ts` 完整覆盖，重启后 API 读回同一 revision 与值。
+- [x] 空值/重复 ID/无效引用/上限有字段错误，失败不覆盖有效配置：重复模型 ID 保存返回 `config-error` 且文件字节不变；校验错误包含 `field` 路径，页面对应输入高亮；provider/凭据不一致同样拒绝。
+- [x] 前端无法读取秘密；表单、响应、错误与页面文本均无合成 key：页面与 `/api/config` 文本断言不含密钥，DTO 只含 `secretRef` 与 `configured`。
+- [x] 测试连接仅由明确点击触发、命中正确模型与凭据；普通设置操作零模型请求：点击前本地替身 0 请求，点击后恰好 1 次且 `Bearer` 密钥与 `model: "local"` 正确。
+- [x] 价格未配置显示 unknown、不默认为免费；价格变更不重写历史用量：页面显示“价格未知（未配置，不会按 0 计算）”，用量估算沿用既有 `estimateCost` 未知语义，配置保存不触碰历史记录。
+
+### 测试与运行
+
+- `tests/m8/settings-ui.test.ts`：2/2；`tests/m5/ui.test.ts` 与 `tests/m8/ui-flow.test.ts` 改为独立构建目录后各 2/2、3/3；全量 43 文件 / 204 项，连续 3 次全绿；双 tsc 通过。无真实供应商调用。
+
+### 已知限制
+
+- 设置页第一版直接编辑配置文件文档，未做逐字段内联校验提示（以字段路径高亮 + 后端消息呈现）；偏好输入为逗号分隔文本。

@@ -11,7 +11,7 @@ import { sanitizeConfig, type ConfigStore } from './config-service.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 
-export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> } }) {
+export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown> }) {
   const app = Fastify({ logger: false });
   const session = createSession();
   const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
@@ -20,7 +20,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const err = error as Error & { statusCode?: number; code?: string };
     const status = typeof err.statusCode === 'number' ? err.statusCode : error instanceof RuntimeError ? 400 : 500;
     const code = error instanceof RuntimeError ? error.code : err.code ?? 'internal';
-    reply.status(status).send({ code, message: err.message });
+    const field = (error as Error & { field?: string }).field;
+    reply.status(status).send({ code, message: err.message, ...(field ? { field } : {}) });
   });
   app.addHook('onRequest', async (request, reply) => {
     if (request.url === '/' || request.url.startsWith('/assets/') || request.url === '/api/health') return;
@@ -47,9 +48,21 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       if (typeof body?.expectedRevision !== 'number' || !Number.isInteger(body.expectedRevision) || body.expectedRevision < 0) {
         throw new RuntimeError('invalid_input', 'expectedRevision must be a nonnegative integer');
       }
+      const current = await options.config!.store.snapshot();
+      const nextModels = (body.document as { models?: { entries?: { id?: unknown }[] } })?.models?.entries;
+      const nextIds = new Set(Array.isArray(nextModels) ? nextModels.map(entry => String(entry?.id ?? '')) : []);
+      const removed = runtime.modelsInUse().filter(id => !nextIds.has(id));
+      if (removed.length) throw new RuntimeError('config_in_use', `Models in use by unfinished tasks cannot be removed: ${removed.join(', ')}`);
       const saved = await options.config!.store.save(body.document, body.expectedRevision);
-      return { revision: saved.revision, restartRequired: true };
+      return { revision: saved.revision, restartRequired: current.revision !== saved.revision };
     });
+    if (options.configTest) {
+      app.post('/api/config/test', async request => {
+        const body = request.body as { modelId?: unknown };
+        if (typeof body?.modelId !== 'string' || !body.modelId.trim()) throw new RuntimeError('invalid_input', 'modelId is required');
+        return options.configTest!(body.modelId);
+      });
+    }
   }
   app.get('/api/settings', async () => {
     const projects = await runtime.user.projects();

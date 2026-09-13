@@ -48,7 +48,11 @@ export function defaultStateDir(env: Record<string, string | undefined>) {
 }
 
 function invalid(message: string): never {
-  throw new RuntimeError('invalid_config', message);
+  const error = new RuntimeError('invalid_config', message) as RuntimeError & { field?: string };
+  // The leading path token (for example models.entries[0].grade) lets the
+  // settings page point at the offending field.
+  error.field = /^[A-Za-z0-9_$.[\]-]+/.exec(message)?.[0] ?? message;
+  throw error;
 }
 
 function asObject(value: unknown, path: string): Record<string, unknown> {
@@ -166,6 +170,15 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
       return parsed;
     });
     if (!entries.length) invalid('models.entries must not be empty');
+    // One provider label is one registered transport, so every model under it
+    // must agree on endpoint and credential; use distinct labels otherwise.
+    const byProvider = new Map<string, { credentialId: string; baseUrl: string }>();
+    entries.forEach((entry, index) => {
+      const existing = byProvider.get(entry.provider);
+      if (!existing) { byProvider.set(entry.provider, { credentialId: entry.credentialId, baseUrl: entry.baseUrl }); return; }
+      if (existing.credentialId !== entry.credentialId) invalid(`models.entries[${index}].credentialId: provider "${entry.provider}" must use one credentialId across its models`);
+      if (existing.baseUrl !== entry.baseUrl) invalid(`models.entries[${index}].baseUrl: provider "${entry.provider}" must use one baseUrl across its models`);
+    });
     const preferences: Partial<Record<ModelGrade, string[]>> = {};
     if (rawModels.preferences !== undefined) {
       for (const [grade, ids] of Object.entries(asObject(rawModels.preferences, 'models.preferences'))) {

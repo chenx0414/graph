@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
@@ -10,10 +10,18 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
+// Each browser suite builds into its own directory; a shared dist/web would
+// let one suite empty it while another is loading the hashed assets.
+let webDir: string;
+beforeAll(async () => {
+  webDir = await mkdtemp(join(tmpdir(), 'graph-m5-web-'));
+  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
+}, 60_000);
+afterAll(() => rm(webDir, { recursive: true, force: true }));
+
 test('the local UI shows settings, queue, graph back-edges, and does not allow editing the graph', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m5-ui-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error' });
   const runtimeOptions = {
     stateDir: join(root, 'state'),
     projects: [{ id: 'project', root }],
@@ -25,7 +33,7 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   const preview = await openTaskRuntime(runtimeOptions);
   preview.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'pub');
   await preview.close();
-  const server = await openGraphServer({ ...runtimeOptions, autoDrive: true, webDir: join(process.cwd(), 'dist/web') });
+  const server = await openGraphServer({ ...runtimeOptions, autoDrive: true, webDir });
   cleanup.push(() => server.close());
   const { taskId } = await server.runtime.user.begin({ projectId: 'project', request: 'Show graph', requestId: 'begin' });
   await server.runtime.supervisor(taskId).propose({
@@ -61,10 +69,9 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
 test('the graph follows runtime events and a budget question accepts a token increment', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m5-live-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error' });
   const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
   const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir: join(process.cwd(), 'dist/web'),
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
     actions: {
       work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
       expensive: { kind: 'agent', reserveTokens: 20_000_001, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
