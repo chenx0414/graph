@@ -23,7 +23,17 @@ export async function openTaskRuntime(options: {
   stateDir: string;
   projects?: ProjectConfig[];
   actions?: Record<string, ActionAdapter>;
-  models?: { entries: ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; apiKey: string; modelRuntime: ModelRuntime };
+  models?: {
+    entries: ModelEntry[];
+    preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
+    /** Legacy single key; used for entries without a credential binding. */
+    apiKey?: string;
+    modelRuntime: ModelRuntime;
+    /** Per-model credential binding so aliases never share or cross keys. */
+    credentialFor?: (entry: ModelEntry) => { credentialId: string; apiKey: string } | undefined;
+  };
+  /** Config version recorded with new tasks so history points at its binding. */
+  config?: { revision(): number };
   master?: { action: string; definitionVersion: string; model: string };
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   /** Host-selected grants and environment for confirmed program checks only. */
@@ -61,7 +71,8 @@ export async function openTaskRuntime(options: {
     }
     const fallback = options.models ? createPiAdapter({
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: () => options.models!.entries,
-      apiKey: options.models.apiKey, modelRuntime: options.models.modelRuntime,
+      apiKey: options.models.apiKey ?? '', modelRuntime: options.models.modelRuntime,
+      ...(options.models.credentialFor ? { apiKeyFor: (entry: ModelEntry) => options.models!.credentialFor!(entry)?.apiKey } : {}),
       ...(options.network ? { network: options.network } : {}),
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
@@ -101,7 +112,7 @@ export async function openTaskRuntime(options: {
           const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
           if (!active_task) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
         }
-        return { taskId, cursor: store.event(taskId, 'task.created', { request: input.request }) };
+        return { taskId, cursor: store.event(taskId, 'task.created', { request: input.request, configRevision: options.config?.revision() ?? null }) };
       });
     },
     task(taskId: string) {

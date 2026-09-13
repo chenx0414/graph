@@ -7,10 +7,11 @@ import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
 import { layoutGraph } from './layout.ts';
 
 import type { StartupInfo } from './host.ts';
+import { sanitizeConfig, type ConfigStore } from './config-service.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 
-export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo }) {
+export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> } }) {
   const app = Fastify({ logger: false });
   const session = createSession();
   const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
@@ -36,6 +37,20 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/startup', async () => options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
+  if (options.config) {
+    app.get('/api/config', async () => {
+      const { revision, config } = await options.config!.store.snapshot();
+      return { revision, config: sanitizeConfig(config, options.config!.env) };
+    });
+    app.post('/api/config', async request => {
+      const body = request.body as { expectedRevision?: unknown; document?: unknown };
+      if (typeof body?.expectedRevision !== 'number' || !Number.isInteger(body.expectedRevision) || body.expectedRevision < 0) {
+        throw new RuntimeError('invalid_input', 'expectedRevision must be a nonnegative integer');
+      }
+      const saved = await options.config!.store.save(body.document, body.expectedRevision);
+      return { revision: saved.revision, restartRequired: true };
+    });
+  }
   app.get('/api/settings', async () => {
     const projects = await runtime.user.projects();
     const models = runtime.models();

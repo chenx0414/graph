@@ -1,6 +1,7 @@
 import { createApp } from './app.ts';
 import { openTaskRuntime } from '../core/task-runtime.ts';
 import { RuntimeError } from '../core/types.ts';
+import type { ConfigStore } from './config-service.ts';
 
 export interface StartupInfo {
   mode: 'view' | 'execute';
@@ -9,9 +10,9 @@ export interface StartupInfo {
   enabledModelCount: number;
 }
 
-export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo }) {
+export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined> }) {
   const runtime = await openTaskRuntime(options);
-  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}) });
+  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}) });
   let address: string;
   try {
     address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });

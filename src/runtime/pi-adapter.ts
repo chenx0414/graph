@@ -51,7 +51,10 @@ export function createPiAdapter(options: {
   instancesDir: string;
   catalog: Catalog;
   directory: () => ModelEntry[];
-  apiKey: string;
+  /** Fallback key for entries without a per-model credential binding. */
+  apiKey?: string;
+  /** Resolve the key per model so aliases on different credentials never share one. */
+  apiKeyFor?: (entry: ModelEntry) => string | undefined;
   modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   channels?: PiAdapterChannels;
@@ -64,6 +67,8 @@ export function createPiAdapter(options: {
       const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
       const entry = options.directory().find(model => model.id === instance.model);
       if (!entry) throw new RuntimeError('model_unavailable', 'No configured model for this instance');
+      const apiKey = options.apiKeyFor?.(entry) ?? options.apiKey;
+      if (!apiKey) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
       const task = options.store.task(operation.taskId);
       const project = options.store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string };
       const definitionVersion = instance.definition_version ?? 'unknown@1';
@@ -109,7 +114,7 @@ export function createPiAdapter(options: {
           const session = await openPiInstance({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(gate, options.apiKey),
+            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(gate, apiKey),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
           });
           try {

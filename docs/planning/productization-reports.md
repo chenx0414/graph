@@ -41,3 +41,35 @@
 - execute 模式真实派发依赖 T02 的凭据绑定与 T04 的并发控制；T01 仅验证拒绝路径与 view 模式。
 - `pnpm dev` 为前端开发服务器，需另开守护进程；不提供 launchd/安装包（按待办范围）。
 - 未运行真实供应商调用，无新增用量。
+
+## T02 · 持久配置与模型/凭据绑定
+
+- 起始提交：`3edf24a`
+- 完成提交：本次提交
+- 修改范围：
+  - `src/runtime/pi-adapter.ts`：新增 `apiKeyFor(entry)`，实际发送前按模型解析凭据；无凭据即 `model_unavailable`，不发请求。
+  - `src/core/task-runtime.ts`：`models` 选项新增 `credentialFor`（凭据 ID + 密钥）与可选 `apiKey`（旧单 key 兼容）；新增 `config.revision()`，任务创建的 `task.created` 事件记录 `configRevision`。
+  - 新增 `src/server/config-service.ts`：`openConfigStore()` 原子保存（临时文件 + rename，0o600）、跨进程编辑锁、revision 检查（`config_conflict`）、`sanitizeConfig()` 脱敏 DTO。
+  - `src/server/app.ts`：`GET /api/config`（脱敏 + revision）、`POST /api/config`（校验后保存，返回 `restartRequired`）。
+  - `src/server/host.ts`、`src/server/start.ts`：配置服务注入；按模型 id 建立凭据映射；启动时解析环境变量，密钥不进入快照/日志/DB。
+  - `tests/fixtures/openai-server.ts`：记录每次请求的 Authorization 头。
+  - 新增 `tests/m8/credentials.test.ts`。
+- 新增接口/配置：`GET/POST /api/config`；配置新增 `revision` 字段（由服务维护）；`task.created` 事件新增 `configRevision`。
+- 生效/迁移规则：配置保存后第一版**需重启守护进程生效**（响应 `restartRequired: true`）；执行中任务保持原绑定，历史事件记录当时的 revision。旧 `apiKey` 编程入口保持可用；配置文件与 T01 相同 schema，旧文件缺少 `revision` 按 0 处理。
+
+### 验收清单
+
+- [x] 两个本地端点各收到自己的凭据、模型切换不串 key：`tests/m8/credentials.test.ts` 用两个合成 provider 各自断言 `Authorization: Bearer key-alpha` / `key-beta`，交叉数为 0。
+- [x] 重启后项目/模型/凭据引用/偏好保持；空凭据在派发前拒绝：配置服务 round-trip + T01 重启测试；无凭据模型的任务 provider 请求数为 0 且错误含 `No credential bound`（进入节点记录）。
+- [x] 非法写入不损坏旧配置、并发编辑有冲突提示：`config_conflict`、`invalid_config` 后文件字节不变；保存使用锁 + 原子 rename。
+- [x] 执行中修改受生效规则约束、历史指向原版本：第一版要求重启生效；`task.created` 记录 `configRevision`（测试断言 revision=7）。
+- [x] 设置/任务详情/SSE/错误/导出均无秘密原文：DTO 只含 `secretRef` 与 `configured`；`/api/config` 文本断言不含合成密钥；密钥仅存在于 adapter 发送路径。
+- [x] 旧单 key 用例与 A13 harness 兼容：全量 40 文件 / 192 项通过，未修改既有 `apiKey` 调用。
+
+### 测试与运行
+
+- `tests/m8/credentials.test.ts`：5/5；全量 40 文件 / 192 项通过（1 次）；双 tsc 通过。无真实供应商调用。
+
+### 已知限制
+
+- `restartRequired` 的界面提示与热重载不在 T02（T05 呈现）；`credentialId` 目前仅用于绑定与展示，并发限制在 T04 使用。

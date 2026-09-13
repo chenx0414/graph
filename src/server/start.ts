@@ -5,7 +5,9 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
 import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
+import { openConfigStore } from './config-service.ts';
 import { openGraphServer } from './host.ts';
+import type { ModelEntry } from '../catalog/models.ts';
 
 export interface DaemonOptions {
   /** Explicit config path; null starts in first-run mode with no projects or models. */
@@ -92,6 +94,14 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   }
   const enabled = entries.length > 0 && missing.size === 0;
   if (entries.length && missing.size) log(`Credentials not configured (${[...missing].join(', ')}); model dispatch stays disabled.`);
+  const configStore = options.configPath ? await openConfigStore(options.configPath) : null;
+  // Model id to credential mapping: one model can never inherit another model's key.
+  const credentials = new Map<string, { credentialId: string; apiKey: string }>();
+  for (const entry of entries) {
+    const secret = resolveCredentialSecret(config, entry.credentialId, options.env);
+    if (secret.configured && secret.value) credentials.set(entry.id, { credentialId: entry.credentialId, apiKey: secret.value });
+  }
+  const credentialFor = (entry: ModelEntry) => credentials.get(entry.id);
 
   let modelRuntime: ModelRuntime | undefined;
   if (enabled) {
@@ -109,13 +119,21 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     stateDir,
     projects: config.projects,
     ...(enabled && modelRuntime ? {
-      models: { entries, preferences: config.models!.preferences, apiKey: resolveCredentialSecret(config, first!.credentialId, options.env).value!, modelRuntime },
+      models: {
+        entries,
+        preferences: config.models!.preferences,
+        apiKey: credentials.get(first!.id)?.apiKey ?? '',
+        modelRuntime,
+        credentialFor,
+      },
       master: { action: 'master', definitionVersion: 'master@1', model: first!.id },
     } : {}),
+    config: { revision: () => configStore?.revision() ?? 0 },
     autoDrive: options.mode === 'execute',
     port: options.port,
     webDir: options.webDir,
     startup: { mode: options.mode, configured: enabled, modelCount: entries.length, enabledModelCount: enabled ? entries.length : 0 },
+    ...(configStore ? { configStore, configEnv: options.env } : {}),
   });
   if (enabled) {
     server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
