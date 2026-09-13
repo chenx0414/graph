@@ -54,6 +54,7 @@ export async function openTaskRuntime(options: {
   let git: GitIntegration;
   const channels: Partial<PiAdapterChannels> = {};
   const ensureOpen = () => { if (closed) throw new RuntimeError('closed', 'Runtime is closed'); };
+  const modelScheduler: ModelScheduler = options.models?.modelScheduler ? options.models.modelScheduler : createModelScheduler();
   try {
     store.transaction(() => {
       for (const project of options.projects ?? []) {
@@ -67,7 +68,7 @@ export async function openTaskRuntime(options: {
     });
     catalog = new Catalog(store);
     git = new GitIntegration(store, stateDir);
-    const scheduler = options.models?.modelScheduler ?? createModelScheduler();
+    const slotScheduler: ModelScheduler = options.models?.modelScheduler ? options.models.modelScheduler : createModelScheduler();
     if (options.models) {
       store.transaction(() => {
         for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
@@ -77,7 +78,7 @@ export async function openTaskRuntime(options: {
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: () => options.models!.entries,
       apiKey: options.models.apiKey ?? '', modelRuntime: options.models.modelRuntime,
       ...(options.models.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
-      scheduler,
+      scheduler: modelScheduler,
       ...(options.network ? { network: options.network } : {}),
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
@@ -283,6 +284,11 @@ export async function openTaskRuntime(options: {
   };
 
   const runtime = {
+    /** Scheduler facts: which credentials are busy and which requests wait. */
+    modelLimits(): { active: Record<string, number>; queued: Record<string, number> } {
+      ensureOpen();
+      return modelScheduler.snapshot();
+    },
     /** Model ids bound to tasks that have not finished, for config deletion guards. */
     modelsInUse(): string[] {
       ensureOpen();

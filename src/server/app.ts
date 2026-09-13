@@ -38,6 +38,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/startup', async () => options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
+  app.get('/api/limits', async () => runtime.modelLimits());
   if (options.config) {
     app.get('/api/config', async () => {
       const { revision, config } = await options.config!.store.snapshot();

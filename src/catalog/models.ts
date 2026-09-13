@@ -12,6 +12,8 @@ export interface ModelEntry {
   contextWindow: number;
   maxTokens: number;
   cost?: ModelCost;
+  /** Credential binding from the daemon configuration; absent in legacy entries. */
+  credentialId?: string;
 }
 
 export function parseDefinitionVersion(value: string) {

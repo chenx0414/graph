@@ -13,11 +13,12 @@ type TaskView = {
   id: string; projectId: string; request: string; phase: string; status: string; paused: boolean; proposalVersion: number;
   acceptedProposalVersion: number | null; targetBranch: string | null; updatedAt: number | null;
   messages: { cursor: number; text: string; requirementVersion: number }[];
-  questions: { id: string; kind: string; status: string; nodeId: string; data: { prompt?: string; grant?: string } }[];
+  questions: { id: string; kind: string; status: string; nodeId: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown> }[];
   nodes: NodeView[];
   evidence: { nodeId: string; acceptanceId: string; summary: string; valid: boolean; artifact?: { path: string; digest: string } }[];
   operations: { nodeId: string; state: string; result?: { output?: unknown } | null }[];
   cost: { unknown?: boolean; amount?: number };
+  integrationSha: string | null;
   proposal: {
     summary?: string; acceptance: { id: string; description: string; checkNode: string }[];
     nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[];
@@ -28,7 +29,9 @@ type NodeView = {
   reserved?: number; instanceId?: string | null; selectedModel?: string; boundDefinition?: string;
   activationId?: string; outputVersion?: number; stallCount?: number;
 };
-type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string }[]; definitions: { id: string; version: number }[]; capabilities: { id: string; version: string }[] };
+type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[]; definitions: { id: string; version: number }[]; capabilities: { id: string; version: string }[] };
+type Limits = { active: Record<string, number>; queued: Record<string, number> };
+type OperationRow = { id: string; nodeId: string; state: string; reserved: number; workerActive: boolean; result: { output?: unknown } | null; durationMs?: number };
 type GraphPayload = {
   nodes: NodeView[];
   containers: { id: string; parent?: string; nodes: string[] }[];
@@ -129,6 +132,24 @@ export function useTaskStream(taskId: string, onEvent: (event: { cursor: number;
   return connected;
 }
 
+function useLimits() {
+  const { data, reload } = useAsync(() => api<Limits>('/api/limits'), []);
+  useEffect(() => {
+    const timer = setInterval(reload, 1_500);
+    return () => clearInterval(timer);
+  }, [reload]);
+  return data;
+}
+
+/** A preparing node whose credential has requests waiting is waiting for a
+ * model slot, not executing on the provider. */
+function waitingForSlot(node: { selectedModel?: string; status: string }, settings: Settings | null, limits: Limits | null) {
+  if (!node.selectedModel || !limits) return false;
+  if (['succeeded', 'skipped', 'failed', 'pending', 'blocked'].includes(node.status)) return false;
+  const credentialId = settings?.models.find(model => model.id === node.selectedModel)?.credentialId;
+  return Boolean(credentialId && (limits.queued[credentialId] ?? 0) > 0);
+}
+
 function route() {
   const hash = location.hash.replace(/^#/, '') || '/';
   return hash;
@@ -170,8 +191,8 @@ export function App() {
       {path === '/' && <Overview settings={settings} tasks={tasks} onTasks={setTasks} />}
       {path === '/catalog' && <Catalog settings={settings} />}
       {path === '/settings' && <Settings />}
-      {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} />}
-      {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} />}
+      {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} settings={settings} />}
+      {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} />}
     </div>
   );
 }
@@ -245,7 +266,7 @@ function Catalog({ settings }: { settings: Settings | null }) {
 
 function QuestionReply({ taskId, question, onDone }: {
   taskId: string;
-  question: { id: string; kind: string; data: { prompt?: string; grant?: string } };
+  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown> };
   onDone: () => void;
 }) {
   const [tokens, setTokens] = useState('100000');
@@ -253,6 +274,7 @@ function QuestionReply({ taskId, question, onDone }: {
   const [outputTokens, setOutputTokens] = useState('0');
   const [value, setValue] = useState('');
   const [proof, setProof] = useState('');
+  const [usageMode, setUsageMode] = useState<'usage' | 'reconcile'>('usage');
   const [error, setError] = useState('');
   async function submit(answer: unknown) {
     try {
@@ -265,12 +287,21 @@ function QuestionReply({ taskId, question, onDone }: {
   return (
     <li>
       {question.kind} {question.data.prompt}
+      <pre data-testid={`question-data-${question.id}`} style={{ whiteSpace: 'pre-wrap', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
       {question.kind === 'budget' && <input data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
       {question.kind === 'waiting' && <input data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} />}
       {question.kind === 'unknown_usage' && <>
-        <input data-testid="usage-input" type="number" min={0} value={inputTokens} onChange={event => setInputTokens(event.target.value)} placeholder="输入 token" />
-        <input data-testid="usage-output" type="number" min={0} value={outputTokens} onChange={event => setOutputTokens(event.target.value)} placeholder="输出 token" />
-        <input data-testid="usage-proof" value={proof} onChange={event => setProof(event.target.value)} placeholder="证据" />
+        <label>处理方式
+          <select data-testid="usage-mode" value={usageMode} onChange={event => setUsageMode(event.target.value as 'usage' | 'reconcile')}>
+            <option value="usage">补记用量（按供应商实际回复填写）</option>
+            <option value="reconcile">无法核对（保留未知，需说明）</option>
+          </select>
+        </label>
+        {usageMode === 'usage' && <>
+          <input data-testid="usage-input" type="number" min={0} value={inputTokens} onChange={event => setInputTokens(event.target.value)} placeholder="输入 token" />
+          <input data-testid="usage-output" type="number" min={0} value={outputTokens} onChange={event => setOutputTokens(event.target.value)} placeholder="输出 token" />
+        </>}
+        <input data-testid="usage-proof" value={proof} onChange={event => setProof(event.target.value)} placeholder={usageMode === 'usage' ? '用量证据' : '无法核对的说明'} />
       </>}
       {question.kind === 'rework' || question.kind === 'stalled' ? <>
         <button type="button" onClick={() => void submit({ type: 'retry' })}>重试</button>
@@ -278,18 +309,22 @@ function QuestionReply({ taskId, question, onDone }: {
       </> : <button type="button" onClick={() => {
         if (question.kind === 'budget') return void submit({ type: 'add_budget', tokens: Number(tokens) });
         if (question.kind === 'waiting') return void submit({ type: 'respond', value });
-        if (question.kind === 'unknown_usage') return void submit({ type: 'usage', usage: { input: Number(inputTokens), output: Number(outputTokens), cacheRead: 0, cacheWrite: 0 }, proof });
+        if (question.kind === 'unknown_usage') {
+          if (usageMode === 'reconcile') return void submit({ type: 'reconcile_usage', proof });
+          return void submit({ type: 'usage', usage: { input: Number(inputTokens), output: Number(outputTokens), cacheRead: 0, cacheWrite: 0 }, proof });
+        }
         if (question.kind === 'permission') return void submit({ type: 'grant', grant: question.data.grant });
         if (['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind)) return void submit({ type: 'retry' });
         return void submit({ type: 'acknowledge' });
-      }}>答复</button>}
+      }}>{['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind) ? '重试' : '答复'}</button>}
       {error && <p data-testid="answer-error">{error}</p>}
     </li>
   );
 }
 
-function TaskPanel({ id, onTasks }: { id: string; onTasks: (tasks: TaskSummary[]) => void }) {
+function TaskPanel({ id, onTasks, settings }: { id: string; onTasks: (tasks: TaskSummary[]) => void; settings: Settings | null }) {
   const { data: view, error, loading, reload } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
+  const limits = useLimits();
   const [text, setText] = useState('');
   const [branch, setBranch] = useState('main');
   const [actionError, setActionError] = useState('');
@@ -319,6 +354,19 @@ function TaskPanel({ id, onTasks }: { id: string; onTasks: (tasks: TaskSummary[]
         {view.messages.map(message => <p key={message.cursor}>需求（v{message.requirementVersion}）：{message.text}</p>)}
         {!view.messages.length && <p>暂无对话。</p>}
       </div>
+      <section>
+        <h3>节点状态</h3>
+        <ul data-testid="node-list">
+          {view.nodes.map(node => (
+            <li key={node.id} data-node={node.id}>
+              {node.id} · {NODE_LABEL[node.status] ?? node.status}
+              {waitingForSlot(node, settings, limits) ? ' · 等待 API 名额' : ''}
+              {node.status === 'blocked' && view.questions.some(question => question.status === 'open' && question.nodeId === node.id) ? ' · 等待人工处理' : ''}
+              {' '}· 实例 {node.instanceId ?? '未知'} · 用量 {node.used == null ? '未知' : node.used}
+            </li>
+          ))}
+        </ul>
+      </section>
       {view.proposal && (
         <section data-testid="proposal">
           <h3>提案 v{view.proposalVersion}{accepted ? '（已确认）' : ''}</h3>
@@ -341,6 +389,25 @@ function TaskPanel({ id, onTasks }: { id: string; onTasks: (tasks: TaskSummary[]
       <button type="button" data-testid="pause" onClick={() => void act(() => api(`/api/tasks/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>暂停</button>
       <button type="button" data-testid="resume" onClick={() => void act(() => api(`/api/tasks/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>继续</button>
       <a href={`#/tasks/${id}/graph`}>查看任务图</a>
+      {(view.phase === 'completed' || view.acceptedProposalVersion !== null) && (
+        <section data-testid="delivery">
+          <h3>交付</h3>
+          <p>目标分支 {view.targetBranch ?? '未确认'} · 集成提交 {view.integrationSha ?? '尚无集成提交'}</p>
+          <p>交付目录 {settings?.projects.find(project => project.id === view.projectId)?.root ?? '未知'}</p>
+          <ul>
+            {view.proposal?.acceptance?.map(item => {
+              const valid = view.evidence.filter(evidence => evidence.acceptanceId === item.id && evidence.valid);
+              const invalid = view.evidence.filter(evidence => evidence.acceptanceId === item.id && !evidence.valid);
+              return (
+                <li key={item.id} data-acceptance={item.id}>
+                  {item.id}：{item.description} — {valid.length ? valid.map(evidence => `${evidence.summary}（${evidence.artifact?.path ?? '无产物'}）`).join('；') : '尚无有效证据'}
+                  {invalid.length ? `；无效或过期证据 ${invalid.length} 条，不计入验收` : ''}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       {actionError && <ErrorBox message={actionError} />}
       {open.length ? (
         <ul data-testid="questions">{open.map(question => (
@@ -351,18 +418,22 @@ function TaskPanel({ id, onTasks }: { id: string; onTasks: (tasks: TaskSummary[]
   );
 }
 
-function GraphPanel({ id }: { id: string }) {
+function GraphPanel({ id, settings }: { id: string; settings: Settings | null }) {
   const { data: graph, error, loading, reload } = useAsync(() => api<GraphPayload>(`/api/tasks/${id}/graph`), [id]);
   const { data: view } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
+  const limits = useLimits();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
+  const [opsLimit, setOpsLimit] = useState(20);
+  const { data: ops } = useAsync(() => api<OperationRow[]>(`/api/tasks/${id}/operations?limit=${opsLimit}`), [id, opsLimit]);
   const connected = useTaskStream(id, () => reload());
   if (loading && !graph) return <p>加载中…</p>;
   if (error && !graph) return <ErrorBox message={error} onRetry={reload} />;
   if (!graph) return <p>加载中…</p>;
   const selectedNode = graph.nodes.find(node => node.id === selected);
   const nodeEvidence = view?.evidence?.filter(item => item.nodeId === selected) ?? [];
-  const nodeOperations = view?.operations?.filter(item => item.nodeId === selected) ?? [];
+  const nodeOperations = (ops ?? []).filter(item => item.nodeId === selected);
+  const nodeWaiting = selectedNode ? waitingForSlot(selectedNode, settings, limits) : false;
   return (
     <section data-testid="graph" data-editable="false">
       <p data-testid="connection">{connected ? '已连接' : '重连中…'}</p>
@@ -381,15 +452,24 @@ function GraphPanel({ id }: { id: string }) {
       <GraphCanvas graph={graph} collapsed={collapsed} onSelect={setSelected} selected={selected} />
       {selectedNode && (
         <aside data-testid="node-detail">
-          <p>{selectedNode.id} {NODE_LABEL[selectedNode.status] ?? selectedNode.status}（{selectedNode.status}）</p>
+          <p>{selectedNode.id} {NODE_LABEL[selectedNode.status] ?? selectedNode.status}（{selectedNode.status}）{nodeWaiting ? ' · 等待 API 名额' : ''}</p>
           <ul>
-            <li>实例 {selectedNode.instanceId ?? '—'}</li>
-            <li>模型 {selectedNode.selectedModel ?? '—'} · 定义 {selectedNode.boundDefinition ?? '—'}</li>
-            <li>用量 {selectedNode.used ?? 0}{selectedNode.budget ? ` / 预算 ${selectedNode.budget}` : ''} · 预留 {selectedNode.reserved ?? 0}</li>
+            <li>实例 {selectedNode.instanceId ?? '未知'}</li>
+            <li>模型 {selectedNode.selectedModel ?? '未知'} · 定义 {selectedNode.boundDefinition ?? '未知'}</li>
+            <li>用量 {selectedNode.used == null ? '未知（无权威计量）' : selectedNode.used}{selectedNode.budget == null ? '' : ` / 预算 ${selectedNode.budget}`} · 预留 {selectedNode.reserved ?? 0}</li>
             <li>尝试次数 {selectedNode.stallCount ?? 0} · 输出版本 {selectedNode.outputVersion ?? 0}</li>
-            <li>操作 {nodeOperations.length} 次{nodeOperations[0]?.result?.output !== undefined ? ` · 最近输出 ${JSON.stringify(nodeOperations[0]?.result?.output)}` : ''}</li>
-            <li>验收证据 {nodeEvidence.length ? nodeEvidence.map(item => `${item.acceptanceId}:${item.valid ? '有效' : '无效'} ${item.summary}`).join(' / ') : '无'}</li>
+            <li>验收证据 {nodeEvidence.length ? nodeEvidence.map(item => `${item.acceptanceId}:${item.valid ? '有效' : '无效或过期'} ${item.summary}`).join(' / ') : '无'}</li>
           </ul>
+          <h4>操作记录（{nodeOperations.length}）</h4>
+          <ol data-testid="node-operations">
+            {nodeOperations.map(operation => (
+              <li key={operation.id}>
+                {operation.state}{operation.durationMs !== undefined ? ` · ${operation.durationMs}ms` : ''} · 预留 {operation.reserved}
+                {operation.result?.output !== undefined && <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(operation.result.output, null, 2)}</pre>}
+              </li>
+            ))}
+          </ol>
+          <button type="button" data-testid="operations-more" onClick={() => setOpsLimit(current => current + 20)}>加载更多操作记录</button>
         </aside>
       )}
     </section>

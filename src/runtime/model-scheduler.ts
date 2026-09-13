@@ -19,6 +19,8 @@ export interface ModelScheduler {
   /** Current in-flight count for one credential, or the total for all. */
   active(credentialId?: string): number;
   queued(): number;
+  /** Backend facts for waiting-state displays: busy and waiting per credential. */
+  snapshot(): { active: Record<string, number>; queued: Record<string, number> };
 }
 
 interface Waiter {
@@ -103,6 +105,16 @@ export function createModelScheduler(): ModelScheduler {
     },
     queued() {
       return waiters.filter(waiter => !waiter.done).length;
+    },
+    snapshot() {
+      const active: Record<string, number> = {};
+      for (const [id, count] of activeByCredential) active[id] = count;
+      const queued: Record<string, number> = {};
+      for (const waiter of waiters) {
+        if (waiter.done) continue;
+        queued[waiter.request.credentialId] = (queued[waiter.request.credentialId] ?? 0) + 1;
+      }
+      return { active, queued };
     },
   };
 }
