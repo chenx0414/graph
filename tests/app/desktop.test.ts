@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
-  resolveDaemonMode, saveSecrets, tailText, taskNotifications,
+  resolveDaemonMode, saveSecrets, tailText, taskNotifications, trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
 
@@ -28,7 +28,7 @@ const paths: AppPaths = {
 
 describe('desktop app paths', () => {
   test('dev layout serves the repository web build and keeps state in userData', () => {
-    const resolved = resolveAppPaths({ appPath: '/repo', resourcesPath: '/unused', isPackaged: false, userData: '/home/me/Library/Application Support/Graph' });
+    const resolved = resolveAppPaths({ appPath: '/repo', isPackaged: false, userData: '/home/me/Library/Application Support/Graph' });
     expect(resolved.root).toBe('/repo');
     expect(resolved.serverEntry).toBe('/repo/src/server/cli.ts');
     expect(resolved.webDir).toBe('/repo/dist/web');
@@ -36,11 +36,11 @@ describe('desktop app paths', () => {
     expect(resolved.configPath).toBe('/home/me/Library/Application Support/Graph/graph.config.json');
   });
 
-  test('packaged layout reads the web build from resources', () => {
-    const resolved = resolveAppPaths({ appPath: '/unused', resourcesPath: '/Applications/Graph.app/Contents/Resources', isPackaged: true, userData: '/home/me/Library/Application Support/Graph' });
-    expect(resolved.root).toBe('/Applications/Graph.app/Contents/Resources');
-    expect(resolved.webDir).toBe('/Applications/Graph.app/Contents/Resources/web');
-    expect(resolved.serverEntry).toBe('/Applications/Graph.app/Contents/Resources/src/server/cli.ts');
+  test('packaged layout reads server and web from the app directory', () => {
+    const resolved = resolveAppPaths({ appPath: '/Applications/Graph.app/Contents/Resources/app', isPackaged: true, userData: '/home/me/Library/Application Support/Graph' });
+    expect(resolved.root).toBe('/Applications/Graph.app/Contents/Resources/app');
+    expect(resolved.webDir).toBe('/Applications/Graph.app/Contents/Resources/app/web');
+    expect(resolved.serverEntry).toBe('/Applications/Graph.app/Contents/Resources/app/src/server/cli.ts');
   });
 });
 
@@ -100,6 +100,18 @@ describe('keychain secrets file', () => {
 
   test('tails logs for bounded dialogs', () => {
     expect(tailText('a\n\nb\nc\n', 2)).toBe('b\nc');
+  });
+});
+
+describe('tray surface', () => {
+  test('points at the template image and reports open questions', () => {
+    expect(trayIconPath('/app')).toBe('/app/build/trayTemplate.png');
+    const items = trayMenuItems(2);
+    expect(items[0]).toMatchObject({ label: '打开控制台', action: 'open' });
+    expect(items[1]).toMatchObject({ label: '待处理问题 2', enabled: false });
+    expect(items[2]?.separator).toBe(true);
+    expect(items[3]).toMatchObject({ label: '退出 Graph', action: 'quit' });
+    expect(trayMenuItems(0)[1]?.label).toBe('没有待处理问题');
   });
 });
 

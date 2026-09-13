@@ -10,14 +10,13 @@ export interface AppPaths {
   webDir: string;
 }
 
-/** Layout for dev (`electron .` in the repo) and packaged builds (extraResources). */
+/** Layout for dev (`electron .` in the repo) and packaged builds (app dir). */
 export function resolveAppPaths(input: {
   appPath: string;
-  resourcesPath: string;
   isPackaged: boolean;
   userData: string;
 }): AppPaths {
-  const root = input.isPackaged ? resolve(input.resourcesPath) : resolve(input.appPath);
+  const root = resolve(input.appPath);
   return {
     root,
     stateDir: join(input.userData, 'state'),
@@ -26,6 +25,27 @@ export function resolveAppPaths(input: {
     serverEntry: join(root, 'src/server/cli.ts'),
     webDir: input.isPackaged ? join(root, 'web') : join(root, 'dist/web'),
   };
+}
+
+export function trayIconPath(root: string): string {
+  return join(root, 'build', 'trayTemplate.png');
+}
+
+export interface TrayMenuItem {
+  label: string;
+  enabled?: boolean;
+  separator?: boolean;
+  action?: 'open' | 'quit';
+}
+
+/** Menu definition for the macOS status item; actions stay in main. */
+export function trayMenuItems(openTotal: number): TrayMenuItem[] {
+  return [
+    { label: '打开控制台', action: 'open' },
+    { label: openTotal > 0 ? `待处理问题 ${openTotal}` : '没有待处理问题', enabled: false },
+    { label: '', separator: true },
+    { label: '退出 Graph', action: 'quit' },
+  ];
 }
 
 /** Daemon arguments for one app launch; port 0 lets the daemon pick a free port. */

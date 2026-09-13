@@ -55,9 +55,9 @@ Graph.app
 - 桌面通知：新增待处理问题、任务完成/失败时发系统通知，点击跳任务；Dock 角标显示开放问题总数。
 - 验收：事件重放与实时一致；未知用量显示“未知”；100 节点图交互实测；现有 `tests/m8` UI 断言适配后全绿，新增 `tests/app/*` 单测（纯逻辑）。
 
-### A4 · 打包与文档
+### A4 · 打包与文档（已交付）
 
-- `electron-builder` 配置、应用图标与托盘常驻、`app:build`；`docs/usage.md` 增补 APP 安装与排障；`README.md` 增补 APP 入口。
+- `electron-builder` 配置、应用图标与托盘常驻、`app:build`；`docs/usage.md` 增补 APP 安装、卸载与排障；`README.md` 增补 APP 入口。
 - 验收：本机产出可双击启动的 `.app`；无 Node/终端环境也能完成 A2 验收流程；卸载说明与数据目录位置准确。
 
 ### A5 · 签名、公证与自动更新（可选，独立确认）

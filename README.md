@@ -75,9 +75,10 @@ pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭
 ```sh
 export PATH="$PWD/node_modules/.bin:$PATH"
 npx --yes electron@44.3.0 .        # 或安装 devDependencies 后：node --run app:dev
+node --run app:build               # 打包：dist/app/mac-arm64/Graph.app 与 Graph-<版本>-arm64.dmg
 ```
 
-当前为 A3（桌面壳 + 向导 + 可视化增强：运行时间线、用量面板、问题收件箱、系统通知与 Dock 角标）：托盘图标、打包与签名在 A4。
+当前为 A4（桌面壳 + 向导 + 可视化增强 + 打包）：可产出本机 `.app`/`.dmg`，托盘常驻；对外分发所需的签名与公证待 Apple Developer ID（A5 前提供操作手册）。
 
 ## 运行验证
 

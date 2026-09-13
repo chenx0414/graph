@@ -32,3 +32,7 @@ __pycache__/
 skills-lock.json
 .worktrees/
 .agents/
+
+# App packaging staging
+.stage/
+.tooling/

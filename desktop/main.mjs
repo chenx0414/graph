@@ -7,7 +7,7 @@
  * Secrets never enter the config file: they are decrypted from the keychain
  * into the child process environment only.
  */
-import { app, BrowserWindow, Notification, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   absolutePaths, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
   parseBannerAddress, resolveAppPaths, resolveDaemonMode, saveSecrets, tailText,
-  taskNotifications,
+  taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
 
 app.setName('Graph');
@@ -41,6 +41,8 @@ if (!app.requestSingleInstanceLock()) {
   let smokeLogged = false;
   let notificationState = { primed: false, questions: {}, status: {} };
   let taskPoll = null;
+  let tray = null;
+  let openQuestionTotal = 0;
 
   const readJson = path => {
     try {
@@ -102,13 +104,16 @@ if (!app.requestSingleInstanceLock()) {
     return loadSecrets(paths.secretsPath, codec, path => readFileSync(path, 'utf8'));
   }
 
-  function startDaemon() {
-    const paths = absolutePaths(resolveAppPaths({
-      appPath: devRoot,
-      resourcesPath: process.resourcesPath,
+  function currentPaths() {
+    return absolutePaths(resolveAppPaths({
+      appPath: app.isPackaged ? app.getAppPath() : devRoot,
       isPackaged: app.isPackaged,
       userData: app.getPath('userData'),
     }));
+  }
+
+  function startDaemon() {
+    const paths = currentPaths();
     mkdirSync(paths.stateDir, { recursive: true });
     mkdirSync(dirname(paths.configPath), { recursive: true });
     const hasConfig = ensureConfigFile(paths.configPath, existsSync, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
@@ -257,8 +262,35 @@ if (!app.requestSingleInstanceLock()) {
         notificationState = result.state;
         for (const decision of result.notifications) notifyDecision(decision);
         if (app.dock) app.dock.setBadge(result.openTotal ? String(result.openTotal) : '');
+        if (result.openTotal !== openQuestionTotal) {
+          openQuestionTotal = result.openTotal;
+          refreshTray();
+        }
       })
       .catch(() => undefined);
+  }
+
+  function refreshTray() {
+    if (!tray) return;
+    tray.setContextMenu(Menu.buildFromTemplate(trayMenuItems(openQuestionTotal).map(item => {
+      if (item.separator) return { type: 'separator' };
+      if (item.action === 'open') {
+        return { label: item.label, click: () => { if (window) { window.show(); window.focus(); } else if (readyUrl) openWindow(readyUrl); } };
+      }
+      if (item.action === 'quit') return { label: item.label, click: () => app.quit() };
+      return { label: item.label, enabled: item.enabled ?? true };
+    })));
+  }
+
+  function createTray() {
+    if (tray) return;
+    const iconPath = trayIconPath(currentPaths().root);
+    if (!existsSync(iconPath)) return;
+    tray = new Tray(nativeImage.createFromPath(iconPath));
+    tray.setToolTip('Graph');
+    if (verbose) console.log('[app] tray ready');
+    tray.on('click', () => { if (window) { window.show(); window.focus(); } else if (readyUrl) openWindow(readyUrl); });
+    refreshTray();
   }
 
   function stopDaemon() {
@@ -300,6 +332,7 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     registerBridge();
+    createTray();
     startDaemon();
     taskPoll = setInterval(pollTasks, 4_000);
   });

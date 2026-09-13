@@ -49,6 +49,13 @@ A3 起控制台内置：任务页运行时间线与用量面板、图页 MiniMap
 
 首次打开且未配置时，从横幅或导航进入 `#/setup` 向导：选择项目目录（原生对话框）、选模型模板、填密钥。桌面 APP 会把密钥写入系统钥匙串（不进入配置文件），保存后自动重启守护进程；未填密钥则保持仅查看模式。数据目录与配置默认在系统用户数据目录下（macOS 为 `~/Library/Application Support/Graph`），与 CLI 版的状态目录相互独立。
 
+### 安装、卸载与打包
+
+- 打包：`export PATH="$PWD/node_modules/.bin:$PATH"; node --run app:build`。产物为 `dist/app/mac-arm64/Graph.app` 与 `dist/app/Graph-<版本>-arm64.dmg`；把 `.app` 拖入“应用程序”即可安装，删除应用即卸载。当前产物为本地构建、未签名；对外分发需要 Apple Developer ID 与公证，本机首次打开无需处理 Gatekeeper 提示。
+- 数据与密钥：全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、`secrets.json` 密文）。卸载应用不会删除该目录；彻底清理时手动删除。
+- 托盘：菜单栏图标提供“打开控制台 / 待处理问题 N / 退出 Graph”；关闭窗口仅关闭窗口，守护进程继续运行，从托盘或 Dock 可重新打开。
+- 打包版本用系统浏览器组件（Electron 44.3.0，内置 Node 24.20.0），运行不依赖系统 Node 或终端环境。
+
 ## 配置
 
 配置文件为版本 1 JSON，默认 `./graph.config.json`，可用 `--config` / `GRAPH_CONFIG` 覆盖。相对项目根按配置文件所在目录解析。示例（无任何真实密钥）：

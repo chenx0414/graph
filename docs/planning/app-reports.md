@@ -80,3 +80,30 @@ node_modules/.bin/vitest run tests/app    # 20 项
 
 - 托盘常驻并入 A4（需要应用图标与打包资源）；当前关闭窗口仍保留 Dock 图标与菜单，通知与角标已在 A3 生效。
 - 100 节点测量只覆盖前端渲染（图布局仍由服务端 ELK 计算）；真实大规模图的服务端布局耗时未在本次测量范围内。
+
+## A4 · 打包（2026-09-13）
+
+**起始提交**：`982e09f`（A3 可视化增强）。
+**完成提交**：本次提交。
+**实际修改范围**：`scripts/make-icons.mjs`（Playwright 渲染应用图标与托盘模板图，可复现）、`scripts/package-app.mjs`（staging + 扁平 npm 生产依赖 + electron-builder）、`build/icon.png` / `build/trayTemplate.png` / `build/trayTemplate@2x.png`、`desktop/lib.ts`（打包路径改按 app 目录解析、托盘菜单定义）、`desktop/main.mjs`（托盘创建与刷新、待处理问题计数）、`package.json`（版本 0.1.0、`app:icons`/`app:build`、electron-builder 26.15.3）、`.gitignore`（`.stage/`、`.tooling/`）、README 与使用文档。
+
+**验收清单**
+
+- [x] 本机产出可双击启动的 `.app`：`dist/app/mac-arm64/Graph.app`（489MB，未压缩；`Graph-0.1.0-arm64.dmg` 162MB），`Info.plist` 中 `CFBundleName=Graph`、`CFBundleIdentifier=dev.graph.console`、`CFBundleShortVersionString=0.1.0`。
+- [x] 无 Node/终端环境可完成 A2 流程：以 `env -i HOME=… PATH=/usr/bin:/bin` 启动打包版，首启向导 → 保存 → 守护进程自动重启到新端口 → `revision 1`；全过程不依赖系统 Node、shell 环境变量或源码目录。
+- [x] 托盘常驻：打包资源内 `build/trayTemplate.png(@2x)` 存在，`tray ready` 日志出现；菜单含“打开控制台 / 待处理问题 N / 退出 Graph”，Dock 角标与通知沿用 A3。
+- [x] 打包不依赖 pnpm 符号链接：`.stage` 用 npm 安装扁平生产依赖，electron-builder 只看到普通目录；`npmRebuild=false`，签名显式关闭（`identity=null`）。
+- [x] 卸载与数据位置写入文档：应用删除即卸载；数据在 `~/Library/Application Support/Graph`（配置、state、secrets 密文）。
+- [x] 质量门：全量测试/双 tsc/build 通过（见提交说明）；打包版启动退出 `orphans=0`。
+
+**证据**
+
+- `acceptance-evidence/app-a4-package.output.txt`（构建摘要、产物信息、无 Node 启动检查、打包版向导 E2E、托盘日志、孤儿计数）。
+- `acceptance-evidence/app-a4-window.png`（打包版真实窗口）。
+- 复跑：`export PATH="$PWD/node_modules/.bin:$PATH"; node --run app:build`。
+
+**已知边界（后续）**
+
+- `.app` 体积 489MB：`@earendil-works/pi-ai` 带入了完整 AWS SDK；本机开发可接受，后续可按需裁剪或在 A5 前做依赖瘦身。
+- 构建未签名/未公证：本机直接运行正常；对外分发需要 Apple Developer ID 与公证（`identity`、`@electron/notarize`），操作手册在 A5 之前以 wizard 形式提供。
+- 目前只产出 mac arm64；Intel 与 Windows/Linux 目标未配置。
