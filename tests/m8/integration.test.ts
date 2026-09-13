@@ -110,14 +110,12 @@ test('the full productized flow runs from the formal start entry with a controll
     env: { ...process.env, GRAPH_INTEGRATION_KEY: 'synthetic-integration-key' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  cleanup.push(() => { child.kill('SIGKILL'); });
+  cleanup.push(() => { try { child.kill('SIGKILL'); } catch { /* already exited */ } });
   const url = await waitForServer(child);
-  cleanup.push(async () => {
-    const exited = new Promise<number | null>(resolveExit => child.once('exit', code => resolveExit(code)));
-    child.kill('SIGTERM');
-    const code = await Promise.race([exited, new Promise<'timeout'>(resolveTimeout => setTimeout(() => resolveTimeout('timeout'), 10_000))]);
-    expect(code).toBe(0);
-  });
+  // The bounded cleanup only guarantees no orphan; the real exit assertion
+  // lives in the test body below so it cannot be swallowed.
+  const exited = new Promise<number | null>(resolveExit => child.once('exit', code => resolveExit(code)));
+  cleanup.push(() => { child.kill('SIGTERM'); });
 
   const evidenceDir = join(process.cwd(), 'docs', 'planning', 'acceptance-evidence');
   const browser = await chromium.launch({ headless: true });
@@ -191,4 +189,11 @@ test('the full productized flow runs from the formal start entry with a controll
   expect(pageErrors).toEqual([]);
   const masterRequests = provider.requests.filter(entry => entry.master).length;
   expect(masterRequests).toBe(1);
+
+  // Stop through the formal signal path and assert the exit outside cleanup.
+  child.kill('SIGTERM');
+  const code = await Promise.race([exited, new Promise<'timeout'>(resolveTimeout => setTimeout(() => resolveTimeout('timeout'), 10_000))]);
+  expect(code).toBe(0);
+  expect(child.exitCode).toBe(0);
+  expect(() => process.kill(child.pid!, 0)).toThrow();
 }, 180_000);

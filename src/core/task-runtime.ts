@@ -55,6 +55,11 @@ export async function openTaskRuntime(options: {
   const channels: Partial<PiAdapterChannels> = {};
   const ensureOpen = () => { if (closed) throw new RuntimeError('closed', 'Runtime is closed'); };
   const modelScheduler: ModelScheduler = options.models?.modelScheduler ? options.models.modelScheduler : createModelScheduler();
+  // The current configuration is the source of truth for what can be started;
+  // persisted projects stay for history but cannot receive new tasks after
+  // they are removed from the config.
+  const configuredProjects = options.projects;
+  const allowedProjects = new Set((configuredProjects ?? []).map(project => project.id));
   try {
     store.transaction(() => {
       for (const project of options.projects ?? []) {
@@ -106,6 +111,7 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       return store.command('user', input.requestId, { type: 'begin', projectId: input.projectId, request: input.request }, () => {
         if (!input.request.trim() || !store.db.prepare('SELECT id FROM projects WHERE id=?').get(input.projectId)) throw new RuntimeError('invalid_input', 'A known project and nonempty request are required');
+        if (configuredProjects !== undefined && !allowedProjects.has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
         const taskId = randomUUID();
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         store.db.prepare('INSERT INTO tasks(id,project_id,request,created_seq) VALUES(?,?,?,?)').run(taskId, input.projectId, input.request, sequence);
@@ -284,6 +290,9 @@ export async function openTaskRuntime(options: {
     },
     async projects() {
       ensureOpen();
+      if (configuredProjects !== undefined) {
+        return configuredProjects.map(project => ({ id: project.id, root: resolve(project.root), grants: [...new Set(project.grants ?? [])].sort() }));
+      }
       return (store.db.prepare('SELECT id,root,grants FROM projects ORDER BY id').all() as { id: string; root: string; grants: string }[])
         .map(row => ({ id: row.id, root: row.root, grants: JSON.parse(row.grants) as string[] }));
     },

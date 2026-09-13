@@ -75,14 +75,26 @@ export function createPiAdapter(options: {
       const apiKey = binding?.apiKey ?? options.apiKeyFor?.(entry) ?? options.apiKey;
       if (!apiKey) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
       const scheduler = options.scheduler;
+      const setWaitingSlot = (waiting: boolean) => {
+        try { options.store.db.prepare('UPDATE operations SET waiting_slot=? WHERE id=?').run(Number(waiting), operation.id); }
+        catch { /* the row is best-effort telemetry for execution slots */ }
+      };
       const slot = binding && scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)
         ? {
-            acquire: (signal?: AbortSignal) => scheduler.acquire({
-              credentialId: binding.credentialId,
-              ...(binding.limit !== undefined ? { limit: binding.limit } : {}),
-              ...(binding.sharedGroupId ? { sharedGroupId: binding.sharedGroupId } : {}),
-              ...(binding.groupLimit !== undefined ? { groupLimit: binding.groupLimit } : {}),
-            }, signal),
+            acquire: async (signal?: AbortSignal) => {
+              setWaitingSlot(true);
+              try {
+                return await scheduler.acquire({
+                  credentialId: binding.credentialId,
+                  apiKey,
+                  ...(binding.limit !== undefined ? { limit: binding.limit } : {}),
+                  ...(binding.sharedGroupId ? { sharedGroupId: binding.sharedGroupId } : {}),
+                  ...(binding.groupLimit !== undefined ? { groupLimit: binding.groupLimit } : {}),
+                }, signal);
+              } finally {
+                setWaitingSlot(false);
+              }
+            },
           }
         : undefined;
       const task = options.store.task(operation.taskId);

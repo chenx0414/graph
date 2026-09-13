@@ -1,10 +1,10 @@
-# T08 探针复跑（2026-09-13T06:25:55Z）
+# 返工后探针复跑（2026-09-13T07:56:54Z，项目 Node v24.20.0）
 === host-listener-contract ===
-{"revision":"7476f1c","probe":"http.cjs","code":0,"stdout":"{\"host\":\"127.0.0.1\",\"address\":{\"address\":\"127.0.0.1\",\"family\":\"IPv4\",\"port\":65415},\"body\":\"r6-127.0.0.1\"}\n{\"host\":\"::1\",\"address\":{\"address\":\"::1\",\"family\":\"IPv6\",\"port\":65417},\"body\":\"r6-::1\"}\n","stderr":""}
+{"revision":"7476f1c","probe":"http.cjs","code":0,"stdout":"{\"host\":\"127.0.0.1\",\"address\":{\"address\":\"127.0.0.1\",\"family\":\"IPv4\",\"port\":56841},\"body\":\"r6-127.0.0.1\"}\n{\"host\":\"::1\",\"address\":{\"address\":\"::1\",\"family\":\"IPv6\",\"port\":56843},\"body\":\"r6-::1\"}\n","stderr":""}
 {"revision":"7476f1c","probe":"denied.cjs","code":0,"stdout":"{\"kind\":\"cleared-Node\",\"status\":0,\"stdout\":\"{\\\"host\\\":\\\"0.0.0.0\\\",\\\"result\\\":\\\"EPERM\\\"}\\n{\\\"host\\\":\\\"127.0.0.1\\\",\\\"result\\\":\\\"EPERM\\\"}\\n{\\\"host\\\":\\\"::\\\",\\\"result\\\":\\\"EPERM\\\"}\\n{\\\"host\\\":\\\"::1\\\",\\\"result\\\":\\\"EPERM\\\"}\\n\",\"stderr\":\"\"}\n{\"kind\":\"non-Node\",\"status\":0,\"stdout\":\"0.0.0.0 1 [Errno 1] Operation not permitted\\n127.0.0.1 1 [Errno 1] Operation not permitted\\n:: 1 [Errno 1] Operation not permitted\\n::1 1 [Errno 1] Operation not permitted\\n\",\"stderr\":\"\"}\n","stderr":""}
-{"revision":"7476f1c","probe":"port.cjs","code":0,"stdout":"{\"requested\":65413,\"actual\":{\"address\":\"127.0.0.1\",\"family\":\"IPv4\",\"port\":65413},\"body\":\"r6-fixed\"}\n","stderr":""}
+{"revision":"7476f1c","probe":"port.cjs","code":0,"stdout":"{\"requested\":56839,\"actual\":{\"address\":\"127.0.0.1\",\"family\":\"IPv4\",\"port\":56839},\"body\":\"r6-fixed\"}\n","stderr":""}
 {"revision":"7476f1c","probe":"five.cjs","code":0,"stdout":"{\"index\":1,\"body\":\"round-1\"}\n{\"index\":2,\"body\":\"round-2\"}\n{\"index\":3,\"body\":\"round-3\"}\n{\"index\":4,\"body\":\"round-4\"}\n{\"index\":5,\"body\":\"round-5\"}\n","stderr":""}
-{"revision":"283ffbb","probe":"port.cjs","code":0,"stdout":"{\"requested\":65413,\"actual\":{\"address\":\"127.0.0.1\",\"family\":\"IPv4\",\"port\":65413},\"body\":\"r6-fixed\"}\n","stderr":""}
+{"revision":"283ffbb","probe":"port.cjs","code":0,"stdout":"{\"requested\":56839,\"actual\":{\"address\":\"127.0.0.1\",\"family\":\"IPv4\",\"port\":56839},\"body\":\"r6-fixed\"}\n","stderr":""}
 {"revision":"283ffbb","probe":"five.cjs","code":0,"stdout":"{\"index\":1,\"body\":\"round-1\"}\n{\"index\":2,\"body\":\"round-2\"}\n{\"index\":3,\"body\":\"round-3\"}\n{\"index\":4,\"body\":\"round-4\"}\n{\"index\":5,\"body\":\"round-5\"}\n","stderr":""}
 rc=0
 === host-listener-paused-gate ===
@@ -30,7 +30,7 @@ rc=0
   "run": {
     "code": 1,
     "stdout": "",
-    "stderr": "/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-qp2wCT/scratch/.graph-listen-guard.cjs:12\n  const error = new Error(message || 'EPERM: sandboxed checks may only listen on an explicit loopback host');\n                ^\n\nError: EPERM: sandboxed checks may only listen on an explicit loopback host\n    at denied (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-qp2wCT/scratch/.graph-listen-guard.cjs:12:17)\n    at deny (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-qp2wCT/scratch/.graph-listen-guard.cjs:16:25)\n    at net.Server.listen (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-qp2wCT/scratch/.graph-listen-guard.cjs:91:78)\n    at file:///private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-qp2wCT/listen.mjs:1:168\n    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:647:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\n  code: 'EPERM'\n}\n\nNode.js v24.20.0\n"
+    "stderr": "/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-XyQwdi/scratch/.graph-listen-guard.cjs:12\n  const error = new Error(message || 'EPERM: sandboxed checks may only listen on an explicit loopback host');\n                ^\n\nError: EPERM: sandboxed checks may only listen on an explicit loopback host\n    at denied (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-XyQwdi/scratch/.graph-listen-guard.cjs:12:17)\n    at deny (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-XyQwdi/scratch/.graph-listen-guard.cjs:16:25)\n    at net.Server.listen (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-XyQwdi/scratch/.graph-listen-guard.cjs:91:78)\n    at file:///private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-local-network-probe-XyQwdi/listen.mjs:1:168\n    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async node:internal/modules/esm/loader:647:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\n  code: 'EPERM'\n}\n\nNode.js v24.20.0\n"
   }
 }
 rc=0
@@ -38,15 +38,15 @@ rc=0
 baseline {
   code: 1,
   stdout: '',
-  stderr: '/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-jnEAKE/workspace/scratch/.graph-listen-guard.cjs:16\n' +
+  stderr: '/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-cyynGs/workspace/scratch/.graph-listen-guard.cjs:16\n' +
     'function deny() { throw denied(); }\n' +
     '                  ^\n' +
     '\n' +
     'Error: EPERM: sandboxed checks may only listen on an explicit loopback host\n' +
-    '    at denied (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-jnEAKE/workspace/scratch/.graph-listen-guard.cjs:12:17)\n' +
-    '    at deny (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-jnEAKE/workspace/scratch/.graph-listen-guard.cjs:16:25)\n' +
-    '    at net.Server.listen (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-jnEAKE/workspace/scratch/.graph-listen-guard.cjs:91:78)\n' +
-    '    at Object.<anonymous> (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-jnEAKE/workspace/listen.cjs:1:149)\n' +
+    '    at denied (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-cyynGs/workspace/scratch/.graph-listen-guard.cjs:12:17)\n' +
+    '    at deny (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-cyynGs/workspace/scratch/.graph-listen-guard.cjs:16:25)\n' +
+    '    at net.Server.listen (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-cyynGs/workspace/scratch/.graph-listen-guard.cjs:91:78)\n' +
+    '    at Object.<anonymous> (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-cyynGs/workspace/listen.cjs:1:149)\n' +
     '    at Module._compile (node:internal/modules/cjs/loader:1929:14)\n' +
     '    at Object..js (node:internal/modules/cjs/loader:2060:10)\n' +
     '    at Module.load (node:internal/modules/cjs/loader:1651:32)\n' +
@@ -88,26 +88,26 @@ cleared_NODE_OPTIONS {
 }
 rc=0
 === ipc-listener-regressions ===
-{"revision":"ed9677d36c09ba8d073dc3d5608a1f601efc53b0","scenario":"close-pending.cjs","elapsedMs":244,"code":0,"stdout":"closeCallback ERR_SERVER_NOT_RUNNING\n{\"callback\":false,\"listening\":false,\"address\":null}\n","stderr":""}
-{"revision":"ed9677d36c09ba8d073dc3d5608a1f601efc53b0","scenario":"parallel.cjs","elapsedMs":95,"code":0,"stdout":"{\"results\":[{\"index\":1,\"port\":65462},{\"index\":2,\"port\":65463},{\"index\":3,\"port\":65464}]}\n{\"index\":1,\"body\":\"ok-1\"}\n{\"index\":2,\"body\":\"ok-2\"}\n{\"index\":3,\"body\":\"ok-3\"}\n","stderr":""}
-{"revision":"283ffbb","scenario":"close-pending.cjs","elapsedMs":240,"code":0,"stdout":"closeCallback ERR_SERVER_NOT_RUNNING\n{\"callback\":false,\"listening\":false,\"address\":null}\n","stderr":""}
-{"revision":"283ffbb","scenario":"parallel.cjs","elapsedMs":97,"code":0,"stdout":"{\"results\":[{\"index\":1,\"port\":65469},{\"index\":2,\"port\":65470},{\"index\":3,\"port\":65471}]}\n{\"index\":1,\"body\":\"ok-1\"}\n{\"index\":2,\"body\":\"ok-2\"}\n{\"index\":3,\"body\":\"ok-3\"}\n","stderr":""}
+{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","scenario":"close-pending.cjs","elapsedMs":250,"code":0,"stdout":"closeCallback ERR_SERVER_NOT_RUNNING\n{\"callback\":false,\"listening\":false,\"address\":null}\n","stderr":""}
+{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","scenario":"parallel.cjs","elapsedMs":96,"code":0,"stdout":"{\"results\":[{\"index\":1,\"port\":56888},{\"index\":2,\"port\":56889},{\"index\":3,\"port\":56890}]}\n{\"index\":1,\"body\":\"ok-1\"}\n{\"index\":2,\"body\":\"ok-2\"}\n{\"index\":3,\"body\":\"ok-3\"}\n","stderr":""}
+{"revision":"283ffbb","scenario":"close-pending.cjs","elapsedMs":244,"code":0,"stdout":"closeCallback ERR_SERVER_NOT_RUNNING\n{\"callback\":false,\"listening\":false,\"address\":null}\n","stderr":""}
+{"revision":"283ffbb","scenario":"parallel.cjs","elapsedMs":98,"code":0,"stdout":"{\"results\":[{\"index\":1,\"port\":56895},{\"index\":2,\"port\":56896},{\"index\":3,\"port\":56897}]}\n{\"index\":1,\"body\":\"ok-1\"}\n{\"index\":2,\"body\":\"ok-2\"}\n{\"index\":3,\"body\":\"ok-3\"}\n","stderr":""}
 rc=0
 === ipc-handoff-listening-event ===
-{"revision":"ed9677d36c09ba8d073dc3d5608a1f601efc53b0","client":{"body":"ok","elapsedMs":251},"elapsedMs":948,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
-{"revision":"283ffbb","client":{"body":"ok","elapsedMs":252},"elapsedMs":966,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
+{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","client":{"body":"ok","elapsedMs":247},"elapsedMs":949,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
+{"revision":"283ffbb","client":{"body":"ok","elapsedMs":248},"elapsedMs":966,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
 rc=0
 === ipc-handoff-duplicate-id ===
-{"revision":"ed9677d36c09ba8d073dc3d5608a1f601efc53b0","result":{"code":0,"stdout":"","stderr":""},"afterRun":[]}
-{"revision":"ed9677d36c09ba8d073dc3d5608a1f601efc53b0","afterExecutorClose":[]}
+{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","result":{"code":0,"stdout":"","stderr":""},"afterRun":[]}
+{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","afterExecutorClose":[]}
 {"revision":"742bf98","result":{"code":0,"stdout":"","stderr":""},"afterRun":[]}
 {"revision":"742bf98","afterExecutorClose":[]}
 rc=0
 === ipc-listening-order ===
-{"revision":"ed9677d36c09ba8d073dc3d5608a1f601efc53b0","scenario":"order.cjs","elapsedMs":64,"code":0,"stdout":"{\"events\":[\"before\",\"callback\",\"after\"],\"ready\":true}\n","stderr":"","hostListenersAfterRun":[]}
-{"revision":"ed9677d36c09ba8d073dc3d5608a1f601efc53b0","hostListenersAfterClose":[]}
-{"revision":"5fb3f66","scenario":"order.cjs","elapsedMs":61,"code":1,"stdout":"{\"events\":[\"before\",\"after\"],\"ready\":false}\n","stderr":"node:assert:152\n  throw new AssertionError(obj);\n  ^\n\nAssertionError [ERR_ASSERTION]: listen callback must initialize service before later registered listening observer\n\nfalse !== true\n\n    at Server.<anonymous> (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-event-order-spec-dE06Zg/order.cjs:1:384)\n    at Server.wrapper (node:events:639:12)\n    at Server.emit (node:events:526:24)\n    at emitListeningNT (node:net:2419:10)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v24.20.0\n","hostListenersAfterRun":[]}
+{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","scenario":"order.cjs","elapsedMs":69,"code":0,"stdout":"{\"events\":[\"before\",\"callback\",\"after\"],\"ready\":true}\n","stderr":"","hostListenersAfterRun":[]}
+{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","hostListenersAfterClose":[]}
+{"revision":"5fb3f66","scenario":"order.cjs","elapsedMs":66,"code":1,"stdout":"{\"events\":[\"before\",\"after\"],\"ready\":false}\n","stderr":"node:assert:152\n  throw new AssertionError(obj);\n  ^\n\nAssertionError [ERR_ASSERTION]: listen callback must initialize service before later registered listening observer\n\nfalse !== true\n\n    at Server.<anonymous> (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-event-order-spec-5fwTFf/order.cjs:1:384)\n    at Server.wrapper (node:events:639:12)\n    at Server.emit (node:events:526:24)\n    at emitListeningNT (node:net:2419:10)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v24.20.0\n","hostListenersAfterRun":[]}
 {"revision":"5fb3f66","hostListenersAfterClose":[]}
-{"revision":"283ffbb","scenario":"order.cjs","elapsedMs":64,"code":0,"stdout":"{\"events\":[\"before\",\"callback\",\"after\"],\"ready\":true}\n","stderr":"","hostListenersAfterRun":[]}
+{"revision":"283ffbb","scenario":"order.cjs","elapsedMs":68,"code":0,"stdout":"{\"events\":[\"before\",\"callback\",\"after\"],\"ready\":true}\n","stderr":"","hostListenersAfterRun":[]}
 {"revision":"283ffbb","hostListenersAfterClose":[]}
 rc=0

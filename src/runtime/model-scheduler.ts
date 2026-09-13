@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /** Host-wide in-flight scheduler for model requests.
  *
  * Slots are owned by credential ids and optional shared groups, so several
@@ -7,6 +9,10 @@
  * after the slot is granted, right before the provider send. */
 export interface SlotRequest {
   credentialId: string;
+  /** Actual key material, used only to derive an internal identity; never stored.
+   * Aliases that resolve to the same key share one counter even if the caller
+   * did not canonicalize their ids. */
+  apiKey?: string;
   /** Per-credential cap. Undefined means unlimited. */
   limit?: number;
   sharedGroupId?: string;
@@ -40,13 +46,25 @@ export function createModelScheduler(): ModelScheduler {
   const waiters: Waiter[] = [];
   const activeByCredential = new Map<string, number>();
   const activeByGroup = new Map<string, number>();
+  const canonicalByKey = new Map<string, string>();
+
+  /** Same actual key under different alias ids shares one accounting identity. */
+  const identityOf = (request: SlotRequest) => {
+    if (!request.apiKey) return request.credentialId;
+    const fingerprint = createHash('sha256').update(request.apiKey).digest('hex');
+    const existing = canonicalByKey.get(fingerprint);
+    if (existing) return existing;
+    canonicalByKey.set(fingerprint, request.credentialId);
+    return request.credentialId;
+  };
 
   const runnable = (waiter: Waiter) =>
-    (activeByCredential.get(waiter.request.credentialId) ?? 0) < (waiter.request.limit ?? Infinity) &&
+    (activeByCredential.get(identityOf(waiter.request)) ?? 0) < (waiter.request.limit ?? Infinity) &&
     (!waiter.request.sharedGroupId || (activeByGroup.get(waiter.request.sharedGroupId) ?? 0) < (waiter.request.groupLimit ?? Infinity));
 
   function grant(waiter: Waiter) {
-    const { credentialId, sharedGroupId } = waiter.request;
+    const credentialId = identityOf(waiter.request);
+    const { sharedGroupId } = waiter.request;
     activeByCredential.set(credentialId, (activeByCredential.get(credentialId) ?? 0) + 1);
     if (sharedGroupId) activeByGroup.set(sharedGroupId, (activeByGroup.get(sharedGroupId) ?? 0) + 1);
     let released = false;
@@ -112,7 +130,8 @@ export function createModelScheduler(): ModelScheduler {
       const queued: Record<string, number> = {};
       for (const waiter of waiters) {
         if (waiter.done) continue;
-        queued[waiter.request.credentialId] = (queued[waiter.request.credentialId] ?? 0) + 1;
+        const identity = identityOf(waiter.request);
+        queued[identity] = (queued[identity] ?? 0) + 1;
       }
       return { active, queued };
     },

@@ -61,8 +61,10 @@ export interface GatedProviderFetchOptions {
   fetchImpl?: typeof fetch;
   delay?: (milliseconds: number) => Promise<void>;
   maxAttempts?: number;
+  /** Acquire a concurrency slot for one attempt; released on retry, failure or response end. */
+  acquireSlot?: () => Promise<() => void>;
   /** Called once for the successful attempt so the caller can settle its usage. */
-  onResponse?: (id: string, response: Response) => Promise<void> | void;
+  onResponse?: (id: string, response: Response, release: () => void) => Promise<void> | void;
 }
 
 const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -81,14 +83,22 @@ export async function gatedProviderFetch(
   for (let attempt = 1; ; attempt++) {
     const id = randomUUID();
     let sent = false;
+    let release: (() => void) | undefined;
     try {
+      // Every attempt acquires its own slot, so a retry must pass the queue and
+      // the gate again instead of holding capacity through the backoff.
+      if (options.acquireSlot) release = await options.acquireSlot();
       const response = await broker.dispatch(id, options.reservation, () => {
         sent = true;
         return (options.fetchImpl ?? fetch)(input, init);
       });
-      void options.onResponse?.(id, response);
-      return response;
+      void options.onResponse?.(id, response, () => release?.());
+      if (!response.body) { release?.(); return response; }
+      // Capacity covers the whole body, not just the headers.
+      const wrapped = response.body.pipeThrough(new TransformStream({ flush() { release?.(); } }));
+      return new Response(wrapped, { status: response.status, statusText: response.statusText, headers: response.headers });
     } catch (error) {
+      release?.();
       if (!sent) throw error; // The gate refused before anything was sent.
       const code = transportCode(error);
       const notSent = typeof code === 'string' && RETRYABLE_TRANSPORT_CODES.has(code);
@@ -120,30 +130,17 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string, slot?: 
           fetch: async (input, init) => {
             if (sent) throw new Error('Unexpected provider retry; use a new controlled invocation');
             sent = true;
-            // Acquire before the gate: the slot covers the whole request
-            // lifecycle and is returned after the body ends, errors or cancels.
-            const release = slot ? await slot.acquire(options?.signal) : () => {};
-            let handedOver = false;
-            try {
-              const response = await gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
-                reservation: model.contextWindow + model.maxTokens,
-                onResponse: (id, response) => {
-                  // Consuming the evidence clone to the end also proves the
-                  // provider finished sending, so it can release the slot too.
-                  evidence = readUsage(response.clone()).then(usage => { broker.settle(id, usage); release(); }, () => { broker.settle(id, null); release(); });
-                },
-              });
-              if (!response.body) { handedOver = true; release(); return response; }
-              // Release when the body ends; consumer cancellation is covered by
-              // the evidence clone, which always completes or errors.
-              const wrapped = response.body.pipeThrough(new TransformStream({
-                flush() { release(); },
-              }));
-              handedOver = true;
-              return new Response(wrapped, { status: response.status, statusText: response.statusText, headers: response.headers });
-            } finally {
-              if (!handedOver) release();
-            }
+            // The slot is acquired per attempt inside gatedProviderFetch, so a
+            // retry re-queues and re-passes the gate after releasing capacity.
+            return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
+              reservation: model.contextWindow + model.maxTokens,
+              ...(slot ? { acquireSlot: () => slot.acquire(options?.signal) } : {}),
+              onResponse: (id, response, release) => {
+                // Consuming the evidence clone to the end also proves the
+                // provider finished sending, so it can release the slot too.
+                evidence = readUsage(response.clone()).then(usage => { broker.settle(id, usage); release(); }, () => { broker.settle(id, null); release(); });
+              },
+            });
           },
         });
         for await (const event of stream) {

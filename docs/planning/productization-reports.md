@@ -266,3 +266,42 @@
 - 平台仅 macOS + 项目 Node；未验证 Windows/Linux。
 - T09（RPM/TPM 与 429 冷却）与 T10（开源项目定向借鉴）为 P2，未实施；不影响本阶段通过范围。
 - 工作区仅本提交涉及的文件；`M .gitignore`、`docs/planning/m2-handoff.md` 已按使用者要求入库，无其他残差。
+
+## 返工轮 PA01–PA04（2026-09-13，响应 [独立验收](productization-acceptance-2026-09-13.md)）
+
+基线：`23aeef1`。独立验收确认 T01–T08 不能关闭，列出四项缺陷；按 PA01/PA02 → PA03 → PA04 顺序修复。
+
+### PA01 · 同一实际 key 的多个凭据别名绕开并发上限
+
+- 宿主按解析后的实际密钥值归一：同一值（相同或不同 `secretRef`）的别名使用同一个调度身份，凭据上限取别名中的**最严格值**；别名指定多个不同共享组时以 `invalid_config` 拒绝（明确的冲突策略）。调度键仍是可读的规范别名，`/api/startup` 增加 `limitAliases`，界面按映射匹配等待状态，不暴露密钥。
+- 发送层增加纵深防御：调度器接受可选 `apiKey` 并以内部指纹归一计数（产品路径由适配器传入实际密钥），即使宿主漏掉归一也不会超发；指纹不出现在快照与接口。
+- 证据：`tests/m8/rework.test.ts` 两种别名场景（同 `secretRef`、不同 `secretRef` 同值）经正式 daemon 各跑两个模型，实际 key 在途始终为 1；`/api/startup` 文本不含密钥。
+- 说明：验收方 `product-key-alias.mts` 直接构造调度请求（不含密钥材料、`credentialId` 互不相同），因此仍报告 2；该探针验证的原始接口不再对应产品路径，daemon 级验收标准由上一条测试覆盖。
+
+### PA02 · 等待 key A 占满执行名额阻塞独立 key B
+
+- `operations` 新增 `waiting_slot`（schema v10 迁移）：在凭据名额上排队的操作不再计入 Agent/程序执行名额；`run()` 与 `remainingSlots()` 共用同一 `occupiedSlots()` 判定。
+- `drive()` 命中执行上限时按 20ms 重扫就绪节点，使独立凭据节点不被排队者挡住；恢复时仍重新申请名额并重过发送门（T04 语义不变）。
+- 顺带修复：确认图中的主管（discussion）节点不属于已确认图计划，`readyNodes` 现在过滤计划外节点，避免 `readiness` 崩溃。
+- 证据：`tests/m8/rework.test.ts` 十个 A 等待者 + 独立 B：`queuedA=10` 时 B 实际发送并成功；验收方 `product-independent-key.mts` 复跑 `providerRequests:1`（修复前 0）、A 仍为 running、暂停/释放后无超发。
+
+### PA03 · 未重启的新任务记录尚未生效的配置版本
+
+- 运行时在启动时冻结生效 revision（`effectiveRevision`），`task.created` 只记录该值；保存返回的 revision 只代表持久化版本。`/api/startup` 暴露 `effectiveRevision`，设置页同时显示“已保存 revision / 当前运行版本”，并说明连通性测试使用运行版本。
+- 附加检查：配置移除的旧项目保留历史任务但不能再创建新任务——`begin` 按当前配置校验项目，`/api/settings` 只列出当前配置项目。
+- 证据：`tests/m8/rework.test.ts` 保存 revision 1 未重启的任务记录 0、重启后记录 1；被移除项目返回 `invalid_input` 且历史任务仍可读；验收方 `product-config-revision.mts` 复跑 `configRevision: 0`（修复前 1）。
+
+### PA04 · 图节点完成后记录与证据不刷新
+
+- `GraphPanel` 的同一任务事件现在合并刷新 graph、task view 与 operations（150ms 去抖），不需要离开页面或点击“加载更多”。
+- `useAsync` 增加请求代次：切换任务后，旧任务的迟到响应不能覆盖当前页面。
+- 证据：`tests/m8/rework-ui.test.ts` 页面停留即看到操作记录与有效证据出现；A→B 快速切换并延迟 A 响应后页面始终只显示 B；验收方 `product-live-records.mts` 复跑 `afterCounts.view=3、operations=3`（修复前各为 1）。
+
+### T08 测试健壮性
+
+- `tests/m8/integration.test.ts` 的 SIGTERM 退出码断言移出被吞异常的清理段，改为在测试体内断言退出码 0、`exitCode` 0 且进程不存在。
+
+### 复验
+
+- 项目 Node 24.20.0：全量 **47 文件 / 215 项**连续 2 次通过；双 tsc、`vite build`、`git diff --check` 通过；八个历史探针全部 `rc=0`；验收方四个探针复跑结果见 `acceptance-evidence/rework-probes.output.txt`。
+- 未运行新的真实供应商任务；A13 历史结论不变。是否关闭 T01–T08 由独立复验决定。

@@ -8,7 +8,7 @@ type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
   acceptedProposalVersion: number | null; updatedAt: number | null;
 };
-type Startup = { mode: 'view' | 'execute'; configured: boolean; modelCount: number; enabledModelCount: number };
+type Startup = { mode: 'view' | 'execute'; configured: boolean; modelCount: number; enabledModelCount: number; effectiveRevision?: number; limitAliases?: Record<string, string> };
 type TaskView = {
   id: string; projectId: string; request: string; phase: string; status: string; paused: boolean; proposalVersion: number;
   acceptedProposalVersion: number | null; targetBranch: string | null; updatedAt: number | null;
@@ -82,14 +82,21 @@ function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
   const [loading, setLoading] = useState(true);
   const loadRef = useRef(load);
   loadRef.current = load;
-  // A different key (task id) must not keep showing the previous record.
-  useEffect(() => { setData(null); setError(null); }, deps);
+  // Every request gets a generation; a late response from an old key must
+  // never overwrite the record the user is looking at now.
+  const generation = useRef(0);
+  useEffect(() => {
+    generation.current += 1;
+    setData(null);
+    setError(null);
+  }, deps);
   const reload = useCallback(() => {
+    const current = ++generation.current;
     setLoading(true);
     loadRef.current()
-      .then(value => { setData(value); setError(null); })
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
-      .finally(() => setLoading(false));
+      .then(value => { if (generation.current === current) { setData(value); setError(null); } })
+      .catch((reason: unknown) => { if (generation.current === current) setError(reason instanceof Error ? reason.message : String(reason)); })
+      .finally(() => { if (generation.current === current) setLoading(false); });
   }, deps);
   useEffect(() => { reload(); }, [reload]);
   return { data, error, loading, reload };
@@ -143,11 +150,14 @@ function useLimits() {
 
 /** A preparing node whose credential has requests waiting is waiting for a
  * model slot, not executing on the provider. */
-function waitingForSlot(node: { selectedModel?: string; status: string }, settings: Settings | null, limits: Limits | null) {
+function waitingForSlot(node: { selectedModel?: string; status: string }, settings: Settings | null, limits: Limits | null, limitAliases?: Record<string, string>) {
   if (!node.selectedModel || !limits) return false;
   if (['succeeded', 'skipped', 'failed', 'pending', 'blocked'].includes(node.status)) return false;
   const credentialId = settings?.models.find(model => model.id === node.selectedModel)?.credentialId;
-  return Boolean(credentialId && (limits.queued[credentialId] ?? 0) > 0);
+  if (!credentialId) return false;
+  // Aliases resolving to the same actual key share one scheduling identity.
+  const canonical = limitAliases?.[credentialId] ?? credentialId;
+  return (limits.queued[canonical] ?? 0) > 0;
 }
 
 function route() {
@@ -191,8 +201,8 @@ export function App() {
       {path === '/' && <Overview settings={settings} tasks={tasks} onTasks={setTasks} />}
       {path === '/catalog' && <Catalog settings={settings} />}
       {path === '/settings' && <Settings />}
-      {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} settings={settings} />}
-      {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} />}
+      {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} settings={settings} startup={startup} />}
+      {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
     </div>
   );
 }
@@ -322,7 +332,7 @@ function QuestionReply({ taskId, question, onDone }: {
   );
 }
 
-function TaskPanel({ id, onTasks, settings }: { id: string; onTasks: (tasks: TaskSummary[]) => void; settings: Settings | null }) {
+function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (tasks: TaskSummary[]) => void; settings: Settings | null; startup: Startup | null }) {
   const { data: view, error, loading, reload } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
   const limits = useLimits();
   const [text, setText] = useState('');
@@ -360,7 +370,7 @@ function TaskPanel({ id, onTasks, settings }: { id: string; onTasks: (tasks: Tas
           {view.nodes.map(node => (
             <li key={node.id} data-node={node.id}>
               {node.id} · {NODE_LABEL[node.status] ?? node.status}
-              {waitingForSlot(node, settings, limits) ? ' · 等待 API 名额' : ''}
+              {waitingForSlot(node, settings, limits, startup?.limitAliases) ? ' · 等待 API 名额' : ''}
               {node.status === 'blocked' && view.questions.some(question => question.status === 'open' && question.nodeId === node.id) ? ' · 等待人工处理' : ''}
               {' '}· 实例 {node.instanceId ?? '未知'} · 用量 {node.used == null ? '未知' : node.used}
             </li>
@@ -418,22 +428,29 @@ function TaskPanel({ id, onTasks, settings }: { id: string; onTasks: (tasks: Tas
   );
 }
 
-function GraphPanel({ id, settings }: { id: string; settings: Settings | null }) {
+function GraphPanel({ id, settings, startup }: { id: string; settings: Settings | null; startup: Startup | null }) {
   const { data: graph, error, loading, reload } = useAsync(() => api<GraphPayload>(`/api/tasks/${id}/graph`), [id]);
-  const { data: view } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
   const limits = useLimits();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [opsLimit, setOpsLimit] = useState(20);
-  const { data: ops } = useAsync(() => api<OperationRow[]>(`/api/tasks/${id}/operations?limit=${opsLimit}`), [id, opsLimit]);
-  const connected = useTaskStream(id, () => reload());
+  const { data: ops, reload: reloadOps } = useAsync(() => api<OperationRow[]>(`/api/tasks/${id}/operations?limit=${opsLimit}`), [id, opsLimit]);
+  const { data: view, reload: reloadView } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const refreshAll = useCallback(() => {
+    // One task event usually means several records changed; coalesce them.
+    clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => { reload(); reloadView(); reloadOps(); }, 150);
+  }, [reload, reloadView, reloadOps]);
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+  const connected = useTaskStream(id, refreshAll);
   if (loading && !graph) return <p>加载中…</p>;
   if (error && !graph) return <ErrorBox message={error} onRetry={reload} />;
   if (!graph) return <p>加载中…</p>;
   const selectedNode = graph.nodes.find(node => node.id === selected);
   const nodeEvidence = view?.evidence?.filter(item => item.nodeId === selected) ?? [];
   const nodeOperations = (ops ?? []).filter(item => item.nodeId === selected);
-  const nodeWaiting = selectedNode ? waitingForSlot(selectedNode, settings, limits) : false;
+  const nodeWaiting = selectedNode ? waitingForSlot(selectedNode, settings, limits, startup?.limitAliases) : false;
   return (
     <section data-testid="graph" data-editable="false">
       <p data-testid="connection">{connected ? '已连接' : '重连中…'}</p>

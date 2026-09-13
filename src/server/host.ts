@@ -8,6 +8,10 @@ export interface StartupInfo {
   configured: boolean;
   modelCount: number;
   enabledModelCount: number;
+  /** Revision the running daemon actually uses; differs from the saved one until restart. */
+  effectiveRevision?: number;
+  /** Credential alias to canonical scheduling identity, for limit displays. */
+  limitAliases?: Record<string, string>;
 }
 
 export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown> }) {

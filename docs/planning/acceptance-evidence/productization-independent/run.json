@@ -1,0 +1,9 @@
+{
+  "head": "23aeef15f515d24349e3c29317a08b47b12a1133",
+  "baseline": "e8e63355b718c9063c0e62c15d5b4dc3786f0eb0",
+  "node": "v24.20.0",
+  "fullSuiteRuns": 1,
+  "tests": 208,
+  "oldProbes": 8,
+  "realPaidProviderCalls": 0
+}

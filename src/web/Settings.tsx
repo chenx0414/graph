@@ -16,6 +16,7 @@ type RawConfig = {
 };
 type ConfigResponse = { revision: number; config: RawConfig & { path: string | null; credentials?: Record<string, RawCredential & { configured?: boolean }> } };
 type TestResult = { ok: boolean; model?: string; credentialId?: string; status?: number; latencyMs?: number; message?: string };
+type Startup = { effectiveRevision?: number };
 type ApiError = Error & { code?: string; field?: string };
 
 const GRADES = ['low', 'medium', 'high', 'highest'];
@@ -51,6 +52,7 @@ export function Settings() {
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
   const [results, setResults] = useState<Record<string, TestResult>>({});
+  const [effectiveRevision, setEffectiveRevision] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -66,6 +68,7 @@ export function Settings() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void api<Startup>('/api/startup').then(startup => setEffectiveRevision(startup.effectiveRevision ?? null)).catch(() => undefined); }, []);
 
   if (!draft) return <section data-testid="settings-page"><p data-testid="settings-loading">加载配置中…</p>{error && <p data-testid="config-error">{error.message}</p>}</section>;
 
@@ -117,8 +120,9 @@ export function Settings() {
     <section data-testid="settings-page">
       <h1>设置</h1>
       <p>
-        配置版本 revision <span data-testid="config-revision">{revision}</span>
-        {dirty ? '（有未保存修改）' : '（已同步）'} · 保存后需重启守护进程生效
+        已保存 revision <span data-testid="config-revision">{revision}</span>
+        {effectiveRevision !== null && <> · 当前运行版本 <span data-testid="effective-revision">{effectiveRevision}</span>{effectiveRevision !== revision ? '（有已保存但未生效的修改，重启后生效）' : ''}</>}
+        {dirty ? ' ·（有未保存修改）' : ''} · 保存后需重启守护进程生效
       </p>
       <div>
         <button type="button" data-testid="settings-save" disabled={saving || !dirty} onClick={() => void save()}>{saving ? '保存中…' : '保存配置'}</button>
@@ -161,6 +165,7 @@ export function Settings() {
       <button type="button" data-testid="credential-add" onClick={() => mutate(next => { next.credentials = { ...(next.credentials ?? {}), 'new-credential': { secretRef: 'GRAPH_NEW_KEY' } }; })}>添加凭据</button>
 
       <h2>模型</h2>
+      <p data-testid="test-connection-note">连通性测试使用当前运行版本的绑定（effective revision），不读取未生效的保存内容。</p>
       {models.map((model, index) => (
         <div style={row} key={index} data-testid={`model-row-${index}`}>
           <div style={{ display: 'flex', flexWrap: 'wrap' }}>

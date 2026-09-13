@@ -1,6 +1,6 @@
 # Graph 首版设计
 
-状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成；M0–M7 已实施。2026-09-13 监听与本地网络返工轮（R6、S4/R8、R9–R13）已由独立验收关闭，见 [R13 最终验收](planning/r13-final-acceptance-2026-09-13.md)。产品化阶段 T01–T06 已实施并本地复验，逐项报告见 [产品化交付报告](planning/productization-reports.md)，使用方式见 [使用文档](usage.md)；T08 整体验收由独立验收 agent 复核，本仓库不自行宣布 Graph 整体完成。本机 Web 应用与导出失败反馈在隔离副本上由 Graph 交付（`main` → `001f288`，a1–a5 有效，交付测试 40/40 含真实无头 Chromium E2E，独立审查通过）。是否合入使用者原仓库、配置 remote 或发布由使用者决定。
+状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成；M0–M7 已实施。2026-09-13 监听与本地网络返工轮（R6、S4/R8、R9–R13）已由独立验收关闭，见 [R13 最终验收](planning/r13-final-acceptance-2026-09-13.md)。产品化阶段 T01–T08 已实施；独立验收提出的 PA01–PA04 已按返工轮修复并本地复验，逐项报告见 [产品化交付报告](planning/productization-reports.md)，验收记录见 [独立验收报告](planning/productization-acceptance-2026-09-13.md)，使用方式见 [使用文档](usage.md)；等待独立复验，本仓库不自行宣布 Graph 整体完成。本机 Web 应用与导出失败反馈在隔离副本上由 Graph 交付（`main` → `001f288`，a1–a5 有效，交付测试 40/40 含真实无头 Chromium E2E，独立审查通过）。是否合入使用者原仓库、配置 remote 或发布由使用者决定。
 
 本文件汇总已确认的产品与执行规则。原始设想见 [draft.md](draft.md)，访谈记录见 [design-discussion.md](design-discussion.md)，术语以 [CONTEXT.md](../CONTEXT.md) 为准。
 

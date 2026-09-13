@@ -45,11 +45,11 @@ export class Execution {
       const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
       for (const row of store.db.prepare("SELECT * FROM operations WHERE state IN ('intent','dispatched')").all() as OperationRow[]) {
         if (row.state === 'intent') {
-          store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0 WHERE id=?").run(row.id);
+          store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0,waiting_slot=0 WHERE id=?").run(row.id);
           store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
           store.event(row.task_id, 'operation.not_sent', { operationId: row.id, reason: 'Recovered before dispatch' });
         } else {
-          store.db.prepare("UPDATE operations SET state='unknown' WHERE id=?").run(row.id);
+          store.db.prepare("UPDATE operations SET state='unknown',waiting_slot=0 WHERE id=?").run(row.id);
           const node = store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(row.task_id, row.node_id) as NodeRow;
           this.block(node, 'recovery', { reason: 'Dispatch was recorded; external outcome and worker liveness require reconciliation' }, row.id);
         }
@@ -195,8 +195,9 @@ export class Execution {
     let dispatched = 0;
     const running = new Set<Promise<boolean>>();
     while (!this.stopping && !this.store.task(active_task).paused) {
+      const ready = this.readyNodes();
       const started: Promise<boolean>[] = [];
-      for (const node of this.readyNodes()) {
+      for (const node of ready) {
         const spec = JSON.parse(node.spec) as NodeSpec;
         if (this.remainingSlots(spec.kind) <= 0) continue;
         const work = this.run(node);
@@ -206,15 +207,27 @@ export class Execution {
       }
       dispatched += started.length;
       if (running.size === 0) break;
+      if (started.length < ready.length) {
+        // The execution cap was hit; some operations may now be parked waiting
+        // for a credential slot. Re-scan shortly so a node on a free credential
+        // is not held behind waiters, which no longer consume execution slots.
+        await new Promise(resolve => setTimeout(resolve, 20));
+        continue;
+      }
       await Promise.race([...running, new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
     }
     return { dispatched };
   }
 
-  private remainingSlots(kind: NodeSpec['kind']) {
+  /** An operation parked on a credential slot consumes no local execution capacity. */
+  private occupiedSlots(kind: NodeSpec['kind']) {
     const { occupied } = this.store.db.prepare(`SELECT COUNT(*) AS occupied FROM operations
-      WHERE (state='intent' OR worker_active=1) AND (instance_id IS NOT NULL)=?`).get(Number(kind === 'agent')) as { occupied: number };
-    return (kind === 'agent' ? 10 : 4) - occupied;
+      WHERE (state='intent' OR (worker_active=1 AND waiting_slot=0)) AND (instance_id IS NOT NULL)=?`).get(Number(kind === 'agent')) as { occupied: number };
+    return occupied;
+  }
+
+  private remainingSlots(kind: NodeSpec['kind']) {
+    return (kind === 'agent' ? 10 : 4) - this.occupiedSlots(kind);
   }
 
   private wakeDrive() {
@@ -233,6 +246,10 @@ export class Execution {
     while (true) {
       nodes = this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(active_task) as NodeRow[];
       graph = loadGraph(this.store, active_task);
+      // The discussion-only master node is not part of the confirmed graph.
+      nodes = nodes.filter(node => graph.plan.nodes.has(node.id));
+      // The discussion-only master node is not part of the confirmed graph.
+      nodes = nodes.filter(node => graph.plan.nodes.has(node.id));
       const skipped = nodes.filter(node => graph.readiness(node.id) === 'skip');
       if (!skipped.length) break;
       this.store.transaction(() => {
@@ -363,9 +380,7 @@ export class Execution {
       this.store.transaction(() => this.block(node, 'permission', { grant: requiredGrant }));
       return false;
     }
-    const { occupied } = this.store.db.prepare(`SELECT COUNT(*) AS occupied FROM operations
-      WHERE (state='intent' OR worker_active=1) AND (instance_id IS NOT NULL)=?`).get(Number(spec.kind === 'agent')) as { occupied: number };
-    if (occupied >= (spec.kind === 'agent' ? 10 : 4)) return false;
+    if (this.occupiedSlots(spec.kind) >= (spec.kind === 'agent' ? 10 : 4)) return false;
     const reservation = spec.kind === 'agent' ? adapter.reserveTokens : 0;
     if (reservation === undefined || !Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_adapter', 'A bounded token reservation is required');
     if (node.instance_id) {

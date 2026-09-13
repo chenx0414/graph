@@ -95,23 +95,53 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   const enabled = entries.length > 0 && missing.size === 0;
   if (entries.length && missing.size) log(`Credentials not configured (${[...missing].join(', ')}); model dispatch stays disabled.`);
   const configStore = options.configPath ? await openConfigStore(options.configPath) : null;
+  // The running daemon keeps the bindings it was started with; a saved file
+  // revision only takes effect after a restart.
+  const effectiveRevision = configStore?.revision() ?? 0;
+  // Credential aliases that resolve to the same actual key must share one
+  // scheduling identity; the alias names themselves stay in the config and are
+  // never replaced by secret material.
+  const bySecretValue = new Map<string, string[]>();
+  for (const id of Object.keys(config.credentials)) {
+    const secret = resolveCredentialSecret(config, id, options.env);
+    if (!secret.configured || !secret.value) continue;
+    bySecretValue.set(secret.value, [...(bySecretValue.get(secret.value) ?? []), id]);
+  }
+  const identities = new Map<string, { canonical: string; limit?: number; sharedGroupId?: string; groupLimit?: number }>();
+  for (const aliases of bySecretValue.values()) {
+    const sorted = [...aliases].sort();
+    const canonical = sorted[0]!;
+    const caps = sorted.map(id => config.limits.credentials[id]).filter((value): value is number => value !== undefined);
+    const groups = [...new Set(sorted.map(id => config.credentials[id]?.sharedLimitGroupId).filter((value): value is string => Boolean(value)))];
+    if (groups.length > 1) throw new RuntimeError('invalid_config', `Credential aliases resolving to one key must share one sharedLimitGroupId: ${sorted.join(', ')}`);
+    const groupId = groups[0];
+    const identity = {
+      canonical,
+      ...(caps.length ? { limit: Math.min(...caps) } : {}),
+      ...(groupId ? { sharedGroupId: groupId } : {}),
+      ...(groupId && config.limits.sharedGroups[groupId] !== undefined ? { groupLimit: config.limits.sharedGroups[groupId] } : {}),
+    };
+    for (const alias of sorted) identities.set(alias, identity);
+    if (sorted.length > 1) log(`Credential aliases ${sorted.join(', ')} resolve to the same key; scheduling as "${canonical}" with the strictest limit.`);
+  }
+
   // Model id to credential mapping: one model can never inherit another model's key.
   const credentials = new Map<string, { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number }>();
   for (const entry of entries) {
     const secret = resolveCredentialSecret(config, entry.credentialId, options.env);
     if (!secret.configured || !secret.value) continue;
-    const groupId = config.credentials[entry.credentialId]?.sharedLimitGroupId;
-    const limit = config.limits.credentials[entry.credentialId];
-    const groupLimit = groupId ? config.limits.sharedGroups[groupId] : undefined;
+    const identity = identities.get(entry.credentialId);
+    if (!identity) continue;
     credentials.set(entry.id, {
-      credentialId: entry.credentialId,
+      credentialId: identity.canonical,
       apiKey: secret.value,
-      ...(limit !== undefined ? { limit } : {}),
-      ...(groupId ? { sharedGroupId: groupId } : {}),
-      ...(groupLimit !== undefined ? { groupLimit } : {}),
+      ...(identity.limit !== undefined ? { limit: identity.limit } : {}),
+      ...(identity.sharedGroupId ? { sharedGroupId: identity.sharedGroupId } : {}),
+      ...(identity.groupLimit !== undefined ? { groupLimit: identity.groupLimit } : {}),
     });
   }
   const credentialFor = (entry: ModelEntry) => credentials.get(entry.id);
+  const limitAliases = Object.fromEntries([...identities.entries()].filter(([alias, identity]) => alias !== identity.canonical).map(([alias, identity]) => [alias, identity.canonical]));
   const limitSummary = [...new Set([...credentials.values()].map(binding => {
     const parts = [binding.limit !== undefined ? `${binding.credentialId} ≤${binding.limit}` : null, binding.groupLimit !== undefined ? `组 ${binding.sharedGroupId} ≤${binding.groupLimit}` : null].filter(Boolean);
     return parts.join(', ');
@@ -169,11 +199,14 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       },
       master: { action: 'master', definitionVersion: 'master@1', model: first!.id },
     } : {}),
-    config: { revision: () => configStore?.revision() ?? 0 },
+    config: { revision: () => effectiveRevision },
     autoDrive: options.mode === 'execute',
     port: options.port,
     webDir: options.webDir,
-    startup: { mode: options.mode, configured: enabled, modelCount: entries.length, enabledModelCount: enabled ? entries.length : 0 },
+    startup: {
+      mode: options.mode, configured: enabled, modelCount: entries.length, enabledModelCount: enabled ? entries.length : 0,
+      effectiveRevision, ...(Object.keys(limitAliases).length ? { limitAliases } : {}),
+    },
     ...(configStore ? { configStore, configEnv: options.env, configTest: testConnection } : {}),
   });
   if (enabled) {
