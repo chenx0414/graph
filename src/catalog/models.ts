@@ -12,6 +12,9 @@ export interface ModelEntry {
   contextWindow: number;
   maxTokens: number;
   cost?: ModelCost;
+  /** Extra HTTP headers for gateways that require routing hints (for example
+   * x-opencode-session on OpenCode GO). Merged over provider defaults. */
+  headers?: Record<string, string>;
   /** Credential binding from the daemon configuration; absent in legacy entries. */
   credentialId?: string;
 }

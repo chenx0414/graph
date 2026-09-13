@@ -87,6 +87,28 @@ A3 起控制台内置：任务页运行时间线与用量面板、图页 MiniMap
 | `limits.credentials` / `limits.sharedGroups` | 并发上限；上限在启动时绑定，修改后重启生效 |
 | `models.entries[].cost` | 可选价格（每百万 token）；未配置时用量费用显示未知，不按 0 计 |
 
+### 模型请求头与 OpenCode GO 示例
+
+`models.entries[].headers` 可为每个模型附加请求头，用于需要路由提示的网关（如 OpenCode GO 要求每个会话发送 `x-opencode-session`）。示例：
+
+```json
+{
+  "id": "deepseek-v4-flash",
+  "provider": "opencode-go",
+  "grade": "highest",
+  "api": "openai-completions",
+  "baseUrl": "https://opencode.ai/zen/go/v1",
+  "contextWindow": 131072,
+  "maxTokens": 8192,
+  "credentialId": "opencode-go",
+  "headers": { "x-opencode-session": "graph-console" }
+}
+```
+
+- 请求头合并到 provider 默认头之上，随每次模型调用与“测试连接”一起发送；设置页会显示每个模型已配置的请求头。
+- 密钥仍只保存环境变量名：CLI 下设置 `OPENCODE_GO_API_KEY`；桌面 APP 在设置页对应凭据行填入密钥并点“保存到钥匙串”，重启守护进程后以执行模式生效。
+- 本仓库的 `graph.config.json` 是本地用户配置（已加入 `.gitignore`），示例只引用环境变量名，不含密钥。
+
 设置页（`#/settings`）可编辑同一文档：显示“已保存 revision”与“当前运行版本”、凭据“已配置/缺失”与“待生效”，保存走版本检查（冲突时拒绝覆盖）与原子写入。保存不会热改运行中的绑定；删除未完成任务正在使用的模型会被拒绝。新任务绑定当前**运行版本**，保存后未重启的任务不会记录尚未生效的版本；连通性测试同样使用运行版本。从配置移除的项目会保留历史任务，但不能再接收新任务。解析到同一实际密钥的多个凭据别名必须属于同一共享组并采用别名中最严格的并发上限；冲突配置在保存时被拒绝（字段错误），手改文件在查看模式下仍可打开控制台但不会派发模型。
 
 ## 数据目录、端口与停止

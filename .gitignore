@@ -36,3 +36,6 @@ skills-lock.json
 # App packaging staging
 .stage/
 .tooling/
+
+# Local daemon configuration (never commit user config)
+graph.config.json

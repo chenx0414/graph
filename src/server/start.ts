@@ -46,6 +46,7 @@ function piModel(entry: ConfiguredModel): Model<'openai-completions'> {
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens,
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ...(entry.headers ? { headers: entry.headers } : {}),
   };
 }
 
@@ -176,7 +177,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     try {
       const response = await fetch(`${entry.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret.value}` },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret.value}`, ...entry.headers },
         body: JSON.stringify({ model: entry.id, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
         signal: controller.signal,
       });

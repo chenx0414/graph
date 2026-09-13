@@ -31,6 +31,9 @@ function toPiModel(entry: ModelEntry): Model<'openai-completions'> {
     reasoning: false, input: ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
     // Pi's Model.cost is required numeric metadata; Graph billing uses catalog cost, never this placeholder.
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    // Gateway routing headers (for example x-opencode-session) must travel
+    // with every provider request.
+    ...(entry.headers ? { headers: entry.headers } : {}),
   };
 }
 

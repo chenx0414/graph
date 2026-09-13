@@ -6,6 +6,7 @@ type Cost = { input: number; output: number; cacheRead: number; cacheWrite: numb
 type RawModel = {
   id: string; provider: string; grade: string; api: 'openai-completions'; baseUrl: string;
   contextWindow: number; maxTokens: number; credentialId: string; cost?: Cost;
+  headers?: Record<string, string>;
 };
 type RawCredential = { secretRef: string; displayName?: string; sharedLimitGroupId?: string };
 type RawConfig = {
@@ -52,6 +53,8 @@ export function Settings() {
   const [saving, setSaving] = useState(false);
   const [results, setResults] = useState<Record<string, TestResult>>({});
   const [effectiveRevision, setEffectiveRevision] = useState<number | null>(null);
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  const bridge = typeof window !== 'undefined' ? window.graph : undefined;
 
   const load = useCallback(async () => {
     try {
@@ -171,6 +174,21 @@ export function Settings() {
               else delete value.sharedLimitGroupId;
             })} /></Field>
             <Pill tone={credentialState[id] ? 'success' : 'warn'} testid={`credential-${index}-state`}>{credentialState[id] ? '已配置' : '缺失'}</Pill>
+            {bridge && <>
+              <input className="input" style={{ width: 180 }} type="password" placeholder="API 密钥" data-testid={`credential-${index}-key`}
+                value={keys[id] ?? ''} onChange={event => setKeys(current => ({ ...current, [id]: event.target.value }))} />
+              <Button size="sm" icon="link" data-testid={`credential-${index}-key-save`} disabled={!(keys[id] ?? '').trim()}
+                onClick={() => void (async () => {
+                  const stored = await bridge.saveSecret(credential.secretRef, (keys[id] ?? '').trim());
+                  if (stored.stored) {
+                    setCredentialState(current => ({ ...current, [id]: true }));
+                    setKeys(current => ({ ...current, [id]: '' }));
+                    toast('密钥已写入系统钥匙串', 'success');
+                  } else {
+                    toast(`密钥保存失败：${stored.message ?? '钥匙串不可用'}`, 'danger');
+                  }
+                })()}>保存到钥匙串</Button>
+            </>}
             <Button size="sm" variant="danger" onClick={() => mutate(next => { delete next.credentials![id]; })}>删除</Button>
           </div>
         ))}
@@ -198,6 +216,9 @@ export function Settings() {
                   </select>
                 </Field>
                 <Pill tone={model.cost ? 'info' : 'warn'} testid={`model-${index}-price`}>{model.cost ? `价格 输入 ${model.cost.input}/输出 ${model.cost.output} 每百万` : '价格未知（未配置，不会按 0 计算）'}</Pill>
+                {model.headers && Object.keys(model.headers).length > 0 && (
+                  <span className="faint" data-testid={`model-${index}-headers`}>请求头 {Object.entries(model.headers).map(([name, value]) => `${name}=${value}`).join(' · ')}</span>
+                )}
               </div>
               <div className="row">
                 <Field label="Base URL"><input className="input" style={{ width: 340, maxWidth: 'none' }} data-invalid={invalid(`models.entries[${index}].baseUrl`)} data-testid={`model-${index}-baseUrl`} value={model.baseUrl} onChange={event => mutate(next => { next.models!.entries[index]!.baseUrl = event.target.value; })} /></Field>

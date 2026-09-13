@@ -128,3 +128,14 @@ node_modules/.bin/vitest run tests/app    # 20 项
 
 - 只做前端呈现层与桌面窗口外观；未引入任何新前端依赖（动效为 CSS 实现）。
 - 打包体积、签名与公证仍按 A4/A6 记录；`/Applications/Graph.app` 中若有用户先前安装的旧实例，不会被本次构建改动。
+
+## 配置扩展 · 模型请求头与 OpenCode GO（2026-09-13）
+
+**修改范围**：`ModelEntry.headers`（`src/catalog/models.ts`）、配置解析校验（`src/server/config.ts`）、pi-ai 与连通性测试转发（`src/runtime/pi-adapter.ts`、`src/server/start.ts`）、设置页请求头展示与钥匙串保存入口（`src/web/Settings.tsx`）、provider 头捕获（`tests/fixtures/openai-server.ts`）、回归 `tests/m8/provider-headers.test.ts`。
+
+**验收**
+
+- [x] 配置支持每模型 `headers`（最多 20 个，名称与取值校验），随真实派发与 `/api/config/test` 一起发送；回归测试用真实 daemon + 受控 provider 断言 `x-opencode-session` 到达且 Authorization 正确。
+- [x] OpenCode GO 接入：仓库 `graph.config.json`（本地、gitignore）加入 `deepseek-v4-flash`（provider `opencode-go`，baseUrl `https://opencode.ai/zen/go/v1`，`headers.x-opencode-session=graph-console`，credentialRef `OPENCODE_GO_API_KEY`）；桌面 APP 配置同步加入该模型并 revision +1。
+- [x] 真实验证（证据 `acceptance-evidence/opencode-go-verification.output.txt`）：直连 `POST /chat/completions` 200、“ok”、3.9s；Graph `/api/config/test` 返回 `ok:true`、HTTP 200、1.26s；真实派发任务让 agent 创建 `hello.txt`，12–17s 内节点 `succeeded`、写入内容 `hello`、消耗 6219–8358 tokens，无待处理问题。
+- [x] 全量 52 文件 / 254 项测试、双 tsc 与构建通过；设置页新增“保存到钥匙串”按钮（桌面壳内），CLI 仍以环境变量提供密钥。
