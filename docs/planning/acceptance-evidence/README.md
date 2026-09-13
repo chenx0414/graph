@@ -126,3 +126,16 @@ R6 收尾验收的两项 P2（暂停拒绝泄漏宿主监听器、固定端口�
 - `host-listener-paused-gate`：gate 拒绝后 `listeners: []`，`executor.close()` 后 0。
 - `local-network-rework`、`listen-guard-child-rework`：OS 层拒绝行为保持。
 - Graph 回归：`tests/m0/restricted-process.test.ts` 断言暂停拒绝不新增监听句柄；`tests/m4/command-check.test.ts` 覆盖固定端口、6 次启停与 `EADDRINUSE` 原样返回；全套 38 文件 / 178 项通过。
+
+## 2026-09-13 第十三轮：R9/R10 与监听交接
+
+IPC 监听返工验收的两项 P2（并发句柄发送队列、取消后迟到回复）修复后，重跑：
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/ipc-listener-regressions.mts
+```
+
+- `parallel.cjs`：三个并发 `127.0.0.1:0` 服务全部成功，正文 `ok-1`/`ok-2`/`ok-3`。
+- `close-pending.cjs`：`listen` 后立即 `close`，无 listening 回调，`listening:false`、`address:null`，约 0.25s 自然退出。
+- 交接协议：宿主保留监听器直到检查回报 adopt，收到后关闭自己的副本再放行检查的 `listening` 回调；这同时消除了宿主与检查抢 accept 造成的偶发 `ECONNRESET`/挂起。
+- `host-listener-contract`、`host-listener-paused-gate`、`local-network-rework`、`listen-guard-child-rework` 输出刷新，行为保持；Graph 全量 3 次 178/178、30 组并行 m4 通过、无孤儿进程；交付浏览器 E2E 3/3。

@@ -64,6 +64,7 @@ function hostHandle(value) {
 const listen = net.Server.prototype.listen;
 const close = net.Server.prototype.close;
 const waiting = new Map();
+const fireOn = new Map();
 const granted = new WeakMap();
 let nextId = 1;
 // The IPC channel must not keep a finished check alive, but a pending listen
@@ -72,7 +73,7 @@ function channelRef() {
   if (process.channel && typeof process.channel.ref === 'function') process.channel.ref();
 }
 function channelIdle() {
-  if (waiting.size === 0 && process.channel && typeof process.channel.unref === 'function') process.channel.unref();
+  if (waiting.size === 0 && fireOn.size === 0 && process.channel && typeof process.channel.unref === 'function') process.channel.unref();
 }
 channelIdle();
 net.Server.prototype.listen = function (...args) {
@@ -91,6 +92,9 @@ net.Server.prototype.close = function (...args) {
   const id = granted.get(this);
   if (id !== undefined) {
     granted.delete(this);
+    // Cancel a listen whose reply has not arrived yet: the late reply may
+    // only release its handle, never restart this server.
+    if (waiting.delete(id) || fireOn.delete(id)) channelIdle();
     if (typeof process.send === 'function' && process.connected !== false) {
       try { process.send({ type: 'graph-check-listener-close', id }); } catch { /* channel closed */ }
     }
@@ -98,14 +102,48 @@ net.Server.prototype.close = function (...args) {
   return close.apply(this, args);
 };
 process.on('message', (message, handle) => {
-  if (!message || message.type !== 'graph-check-listener-result') return;
+  if (!message) return;
+  if (message.type === 'graph-check-listener-ready') {
+    const pending = fireOn.get(message.id);
+    if (!pending) { channelIdle(); return; }
+    fireOn.delete(message.id);
+    channelIdle();
+    if (pending.callback) pending.callback.call(pending.server);
+    return;
+  }
+  if (message.type !== 'graph-check-listener-result') return;
   const entry = waiting.get(message.id);
   if (!entry) {
     if (handle && typeof handle.close === 'function') { try { handle.close(); } catch { /* already closed */ } }
+    channelIdle();
     return;
   }
   waiting.delete(message.id);
-  if (message.ok && handle) { listen.call(entry.server, handle, entry.callback); channelIdle(); return; }
+  if (message.ok && handle) {
+    // Adopt first, tell the host, and only fire the check's callback once the
+    // host has fully closed its own copy. That removes both races around the
+    // hand-off: the host never accepts a check connection, and a host close
+    // never lands in the middle of adoption.
+    fireOn.set(message.id, entry);
+    entry.server.once('listening', () => {
+      if (typeof process.send === 'function' && process.connected !== false) {
+        process.send({ type: 'graph-check-listener-adopted', id: message.id });
+        return;
+      }
+      const pending = fireOn.get(message.id);
+      if (pending) { fireOn.delete(message.id); channelIdle(); if (pending.callback) pending.callback.call(pending.server); }
+    });
+    try { listen.call(entry.server, handle); }
+    catch (error) {
+      fireOn.delete(message.id);
+      if (handle && typeof handle.close === 'function') { try { handle.close(); } catch { /* already closed */ } }
+      channelIdle();
+      process.nextTick(() => { throw error; });
+      return;
+    }
+    channelIdle();
+    return;
+  }
   const error = new Error(message.message || 'EPERM: the host refused the loopback listener');
   error.code = message.code || 'EPERM';
   channelIdle();
@@ -290,6 +328,18 @@ export async function openRestrictedExecutor() {
       const guardEnv = listenGuard
         ? { NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', `--require=${listenGuard}`].filter(Boolean).join(' ') }
         : {};
+      // Host listeners stay open until their handle is actually written to the
+      // channel: Node queues handle sends behind an unacknowledged one and
+      // reads the server handle only when that queue is flushed.
+      const pendingListeners = new Map<number, TcpServer>();
+      const boundListeners = new Set<number>();
+      const cancelledListeners = new Set<number>();
+      const closePendingListeners = () => {
+        for (const listener of pendingListeners.values()) { try { listener.close(); } catch { /* already closed */ } }
+        pendingListeners.clear();
+        boundListeners.clear();
+        cancelledListeners.clear();
+      };
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
         const child = command.broker.dispatch(invocationId, 0, () => {
@@ -300,37 +350,86 @@ export async function openRestrictedExecutor() {
           if (command.localNetwork) {
             // The host owns every listener: it binds the exact loopback port a
             // check asks for, duplicates the bound socket over the IPC channel
-            // and immediately drops its own descriptor. The check therefore
-            // holds the only accepting copy, a busy port keeps its original
-            // error instead of being replaced, and no descriptor survives a
-            // denied dispatch, a failed spawn or an executor close.
+            // and then drops its own descriptor. The check holds the only
+            // accepting copy, a busy port keeps its original error instead of
+            // being replaced, and no descriptor survives a denied dispatch, a
+            // failed spawn or an executor close.
             spawned.on('message', (raw: unknown) => {
               if (!raw || typeof raw !== 'object') return;
               const request = raw as { type?: unknown; id?: unknown; port?: unknown; host?: unknown };
+              const requestId = Number.isInteger(request.id) ? request.id as number : undefined;
+              const reply = (payload: Record<string, unknown>) => {
+                try { spawned.send(payload); } catch { /* The channel is gone; the check guard denies its listen. */ }
+              };
+              if (request.type === 'graph-check-listener-close') {
+                if (requestId !== undefined) {
+                  const held = pendingListeners.get(requestId);
+                  if (held !== undefined && boundListeners.delete(requestId)) {
+                    // The check closed its server before or after adoption.
+                    pendingListeners.delete(requestId);
+                    held.close();
+                  } else {
+                    cancelledListeners.add(requestId);
+                  }
+                }
+                return;
+              }
+              if (request.type === 'graph-check-listener-adopted') {
+                if (requestId === undefined) return;
+                const held = pendingListeners.get(requestId);
+                if (held === undefined) { reply({ type: 'graph-check-listener-ready', id: requestId }); return; }
+                pendingListeners.delete(requestId);
+                boundListeners.delete(requestId);
+                // Close the host copy completely, then release the check's
+                // listen callback. The adopted descriptor stays valid.
+                held.close(() => reply({ type: 'graph-check-listener-ready', id: requestId }));
+                return;
+              }
               if (request.type !== 'graph-check-listener') return;
-              const id = Number.isInteger(request.id) ? request.id as number : undefined;
               const port = Number.isInteger(request.port) && (request.port as number) >= 0 && (request.port as number) <= 65_535 ? request.port as number : undefined;
               const host = request.host === '127.0.0.1' || request.host === '::1' || request.host === 'localhost' ? request.host : undefined;
-              const reply = (payload: Record<string, unknown>, handle?: TcpServer) => {
-                try {
-                  if (handle === undefined) spawned.send(payload);
-                  else spawned.send(payload, handle, error => { if (error) handle.close(); });
-                } catch { /* The channel is gone; the check guard denies its listen. */ }
-              };
-              if (id === undefined || port === undefined || host === undefined) {
-                if (id !== undefined) reply({ type: 'graph-check-listener-result', id, ok: false, code: 'EINVAL', message: 'Invalid listener request' });
+              if (requestId === undefined || port === undefined || host === undefined) {
+                if (requestId !== undefined) reply({ type: 'graph-check-listener-result', id: requestId, ok: false, code: 'EINVAL', message: 'Invalid listener request' });
                 return;
               }
               const listener: TcpServer = createTcpServer();
+              pendingListeners.set(requestId, listener);
               listener.once('error', (error: NodeJS.ErrnoException) => {
-                reply({ type: 'graph-check-listener-result', id, ok: false, code: error.code ?? 'EPERM', message: String(error) });
+                pendingListeners.delete(requestId);
+                boundListeners.delete(requestId);
+                cancelledListeners.delete(requestId);
+                reply({ type: 'graph-check-listener-result', id: requestId, ok: false, code: error.code ?? 'EPERM', message: String(error) });
                 listener.close();
               });
               listener.listen(port, host, () => {
+                if (cancelledListeners.delete(requestId)) { pendingListeners.delete(requestId); boundListeners.delete(requestId); listener.close(); return; }
+                boundListeners.add(requestId);
                 const address = listener.address();
-                reply({ type: 'graph-check-listener-result', id, ok: true, port: typeof address === 'object' && address ? address.port : port }, listener);
-                // The check holds the duplicated descriptor; the host stops accepting.
-                listener.close();
+                const payload = { type: 'graph-check-listener-result', id: requestId, ok: true, port: typeof address === 'object' && address ? address.port : port };
+                try {
+                  spawned.send(payload, listener, error => {
+                    // The listener stays open until the check reports adoption:
+                    // a send queued behind another handle reads server._handle
+                    // only when that queue is flushed. Failures release it now.
+                    if (error) {
+                      pendingListeners.delete(requestId);
+                      boundListeners.delete(requestId);
+                      listener.close();
+                      reply({ type: 'graph-check-listener-result', id: requestId, ok: false, code: 'EIO', message: String(error) });
+                      return;
+                    }
+                    if (cancelledListeners.delete(requestId)) {
+                      pendingListeners.delete(requestId);
+                      boundListeners.delete(requestId);
+                      listener.close();
+                    }
+                  });
+                } catch (error) {
+                  pendingListeners.delete(requestId);
+                  boundListeners.delete(requestId);
+                  listener.close();
+                  reply({ type: 'graph-check-listener-result', id: requestId, ok: false, code: 'EIO', message: String(error) });
+                }
               });
             });
           }
@@ -339,7 +438,7 @@ export async function openRestrictedExecutor() {
         let stdout = '', stderr = '';
         // The sandbox child is a process-group leader: timeouts and completion
         // must reap its whole tree so a hung check cannot leak grandchildren.
-        const killTree = () => { try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } } };
+        const killTree = () => { closePendingListeners(); try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } } };
         const timer = command.timeoutMs ? setTimeout(killTree, command.timeoutMs) : undefined;
         timer?.unref?.();
         const channel = child.stdio[3] as Duplex;
@@ -363,7 +462,7 @@ export async function openRestrictedExecutor() {
         });
         child.stdout!.on('data', data => { stdout += String(data); });
         child.stderr!.on('data', data => { stderr += String(data); });
-        child.on('error', reject);
+        child.on('error', error => { closePendingListeners(); reject(error); });
         child.on('close', (code, signal) => {
           if (timer) clearTimeout(timer);
           killTree();

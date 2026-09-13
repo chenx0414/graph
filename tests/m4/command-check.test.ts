@@ -160,7 +160,7 @@ test('a graph.command check may bind loopback but not a non-loopback interface',
   expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
 });
 
-test('a graph.command check keeps its fixed loopback port and recycles listeners', async () => {
+test('a graph.command check keeps fixed loopback ports, concurrent listeners and cancellation', async () => {
   const root = await repo();
   const listenAction: ActionAdapter = {
     kind: 'agent', reserveTokens: 100,
@@ -196,6 +196,21 @@ test('a graph.command check keeps its fixed loopback port and recycles listeners
         "  assert.equal(conflict && conflict.code, 'EADDRINUSE');",
         "  if (!conflict) await new Promise(resolve => busy.close(resolve));",
         "  await new Promise(resolve => held.close(resolve));",
+        "  const concurrent = await Promise.all([serve(0), serve(0), serve(0)]);",
+        "  const bodies = await Promise.all(concurrent.map(server => fetch('http://127.0.0.1:' + server.address().port + '/').then(response => response.text())));",
+        "  assert.deepEqual(bodies, ['ok-0', 'ok-0', 'ok-0']);",
+        "  await Promise.all(concurrent.map(server => new Promise(resolve => server.close(resolve))));",
+        "  const cancelled = createServer();",
+        "  let late = false;",
+        "  cancelled.listen(0, '127.0.0.1', () => { late = true; });",
+        "  await new Promise(resolve => cancelled.close(() => resolve()));",
+        "  await new Promise(resolve => setTimeout(resolve, 250));",
+        "  assert.equal(late, false);",
+        "  assert.equal(cancelled.listening, false);",
+        "  assert.equal(cancelled.address(), null);",
+        "  const after = await serve(0);",
+        "  assert.equal(await (await fetch('http://127.0.0.1:' + after.address().port + '/')).text(), 'ok-0');",
+        "  await new Promise(resolve => after.close(resolve));",
         "});",
       ].join('\n'));
       return { outcome: 'completed', output: null, usage };

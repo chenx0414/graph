@@ -109,6 +109,22 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
 - 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
 
+## 第十三轮：R9/R10 与监听交接收尾（2026-09-13）
+
+[IPC 监听返工验收](ipc-listener-acceptance-2026-09-13.md) 指出两项 P2：
+
+- **R9**：并发 `listen` 时，Node 的 IPC 句柄发送会把后续 handle 排队到前一个 ACK 之后；旧代码在 `send` 返回时就关闭宿主监听器，出队时 `_handle` 已为空，检查收到 `ok` 却没有 handle。
+- **R10**：`listen` 后立刻 `close`，迟到回复仍会调用原始 `listen` 启动服务，进程无法自然退出。
+
+修复：
+
+- 宿主监听器保留到检查确认 adopt（`graph-check-listener-adopted`）后再关闭；发送失败立即释放。排队中的 handle 在出队时仍有有效 `_handle`。
+- 检查 adopt 成功后通知宿主；宿主**完全关闭**自己的副本后才回复 `graph-check-listener-ready`，检查的 `listening` 回调此时才触发。宿主既不会再与检查抢 accept，也不会在 adopt 中途关闭 fd。
+- `close` 取消尚未完成的监听（`waiting`/`fireOn`），迟到回复只释放句柄、不重启 Server；IPC 引用计数覆盖两段等待，检查可自然退出。
+- 同时修复首次全量偶发挂起：旧实现在发送回调前宿主可能抢先 accept 检查的 fetch 并丢弃连接；新握手中宿主在检查回调前已完全关闭，连接只可能由检查 accept。
+
+复验：`ipc-listener-regressions.mts` 三个并发服务 3/3 正文正确，`close` 后 `listening:false` 且自然退出；`host-listener-contract`、`host-listener-paused-gate`、`local-network-rework`、`listen-guard-child-rework` 行为保持；30 组并行 m4、3 次全量 178 项通过且无孤儿进程；交付浏览器 E2E 3/3。是否关闭 R9/R10 由独立复验决定。
+
 ## 第十二轮：S4/R8 收尾（2026-09-13）
 
 [R6 收尾验收](r6-acceptance-2026-09-13.md) 关闭了原权限绕过，但指出两项 P2：旧实现会在 `broker.dispatch` 之前预创建 4+4 个宿主监听器且不回收（S4），预分配 fd 会忽略 `listen()` 的请求端口并在第五次监听时耗尽（R8）。

@@ -1,15 +1,15 @@
 baseline {
   code: 1,
   stdout: '',
-  stderr: '/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-8Ww9Ur/workspace/scratch/.graph-listen-guard.cjs:16\n' +
+  stderr: '/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-siPyle/workspace/scratch/.graph-listen-guard.cjs:16\n' +
     'function deny() { throw denied(); }\n' +
     '                  ^\n' +
     '\n' +
     'Error: EPERM: sandboxed checks may only listen on an explicit loopback host\n' +
-    '    at denied (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-8Ww9Ur/workspace/scratch/.graph-listen-guard.cjs:12:17)\n' +
-    '    at deny (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-8Ww9Ur/workspace/scratch/.graph-listen-guard.cjs:16:25)\n' +
-    '    at net.Server.listen (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-8Ww9Ur/workspace/scratch/.graph-listen-guard.cjs:63:78)\n' +
-    '    at Object.<anonymous> (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-8Ww9Ur/workspace/listen.cjs:1:149)\n' +
+    '    at denied (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-siPyle/workspace/scratch/.graph-listen-guard.cjs:12:17)\n' +
+    '    at deny (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-siPyle/workspace/scratch/.graph-listen-guard.cjs:16:25)\n' +
+    '    at net.Server.listen (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-siPyle/workspace/scratch/.graph-listen-guard.cjs:64:78)\n' +
+    '    at Object.<anonymous> (/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-r3-spec-siPyle/workspace/listen.cjs:1:149)\n' +
     '    at Module._compile (node:internal/modules/cjs/loader:1929:14)\n' +
     '    at Object..js (node:internal/modules/cjs/loader:2060:10)\n' +
     '    at Module.load (node:internal/modules/cjs/loader:1651:32)\n' +
