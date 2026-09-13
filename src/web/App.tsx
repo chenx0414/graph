@@ -239,7 +239,7 @@ export function App() {
             <Icon name="alert" />
             {startup.modelCount === 0
               ? <>首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请<a href="#/setup">打开配置向导</a>，或在 graph.config.json 中添加模型与凭据后重启。</>
-              : <>模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请<a href="#/setup">打开配置向导</a>检查凭据，或设置凭据引用的环境变量后重启。</>}
+              : <>模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请<a href="#/setup">打开配置向导</a>检查凭据，或设置凭据引用的环境变量后重启。{typeof window !== 'undefined' && window.graph && '桌面 APP 也可在设置页为凭据保存密钥到钥匙串，然后重启。'}</>}
           </div>
         )}
         {startup?.mode === 'view' && startup.configured && (

@@ -67,17 +67,20 @@ describe('daemon launch contract', () => {
     expect(isLoopbackUrl('http://evil.example/')).toBe(false);
   });
 
-  test('execute mode requires models and every referenced secret', () => {
+  test('execute mode needs one resolvable model; unresolved models stay disabled', () => {
     const config = {
       version: 1,
-      models: { entries: [{ id: 'local' }] },
-      credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+      models: { entries: [{ id: 'local', credentialId: 'local' }, { id: 'go', credentialId: 'go' }] },
+      credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' }, go: { secretRef: 'OPENCODE_GO_API_KEY' } },
     };
     expect(resolveDaemonMode(undefined, {}, {})).toBe('view');
     expect(resolveDaemonMode({ ...config, models: { entries: [] } }, {}, {})).toBe('view');
     expect(resolveDaemonMode(config, {}, {})).toBe('view');
+    // One broken credential must not force the whole daemon into view-only.
+    expect(resolveDaemonMode(config, { OPENCODE_GO_API_KEY: 'x' }, {})).toBe('execute');
+    expect(resolveDaemonMode(config, {}, { OPENCODE_GO_API_KEY: 'x' })).toBe('execute');
     expect(resolveDaemonMode(config, { GRAPH_LOCAL_KEY: 'x' }, {})).toBe('execute');
-    expect(resolveDaemonMode(config, {}, { GRAPH_LOCAL_KEY: 'x' })).toBe('execute');
+    expect(resolveDaemonMode({ ...config, models: { entries: [{ id: 'local', credentialId: 'missing' }] } }, { OPENCODE_GO_API_KEY: 'x' }, {})).toBe('view');
   });
 });
 

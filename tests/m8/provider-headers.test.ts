@@ -90,3 +90,101 @@ test('config parsing validates and keeps per-model request headers', () => {
   expect(() => parseGraphConfig(document({ 'x-test': '' }), '/tmp/graph.config.json')).toThrow(/non-empty string/);
   expect(() => parseGraphConfig(document({ 'x-test': 42 }), '/tmp/graph.config.json')).toThrow(/non-empty string/);
 });
+
+test('an unresolved credential only disables its own model, not dispatch for others', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m8-partial-credentials-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  const webDir = join(root, 'web');
+  await mkdir(project, { recursive: true });
+  await mkdir(webDir, { recursive: true });
+  await writeFile(join(webDir, 'index.html'), '<!doctype html><div id="root"></div>');
+
+  const provider = await openaiServer([{ text: 'usable model' }]);
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [
+        { id: 'usable', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'usable' },
+        { id: 'unusable', provider: 'graph-openai-unusable', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'unusable' },
+      ],
+    },
+    credentials: { usable: { secretRef: 'GRAPH_USABLE_KEY' }, unusable: { secretRef: 'GRAPH_MISSING_KEY' } },
+    limits: {},
+  }, null, 2));
+
+  const daemon = await startGraphDaemon({
+    configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute',
+    env: { GRAPH_USABLE_KEY: 'usable-key' }, log: () => undefined,
+  });
+  cleanup.push(() => daemon.close());
+  expect(daemon.mode).toBe('execute');
+  expect(daemon.configured).toBe(true);
+  expect(daemon.modelCount).toBe(2);
+  expect(daemon.enabledModelCount).toBe(1);
+
+  const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'p', request: 'partial credentials', requestId: 'begin' });
+  await daemon.server.runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'partial',
+    acceptance: [{ id: 'works', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'usable' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['-e', 'process.exit(0)'] } },
+    ],
+  }, 'proposal');
+  await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await daemon.server.runtime.host.runReady();
+    const node = (await daemon.server.runtime.user.task(taskId).view()).nodes.find(candidate => candidate.id === 'work');
+    if (node && ['succeeded', 'failed', 'blocked'].includes(node.status)) break;
+    await sleep(100);
+  }
+  expect(provider.requests.length).toBeGreaterThan(0);
+  expect((await daemon.server.runtime.user.task(taskId).view()).nodes.find(node => node.id === 'work')?.status).toBe('succeeded');
+}, 90_000);
+
+test('tasks created while dispatch was disabled are recovered on the next execute start', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m8-master-recovery-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  const webDir = join(root, 'web');
+  await mkdir(project, { recursive: true });
+  await mkdir(webDir, { recursive: true });
+  await writeFile(join(webDir, 'index.html'), '<!doctype html><div id="root"></div>');
+
+  const provider = await openaiServer([{ text: 'master ready' }]);
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }],
+    },
+    credentials: { local: { secretRef: 'GRAPH_RECOVERY_KEY' } },
+    limits: {},
+  }, null, 2));
+
+  // View-only: the task is accepted but cannot dispatch.
+  const view = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'view', env: {}, log: () => undefined });
+  const { taskId } = await view.server.runtime.user.begin({ projectId: 'p', request: 'queued while view-only', requestId: 'begin' });
+  expect((await view.server.runtime.user.task(taskId).view()).nodes).toHaveLength(0);
+  await view.close();
+
+  // Execute: the master is backfilled, becomes active and dispatches.
+  const execute = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute', env: { GRAPH_RECOVERY_KEY: 'recovery-key' }, log: () => undefined });
+  cleanup.push(() => execute.close());
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await execute.server.runtime.host.runReady();
+    if (provider.requests.length > 0) break;
+    await sleep(100);
+  }
+  const nodes = (await execute.server.runtime.user.task(taskId).view()).nodes;
+  expect(nodes.map(node => node.id)).toContain('master');
+  expect(provider.requests.length).toBeGreaterThan(0);
+  expect(provider.authorizations[0]).toBe('Bearer recovery-key');
+  expect(nodes.find(node => node.id === 'master')?.status).not.toBe('pending');
+}, 90_000);

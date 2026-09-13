@@ -100,6 +100,26 @@ export async function openTaskRuntime(options: {
       ...(options.models?.preferences ? { preferences: options.models.preferences } : {}),
       ...(options.program ? { program: options.program } : {}),
     });
+    // Tasks created while dispatch was disabled carry no master node. Once a
+    // master binding exists they get one and become driveable again.
+    if (options.master) {
+      store.transaction(() => {
+        const discussing = store.db.prepare("SELECT id FROM tasks WHERE phase='discussing' ORDER BY created_seq").all() as { id: string }[];
+        for (const task of discussing) {
+          const nodes = store.db.prepare('SELECT spec FROM nodes WHERE task_id=?').all(task.id) as { spec: string }[];
+          if (nodes.some(row => (JSON.parse(row.spec) as NodeSpec).role === 'master')) continue;
+          const master = options.master!;
+          const spec: NodeSpec = { id: 'master', kind: 'agent', action: master.action, definitionVersion: master.definitionVersion, model: master.model, role: 'master' };
+          const instanceId = randomUUID();
+          store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(task.id, spec.id, canonicalJson(spec), instanceId);
+          store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,?,?)').run(instanceId, task.id, spec.id, spec.definitionVersion ?? null, spec.model ?? null);
+          createActivation(store, task.id, spec.id, 0);
+          store.event(task.id, 'task.master_recovered', { reason: 'dispatch was disabled when the task was created' });
+        }
+        const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+        if (!active_task && discussing.length) store.db.prepare('UPDATE runtime SET active_task=?').run(discussing[0]!.id);
+      });
+    }
   } catch (error) {
     try { store.close(); } finally { releaseOwner(); }
     throw error;

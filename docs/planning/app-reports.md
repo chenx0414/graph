@@ -139,3 +139,9 @@ node_modules/.bin/vitest run tests/app    # 20 项
 - [x] OpenCode GO 接入：仓库 `graph.config.json`（本地、gitignore）加入 `deepseek-v4-flash`（provider `opencode-go`，baseUrl `https://opencode.ai/zen/go/v1`，`headers.x-opencode-session=graph-console`，credentialRef `OPENCODE_GO_API_KEY`）；桌面 APP 配置同步加入该模型并 revision +1。
 - [x] 真实验证（证据 `acceptance-evidence/opencode-go-verification.output.txt`）：直连 `POST /chat/completions` 200、“ok”、3.9s；Graph `/api/config/test` 返回 `ok:true`、HTTP 200、1.26s；真实派发任务让 agent 创建 `hello.txt`，12–17s 内节点 `succeeded`、写入内容 `hello`、消耗 6219–8358 tokens，无待处理问题。
 - [x] 全量 52 文件 / 254 项测试、双 tsc 与构建通过；设置页新增“保存到钥匙串”按钮（桌面壳内），CLI 仍以环境变量提供密钥。
+
+## 修复 · 仅查看模式任务停摆与调度恢复（2026-09-13）
+
+**问题**：在仅查看模式下提交的任务一直停在“讨论中”、任务图为空。原因有三层：桌面壳 `resolveDaemonMode` 要求**全部**凭据可解析，一条凭据缺失就整体降级；daemon 的 `enabled` 同样要求 `missing.size === 0`，与文档“至少一个模型”不符；且仅查看模式下 `begin` 不创建 master 节点，切换到执行模式后没有任何可派发节点，`active_task` 也为空。
+
+**修复**：`resolveDaemonMode` 与 daemon 的 `enabled` 改为“至少一个模型的凭据可解析即调度”，缺失凭据的模型保持禁用并在派发时明确拒绝；CLI 执行模式仅在**无任何**可用凭据时报错；启动时若存在“讨论中且无 master”的任务则补建 master、写 `task.master_recovered` 事件并按顺序激活第一条，使其在执行模式下自动继续；`enabledModelCount` 报告真实可用模型数；首启横幅在桌面壳内提示可用设置页保存密钥。回归：`provider-headers.test.ts` 新增部分凭据与恢复调度两用例，`desktop.test.ts` 更新模式判定；全量 52 文件 / 256 项通过。

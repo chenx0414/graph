@@ -26,7 +26,7 @@ export interface GraphDaemon {
   webDir: string;
   configPath: string | null;
   mode: 'view' | 'execute';
-  /** True when at least one model is configured and all its credentials resolved. */
+  /** True when at least one configured model has a resolved credential. */
   configured: boolean;
   modelCount: number;
   enabledModelCount: number;
@@ -90,8 +90,9 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     throw new RuntimeError('models_missing', 'Execution mode requires a config with at least one model entry; start view-only or configure a model first');
   }
   const missing = missingSecrets(config, entries, options.env);
-  if (missing.size && options.mode === 'execute') {
-    throw new RuntimeError('credentials_missing', `Execution mode requires configured credentials; set: ${[...missing].join(', ')}`);
+  const resolvable = Object.keys(config.credentials).some(id => resolveCredentialSecret(config, id, options.env).configured);
+  if (entries.length && !resolvable && options.mode === 'execute') {
+    throw new RuntimeError('credentials_missing', `Execution mode requires at least one configured credential; set: ${[...missing].join(', ')}`);
   }
   // A conflicting hand-edited config must not prevent the console from
   // starting; execute mode still refuses it instead of guessing limits.
@@ -100,8 +101,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   catch (error) { groupConflict = error as RuntimeError; }
   if (groupConflict && options.mode === 'execute') throw groupConflict;
   if (groupConflict) log(`Config problem (${groupConflict.message}); model dispatch stays disabled.`);
-  const enabled = entries.length > 0 && missing.size === 0 && !groupConflict;
-  if (entries.length && missing.size) log(`Credentials not configured (${[...missing].join(', ')}); model dispatch stays disabled.`);
   const configStore = options.configPath ? await openConfigStore(options.configPath) : null;
   // The running daemon keeps the bindings it was started with; a saved file
   // revision only takes effect after a restart.
@@ -148,6 +147,14 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     });
   }
   const credentialFor = (entry: ModelEntry) => credentials.get(entry.id);
+  // Dispatch needs one usable model, not a fully populated config: entries
+  // whose credential cannot resolve stay disabled and refuse dispatch cleanly.
+  const enabled = entries.length > 0 && credentials.size > 0 && !groupConflict;
+  if (entries.length && missing.size) {
+    log(credentials.size > 0
+      ? `Credentials not configured (${[...missing].join(', ')}); those models stay disabled.`
+      : `Credentials not configured (${[...missing].join(', ')}); model dispatch stays disabled.`);
+  }
   const limitAliases = Object.fromEntries([...identities.entries()].filter(([alias, identity]) => alias !== identity.canonical).map(([alias, identity]) => [alias, identity.canonical]));
   const limitSummary = [...new Set([...credentials.values()].map(binding => {
     const parts = [binding.limit !== undefined ? `${binding.credentialId} ≤${binding.limit}` : null, binding.groupLimit !== undefined ? `组 ${binding.sharedGroupId} ≤${binding.groupLimit}` : null].filter(Boolean);
@@ -160,7 +167,8 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: true, refreshOnCreate: false });
     for (const [provider, group] of providerGroups(entries)) {
       const secret = resolveCredentialSecret(config, group.credentialId, options.env);
-      modelRuntime.registerProvider(provider, { baseUrl: group.baseUrl, api: 'openai-completions', apiKey: secret.value!, models: group.entries.map(piModel) });
+      if (!secret.configured || !secret.value) continue;
+      modelRuntime.registerProvider(provider, { baseUrl: group.baseUrl, api: 'openai-completions', apiKey: secret.value, models: group.entries.map(piModel) });
     }
   }
 
@@ -192,7 +200,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   };
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
-  const first = enabled ? entries[0]! : null;
+  const first = enabled ? entries.find(entry => credentials.has(entry.id))! : null;
   const server = await openGraphServer({
     stateDir,
     projects: config.projects,
@@ -211,7 +219,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     port: options.port,
     webDir: options.webDir,
     startup: {
-      mode: options.mode, configured: enabled, modelCount: entries.length, enabledModelCount: enabled ? entries.length : 0,
+      mode: options.mode, configured: enabled, modelCount: entries.length, enabledModelCount: credentials.size,
       effectiveRevision, ...(Object.keys(limitAliases).length ? { limitAliases } : {}),
     },
     ...(configStore ? { configStore, configEnv: options.env, configTest: testConnection } : {}),
@@ -229,7 +237,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     mode: options.mode,
     configured: enabled,
     modelCount: entries.length,
-    enabledModelCount: enabled ? entries.length : 0,
+    enabledModelCount: credentials.size,
     server,
     async close() { await server.close(); },
   };

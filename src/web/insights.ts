@@ -23,6 +23,7 @@ export interface TimelineEntry {
 
 const EVENT_LABEL: Record<string, string> = {
   'task.created': '创建任务',
+  'task.master_recovered': '恢复任务调度',
   'task.started': '开始执行',
   'task.completed': '任务完成',
   'task.pause_requested': '请求暂停',

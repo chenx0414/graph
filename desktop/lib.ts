@@ -78,24 +78,26 @@ export function parseBannerAddress(text: string): string | undefined {
   }
 }
 
-/** Execute mode needs at least one model and every referenced secret resolvable. */
+/** Execute mode needs at least one model whose credential resolves; models
+ * with missing credentials stay disabled instead of forcing view-only. */
 export function resolveDaemonMode(
   config: unknown,
   env: Record<string, string | undefined>,
   secrets: Record<string, string>,
 ): 'view' | 'execute' {
   if (!config || typeof config !== 'object') return 'view';
-  const models = (config as { models?: { entries?: unknown } }).models;
-  const entries = models?.entries;
+  const entries = (config as { models?: { entries?: unknown } }).models?.entries;
   if (!Array.isArray(entries) || entries.length === 0) return 'view';
   const credentials = (config as { credentials?: unknown }).credentials;
   if (!credentials || typeof credentials !== 'object') return 'view';
-  for (const credential of Object.values(credentials as Record<string, unknown>)) {
-    const ref = (credential as { secretRef?: unknown } | null)?.secretRef;
-    if (typeof ref !== 'string' || ref.length === 0) return 'view';
-    if (env[ref] === undefined && secrets[ref] === undefined) return 'view';
+  for (const model of entries) {
+    const credentialId = (model as { credentialId?: unknown } | null)?.credentialId;
+    if (typeof credentialId !== 'string' || credentialId.length === 0) continue;
+    const ref = (credentials as Record<string, { secretRef?: unknown }>)[credentialId]?.secretRef;
+    if (typeof ref !== 'string' || ref.length === 0) continue;
+    if (env[ref] !== undefined || secrets[ref] !== undefined) return 'execute';
   }
-  return 'execute';
+  return 'view';
 }
 
 export interface SecretCodec {
