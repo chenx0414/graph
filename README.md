@@ -68,6 +68,17 @@ pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭
 }
 ```
 
+## 桌面 APP（开发预览）
+
+分支 `feat/app-console` 提供桌面壳：APP 以子进程方式托管现有守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](docs/planning/app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](docs/planning/app-reports.md)。
+
+```sh
+export PATH="$PWD/node_modules/.bin:$PATH"
+npx --yes electron@44.3.0 .        # 或安装 devDependencies 后：node --run app:dev
+```
+
+当前为 A1（桌面壳骨架）：首次运行向导、托盘与通知在 A2/A3，打包与签名在 A4。
+
 ## 运行验证
 
 ```sh

@@ -1,0 +1,103 @@
+import { describe, expect, test } from 'vitest';
+import {
+  daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
+  resolveDaemonMode, saveSecrets, tailText, type AppPaths, type SecretCodec,
+} from '../../desktop/lib.ts';
+
+const codec: SecretCodec = {
+  isEncryptionAvailable: () => true,
+  encryptString: value => Buffer.from(`sealed:${value}`),
+  decryptString: value => value.toString().replace(/^sealed:/, ''),
+};
+
+const banner = [
+  'Graph console',
+  '  mode:      view-only (history, settings and graph; no model dispatch)',
+  '  config:    none — first run; add graph.config.json to enable projects and models',
+  '  state:     /tmp/state',
+  '  web:       /tmp/web',
+  '  models:    0 configured, 0 enabled',
+  '  address:   http://127.0.0.1:53631',
+].join('\n');
+
+const paths: AppPaths = {
+  root: '/repo', stateDir: '/repo/state', configPath: '/repo/graph.config.json',
+  secretsPath: '/repo/secrets.json', serverEntry: '/repo/src/server/cli.ts', webDir: '/repo/dist/web',
+};
+
+describe('desktop app paths', () => {
+  test('dev layout serves the repository web build and keeps state in userData', () => {
+    const resolved = resolveAppPaths({ appPath: '/repo', resourcesPath: '/unused', isPackaged: false, userData: '/home/me/Library/Application Support/Graph' });
+    expect(resolved.root).toBe('/repo');
+    expect(resolved.serverEntry).toBe('/repo/src/server/cli.ts');
+    expect(resolved.webDir).toBe('/repo/dist/web');
+    expect(resolved.stateDir).toBe('/home/me/Library/Application Support/Graph/state');
+    expect(resolved.configPath).toBe('/home/me/Library/Application Support/Graph/graph.config.json');
+  });
+
+  test('packaged layout reads the web build from resources', () => {
+    const resolved = resolveAppPaths({ appPath: '/unused', resourcesPath: '/Applications/Graph.app/Contents/Resources', isPackaged: true, userData: '/home/me/Library/Application Support/Graph' });
+    expect(resolved.root).toBe('/Applications/Graph.app/Contents/Resources');
+    expect(resolved.webDir).toBe('/Applications/Graph.app/Contents/Resources/web');
+    expect(resolved.serverEntry).toBe('/Applications/Graph.app/Contents/Resources/src/server/cli.ts');
+  });
+});
+
+describe('daemon launch contract', () => {
+  test('passes an explicit state dir, web dir and a free port', () => {
+    expect(daemonArgs({ paths, port: 0, mode: 'view', hasConfig: false })).toEqual([
+      '--state-dir', paths.stateDir, '--web-dir', paths.webDir, '--port', '0',
+    ]);
+  });
+
+  test('adds the config and execute flag only when usable', () => {
+    expect(daemonArgs({ paths, port: 4173, mode: 'execute', hasConfig: true })).toEqual([
+      '--state-dir', paths.stateDir, '--web-dir', paths.webDir, '--port', '4173',
+      '--config', paths.configPath, '--execute',
+    ]);
+  });
+
+  test('parses only the loopback banner address', () => {
+    expect(parseBannerAddress(banner)).toBe('http://127.0.0.1:53631');
+    expect(parseBannerAddress('  address:   http://10.0.0.5:4173')).toBeUndefined();
+    expect(parseBannerAddress('  address:   http://127.0.0.1:4173/path')).toBe('http://127.0.0.1:4173');
+    expect(parseBannerAddress('no address here')).toBeUndefined();
+    expect(isLoopbackUrl('http://127.0.0.1:9/a')).toBe(true);
+    expect(isLoopbackUrl('http://evil.example/')).toBe(false);
+  });
+
+  test('execute mode requires models and every referenced secret', () => {
+    const config = {
+      version: 1,
+      models: { entries: [{ id: 'local' }] },
+      credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+    };
+    expect(resolveDaemonMode(undefined, {}, {})).toBe('view');
+    expect(resolveDaemonMode({ ...config, models: { entries: [] } }, {}, {})).toBe('view');
+    expect(resolveDaemonMode(config, {}, {})).toBe('view');
+    expect(resolveDaemonMode(config, { GRAPH_LOCAL_KEY: 'x' }, {})).toBe('execute');
+    expect(resolveDaemonMode(config, {}, { GRAPH_LOCAL_KEY: 'x' })).toBe('execute');
+  });
+});
+
+describe('keychain secrets file', () => {
+  test('round-trips through the safeStorage codec without plaintext keys', () => {
+    const files = new Map<string, string>();
+    expect(saveSecrets('/secrets.json', codec, { GRAPH_A_KEY: 'sk-a' }, (path, data) => files.set(path, data))).toBe(true);
+    const raw = files.get('/secrets.json')!;
+    expect(raw).not.toContain('sk-a');
+    expect(loadSecrets('/secrets.json', codec, path => files.get(path)!)).toEqual({ GRAPH_A_KEY: 'sk-a' });
+  });
+
+  test('degrades to no secrets when encryption is unavailable or the file is corrupt', () => {
+    const unavailable: SecretCodec = { ...codec, isEncryptionAvailable: () => false };
+    expect(loadSecrets('/secrets.json', unavailable, () => '{}')).toEqual({});
+    expect(saveSecrets('/secrets.json', unavailable, { A: 'x' }, () => { throw new Error('must not write'); })).toBe(false);
+    expect(loadSecrets('/secrets.json', codec, () => 'not json')).toEqual({});
+    expect(loadSecrets('/secrets.json', codec, () => '{"version":1,"entries":{"A":"%%%"}}')).toEqual({});
+  });
+
+  test('tails logs for bounded dialogs', () => {
+    expect(tailText('a\n\nb\nc\n', 2)).toBe('b\nc');
+  });
+});

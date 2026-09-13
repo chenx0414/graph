@@ -36,6 +36,17 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 
 执行模式要求配置中至少一个模型且其凭据引用的环境变量已设置；否则启动失败并明确报错。前端开发模式使用 `node --run dev`（Vite，默认 5173，`/api` 代理到 `GRAPH_DEV_API` 或 `http://127.0.0.1:4173`）。
 
+## 桌面 APP（开发预览）
+
+A1 起提供 Electron 桌面壳：APP 负责启动守护进程（`--port 0` 自动选端口、显式状态目录）并在窗口中加载控制台；关闭窗口不停止守护进程，再次启动 APP 会聚焦或重开窗口，退出 APP 触发与 CLI 相同的 5 秒有界停止。密钥边界不变：配置文件只保存 `secretRef`，APP 只把解密后的值放进子进程环境变量。
+
+```sh
+export PATH="$PWD/node_modules/.bin:$PATH"
+npx --yes electron@44.3.0 .        # 开发预览；已安装 devDependencies 时 node --run app:dev
+```
+
+数据目录默认在系统用户数据目录下（macOS 为 `~/Library/Application Support/Graph/state`），与 CLI 版的状态目录相互独立。
+
 ## 配置
 
 配置文件为版本 1 JSON，默认 `./graph.config.json`，可用 `--config` / `GRAPH_CONFIG` 覆盖。相对项目根按配置文件所在目录解析。示例（无任何真实密钥）：
