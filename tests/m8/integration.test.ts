@@ -117,7 +117,10 @@ test('the full productized flow runs from the formal start entry with a controll
   const exited = new Promise<number | null>(resolveExit => child.once('exit', code => resolveExit(code)));
   cleanup.push(() => { child.kill('SIGTERM'); });
 
-  const evidenceDir = join(process.cwd(), 'docs', 'planning', 'acceptance-evidence');
+  // Screenshots are run artifacts, not repository state; keeping them in the
+  // temporary workspace means a full test run never dirties git.
+  const evidenceDir = join(workspace, 'screenshots');
+  await mkdir(evidenceDir, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();

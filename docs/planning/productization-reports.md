@@ -299,7 +299,7 @@
 
 ### T08 测试健壮性
 
-- `tests/m8/integration.test.ts` 的 SIGTERM 退出码断言移出被吞异常的清理段，改为在测试体内断言退出码 0、`exitCode` 0 且进程不存在。
+- `tests/m8/integration.test.ts` 的 SIGTERM 退出码断言移出被吞异常的清理段，改为在测试体内断言退出码 0、`exitCode` 0 且进程不存在；截图写入临时运行目录，全量测试不再改写仓库内证据文件。
 
 ### 复验
 
