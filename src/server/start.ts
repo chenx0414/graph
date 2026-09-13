@@ -96,12 +96,27 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   if (entries.length && missing.size) log(`Credentials not configured (${[...missing].join(', ')}); model dispatch stays disabled.`);
   const configStore = options.configPath ? await openConfigStore(options.configPath) : null;
   // Model id to credential mapping: one model can never inherit another model's key.
-  const credentials = new Map<string, { credentialId: string; apiKey: string }>();
+  const credentials = new Map<string, { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number }>();
   for (const entry of entries) {
     const secret = resolveCredentialSecret(config, entry.credentialId, options.env);
-    if (secret.configured && secret.value) credentials.set(entry.id, { credentialId: entry.credentialId, apiKey: secret.value });
+    if (!secret.configured || !secret.value) continue;
+    const groupId = config.credentials[entry.credentialId]?.sharedLimitGroupId;
+    const limit = config.limits.credentials[entry.credentialId];
+    const groupLimit = groupId ? config.limits.sharedGroups[groupId] : undefined;
+    credentials.set(entry.id, {
+      credentialId: entry.credentialId,
+      apiKey: secret.value,
+      ...(limit !== undefined ? { limit } : {}),
+      ...(groupId ? { sharedGroupId: groupId } : {}),
+      ...(groupLimit !== undefined ? { groupLimit } : {}),
+    });
   }
   const credentialFor = (entry: ModelEntry) => credentials.get(entry.id);
+  const limitSummary = [...new Set([...credentials.values()].map(binding => {
+    const parts = [binding.limit !== undefined ? `${binding.credentialId} ≤${binding.limit}` : null, binding.groupLimit !== undefined ? `组 ${binding.sharedGroupId} ≤${binding.groupLimit}` : null].filter(Boolean);
+    return parts.join(', ');
+  }).filter(Boolean))];
+  if (limitSummary.length) log(`Concurrency limits: ${limitSummary.join('; ')}`);
 
   let modelRuntime: ModelRuntime | undefined;
   if (enabled) {

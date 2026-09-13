@@ -99,8 +99,13 @@ export async function gatedProviderFetch(
   }
 }
 
+/** A host-wide concurrency slot for one logical provider send. */
+export interface StreamSlot {
+  acquire(signal?: AbortSignal): Promise<() => void>;
+}
+
 /** Controlled lower-level adapter, currently verified for OpenAI chat-completions SSE. */
-export function controlledOpenAIStream(broker: SendGate, apiKey: string): StreamFn {
+export function controlledOpenAIStream(broker: SendGate, apiKey: string, slot?: StreamSlot): StreamFn {
   return (model, context, options) => {
     const output = createAssistantMessageEventStream();
     void (async () => {
@@ -112,15 +117,33 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string): Stream
           ...options, apiKey, maxRetries: 0, transport: 'sse',
           // Reserve an upper bound for this model's accepted context and output.
           maxTokens: Math.min(options?.maxTokens ?? model.maxTokens, model.maxTokens),
-          fetch: (input, init) => {
+          fetch: async (input, init) => {
             if (sent) throw new Error('Unexpected provider retry; use a new controlled invocation');
             sent = true;
-            return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
-              reservation: model.contextWindow + model.maxTokens,
-              onResponse: (id, response) => {
-                evidence = readUsage(response.clone()).then(usage => broker.settle(id, usage), () => broker.settle(id, null));
-              },
-            });
+            // Acquire before the gate: the slot covers the whole request
+            // lifecycle and is returned after the body ends, errors or cancels.
+            const release = slot ? await slot.acquire(options?.signal) : () => {};
+            let handedOver = false;
+            try {
+              const response = await gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
+                reservation: model.contextWindow + model.maxTokens,
+                onResponse: (id, response) => {
+                  // Consuming the evidence clone to the end also proves the
+                  // provider finished sending, so it can release the slot too.
+                  evidence = readUsage(response.clone()).then(usage => { broker.settle(id, usage); release(); }, () => { broker.settle(id, null); release(); });
+                },
+              });
+              if (!response.body) { handedOver = true; release(); return response; }
+              // Release when the body ends; consumer cancellation is covered by
+              // the evidence clone, which always completes or errors.
+              const wrapped = response.body.pipeThrough(new TransformStream({
+                flush() { release(); },
+              }));
+              handedOver = true;
+              return new Response(wrapped, { status: response.status, statusText: response.statusText, headers: response.headers });
+            } finally {
+              if (!handedOver) release();
+            }
           },
         });
         for await (const event of stream) {

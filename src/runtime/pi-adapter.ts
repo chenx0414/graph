@@ -9,6 +9,7 @@ import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
 import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
+import type { ModelScheduler } from './model-scheduler.ts';
 import { openPiInstance } from './pi-instance.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
@@ -55,6 +56,9 @@ export function createPiAdapter(options: {
   apiKey?: string;
   /** Resolve the key per model so aliases on different credentials never share one. */
   apiKeyFor?: (entry: ModelEntry) => string | undefined;
+  /** Full credential binding for one model, including concurrency caps. */
+  bindingFor?: (entry: ModelEntry) => { apiKey: string; credentialId: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
+  scheduler?: ModelScheduler;
   modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   channels?: PiAdapterChannels;
@@ -67,8 +71,20 @@ export function createPiAdapter(options: {
       const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
       const entry = options.directory().find(model => model.id === instance.model);
       if (!entry) throw new RuntimeError('model_unavailable', 'No configured model for this instance');
-      const apiKey = options.apiKeyFor?.(entry) ?? options.apiKey;
+      const binding = options.bindingFor?.(entry);
+      const apiKey = binding?.apiKey ?? options.apiKeyFor?.(entry) ?? options.apiKey;
       if (!apiKey) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
+      const scheduler = options.scheduler;
+      const slot = binding && scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)
+        ? {
+            acquire: (signal?: AbortSignal) => scheduler.acquire({
+              credentialId: binding.credentialId,
+              ...(binding.limit !== undefined ? { limit: binding.limit } : {}),
+              ...(binding.sharedGroupId ? { sharedGroupId: binding.sharedGroupId } : {}),
+              ...(binding.groupLimit !== undefined ? { groupLimit: binding.groupLimit } : {}),
+            }, signal),
+          }
+        : undefined;
       const task = options.store.task(operation.taskId);
       const project = options.store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string };
       const definitionVersion = instance.definition_version ?? 'unknown@1';
@@ -114,7 +130,7 @@ export function createPiAdapter(options: {
           const session = await openPiInstance({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(gate, apiKey),
+            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(gate, apiKey, slot),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
           });
           try {

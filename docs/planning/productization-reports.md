@@ -102,3 +102,37 @@
 ### 已知限制
 
 - 未做浏览器级别的强制断线演练（依赖游标重连实现与单测）；T04 的“等待名额”状态在 T06 呈现在本页框架内。
+
+## T04 · 按凭据及共享组限制 API 并发
+
+- 起始提交：`baef41d`
+- 完成提交：本次提交
+- 修改范围：
+  - 新增 `src/runtime/model-scheduler.ts`：宿主级名额调度器，按 `credentialId` 与共享组计数；FIFO 扫描式发放避免队头阻塞；支持 `AbortSignal`、动态更低上限（在途不受影响）与可观测的 `active()/queued()`。
+  - `src/runtime/controlled-openai.ts`：发送路径新增可选 `StreamSlot`，在 `gatedProviderFetch` 之前申请名额，在响应体结束、使用量证据完成、错误或取消后释放；名额覆盖完整响应生命周期（响应头不释放）。
+  - `src/runtime/pi-adapter.ts`：`bindingFor` 返回模型对应的凭据与上限，仅在有上限时接入调度器；无凭据仍为 `model_unavailable`。
+  - `src/core/task-runtime.ts`：`credentialFor` 增加 `limit/sharedGroupId/groupLimit`；新增可选 `modelScheduler`，缺省每个 runtime 创建一个。
+  - `src/server/start.ts`：从配置把凭据上限、共享组与组上限绑定到模型；启动日志打印生效上限。
+  - 新增 `tests/m8/concurrency.test.ts`。
+- 接口/schema：配置 `limits.credentials.<id>`、`limits.sharedGroups.<groupId>` 与 `credentials.<id>.sharedLimitGroupId` 生效（T02 已定义）；无新 HTTP 接口。
+- 生效规则：上限在守护进程启动时绑定；运行中修改配置仍按 T02 的“重启生效”规则（不热改、不强杀在途请求）。调度器是内存态，进程重启从零开始；旧请求的在途核查沿用 CallBroker/unknown usage 机制。
+
+### 验收清单
+
+- [x] 同 key 多模型、多实例、上限 2 时始终 ≤2：`concurrency.test.ts` 用 5 个不同密钥别名（同一 `credentialId`）并发，服务端记录的最大并发 ≤2，全部完成。
+- [x] 不同 key 独立；同共享组合计受限；别名不能绕过：共享组上限 2 时两组请求最大并发 ≤2；无组时两凭据各限 1 可并行（服务端观察到并发 2）；同一凭据的多个别名共用同一计数器。
+- [x] 响应头到达后阻塞响应体，名额不提前释放：300ms 响应体延迟下，活动数保持 1、第二个申请保持排队。
+- [x] 成功、传输失败、用户取消正确释放；未知 usage 规则不变：成功、HTTP 500、门拒绝（暂停）与 `AbortSignal` 取消后 `active=0`；未知 usage 仍由既有 CallBroker 阻塞，不与名额混账（未改动该路径）。
+- [x] 排队后暂停不得绕过门发送；恢复不重复计费：runtime 级测试在持有一个名额时暂停任务并释放名额，provider 收到 0 个请求，`invocations` 为 0，worker 不再活动。
+- [x] 排队不持有长写事务、不阻塞查询：排队期间 `view()` 正常返回；独立凭据分支在另一测试中并行通过。
+- [x] 重试重新申请名额并重过门：不可达端点触发 3 次 dispatch（每次重新过门），结束后名额释放。所有 Agent 调用（主管、工人、审查、压缩摘要）共用 `controlledOpenAIStream` 这一实际发送路径。
+- [x] 运行中降低上限不强杀在途、新请求等待：调度器按最新请求上限判定，已在途名额不受影响（测试 3 覆盖等待语义）；通过配置修改的路径按 T02 明确要求重启。
+- [x] 后台重启后无永久占用、无恢复瞬间超限：新调度器从空计数开始（测试），在途核查沿用既有机制。
+
+### 测试与运行
+
+- `tests/m8/concurrency.test.ts`：7/7；全量 42 文件 / 202 项（1 次）；双 tsc 通过。无真实供应商调用。
+
+### 已知限制
+
+- 本版仅并发；RPM/TPM、429 与冷却为 T09。等待名额目前不产生独立 UI 事件，T06 负责呈现。

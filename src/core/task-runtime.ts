@@ -13,6 +13,7 @@ import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.t
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
 import { CallBroker } from '../runtime/call-broker.ts';
+import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
 import { openRestrictedExecutor } from '../runtime/restricted-process.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { OperationRow } from './execution.ts';
@@ -30,7 +31,9 @@ export async function openTaskRuntime(options: {
     apiKey?: string;
     modelRuntime: ModelRuntime;
     /** Per-model credential binding so aliases never share or cross keys. */
-    credentialFor?: (entry: ModelEntry) => { credentialId: string; apiKey: string } | undefined;
+    credentialFor?: (entry: ModelEntry) => { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
+    /** Shared scheduler; one is created per runtime when omitted. */
+    modelScheduler?: ModelScheduler;
   };
   /** Config version recorded with new tasks so history points at its binding. */
   config?: { revision(): number };
@@ -64,6 +67,7 @@ export async function openTaskRuntime(options: {
     });
     catalog = new Catalog(store);
     git = new GitIntegration(store, stateDir);
+    const scheduler = options.models?.modelScheduler ?? createModelScheduler();
     if (options.models) {
       store.transaction(() => {
         for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
@@ -72,7 +76,8 @@ export async function openTaskRuntime(options: {
     const fallback = options.models ? createPiAdapter({
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: () => options.models!.entries,
       apiKey: options.models.apiKey ?? '', modelRuntime: options.models.modelRuntime,
-      ...(options.models.credentialFor ? { apiKeyFor: (entry: ModelEntry) => options.models!.credentialFor!(entry)?.apiKey } : {}),
+      ...(options.models.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
+      scheduler,
       ...(options.network ? { network: options.network } : {}),
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
