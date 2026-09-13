@@ -160,3 +160,20 @@ export function absolutePaths(paths: AppPaths): AppPaths {
 export function configDir(paths: AppPaths): string {
   return dirname(paths.configPath);
 }
+
+/** The config store only exists when the daemon is started with a config
+ * path, so the app seeds the smallest valid document before first launch.
+ * `exists` keeps the helper filesystem-free for tests. */
+export function ensureConfigFile(
+  configPath: string,
+  exists: (path: string) => boolean,
+  write: (path: string, data: string) => void,
+): boolean {
+  if (exists(configPath)) return true;
+  try {
+    write(configPath, `${JSON.stringify({ version: 1, projects: [] }, null, 2)}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}

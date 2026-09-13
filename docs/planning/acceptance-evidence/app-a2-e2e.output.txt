@@ -1,0 +1,12 @@
+# APP A2 · 首次运行向导 E2E（2026-09-13T12:43:06Z，项目 Node v24.20.0，Electron v44.3.0）
+# 干净 userData + 临时项目目录，真实 Chromium 经 CDP 驱动真实窗口
+banner_wizard_link true
+after_save {"hash":"","hasSetup":false,"status":"","body":"模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请打开配置向导检查凭据，或设置凭据引用的环境变量后重启。 概览人才库向导设置 Graph 项目与模型 e2e-demo /tmp/graph-app-e2e.46GKX8/proje"}
+first_origin http://127.0.0.1:64147
+second_origin http://127.0.0.1:64158
+daemon_restarted true
+startup {"mode":"view","configured":false,"modelCount":1,"enabledModelCount":0,"effectiveRevision":1}
+config_saved e2e-demo local-model revision1
+secrets_file_exists no
+orphans=0
+# 截图：app-a2-wizard.png（向导首屏，横幅链接可达）
