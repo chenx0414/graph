@@ -506,3 +506,148 @@ test('a pause after partial work keeps the operation interrupted and resumable',
   expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(100);
   expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
 }, 90_000);
+
+async function interruptedUnknown(check: 'usage' | 'reconcile') {
+  const root = await temp(`unknown-${check}`);
+  const provider = await openaiServer([
+    { usage: null, tools: [{ id: 'write-1', name: 'write_file', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
+    { text: 'Work complete after release' },
+  ]);
+  cleanup.push(() => provider.close());
+  let task: { pause(requestId: string): Promise<unknown> } | undefined;
+  const baseScheduler = createModelScheduler();
+  let acquisitions = 0;
+  const modelScheduler = {
+    ...baseScheduler,
+    acquire: async (request: Parameters<typeof baseScheduler.acquire>[0], signal?: AbortSignal) => {
+      acquisitions += 1;
+      if (acquisitions === 2) await task!.pause('pause-unknown-after-effect');
+      return baseScheduler.acquire(request, signal);
+    },
+  };
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime, modelScheduler,
+      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'synthetic', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }),
+      },
+    },
+  });
+  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const begun = await server.runtime.user.begin({ projectId: 'p', request: `unknown ${check}`, requestId: 'begin' });
+  const userTask = server.runtime.user.task(begun.taskId);
+  task = userTask;
+  await server.runtime.supervisor(begun.taskId).propose({
+    requirementVersion: 1, summary: 'unknown usage pause',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await server.runtime.host.drive();
+  await waitFor(async () => {
+    const view = await userTask.view();
+    return view.operations[0]?.state === 'interrupted' && view.questions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
+  }, 15_000);
+  const question = (await userTask.view()).questions.find(item => item.kind === 'unknown_usage' && item.status === 'open')!;
+  if (check === 'usage') {
+    await userTask.answer(question.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'synthetic provider bill' }, 'answer-usage');
+  } else {
+    await userTask.answer(question.id, { type: 'reconcile_usage', proof: 'provider exposes no usage' }, 'answer-reconcile');
+  }
+  const answered = await userTask.view();
+  expect(answered.questions.filter(item => item.status === 'open')).toEqual([]);
+  expect(answered.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending', used: check === 'usage' ? 50 : 0 });
+  await expect(userTask.answer(question.id, { type: 'reconcile_usage', proof: 'duplicate' }, 'answer-again')).rejects.toMatchObject({ code: 'invalid_question' });
+
+  await userTask.resume('resume-after-answer');
+  await server.runtime.host.drive();
+  const completed = await userTask.view();
+  expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
+  expect(provider.requests).toHaveLength(2);
+  // The unknown invocation is either recorded (50) or kept unknown; the resumed
+  // call adds its own 50 exactly once.
+  expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 100 : 50);
+}
+
+test('interrupted unknown usage can be recorded or released and then resumes', async () => {
+  await interruptedUnknown('usage');
+  await interruptedUnknown('reconcile');
+}, 120_000);
+
+async function interruptedMixed(check: 'usage' | 'reconcile') {
+  const root = await temp(`mixed-${check}`);
+  const provider = await openaiServer([
+    { tools: [{ id: 'write-1', name: 'write_file', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
+    { usage: null, tools: [{ id: 'write-2', name: 'write_file', arguments: JSON.stringify({ path: 'second.txt', content: 'second turn' }) }] },
+    { text: 'Work complete after release' },
+  ]);
+  cleanup.push(() => provider.close());
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'synthetic', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }),
+      },
+    },
+  });
+  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const begun = await server.runtime.user.begin({ projectId: 'p', request: `mixed ${check}`, requestId: 'begin' });
+  const userTask = server.runtime.user.task(begun.taskId);
+  await server.runtime.supervisor(begun.taskId).propose({
+    requirementVersion: 1, summary: 'mixed usage pause',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await server.runtime.host.drive();
+  await waitFor(async () => {
+    const view = await userTask.view();
+    return view.operations[0]?.state === 'interrupted' && view.questions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
+  }, 20_000);
+  const before = await userTask.view();
+  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+  expect(before.invocations.filter(invocation => invocation.usage === null)).toHaveLength(1);
+  // The known model call is preserved; the zero-usage tool invocation adds nothing.
+  expect(before.invocations.some(invocation => invocation.usage !== null && invocation.usage.input > 0)).toBe(true);
+  expect(before.nodes.find(node => node.id === 'work')?.used).toBe(0);
+  const question = before.questions.find(item => item.kind === 'unknown_usage' && item.status === 'open')!;
+  if (check === 'usage') {
+    await userTask.answer(question.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'synthetic provider bill' }, 'mixed-usage');
+  } else {
+    await userTask.answer(question.id, { type: 'reconcile_usage', proof: 'provider exposes no usage' }, 'mixed-reconcile');
+  }
+  const answered = await userTask.view();
+  expect(answered.questions.filter(item => item.status === 'open')).toEqual([]);
+  // Known invocations are applied once; the unknown one is either recorded or kept unknown.
+  expect(answered.nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 100 : 50);
+  await server.runtime.host.drive();
+  const completed = await userTask.view();
+  expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
+  expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 150 : 100);
+  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+}
+
+test('mixed known and unknown usage can be reconciled and continue', async () => {
+  await interruptedMixed('usage');
+  await interruptedMixed('reconcile');
+}, 120_000);

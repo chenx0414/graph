@@ -7,7 +7,7 @@ import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
-import { selectModel, type ModelEntry } from '../catalog/models.ts';
+import { estimateCost, selectModel, type ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
 import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
@@ -118,6 +118,44 @@ export class Execution {
     try { await work; } finally { this.pending.delete(work); }
   }
 
+  /** Release an interrupted operation's unknown usage through the
+   * authenticated answer path. Recording fills the single unknown invocation;
+   * keeping it unknown leaves that record and applies only the known part.
+   * The operation stays interrupted, so the node can continue on its session
+   * once the question is resolved. */
+  private recordInterruptedUsage(operation: OperationRow, answer: { type: 'usage'; usage: TokenUsage; proof: string } | { type: 'reconcile_usage'; proof: string }) {
+    if (!answer.proof.trim()) throw new RuntimeError('invalid_answer', 'Evidence is required to release unknown usage');
+    if (operation.result || operation.worker_active) throw new RuntimeError('invalid_answer', 'Interrupted usage reconciliation requires a quiescent operation without a result');
+    if (answer.type === 'usage') {
+      const unknown = this.store.db.prepare('SELECT id FROM invocations WHERE operation_id=? AND usage IS NULL').all(operation.id) as { id: string }[];
+      if (unknown.length !== 1) throw new RuntimeError('invalid_answer', 'Recording authoritative usage requires exactly one unknown invocation');
+      const values = [answer.usage.input, answer.usage.output, answer.usage.cacheRead, answer.usage.cacheWrite];
+      const total = values.reduce((sum, value) => sum + value, 0);
+      if (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total)) throw new RuntimeError('invalid_usage', 'Invalid disjoint token counts');
+      const instance = operation.instance_id
+        ? this.store.db.prepare('SELECT model FROM instances WHERE id=?').get(operation.instance_id) as { model: string | null }
+        : undefined;
+      const entry = instance?.model ? this.models?.().find(model => model.id === instance.model) : undefined;
+      this.store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?')
+        .run(canonicalJson(answer.usage), canonicalJson(estimateCost(answer.usage, entry?.cost)), unknown[0]!.id);
+    }
+    const known = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL').all(operation.id) as { usage: string }[])
+      .reduce<TokenUsage>((sum, row) => {
+        const usage = JSON.parse(row.usage) as TokenUsage;
+        return { input: sum.input + usage.input, output: sum.output + usage.output, cacheRead: sum.cacheRead + usage.cacheRead, cacheWrite: sum.cacheWrite + usage.cacheWrite };
+      }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    const total = known.input + known.output + known.cacheRead + known.cacheWrite;
+    if (total > 0 && operation.instance_id) {
+      this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instance_id);
+      const account = this.store.db.prepare('SELECT model,models_used FROM instances WHERE id=?').get(operation.instance_id) as { model: string | null; models_used: string };
+      const usedModels = JSON.parse(account.models_used) as string[];
+      if (account.model && !usedModels.includes(account.model)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...usedModels, account.model]), operation.instance_id);
+    }
+    this.store.event(operation.task_id, 'operation.usage_reconciled', {
+      operationId: operation.id, decision: answer.type === 'usage' ? 'recorded' : 'usage_unavailable', known, proof: answer.proof,
+    });
+  }
+
   /** Called only inside the authenticated user command transaction. */
   answer(taskId: string, questionId: string, answer: Answer) {
     const question = this.store.db.prepare('SELECT * FROM questions WHERE id=? AND task_id=?').get(questionId, taskId) as { node_id: string; operation_id: string | null; kind: string; status: string; data: string } | undefined;
@@ -129,8 +167,12 @@ export class Execution {
       this.store.db.prepare('UPDATE instances SET budget=budget+? WHERE id=?').run(answer.tokens, instance.id);
     } else if (question.kind === 'unknown_usage' && answer.type === 'usage') {
       const operation = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(question.operation_id!) as OperationRow;
-      if (!answer.proof.trim() || !operation.result || operation.worker_active) throw new RuntimeError('invalid_answer', 'Usage requires a known result, quiescent worker and evidence');
-      this.settle(JSON.parse(operation.spec) as Operation, { ...JSON.parse(operation.result) as OperationResult, usage: answer.usage });
+      if (operation.state === 'interrupted') {
+        this.recordInterruptedUsage(operation, answer);
+      } else {
+        if (!answer.proof.trim() || !operation.result || operation.worker_active) throw new RuntimeError('invalid_answer', 'Usage requires a known result, quiescent worker and evidence');
+        this.settle(JSON.parse(operation.spec) as Operation, { ...JSON.parse(operation.result) as OperationResult, usage: answer.usage });
+      }
     } else if (question.kind === 'unknown_usage' && answer.type === 'reconcile_usage') {
       // The host reviewed the failed call and the provider exposes no usage for
       // it. The unknown invocation keeps its unknown record, while every known
@@ -138,6 +180,9 @@ export class Execution {
       // goes through the normal settlement path (output, route, waiting
       // question, budget) exactly once.
       const operation = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(question.operation_id!) as OperationRow;
+      if (operation.state === 'interrupted') {
+        this.recordInterruptedUsage(operation, answer);
+      } else {
       if (!answer.proof.trim() || !operation.result || operation.worker_active) throw new RuntimeError('invalid_answer', 'Reconciliation requires a known result, quiescent worker and proof');
       const known = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL').all(operation.id) as { usage: string }[])
         .reduce<TokenUsage>((sum, row) => {
@@ -146,6 +191,7 @@ export class Execution {
         }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
       this.settle(JSON.parse(operation.spec) as Operation, { ...JSON.parse(operation.result) as OperationResult, usage: known });
       this.store.event(taskId, 'operation.usage_reconciled', { operationId: operation.id, decision: 'usage_unavailable', known, proof: answer.proof });
+      }
     } else if (question.kind === 'permission' && answer.type === 'grant') {
       if (answer.grant !== (JSON.parse(question.data) as { grant: string }).grant) throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
       this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);
