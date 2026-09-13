@@ -139,3 +139,16 @@ IPC 监听返工验收的两项 P2（并发句柄发送队列、取消后迟到�
 - `close-pending.cjs`：`listen` 后立即 `close`，无 listening 回调，`listening:false`、`address:null`，约 0.25s 自然退出。
 - 交接协议：宿主保留监听器直到检查回报 adopt，收到后关闭自己的副本再放行检查的 `listening` 回调；这同时消除了宿主与检查抢 accept 造成的偶发 `ECONNRESET`/挂起。
 - `host-listener-contract`、`host-listener-paused-gate`、`local-network-rework`、`listen-guard-child-rework` 输出刷新，行为保持；Graph 全量 3 次 178/178、30 组并行 m4 通过、无孤儿进程；交付浏览器 E2E 3/3。
+
+## 2026-09-13 第十四轮：R11/R12 收尾
+
+adopted/ready 交接验收的两项 P2（原生 `listening` 事件提前、检查重复 ID 覆盖宿主监听）修复后，重跑：
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/ipc-handoff-listening-event.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/ipc-handoff-duplicate-id.mts
+```
+
+- `ipc-handoff-listening-event`：事件驱动的外部客户端在 248ms 返回 `ok`（与 283ffbb 基线一致），`CALLBACK` 正常；守卫现在把 `listening` 事件与 callback 一并推迟到宿主 `ready` 之后。
+- `ipc-handoff-duplicate-id`：重复 ID 的第二条请求被拒绝，运行结束与 `executor.close()` 后宿主监听均为 0（旧版残留 1 个）。
+- 全部既有探针（R9/R10、S4、R8、R6、清环境子进程）行为保持；Graph 全量 3 次 179/179、6 路并行 m4、交付浏览器 E2E 3/3。

@@ -88,6 +88,29 @@ test('worker preparation writes only to its granted scratch directory, even with
   } finally { broker.close(); }
 });
 
+test('a check cannot overwrite a host listener with a duplicate request id', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-duplicate-listener-'))); dirs.push(root);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  // The check sends raw IPC messages, so the host must treat ids as
+  // untrusted: a repeated id could otherwise overwrite a live listener that
+  // the run-end cleanup can no longer reach.
+  await writeFile(join(root, 'duplicate.cjs'), [
+    "process.send({type:'graph-check-listener',id:44,port:0,host:'127.0.0.1'});",
+    "process.send({type:'graph-check-listener',id:44,port:0,host:'127.0.0.1'});",
+    'setTimeout(() => process.exit(0), 200);',
+  ].join('\n'));
+  const before = activeServerHandles().length;
+  try {
+    const result = await executor.run({
+      broker, cwd: root, executable: process.execPath, args: ['duplicate.cjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [root], localNetwork: true, timeoutMs: 5_000,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(activeServerHandles()).toHaveLength(before);
+  } finally { broker.close(); }
+});
+
 test('replacing a granted subdirectory with a symlink cannot redirect a later host grant', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-grant-swap-'))); dirs.push(root);
   const workspace = join(root, "worker's files"); await mkdir(workspace);

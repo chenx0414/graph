@@ -109,6 +109,20 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
 - 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
 
+## 第十四轮：R11/R12 收尾（2026-09-13）
+
+[adopted/ready 交接独立验收](ipc-handoff-acceptance-2026-09-13.md) 指出两项 P2：
+
+- **R11**：上一轮只延迟了传给 `listen()` 的 callback，检查通过 `server.once('listening')` 注册的原生事件仍在宿主关闭前触发；事件处理器同步初始化期间，宿主仍可能接走外部客户端连接。
+- **R12**：检查可直接 `process.send` 发送原始请求；重复的请求 ID 让第二个 listener 覆盖第一个，运行结束与 `executor.close()` 都无法关闭被覆盖的对象。
+
+修复：
+
+- 守卫在 adopt 前接管该 server 的 `emit('listening')`，把事件与 callback 一并推迟到宿主 `ready`（宿主副本完全关闭）之后，再按 Node 顺序放行；取消路径会恢复 `emit` 且不暴露事件。检查和事件驱动代码都无法在宿主关闭前看到端口。
+- 宿主把检查提供的 ID 视为不可信：每个 ID 只接受一次（`seenListeners`），重复请求返回 `EINVAL` 且不创建资源；运行结束统一清理且异步回调不再按复用 ID 定位对象。
+
+复验：`ipc-handoff-listening-event.mts` 事件驱动的外部客户端 248ms 返回 `ok`（与 283ffbb 基线一致），`ipc-handoff-duplicate-id.mts` 运行结束与 `executor.close()` 后宿主监听均为 0；R9/R10、S4、R8、R6 全部探针保持；Graph 测试 38 文件 / 179 项，3 次全量与 6 路并行 m4 通过且无孤儿；交付浏览器 E2E 3/3。是否关闭 R11/R12 由独立复验决定。
+
 ## 第十三轮：R9/R10 与监听交接收尾（2026-09-13）
 
 [IPC 监听返工验收](ipc-listener-acceptance-2026-09-13.md) 指出两项 P2：

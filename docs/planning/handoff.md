@@ -2,7 +2,7 @@
 
 快照：2026-09-12（Asia/Shanghai）。使用者要求把本轮 R1–R4 修复整理成 handoff，供其他 Agent 接手。
 
-**状态：待独立复验。A13 与 S1–S3、R1–R5、R7 已通过；R6 原权限绕过已关闭；S4/R8 已按第十二轮、IPC 返工验收的 R9/R10 已按第十三轮修复并本地复验（adopt 后关闭的监听交接），等待独立复验，本仓库不自行宣布 Graph 整体完成。Graph 测试 38 文件 / 178 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，a1–a5 全部有效，交付测试 40/40（含真实无头 Chromium E2E 与导出错误回归），独立审查见 `docs/review-web-v2.md`/`v3.md`。运行记录见 [M7 报告](m7-results.md) 与 [第十一轮](next-steps-after-r3.md#第十一轮r6-收尾2026-09-12)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：待独立复验。A13 与 S1–S3、R1–R5、R7 已通过；R6 原权限绕过已关闭；S4/R8 已按第十二轮、R9/R10 已按第十三轮、R11/R12 已按第十四轮修复并本地复验（adopt 后关闭、事件与 callback 一并延迟的监听交接），等待独立复验，本仓库不自行宣布 Graph 整体完成。Graph 测试 38 文件 / 179 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，a1–a5 全部有效，交付测试 40/40（含真实无头 Chromium E2E 与导出错误回归），独立审查见 `docs/review-web-v2.md`/`v3.md`。运行记录见 [M7 报告](m7-results.md) 与 [第十一轮](next-steps-after-r3.md#第十一轮r6-收尾2026-09-12)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 

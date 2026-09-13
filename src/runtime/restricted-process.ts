@@ -66,7 +66,34 @@ const close = net.Server.prototype.close;
 const waiting = new Map();
 const fireOn = new Map();
 const granted = new WeakMap();
+const heldListening = new WeakMap();
 let nextId = 1;
+// The host owns the only loopback listener until it reports the hand-off
+// complete. Both the check's callback and the native 'listening' event must
+// wait for that report: code that watches the event would otherwise reach a
+// port the host still accepts on. Hold the event on the instance and re-emit
+// it, unchanged, once the host is gone.
+function holdListening(server) {
+  if (heldListening.has(server)) return;
+  const original = server.emit;
+  const state = { original, patched: null, deferred: null };
+  state.patched = function (event, ...args) {
+    if (event === 'listening') {
+      state.deferred = () => original.call(this, 'listening', ...args);
+      return true;
+    }
+    return original.apply(this, [event, ...args]);
+  };
+  server.emit = state.patched;
+  heldListening.set(server, state);
+}
+function releaseListening(server, fire) {
+  const state = heldListening.get(server);
+  if (!state) return;
+  heldListening.delete(server);
+  if (server.emit === state.patched) server.emit = state.original;
+  if (fire && state.deferred) state.deferred();
+}
 // The IPC channel must not keep a finished check alive, but a pending listen
 // request needs it until its reply arrives. Ref only while one is in flight.
 function channelRef() {
@@ -93,8 +120,9 @@ net.Server.prototype.close = function (...args) {
   if (id !== undefined) {
     granted.delete(this);
     // Cancel a listen whose reply has not arrived yet: the late reply may
-    // only release its handle, never restart this server.
-    if (waiting.delete(id) || fireOn.delete(id)) channelIdle();
+    // only release its handle, never restart this server. A cancelled server
+    // must not expose a deferred 'listening' event either.
+    if (waiting.delete(id) || fireOn.delete(id)) { releaseListening(this, false); channelIdle(); }
     if (typeof process.send === 'function' && process.connected !== false) {
       try { process.send({ type: 'graph-check-listener-close', id }); } catch { /* channel closed */ }
     }
@@ -107,6 +135,9 @@ process.on('message', (message, handle) => {
     const pending = fireOn.get(message.id);
     if (!pending) { channelIdle(); return; }
     fireOn.delete(message.id);
+    // The host copy is fully closed: release the native event first, then the
+    // callback, matching Node's own ordering.
+    releaseListening(pending.server, true);
     channelIdle();
     if (pending.callback) pending.callback.call(pending.server);
     return;
@@ -120,26 +151,28 @@ process.on('message', (message, handle) => {
   }
   waiting.delete(message.id);
   if (message.ok && handle) {
-    // Adopt first, tell the host, and only fire the check's callback once the
-    // host has fully closed its own copy. That removes both races around the
-    // hand-off: the host never accepts a check connection, and a host close
-    // never lands in the middle of adoption.
+    // Adopt first, ask the host to close its copy, and expose neither the
+    // native 'listening' event nor the callback until that is done. The host
+    // owns the only accepting descriptor during the hand-off, so both signals
+    // must point at a port that no longer races the host.
+    holdListening(entry.server);
     fireOn.set(message.id, entry);
-    entry.server.once('listening', () => {
-      if (typeof process.send === 'function' && process.connected !== false) {
-        process.send({ type: 'graph-check-listener-adopted', id: message.id });
-        return;
-      }
-      const pending = fireOn.get(message.id);
-      if (pending) { fireOn.delete(message.id); channelIdle(); if (pending.callback) pending.callback.call(pending.server); }
-    });
     try { listen.call(entry.server, handle); }
     catch (error) {
       fireOn.delete(message.id);
+      releaseListening(entry.server, false);
       if (handle && typeof handle.close === 'function') { try { handle.close(); } catch { /* already closed */ } }
       channelIdle();
       process.nextTick(() => { throw error; });
       return;
+    }
+    if (typeof process.send === 'function' && process.connected !== false) {
+      process.send({ type: 'graph-check-listener-adopted', id: message.id });
+    } else {
+      fireOn.delete(message.id);
+      releaseListening(entry.server, true);
+      channelIdle();
+      if (entry.callback) entry.callback.call(entry.server);
     }
     channelIdle();
     return;
@@ -334,11 +367,16 @@ export async function openRestrictedExecutor() {
       const pendingListeners = new Map<number, TcpServer>();
       const boundListeners = new Set<number>();
       const cancelledListeners = new Set<number>();
+      // The check supplies the request ids and may send raw messages, so ids
+      // must be treated as untrusted: a repeated id would otherwise overwrite a
+      // live listener and escape the run-end cleanup.
+      const seenListeners = new Set<number>();
       const closePendingListeners = () => {
         for (const listener of pendingListeners.values()) { try { listener.close(); } catch { /* already closed */ } }
         pendingListeners.clear();
         boundListeners.clear();
         cancelledListeners.clear();
+        seenListeners.clear();
       };
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
@@ -392,6 +430,11 @@ export async function openRestrictedExecutor() {
                 if (requestId !== undefined) reply({ type: 'graph-check-listener-result', id: requestId, ok: false, code: 'EINVAL', message: 'Invalid listener request' });
                 return;
               }
+              if (seenListeners.has(requestId) || seenListeners.size >= 1_024) {
+                reply({ type: 'graph-check-listener-result', id: requestId, ok: false, code: 'EINVAL', message: 'Duplicate listener id' });
+                return;
+              }
+              seenListeners.add(requestId);
               const listener: TcpServer = createTcpServer();
               pendingListeners.set(requestId, listener);
               listener.once('error', (error: NodeJS.ErrnoException) => {

@@ -1,6 +1,6 @@
 # M7 MediaBookmarks 真实任务验收
 
-> **2026-09-13 状态（待独立复验）：** R6 原权限绕过已关闭；其收尾验收新增的 S4/R8（宿主监听生命周期与端口语义）已按第十二轮修复并本地复验：宿主按请求端口绑定、经 IPC 交付句柄后立即释放，暂停拒绝与 `close()` 后监听器均为 0，固定端口与多次启停正常。Graph 测试 38 文件 / 178 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，a1–a5 全部有效，交付测试 40/40，独立审查 `docs/review-web-v3.md` 通过。是否关闭 S4/R8、R9/R10 待独立复验；本仓库不自行宣布 Graph 整体完成。见 [R6 收尾验收](r6-acceptance-2026-09-13.md)、[IPC 监听返工验收](ipc-listener-acceptance-2026-09-13.md) 与 [验收证据](acceptance-evidence/README.md)。
+> **2026-09-13 状态（待独立复验）：** R6 原权限绕过已关闭；S4/R8 已按第十二轮、R9/R10 已按第十三轮、R11/R12（原生 `listening` 事件提前暴露、重复 ID 覆盖宿主监听）已按第十四轮修复并本地复验：宿主按请求端口绑定、交付句柄并在检查 adopt 后释放，事件与 callback 一并延迟，重复 ID 被拒绝；暂停拒绝与 `close()` 后监听器均为 0，固定端口、多次启停、并发、取消与事件驱动启动均正常。Graph 测试 38 文件 / 179 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，a1–a5 全部有效，交付测试 40/40，独立审查 `docs/review-web-v3.md` 通过。是否关闭 S4/R8、R9/R10、R11/R12 待独立复验；本仓库不自行宣布 Graph 整体完成。见 [R6 收尾验收](r6-acceptance-2026-09-13.md)、[IPC 监听返工验收](ipc-listener-acceptance-2026-09-13.md)、[adopted/ready 交接验收](ipc-handoff-acceptance-2026-09-13.md) 与 [验收证据](acceptance-evidence/README.md)。
 
 日期：2026-09-12。对应 [实施计划 G17–G18](../implementation-plan.md#m7-mediabookmarks-真实任务验收) 与验收矩阵 A13。基于 M6 的提交 `b1ec02c`。本轮在 Graph 内讨论并冻结 B站本机 Web 验收，并在 MediaBookmarks 的 git 克隆上拆解、分配工作副本、实现、检查、独立审查、记录人工登录项并合入目标分支。scripted 工人覆盖全图编排；生产 Pi 经工作区工具写入同一载荷。页面含登录准入、异步采集进度与笔记阅读。不调用收费模型。
 
