@@ -489,23 +489,46 @@ export class Execution {
       }
       this.report(operation.id, operation.generation, result);
     } catch (error) {
-      // A gate refusal before any provider request means nothing was sent:
-      // keep the node pending (pause) or open the matching question, instead
-      // of recording a successful operation with zero requests.
+      // A gate refusal means the refused send never happened. With no prior
+      // provider request the operation is not_sent; after partial work it is
+      // interrupted with its known usage accounted once and its session kept,
+      // so the node can resume on the same instance. Neither case advances the
+      // graph or hides the worker state.
       const refusal = error instanceof RuntimeError ? error : undefined;
       const refusalCode = refusal?.code;
-      const noInvocations = !this.store.db.prepare('SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1').get(operation.id);
-      if (refusal && refusalCode && noInvocations && ['paused', 'budget', 'unknown_usage'].includes(refusalCode)) {
-        this.store.transaction(() => {
+      if (refusal && refusalCode && ['paused', 'budget', 'unknown_usage'].includes(refusalCode)) {
+        const handled = this.store.transaction(() => {
           const current = this.store.db.prepare('SELECT state FROM operations WHERE id=?').get(operation.id) as { state: string };
-          if (!['dispatched', 'unknown'].includes(current.state)) return;
-          this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0,waiting_slot=0 WHERE id=?").run(operation.id);
-          this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(node.task_id, node.id);
-          this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id, reason: refusal.message });
+          if (!['dispatched', 'unknown'].includes(current.state)) return false;
+          const invocations = this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=?').all(operation.id) as { usage: string | null }[];
+          const known = invocations.map(row => row.usage ? JSON.parse(row.usage) as TokenUsage : null);
+          const unknown = known.some(value => value === null);
+          const total = known.reduce((sum, value) => sum + (value ? value.input + value.output + value.cacheRead + value.cacheWrite : 0), 0);
+          const state = invocations.length ? 'interrupted' : 'not_sent';
+          this.store.db.prepare('UPDATE operations SET state=?,reserved=0,worker_active=0,waiting_slot=0 WHERE id=?').run(state, operation.id);
+          if (state === 'interrupted') {
+            if (!unknown && total > 0 && operation.instanceId) {
+              this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instanceId);
+              const account = this.store.db.prepare('SELECT model,models_used FROM instances WHERE id=?').get(operation.instanceId) as { model: string | null; models_used: string };
+              const usedModels = JSON.parse(account.models_used) as string[];
+              if (account.model && !usedModels.includes(account.model)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...usedModels, account.model]), operation.instanceId);
+            }
+            this.store.event(node.task_id, 'operation.interrupted', { operationId: operation.id, reason: refusal.message, usage: unknown ? null : total, invocations: invocations.length });
+          } else {
+            this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id, reason: refusal.message });
+          }
           if (refusalCode === 'budget') this.block(node, 'budget', { reason: refusal.message, requested: reservation });
-          else if (refusalCode === 'unknown_usage') this.block(node, 'unknown_usage', { reason: refusal.message });
+          else if (unknown || refusalCode === 'unknown_usage') {
+            // The gate already recorded the unknown-usage question for this operation.
+            const existing = this.store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id) as { id: string } | undefined;
+            if (existing) this.store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?").run(node.task_id, node.id);
+            else this.block(node, 'unknown_usage', { reason: refusal.message });
+          } else {
+            this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(node.task_id, node.id);
+          }
+          return true;
         });
-        return false;
+        if (handled) return false;
       }
       this.store.transaction(() => {
         const current = this.store.db.prepare('SELECT state FROM operations WHERE id=?').get(operation.id) as { state: string };

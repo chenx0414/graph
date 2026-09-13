@@ -345,3 +345,20 @@
 - 新增回归 `tests/m8/rework.test.ts`：20 个节点在凭据队列中暂停 → 释放占位并收敛后，0 次请求、0 个成功节点、后继检查保持 pending、名额归零；恢复后 20 次请求、全部成功、最大并发 ≤10；另有正常恢复与名额上限回归保持通过。
 - 验收方探针 `product-pause-false-completion.mts --pause` 阶段输出：暂停后 `providerRequests:0、succeeded:0`，恢复后 `providerRequests:20` 且全部节点 succeeded；`product-resume-complete` 20/20、最大并发 10；`product-resume-execution-cap` 在途 ≤10；PA05 相关探针保持通过。探针末尾断言（期望恢复后仍为 0 请求）与其报告的第 2 条关闭标准冲突，按报告“以阶段结果为准”判定，说明见 `rework3-independent.output.txt`。
 - 项目 Node 24.20.0：全量 **47 文件 / 218 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针全部 `rc=0`。未调用付费供应商；是否关闭由独立复验决定。
+
+## 返工轮 4 · PA02-R3（部分执行后的暂停进入可恢复路径）
+
+基线：`fe8e2c4`。第四次独立验收确认零发送暂停与并发上限修复，保留 PA02-R3：已有权威调用（50 tokens）后，下一次发送被暂停门拒绝时，操作被通用异常分支记为 `unknown / workerActive=true / result:null`，实例 `used` 仍为 0，恢复不派发、`reconcile` 返回 `reconciliation_unavailable`。
+
+### 修复
+
+- **有证据的交接**：门拒绝（暂停/预算/未知用量）到达 `execution` 后按“是否已有 invocation”分流：没有任何 invocation 仍是 `not_sent`（安全约束不变）；已有部分调用则记为 `interrupted` —— `worker_active=0`、`reserved=0`、`waiting_slot=0`、结果保持 `null`，并写入 `operation.interrupted` 事件（原因、已知用量、调用次数）。不再进入需要 reconcile 的 `unknown/recovery`。
+- **用量准确累计一次**：把该操作已结算 invocation 的权威用量一次性加到 `instances.used`（同步 `models_used`）；若任一 invocation 用量未知，则不折零、不累计，保持 `unknown_usage` 问题阻塞。后续恢复派发产生新操作，各自结算，不会重复计数。
+- **恢复路径**：暂停时节点回到 `pending`，实例与 Pi 会话（含工具结果）保留；用户恢复后按正常派发继续原实例，不盲目重复工具效果；后继节点只在真正成功后运行。预算拒绝仍开 `budget` 问题，未知用量仍走既有认证答复路径。
+- 工具调用通过调用门执行，暂停期间的本地工具同样被拒绝——这是既有边界；暂停点选在工具效果之后（验收方 `after-tool-pause` 场景）时效果保留在会话与磁盘上，恢复继续。
+
+### 复验
+
+- 新增回归 `tests/m8/rework.test.ts`：首轮工具调用写入 `partial.txt` 并消耗 50 tokens，第二次发送前暂停；暂停态断言 `interrupted / workerActive:false / reserved:0 / used:50 / 无问题 / work pending / 检查 pending`，文件已写入；恢复后 2 次请求、全部成功、`used=100`（两次调用各计一次）、文件未被重复覆盖。
+- 验收方探针复跑：`partial-pause`、`after-tool-pause` 均 `interrupted` → 恢复后 `completed`、`reconcile` 接受；`pause-resume-verified --pause` 阶段断言通过（暂停 0 请求 0 成功、恢复 20 请求全部成功且并发 ≤10）；`graph-rework3-model-error` 保持失败结算。
+- 项目 Node 24.20.0：全量 **47 文件 / 219 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针全部 `rc=0`。证据见 `acceptance-evidence/rework4-independent.output.txt`、`rework4-graph-full.output.txt`。未调用付费供应商；是否关闭由独立复验决定。

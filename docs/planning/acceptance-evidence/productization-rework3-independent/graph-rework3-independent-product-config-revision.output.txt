@@ -1,0 +1,23 @@
+save 200 { revision: 1, restartRequired: true }
+activeProjects [
+  {
+    id: 'old',
+    root: '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-review-config-KR6vba',
+    grants: []
+  }
+] created [
+  {
+    cursor: 1,
+    type: 'task.created',
+    data: { configRevision: 0, request: 'old active config' },
+    timestamp: 1789299117940,
+    taskId: '3a2f50e8-b5d3-42af-8374-81d2efdac193'
+  }
+]
+afterRestartProjects [
+  {
+    id: 'new',
+    root: '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-review-config-KR6vba',
+    grants: []
+  }
+]

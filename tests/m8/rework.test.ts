@@ -12,6 +12,7 @@ import { openGraphServer } from '../../src/server/host.ts';
 import { createModelScheduler } from '../../src/runtime/model-scheduler.ts';
 import { controlledOpenAIStream } from '../../src/runtime/controlled-openai.ts';
 import { git } from '../../src/git/git.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 import type { NodeSpec } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -436,3 +437,72 @@ test('a paused pre-send refusal is not a success and the nodes run after resume'
   expect(provider.state.maxInFlight).toBeLessThanOrEqual(10);
   expect(scheduler.active()).toBe(0);
 }, 180_000);
+
+test('a pause after partial work keeps the operation interrupted and resumable', async () => {
+  const root = await temp('partial-pause');
+  let task: { pause(requestId: string): Promise<unknown> } | undefined;
+  const provider = await openaiServer([
+    { tools: [{ id: 'write-1', name: 'write_file', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
+    { text: 'Work complete after resume' },
+  ]);
+  cleanup.push(() => provider.close());
+  // Pause before the second model send, after the tool effect has happened.
+  const baseScheduler = createModelScheduler();
+  let acquisitions = 0;
+  const modelScheduler = {
+    ...baseScheduler,
+    acquire: async (request: Parameters<typeof baseScheduler.acquire>[0], signal?: AbortSignal) => {
+      acquisitions += 1;
+      if (acquisitions === 2) await task!.pause('pause-after-tool-effect');
+      return baseScheduler.acquire(request, signal);
+    },
+  };
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime, modelScheduler,
+      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'synthetic', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }),
+      },
+    },
+  });
+  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const begun = await server.runtime.user.begin({ projectId: 'p', request: 'partial pause', requestId: 'begin' });
+  const userTask = server.runtime.user.task(begun.taskId);
+  task = userTask;
+  await server.runtime.supervisor(begun.taskId).propose({
+    requirementVersion: 1, summary: 'partial pause',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await server.runtime.host.drive();
+  await waitFor(async () => (await userTask.view()).operations[0]?.state === 'interrupted', 15_000);
+
+  const paused = await userTask.view();
+  expect(provider.requests).toHaveLength(1);
+  expect(paused.operations[0]).toMatchObject({ state: 'interrupted', workerActive: false, result: null, reserved: 0 });
+  expect(paused.invocations[0]?.usage).toMatchObject({ input: 25, output: 10, cacheRead: 15 });
+  expect(paused.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending', used: 50 });
+  expect(paused.nodes.find(node => node.id === 'check')?.status).toBe('pending');
+  expect(paused.questions).toEqual([]);
+  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+
+  await userTask.resume('resume-partial');
+  await server.runtime.host.drive();
+  const completed = await userTask.view();
+  expect(provider.requests).toHaveLength(2);
+  expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
+  // Two real calls (first tool turn + resumed turn), each counted exactly once.
+  expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(100);
+  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+}, 90_000);
