@@ -1,12 +1,17 @@
-import { ReactFlow, Background, Controls } from '@xyflow/react';
+import { ReactFlow, Background, Controls, MarkerType } from '@xyflow/react';
 
 type GraphPayload = {
-  nodes: { id: string; kind: string; status: string; container?: string }[];
+  nodes: { id: string; kind: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null }[];
   containers: { id: string; parent?: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
 };
 
-export function GraphCanvas({ graph, collapsed, onSelect }: { graph: GraphPayload; collapsed: Record<string, boolean>; onSelect: (id: string) => void }) {
+export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
+  graph: GraphPayload;
+  collapsed: Record<string, boolean>;
+  onSelect: (id: string) => void;
+  selected?: string | null;
+}) {
   const hiddenContainers = new Set<string>();
   const walk = (id: string) => {
     hiddenContainers.add(id);
@@ -26,16 +31,26 @@ export function GraphCanvas({ graph, collapsed, onSelect }: { graph: GraphPayloa
     }),
     ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => {
       const position = graph.layout.positions[node.id] ?? { x: 0, y: 0, width: 180, height: 48 };
+      const selectedStyle = selected === node.id ? { border: '2px solid #2563eb', boxShadow: '0 0 0 2px rgba(37,99,235,0.2)' } : {};
       return {
         id: node.id, position: { x: position.x, y: position.y },
         data: { label: `${node.id} ${node.status}` },
-        style: { width: position.width, height: position.height, minWidth: 120, minHeight: 36 },
+        // Layout already knows the size; providing it keeps event-driven
+        // remounts from waiting on a ResizeObserver measurement.
+        measured: { width: position.width, height: position.height },
+        style: { width: position.width, height: position.height, minWidth: 120, minHeight: 36, ...selectedStyle },
         ...(node.container ? { parentId: node.container } : {}),
       };
     }),
   ];
   const edges = graph.layout.edges.filter(edge => !hidden.has(edge.source) && !hidden.has(edge.target))
-    .map(edge => ({ id: edge.id, source: edge.source, target: edge.target }));
+    .map(edge => {
+      const loop = edge.id.startsWith('loop:');
+      return {
+        id: edge.id, source: edge.source, target: edge.target,
+        ...(loop ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } } : {}),
+      };
+    });
   return (
     <div style={{ height: 480 }} data-testid="flow">
       <ReactFlow nodes={nodes} edges={edges} nodesDraggable={false} nodesConnectable={false} elementsSelectable

@@ -215,6 +215,7 @@ export async function openTaskRuntime(options: {
             })(),
             revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused),
+            updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
             status: task.paused ? (operations.some(op => op.worker_active) ? 'pausing' : 'paused') : questions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operations: operations.map(row => ({ ...JSON.parse(row.spec) as Operation, state: row.state, reserved: row.reserved, workerActive: Boolean(row.worker_active), result: row.result ? JSON.parse(row.result) as OperationResult : null })),
             questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
@@ -257,7 +258,18 @@ export async function openTaskRuntime(options: {
         },
       };
     },
-    async list() { ensureOpen(); return store.db.prepare('SELECT id,phase FROM tasks ORDER BY created_seq').all() as { id: string; phase: string }[]; },
+    async list() {
+      ensureOpen();
+      const rows = store.db.prepare(`SELECT t.id,t.project_id AS projectId,t.request,t.phase,t.paused,t.accepted_proposal AS acceptedProposalVersion,
+        (SELECT MAX(timestamp) FROM events WHERE task_id=t.id) AS updatedAt,
+        (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open') AS openQuestions
+        FROM tasks t ORDER BY t.created_seq`).all() as { id: string; projectId: string; request: string; phase: string; paused: number; acceptedProposalVersion: number | null; updatedAt: number | null; openQuestions: number }[];
+      return rows.map(row => ({
+        id: row.id, projectId: row.projectId, request: row.request, phase: row.phase,
+        status: row.paused ? 'paused' : row.openQuestions > 0 ? 'blocked' : row.phase,
+        acceptedProposalVersion: row.acceptedProposalVersion, updatedAt: row.updatedAt,
+      }));
+    },
     async projects() {
       ensureOpen();
       return (store.db.prepare('SELECT id,root,grants FROM projects ORDER BY id').all() as { id: string; root: string; grants: string }[])
