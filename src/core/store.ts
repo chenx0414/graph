@@ -162,8 +162,12 @@ export class TaskStore {
     });
   }
   event(taskId: string, type: string, data: unknown) {
-    return Number(this.db.prepare('INSERT INTO events(task_id,type,data,timestamp) VALUES(?,?,?,?)')
+    const cursor = Number(this.db.prepare('INSERT INTO events(task_id,type,data,timestamp) VALUES(?,?,?,?)')
       .run(taskId, type, canonicalJson(data), Date.now()).lastInsertRowid);
+    // Some writers record events outside a transaction; wake stream watchers
+    // here so live delivery cannot depend on an unrelated commit.
+    this.changes.emit('change');
+    return cursor;
   }
   task(id: string): TaskRow {
     const row = this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id) as TaskRow | undefined;

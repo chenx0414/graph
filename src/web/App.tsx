@@ -135,7 +135,7 @@ export function useTaskStream(taskId: string, onEvent: (event: { cursor: number;
 function useLimits() {
   const { data, reload } = useAsync(() => api<Limits>('/api/limits'), []);
   useEffect(() => {
-    const timer = setInterval(reload, 1_500);
+    const timer = setInterval(reload, 500);
     return () => clearInterval(timer);
   }, [reload]);
   return data;

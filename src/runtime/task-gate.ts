@@ -51,8 +51,12 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
         if (!usage) {
           unknown = true;
           if (nodeId && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
+            const questionId = randomUUID();
+            const data = { reason: 'Agent returned no authoritative usage' };
             store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
-              .run(randomUUID(), operation.taskId, nodeId, operation.id, 'unknown_usage', canonicalJson({ reason: 'Agent returned no authoritative usage' }));
+              .run(questionId, operation.taskId, nodeId, operation.id, 'unknown_usage', canonicalJson(data));
+            // The stream must see the question even though no node status changed.
+            store.event(operation.taskId, 'question.opened', { nodeId, kind: 'unknown_usage', data, operationId: operation.id });
           }
         } else {
           total.input += usage.input; total.output += usage.output; total.cacheRead += usage.cacheRead; total.cacheWrite += usage.cacheWrite;

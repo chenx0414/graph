@@ -1,0 +1,11 @@
+# T08 验证（2026-09-13T06:28:18Z，项目 Node）
+## node
+v24.20.0
+## tsc
+root tsc rc=0
+web tsc rc=0
+## build:web
+
+✓ built in 69ms
+## git diff --check
+diff rc=0

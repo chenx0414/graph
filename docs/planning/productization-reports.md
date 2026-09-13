@@ -232,3 +232,37 @@
 ### 已知限制
 
 - 文档未覆盖 Windows/Linux 的具体沙箱差异（平台边界以 architecture.md 与 M0 报告为准）。
+
+## T08 · 新阶段整体验收与交接包
+
+- 起始提交：`ed9677d`
+- 完成提交：本次提交
+- 提交范围：
+  - 新增 `tests/m8/integration.test.ts`：从正式 CLI 入口（`node src/server/cli.ts --execute`）启动守护进程，全新临时 Git 项目 + 临时 stateDir，真实 Chromium 浏览器完成“配置 → 提需求 → 主管提案 → 确认（分支 main）→ 并发等待（凭据上限 1）→ 等待期间保存配置 → 两次未知用量答复 → 暂停/恢复 → 命令检查产物 → 交付面板”，SIGTERM 退出码 0，页面无 JS 错误。
+  - 集成过程中发现并修复的缺口：
+    - `src/runtime/task-gate.ts`：未知用量问题此前只插入 `questions` 表、不写事件，SSE 流因此永远收不到该状态（真实浏览器表现为界面停在“执行中”）。现同时记录 `question.opened`。
+    - `src/core/store.ts` / `src/core/task-runtime.ts`：事件写入即唤醒监听者，并为流增加 250ms 兜底轮询，避免任何未通知写入导致实时状态缺失。
+    - `src/web/App.tsx`：等待名额的 `/api/limits` 轮询收紧到 500ms，保证短暂的排队窗口可见。
+  - 证据：`acceptance-evidence/t08-{integration,graph-full,verification,probes}.output.txt`、四张关键页面截图 `t08-{overview,confirm,waiting,delivery}.png`；README 启动流程在原 Node 下复跑 `usage-readme-start.output.txt`。
+- 生效/迁移规则：不涉及新配置；修复只影响事件通知与展示。
+
+### 验收清单
+
+- [x] T01–T07 逐项证据或未完成项见 `productization-reports.md` 各节，未使用“基本完成”表述；T09/T10 为 P2 可选、未启动并在本节列为边界。
+- [x] 项目 Node 24.20.0 下：全量 **45 文件 / 208 项**连续 2 次、双 tsc、`vite build`、`git diff --check` 全部通过（`t08-graph-full.output.txt`、`t08-verification.output.txt`）。
+- [x] 原 R6、S4/R8、R9–R13 探针保持正确：8 个探针全部 `rc=0`（`t08-probes.output.txt`）。发送路径（T04）有改动，浏览器套件在本次均真实运行 Chromium；A13 交付副本未改动，沿用历史证据，未重跑昂贵真实供应商任务。
+- [x] 真实浏览器完整流程通过：集成测试断言行为而非仅截图，并附四张关键页面截图；原始输出见 `t08-integration.output.txt`。
+- [x] 失败/重启测试有界：所有探针与测试均使用硬超时；清理包含 5–8s 上限；运行后无孤儿进程（`ps` 计数 0）。
+- [x] 报告含准确提交、变更范围、测试命令/次数/结果、未知与未验证边界、工作区残差：见本节与各任务报告。
+- [ ] 独立验收：由使用者交独立验收 agent 按 Standards / Spec 复核；实现 agent 不代其宣布通过。
+
+### 测试与运行
+
+- `tests/m8/integration.test.ts`：项目 Node 下 1/1 通过（另在两次全量中各 1 次）；全量 208 项连续 2 次；探针 8/8。
+
+### 未知与未验证边界
+
+- 未运行新的真实供应商任务；A13 真实运行结论引用历史证据。
+- 平台仅 macOS + 项目 Node；未验证 Windows/Linux。
+- T09（RPM/TPM 与 429 冷却）与 T10（开源项目定向借鉴）为 P2，未实施；不影响本阶段通过范围。
+- 工作区仅本提交涉及的文件；`M .gitignore`、`docs/planning/m2-handoff.md` 已按使用者要求入库，无其他残差。

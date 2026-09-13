@@ -253,7 +253,13 @@ export async function openTaskRuntime(options: {
                   cursor = row.cursor;
                   yield { ...row, taskId, data: JSON.parse(row.data) } as TaskUpdate;
                 }
-              } else { await wake.promise; }
+              } else {
+                // The wake normally fires immediately; the bounded fallback
+                // heals any writer that could not notify and keeps the
+                // stream caught up with the database.
+                await Promise.race([wake.promise, new Promise(resolve => setTimeout(resolve, 250))]);
+                wake.cancel();
+              }
             }
           })();
           return {
