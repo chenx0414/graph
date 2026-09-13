@@ -1,6 +1,6 @@
 # Graph 首版设计
 
-状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成；M0–M7 已实施。2026-09-12 三轮独立复核的全部发现已修复并复验：本机 Web 应用与导出失败反馈在隔离副本上由 Graph 交付（`main` → `001f288`，a1–a5 有效，交付测试 40/40 含真实无头 Chromium E2E，独立审查通过）；见 [复验报告](planning/rework-acceptance-2026-09-12.md) 与 [M7 报告](planning/m7-results.md)。是否合入使用者原仓库、配置 remote 或发布由使用者决定。
+状态：2026-09-10 使用者确认结束设计追问，产品与执行规则已接受；[实现规划](implementation-plan.md) 已完成；M0–M7 已实施。2026-09-12 三轮独立复核中 A13 与 S1–S3、R1–R5、R7 已通过；R6（主机监听边界）已修复并本地有界复验，等待独立复验关闭 A10，本仓库不自行宣布 Graph 整体完成。本机 Web 应用与导出失败反馈在隔离副本上由 Graph 交付（`main` → `001f288`，a1–a5 有效，交付测试 40/40 含真实无头 Chromium E2E，独立审查通过）。是否合入使用者原仓库、配置 remote 或发布由使用者决定。
 
 本文件汇总已确认的产品与执行规则。原始设想见 [draft.md](draft.md)，访谈记录见 [design-discussion.md](design-discussion.md)，术语以 [CONTEXT.md](../CONTEXT.md) 为准。
 

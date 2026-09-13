@@ -126,17 +126,28 @@ test('a graph.command check may bind loopback but not a non-loopback interface',
     kind: 'agent', reserveTokens: 100,
     prepare: async operation => async () => {
       await mkdir(join(operation.workspace!, 'test'), { recursive: true });
+      await mkdir(join(operation.workspace!, 'support'), { recursive: true });
+      await writeFile(join(operation.workspace!, 'support', 'net-child.cjs'), [
+        "const { createServer } = require('node:http');",
+        "const attempt = host => new Promise(resolve => { const server = createServer(); server.on('error', error => resolve(error.code || String(error))); server.listen(0, host, () => { server.close(); resolve('LISTENED'); }); });",
+        "(async () => { console.log(JSON.stringify({ wildcard: await attempt('0.0.0.0'), loopback: await attempt('127.0.0.1') })); })();",
+      ].join('\n'));
       await writeFile(join(operation.workspace!, 'test', 'network.test.js'), [
         "import { test } from 'node:test';",
         "import assert from 'node:assert';",
         "import { createServer } from 'node:http';",
-        "test('loopback binds, any-interface does not', async () => {",
+        "import { spawnSync } from 'node:child_process';",
+        "test('loopback binds, any-interface does not, and a child cannot clear the guard', async () => {",
         "  const loopback = createServer(() => {});",
         "  await new Promise((resolve, reject) => { loopback.on('error', reject); loopback.listen(0, '127.0.0.1', resolve); });",
         "  await new Promise(resolve => loopback.close(resolve));",
         "  const anyInterface = createServer(() => {});",
         "  await assert.rejects(new Promise((resolve, reject) => { anyInterface.on('error', reject); anyInterface.listen(0, '0.0.0.0', resolve); }), error => error.code === 'EPERM');",
         "  anyInterface.close();",
+        "  const env = { ...process.env }; delete env.NODE_OPTIONS;",
+        "  const child = spawnSync(process.execPath, ['support/net-child.cjs'], { cwd: process.cwd(), encoding: 'utf8', env });",
+        "  assert.equal(child.status, 0, child.stderr);",
+        "  assert.deepEqual(JSON.parse(child.stdout), { wildcard: 'EPERM', loopback: 'EPERM' });",
         "});",
       ].join('\n'));
       return { outcome: 'completed', output: null, usage };

@@ -132,7 +132,7 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 
 正式数据库、任务授权和供应商凭据由后台持有；Pi worker、MCP 进程和安装脚本在实际受限的执行环境内运行。模型请求经 broker，信息检索经受控读取 broker，外部写操作经带范围授权的工具。域名白名单、独立 cwd 和普通子进程都不足以证明上述约束成立。受限执行边界在每次派发前扫描写授权内已存在的 `.git` 条目（含 worktree 链接文件），并以解析后的 literal/subpath 规则拒绝其写入，普通命令与 MCP 共用；只读 Git 子命令以具体的 Command Line Tools 二进制运行。
 
-本机 macOS sandbox-runtime 是候选执行 adapter，M0 必须验证路径、子进程、网络与凭据隔离，以及任意扩展不能绕过调用门。已确认任务的 `graph.command` 检查可以在同一受限边界内绑定 loopback 并运行本机应用与无头浏览器测试（含 Chromium 的 Mach 注册服务）；只有检查节点获得该本地网络例外，Agent 工具、本地 MCP 与扩展仍不允许网络。Seatbelt 的 `local ip "localhost"` 不能区分通配绑定，因此宿主为本地网络检查注入只允许显式 loopback 地址的 listen/bind 守卫，非 loopback 监听在到达操作系统前即被拒绝。扩展在受限 worker 内的最小接口已实现；官方 Pi 扩展 API 的完整语义、远程 MCP 的其他 transport 与其他平台仍未验证。若不兼容，调整 adapter 并复验；不静默移除自主安装能力，也不放宽已确认权限规则。公开 Pi 接口与仍待验证的路径见 [Pi 详细核查](planning/kernel-task-runtime.md)。
+本机 macOS sandbox-runtime 是候选执行 adapter，M0 必须验证路径、子进程、网络与凭据隔离，以及任意扩展不能绕过调用门。已确认任务的 `graph.command` 检查可以在同一受限边界内绑定 loopback 并运行本机应用与无头浏览器测试（含 Chromium 的 Mach 注册服务）；只有检查节点获得该本地网络例外，Agent 工具、本地 MCP 与扩展仍不允许网络。Seatbelt 无法表达只允许 loopback 的绑定；本地网络检查由可信宿主在 `127.0.0.1`/`::1` 上持有监听 socket，并把已绑定 fd 交给检查进程，沙箱 profile 显式 `(deny network-bind)`，因此检查、其子进程与非 Node 进程都无法新建监听；Node 预载只把 loopback 监听路由到宿主 fd，不是权限边界。扩展在受限 worker 内的最小接口已实现；官方 Pi 扩展 API 的完整语义、远程 MCP 的其他 transport 与其他平台仍未验证。若不兼容，调整 adapter 并复验；不静默移除自主安装能力，也不放宽已确认权限规则。公开 Pi 接口与仍待验证的路径见 [Pi 详细核查](planning/kernel-task-runtime.md)。
 
 ## Git 与最终验收
 

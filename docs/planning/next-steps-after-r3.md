@@ -109,6 +109,16 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
 - 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
 
+## 第十一轮：R6 收尾（2026-09-12）
+
+第三轮复验指出 listen 守卫可被子进程清除 `NODE_OPTIONS` 绕过。改为宿主持有的监听边界：
+
+- 沙箱 profile 对本地网络检查显式 `(deny network-bind)`：任何新 bind（直接、清环境子进程、非 Node 进程）都在操作系统层 EPERM。
+- 可信宿主在 `127.0.0.1`/`::1` 上预绑定监听 socket，经独立 fd（每族 4 个，支持顺序多次监听）交给检查；Node 预载把 loopback `listen` 路由到宿主 fd，`--test-isolation=none` 保证 `node --test` 进程能继承 fd。预载可被移除，但移除后无法监听，不再是权限边界。
+- 进程组清理：受限命令以独立进程组启动，超时/结束时 `SIGKILL` 整棵树，避免之前的孤儿 `node --test` 进程。
+- 有界复验（60s）：直接 `0.0.0.0` EPERM；清 `NODE_OPTIONS` 子进程的 `0.0.0.0` 与 `127.0.0.1` 新 bind 均 EPERM；IPv4/IPv6 loopback 监听与自取回、真实交付的两个浏览器 E2E（1+2 项）通过；`local-network-rework.mts` 与 `listen-guard-child-rework.mts` 输出已更新为修复后行为；Graph 测试 38 文件 / 177 项；无孤儿进程。
+- 是否关闭 A10 由独立复验决定；本仓库不自行宣布 Graph 整体完成。
+
 ## 第十轮：返工复验（2026-09-12，第二轮）
 
 [第二轮复验](rework-acceptance-2026-09-12.md) 保留原六项修复，但新增 S2/S3/R6/R7。Graph 侧已修复：

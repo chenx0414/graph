@@ -1,5 +1,7 @@
 # M2–M7 验收证据
 
+第三轮复验见 [283ffbb 独立验收](../third-round-acceptance-2026-09-12.md)。新增 `listen-guard-child-rework.mts` 与对应输出验证受限检查子进程清除 `NODE_OPTIONS` 后的实际监听和入站边界；使用项目 Node 24.20.0，从 Graph 根目录执行，仅连接本机 Ethernet/Wi-Fi 地址。`third-round-delivery-tests.output.txt` 为精确交付 `001f288` 的 40 项独立测试结果（包含真实 Chromium）。
+
 最新复验：[6004a2a 返工独立复验](../rework-acceptance-2026-09-12.md)。本轮新增诊断从 Graph 根目录运行：
 
 ```sh
@@ -93,3 +95,16 @@ R7 已由小型 Graph 任务修复并重绑证据（`graph-m7-acceptance-9`，`m
 ```
 
 输出：HTTP 500、`error:"synthetic browser unavailable"`，页面显示“导出失败：synthetic browser unavailable / 可重试”，`falselyClaimsSuccess:false`、`displaysFailureReason:true`。
+
+## 2026-09-12 第十一轮：R6 收尾
+
+第三轮复验的 `listen-guard-child-rework.mts` 指出可清除 `NODE_OPTIONS` 绕过 Node 预载。改为宿主持有监听边界后，两个探针输出已更新为修复后行为：
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/local-network-rework.mts
+./node_modules/.bin/node docs/planning/acceptance-evidence/listen-guard-child-rework.mts
+```
+
+- `local-network-rework.mts`：`localNetwork` 两种模式下 `0.0.0.0` 监听均为 EPERM。
+- `listen-guard-child-rework.mts`：直接监听被拒；清 `NODE_OPTIONS` 的子进程对 `0.0.0.0` 与 `127.0.0.1` 的新 bind 都由操作系统 `(deny network-bind)` 拒绝（`bind: undefined`、`listen EPERM`）。
+- 有界验证脚本另行确认 IPv4/IPv6 loopback 监听与自取回正常；真实交付的两个浏览器 E2E（1+2 项）通过；Graph 回归 `tests/m4/command-check.test.ts` 覆盖清环境子进程。

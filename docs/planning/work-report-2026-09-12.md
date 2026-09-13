@@ -1,6 +1,6 @@
 # Graph 首版收尾工作报告
 
-> **2026-09-12 最终结果（三轮返工后）：全部复核发现已关闭。**三轮发现（S1/R1–R5、S2/S3/R6、R7）均已修复并复验：Graph 测试 38 文件 / 177 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，a1–a5 全部有效，交付测试 40/40（含真实无头 Chromium E2E 与导出错误回归），独立审查 `docs/review-web-v3.md` 通过。见 [复验报告](rework-acceptance-2026-09-12.md) 与 [第十轮](next-steps-after-r3.md#第十轮返工复验2026-09-12第二轮)。
+> **2026-09-12 状态（待独立复验）：A13 与 S1–S3、R1–R5、R7 已通过；R6 第三轮复验未关闭，已按第十一轮改为宿主持有 loopback 监听 + 沙箱 `(deny network-bind)`，本地有界复验通过，等待独立复验。**Graph 测试 38 文件 / 177 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，a1–a5 全部有效，交付测试 40/40，独立审查 `docs/review-web-v3.md` 通过。见 [复验报告](rework-acceptance-2026-09-12.md) 与 [第十一轮](next-steps-after-r3.md#第十一轮r6-收尾2026-09-12)。
 
 日期：2026-09-12（Asia/Shanghai）。基线 `f1ddaaa`，收尾提交 `60fb185`。本报告汇总从第三轮复验接手到首版完成的全部工作、证据与边界；详细过程见各 `mN-results.md`、[acceptance-followup.md](acceptance-followup.md)、[next-steps-after-r3.md](next-steps-after-r3.md) 与 `git log`。
 

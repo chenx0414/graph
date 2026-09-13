@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir, realpath, writeFile } from 'node:fs/promises';
+import { createServer as createTcpServer, type Server as TcpServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
@@ -9,11 +10,11 @@ import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import type { TokenUsage } from './call-broker.ts';
 
 /**
- * Seatbelt cannot express a loopback-only bind (`localhost` also matches
- * wildcard binds), so every local-network program check gets this host-owned
- * preload: it rejects any listen address that is not explicit loopback before
- * the socket reaches the OS. The sandbox still blocks non-loopback outbound
- * traffic and the profile grants bind/inbound only for local addresses.
+ * The host owns the only listening sockets of a local-network check. The
+ * sandbox profile denies every bind, so a check and its children cannot create
+ * a listener even when they clear NODE_OPTIONS. This preload is only a routing
+ * shim: loopback listen calls are served by the host's already-bound sockets,
+ * and every non-loopback or unresolved call is refused before the socket API.
  */
 const LOOPBACK_LISTEN_GUARD = String.raw`'use strict';
 const net = require('node:net');
@@ -24,29 +25,43 @@ function deny() {
   error.code = 'EPERM';
   throw error;
 }
+function queue(name) {
+  return String(process.env[name] || '').split(',').map(Number).filter(value => Number.isInteger(value) && value > 0);
+}
+const ipv4 = queue('GRAPH_CHECK_LISTEN_FD_V4');
+const ipv6 = queue('GRAPH_CHECK_LISTEN_FD_V6');
 function serverHost(args) {
   const first = args[0];
   if (first && typeof first === 'object') return first.host;
   return typeof args[1] === 'string' ? args[1] : undefined;
 }
-function socketHost(args) {
-  const first = args[0];
-  if (first && typeof first === 'object') return first.address;
-  return typeof args[1] === 'string' ? args[1] : undefined;
-}
 const listen = net.Server.prototype.listen;
 net.Server.prototype.listen = function (...args) {
   const host = serverHost(args);
-  if (!host || !LOOPBACK.has(host)) deny();
-  return listen.apply(this, args);
+  if (host !== undefined && !LOOPBACK.has(host)) deny();
+  const fd = (host === '::1' ? ipv6 : ipv4).shift();
+  if (!fd) deny();
+  const callback = args.length && typeof args[args.length - 1] === 'function' ? args[args.length - 1] : undefined;
+  return callback ? listen.call(this, { fd }, callback) : listen.call(this, { fd });
 };
-const bind = dgram.Socket.prototype.bind;
-dgram.Socket.prototype.bind = function (...args) {
-  const host = socketHost(args);
-  if (!host || !LOOPBACK.has(host)) deny();
-  return bind.apply(this, args);
-};
+// No UDP listener is host-provided; the profile denies the bind as well.
+dgram.Socket.prototype.bind = function () { deny(); };
 `;
+
+interface HostListener { fd: number; close(): void }
+
+/** A trusted host-side loopback listener whose duplicated fd is handed to one check run. */
+async function loopbackListener(host: string): Promise<HostListener | undefined> {
+  return new Promise(resolve => {
+    const server: TcpServer = createTcpServer(() => {});
+    server.once('error', () => resolve(undefined));
+    server.listen(0, host, () => {
+      const fd = (server as unknown as { _handle?: { fd?: number } })._handle?.fd;
+      if (!fd) { server.close(); resolve(undefined); return; }
+      resolve({ fd, close: () => { try { server.close(); } catch { /* already closed */ } } });
+    });
+  });
+}
 
 export interface RestrictedGate {
   dispatch<T>(id: string, reservation: number, send: () => T): T;
@@ -185,8 +200,14 @@ export async function openRestrictedExecutor() {
       // listen/inbound/outbound plus the Chromium rendezvous services appended
       // here; every other restricted run keeps the no-network profile. Bind and
       // inbound stay limited to loopback addresses, never "*:*".
+      // SRT reads allowLocalBinding from its initialized config, so a per-run
+      // custom config cannot widen it. Confirmed program checks get loopback
+      // inbound/outbound plus the Chromium rendezvous services appended here,
+      // and every bind is denied: the only listening sockets are the host's
+      // loopback listeners, whose duplicated fds the check receives. Every
+      // other restricted run keeps the no-network profile.
       const localNetworkProfile = command.localNetwork
-        ? '\n(allow network-bind (local ip "localhost:*"))\n(allow network-inbound (local ip "localhost:*"))\n(allow network-outbound (remote ip "localhost:*"))'
+        ? '\n(allow network-inbound (local ip "localhost:*"))\n(allow network-outbound (remote ip "localhost:*"))\n(deny network-bind)'
           + '\n(allow mach-register (global-name-regex #"^org\\.chromium\\."))\n(allow mach-lookup (global-name-regex #"^org\\.chromium\\."))'
         : '';
       const commandText = [command.executable, ...command.args].map(quote).join(' ');
@@ -206,19 +227,40 @@ export async function openRestrictedExecutor() {
       );
       const boundedProfile = extractProfile(wrapped, launch) + '\n' + profile + localNetworkProfile;
       let listenGuard: string | undefined;
+      const stdio: ('pipe' | number)[] = ['pipe', 'pipe', 'pipe', 'pipe'];
+      const listeners: HostListener[] = [];
+      const ipv4Fds: number[] = [];
+      const ipv6Fds: number[] = [];
       if (command.localNetwork) {
         listenGuard = join(scratchDir, '.graph-listen-guard.cjs');
         await writeFile(listenGuard, LOOPBACK_LISTEN_GUARD, { mode: 0o600 });
+        // Distinct listeners per family keep later listens in one check process
+        // alive after an earlier server closed its descriptor.
+        const ipv4 = await Promise.all(Array.from({ length: 4 }, () => loopbackListener('127.0.0.1')));
+        const ipv6 = await Promise.all(Array.from({ length: 4 }, () => loopbackListener('::1')));
+        for (const listener of [...ipv4, ...ipv6]) if (listener) listeners.push(listener);
+        for (const listener of ipv4) if (listener) { ipv4Fds.push(stdio.length); stdio.push(listener.fd); }
+        for (const listener of ipv6) if (listener) { ipv6Fds.push(stdio.length); stdio.push(listener.fd); }
       }
-      const nodeOptions = [command.env?.NODE_OPTIONS, listenGuard ? `--require=${listenGuard}` : undefined].filter(Boolean).join(' ');
+      const guardEnv = listenGuard
+        ? { NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', `--require=${listenGuard}`].filter(Boolean).join(' '), GRAPH_CHECK_LISTEN_FD_V4: ipv4Fds.join(','), GRAPH_CHECK_LISTEN_FD_V6: ipv6Fds.join(',') }
+        : {};
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
-        const child = command.broker.dispatch(invocationId, 0, () => spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
-          cwd, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}), ...(listenGuard ? { NODE_OPTIONS: nodeOptions } : {}) },
-          stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
-        }));
+        const child = command.broker.dispatch(invocationId, 0, () => {
+          const spawned = spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
+            cwd, detached: true, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}), ...guardEnv },
+            stdio,
+          });
+          // The child holds duplicated descriptors, so the host can stop accepting now.
+          for (const listener of listeners) listener.close();
+          return spawned;
+        });
         let stdout = '', stderr = '';
-        const timer = command.timeoutMs ? setTimeout(() => child.kill('SIGKILL'), command.timeoutMs) : undefined;
+        // The sandbox child is a process-group leader: timeouts and completion
+        // must reap its whole tree so a hung check cannot leak grandchildren.
+        const killTree = () => { try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } } };
+        const timer = command.timeoutMs ? setTimeout(killTree, command.timeoutMs) : undefined;
         timer?.unref?.();
         const channel = child.stdio[3] as Duplex;
         let pending = '', requests = Promise.resolve();
@@ -239,16 +281,17 @@ export async function openRestrictedExecutor() {
             });
           }
         });
-        child.stdout.on('data', data => { stdout += String(data); });
-        child.stderr.on('data', data => { stderr += String(data); });
+        child.stdout!.on('data', data => { stdout += String(data); });
+        child.stderr!.on('data', data => { stderr += String(data); });
         child.on('error', reject);
         child.on('close', (code, signal) => {
           if (timer) clearTimeout(timer);
+          killTree();
           if (signal) stderr += `Process terminated by ${signal}\n`;
           command.broker.settle(invocationId, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
           void requests.then(() => resolve({ code, stdout, stderr }), reject);
         });
-        child.stdin.end(command.input);
+        child.stdin!.end(command.input);
       });
     },
     async close() { await SandboxManager.reset(); },
