@@ -31,3 +31,4 @@ __pycache__/
 .playwright-mcp/
 skills-lock.json
 .worktrees/
+.agents/
