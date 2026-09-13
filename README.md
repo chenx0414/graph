@@ -2,10 +2,12 @@
 
 为已有项目的功能开发编排 Agent：先与主管讨论并确认需求，再自主拆解、并行执行、交接上下文、审查返工和合并。
 
-当前状态：M0–M7 已落地。机制矩阵与 MediaBookmarks 克隆交付见各里程碑报告；独立验收反例的修复见 [验收复验](docs/planning/acceptance-rework.md)。A13 使用克隆、受控本地模型与 `GRAPH_FIXTURE` 合成数据，不是真实 B站登录或收费模型。Graph 为当前工作名称。
+当前状态：M0–M7 已落地；监听与本地网络返工轮（R6、S4/R8、R9–R13）已由独立验收关闭（见 [R13 最终验收](docs/planning/r13-final-acceptance-2026-09-13.md)）。产品化阶段 T01–T06 已实施并本地复验（[产品化交付报告](docs/planning/productization-reports.md)），T08 整体验收由独立验收 agent 复核；本仓库不自行宣布整体完成。历史上 A13 使用克隆、受控本地模型与合成数据，结论保持原记录。Graph 为当前工作名称。
 
 ## 从这里开始
 
+- [使用文档](docs/usage.md)：启动、配置、数据目录、停止与排障。
+- [产品化交付报告](docs/planning/productization-reports.md)：T01–T06 的逐项验收与证据。
 - [首版产品设计](docs/graph-mvp.md)：范围、执行规则与首个真实任务。
 - [实现架构](docs/architecture.md)：模块 interface、持久化、Pi 接入与恢复方式。
 - [实施计划](docs/implementation-plan.md)：M0–M7、18 个工作包和验收矩阵。首版两组验收均已完成。

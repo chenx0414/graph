@@ -204,3 +204,31 @@
 ### 已知限制
 
 - 操作记录分页为“增加加载条数”而非游标分页；等待名额的刷新为 1.5s 轮询。T09 增加速率限制后复用同一等待展示。
+
+## T07 · 使用文档与发布前整理
+
+- 起始提交：`0d4effc`
+- 完成提交：本次提交
+- 修改范围：
+  - 新增 `docs/usage.md`：最短启动流程、配置参考表、数据目录/端口/停止、排障表、权限与平台边界、Graph 控制台与 MediaBookmarks 的区别、配置迁移。
+  - `README.md`：当前状态改为监听返工轮已关闭 + 产品化 T01–T06 已交付、T08 待独立验收；加入使用文档与产品化报告入口；删除对历史 A13 运行性质的复述，历史结论链接保留。
+  - `docs/planning/handoff.md`：快照更新到 2026-09-13，工作区应为干净、当前测试数 44 文件 / 207 项、入口与边界；机器专属路径改为 `$REPO` / `$HOME` 说明。
+  - `docs/graph-mvp.md`：状态改为 R13 关闭、产品化阶段指向报告与使用文档；示例路径去机器化。
+  - `docs/implementation-plan.md`：新增产品化阶段指引；过期状态（“尚未运行真实收费模型请求”）改为引用证据。
+  - `docs/planning/acceptance-evidence/usage-readme-start.output.txt`：按 README 从全新临时配置复跑。
+- 生效/迁移规则：文档描述的默认值、字段与错误码与 T01–T06 实现一致；历史报告不覆写，仅追加链接。
+
+### 验收清单
+
+- [x] 按 README 从新的临时配置启动成功、不依赖 /tmp 脚本或隐藏状态：证据 `usage-readme-start.output.txt`（`node --run build:web` → `start --config /tmp/t07-readme/graph.config.json --state-dir … --port 0` → `/api/health` ok、`GET /` HTTP 200、SIGTERM 干净退出）。
+- [x] 当前状态段不再误写“仅合成 A13/未运行真实模型/等待 R13 复验”，历史上下文保留：README、graph-mvp、handoff、implementation-plan 均已更新并链接历史报告。
+- [x] 示例不含真实密钥、个人 Cookie 或机器专属绝对路径：新增与更新的示例只含合成值；当前文档中的工作区路径改为 `$REPO`/`$HOME` 说明，历史证据文件保持原样。
+- [x] 文档命令、字段、默认路径与实现一致且声明链接证据：启动命令、`GRAPH_*` 环境变量、`/api` 错误码与设置页行为逐项对照实现；完成声明链接到 `productization-reports.md` 与 `r13-final-acceptance-2026-09-13.md`。
+
+### 测试与运行
+
+- 文档复跑 1 次；全量测试沿用 T06 提交的 44 文件 / 207 项（本次未改代码）；`git diff --check` 通过。
+
+### 已知限制
+
+- 文档未覆盖 Windows/Linux 的具体沙箱差异（平台边界以 architecture.md 与 M0 报告为准）。

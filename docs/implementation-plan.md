@@ -1,6 +1,8 @@
 # Graph 首版实施计划
 
-日期：2026-09-12。产品规则已经使用者确认。M0–M7（G01–G18）的可运行验证见各 `planning/mN-results.md`；独立验收反例的修复见 [验收复验](planning/acceptance-rework.md)。尚未运行真实收费模型请求。
+日期：2026-09-12。产品规则已经使用者确认。M0–M7（G01–G18）的可运行验证见各 `planning/mN-results.md`；独立验收反例的修复见 [验收复验](planning/acceptance-rework.md)；后续返工与关闭记录见各轮次报告。真实运行、用量与登录边界以 [M7 报告](planning/m7-results.md) 与验收记录为准，本文不复述。
+
+产品化阶段（T01–T10：启动入口、配置与凭据、任务主流程、并发限制、设置页、节点与用量、文档、整体验收及后续可选项）见 [产品化待办](planning/productization-todo-2026-09-13.md)，已交付任务报告见 [产品化交付报告](planning/productization-reports.md)。该阶段不改变首版里程碑的出口定义。
 
 依据：[产品设计](graph-mvp.md)、[实现架构](architecture.md)、[术语表](../CONTEXT.md)。首版必须完成全部图模式、三类验证器和两组验收；中间里程碑用于验证进度，不作为缩减后的首版交付。
 
@@ -173,7 +175,7 @@ M6 已用真实磁盘 SQLite、临时 Git、macOS 受限进程和 scripted 响�
 
 ### G17 — 在 Graph 内形成该任务的验收说明
 
-- 依赖：G16；输入为已有项目 `/Users/macmini/workspace/12-MediaBookmarks`。
+- 依赖：G16；输入为已有项目 `$HOME/workspace/12-MediaBookmarks（使用者工作区，示例路径）`。
 - 已固定范围：本机 Web，复用现有 CLI，B站确认登录 → 采集 → 进度/失败原因 → 收藏与已有笔记 → Markdown 导出。
 - 在 Graph 的需求讨论中明确具体界面、测试数据和人工登录/检查步骤，固定验收说明与目标分支。保留现有其他平台 CLI 和 JavaScript/Python 代码，不把 Graph 的技术约束强加给目标项目。
 - 不把浏览器 profile、真实收藏或登录态当成可无条件并发共享资源；由该任务确认资源访问方式。
