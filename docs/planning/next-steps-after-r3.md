@@ -109,6 +109,16 @@ Standards：1 项新 P1；Spec：2 项新 P1，另有已明确未完成的能力
 - 网关另有单次流时长上限（观察到 13 分 06 秒的中止）。真实运行用 `GRAPH_M7_MODEL_MAX_TOKENS=8192` 让单轮更早结束。
 - 为了让已确认的提案不白费，新尝试（工作目录 `graph-m7-acceptance-5`）直接复用 workdir-4 中使用者确认过的同一提案内容，不重新生成、不改变范围。
 
+## 第十五轮：R13 回调注册顺序（2026-09-13）
+
+[R11/R12 复验](ipc-listening-release-acceptance-2026-09-13.md) 确认原反例关闭，另指出一项 P2：
+
+- **R13**：上一轮为了推迟 `listening` 事件，把 `listen()` callback 从事件监听序列中取出、改为事件结束后手动调用。Node 的语义是 callback 在 `listen()` 调用时作为 `once('listening')` 监听器注册，位置在调用前后注册的观察者之间；手动后置会让后注册的观察者先于初始化 callback 执行，原本正常的初始化检查因此失败（`5fb3f66` 起存在，非上一提交引入）。
+
+修复：预载在拦截 `listen()` 的同一时刻把 callback 注册进该 server 的 `listening` 监听序列（与 Node 相同位置），随后不再手动调用；取消或失败路径保持与原生一致的 pending 监听器语义。事件释放时 callback 按注册顺序触发。
+
+复验：`ipc-listening-order.mts` 中当前修订与 283ffbb 基线一致输出 `["before","callback","after"] / ready:true`，`5fb3f66` 仍复现 `["before","after"]` 断言失败；R11/R12 探针、R9/R10、S4、R8、R6、暂停拒绝、清环境子进程全部保持；Graph 38 文件 / 179 项（3 次全量与 6 路并行 m4，无孤儿），交付浏览器 E2E 3/3。内部检查脚本新增注册顺序回归。是否关闭 R13 由独立复验决定。
+
 ## 第十四轮：R11/R12 收尾（2026-09-13）
 
 [adopted/ready 交接独立验收](ipc-handoff-acceptance-2026-09-13.md) 指出两项 P2：

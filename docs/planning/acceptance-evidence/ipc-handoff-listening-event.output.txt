@@ -1,2 +1,2 @@
-{"revision":"5fb3f66a2f7b8904ffa14bc0158cf0f41a32a9c3","client":{"body":"ok","elapsedMs":248},"elapsedMs":951,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
-{"revision":"283ffbb","client":{"body":"ok","elapsedMs":250},"elapsedMs":976,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
+{"revision":"8f0e1b2f9572e4e5dce5e69fa77b318146cda551","client":{"body":"ok","elapsedMs":247},"elapsedMs":948,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
+{"revision":"283ffbb","client":{"body":"ok","elapsedMs":250},"elapsedMs":966,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}

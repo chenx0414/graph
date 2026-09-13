@@ -109,7 +109,12 @@ net.Server.prototype.listen = function (...args) {
   if (!request || request.host === undefined || !LOOPBACK.has(request.host)) deny();
   if (typeof process.send !== 'function' || process.connected === false) deny();
   const id = nextId++;
-  waiting.set(id, { server: this, callback: lastCallback(args) });
+  // Node registers the listen callback as a 'listening' listener at call time,
+  // so it must keep that exact position among observers registered before and
+  // after the call. Register it here, not at release time.
+  const callback = lastCallback(args);
+  if (callback) this.once('listening', callback);
+  waiting.set(id, { server: this });
   granted.set(this, id);
   channelRef();
   process.send({ type: 'graph-check-listener', id, port: request.port, host: request.host });
@@ -135,11 +140,10 @@ process.on('message', (message, handle) => {
     const pending = fireOn.get(message.id);
     if (!pending) { channelIdle(); return; }
     fireOn.delete(message.id);
-    // The host copy is fully closed: release the native event first, then the
-    // callback, matching Node's own ordering.
+    // The host copy is fully closed: releasing the native event runs the
+    // callback in its original registration position.
     releaseListening(pending.server, true);
     channelIdle();
-    if (pending.callback) pending.callback.call(pending.server);
     return;
   }
   if (message.type !== 'graph-check-listener-result') return;
@@ -172,7 +176,6 @@ process.on('message', (message, handle) => {
       fireOn.delete(message.id);
       releaseListening(entry.server, true);
       channelIdle();
-      if (entry.callback) entry.callback.call(entry.server);
     }
     channelIdle();
     return;

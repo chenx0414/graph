@@ -152,3 +152,14 @@ adopted/ready 交接验收的两项 P2（原生 `listening` 事件提前、检�
 - `ipc-handoff-listening-event`：事件驱动的外部客户端在 248ms 返回 `ok`（与 283ffbb 基线一致），`CALLBACK` 正常；守卫现在把 `listening` 事件与 callback 一并推迟到宿主 `ready` 之后。
 - `ipc-handoff-duplicate-id`：重复 ID 的第二条请求被拒绝，运行结束与 `executor.close()` 后宿主监听均为 0（旧版残留 1 个）。
 - 全部既有探针（R9/R10、S4、R8、R6、清环境子进程）行为保持；Graph 全量 3 次 179/179、6 路并行 m4、交付浏览器 E2E 3/3。
+
+## 2026-09-13 第十五轮：R13 回调注册顺序
+
+R13 修复后重跑 `ipc-listening-order.mts`：
+
+```sh
+./node_modules/.bin/node docs/planning/acceptance-evidence/ipc-listening-order.mts
+```
+
+- 当前修订与 283ffbb 基线一致：`events: ["before","callback","after"]`、`ready: true`、退出码 0；`5fb3f66` 仍复现 `["before","after"]` 与断言失败。callback 在 `listen()` 调用时注册进监听序列，事件释放时按注册顺序触发。
+- R11/R12 探针（248ms `ok`、重复 ID 后监听为 0）与全部既有探针保持不变；Graph 38 文件 / 179 项、3 次全量、6 路并行 m4（内部检查脚本含注册顺序回归）、交付浏览器 E2E 3/3。
