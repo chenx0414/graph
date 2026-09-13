@@ -328,3 +328,20 @@
 ### 复验
 
 - 项目 Node 24.20.0：全量 **47 文件 / 217 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针 `rc=0`；独立探针输出见 `acceptance-evidence/rework2-independent.output.txt`、`t08-probes.output.txt`。未调用付费供应商；是否关闭由独立复验决定。
+
+## 返工轮 3 · PA02-R2（暂停拒绝的工作不再误报成功）
+
+基线：`35118a5`。第三次独立验收确认 PA05 关闭、并发上限修复通过，保留 PA02-R2：暂停后发送门拒绝的工作被适配器当成正常回合结束，节点记 succeeded 且零请求，恢复后后继节点被直接推进。
+
+### 修复
+
+- **发送前拒绝可见**：`pi-adapter` 用 `observedGate` 包装发送门，只有在自己未调用 `send()` 时捕获拒绝（暂停/预算/未知用量），在 `session.prompt()` 返回后重新抛出，不再被受控流的 error 事件吞掉。
+- **未发送的工作回到可恢复状态**：`execution` 的异常路径识别这三种门拒绝，且仅当该操作**没有任何 invocation** 时，把操作置为 `not_sent`、节点回到 `pending`；暂停不产生问题，预算/未知用量分别打开对应问题。已有部分发送或已知用量的情况仍走原有 unknown/recovery 规则，不丢用量、不虚增。
+- **模型/传输错误不再当成成功**：适配器检查末次 assistant 的 `stopReason === 'error'`，返回 `failed`（由既有 `execution_failed`/unknown usage 规则结算），不再返回 `completed`。
+- **等待标记写入不再吞错**：`waiting_slot` 影响正式调度，写入失败现在会进入可处理的失败路径，而不是被注释成 telemetry 后忽略。
+
+### 复验
+
+- 新增回归 `tests/m8/rework.test.ts`：20 个节点在凭据队列中暂停 → 释放占位并收敛后，0 次请求、0 个成功节点、后继检查保持 pending、名额归零；恢复后 20 次请求、全部成功、最大并发 ≤10；另有正常恢复与名额上限回归保持通过。
+- 验收方探针 `product-pause-false-completion.mts --pause` 阶段输出：暂停后 `providerRequests:0、succeeded:0`，恢复后 `providerRequests:20` 且全部节点 succeeded；`product-resume-complete` 20/20、最大并发 10；`product-resume-execution-cap` 在途 ≤10；PA05 相关探针保持通过。探针末尾断言（期望恢复后仍为 0 请求）与其报告的第 2 条关闭标准冲突，按报告“以阶段结果为准”判定，说明见 `rework3-independent.output.txt`。
+- 项目 Node 24.20.0：全量 **47 文件 / 218 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针全部 `rc=0`。未调用付费供应商；是否关闭由独立复验决定。

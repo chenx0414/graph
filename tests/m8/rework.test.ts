@@ -377,3 +377,62 @@ test('conflicting alias groups are refused at save time and a hand-edited confli
     .rejects.toMatchObject({ code: 'invalid_config' });
   expect(await readFile(configPath, 'utf8')).toBe(handEdited);
 }, 60_000);
+
+test('a paused pre-send refusal is not a success and the nodes run after resume', async () => {
+  const root = await temp('pause-refusal');
+  const provider = await trackingProvider({ delayMs: 100 });
+  const scheduler = createModelScheduler();
+  const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false, refreshOnCreate: false });
+  const piModel = { id: 'a', name: 'p-a', provider: 'p-a', api: 'openai-completions' as const, baseUrl: provider.baseUrl, reasoning: false, input: ['text' as const], contextWindow: 32_000, maxTokens: 256, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  modelRuntime.registerProvider('p-a', { baseUrl: provider.baseUrl, api: 'openai-completions', apiKey: 'key-a', models: [piModel] });
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: {
+      entries: [{ id: 'a', provider: 'p-a', grade: 'high', api: 'openai-completions', baseUrl: provider.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'cred-a' }],
+      apiKey: 'unused', modelRuntime, modelScheduler: scheduler,
+      credentialFor: () => ({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 }),
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'e'.repeat(64) } }] }),
+      },
+    },
+  });
+  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'pause refusal', requestId: 'begin' });
+  const nodes: NodeSpec[] = [
+    ...Array.from({ length: 20 }, (_unused, index) => ({ id: `a${index}`, kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'a' })),
+    { id: 'check', kind: 'program', action: 'check', dependsOn: Array.from({ length: 20 }, (_unused, index) => `a${index}`) },
+  ];
+  await server.runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'pause refusal',
+    acceptance: [{ id: 'works', description: 'works', checkNode: 'check' }],
+    nodes,
+  }, 'proposal');
+  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+
+  const holds = await Promise.all(Array.from({ length: 20 }, () => scheduler.acquire({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 })));
+  const driving = server.runtime.host.drive();
+  await waitFor(() => scheduler.queued() === 20, 30_000);
+  await server.runtime.user.task(taskId).pause('pause-queued');
+  for (const release of holds) release();
+  await driving;
+  await waitFor(() => scheduler.active() === 0 && scheduler.queued() === 0, 15_000);
+  const paused = await server.runtime.user.task(taskId).view();
+  expect(provider.state.requests).toHaveLength(0);
+  expect(paused.nodes.filter(node => node.id.startsWith('a')).every(node => node.status !== 'succeeded')).toBe(true);
+  expect(paused.nodes.find(node => node.id === 'check')?.status).toBe('pending');
+  expect(paused.operations.filter(operation => operation.nodeId.startsWith('a')).every(operation => operation.state === 'not_sent')).toBe(true);
+
+  await server.runtime.user.task(taskId).resume('resume-queued');
+  await server.runtime.host.drive();
+  await waitFor(() => provider.state.requests.length === 20, 60_000);
+  await waitFor(async () => {
+    const view = await server.runtime.user.task(taskId).view();
+    return view.nodes.every(node => node.status === 'succeeded');
+  }, 60_000);
+  expect(provider.state.maxInFlight).toBeLessThanOrEqual(10);
+  expect(scheduler.active()).toBe(0);
+}, 180_000);

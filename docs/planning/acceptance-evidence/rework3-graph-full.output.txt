@@ -1,0 +1,9 @@
+
+ RUN  v5.0.0 /Users/macmini/workspace/13-Graph
+
+
+ Test Files  47 passed (47)
+      Tests  218 passed (218)
+   Start at  19:27:13
+   Duration  15.14s (tests 72%, import 26%, transform 2%)
+

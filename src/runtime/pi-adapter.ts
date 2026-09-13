@@ -8,7 +8,7 @@ import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Propos
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
 import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
-import { controlledOpenAIStream } from './controlled-openai.ts';
+import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { openPiInstance } from './pi-instance.ts';
@@ -76,9 +76,10 @@ export function createPiAdapter(options: {
       const apiKey = binding?.apiKey ?? options.apiKeyFor?.(entry) ?? options.apiKey;
       if (!apiKey) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
       const scheduler = options.scheduler;
+      // waiting_slot is what keeps a parked operation out of execution
+      // accounting; a failed write must fail the operation, not be hidden.
       const setWaitingSlot = (waiting: boolean) => {
-        try { options.store.db.prepare('UPDATE operations SET waiting_slot=? WHERE id=?').run(Number(waiting), operation.id); }
-        catch { /* the row is best-effort telemetry for execution slots */ }
+        options.store.db.prepare('UPDATE operations SET waiting_slot=? WHERE id=?').run(Number(waiting), operation.id);
       };
       const slot = binding && scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)
         ? {
@@ -112,6 +113,22 @@ export function createPiAdapter(options: {
       const definitionVersion = instance.definition_version ?? 'unknown@1';
       return async () => {
         const gate = taskGate(options.store, { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId }, entry);
+        // A pre-send gate refusal (pause, budget, unknown usage) surfaces as an
+        // error inside the Pi session; keep it so the operation is not recorded
+        // as a success with zero provider requests.
+        let gateRefusal: unknown;
+        const observedGate: SendGate = {
+          dispatch: (id, reservation, send) => {
+            let sending = false;
+            try {
+              return gate.dispatch(id, reservation, () => { sending = true; return send(); });
+            } catch (error) {
+              if (!sending) gateRefusal = error;
+              throw error;
+            }
+          },
+          settle: (id, usage) => gate.settle(id, usage),
+        };
         const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
@@ -152,7 +169,7 @@ export function createPiAdapter(options: {
           const session = await openPiInstance({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(gate, apiKey, slot),
+            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, apiKey, slot),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
           });
           try {
@@ -176,6 +193,14 @@ export function createPiAdapter(options: {
                 ].join('\n')
               : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             await session.prompt(`${briefing}${hint}`);
+            if (gateRefusal) throw gateRefusal;
+            // A provider or transport error ends the turn with an assistant
+            // error message; that is a failure, never a successful operation.
+            const messages = session.inspect().messages as { role?: string; stopReason?: string; errorMessage?: string }[];
+            const lastAssistant = [...messages].reverse().find(message => message.role === 'assistant');
+            if (lastAssistant?.stopReason === 'error') {
+              return { outcome: 'failed', output: { error: lastAssistant.errorMessage ?? 'Model request failed' }, usage: gate.total() };
+            }
             if (permissionRequest) {
               return {
                 outcome: 'waiting', output: { permission: { grant: permissionRequest.grant, capabilityId: permissionRequest.capabilityId, tool: permissionRequest.tool } },

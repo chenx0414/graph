@@ -489,6 +489,24 @@ export class Execution {
       }
       this.report(operation.id, operation.generation, result);
     } catch (error) {
+      // A gate refusal before any provider request means nothing was sent:
+      // keep the node pending (pause) or open the matching question, instead
+      // of recording a successful operation with zero requests.
+      const refusal = error instanceof RuntimeError ? error : undefined;
+      const refusalCode = refusal?.code;
+      const noInvocations = !this.store.db.prepare('SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1').get(operation.id);
+      if (refusal && refusalCode && noInvocations && ['paused', 'budget', 'unknown_usage'].includes(refusalCode)) {
+        this.store.transaction(() => {
+          const current = this.store.db.prepare('SELECT state FROM operations WHERE id=?').get(operation.id) as { state: string };
+          if (!['dispatched', 'unknown'].includes(current.state)) return;
+          this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0,waiting_slot=0 WHERE id=?").run(operation.id);
+          this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(node.task_id, node.id);
+          this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id, reason: refusal.message });
+          if (refusalCode === 'budget') this.block(node, 'budget', { reason: refusal.message, requested: reservation });
+          else if (refusalCode === 'unknown_usage') this.block(node, 'unknown_usage', { reason: refusal.message });
+        });
+        return false;
+      }
       this.store.transaction(() => {
         const current = this.store.db.prepare('SELECT state FROM operations WHERE id=?').get(operation.id) as { state: string };
         if (!['dispatched', 'unknown'].includes(current.state)) {
