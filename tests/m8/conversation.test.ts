@@ -448,3 +448,127 @@ test('a confirmed task carries the conversation decisions and constraints to its
   expect(seen[0]!.context.briefing).toContain('Decisions and constraints from the conversation');
   expect(seen[0]!.context.briefing).toContain('预算有限，登录先不改');
 });
+
+test('decision snapshots are frozen with the draft and scoped to the project binding', async () => {
+  const proposalOf = (requirementVersion: number, summary: string, decisions?: string[]) => ({
+    requirementVersion, summary, ...(decisions ? { decisions } : {}),
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  });
+  const { mkdir } = await import('node:fs/promises');
+
+  // A constraint from project A must never reach the worker of a B draft.
+  {
+    const root = await temp('choices-binding');
+    await mkdir(join(root, 'a'), { recursive: true });
+    await mkdir(join(root, 'b'), { recursive: true });
+    const seen: Operation[] = [];
+    const runtime = await openTaskRuntime({
+      stateDir: join(root, 'state'),
+      projects: [{ id: 'a', root: join(root, 'a') }, { id: 'b', root: join(root, 'b') }],
+      actions: {
+        master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })),
+        work: scripted(operation => { seen.push(operation); return { outcome: 'completed', output: { done: true }, usage }; }),
+      },
+      master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    });
+    cleanup.push(() => runtime.close());
+    const created = await runtime.conversations.create({ projectId: 'a', text: 'A_ONLY: 必须保留 A 的数据库结构。', requestId: 'create' });
+    await runtime.host.runReady();
+    const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+    await runtime.supervisor(anchor).propose(proposalOf(1, 'Only A maintenance'), 'draft-a');
+    await runtime.conversations.bind(created.conversationId, { projectId: 'b', requestId: 'rebind' });
+    await runtime.supervisor(anchor).propose(proposalOf(2, 'Only B CSS colors'), 'draft-b');
+    await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm' });
+    await runtime.host.runReady();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.context.briefing).not.toContain('A_ONLY');
+  }
+
+  // An early constraint survives later discussion in the same binding.
+  {
+    const root = await temp('choices-long');
+    await mkdir(join(root, 'a'), { recursive: true });
+    const seen: Operation[] = [];
+    const runtime = await openTaskRuntime({
+      stateDir: join(root, 'state'),
+      projects: [{ id: 'a', root: join(root, 'a') }],
+      actions: {
+        master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })),
+        work: scripted(operation => { seen.push(operation); return { outcome: 'completed', output: { done: true }, usage }; }),
+      },
+      master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    });
+    cleanup.push(() => runtime.close());
+    const created = await runtime.conversations.create({ projectId: 'a', text: 'PERSISTENT_CONSTRAINT: 永远不要改 login.ts。', requestId: 'create' });
+    await runtime.host.runReady();
+    for (let index = 0; index < 10; index++) {
+      await runtime.conversations.chat(created.conversationId, { text: `讨论实现细节 ${index}`, requestId: `chat-${index}` });
+      await runtime.host.runReady();
+    }
+    const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+    await runtime.supervisor(anchor).propose(proposalOf(1, '改进仪表盘'), 'draft');
+    await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    await runtime.host.runReady();
+    expect(seen[0]!.context.briefing).toContain('PERSISTENT_CONSTRAINT');
+  }
+
+  // Pending chat that arrived after the draft is proposed stays out of the
+  // frozen snapshot and is visible as unreviewed on the draft card.
+  {
+    const root = await temp('choices-after-draft');
+    await mkdir(join(root, 'a'), { recursive: true });
+    const seen: Operation[] = [];
+    const runtime = await openTaskRuntime({
+      stateDir: join(root, 'state'),
+      projects: [{ id: 'a', root: join(root, 'a') }],
+      actions: {
+        master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })),
+        work: scripted(operation => { seen.push(operation); return { outcome: 'completed', output: { done: true }, usage }; }),
+      },
+      master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    });
+    cleanup.push(() => runtime.close());
+    const created = await runtime.conversations.create({ projectId: 'a', text: '只调整颜色，保留登录逻辑。', requestId: 'create' });
+    await runtime.host.runReady();
+    const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+    await runtime.supervisor(anchor).propose(proposalOf(1, 'Only adjust colors'), 'draft');
+    await runtime.conversations.chat(created.conversationId, { text: 'UNREVIEWED_NEXT_TASK: 之后还想替换登录和结算，等这个任务之后再讨论。', requestId: 'after' });
+    const draft = await runtime.conversations.view(created.conversationId);
+    expect(draft.messages.at(-1)!.state).toBe('pending');
+    expect(draft.proposal?.decisions).not.toContain('UNREVIEWED_NEXT_TASK');
+    await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    await runtime.host.runReady();
+    expect(seen[0]!.context.briefing).not.toContain('UNREVIEWED_NEXT_TASK');
+  }
+
+  // Master-authored decisions are frozen verbatim and shown on the card.
+  {
+    const root = await temp('choices-curated');
+    await mkdir(join(root, 'a'), { recursive: true });
+    const seen: Operation[] = [];
+    const runtime = await openTaskRuntime({
+      stateDir: join(root, 'state'),
+      projects: [{ id: 'a', root: join(root, 'a') }],
+      actions: {
+        master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })),
+        work: scripted(operation => { seen.push(operation); return { outcome: 'completed', output: { done: true }, usage }; }),
+      },
+      master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    });
+    cleanup.push(() => runtime.close());
+    const created = await runtime.conversations.create({ projectId: 'a', text: '原始聊天文本不应直接当作决策。', requestId: 'create' });
+    await runtime.host.runReady();
+    const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+    await runtime.supervisor(anchor).propose(proposalOf(1, 'Curated', ['不要修改 login.ts']), 'draft');
+    const draft = await runtime.conversations.view(created.conversationId);
+    expect(draft.proposal?.decisions).toBe('- 不要修改 login.ts');
+    await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    await runtime.host.runReady();
+    expect(seen[0]!.context.briefing).toContain('不要修改 login.ts');
+    expect(seen[0]!.context.briefing).not.toContain('原始聊天文本不应直接当作决策');
+  }
+});

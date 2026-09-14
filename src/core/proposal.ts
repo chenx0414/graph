@@ -11,6 +11,8 @@ export function validateProposal(proposal: Proposal) {
   const nodes = new Map(proposal.nodes.map(node => [node.id, node]));
   if (nodes.size !== proposal.nodes.length) invalid('Node IDs must be unique');
   if (proposal.nodes.filter(node => node.role === 'master').length > 1) invalid('Only one master is allowed');
+  if (proposal.decisions !== undefined && (!Array.isArray(proposal.decisions) || proposal.decisions.length > 50
+    || proposal.decisions.some(item => typeof item !== 'string' || !item.trim() || item.length > 800))) invalid('Decisions must be a bounded list of nonempty strings');
   for (const node of proposal.nodes) {
     if (!text(node.id) || !text(node.action) || !['agent', 'program'].includes(node.kind)) invalid('Invalid node identity or action');
     if (node.kind === 'agent' && (!text(node.definitionVersion) || !text(node.model))) invalid('Agents require a definition version and model');

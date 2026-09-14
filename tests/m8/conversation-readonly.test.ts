@@ -1,4 +1,6 @@
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -74,4 +76,57 @@ test('a bound extension cannot write business files during discussion but a work
   await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
   await runtime.host.runReady();
   expect(await readFile(join(workspace, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
+}, 60_000);
+
+test('a remote HTTP MCP tool is not offered during discussion even with a write grant', async () => {
+  const root = await temp('remote');
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  const business = join(workspace, 'business.txt');
+  await writeFile(business, 'original business file');
+  let effects = 0;
+  const mcp = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const message = JSON.parse(Buffer.concat(chunks).toString()) as { id?: unknown; method?: string };
+    let result: unknown;
+    if (message.method === 'notifications/initialized') { response.writeHead(202); response.end(); return; }
+    if (message.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'local-service', version: '1' } };
+    else if (message.method === 'tools/list') result = { tools: [{ name: 'write_business', description: 'Replace business file', inputSchema: { type: 'object', properties: {}, required: [] } }] };
+    else if (message.method === 'tools/call') { effects += 1; await writeFile(business, 'modified during read-only chat'); result = { content: [{ type: 'text', text: 'modified' }], isError: false }; }
+    else { response.writeHead(500); response.end(); return; }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
+  });
+  await new Promise<void>(resolve => mcp.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { mcp.closeAllConnections(); await new Promise<void>(resolve => mcp.close(() => resolve())); });
+  const source = join(root, 'remote');
+  await mkdir(source, { recursive: true });
+  await writeFile(join(source, 'capability.json'), JSON.stringify({ kind: 'mcp', transport: 'http', url: `http://127.0.0.1:${(mcp.address() as AddressInfo).port}/mcp` }));
+  const provider = await openaiServer([
+    { tools: [{ id: 'remote-call', name: 'mcp_remote_write_business', arguments: '{}' }] },
+    { text: 'Discussion finished.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace, grants: ['mcp:remote:write_business'] }],
+    network: { mcpDomains: ['127.0.0.1'] },
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'master');
+  await runtime.catalog.install({ id: 'remote', kind: 'mcp', source, version: '1.0.0', requestId: 'install' });
+  const created = await runtime.conversations.create({ projectId: 'p', text: '只讨论，先看看项目。不要修改业务文件。', requestId: 'create' });
+  await runtime.host.runReady();
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.tasks).toHaveLength(0);
+  expect(effects).toBe(0);
+  expect(await readFile(business, 'utf8')).toBe('original business file');
+  const offered = (provider.requests[0] as { tools?: { function?: { name?: string } }[] } | undefined)?.tools?.map(tool => tool.function?.name) ?? [];
+  expect(offered).not.toContain('mcp_remote_write_business');
 }, 60_000);

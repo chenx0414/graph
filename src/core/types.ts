@@ -28,6 +28,8 @@ export interface Proposal {
   nodes: NodeSpec[];
   containers?: ContainerSpec[];
   loops?: LoopSpec[];
+  /** Master-authored decisions/constraints frozen with this draft version. */
+  decisions?: string[];
 }
 export interface Receipt { taskId: string; cursor: number }
 export interface ProposalReceipt extends Receipt { proposalVersion: number }

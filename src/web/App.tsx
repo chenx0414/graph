@@ -115,7 +115,7 @@ export function App() {
       {path === '/' && <Overview settings={settings} tasks={tasks} onTasks={setTasks} />}
       {path === '/catalog' && <Catalog settings={settings} />}
       {path === '/settings' && <Settings />}
-      {conversationMatch && <ConversationPanel id={conversationMatch[1]!} settings={settings} />}
+      {conversationMatch && <ConversationPanel key={conversationMatch[1]} id={conversationMatch[1]!} settings={settings} />}
       {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} settings={settings} startup={startup} />}
       {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
     </div>

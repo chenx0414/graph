@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
-import { appendMessage, conversationRow, listMessages } from './conversation.ts';
+import { appendMessage, conversationForTask, conversationRow, listMessages } from './conversation.ts';
 import { Execution } from './execution.ts';
 import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
@@ -404,7 +404,7 @@ export async function openTaskRuntime(options: {
       const anchor = store.task(conversation.anchor_task_id);
       const master = store.db.prepare("SELECT n.status,i.used,i.budget,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; used: number | null; budget: number | null; model: string | null; definition_version: string | null } | undefined;
       const proposalRow = anchor.latest_proposal
-        ? store.db.prepare('SELECT version,requirement_version,spec FROM proposals WHERE task_id=? AND version=?').get(anchor.id, anchor.latest_proposal) as { version: number; requirement_version: number; spec: string } | undefined
+        ? store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?').get(anchor.id, anchor.latest_proposal) as { version: number; requirement_version: number; spec: string; decision_snapshot: string | null } | undefined
         : undefined;
       const accepted = store.db.prepare('SELECT proposal_version,task_id,target_branch,accepted_at FROM conversation_acceptances WHERE conversation_id=? ORDER BY accepted_at').all(conversationId) as { proposal_version: number; task_id: string; target_branch: string; accepted_at: number }[];
       const tasks = (store.db.prepare("SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; request: string; phase: string; paused: number; target_branch: string | null; accepted_proposal: number | null; integration_sha: string | null }[]).map(task => {
@@ -444,7 +444,7 @@ export async function openTaskRuntime(options: {
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
         messages: listMessages(store, conversationId, query), messageCount,
         questions: anchorQuestions,
-        proposal: proposalRow ? { version: proposalRow.version, requirementVersion: proposalRow.requirement_version, stale: proposalRow.requirement_version !== anchor.requirement_version, spec: JSON.parse(proposalRow.spec) as Proposal } : null,
+        proposal: proposalRow ? { version: proposalRow.version, requirementVersion: proposalRow.requirement_version, stale: proposalRow.requirement_version !== anchor.requirement_version, spec: JSON.parse(proposalRow.spec) as Proposal, decisions: proposalRow.decision_snapshot } : null,
         accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at })),
         master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, budget: master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
         cost, usage: { used, budget },
@@ -483,6 +483,7 @@ export async function openTaskRuntime(options: {
           // project makes every existing draft unconfirmable, not just hidden.
           invalidated = true;
           store.db.prepare('UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?').run(conversation.anchor_task_id);
+          store.db.prepare('UPDATE conversations SET binding_since_seq=COALESCE((SELECT MAX(seq) FROM messages WHERE conversation_id=?),0) WHERE id=?').run(conversationId, conversationId);
           appendMessage(store, { conversationId, role: 'system', kind: 'project', text: `项目已从 ${previous} 变更为 ${input.projectId}；旧草稿失效，请重新调查后生成新草稿。`, state: 'done' });
           store.event(conversation.anchor_task_id, 'conversation.rebound', { from: previous, to: input.projectId });
         } else {
@@ -498,7 +499,7 @@ export async function openTaskRuntime(options: {
         if (!conversation.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
         if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
         const anchor = store.task(conversation.anchor_task_id);
-        const row = store.db.prepare('SELECT requirement_version,spec FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { requirement_version: number; spec: string } | undefined;
+        const row = store.db.prepare('SELECT requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { requirement_version: number; spec: string; decision_snapshot: string | null } | undefined;
         if (!row || anchor.latest_proposal !== input.proposalVersion || row.requirement_version !== anchor.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current draft on the current requirement can be confirmed');
         if (store.db.prepare('SELECT proposal_version FROM conversation_acceptances WHERE conversation_id=? AND proposal_version=?').get(conversationId, input.proposalVersion)) throw new RuntimeError('already_accepted', 'This draft was already confirmed');
         const proposal = JSON.parse(row.spec) as Proposal;
@@ -506,13 +507,13 @@ export async function openTaskRuntime(options: {
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
         const phase = active_task ? 'queued' : 'running';
-        // Sub-agents inherit the discussion facts that shaped this draft, not
-        // only the one-line proposal summary.
-        const decisions = (store.db.prepare("SELECT text FROM messages WHERE conversation_id=? AND role='user' ORDER BY seq DESC LIMIT 10").all(conversationId) as { text: string }[]).reverse();
-        const decisionDigest = [`Confirmed draft v${input.proposalVersion}: ${proposal.summary}`, ...decisions.map(message => `- user: ${message.text.slice(0, 240)}`)].join('\n');
+        // Sub-agents inherit exactly the snapshot frozen with this draft and
+        // reviewed on the confirmation card; nothing from later chat or from a
+        // previous project binding can slip in.
+        const decisionDigest = row.decision_snapshot;
         store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,1,1,1,?,?,?,1,?,?)')
           .run(taskId, conversation.project_id, proposal.summary, input.targetBranch, phase, sequence, conversationId, decisionDigest);
-        store.db.prepare('INSERT INTO proposals VALUES(?,?,?,?)').run(taskId, 1, 1, row.spec);
+        store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)').run(taskId, 1, 1, row.spec, row.decision_snapshot);
         store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,1,?,?,0)').run(taskId, row.spec, 'Confirmed conversation draft');
         for (const node of proposal.nodes) {
           const instanceId = node.kind === 'agent' ? randomUUID() : null;
@@ -615,7 +616,20 @@ export async function openTaskRuntime(options: {
             if (task.requirement_version !== proposal.requirementVersion) throw new RuntimeError('stale_requirement', 'Proposal uses an old requirement version');
             validateProposal(proposal);
             const version = task.latest_proposal + 1;
-            store.db.prepare('INSERT INTO proposals VALUES(?,?,?,?)').run(taskId, version, proposal.requirementVersion, canonicalJson(proposal));
+            // Freeze what the user will review: master-authored decisions when
+            // present, otherwise the consumed user messages of this project
+            // binding (delivered only, so unreviewed pending chat stays out).
+            const conversation = conversationForTask(store, taskId);
+            const curated = (proposal.decisions ?? []).map(item => item.trim()).filter(Boolean);
+            let snapshot: string | null = null;
+            if (curated.length) snapshot = curated.map(item => `- ${item}`).join('\n');
+            else if (conversation) {
+              const since = conversationRow(store, conversation.id).binding_since_seq;
+              const rows = store.db.prepare("SELECT seq,text FROM messages WHERE conversation_id=? AND role='user' AND state='delivered' AND seq>? ORDER BY seq").all(conversation.id, since) as { seq: number; text: string }[];
+              if (rows.length) snapshot = rows.map(row => `- [msg ${row.seq}] ${row.text.slice(0, 240)}`).join('\n');
+            }
+            store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)')
+              .run(taskId, version, proposal.requirementVersion, canonicalJson(proposal), snapshot);
             store.db.prepare('UPDATE tasks SET latest_proposal=? WHERE id=?').run(version, taskId);
             return { taskId, proposalVersion: version, cursor: store.event(taskId, 'proposal.created', { proposalVersion: version }) };
           });

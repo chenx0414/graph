@@ -1,6 +1,6 @@
 # 主 Agent 入口：独立验收返工报告
 
-日期：2026-09-14。状态：**ME-S01 与 ME-R01–R06 已修复并本地验证；等待独立复验。** 本文不宣布整体通过。独立验收报告见 [master-agent-entry-acceptance-2026-09-14](master-agent-entry-acceptance-2026-09-14.md)，原实施报告见 [master-agent-entry-report-2026-09-14](master-agent-entry-report-2026-09-14.md)，决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)。
+日期：2026-09-14。状态：**第一轮修复已由独立验收复验：ME-R01/R02/R03/R05/R06 关闭；ME-S01、ME-R04 保留开放并已在本轮继续修复（见 [第二轮返工报告](master-agent-entry-rework2-report-2026-09-14.md)）。** 本文不宣布整体通过。独立验收报告见 [master-agent-entry-acceptance-2026-09-14](master-agent-entry-acceptance-2026-09-14.md)，原实施报告见 [master-agent-entry-report-2026-09-14](master-agent-entry-report-2026-09-14.md)，决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)。
 
 ## 基线、分支与提交
 

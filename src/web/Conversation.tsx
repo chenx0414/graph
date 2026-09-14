@@ -35,7 +35,7 @@ type ConversationView = {
   createdAt: number; requirementVersion: number; paused: boolean;
   messages: ConversationMessage[]; messageCount: number;
   questions: AnchorQuestion[];
-  proposal: { version: number; requirementVersion: number; stale: boolean; spec: { summary: string; acceptance: { id: string; description: string; checkNode: string }[]; nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[]; loops?: { from: string; to: string }[] } } | null;
+  proposal: { version: number; requirementVersion: number; stale: boolean; decisions: string | null; spec: { summary: string; acceptance: { id: string; description: string; checkNode: string }[]; nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[]; loops?: { from: string; to: string }[] } } | null;
   accepted: { proposalVersion: number; taskId: string; targetBranch: string; acceptedAt: number }[];
   master: { nodeId: string; status: string; model: string | null; used: number | null; budget: number | null; definitionVersion: string | null; cost: { unknown?: boolean; amount?: number } } | null;
   cost: { unknown?: boolean; amount?: number };
@@ -138,7 +138,8 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   const [branch, setBranch] = useState('main');
   const [liveText, setLiveText] = useState<Record<string, string>>({});
   const [liveTools, setLiveTools] = useState<LiveTool[]>([]);
-  const [older, setOlder] = useState<ConversationMessage[]>([]);
+  const [cache, setCache] = useState<Record<string, ConversationMessage>>({});
+  const [historyExhausted, setHistoryExhausted] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
@@ -167,6 +168,21 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
     const latest = view?.accepted.at(-1);
     if (latest?.targetBranch) setBranch(latest.targetBranch);
   }, [view?.accepted]);
+  useEffect(() => {
+    if (!view) return;
+    setCache(current => {
+      let changed = false;
+      const next = { ...current };
+      for (const message of view.messages) {
+        const previous = next[message.id];
+        if (!previous || previous.text !== message.text || previous.state !== message.state || previous.updatedAt !== message.updatedAt) {
+          next[message.id] = message;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [view]);
   if (loading && !view) return <p>加载中…</p>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <p>加载中…</p>;
@@ -202,19 +218,23 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   }
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
-  const mergedMessages = [...older, ...view.messages].filter((message, index, list) => list.findIndex(candidate => candidate.id === message.id) === index);
-  const currentMessages = view.messages;
-  const oldestSeq = currentMessages[0]?.seq;
-  const hasOlder = typeof oldestSeq === 'number' && oldestSeq > 1;
+  // One stable, seq-ordered cache per mounted conversation: the sliding latest
+  // window is merged in by stable ID so history never develops gaps, and the
+  // history cursor always advances from the earliest record shown.
+  const cachedMessages = Object.values(cache).sort((left, right) => left.seq - right.seq);
+  const hasOlder = !historyExhausted && view.messageCount > cachedMessages.length;
   async function loadOlder() {
-    if (typeof oldestSeq !== 'number' || loadingOlder) return;
+    const earliest = cachedMessages[0]?.seq;
+    if (earliest === undefined || loadingOlder) return;
     setLoadingOlder(true);
     setActionError('');
     try {
-      const page = await api<ConversationView>(`/api/conversations/${id}?before=${oldestSeq}&limit=200`);
-      setOlder(current => {
-        const seen = new Set([...current, ...currentMessages].map(message => message.id));
-        return [...page.messages.filter(message => !seen.has(message.id)), ...current];
+      const page = await api<ConversationView>(`/api/conversations/${id}?before=${earliest}&limit=200`);
+      if (page.messages.length === 0) setHistoryExhausted(true);
+      setCache(current => {
+        const next = { ...current };
+        for (const message of page.messages) next[message.id] = message;
+        return next;
       });
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason));
@@ -259,7 +279,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
 
       <div data-testid="message-list">
         {hasOlder && <button type="button" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
-        {mergedMessages.map(message => <MessageRow key={message.id} message={message} />)}
+        {cachedMessages.map(message => <MessageRow key={message.id} message={message} />)}
         {liveEntries.map(([operationId, chunk]) => (
           <div key={operationId} data-testid="streaming" style={bubble}>
             <strong>主 Agent</strong> <small>正在输入…</small>
@@ -301,11 +321,18 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
             {(proposal.spec.loops?.length ?? 0) > 0 && (
               <p data-testid="draft-loops">返工回边：{proposal.spec.loops!.map(loop => `${loop.from} → ${loop.to}`).join('，')}</p>
             )}
+            {proposal.decisions && (
+              <div data-testid="draft-decisions">
+                <h5>确认后原样交给工人的决策/约束</h5>
+                <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0' }}>{proposal.decisions}</pre>
+              </div>
+            )}
             {proposal.stale && <p data-testid="draft-stale">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}
             {acceptedVersions.has(proposal.version) && <p data-testid="draft-accepted">此草稿已确认，执行任务见下方。</p>}
             {confirmable && !view.projectId && <p data-testid="draft-needs-project">确认前需要先绑定项目。</p>}
             {confirmable && view.projectId && (
               <div>
+                <p data-testid="draft-budget" style={{ color: '#666' }}>额度：主管已用 {view.master?.used ?? 0} / {view.master?.budget ?? 20_000_000} tokens；确认后每个 Agent 实例默认额度 20,000,000 tokens，由执行内核逐调用预留与结算。</p>
                 <label>目标分支 <input data-testid="accept-branch" value={branch} onChange={event => setBranch(event.target.value)} /></label>
                 <button type="button" data-testid="confirm-draft" onClick={() => void act(() => api(`/api/conversations/${id}/confirm`, { method: 'POST', body: JSON.stringify({ proposalVersion: proposal.version, targetBranch: branch, requestId: `confirm-${crypto.randomUUID()}` }) }))}>确认草稿并开始执行</button>
               </div>

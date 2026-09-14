@@ -237,6 +237,7 @@ export function createPiAdapter(options: {
                   ...(discussion ? [
                     '\nYou are the master agent in an ongoing conversation with the user. Understand the goal, investigate the project with the read-only tools, compare options, and ask only questions whose answers change the plan. Do not modify files, run implementation commands, or claim work is done.',
                     'propose_graph creates a draft version for the user to confirm; nothing is dispatched before confirmation. When the user changes direction, propose a new draft instead of arguing for the old one (only the latest draft on the current requirement can be confirmed).',
+                    'Each proposal should include a short decisions list of the binding constraints the user confirmed (for example "do not touch login.ts"); update or drop entries when the user revises them. The list is frozen with the draft and shown on the confirmation card, so workers receive exactly what the user reviewed.',
                     'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
                     'Write normal prose replies for chat; use tools only to investigate or to submit a draft.',
                   ] : []),
@@ -251,7 +252,8 @@ export function createPiAdapter(options: {
                   '  {"id":"review","kind":"agent","action":"review","definitionVersion":"reviewer@1","model":"<a different configured model>"},',
                   '  {"id":"review-gate","kind":"program","action":"graph.verify","dependsOn":["review"],"verifier":{"kind":"independent","reportNodes":["review"]}},',
                   '  {"id":"login","kind":"program","action":"graph.human_check","dependsOn":["review-gate"]}],',
-                  ' "loops": [{"from":"check","to":"work"}]}',
+                  ' "loops": [{"from":"check","to":"work"}],',
+                  ' "decisions": ["<binding constraint the user confirmed>"]}',
                 ].join('\n')
               : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             await session.prompt(`${briefing}${hint}`);

@@ -1,6 +1,6 @@
 # 以主 Agent 为入口：实施与验收报告
 
-日期：2026-09-14（返工轮更新）。状态：**首轮独立验收不通过；ME-S01 与 ME-R01–R06 已修复，等待独立复验；本文不宣布整体通过。** 返工记录见 [返工报告](master-agent-entry-rework-report-2026-09-14.md)。 方案见 [主 Agent 入口改造草案](master-agent-entry-plan-2026-09-14.md)，差距核对见 [代码差距核对](master-agent-entry-gap-2026-09-14.md)，架构决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)。
+日期：2026-09-14（返工轮更新）。状态：**首轮独立验收不通过；ME-S01 与 ME-R01–R06 已修复，等待独立复验；本文不宣布整体通过。** 返工记录见 [第一轮返工报告](master-agent-entry-rework-report-2026-09-14.md) 与 [第二轮返工报告](master-agent-entry-rework2-report-2026-09-14.md)。 方案见 [主 Agent 入口改造草案](master-agent-entry-plan-2026-09-14.md)，差距核对见 [代码差距核对](master-agent-entry-gap-2026-09-14.md)，架构决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)。
 
 ## 基线、分支与提交
 

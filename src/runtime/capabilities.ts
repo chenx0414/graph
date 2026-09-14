@@ -220,6 +220,13 @@ export async function loadCapabilities(input: {
         releases.push(acquired.release);
         connection = await localConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
       } else {
+        // HTTP is only a transport: a remote service can operate on business
+        // resources and its self-reported annotations are not authorization.
+        // Discussion therefore uses only host-recognized read paths (built-in
+        // reads, capability snapshots, local capability reads with a read-only
+        // business directory, and controlled retrieval); remote tools load at
+        // execution time and remain grant-gated per call.
+        if (input.readOnly) continue;
         const grants = input.grants ?? [];
         authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };
         connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? []);
