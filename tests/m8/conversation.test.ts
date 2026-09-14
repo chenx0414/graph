@@ -312,3 +312,22 @@ test('a scope change after confirmation becomes a new queued task, not an edit o
   expect(unchanged.phase).toBe('running');
   expect(view.requirementVersion).toBe(3);
 });
+
+test('a conversation created without models gets its master once dispatch is available', async () => {
+  const root = await temp('view-mode');
+  const first = await withRuntime(root, () => ({ outcome: 'completed', output: { text: 'never runs' }, usage }), false);
+  const created = await first.conversations.create({ text: '仅查看模式下的消息', requestId: 'create' });
+  const before = await first.conversations.view(created.conversationId);
+  expect(before.master).toBeNull();
+  expect(before.messages.find(message => message.role === 'user')!.state).toBe('pending');
+  await first.close();
+
+  const seen: Operation[] = [];
+  const second = await withRuntime(root, operation => { seen.push(operation); return { outcome: 'completed', output: { text: '恢复后的主管答复' }, usage }; });
+  await second.host.runReady();
+  expect(seen).toHaveLength(1);
+  expect(seen[0]!.context.messages?.map(message => message.text)).toEqual(['仅查看模式下的消息']);
+  const after = await second.conversations.view(created.conversationId);
+  expect(after.master?.status).toBe('succeeded');
+  expect(after.messages.find(message => message.role === 'assistant')?.text).toBe('恢复后的主管答复');
+});
