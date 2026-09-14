@@ -339,6 +339,13 @@ export async function openTaskRuntime(options: {
     }, 0) };
   };
 
+  /** The anchor plus every feature task created from this conversation. */
+  const conversationTaskIds = (store: TaskStore, conversationId: string) => {
+    const anchor = conversationRow(store, conversationId).anchor_task_id;
+    const linked = (store.db.prepare('SELECT id FROM tasks WHERE conversation_id=?').all(conversationId) as { id: string }[]).map(row => row.id);
+    return [...new Set([anchor, ...linked])];
+  };
+
   // Conversation entry: chat messages are durable and queue behind the master
   // turn, while every formal change (bind, confirm) is a validated command.
   const conversations = {
@@ -391,7 +398,7 @@ export async function openTaskRuntime(options: {
         status: row.openQuestions > 0 ? 'blocked' : row.taskCount > 0 ? 'executing' : 'chatting',
       }));
     },
-    async view(conversationId: string, query: { after?: number; limit?: number } = {}) {
+    async view(conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
@@ -416,15 +423,31 @@ export async function openTaskRuntime(options: {
         };
       });
       const project = conversation.project_id ? store.db.prepare('SELECT root FROM projects WHERE id=?').get(conversation.project_id) as { root: string } | undefined : undefined;
+      const anchorQuestions = (store.db.prepare('SELECT id,node_id,operation_id,kind,status,data,answer FROM questions WHERE task_id=? ORDER BY rowid').all(conversation.anchor_task_id) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null }[])
+        .map(question => ({ id: question.id, nodeId: question.node_id, operationId: question.operation_id, kind: question.kind, status: question.status, data: JSON.parse(question.data) as Json, answer: question.answer ? JSON.parse(question.answer) as Json : null, taskId: conversation.anchor_task_id }));
+      const ledgerCost = taskCost(conversation.anchor_task_id);
+      // Unknown usage can be pending reconciliation before any priced
+      // invocation exists (scripted adapters, recovery before settle); an open
+      // unknown_usage question is authoritative that the cost is not known.
+      const masterUnknown = anchorQuestions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
+      const unknownPending = masterUnknown || tasks.some(task => task.openQuestions.some(question => question.kind === 'unknown_usage'));
+      const masterCost = masterUnknown && ledgerCost.unknown !== true ? { unknown: true as const } : ledgerCost;
+      const unknownCost = masterCost.unknown === true || unknownPending || tasks.some(task => task.cost.unknown === true);
+      const cost = unknownCost ? { unknown: true as const } : { amount: (masterCost.amount ?? 0) + tasks.reduce((sum, task) => sum + (task.cost.amount ?? 0), 0) };
+      const used = (master?.used ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.used ?? 0), 0), 0);
+      const budget = (master?.budget ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.budget ?? 0), 0), 0);
+      const messageCount = (store.db.prepare('SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?').get(conversationId) as { count: number }).count;
       return {
         id: conversation.id, title: conversation.title, projectId: conversation.project_id, projectRoot: project?.root ?? null,
         paused: Boolean(anchor.paused),
         workspaceProjectId: conversation.workspace_project_id, anchorTaskId: conversation.anchor_task_id,
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
-        messages: listMessages(store, conversationId, query.after ?? 0, query.limit ?? 200),
+        messages: listMessages(store, conversationId, query), messageCount,
+        questions: anchorQuestions,
         proposal: proposalRow ? { version: proposalRow.version, requirementVersion: proposalRow.requirement_version, stale: proposalRow.requirement_version !== anchor.requirement_version, spec: JSON.parse(proposalRow.spec) as Proposal } : null,
         accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at })),
-        master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, budget: master.budget, definitionVersion: master.definition_version } : null,
+        master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, budget: master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
+        cost, usage: { used, budget },
         tasks,
         cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
       };
@@ -450,10 +473,22 @@ export async function openTaskRuntime(options: {
       if (!store.db.prepare('SELECT id FROM projects WHERE id=?').get(input.projectId)) throw new RuntimeError('invalid_input', 'A known project is required');
       if (configuredProjects !== undefined && !allowedProjects.has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
       return store.command(`conversation:${conversationId}`, input.requestId, { type: 'bind', projectId: input.projectId }, () => {
+        const previous = conversation.project_id;
+        if (previous === input.projectId) return { conversationId, taskId: conversation.anchor_task_id, changed: false, cursor: null as number | null };
         store.db.prepare('UPDATE conversations SET project_id=? WHERE id=?').run(input.projectId, conversationId);
         store.db.prepare('UPDATE tasks SET project_id=? WHERE id=?').run(input.projectId, conversation.anchor_task_id);
-        appendMessage(store, { conversationId, role: 'system', kind: 'project', text: `已绑定项目 ${input.projectId}`, state: 'done' });
-        return { conversationId, taskId: conversation.anchor_task_id, cursor: store.event(conversation.anchor_task_id, 'conversation.bound', { projectId: input.projectId }) };
+        let invalidated = false;
+        if (previous !== null) {
+          // A draft was investigated against the old project; switching the
+          // project makes every existing draft unconfirmable, not just hidden.
+          invalidated = true;
+          store.db.prepare('UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?').run(conversation.anchor_task_id);
+          appendMessage(store, { conversationId, role: 'system', kind: 'project', text: `项目已从 ${previous} 变更为 ${input.projectId}；旧草稿失效，请重新调查后生成新草稿。`, state: 'done' });
+          store.event(conversation.anchor_task_id, 'conversation.rebound', { from: previous, to: input.projectId });
+        } else {
+          appendMessage(store, { conversationId, role: 'system', kind: 'project', text: `已绑定项目 ${input.projectId}`, state: 'done' });
+        }
+        return { conversationId, taskId: conversation.anchor_task_id, changed: true, invalidatedDrafts: invalidated, cursor: store.event(conversation.anchor_task_id, 'conversation.bound', { projectId: input.projectId, previous }) };
       });
     },
     async confirm(conversationId: string, input: { proposalVersion: number; targetBranch: string; requestId: string }) {
@@ -471,8 +506,12 @@ export async function openTaskRuntime(options: {
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
         const phase = active_task ? 'queued' : 'running';
-        store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id) VALUES(?,?,?,1,1,1,?,?,?,1,?)')
-          .run(taskId, conversation.project_id, proposal.summary, input.targetBranch, phase, sequence, conversationId);
+        // Sub-agents inherit the discussion facts that shaped this draft, not
+        // only the one-line proposal summary.
+        const decisions = (store.db.prepare("SELECT text FROM messages WHERE conversation_id=? AND role='user' ORDER BY seq DESC LIMIT 10").all(conversationId) as { text: string }[]).reverse();
+        const decisionDigest = [`Confirmed draft v${input.proposalVersion}: ${proposal.summary}`, ...decisions.map(message => `- user: ${message.text.slice(0, 240)}`)].join('\n');
+        store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,1,1,1,?,?,?,1,?,?)')
+          .run(taskId, conversation.project_id, proposal.summary, input.targetBranch, phase, sequence, conversationId, decisionDigest);
         store.db.prepare('INSERT INTO proposals VALUES(?,?,?,?)').run(taskId, 1, 1, row.spec);
         store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,1,?,?,0)').run(taskId, row.spec, 'Confirmed conversation draft');
         for (const node of proposal.nodes) {
@@ -503,15 +542,44 @@ export async function openTaskRuntime(options: {
     },
     watch(conversationId: string, after = 0): TaskWatch {
       ensureOpen();
-      return user.task(conversationRow(store, conversationId).anchor_task_id).watch(after);
+      conversationRow(store, conversationId);
+      if (!Number.isSafeInteger(after) || after < 0) throw new RuntimeError('invalid_cursor', 'Invalid event cursor');
+      const controller = new AbortController();
+      // The stream covers the anchor and every task the conversation created,
+      // re-reading the task set each iteration so a new task is included
+      // without reconnecting. The global event cursor stays monotonic.
+      const iterator = (async function* () {
+        let cursor = after;
+        while (!closed && !controller.signal.aborted) {
+          const wake = store.waitForChange(controller.signal);
+          const ids = conversationTaskIds(store, conversationId);
+          const rows = store.db.prepare(`SELECT cursor,task_id,type,data,timestamp FROM events WHERE task_id IN (${ids.map(() => '?').join(',')}) AND cursor>? ORDER BY cursor LIMIT 100`)
+            .all(...ids, cursor) as { cursor: number; task_id: string; type: string; data: string; timestamp: number }[];
+          if (rows.length) {
+            wake.cancel();
+            for (const row of rows) {
+              if (controller.signal.aborted) return;
+              cursor = row.cursor;
+              yield { cursor: row.cursor, taskId: row.task_id, type: row.type, data: JSON.parse(row.data) as Json, timestamp: row.timestamp } as TaskUpdate;
+            }
+          } else {
+            await Promise.race([wake.promise, new Promise(resolve => setTimeout(resolve, 250))]);
+            wake.cancel();
+          }
+        }
+      })();
+      return {
+        [Symbol.asyncIterator]() { return this; },
+        next: () => iterator.next(),
+        return: async () => { controller.abort(); return iterator.return(); },
+      };
     },
     events(conversationId: string, after = 0, limit = 200) {
       ensureOpen();
-      const anchorTaskId = conversationRow(store, conversationId).anchor_task_id;
-      store.task(anchorTaskId);
+      const ids = conversationTaskIds(store, conversationId);
       const cap = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 200;
-      return (store.db.prepare('SELECT cursor,type,data,timestamp FROM events WHERE task_id=? AND cursor>? ORDER BY cursor LIMIT ?').all(anchorTaskId, after, cap) as { cursor: number; type: string; data: string; timestamp: number }[])
-        .map(row => ({ cursor: row.cursor, type: row.type, data: JSON.parse(row.data) as Json, timestamp: row.timestamp, taskId: anchorTaskId }));
+      return (store.db.prepare(`SELECT cursor,task_id,type,data,timestamp FROM events WHERE task_id IN (${ids.map(() => '?').join(',')}) AND cursor>? ORDER BY cursor LIMIT ?`).all(...ids, after, cap) as { cursor: number; task_id: string; type: string; data: string; timestamp: number }[])
+        .map(row => ({ cursor: row.cursor, type: row.type, data: JSON.parse(row.data) as Json, timestamp: row.timestamp, taskId: row.task_id }));
     },
   };
 

@@ -165,6 +165,7 @@ export function createPiAdapter(options: {
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
             workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'), gate,
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
+            ...(discussion ? { readOnly: true } : {}),
             grants: operation.grants,
             onPermissionRequired: request => { permissionRequest ??= request; },
           });

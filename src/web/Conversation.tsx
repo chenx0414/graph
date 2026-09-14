@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
+import { GraphCanvas } from './GraphCanvas.tsx';
 import { QuestionReply } from './Questions.tsx';
-import { ErrorBox, useAsync, useTaskStream } from './shared.tsx';
+import { ErrorBox, useAsync, useEventStream } from './shared.tsx';
 
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[] };
 type ConversationSummary = {
@@ -22,13 +23,23 @@ type ConversationTask = {
   cost: { unknown?: boolean; amount?: number };
   evidence: { acceptanceId: string; valid: boolean }[];
 };
+type DraftGraph = {
+  nodes: { id: string; kind: string; status: string; container?: string }[];
+  containers: { id: string; parent?: string }[];
+  loops: { from: string; to: string }[];
+  layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
+};
+type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string };
 type ConversationView = {
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;
   createdAt: number; requirementVersion: number; paused: boolean;
-  messages: ConversationMessage[];
-  proposal: { version: number; requirementVersion: number; stale: boolean; spec: { summary: string; acceptance: { id: string; description: string; checkNode: string }[]; nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[] } } | null;
+  messages: ConversationMessage[]; messageCount: number;
+  questions: AnchorQuestion[];
+  proposal: { version: number; requirementVersion: number; stale: boolean; spec: { summary: string; acceptance: { id: string; description: string; checkNode: string }[]; nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[]; loops?: { from: string; to: string }[] } } | null;
   accepted: { proposalVersion: number; taskId: string; targetBranch: string; acceptedAt: number }[];
-  master: { nodeId: string; status: string; model: string | null; used: number | null; budget: number | null; definitionVersion: string | null } | null;
+  master: { nodeId: string; status: string; model: string | null; used: number | null; budget: number | null; definitionVersion: string | null; cost: { unknown?: boolean; amount?: number } } | null;
+  cost: { unknown?: boolean; amount?: number };
+  usage: { used: number; budget: number };
   tasks: ConversationTask[];
   cursor: number;
 };
@@ -119,6 +130,7 @@ function MessageRow({ message }: { message: ConversationMessage }) {
 
 export function ConversationPanel({ id, settings }: { id: string; settings: Settings | null }) {
   const { data: view, error, loading, reload } = useAsync(() => api<ConversationView>(`/api/conversations/${id}`), [id]);
+  const { data: draftGraph } = useAsync(() => api<DraftGraph>(`/api/conversations/${id}/draft-graph`), [id, view?.proposal?.version]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -126,6 +138,8 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   const [branch, setBranch] = useState('main');
   const [liveText, setLiveText] = useState<Record<string, string>>({});
   const [liveTools, setLiveTools] = useState<LiveTool[]>([]);
+  const [older, setOlder] = useState<ConversationMessage[]>([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
     // One event usually means several records changed; coalesce the refetches.
@@ -133,7 +147,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
     refreshTimer.current = setTimeout(() => reload(), 150);
   }, [reload]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
-  const connected = useTaskStream(view?.anchorTaskId ?? null, event => {
+  const connected = useEventStream(view ? `/api/conversations/${view.id}/events/stream` : null, event => {
     const data = event.data as { operationId?: string; text?: string; message?: ConversationMessage; phase?: string; toolCallId?: string; toolName?: string; summary?: string } | undefined;
     if (event.type === 'message.delta' && data?.text) {
       setLiveText(current => ({ ...current, [data.operationId ?? 'stream']: (current[data.operationId ?? 'stream'] ?? '') + data.text }));
@@ -164,9 +178,6 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   const durableAssistantOps = new Set(view.messages.filter(message => message.role === 'assistant' && message.operationId).map(message => message.operationId!));
   const durableToolIds = new Set(view.messages.filter(message => message.role === 'tool' && typeof message.data?.toolCallId === 'string').map(message => String(message.data!.toolCallId)));
   const liveEntries = Object.entries(liveText).filter(([operationId]) => !durableAssistantOps.has(operationId));
-  const totalUsed = view.master?.used ?? 0;
-  const totalTasksCost = view.tasks.reduce((sum, task) => sum + (task.cost.unknown ? 0 : task.cost.amount ?? 0), 0);
-  const unknownCost = view.tasks.some(task => task.cost.unknown);
 
   async function act(action: () => Promise<unknown>, after?: () => void) {
     setActionError('');
@@ -190,6 +201,27 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
     }
   }
 
+  const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
+  const mergedMessages = [...older, ...view.messages].filter((message, index, list) => list.findIndex(candidate => candidate.id === message.id) === index);
+  const currentMessages = view.messages;
+  const oldestSeq = currentMessages[0]?.seq;
+  const hasOlder = typeof oldestSeq === 'number' && oldestSeq > 1;
+  async function loadOlder() {
+    if (typeof oldestSeq !== 'number' || loadingOlder) return;
+    setLoadingOlder(true);
+    setActionError('');
+    try {
+      const page = await api<ConversationView>(`/api/conversations/${id}?before=${oldestSeq}&limit=200`);
+      setOlder(current => {
+        const seen = new Set([...current, ...currentMessages].map(message => message.id));
+        return [...page.messages.filter(message => !seen.has(message.id)), ...current];
+      });
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
   return (
     <section data-testid="conversation">
       <h2 data-testid="conversation-title">{view.title}</h2>
@@ -197,7 +229,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
         {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}（{view.projectRoot}）</span> : <span data-testid="conversation-project">未绑定项目</span>}
         {' · '}主 Agent：<span data-testid="master-status">{view.paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
         {' · '}<span data-testid="conversation-connection">{connected ? '已连接' : '重连中…'}</span>
-        {' · '}已计量 {totalUsed} tokens{unknownCost ? ' · 费用未知' : ` · 费用 ${totalTasksCost}`}
+        {' · '}已计量 {view.usage.used} tokens{view.cost.unknown ? ' · 费用未知' : ` · 费用 ${view.cost.amount ?? 0}`}
       </p>
       <p>
         <button type="button" data-testid="conversation-pause" onClick={() => void act(() => api(`/api/conversations/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>暂停主 Agent</button>
@@ -216,8 +248,18 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
         </section>
       )}
 
+      {masterQuestions.length > 0 && (
+        <section data-testid="master-questions" style={{ border: '1px solid #e7c66b', background: '#fff9e8', padding: '8px 12px', margin: '8px 0' }}>
+          <h3 style={{ margin: '0 0 6px' }}>主 Agent 需要你的处理</h3>
+          <ul data-testid="master-questions-list">
+            {masterQuestions.map(question => <QuestionReply key={question.id} taskId={question.taskId} question={question} onDone={() => void reload()} />)}
+          </ul>
+        </section>
+      )}
+
       <div data-testid="message-list">
-        {view.messages.map(message => <MessageRow key={message.id} message={message} />)}
+        {hasOlder && <button type="button" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
+        {mergedMessages.map(message => <MessageRow key={message.id} message={message} />)}
         {liveEntries.map(([operationId, chunk]) => (
           <div key={operationId} data-testid="streaming" style={bubble}>
             <strong>主 Agent</strong> <small>正在输入…</small>
@@ -251,6 +293,14 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
             <ul>{proposal.spec.nodes.map(node => (
               <li key={node.id}>{node.id} · {node.kind}{node.action ? ` · ${node.action}` : ''}{node.model ? ` · 模型 ${node.model}` : ''}{node.definitionVersion ? ` · ${node.definitionVersion}` : ''}{node.dependsOn?.length ? ` · 依赖 ${node.dependsOn.join(',')}` : ''}</li>
             ))}</ul>
+            {draftGraph && draftGraph.nodes.length > 0 && (
+              <div data-testid="draft-graph" style={{ height: 480, border: '1px solid #d8d8d8', marginTop: 8, position: 'relative' }}>
+                <GraphCanvas graph={{ nodes: draftGraph.nodes, containers: draftGraph.containers, layout: draftGraph.layout }} collapsed={{}} onSelect={() => undefined} />
+              </div>
+            )}
+            {(proposal.spec.loops?.length ?? 0) > 0 && (
+              <p data-testid="draft-loops">返工回边：{proposal.spec.loops!.map(loop => `${loop.from} → ${loop.to}`).join('，')}</p>
+            )}
             {proposal.stale && <p data-testid="draft-stale">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}
             {acceptedVersions.has(proposal.version) && <p data-testid="draft-accepted">此草稿已确认，执行任务见下方。</p>}
             {confirmable && !view.projectId && <p data-testid="draft-needs-project">确认前需要先绑定项目。</p>}

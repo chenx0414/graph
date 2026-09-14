@@ -206,7 +206,13 @@ export class Execution {
       // history and must not satisfy the dependency that is still pending.
       const current = this.store.db.prepare("SELECT o.state,o.result FROM operations o JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id WHERE o.task_id=? AND o.node_id=? AND o.activation_id=n.activation_id ORDER BY o.rowid DESC LIMIT 1").get(taskId, question.node_id) as { state: string; result: string | null } | undefined;
       const completed = current?.state === 'succeeded' && current.result !== null && (JSON.parse(current.result) as OperationResult).outcome === 'completed';
-      if (!['rework', 'stalled'].includes(question.kind)) this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?').run(completed ? 'succeeded' : 'pending', taskId, question.node_id);
+      // A conversation master with messages queued during the blocked turn must
+      // stay pending: marking it succeeded here would strand the second message
+      // after an unknown-usage or budget reconciliation.
+      const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(taskId, question.node_id) as { spec: string }).spec) as NodeSpec;
+      const conversation = nodeSpec.role === 'master' ? conversationForTask(this.store, taskId) : undefined;
+      const queued = conversation ? pendingMessages(this.store, conversation.id, 1).length : 0;
+      if (!['rework', 'stalled'].includes(question.kind)) this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?').run(completed && !queued ? 'succeeded' : 'pending', taskId, question.node_id);
     }
     if (['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond')) {
       const resume = (JSON.parse(question.data) as { resume?: string[] }).resume ?? [];
@@ -500,6 +506,7 @@ export class Execution {
           ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
           ...(review ? { review } : {}),
           ...(conversationStatus ? { conversation: conversationStatus } : {}),
+          ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
           ...(spec.role === 'master' ? { catalog: {
             definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
             capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
@@ -512,6 +519,7 @@ export class Execution {
           ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
           ...(review ? { review } : {}),
           ...(conversationStatus ? { conversation: conversationStatus } : {}),
+          ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
         });
       }
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")

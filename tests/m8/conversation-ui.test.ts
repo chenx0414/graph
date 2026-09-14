@@ -185,6 +185,8 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('chat-send').click();
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('最小可用版');
+  // The draft graph renders from the same versioned proposal.
+  await page.getByTestId('draft-graph').waitFor();
   await page.screenshot({ path: join(evidence, '02-first-draft.png'), fullPage: true });
 
   // 3. Overturn the draft before confirming; the new draft replaces it.

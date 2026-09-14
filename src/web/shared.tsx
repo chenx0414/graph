@@ -36,10 +36,12 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
   return { data, error, loading, reload };
 }
 
+export type StreamEvent = { cursor: number; type: string; taskId?: string; data?: unknown; timestamp?: number };
+
 /** EventSource with an event cursor. Reconnects from the last applied cursor,
  * so a drop replays only what was missed and duplicate deliveries are ignored.
- * A null task id keeps the stream closed until the record is known. */
-export function useTaskStream(taskId: string | null, onEvent: (event: { cursor: number; type: string; data?: unknown; timestamp?: number }) => void) {
+ * A null URL keeps the stream closed until the record is known. */
+export function useEventStream(url: string | null, onEvent: (event: StreamEvent) => void) {
   const [connected, setConnected] = useState(false);
   const cursor = useRef(0);
   const handler = useRef(onEvent);
@@ -47,13 +49,13 @@ export function useTaskStream(taskId: string | null, onEvent: (event: { cursor: 
   useEffect(() => {
     cursor.current = 0;
     setConnected(false);
-    if (!taskId) return;
+    if (!url) return;
     let source: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
     const open = () => {
       if (closed) return;
-      source = new EventSource(`/api/tasks/${taskId}/events/stream?after=${cursor.current}`);
+      source = new EventSource(`${url}?after=${cursor.current}`);
       source.onopen = () => setConnected(true);
       source.onmessage = message => {
         try {
@@ -72,6 +74,10 @@ export function useTaskStream(taskId: string | null, onEvent: (event: { cursor: 
     };
     open();
     return () => { closed = true; clearTimeout(timer); source?.close(); };
-  }, [taskId]);
+  }, [url]);
   return connected;
+}
+
+export function useTaskStream(taskId: string | null, onEvent: (event: StreamEvent) => void) {
+  return useEventStream(taskId ? `/api/tasks/${taskId}/events/stream` : null, onEvent);
 }

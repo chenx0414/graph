@@ -75,10 +75,21 @@ export function releaseMessages(store: TaskStore, operationId: string) {
   store.db.prepare("UPDATE messages SET state='pending',operation_id=NULL,updated_at=? WHERE operation_id=? AND state='delivered'").run(Date.now(), operationId);
 }
 
-export function listMessages(store: TaskStore, conversationId: string, after = 0, limit = 200) {
-  const cap = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 200;
-  return (store.db.prepare('SELECT * FROM messages WHERE conversation_id=? AND seq>? ORDER BY seq LIMIT ?').all(conversationId, after, cap) as unknown as MessageRow[])
-    .map(publicMessage);
+/** Page messages without ever hiding the newest records: the default page is
+ * the latest window, `after` walks forward (incremental reads) and `before`
+ * walks backward (history). */
+export function listMessages(store: TaskStore, conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+  const cap = Number.isSafeInteger(query.limit) && query.limit! > 0 ? Math.min(query.limit!, 500) : 200;
+  if (query.after !== undefined) {
+    return (store.db.prepare('SELECT * FROM messages WHERE conversation_id=? AND seq>? ORDER BY seq LIMIT ?').all(conversationId, query.after, cap) as unknown as MessageRow[])
+      .map(publicMessage);
+  }
+  if (query.before !== undefined) {
+    return (store.db.prepare('SELECT * FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?').all(conversationId, query.before, cap) as unknown as MessageRow[])
+      .reverse().map(publicMessage);
+  }
+  return (store.db.prepare('SELECT * FROM messages WHERE conversation_id=? ORDER BY seq DESC LIMIT ?').all(conversationId, cap) as unknown as MessageRow[])
+    .reverse().map(publicMessage);
 }
 
 function projectLine(store: TaskStore, projectId: string | null) {

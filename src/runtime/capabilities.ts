@@ -98,7 +98,7 @@ async function runGrants(workspace: string, scratchDir: string) {
 
 async function localConnection(input: {
   executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
-  manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string;
+  manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
 }): Promise<McpExchange> {
   if (typeof input.manifest.command !== 'string' || !isAbsolute(input.manifest.command)) {
     throw new RuntimeError('capability_unavailable', 'A local MCP capability requires capability.json with an absolute command');
@@ -109,14 +109,15 @@ async function localConnection(input: {
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
     command: input.manifest.command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
     readPaths: [input.snapshot, dirname(process.execPath)],
-    writePaths: [grants.workspace, grants.scratchDir],
+    // Discussion turns may read the business directory but only write scratch.
+    writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],
   });
 }
 
 /** Extensions load only inside the restricted worker, never in the background process. */
 async function extensionConnection(input: {
   executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
-  manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string;
+  manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
 }): Promise<McpExchange> {
   const entryValue = typeof input.manifest.entry === 'string' && input.manifest.entry.trim() ? input.manifest.entry : './index.mjs';
   const entry = isAbsolute(entryValue) ? entryValue : resolve(input.snapshot, entryValue);
@@ -129,7 +130,9 @@ async function extensionConnection(input: {
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
     command: process.execPath, args: [extensionWorker, await realpath(entry)],
     readPaths: [input.snapshot, dirname(process.execPath), dirname(extensionWorker)],
-    writePaths: [grants.workspace, grants.scratchDir],
+    // Extension register() and every tool call share this restriction, so a
+    // bound extension cannot write business files during discussion.
+    writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],
   });
 }
 
@@ -176,6 +179,8 @@ export async function loadCapabilities(input: {
   gate: SendGate;
   mcpDomains?: string[];
   grants?: string[];
+  /** Discussion turns investigate without writing the business directory. */
+  readOnly?: boolean;
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
 }): Promise<LoadedCapabilities> {
   const skillPaths: string[] = [];
@@ -209,11 +214,11 @@ export async function loadCapabilities(input: {
       if (record.kind === 'extension') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
-        connection = await extensionConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir });
+        connection = await extensionConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
       } else if (typeof manifest.command === 'string') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
-        connection = await localConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir });
+        connection = await localConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
       } else {
         const grants = input.grants ?? [];
         authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };

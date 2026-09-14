@@ -80,8 +80,23 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/conversations/:conversationId', async request => {
     const params = request.params as { conversationId: string };
-    const query = request.query as { after?: string; limit?: string };
-    return runtime.conversations.view(params.conversationId, { ...(query.after ? { after: Number(query.after) } : {}), ...(query.limit ? { limit: Number(query.limit) } : {}) });
+    const query = request.query as { after?: string; before?: string; limit?: string };
+    return runtime.conversations.view(params.conversationId, {
+      ...(query.after ? { after: Number(query.after) } : {}),
+      ...(query.before ? { before: Number(query.before) } : {}),
+      ...(query.limit ? { limit: Number(query.limit) } : {}),
+    });
+  });
+  app.get('/api/conversations/:conversationId/draft-graph', async request => {
+    const params = request.params as { conversationId: string };
+    const view = await runtime.conversations.view(params.conversationId, { limit: 1 });
+    const spec = view.proposal?.spec;
+    if (!spec) return { nodes: [], containers: [], loops: [], layout: { positions: {}, edges: [] } };
+    const layout = await layoutGraph({ nodes: spec.nodes, containers: spec.containers ?? [], loops: spec.loops ?? [] });
+    return {
+      nodes: spec.nodes.map(node => ({ id: node.id, kind: node.kind, status: 'draft', container: node.container })),
+      containers: spec.containers ?? [], loops: spec.loops ?? [], layout,
+    };
   });
   app.post('/api/conversations/:conversationId/messages', async request => {
     const params = request.params as { conversationId: string };
