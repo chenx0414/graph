@@ -1,0 +1,457 @@
+{
+  "scenario": "real-clock-message-state-versions",
+  "sampleCount": 30,
+  "sameMillisecondTransitions": 0,
+  "samples": [
+    {
+      "updates": [
+        {
+          "cursor": 3,
+          "state": "delivered",
+          "updatedAt": 1789393038051
+        },
+        {
+          "cursor": 5,
+          "state": "pending",
+          "updatedAt": 1789393038052
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 9,
+          "state": "delivered",
+          "updatedAt": 1789393038053
+        },
+        {
+          "cursor": 11,
+          "state": "pending",
+          "updatedAt": 1789393038054
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 15,
+          "state": "delivered",
+          "updatedAt": 1789393038054
+        },
+        {
+          "cursor": 17,
+          "state": "pending",
+          "updatedAt": 1789393038055
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 21,
+          "state": "delivered",
+          "updatedAt": 1789393038055
+        },
+        {
+          "cursor": 23,
+          "state": "pending",
+          "updatedAt": 1789393038056
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 27,
+          "state": "delivered",
+          "updatedAt": 1789393038056
+        },
+        {
+          "cursor": 29,
+          "state": "pending",
+          "updatedAt": 1789393038057
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 33,
+          "state": "delivered",
+          "updatedAt": 1789393038057
+        },
+        {
+          "cursor": 35,
+          "state": "pending",
+          "updatedAt": 1789393038058
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 39,
+          "state": "delivered",
+          "updatedAt": 1789393038058
+        },
+        {
+          "cursor": 41,
+          "state": "pending",
+          "updatedAt": 1789393038059
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 45,
+          "state": "delivered",
+          "updatedAt": 1789393038059
+        },
+        {
+          "cursor": 47,
+          "state": "pending",
+          "updatedAt": 1789393038060
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 51,
+          "state": "delivered",
+          "updatedAt": 1789393038060
+        },
+        {
+          "cursor": 53,
+          "state": "pending",
+          "updatedAt": 1789393038061
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 57,
+          "state": "delivered",
+          "updatedAt": 1789393038061
+        },
+        {
+          "cursor": 59,
+          "state": "pending",
+          "updatedAt": 1789393038062
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 63,
+          "state": "delivered",
+          "updatedAt": 1789393038063
+        },
+        {
+          "cursor": 65,
+          "state": "pending",
+          "updatedAt": 1789393038064
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 69,
+          "state": "delivered",
+          "updatedAt": 1789393038064
+        },
+        {
+          "cursor": 71,
+          "state": "pending",
+          "updatedAt": 1789393038065
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 75,
+          "state": "delivered",
+          "updatedAt": 1789393038065
+        },
+        {
+          "cursor": 77,
+          "state": "pending",
+          "updatedAt": 1789393038066
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 81,
+          "state": "delivered",
+          "updatedAt": 1789393038066
+        },
+        {
+          "cursor": 83,
+          "state": "pending",
+          "updatedAt": 1789393038067
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 87,
+          "state": "delivered",
+          "updatedAt": 1789393038067
+        },
+        {
+          "cursor": 89,
+          "state": "pending",
+          "updatedAt": 1789393038068
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 93,
+          "state": "delivered",
+          "updatedAt": 1789393038068
+        },
+        {
+          "cursor": 95,
+          "state": "pending",
+          "updatedAt": 1789393038069
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 99,
+          "state": "delivered",
+          "updatedAt": 1789393038070
+        },
+        {
+          "cursor": 101,
+          "state": "pending",
+          "updatedAt": 1789393038071
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 105,
+          "state": "delivered",
+          "updatedAt": 1789393038071
+        },
+        {
+          "cursor": 107,
+          "state": "pending",
+          "updatedAt": 1789393038072
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 111,
+          "state": "delivered",
+          "updatedAt": 1789393038072
+        },
+        {
+          "cursor": 113,
+          "state": "pending",
+          "updatedAt": 1789393038073
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 117,
+          "state": "delivered",
+          "updatedAt": 1789393038073
+        },
+        {
+          "cursor": 119,
+          "state": "pending",
+          "updatedAt": 1789393038074
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 123,
+          "state": "delivered",
+          "updatedAt": 1789393038074
+        },
+        {
+          "cursor": 125,
+          "state": "pending",
+          "updatedAt": 1789393038075
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 129,
+          "state": "delivered",
+          "updatedAt": 1789393038076
+        },
+        {
+          "cursor": 131,
+          "state": "pending",
+          "updatedAt": 1789393038077
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 135,
+          "state": "delivered",
+          "updatedAt": 1789393038077
+        },
+        {
+          "cursor": 137,
+          "state": "pending",
+          "updatedAt": 1789393038078
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 141,
+          "state": "delivered",
+          "updatedAt": 1789393038078
+        },
+        {
+          "cursor": 143,
+          "state": "pending",
+          "updatedAt": 1789393038079
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 147,
+          "state": "delivered",
+          "updatedAt": 1789393038080
+        },
+        {
+          "cursor": 149,
+          "state": "pending",
+          "updatedAt": 1789393038081
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 153,
+          "state": "delivered",
+          "updatedAt": 1789393038081
+        },
+        {
+          "cursor": 155,
+          "state": "pending",
+          "updatedAt": 1789393038082
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 159,
+          "state": "delivered",
+          "updatedAt": 1789393038083
+        },
+        {
+          "cursor": 161,
+          "state": "pending",
+          "updatedAt": 1789393038084
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 165,
+          "state": "delivered",
+          "updatedAt": 1789393038084
+        },
+        {
+          "cursor": 167,
+          "state": "pending",
+          "updatedAt": 1789393038085
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 171,
+          "state": "delivered",
+          "updatedAt": 1789393038085
+        },
+        {
+          "cursor": 173,
+          "state": "pending",
+          "updatedAt": 1789393038086
+        }
+      ],
+      "equalTimestamp": false
+    },
+    {
+      "updates": [
+        {
+          "cursor": 177,
+          "state": "delivered",
+          "updatedAt": 1789393038087
+        },
+        {
+          "cursor": 179,
+          "state": "pending",
+          "updatedAt": 1789393038088
+        }
+      ],
+      "equalTimestamp": false
+    }
+  ]
+}

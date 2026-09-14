@@ -146,3 +146,50 @@ test('processed history messages update from pending to delivered without a relo
   expect(first.text).toBe('PENDING-000');
   expect(first.state).toBe('delivered');
 }, 120_000);
+
+test('interleaved conversations page by their own records, not by global sequence steps', async () => {
+  const root = await temp('interleaved');
+  const server = await openGraphServer({ stateDir: join(root, 'state'), autoDrive: false, webDir });
+  cleanup.push(() => server.close());
+  const runtime = server.runtime;
+  const a = await runtime.conversations.create({ text: 'A-000', requestId: 'a' });
+  const b = await runtime.conversations.create({ text: 'B-000', requestId: 'b' });
+  // B interleaves every record, so A's global seqs are sparse inside A.
+  for (let index = 1; index <= 500; index++) {
+    await runtime.conversations.chat(a.conversationId, { text: `A-${String(index).padStart(3, '0')}`, requestId: `a-${index}` });
+    await runtime.conversations.chat(b.conversationId, { text: `B-${String(index).padStart(3, '0')}`, requestId: `b-${index}` });
+  }
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const userMessages = () => page.getByTestId('message-user');
+  await page.goto(`${server.url}/#/conversations/${a.conversationId}`);
+  await userMessages().filter({ hasText: 'A-500' }).waitFor();
+  expect(await userMessages().count()).toBe(200);
+
+  await page.getByTestId('load-older').click();
+  await userMessages().filter({ hasText: 'A-101' }).waitFor();
+  expect(await userMessages().count()).toBe(400);
+  await page.getByTestId('load-older').click();
+  await userMessages().filter({ hasText: 'A-000' }).waitFor();
+  expect(await userMessages().count()).toBe(501);
+  expect(await page.getByTestId('load-older').count()).toBe(0);
+  expect(await userMessages().filter({ hasText: 'B-' }).count()).toBe(0);
+
+  // A burst during interleaving must still fill every real hole.
+  for (let index = 501; index <= 760; index++) {
+    await runtime.conversations.chat(a.conversationId, { text: `A-${String(index).padStart(3, '0')}`, requestId: `a-${index}` });
+    await runtime.conversations.chat(b.conversationId, { text: `B-${String(index).padStart(3, '0')}`, requestId: `b-${index}` });
+  }
+  await userMessages().filter({ hasText: 'A-760' }).waitFor();
+  const deadline = Date.now() + 20_000;
+  while (await userMessages().count() < 761 && Date.now() < deadline) {
+    const button = page.getByTestId('load-older');
+    if (await button.count() > 0) await button.click();
+    await page.waitForTimeout(200);
+  }
+  expect(await userMessages().count()).toBe(761);
+  expect(await userMessages().filter({ hasText: 'A-501' }).count()).toBe(1);
+  expect(await userMessages().filter({ hasText: 'A-700' }).count()).toBe(1);
+  expect(await userMessages().filter({ hasText: 'B-' }).count()).toBe(0);
+}, 120_000);

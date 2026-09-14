@@ -48,7 +48,7 @@ export function appendMessage(store: TaskStore, input: {
   const now = Date.now();
   let row: MessageRow;
   if (input.messageId) {
-    store.db.prepare('UPDATE messages SET text=?,data=?,state=?,operation_id=?,turn=?,updated_at=? WHERE id=? AND conversation_id=?')
+    store.db.prepare('UPDATE messages SET text=?,data=?,state=?,operation_id=?,turn=?,updated_at=MAX(?,updated_at+1) WHERE id=? AND conversation_id=?')
       .run(input.text, input.data === undefined ? null : canonicalJson(input.data), input.state ?? 'done', input.operationId ?? null, input.turn ?? 0, now, input.messageId, input.conversationId);
     row = store.db.prepare('SELECT * FROM messages WHERE id=?').get(input.messageId) as unknown as MessageRow;
     store.event((store.db.prepare('SELECT anchor_task_id FROM conversations WHERE id=?').get(input.conversationId) as { anchor_task_id: string }).anchor_task_id, 'message.updated', { message: publicMessage(row) });
@@ -84,7 +84,7 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
 export function releaseMessages(store: TaskStore, operationId: string) {
   const rows = messagesForOperation(store, operationId).filter(row => row.state === 'delivered');
   if (!rows.length) return;
-  store.db.prepare("UPDATE messages SET state='pending',operation_id=NULL,updated_at=? WHERE operation_id=? AND state='delivered'").run(Date.now(), operationId);
+  store.db.prepare("UPDATE messages SET state='pending',operation_id=NULL,updated_at=MAX(?,updated_at+1) WHERE operation_id=? AND state='delivered'").run(Date.now(), operationId);
   for (const row of rows) publishMessageUpdate(store, row.id);
 }
 

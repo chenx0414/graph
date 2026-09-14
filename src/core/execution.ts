@@ -529,7 +529,10 @@ export class Execution {
         // the binding durable before any provider send can happen. The state
         // change is published so a browser cache that no longer holds these
         // records in its latest window still updates from pending to delivered.
-        this.store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=? WHERE id IN (${chatMessages.map(() => '?').join(',')})`)
+        // MAX(?, updated_at+1) keeps every state transition strictly newer
+        // than the previous record even when two changes land in the same
+        // millisecond, so incremental caches can order them reliably.
+        this.store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1) WHERE id IN (${chatMessages.map(() => '?').join(',')})`)
           .run(operation.id, attempt, Date.now(), ...chatMessages.map(message => message.id));
         for (const message of chatMessages) publishMessageUpdate(this.store, message.id);
       }

@@ -1,0 +1,2 @@
+{"scenario":"loaded-history-state-refresh","initial":"pending","ledgerState":"delivered","uiState":"delivered","visibleUserCount":220,"passed":true}
+{"scenario":"burst-middle-page-gap","ledgerCount":280,"beforeHistory":280,"afterHistory":280,"gapBefore":false,"gapAfter":false,"loadOlderVisible":false,"passed":true}

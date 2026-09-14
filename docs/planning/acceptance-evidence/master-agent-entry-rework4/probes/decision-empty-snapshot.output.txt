@@ -1,0 +1,10 @@
+{
+  "name": "explicit-empty-decisions",
+  "declaredDecisions": [],
+  "confirmationSnapshot": "",
+  "acceptedTask": "0c30e171-ba3b-4fe0-a630-af8e7a0c0062",
+  "workerCount": 1,
+  "workerReceivesWithdrawnConstraint": false,
+  "workerBriefing": "Request: Revised draft with no remaining constraints\nRequirement version: 1\nUser messages:\n- (v1) Revised draft with no remaining constraints\nSummary: Revised draft with no remaining constraints\nAcceptance:\n- works (check check): Fixture check\nTask graph (program checks run these inputs; confirmed check inputs must stay unchanged):\n- work (agent work)\n- check (program graph.command) after work input={\"args\":[\"check.js\"],\"command\":\"node\"}",
+  "passed": true
+}

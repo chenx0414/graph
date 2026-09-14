@@ -140,6 +140,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   const [liveTools, setLiveTools] = useState<LiveTool[]>([]);
   const [cache, setCache] = useState<Record<string, ConversationMessage>>({});
   const [historyExhausted, setHistoryExhausted] = useState(false);
+  const [forwardCursor, setForwardCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   // One stable, seq-ordered cache per mounted conversation. Every source
   // (latest window, history pages, streamed message records) merges by stable
@@ -235,26 +236,36 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
   const cachedMessages = Object.values(cache).sort((left, right) => left.seq - right.seq);
-  const gapIndex = cachedMessages.findIndex((message, index) => index > 0 && message.seq > cachedMessages[index - 1]!.seq + 1);
-  const hasOlder = !historyExhausted && (gapIndex > 0 || view.messageCount > cachedMessages.length);
+  const currentMessages = view.messages;
+  const totalMessages = view.messageCount;
+  const hasOlder = !historyExhausted && totalMessages > cachedMessages.length;
   async function loadOlder() {
     if (loadingOlder) return;
+    if (totalMessages <= cachedMessages.length) { setHistoryExhausted(true); return; }
     setLoadingOlder(true);
     setActionError('');
     try {
-      // A burst of new records can leave a hole between the loaded head and the
-      // latest window; walk forward from the hole before reaching further back.
-      if (gapIndex > 0) {
-        const page = await api<ConversationView>(`/api/conversations/${id}?after=${cachedMessages[gapIndex - 1]!.seq}&limit=200`);
-        mergeMessages(page.messages);
-        if (page.messages.length === 0) setHistoryExhausted(true);
-        return;
+      // `messages.seq` is a global sequence shared by every conversation, so a
+      // step in the numbers is not evidence of a missing record here. History
+      // is always fetched by the conversation's own filters: first older than
+      // the earliest known record, and only once that is exhausted does a
+      // forward cursor sweep any remaining middle/latest records.
+      const earliest = cachedMessages[0]?.seq;
+      if (earliest !== undefined && earliest > 1) {
+        const older = await api<ConversationView>(`/api/conversations/${id}?before=${earliest}&limit=200`);
+        if (older.messages.length) { mergeMessages(older.messages); return; }
       }
-      const earliest = cachedMessages[0]?.seq ?? 1;
-      if (earliest <= 1) { setHistoryExhausted(true); return; }
-      const page = await api<ConversationView>(`/api/conversations/${id}?before=${earliest}&limit=200`);
-      mergeMessages(page.messages);
-      if (page.messages.length === 0) setHistoryExhausted(true);
+      // Start the sweep from the tail of the records known to precede the
+      // latest window, so a burst fills its hole instead of re-walking the
+      // whole conversation; the cursor then advances page by page.
+      const windowStart = currentMessages[0]?.seq;
+      const belowWindow = windowStart === undefined ? cachedMessages : cachedMessages.filter(message => message.seq < windowStart);
+      const base = belowWindow.length ? belowWindow[belowWindow.length - 1]!.seq : (earliest ?? 0);
+      const cursor = forwardCursor === null ? base : Math.max(forwardCursor, base);
+      const forward = await api<ConversationView>(`/api/conversations/${id}?after=${cursor}&limit=200`);
+      if (!forward.messages.length) { setHistoryExhausted(true); return; }
+      mergeMessages(forward.messages);
+      setForwardCursor(forward.messages[forward.messages.length - 1]!.seq);
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
