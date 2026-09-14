@@ -73,6 +73,58 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return { projects, models, definitions, capabilities };
   });
   app.get('/api/tasks', async () => runtime.user.list());
+  app.get('/api/conversations', async () => runtime.conversations.list());
+  app.post('/api/conversations', async request => {
+    const body = request.body as { projectId?: string; title?: string; text?: string; requestId: string };
+    return runtime.conversations.create({ ...(body.projectId ? { projectId: body.projectId } : {}), ...(body.title ? { title: body.title } : {}), ...(body.text ? { text: body.text } : {}), requestId: body.requestId });
+  });
+  app.get('/api/conversations/:conversationId', async request => {
+    const params = request.params as { conversationId: string };
+    const query = request.query as { after?: string; limit?: string };
+    return runtime.conversations.view(params.conversationId, { ...(query.after ? { after: Number(query.after) } : {}), ...(query.limit ? { limit: Number(query.limit) } : {}) });
+  });
+  app.post('/api/conversations/:conversationId/messages', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { text: string; requestId: string };
+    return runtime.conversations.chat(params.conversationId, { text: body.text, requestId: body.requestId });
+  });
+  app.post('/api/conversations/:conversationId/bind', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { projectId: string; requestId: string };
+    return runtime.conversations.bind(params.conversationId, { projectId: body.projectId, requestId: body.requestId });
+  });
+  app.post('/api/conversations/:conversationId/confirm', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { proposalVersion: number; targetBranch: string; requestId: string };
+    return runtime.conversations.confirm(params.conversationId, { proposalVersion: body.proposalVersion, targetBranch: body.targetBranch, requestId: body.requestId });
+  });
+  app.post('/api/conversations/:conversationId/pause', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.pause(params.conversationId, body.requestId);
+  });
+  app.post('/api/conversations/:conversationId/resume', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.resume(params.conversationId, body.requestId);
+  });
+  app.get('/api/conversations/:conversationId/events', async request => {
+    const params = request.params as { conversationId: string };
+    const query = request.query as { after?: string; limit?: string };
+    return runtime.conversations.events(params.conversationId, Number(query.after ?? 0), query.limit ? Number(query.limit) : 200);
+  });
+  app.get('/api/conversations/:conversationId/events/stream', async (request, reply) => {
+    const params = request.params as { conversationId: string };
+    const after = Number((request.query as { after?: string }).after ?? 0);
+    reply.hijack();
+    reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    const watch = runtime.conversations.watch(params.conversationId, after);
+    try {
+      for await (const event of watch) {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+    } finally { await watch.return?.(); reply.raw.end(); }
+  });
   app.post('/api/tasks', async request => {
     const body = request.body as { projectId: string; request: string; requestId: string };
     return runtime.user.begin({ projectId: body.projectId, request: body.request, requestId: body.requestId });

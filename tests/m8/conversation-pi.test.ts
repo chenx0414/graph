@@ -1,0 +1,179 @@
+import { createServer } from 'node:http';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { AddressInfo } from 'node:net';
+import { afterEach, expect, test } from 'vitest';
+import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { git } from '../../src/git/git.ts';
+
+const cleanup: (() => Promise<void> | void)[] = [];
+afterEach(async () => {
+  for (const action of cleanup.reverse()) {
+    await Promise.race([Promise.resolve(action()).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]);
+  }
+  cleanup.length = 0;
+});
+
+async function temp(name: string) {
+  const dir = await mkdtemp(join(tmpdir(), `graph-m8-conv-pi-${name}-`));
+  cleanup.push(() => rm(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+const proposal = {
+  requirementVersion: 1, summary: '最小可用版',
+  acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+  nodes: [
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+    { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+  ],
+};
+
+/** Deterministic local provider: a master that investigates once, drafts once,
+ * then answers from its briefing; workers always finish. */
+async function conversationProvider() {
+  const requests: { tools: string[]; messages: { role?: string; content?: unknown }[] }[] = [];
+  let listed = false;
+  let drafted = false;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] } : {};
+    const tools = (body.tools ?? []).map(tool => tool.function?.name ?? '');
+    requests.push({ tools, messages: body.messages ?? [] });
+    const isMaster = tools.includes('propose_graph');
+    // A new prompt ends with the user briefing; tool follow-ups end with a tool
+    // result, which the persistent session also keeps in older history.
+    const isNewPrompt = (body.messages ?? []).at(-1)?.role === 'user';
+    const usage = { prompt_tokens: 12, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 0 } };
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    const chunk = (delta: unknown, finish: string | null) => response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
+    const end = (finish: string) => {
+      chunk({}, finish);
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: finish }], usage })}\n\n`);
+      response.end('data: [DONE]\n\n');
+    };
+    if (!isMaster) {
+      chunk({ role: 'assistant', content: 'worker finished' }, null);
+      end('stop');
+      return;
+    }
+    if (!isNewPrompt) {
+      const text = drafted ? '草稿已经生成，等待你确认。' : '本轮完成';
+      chunk({ role: 'assistant', content: text }, null);
+      end('stop');
+      return;
+    }
+    if (!listed) {
+      listed = true;
+      chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'call-ls', type: 'function', function: { name: 'list_dir', arguments: JSON.stringify({ path: '.' }) } }] }, null);
+      end('tool_calls');
+      return;
+    }
+    if (!drafted) {
+      drafted = true;
+      chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'call-propose', type: 'function', function: { name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'master-draft' }) } }] }, null);
+      end('tool_calls');
+      return;
+    }
+    chunk({ role: 'assistant', content: '当前 work 节点还在执行准备中，check 尚未运行。' }, null);
+    end('stop');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+  const model: Model<'openai-completions'> = {
+    id: 'local', name: 'Local', provider: 'local', api: 'openai-completions', baseUrl,
+    reasoning: false, input: ['text'], contextWindow: 32_000, maxTokens: 256,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+  const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false, refreshOnCreate: false });
+  modelRuntime.registerProvider('local', { baseUrl, api: 'openai-completions', apiKey: 'local-key', models: [model] });
+  return { baseUrl, modelRuntime, requests };
+}
+
+test('the real Pi master investigates, drafts, and keeps answering after confirmation', async () => {
+  const root = await temp('flow');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, 'check.js'), 'console.log("check passed");\n');
+  await writeFile(join(project, 'README.md'), '# Conversation project\n');
+  git(project, ['init', '-q', '-b', 'main']);
+  git(project, ['config', 'user.email', 'graph@example.invalid']);
+  git(project, ['config', 'user.name', 'Graph Test']);
+  git(project, ['add', '.']);
+  git(project, ['commit', '-q', '-m', 'init']);
+
+  const provider = await conversationProvider();
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [{ id: 'local', provider: 'local', grade: 'high', api: 'openai-completions', baseUrl: provider.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'c' }],
+      apiKey: 'local-key', modelRuntime: provider.modelRuntime,
+      credentialFor: () => ({ credentialId: 'c', apiKey: 'local-key' }),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
+
+  // 1. Chat before any project or task exists.
+  const created = await runtime.conversations.create({ text: '这个项目很乱，先帮我看看。', requestId: 'create' });
+  await runtime.host.runReady();
+  let view = await runtime.conversations.view(created.conversationId);
+  expect(view.projectId).toBeNull();
+  expect(view.messages.map(message => message.role)).toContain('tool');
+  expect(view.messages.filter(message => message.role === 'assistant').map(message => message.text)).toContain('本轮完成');
+  expect(view.tasks).toEqual([]);
+
+  // 2. Bind the project, discuss, and let the master draft.
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  await runtime.conversations.chat(created.conversationId, { text: '就用这个项目，先做最小可用版。', requestId: 'chat' });
+  await runtime.host.runReady();
+  view = await runtime.conversations.view(created.conversationId);
+  expect(view.proposal?.version).toBe(1);
+  expect(view.proposal?.spec.summary).toBe('最小可用版');
+  expect(view.tasks).toEqual([]);
+  expect(view.messages.some(message => message.role === 'system' && message.kind === 'project')).toBe(true);
+  expect(view.messages.some(message => message.role === 'assistant' && message.text === '草稿已经生成，等待你确认。')).toBe(true);
+
+  // 3. Confirm and keep talking while the feature task exists.
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  await runtime.conversations.chat(created.conversationId, { text: '现在卡在哪里？', requestId: 'ask' });
+  await runtime.host.runReady();
+  view = await runtime.conversations.view(created.conversationId);
+  expect(view.tasks.map(task => task.id)).toEqual([confirmed.taskId]);
+  expect(view.messages.some(message => message.role === 'system' && message.kind === 'confirmed')).toBe(true);
+  expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('work 节点');
+
+  // Read-only discussion: master requests must never expose write tools.
+  const masterRequests = provider.requests.filter(request => request.tools.includes('propose_graph'));
+  expect(masterRequests.length).toBeGreaterThanOrEqual(3);
+  for (const request of masterRequests) {
+    expect(request.tools).not.toContain('write_file');
+    expect(request.tools).not.toContain('run_command');
+    expect(request.tools).toContain('read');
+  }
+  expect(JSON.stringify(masterRequests[0]!.messages)).toContain('ongoing conversation');
+  // The post-confirmation briefing carries recorded execution facts.
+  const statusRequest = provider.requests.find(request => JSON.stringify(request.messages).includes('现在卡在哪里？'));
+  expect(statusRequest).toBeTruthy();
+  const statusPrompt = JSON.stringify(statusRequest!.messages);
+  expect(statusPrompt).toContain('Feature task');
+  expect(statusPrompt).toContain(confirmed.taskId.slice(0, 8));
+  expect(statusPrompt).toContain('work:pending');
+  // Workers keep their write tools.
+  expect(provider.requests.some(request => request.tools.includes('write_file'))).toBe(true);
+
+  // Streaming and tool activity are on the conversation stream; the durable
+  // messages stay the authoritative record.
+  const events = runtime.conversations.events(created.conversationId);
+  expect(events.some(event => event.type === 'message.delta')).toBe(true);
+  expect(events.some(event => event.type === 'message.tool' && (event.data as { phase?: string }).phase === 'start')).toBe(true);
+  expect(view.messages.some(message => message.role === 'tool' && message.text.includes('list_dir'))).toBe(true);
+}, 120_000);

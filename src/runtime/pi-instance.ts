@@ -33,6 +33,9 @@ export interface PiInstanceOptions {
   skillPaths?: string[];
   broker?: SendGate;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
+  /** A conversation master may bind a project after its first turn; the
+   * session keeps its identity while the workspace moves to the project. */
+  allowWorkspaceChange?: boolean;
   onEvent?: (event: AgentSessionEvent) => void;
 }
 
@@ -61,7 +64,8 @@ export async function openPiInstance(options: PiInstanceOptions) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  if (manifest && (manifest.version !== 1 || manifest.workspace !== workspace ||
+  if (manifest && (manifest.version !== 1 ||
+    (manifest.workspace !== workspace && !options.allowWorkspaceChange) ||
     manifest.binding.instanceId !== options.binding.instanceId ||
     manifest.binding.nodeId !== options.binding.nodeId ||
     manifest.binding.definitionVersion !== options.binding.definitionVersion)) {

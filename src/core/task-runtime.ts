@@ -504,6 +504,14 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       return user.task(conversationRow(store, conversationId).anchor_task_id).watch(after);
     },
+    events(conversationId: string, after = 0, limit = 200) {
+      ensureOpen();
+      const anchorTaskId = conversationRow(store, conversationId).anchor_task_id;
+      store.task(anchorTaskId);
+      const cap = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 200;
+      return (store.db.prepare('SELECT cursor,type,data,timestamp FROM events WHERE task_id=? AND cursor>? ORDER BY cursor LIMIT ?').all(anchorTaskId, after, cap) as { cursor: number; type: string; data: string; timestamp: number }[])
+        .map(row => ({ cursor: row.cursor, type: row.type, data: JSON.parse(row.data) as Json, timestamp: row.timestamp, taskId: anchorTaskId }));
+    },
   };
 
   const runtime = {

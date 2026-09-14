@@ -2,11 +2,13 @@ import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import type { Model } from '@earendil-works/pi-ai';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
+import { conversationForTask } from '../core/conversation.ts';
 import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
@@ -40,6 +42,19 @@ function assistantText(messages: unknown[]) {
     if (message.role === 'assistant') return message.content?.filter(part => part.type === 'text').map(part => part.text ?? '').join('') ?? '';
   }
   return '';
+}
+
+/** One-line summary of a tool call for the conversation activity stream. */
+function summarizeToolCall(name: string, args: unknown) {
+  const body = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {};
+  const target = (key: string) => typeof body[key] === 'string' ? body[key] as string : undefined;
+  const summary = name === 'read' || name === 'write_file' || name === 'list_dir' ? target('path') ?? name
+    : name === 'run_command' ? [target('command'), ...(Array.isArray(body.args) ? (body.args as unknown[]).map(String) : [])].filter(Boolean).join(' ')
+      : name === 'fetch' ? target('url') ?? name
+        : name === 'propose_graph' ? 'draft'
+          : name === 'submit_result' ? 'structured result'
+            : name;
+  return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
 }
 
 // One Pi operation is a whole session of provider calls, not a single request.
@@ -130,6 +145,11 @@ export function createPiAdapter(options: {
           settle: (id, usage) => gate.settle(id, usage),
         };
         const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+        // Discussion turns must investigate without modifying the project; the
+        // same read-only boundary applies to conversation masters after the
+        // draft is confirmed.
+        const discussion = spec.role === 'master' && (task.phase === 'chatting' || task.phase === 'discussing');
+        const conversation = task.phase === 'chatting' ? conversationForTask(options.store, operation.taskId) : undefined;
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
@@ -157,6 +177,7 @@ export function createPiAdapter(options: {
         const tools = [
           ...agentTools({
             workspace, ...(spec.role ? { role: spec.role } : {}),
+            ...(discussion ? { readOnly: true } : {}),
             ...(capabilities.readRoots.length ? { readRoots: capabilities.readRoots } : {}),
             run: (command, args) => commands.run(command, args),
             ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
@@ -165,12 +186,46 @@ export function createPiAdapter(options: {
           }),
           ...capabilities.tools,
         ];
+        // Live conversation text and tool activity are separate from the final
+        // message: deltas are coalesced for reconnect, the durable assistant
+        // record is written by the kernel when the operation settles.
+        const streamed = { text: '', buffer: '', lastFlush: 0 };
+        const flushDeltas = (force: boolean) => {
+          if (!conversation || !streamed.buffer) return;
+          const now = Date.now();
+          if (!force && now - streamed.lastFlush < 150) return;
+          const text = streamed.buffer;
+          streamed.buffer = '';
+          streamed.lastFlush = now;
+          options.store.event(operation.taskId, 'message.delta', { operationId: operation.id, text });
+        };
+        const toolSummaries = new Map<string, string>();
+        const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
+        const onEvent = (event: AgentSessionEvent) => {
+          if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
+            streamed.text += event.assistantMessageEvent.delta;
+            streamed.buffer += event.assistantMessageEvent.delta;
+            flushDeltas(false);
+            return;
+          }
+          if (!conversation) return;
+          if (event.type === 'tool_execution_start') {
+            const summary = summarizeToolCall(event.toolName, event.args);
+            toolSummaries.set(event.toolCallId, summary);
+            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary });
+          } else if (event.type === 'tool_execution_end') {
+            const summary = toolSummaries.get(event.toolCallId) ?? event.toolName;
+            toolActivity.push({ toolCallId: event.toolCallId, name: event.toolName, summary, state: event.isError ? 'error' : 'done' });
+            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError });
+          }
+        };
         try {
           const session = await openPiInstance({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, apiKey, slot),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
+            ...(conversation ? { allowWorkspaceChange: true, onEvent } : {}),
           });
           try {
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
@@ -178,7 +233,13 @@ export function createPiAdapter(options: {
             const models = options.directory().map((entry, index) => `${index === 0 ? 'implementation' : 'review'}=${entry.id} (${entry.grade})`).join(', ');
             const hint = spec.role === 'master'
               ? [
-                  '\nUse propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands (including a headless browser test), graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.',
+                  ...(discussion ? [
+                    '\nYou are the master agent in an ongoing conversation with the user. Understand the goal, investigate the project with the read-only tools, compare options, and ask only questions whose answers change the plan. Do not modify files, run implementation commands, or claim work is done.',
+                    'propose_graph creates a draft version for the user to confirm; nothing is dispatched before confirmation. When the user changes direction, propose a new draft instead of arguing for the old one (only the latest draft on the current requirement can be confirmed).',
+                    'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
+                    'Write normal prose replies for chat; use tools only to investigate or to submit a draft.',
+                  ] : []),
+                  'Use propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands (including a headless browser test), graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.',
                   `Configured models: ${models || '(none)'}. Implementation nodes must use the implementation model and review nodes must use the review model, both from the briefing catalog (for example coder@1, reviewer@1).`,
                   'proposalJson schema:',
                   `{"requirementVersion": ${operation.requirementVersion}, "summary": "<one line>",`,
@@ -193,6 +254,7 @@ export function createPiAdapter(options: {
                 ].join('\n')
               : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             await session.prompt(`${briefing}${hint}`);
+            flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
             // A provider or transport error ends the turn with an assistant
             // error message; that is a failure, never a successful operation.
@@ -209,7 +271,13 @@ export function createPiAdapter(options: {
               };
             }
             const text = assistantText(session.inspect().messages);
-            return { outcome: 'completed', output: (submitted ?? { text }) as Json, usage: gate.total() };
+            const reply = text.trim() ? text : streamed.text;
+            // The conversation output always carries the visible reply; worker
+            // output keeps its existing submitted-or-text shape.
+            const output: Json = conversation
+              ? { text: reply, ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
+              : (submitted ?? { text });
+            return { outcome: 'completed', output, usage: gate.total() };
           } finally { await session.close(); }
         } finally { await capabilities.close(); await commands.close(); }
       };

@@ -25,6 +25,8 @@ export function agentTools(input: {
   workspace: string;
   role?: NodeSpec['role'];
   readRoots?: string[];
+  /** Discussion turns investigate without writing business files or running commands. */
+  readOnly?: boolean;
   run?: (command: string, args: string[]) => Promise<{ code: number | null; stdout: string; stderr: string }>;
   fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
@@ -48,15 +50,15 @@ export function agentTools(input: {
         return text(await readBounded(root, requested));
       },
     },
-    {
+    ...(input.readOnly ? [] : [{
       name: 'write_file', label: 'Write file', description: 'Write a UTF-8 file inside the instance workspace.',
       parameters: Type.Object({ path: Type.String(), content: Type.String() }),
-      execute: async (_id, params) => {
+      execute: async (_id: string, params: unknown) => {
         const body = fields(params);
         await writeBounded(root, String(body.path), String(body.content));
         return text(`Wrote ${body.path}`);
       },
-    },
+    }]),
     {
       name: 'list_dir', label: 'List directory', description: 'List files in a workspace directory.',
       parameters: Type.Object({ path: Type.String() }),
@@ -71,7 +73,7 @@ export function agentTools(input: {
       },
     },
   ];
-  if (input.run) {
+  if (input.run && !input.readOnly) {
     const run = input.run;
     tools.push(externallyGated({
       name: 'run_command', label: 'Run command', description: 'Run an allowed command inside the work copy: command is a bare executable name (node or git) and args is a string array, for example {command:"node",args:["--test","test/x.test.js"]}. It is not a shell; git only supports read-only status/diff/log/show.',
