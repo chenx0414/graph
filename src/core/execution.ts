@@ -714,9 +714,13 @@ export class Execution {
           throw new RuntimeError('invalid_adapter', 'graph.command requires input {command, args}');
         }
         validateWorkspaceCommand(input.command, input.args);
-        if (!operation.workspace) throw new RuntimeError('invalid_adapter', 'graph.command requires a work copy');
+        const projectRoot = (this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(this.store.task(operation.taskId).project_id) as { root: string } | undefined)?.root;
+        // Non-git projects have no work copy; their agent instances work in the
+        // project root, so the confirmed check runs there too. Git projects
+        // must use a work copy so the primary checkout stays untouched.
+        const workspace = operation.workspace ?? (projectRoot && !this.git?.repoRoot(operation.taskId) ? projectRoot : undefined);
+        if (!workspace) throw new RuntimeError('invalid_adapter', 'graph.command requires a work copy');
         return async () => {
-          const workspace = operation.workspace!;
           // The host may provide the project's dependency directory so a
           // confirmed browser check can resolve Playwright from the work copy.
           if (this.program?.nodeModulesPath) {

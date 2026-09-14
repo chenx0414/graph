@@ -134,3 +134,45 @@ test('read-only Git commands still run inside the sandbox', async () => {
   await expect(runner.run('git', ['commit', '-m', 'changed'])).rejects.toMatchObject({ code: 'permission' });
   expect(await readFile(join(workspace, 'README.md'), 'utf8')).toBe('project\n');
 });
+
+test('graph.command checks run in the project root of a non-git project', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-command-plain-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(join(workspace, 'test'), { recursive: true });
+  await writeFile(join(workspace, 'test/sample.test.js'), [
+    "import { test } from 'node:test';",
+    "import { writeFileSync } from 'node:fs';",
+    "test('writes proof', () => { writeFileSync('ran-plain.txt', 'ran'); });",
+  ].join('\n'));
+  const provider = await openaiServer([{ text: 'Done.' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: {},
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Run the tests.', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Run the tests',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--test', 'test/sample.test.js'] } },
+    ],
+  }, 'proposal');
+  const task = runtime.user.task(taskId);
+  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await runtime.host.runReady();
+    const view = await task.view();
+    if (view.phase === 'completed' || view.nodes.some(node => node.id === 'check' && node.status === 'failed')) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const view = await task.view();
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  expect(await readFile(join(workspace, 'ran-plain.txt'), 'utf8')).toBe('ran');
+  expect(view.questions.filter(question => question.kind === 'adapter_error')).toHaveLength(0);
+}, 90_000);
