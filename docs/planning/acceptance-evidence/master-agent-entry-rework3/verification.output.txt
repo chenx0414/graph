@@ -46,3 +46,18 @@ ipc-handoff-listening-event rc=0
 ipc-handoff-duplicate-id rc=0
 ipc-listening-order rc=0
 === done 2026年 9月14日 星期一 21时18分08秒 CST ===
+
+=== post-commit verification 714ce2a32b726a35ab20ba9eef58a00abe0df0d9 2026年 9月14日 星期一 21时18分51秒 CST ===
+tsc main rc=0
+tsc web rc=0
+      Tests  247 passed (247)
+   Start at  21:18:51
+   Duration  18.40s (tests 74%, import 25%, transform 1%)
+
+rework-probes rc=0
+{"check":"message-pagination","passed":true,"total":202,"pageFirst":"message-002","pageLast":"message-201","older":["message-000","message-001"],"forward":0}
+{"check":"unknown-cost-and-decision-digest","passed":true,"unknownCost":true,"digestPresent":true}
+history-cache-consistency rc=0
+2
+decision-empty-snapshot rc=0
+1

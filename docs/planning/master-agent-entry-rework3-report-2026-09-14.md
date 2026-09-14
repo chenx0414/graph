@@ -5,7 +5,7 @@
 ## 基线、分支与提交
 
 - 被验收基线：`ff0e7666439bf6e1e62f0ddda4c6a10376547bcd`（固定比较 `6cec5aa...ff0e766`）。
-- 工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`。修复提交在本文件提交后列出。未合并、未覆盖 `main`、`feat/app-console` 或主工作区文件。
+- 工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`。修复提交：`714ce2a`（缓存状态同步与显式空决策）；其后提交仅为文档/证据更新。未合并、未覆盖 `main`、`feat/app-console` 或主工作区文件。
 
 ## 逐项修复
 
