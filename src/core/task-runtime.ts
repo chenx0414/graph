@@ -104,7 +104,10 @@ export async function openTaskRuntime(options: {
     // master binding exists they get one and become driveable again.
     if (options.master) {
       store.transaction(() => {
-        const discussing = store.db.prepare("SELECT id FROM tasks WHERE phase='discussing' ORDER BY created_seq").all() as { id: string }[];
+        const discussing = (store.db.prepare("SELECT id, project_id FROM tasks WHERE phase='discussing' ORDER BY created_seq").all() as { id: string; project_id: string }[])
+          // A task whose project was removed from the configuration keeps its
+          // history but is not brought back to life.
+          .filter(task => configuredProjects === undefined || allowedProjects.has(task.project_id));
         for (const task of discussing) {
           const nodes = store.db.prepare('SELECT spec FROM nodes WHERE task_id=?').all(task.id) as { spec: string }[];
           if (nodes.some(row => (JSON.parse(row.spec) as NodeSpec).role === 'master')) continue;

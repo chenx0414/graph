@@ -168,9 +168,19 @@ test('tasks created while dispatch was disabled are recovered on the next execut
     limits: {},
   }, null, 2));
 
-  // View-only: the task is accepted but cannot dispatch.
-  const view = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'view', env: {}, log: () => undefined });
+  // View-only: tasks are accepted but cannot dispatch; one belongs to a
+  // project that is removed before the next start.
+  const viewConfig = join(root, 'view.config.json');
+  await writeFile(viewConfig, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }, { id: 'gone', root: project }],
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] },
+    credentials: { local: { secretRef: 'GRAPH_RECOVERY_KEY' } },
+    limits: {},
+  }, null, 2));
+  const view = await startGraphDaemon({ configPath: viewConfig, stateDir: join(root, 'state'), webDir, port: 0, mode: 'view', env: {}, log: () => undefined });
   const { taskId } = await view.server.runtime.user.begin({ projectId: 'p', request: 'queued while view-only', requestId: 'begin' });
+  const gone = await view.server.runtime.user.begin({ projectId: 'gone', request: 'removed project', requestId: 'begin-gone' });
   expect((await view.server.runtime.user.task(taskId).view()).nodes).toHaveLength(0);
   await view.close();
 
@@ -187,4 +197,6 @@ test('tasks created while dispatch was disabled are recovered on the next execut
   expect(provider.requests.length).toBeGreaterThan(0);
   expect(provider.authorizations[0]).toBe('Bearer recovery-key');
   expect(nodes.find(node => node.id === 'master')?.status).not.toBe('pending');
+  // The removed-project task keeps its history but is not recovered.
+  expect((await execute.server.runtime.user.task(gone.taskId).view()).nodes).toHaveLength(0);
 }, 90_000);
