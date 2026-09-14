@@ -14,6 +14,8 @@
 | `1a1a974` | 会话与消息账本、schema v11、排队/恢复、确认创建功能任务、10 项内核测试 |
 | `a66459f` | 生产 Pi 主管：讨论只读工具、对话提示、流式文字与工具活动、受控 provider 协议测试、会话 REST/SSE |
 | `f12746d` | 会话优先 Web 入口、问题答复组件复用、SSE 关闭修复、Playwright 真实浏览器全流程与截图 |
+| `876892a` | 使用文档、报告与验收证据归档 |
+| `361c66f` | 仅查看模式会话在模型可用后恢复主管的回归测试 |
 
 - 依赖与范围：不新增运行时依赖；沿用 main 的 Node 24.20.0、Pi SDK、`node:sqlite`、Fastify、React/Vite、Playwright 与 `@anthropic-ai/sandbox-runtime` 受限执行边界。变更 28 个文件、+2019/−187 行。
 
