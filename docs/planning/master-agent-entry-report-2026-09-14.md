@@ -1,6 +1,6 @@
 # 以主 Agent 为入口：实施与验收报告
 
-日期：2026-09-14。状态：**已实施并本地验证，等待独立验收；本文不宣布整体通过。** 方案见 [主 Agent 入口改造草案](master-agent-entry-plan-2026-09-14.md)，差距核对见 [代码差距核对](master-agent-entry-gap-2026-09-14.md)，架构决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)。
+日期：2026-09-14（返工轮更新）。状态：**首轮独立验收不通过；ME-S01 与 ME-R01–R06 已修复，等待独立复验；本文不宣布整体通过。** 返工记录见 [返工报告](master-agent-entry-rework-report-2026-09-14.md)。 方案见 [主 Agent 入口改造草案](master-agent-entry-plan-2026-09-14.md)，差距核对见 [代码差距核对](master-agent-entry-gap-2026-09-14.md)，架构决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)。
 
 ## 基线、分支与提交
 
@@ -102,9 +102,9 @@ export PATH="$PWD/node_modules/.bin:$PATH"
 
 ## 遗留限制与待独立核实
 
-- 讨论只读通过**移除工具**实现；若将来给 `master@1` 定义绑定带写权限的能力（MCP/扩展），需要按能力逐项限制，本轮未验证该组合。
+- 讨论只读已在能力层落实：绑定扩展与本地 MCP 在讨论期的受限执行只写宿主 scratch（见返工报告 ME-S01）；远程 MCP 无宿主文件系统权限且逐工具按任务 grant 校验。
 - `chat` 不改变需求版本；旧的 `begin` + `say` 路径保持原语义（每次 `say` 递增版本），两条入口并存，未合并。
-- 跨功能任务的上下文只有 `conversation_id` 关联与主管会话本身；子 Agent 说明包仍以确认后的提案为权威范围，不含聊天决策摘要。
+- 跨功能任务通过确认时的 `decision_digest` 把讨论决策/约束带入子 Agent 说明包；长会话自动摘要仍未实现（返工报告已列明）。
 - 交互优先只是“主管先于图节点派发”，凭据队列仍为 FIFO；未做 per-request 优先级。
 - 长会话未实现压缩/摘要（Pi compaction 关闭），消息页每次返回最新 200 条；超长会话的上下文增长策略留待后续。
 - 未实现会话级整体运行时间上限与心跳看门狗，沿用已验收的逐调用门与未知用量暂停规则。

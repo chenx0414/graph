@@ -1,0 +1,16 @@
+file:///Users/macmini/workspace/graph-master-entry-dev/src/core/task-runtime.ts:502
+        if (!row || anchor.latest_proposal !== input.proposalVersion || row.requirement_version !== anchor.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current draft on the current requirement can be confirmed');
+                                                                                                                                      ^
+
+RuntimeError: Only the current draft on the current requirement can be confirmed
+    at file:///Users/macmini/workspace/graph-master-entry-dev/src/core/task-runtime.ts:502:135
+    at file:///Users/macmini/workspace/graph-master-entry-dev/src/core/store.ts:187:22
+    at TaskStore.transaction (file:///Users/macmini/workspace/graph-master-entry-dev/src/core/store.ts:174:20)
+    at TaskStore.command (file:///Users/macmini/workspace/graph-master-entry-dev/src/core/store.ts:181:17)
+    at Object.confirm (file:///Users/macmini/workspace/graph-master-entry-dev/src/core/task-runtime.ts:496:29)
+    at file:///Users/macmini/workspace/13-Graph/docs/planning/acceptance-evidence/master-agent-entry-independent/bind-and-message-pagination.mts:16:45 {
+  code: 'stale_proposal'
+}
+
+Node.js v24.20.0
+exit=1

@@ -1,6 +1,6 @@
 # 会话优先的主 Agent 入口
 
-状态：2026-09-14 已实施并本地验证，等待独立验收（分支 `feat/master-agent-entry`，基线 `main@688dd1f`）。方案见 [主 Agent 入口改造草案](../planning/master-agent-entry-plan-2026-09-14.md)，代码差距见 [差距核对](../planning/master-agent-entry-gap-2026-09-14.md)，结果见 [实施与验收报告](../planning/master-agent-entry-report-2026-09-14.md)。
+状态：2026-09-14 已实施并本地验证，等待独立验收（分支 `feat/master-agent-entry`，基线 `main@688dd1f`）。方案见 [主 Agent 入口改造草案](../planning/master-agent-entry-plan-2026-09-14.md)，代码差距见 [差距核对](../planning/master-agent-entry-gap-2026-09-14.md)，结果见 [实施与验收报告](../planning/master-agent-entry-report-2026-09-14.md)，独立验收反例的修复见 [返工报告](../planning/master-agent-entry-rework-report-2026-09-14.md)。
 
 ## 背景
 

@@ -1,0 +1,113 @@
+=== baseline c0247abd59d2e2ba3a9a6a620d0205ad64a6ced2 2026年 9月14日 星期一 16时58分32秒 CST ===
+=== tsc main ===
+OK
+=== tsc web ===
+OK
+=== vite build ===
+
+✓ built in 68ms
+
+=== vitest run 1 ===
+
+ Test Files  52 passed (52)
+      Tests  240 passed (240)
+   Start at  16:58:38
+   Duration  17.23s (tests 74%, import 25%, transform 1%)
+
+=== vitest run 2 ===
+
+ Test Files  52 passed (52)
+      Tests  240 passed (240)
+   Start at  16:58:55
+   Duration  16.92s (tests 74%, import 24%, transform 1%)
+
+
+=== rework probe (kernel) ===
+{"check":"queued-message-after-usage","passed":true,"providerTurns":2,"assistant":["first","second"],"secondState":"delivered"}
+{"check":"queued-message-after-reconcile_usage","passed":true,"providerTurns":2,"assistant":["first","second"],"secondState":"delivered"}
+{"check":"rebind-invalidates-draft","passed":true,"rejected":"stale_proposal","project":"b","stale":true,"confirmedProject":"b"}
+{"check":"message-pagination","passed":true,"total":202,"pageFirst":"message-002","pageLast":"message-201","older":["message-000","message-001"],"forward":0}
+{"check":"unknown-cost-and-decision-digest","passed":true,"unknownCost":true,"digestPresent":true}
+rework-probes rc=0
+=== reviewer probe queued-usage-pi ===
+{"scenario":"production-pi-queued-usage","type":"usage","passed":true,"providerRequests":2,"master":{"nodeId":"master","status":"succeeded","model":"local","used":100,"budget":20000000,"definitionVersion":"master@1","cost":{"unknown":true},"questions":[]},"messages":[{"role":"user","text":"First message","state":"delivered"},{"role":"assistant","text":"First response","state":"done"},{"role":"user","text":"Second message","state":"delivered"},{"role":"assistant","text":"Second response","state":"done"}]}
+{"scenario":"production-pi-queued-usage","type":"reconcile_usage","passed":true,"providerRequests":2,"master":{"nodeId":"master","status":"succeeded","model":"local","used":50,"budget":20000000,"definitionVersion":"master@1","cost":{"unknown":true},"questions":[]},"messages":[{"role":"user","text":"First message","state":"delivered"},{"role":"assistant","text":"First response","state":"done"},{"role":"user","text":"Second message","state":"delivered"},{"role":"assistant","text":"Second response","state":"done"}]}
+rc=0
+=== reviewer probe master-readonly-capability ===
+{
+  "node": "v24.20.0",
+  "featureTasks": 0,
+  "accepted": 0,
+  "offeredTools": [
+    "read",
+    "list_dir",
+    "submit_result",
+    "propose_graph",
+    "revise_graph",
+    "publish_definition",
+    "install_capability",
+    "mcp_ext_write_proof"
+  ],
+  "projectWrite": null,
+  "outside": "unchanged",
+  "master": {
+    "nodeId": "master",
+    "status": "succeeded",
+    "model": "local",
+    "used": 100,
+    "budget": 20000000,
+    "definitionVersion": "master@1",
+    "cost": {
+      "unknown": true
+    },
+    "questions": []
+  },
+  "messages": [
+    {
+      "role": "user",
+      "text": "只讨论，先看看项目。不要修改业务文件。"
+    },
+    {
+      "role": "assistant",
+      "text": "Discussion completed."
+    },
+    {
+      "role": "tool",
+      "text": "mcp_ext_write_proof: mcp_ext_write_proof"
+    }
+  ],
+  "questions": []
+}
+rc=0
+=== reviewer probe conversation-ui-boundaries ===
+{"scenario":"hidden-master-question-and-cost","anchorQuestions":[{"id":"94452078-9c59-44c1-858c-80924fd2f653","kind":"unknown_usage"}],"masterStatus":"blocked","visibleControls":["暂停主 Agent","继续","答复","发送"],"conversationHasMasterQuestions":true,"header":"项目 p（/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-entry-ui-boundaries-7oykPv/project） · 主 Agent：被阻塞 · 已连接 · 已计量 0 tokens · 费用未知","canFindUnknownUsage":true}
+{"scenario":"feature-task-live-status","before":"running","ledgerAfter":"succeeded","uiAfter":"succeeded","uiAfterReload":"succeeded","passed":true}
+rc=0
+=== reviewer probe bind-and-message-pagination ===
+file:///Users/macmini/workspace/graph-master-entry-dev/src/core/task-runtime.ts:502
+        if (!row || anchor.latest_proposal !== input.proposalVersion || row.requirement_version !== anchor.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current draft on the current requirement can be confirmed');
+                                                                                                                                      ^
+
+RuntimeError: Only the current draft on the current requirement can be confirmed
+    at file:///Users/macmini/workspace/graph-master-entry-dev/src/core/task-runtime.ts:502:135
+    at file:///Users/macmini/workspace/graph-master-entry-dev/src/core/store.ts:187:22
+    at TaskStore.transaction (file:///Users/macmini/workspace/graph-master-entry-dev/src/core/store.ts:174:20)
+    at TaskStore.command (file:///Users/macmini/workspace/graph-master-entry-dev/src/core/store.ts:181:17)
+    at Object.confirm (file:///Users/macmini/workspace/graph-master-entry-dev/src/core/task-runtime.ts:496:29)
+    at file:///Users/macmini/workspace/13-Graph/docs/planning/acceptance-evidence/master-agent-entry-independent/bind-and-message-pagination.mts:16:45 {
+  code: 'stale_proposal'
+}
+
+Node.js v24.20.0
+rc=0
+
+=== historical probes (rc) ===
+host-listener-contract rc=0
+host-listener-paused-gate rc=0
+local-network-rework rc=0
+listen-guard-child-rework rc=0
+ipc-listener-regressions rc=0
+ipc-handoff-listening-event rc=0
+ipc-handoff-duplicate-id rc=0
+ipc-listening-order rc=0
+=== done 2026年 9月14日 星期一 16时59分40秒 CST ===

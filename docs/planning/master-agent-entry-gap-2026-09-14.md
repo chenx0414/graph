@@ -1,6 +1,6 @@
 # 以主 Agent 为入口：代码差距核对
 
-日期：2026-09-14。状态：**分析已完成，改造已实施并本地验证；等待独立验收**。基线：`main@688dd1f`（T01–T08 与 PA01–PA05 返工均已独立验收关闭）。隔离工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`（提交 `68795c2`、`1a1a974`、`a66459f`、`f12746d`；未合并、未覆盖 `main` 与 `feat/app-console`）。方案见 [主 Agent 入口改造草案](master-agent-entry-plan-2026-09-14.md)，决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)，实施与验收结果见 [实施与验收报告](master-agent-entry-report-2026-09-14.md)。
+日期：2026-09-14。状态：**分析已完成，改造已实施并本地验证；等待独立验收**。基线：`main@688dd1f`（T01–T08 与 PA01–PA05 返工均已独立验收关闭）。隔离工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`（提交 `68795c2`、`1a1a974`、`a66459f`、`f12746d`；未合并、未覆盖 `main` 与 `feat/app-console`）。方案见 [主 Agent 入口改造草案](master-agent-entry-plan-2026-09-14.md)，决策见 [ADR 0009](../adr/0009-conversation-first-master-entry.md)，实施与验收结果见 [实施与验收报告](master-agent-entry-report-2026-09-14.md)；独立验收反例的修复见 [返工报告](master-agent-entry-rework-report-2026-09-14.md)。
 
 ## 已存在、本次复用的能力
 
