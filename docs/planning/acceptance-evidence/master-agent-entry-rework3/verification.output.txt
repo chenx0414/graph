@@ -1,0 +1,48 @@
+=== baseline ff0e7666439bf6e1e62f0ddda4c6a10376547bcd 2026年 9月14日 星期一 21时16分58秒 CST ===
+=== tsc main ===
+tsc main rc=0
+=== tsc web ===
+tsc web rc=0
+=== vite build ===
+
+✓ built in 68ms
+=== vitest run 1 ===
+ Test Files  53 passed (53)
+      Tests  247 passed (247)
+   Start at  21:16:59
+   Duration  18.52s (tests 73%, import 25%, transform 1%)
+
+=== vitest run 2 ===
+ Test Files  53 passed (53)
+      Tests  247 passed (247)
+   Start at  21:17:26
+   Duration  18.88s (tests 72%, import 26%, transform 1%)
+
+=== delivery rework probes ===
+{"check":"queued-message-after-usage","passed":true,"providerTurns":2,"assistant":["first","second"],"secondState":"delivered"}
+{"check":"queued-message-after-reconcile_usage","passed":true,"providerTurns":2,"assistant":["first","second"],"secondState":"delivered"}
+{"check":"rebind-invalidates-draft","passed":true,"rejected":"stale_proposal","project":"b","stale":true,"confirmedProject":"b"}
+{"check":"message-pagination","passed":true,"total":202,"pageFirst":"message-002","pageLast":"message-201","older":["message-000","message-001"],"forward":0}
+{"check":"unknown-cost-and-decision-digest","passed":true,"unknownCost":true,"digestPresent":true}
+rework-probes rc=0
+=== reviewer probes (true exit codes) ===
+queued-usage-pi rc=0
+master-readonly-capability rc=0
+conversation-ui-boundaries rc=0
+readonly-remote-mcp rc=0
+message-history-ui rc=0
+bind-decision-contract rc=0
+remote-mcp-mode-contract rc=0
+reconcile-ui-restart rc=0
+history-cache-consistency rc=0
+decision-empty-snapshot rc=0
+=== historical probes (true exit codes) ===
+host-listener-contract rc=0
+host-listener-paused-gate rc=0
+local-network-rework rc=0
+listen-guard-child-rework rc=0
+ipc-listener-regressions rc=0
+ipc-handoff-listening-event rc=0
+ipc-handoff-duplicate-id rc=0
+ipc-listening-order rc=0
+=== done 2026年 9月14日 星期一 21时18分08秒 CST ===

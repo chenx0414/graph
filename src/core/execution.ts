@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { realpath, symlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
-import { appendMessage, conversationDigest, conversationForTask, pendingMessages, releaseMessages } from './conversation.ts';
+import { appendMessage, conversationDigest, conversationForTask, pendingMessages, publishMessageUpdate, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
@@ -526,9 +526,12 @@ export class Execution {
         .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
       if (conversation && chatMessages.length) {
         // Consuming the queue in the same transaction as the operation makes
-        // the binding durable before any provider send can happen.
+        // the binding durable before any provider send can happen. The state
+        // change is published so a browser cache that no longer holds these
+        // records in its latest window still updates from pending to delivered.
         this.store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=? WHERE id IN (${chatMessages.map(() => '?').join(',')})`)
           .run(operation.id, attempt, Date.now(), ...chatMessages.map(message => message.id));
+        for (const message of chatMessages) publishMessageUpdate(this.store, message.id);
       }
       this.store.db.prepare("UPDATE activations SET input_versions=?,state='preparing' WHERE id=?").run(canonicalJson(inputVersions), node.activation_id);
       this.store.db.prepare("UPDATE nodes SET status='preparing' WHERE task_id=? AND id=?").run(node.task_id, node.id);

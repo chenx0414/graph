@@ -141,6 +141,26 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   const [cache, setCache] = useState<Record<string, ConversationMessage>>({});
   const [historyExhausted, setHistoryExhausted] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // One stable, seq-ordered cache per mounted conversation. Every source
+  // (latest window, history pages, streamed message records) merges by stable
+  // ID and only newer records may replace older ones, so a late history
+  // response cannot roll a state change back.
+  const mergeMessages = useCallback((incoming: ConversationMessage[]) => {
+    if (!incoming.length) return;
+    setCache(current => {
+      let changed = false;
+      const next = { ...current };
+      for (const message of incoming) {
+        const previous = next[message.id];
+        if (previous && message.updatedAt < previous.updatedAt) continue;
+        if (!previous || previous.text !== message.text || previous.state !== message.state || previous.updatedAt !== message.updatedAt) {
+          next[message.id] = message;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, []);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
     // One event usually means several records changed; coalesce the refetches.
@@ -159,6 +179,14 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
       });
     } else if (event.type === 'message.created' || event.type === 'message.updated') {
       const message = data?.message;
+      // Incremental contract: state changes always merge, while replayed or
+      // historical created records must not bypass pagination (the latest
+      // window plus explicit history pages own backfill). Only records newer
+      // than everything cached extend the live window.
+      if (message?.id) {
+        const knownMax = Object.values(cache).reduce((max, candidate) => Math.max(max, candidate.seq), 0);
+        if (event.type === 'message.updated' || message.seq > knownMax) mergeMessages([message]);
+      }
       if (message?.role === 'assistant' && message.operationId) setLiveText(current => { const next = { ...current }; delete next[message.operationId!]; return next; });
       if (message?.role === 'tool' && typeof message.data?.toolCallId === 'string') setLiveTools(current => current.filter(tool => tool.toolCallId !== message.data!.toolCallId));
     }
@@ -169,20 +197,8 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
     if (latest?.targetBranch) setBranch(latest.targetBranch);
   }, [view?.accepted]);
   useEffect(() => {
-    if (!view) return;
-    setCache(current => {
-      let changed = false;
-      const next = { ...current };
-      for (const message of view.messages) {
-        const previous = next[message.id];
-        if (!previous || previous.text !== message.text || previous.state !== message.state || previous.updatedAt !== message.updatedAt) {
-          next[message.id] = message;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [view]);
+    if (view) mergeMessages(view.messages);
+  }, [view, mergeMessages]);
   if (loading && !view) return <p>加载中…</p>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <p>加载中…</p>;
@@ -218,24 +234,27 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   }
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
-  // One stable, seq-ordered cache per mounted conversation: the sliding latest
-  // window is merged in by stable ID so history never develops gaps, and the
-  // history cursor always advances from the earliest record shown.
   const cachedMessages = Object.values(cache).sort((left, right) => left.seq - right.seq);
-  const hasOlder = !historyExhausted && view.messageCount > cachedMessages.length;
+  const gapIndex = cachedMessages.findIndex((message, index) => index > 0 && message.seq > cachedMessages[index - 1]!.seq + 1);
+  const hasOlder = !historyExhausted && (gapIndex > 0 || view.messageCount > cachedMessages.length);
   async function loadOlder() {
-    const earliest = cachedMessages[0]?.seq;
-    if (earliest === undefined || loadingOlder) return;
+    if (loadingOlder) return;
     setLoadingOlder(true);
     setActionError('');
     try {
+      // A burst of new records can leave a hole between the loaded head and the
+      // latest window; walk forward from the hole before reaching further back.
+      if (gapIndex > 0) {
+        const page = await api<ConversationView>(`/api/conversations/${id}?after=${cachedMessages[gapIndex - 1]!.seq}&limit=200`);
+        mergeMessages(page.messages);
+        if (page.messages.length === 0) setHistoryExhausted(true);
+        return;
+      }
+      const earliest = cachedMessages[0]?.seq ?? 1;
+      if (earliest <= 1) { setHistoryExhausted(true); return; }
       const page = await api<ConversationView>(`/api/conversations/${id}?before=${earliest}&limit=200`);
+      mergeMessages(page.messages);
       if (page.messages.length === 0) setHistoryExhausted(true);
-      setCache(current => {
-        const next = { ...current };
-        for (const message of page.messages) next[message.id] = message;
-        return next;
-      });
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -321,10 +340,12 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
             {(proposal.spec.loops?.length ?? 0) > 0 && (
               <p data-testid="draft-loops">返工回边：{proposal.spec.loops!.map(loop => `${loop.from} → ${loop.to}`).join('，')}</p>
             )}
-            {proposal.decisions && (
+            {proposal.decisions !== null && (
               <div data-testid="draft-decisions">
                 <h5>确认后原样交给工人的决策/约束</h5>
-                <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0' }}>{proposal.decisions}</pre>
+                {proposal.decisions.trim()
+                  ? <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0' }}>{proposal.decisions}</pre>
+                  : <p data-testid="draft-decisions-empty" style={{ margin: '4px 0', color: '#666' }}>主管已声明本任务没有需要传递的决策或约束。</p>}
               </div>
             )}
             {proposal.stale && <p data-testid="draft-stale">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}

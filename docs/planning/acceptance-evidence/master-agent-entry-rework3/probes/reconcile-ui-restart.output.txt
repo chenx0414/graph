@@ -1,0 +1,2 @@
+{"scenario":"ui-reconcile-pause-restart-resume","mode":"usage","passed":true,"pausedRequests":1,"resumedRequests":2,"master":"succeeded","used":100,"cost":{"unknown":true},"messages":[{"text":"First message","state":"delivered"},{"text":"Second message","state":"delivered"}]}
+{"scenario":"ui-reconcile-pause-restart-resume","mode":"reconcile","passed":true,"pausedRequests":1,"resumedRequests":2,"master":"succeeded","used":50,"cost":{"unknown":true},"messages":[{"text":"First message","state":"delivered"},{"text":"Second message","state":"delivered"}]}

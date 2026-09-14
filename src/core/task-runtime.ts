@@ -620,9 +620,13 @@ export async function openTaskRuntime(options: {
             // present, otherwise the consumed user messages of this project
             // binding (delivered only, so unreviewed pending chat stays out).
             const conversation = conversationForTask(store, taskId);
+            const declared = Array.isArray(proposal.decisions);
             const curated = (proposal.decisions ?? []).map(item => item.trim()).filter(Boolean);
             let snapshot: string | null = null;
-            if (curated.length) snapshot = curated.map(item => `- ${item}`).join('\n');
+            // An explicit list (including []) is the master's authoritative
+            // snapshot: [] freezes no constraints and must not be backfilled
+            // from chat. Only a missing field keeps the compatibility fallback.
+            if (declared) snapshot = curated.map(item => `- ${item}`).join('\n');
             else if (conversation) {
               const since = conversationRow(store, conversation.id).binding_since_seq;
               const rows = store.db.prepare("SELECT seq,text FROM messages WHERE conversation_id=? AND role='user' AND state='delivered' AND seq>? ORDER BY seq").all(conversation.id, since) as { seq: number; text: string }[];

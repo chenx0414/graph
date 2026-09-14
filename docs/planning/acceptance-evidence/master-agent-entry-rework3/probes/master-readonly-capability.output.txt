@@ -1,0 +1,44 @@
+{
+  "node": "v24.20.0",
+  "featureTasks": 0,
+  "accepted": 0,
+  "offeredTools": [
+    "read",
+    "list_dir",
+    "submit_result",
+    "propose_graph",
+    "revise_graph",
+    "publish_definition",
+    "install_capability",
+    "mcp_ext_write_proof"
+  ],
+  "projectWrite": null,
+  "outside": "unchanged",
+  "master": {
+    "nodeId": "master",
+    "status": "succeeded",
+    "model": "local",
+    "used": 100,
+    "budget": 20000000,
+    "definitionVersion": "master@1",
+    "cost": {
+      "unknown": true
+    },
+    "questions": []
+  },
+  "messages": [
+    {
+      "role": "user",
+      "text": "只讨论，先看看项目。不要修改业务文件。"
+    },
+    {
+      "role": "assistant",
+      "text": "Discussion completed."
+    },
+    {
+      "role": "tool",
+      "text": "mcp_ext_write_proof: mcp_ext_write_proof"
+    }
+  ],
+  "questions": []
+}

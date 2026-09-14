@@ -72,9 +72,20 @@ export function messagesForOperation(store: TaskStore, operationId: string): Mes
   return store.db.prepare('SELECT * FROM messages WHERE operation_id=? ORDER BY seq').all(operationId) as unknown as MessageRow[];
 }
 
-/** A pre-send refusal proves the model never saw the message, so it queues again. */
+/** Publish one durable message record on the conversation stream. */
+export function publishMessageUpdate(store: TaskStore, messageId: string) {
+  const row = store.db.prepare('SELECT * FROM messages WHERE id=?').get(messageId) as unknown as MessageRow | undefined;
+  if (!row) return;
+  store.event(conversationRow(store, row.conversation_id).anchor_task_id, 'message.updated', { message: publicMessage(row) });
+}
+
+/** A pre-send refusal proves the model never saw the message, so it queues
+ * again; the state change is published so incremental caches catch up. */
 export function releaseMessages(store: TaskStore, operationId: string) {
+  const rows = messagesForOperation(store, operationId).filter(row => row.state === 'delivered');
+  if (!rows.length) return;
   store.db.prepare("UPDATE messages SET state='pending',operation_id=NULL,updated_at=? WHERE operation_id=? AND state='delivered'").run(Date.now(), operationId);
+  for (const row of rows) publishMessageUpdate(store, row.id);
 }
 
 /** Page messages without ever hiding the newest records: the default page is

@@ -572,3 +572,87 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
     expect(seen[0]!.context.briefing).not.toContain('原始聊天文本不应直接当作决策');
   }
 });
+
+test('an explicit empty decisions list revokes constraints without falling back to chat', async () => {
+  const root = await temp('choices-empty');
+  const project = join(root, 'project');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(project, { recursive: true });
+  const seen: Operation[] = [];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    actions: {
+      master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })),
+      work: scripted(operation => { seen.push(operation); return { outcome: 'completed', output: { done: true }, usage }; }),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const draftOf = (requirementVersion: number, version: number, decisions?: string[]) => ({
+    requirementVersion, summary: `draft-${version}`, ...(decisions ? { decisions } : {}),
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  });
+  const created = await runtime.conversations.create({ projectId: 'p', text: 'OLD_CONSTRAINT: 永远不要修改 login.ts。', requestId: 'create' });
+  await runtime.host.runReady();
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await runtime.supervisor(anchor).propose(draftOf(1, 1, ['不要修改 login.ts']), 'draft-1');
+  await runtime.conversations.chat(created.conversationId, { text: '撤销该约束；修订后的提案没有绑定约束。', requestId: 'revoke' });
+  await runtime.host.runReady();
+  await runtime.supervisor(anchor).propose(draftOf(1, 2, []), 'draft-2');
+  const drafted = await runtime.conversations.view(created.conversationId);
+  expect(drafted.proposal?.version).toBe(2);
+  expect(drafted.proposal?.decisions).toBe('');
+  await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm' });
+  await runtime.host.runReady();
+  expect(seen).toHaveLength(1);
+  expect(seen[0]!.context.briefing).not.toContain('OLD_CONSTRAINT');
+  expect(seen[0]!.context.briefing).not.toContain('不要修改 login.ts');
+  // A later feature in the same conversation that declares no constraints
+  // freezes its own empty snapshot instead of inheriting the previous task's.
+  await runtime.supervisor(anchor).propose(draftOf(2, 3, []), 'draft-3');
+  const second = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 3, targetBranch: 'main', requestId: 'confirm-2' });
+  expect((await runtime.user.task(second.taskId).view()).request).toBe('draft-3');
+  expect((await runtime.conversations.view(created.conversationId)).proposal?.decisions).toBe('');
+});
+
+test('message state changes are published so incremental caches stay in sync', async () => {
+  const root = await temp('message-state');
+  let prepareFails = false;
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: {
+      kind: 'agent', reserveTokens: 100,
+      prepare: async operation => {
+        if (prepareFails) throw new Error('adapter exploded before dispatch');
+        return async () => ({ outcome: 'completed', output: { text: 'ok' }, usage });
+      },
+    } },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: 'state message', requestId: 'create' });
+  await runtime.host.runReady();
+  const view = await runtime.conversations.view(created.conversationId);
+  const messageId = view.messages.find(message => message.role === 'user')!.id;
+  const updates = (id: string) => runtime.conversations.events(created.conversationId)
+    .filter(event => event.type === 'message.updated')
+    .map(event => (event.data as { message?: { id?: string; state?: string } }).message)
+    .filter(message => message?.id === id)
+    .map(message => message!.state);
+  expect(updates(messageId)).toContain('delivered');
+
+  // A pre-send failure returns the message to pending and publishes that too.
+  prepareFails = true;
+  await runtime.conversations.chat(created.conversationId, { text: '再试一次', requestId: 'chat-2' });
+  await runtime.host.runReady();
+  const retried = await runtime.conversations.view(created.conversationId);
+  const retriedId = retried.messages.find(message => message.text === '再试一次')!.id;
+  expect(retried.messages.find(message => message.id === retriedId)!.state).toBe('pending');
+  expect(updates(retriedId)).toContain('pending');
+});
