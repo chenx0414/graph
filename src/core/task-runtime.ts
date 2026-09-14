@@ -418,6 +418,7 @@ export async function openTaskRuntime(options: {
       const project = conversation.project_id ? store.db.prepare('SELECT root FROM projects WHERE id=?').get(conversation.project_id) as { root: string } | undefined : undefined;
       return {
         id: conversation.id, title: conversation.title, projectId: conversation.project_id, projectRoot: project?.root ?? null,
+        paused: Boolean(anchor.paused),
         workspaceProjectId: conversation.workspace_project_id, anchorTaskId: conversation.anchor_task_id,
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
         messages: listMessages(store, conversationId, query.after ?? 0, query.limit ?? 200),

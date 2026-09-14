@@ -43,6 +43,8 @@ export async function openGraphServer(options: Parameters<typeof openTaskRuntime
       closed = true;
       stopped = true;
       await loop;
+      // Long-lived SSE connections must not keep the daemon from stopping.
+      app.server.closeAllConnections();
       await app.close();
       await runtime.close();
     },

@@ -119,11 +119,13 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     reply.hijack();
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     const watch = runtime.conversations.watch(params.conversationId, after);
+    const abort = () => { void watch.return?.(); };
+    request.raw.on('close', abort);
     try {
       for await (const event of watch) {
         reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
       }
-    } finally { await watch.return?.(); reply.raw.end(); }
+    } finally { request.raw.off('close', abort); await watch.return?.(); reply.raw.end(); }
   });
   app.post('/api/tasks', async request => {
     const body = request.body as { projectId: string; request: string; requestId: string };
@@ -167,11 +169,15 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     reply.hijack();
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     const watch = runtime.user.task(params.taskId).watch(after);
+    // A client disconnect must end the server-side iterator, or the daemon
+    // shutdown would wait on a stream nobody can consume.
+    const abort = () => { void watch.return?.(); };
+    request.raw.on('close', abort);
     try {
       for await (const event of watch) {
         reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
       }
-    } finally { await watch.return?.(); reply.raw.end(); }
+    } finally { request.raw.off('close', abort); await watch.return?.(); reply.raw.end(); }
   });
   app.get('/api/tasks/:taskId/operations', async request => {
     const params = request.params as { taskId: string };

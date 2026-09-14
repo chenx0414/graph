@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { nextEventCursor } from './event-cursor.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
+import { ConversationList, ConversationPanel } from './Conversation.tsx';
+import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, when } from './labels.ts';
+import { QuestionReply } from './Questions.tsx';
+import { ErrorBox, useAsync, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
 
 type TaskSummary = {
@@ -41,102 +45,11 @@ type GraphPayload = {
   cost: { unknown?: boolean; amount?: number };
 };
 
-const TASK_LABEL: Record<string, string> = {
-  discussing: '讨论中', running: '执行中', queued: '排队中', paused: '已暂停', pausing: '暂停中',
-  blocked: '等待处理', completed: '已完成', failed: '失败', skipped: '已跳过',
-};
-const NODE_LABEL: Record<string, string> = {
-  pending: '待执行', preparing: '执行中', succeeded: '已完成', failed: '失败', blocked: '被阻塞', skipped: '已跳过', ready: '就绪',
-};
-const QUESTION_LABEL: Record<string, string> = {
-  waiting: '等待外部条件', human_check: '等待人工确认', reservation_exceeded: '预算不足',
-  unknown_usage: '用量未知待核对', model_unavailable: '模型不可用', adapter_error: '适配器错误',
-  execution_failed: '执行失败', git_conflict: 'Git 冲突', rework: '需要返工', stalled: '任务停滞',
-  permission: '等待权限确认', budget: '预算不足', git_dirty: '工作区不干净',
-};
-
 function statusText(view: TaskView) {
   if (view.paused) return TASK_LABEL[view.status] ?? view.status;
   const open = view.questions.filter(question => question.status === 'open');
   if (open.length) return open.map(question => QUESTION_LABEL[question.kind] ?? question.kind).join('、');
   return TASK_LABEL[view.status] ?? view.status;
-}
-
-function when(timestamp: number | null) {
-  if (!timestamp) return '—';
-  return new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).toLocaleString();
-}
-
-function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return (
-    <div data-testid="error" style={{ background: '#fde8e8', border: '1px solid #e0a0a0', padding: '8px 12px', margin: '8px 0' }}>
-      <strong>加载失败：</strong>{message}
-      {onRetry && <button type="button" style={{ marginLeft: 8 }} onClick={onRetry}>重试</button>}
-    </div>
-  );
-}
-
-function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const loadRef = useRef(load);
-  loadRef.current = load;
-  // Every request gets a generation; a late response from an old key must
-  // never overwrite the record the user is looking at now.
-  const generation = useRef(0);
-  useEffect(() => {
-    generation.current += 1;
-    setData(null);
-    setError(null);
-  }, deps);
-  const reload = useCallback(() => {
-    const current = ++generation.current;
-    setLoading(true);
-    loadRef.current()
-      .then(value => { if (generation.current === current) { setData(value); setError(null); } })
-      .catch((reason: unknown) => { if (generation.current === current) setError(reason instanceof Error ? reason.message : String(reason)); })
-      .finally(() => { if (generation.current === current) setLoading(false); });
-  }, deps);
-  useEffect(() => { reload(); }, [reload]);
-  return { data, error, loading, reload };
-}
-
-/** EventSource with an event cursor. Reconnects from the last applied cursor,
- * so a drop replays only what was missed and duplicate deliveries are ignored. */
-export function useTaskStream(taskId: string, onEvent: (event: { cursor: number; type: string }) => void) {
-  const [connected, setConnected] = useState(false);
-  const cursor = useRef(0);
-  const handler = useRef(onEvent);
-  handler.current = onEvent;
-  useEffect(() => {
-    cursor.current = 0;
-    let source: EventSource | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let closed = false;
-    const open = () => {
-      if (closed) return;
-      source = new EventSource(`/api/tasks/${taskId}/events/stream?after=${cursor.current}`);
-      source.onopen = () => setConnected(true);
-      source.onmessage = message => {
-        try {
-          const event = nextEventCursor(cursor.current, JSON.parse(message.data));
-          if (!event) return;
-          cursor.current = event.cursor;
-          handler.current(event);
-        } catch { /* keep the stream on malformed frames */ }
-      };
-      source.onerror = () => {
-        setConnected(false);
-        source?.close();
-        source = null;
-        if (!closed) timer = setTimeout(open, 1000);
-      };
-    };
-    open();
-    return () => { closed = true; clearTimeout(timer); source?.close(); };
-  }, [taskId]);
-  return connected;
 }
 
 function useLimits() {
@@ -179,6 +92,7 @@ export function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(path);
+  const conversationMatch = /^\/conversations\/([^/]+)$/.exec(path);
   return (
     <div>
       {startup && !startup.configured && (
@@ -201,6 +115,7 @@ export function App() {
       {path === '/' && <Overview settings={settings} tasks={tasks} onTasks={setTasks} />}
       {path === '/catalog' && <Catalog settings={settings} />}
       {path === '/settings' && <Settings />}
+      {conversationMatch && <ConversationPanel id={conversationMatch[1]!} settings={settings} />}
       {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} settings={settings} startup={startup} />}
       {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
     </div>
@@ -232,6 +147,7 @@ function Overview({ settings, tasks, onTasks }: { settings: Settings | null; tas
   return (
     <section>
       <h1>Graph</h1>
+      <ConversationList settings={settings} />
       <section data-testid="settings">
         <h2>项目与模型</h2>
         <ul>{settings?.projects.map(project => <li key={project.id}>{project.id} {project.root}</li>)}</ul>
@@ -271,64 +187,6 @@ function Catalog({ settings }: { settings: Settings | null }) {
       <ul>{settings?.definitions.map(item => <li key={item.id}>{item.id}@{item.version}</li>)}</ul>
       <ul>{settings?.capabilities.map(item => <li key={item.id}>{item.id}@{item.version}</li>)}</ul>
     </section>
-  );
-}
-
-function QuestionReply({ taskId, question, onDone }: {
-  taskId: string;
-  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown> };
-  onDone: () => void;
-}) {
-  const [tokens, setTokens] = useState('100000');
-  const [inputTokens, setInputTokens] = useState('0');
-  const [outputTokens, setOutputTokens] = useState('0');
-  const [value, setValue] = useState('');
-  const [proof, setProof] = useState('');
-  const [usageMode, setUsageMode] = useState<'usage' | 'reconcile'>('usage');
-  const [error, setError] = useState('');
-  async function submit(answer: unknown) {
-    try {
-      await api(`/api/tasks/${taskId}/answer`, { method: 'POST', body: JSON.stringify({ questionId: question.id, answer, requestId: `ans-${question.id}-${crypto.randomUUID()}` }) });
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-  return (
-    <li>
-      {question.kind} {question.data.prompt}
-      <pre data-testid={`question-data-${question.id}`} style={{ whiteSpace: 'pre-wrap', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
-      {question.kind === 'budget' && <input data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
-      {question.kind === 'waiting' && <input data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} />}
-      {question.kind === 'unknown_usage' && <>
-        <label>处理方式
-          <select data-testid="usage-mode" value={usageMode} onChange={event => setUsageMode(event.target.value as 'usage' | 'reconcile')}>
-            <option value="usage">补记用量（按供应商实际回复填写）</option>
-            <option value="reconcile">无法核对（保留未知，需说明）</option>
-          </select>
-        </label>
-        {usageMode === 'usage' && <>
-          <input data-testid="usage-input" type="number" min={0} value={inputTokens} onChange={event => setInputTokens(event.target.value)} placeholder="输入 token" />
-          <input data-testid="usage-output" type="number" min={0} value={outputTokens} onChange={event => setOutputTokens(event.target.value)} placeholder="输出 token" />
-        </>}
-        <input data-testid="usage-proof" value={proof} onChange={event => setProof(event.target.value)} placeholder={usageMode === 'usage' ? '用量证据' : '无法核对的说明'} />
-      </>}
-      {question.kind === 'rework' || question.kind === 'stalled' ? <>
-        <button type="button" onClick={() => void submit({ type: 'retry' })}>重试</button>
-        <button type="button" onClick={() => void submit({ type: 'respond', value })}>答复</button>
-      </> : <button type="button" onClick={() => {
-        if (question.kind === 'budget') return void submit({ type: 'add_budget', tokens: Number(tokens) });
-        if (question.kind === 'waiting') return void submit({ type: 'respond', value });
-        if (question.kind === 'unknown_usage') {
-          if (usageMode === 'reconcile') return void submit({ type: 'reconcile_usage', proof });
-          return void submit({ type: 'usage', usage: { input: Number(inputTokens), output: Number(outputTokens), cacheRead: 0, cacheWrite: 0 }, proof });
-        }
-        if (question.kind === 'permission') return void submit({ type: 'grant', grant: question.data.grant });
-        if (['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind)) return void submit({ type: 'retry' });
-        return void submit({ type: 'acknowledge' });
-      }}>{['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind) ? '重试' : '答复'}</button>}
-      {error && <p data-testid="answer-error">{error}</p>}
-    </li>
   );
 }
 

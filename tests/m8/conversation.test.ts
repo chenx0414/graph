@@ -263,3 +263,52 @@ test('unknown master usage opens the accepted reconciliation path without duplic
   const master = anchorAfter.nodes.find(node => node.role === 'master');
   expect(master?.used).toBe(15);
 });
+
+test('a scope change after confirmation becomes a new queued task, not an edit of the running one', async () => {
+  const root = await temp('new-task');
+  const project = join(root, 'project');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(project, { recursive: true });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    actions: {
+      master: scripted(() => ({ outcome: 'completed', output: { text: '这会是一个新任务。' }, usage })),
+      work: scripted(() => ({ outcome: 'completed', output: { done: true }, usage })),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '先做第一版', requestId: 'create' });
+  await runtime.host.runReady();
+  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  const proposal = (summary: string, requirementVersion: number) => ({
+    requirementVersion, summary,
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  });
+  await runtime.supervisor(anchorTaskId).propose(proposal('第一版', 1), 'draft-1');
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  const first = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-1' });
+  const firstTask = await runtime.user.task(first.taskId).view();
+  expect(firstTask.phase).toBe('running');
+
+  // The user changes the goal while the first task runs.
+  await runtime.conversations.chat(created.conversationId, { text: '顺便加上另一平台。', requestId: 'scope' });
+  await runtime.host.runReady();
+  await runtime.supervisor(anchorTaskId).propose(proposal('另一平台', 2), 'draft-2');
+  const second = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-2' });
+  expect(second.taskId).not.toBe(first.taskId);
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.tasks.map(task => task.id)).toEqual([first.taskId, second.taskId]);
+  expect(view.tasks.map(task => task.phase)).toEqual(['running', 'queued']);
+  // The running task keeps its confirmed acceptance scope.
+  const unchanged = await runtime.user.task(first.taskId).view();
+  expect(unchanged.acceptedProposalVersion).toBe(1);
+  expect(unchanged.proposal?.acceptance.map(item => item.description)).toEqual(['检查通过']);
+  expect(unchanged.phase).toBe('running');
+  expect(view.requirementVersion).toBe(3);
+});
