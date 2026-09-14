@@ -179,14 +179,34 @@ test('graph.command checks run in the project root of a non-git project', async 
 
 test('node resolves to Electron in Node mode with framework read access inside a packaged app', () => {
   const packaged = resolveNodeCommand(['--test'], { execPath: '/Applications/Graph.app/Contents/MacOS/Graph', electron: '44.3.0' });
-  expect(packaged).toEqual({
-    executable: '/Applications/Graph.app/Contents/MacOS/Graph',
-    args: ['--test'],
-    readPaths: ['/Applications/Graph.app/Contents'],
-    env: { ELECTRON_RUN_AS_NODE: '1' },
-  });
+  expect(packaged.executable).toBe('/Applications/Graph.app/Contents/MacOS/Graph');
+  expect(packaged.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' });
+  expect(packaged.readPaths).toContain('/Applications/Graph.app/Contents');
+  expect(packaged.args[0]).toBe('--require');
+  expect(packaged.args.slice(2)).toEqual(['--test']);
   const plain = resolveNodeCommand(['--test'], { execPath: '/usr/local/bin/node' });
-  expect(plain).toEqual({ executable: '/usr/local/bin/node', args: ['--test'] });
-  expect(validateWorkspaceCommand('node', ['--test'])).toMatchObject({ args: ['--test'] });
+  expect(plain.executable).toBe('/usr/local/bin/node');
+  expect(plain.args.slice(2)).toEqual(['--test']);
+  expect(plain.env).toBeUndefined();
+  // --check parses a single file and rejects additional options.
+  expect(resolveNodeCommand(['--check', 'file.js'], { execPath: '/usr/local/bin/node' }).args).toEqual(['--check', 'file.js']);
+  expect(validateWorkspaceCommand('node', ['--test']).args.slice(2)).toEqual(['--test']);
   expect(() => validateWorkspaceCommand('node', ['-e', 'x'])).toThrow(/Inline node evaluation/);
+});
+
+test('checks can resolve loopback host names inside the sandbox', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-command-dns-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, 'resolve.mjs'), [
+    "import { lookup } from 'node:dns/promises';",
+    "const { address } = await lookup('localhost');",
+    'console.log(address);',
+  ].join('\n'));
+  const runner = await openWorkspaceCommandRunner({ workspace, scratchDir: join(root, 'scratch'), localNetwork: true, gate: { dispatch: (_id, _reservation, send) => send(), settle: () => {} } });
+  cleanup.push(() => runner.close());
+  const result = await runner.run('node', ['resolve.mjs']);
+  expect(result.code, result.stderr || result.stdout).toBe(0);
+  expect(result.stdout.trim()).toMatch(/^(127\.0\.0\.1|::1)$/);
 });

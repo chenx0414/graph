@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { RuntimeError } from '../core/types.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 
@@ -15,6 +16,10 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
 }
+
+/** Loopback resolver shim for sandboxed node checks; readable in both the
+ * repository and the packaged app (its directory joins the read grants). */
+const RESOLVER_SHIM = fileURLToPath(new URL('./check-resolver.cjs', import.meta.url));
 
 export interface ResolvedCommand {
   executable: string;
@@ -31,11 +36,15 @@ export function resolveNodeCommand(
   args: string[],
   runtime: { execPath: string; electron?: string | undefined } = { execPath: process.execPath, ...(process.versions.electron ? { electron: process.versions.electron } : {}) },
 ): ResolvedCommand {
-  if (!runtime.electron) return { executable: runtime.execPath, args };
+  // --require makes the shim run before the check's own modules, and works in
+  // Electron's Node mode where NODE_OPTIONS is ignored. `--check` only parses
+  // a file and rejects extra options.
+  const shimArgs = args.includes('--check') ? args : ['--require', RESOLVER_SHIM, ...args];
+  if (!runtime.electron) return { executable: runtime.execPath, args: shimArgs, readPaths: [dirname(RESOLVER_SHIM)] };
   return {
     executable: runtime.execPath,
-    args,
-    readPaths: [dirname(dirname(runtime.execPath))],
+    args: shimArgs,
+    readPaths: [dirname(RESOLVER_SHIM), dirname(dirname(runtime.execPath))],
     env: { ELECTRON_RUN_AS_NODE: '1' },
   };
 }

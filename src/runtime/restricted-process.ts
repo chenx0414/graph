@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync, writeFileSync } from 'node:fs';
 import { readdir, realpath, writeFile } from 'node:fs/promises';
 import { createServer as createTcpServer, type Server as TcpServer } from 'node:net';
 import { homedir } from 'node:os';
@@ -317,6 +317,10 @@ export async function openRestrictedExecutor() {
       // /private/var/select and then executes the Command Line Tools binaries.
       const systemReads = ['/System', '/usr', '/bin', '/sbin', '/Library/Apple', '/dev'];
       for (const shim of ['/private/var/select', '/Library/Developer/CommandLineTools']) if (existsSync(shim)) systemReads.push(shim);
+      // Checks may resolve loopback host names (for example vitest resolves
+      // localhost). The resolver reads /etc/hosts and friends, and the
+      // profile's subpath filters only match directories.
+      if (existsSync('/etc')) systemReads.push(realpathSync('/etc'));
       const allowedReads = [...systemReads, cwd, scratchDir, ...readPaths];
       const deviceWrites = ['/dev/stdout', '/dev/stderr', '/dev/null', '/dev/tty', '/dev/dtracehelper', '/dev/autofs_nowait'];
       const gitPaths = await gitMetadataPaths(writePaths, scratchDir);
@@ -352,6 +356,7 @@ export async function openRestrictedExecutor() {
         },
       );
       const boundedProfile = extractProfile(wrapped, launch) + '\n' + profile + localNetworkProfile;
+      if (process.env.GRAPH_SANDBOX_PROFILE_DUMP) writeFileSync(process.env.GRAPH_SANDBOX_PROFILE_DUMP, boundedProfile);
       let listenGuard: string | undefined;
       // An IPC channel carries each host-bound loopback listener to the check.
       const stdio: ('pipe' | 'ipc')[] = command.localNetwork ? ['pipe', 'pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe', 'pipe'];
