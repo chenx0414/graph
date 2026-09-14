@@ -8,6 +8,8 @@
 
 - [使用文档](docs/usage.md)：启动、配置、数据目录、停止与排障。
 - [产品化交付报告](docs/planning/productization-reports.md)：T01–T06 的逐项验收与证据。
+- [主 Agent 入口方案](docs/planning/master-agent-entry-plan-2026-09-14.md)与[第四轮返工报告](docs/planning/master-agent-entry-rework4-report-2026-09-14.md)：对话式讨论、草稿确认与执行。
+- [合并报告](docs/planning/merge-report-2026-09-14.md)：`feat/master-agent-entry` 与 `feat/app-console` 合并到 `feat/unified-console` 的冲突解决与验证。
 - [首版产品设计](docs/graph-mvp.md)：范围、执行规则与首个真实任务。
 - [实现架构](docs/architecture.md)：模块 interface、持久化、Pi 接入与恢复方式。
 - [实施计划](docs/implementation-plan.md)：M0–M7、18 个工作包和验收矩阵。首版两组验收均已完成。
@@ -70,7 +72,7 @@ pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭
 
 ## 桌面 APP（开发预览）
 
-分支 `feat/app-console` 提供桌面壳：APP 以子进程方式托管现有守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](docs/planning/app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](docs/planning/app-reports.md)。
+本分支包含桌面壳：APP 以子进程方式托管现有守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](docs/planning/app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](docs/planning/app-reports.md)。
 
 ```sh
 export PATH="$PWD/node_modules/.bin:$PATH"
