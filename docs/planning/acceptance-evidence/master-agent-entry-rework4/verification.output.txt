@@ -71,3 +71,19 @@ message-state-millisecond rc=0
 decision-empty-snapshot rc=0
 conversation-ui-boundaries rc=0
 === done 2026年 9月14日 星期一 21时39分34秒 CST ===
+
+=== post-commit verification 6d1531b2b49b98f861dd4adc408b0de23b8db276 2026年 9月14日 星期一 21时40分00秒 CST ===
+tsc main rc=0
+tsc web rc=0
+      Tests  248 passed (248)
+   Start at  21:40:01
+   Duration  17.74s (tests 73%, import 26%, transform 1%)
+
+history-global-seq rc=0
+"afterClicks":[400,501,501]
+"passed":true
+history-cache-consistency rc=0
+"passed":true
+"passed":true
+message-state-millisecond rc=0
+"sameMillisecondTransitions": 0

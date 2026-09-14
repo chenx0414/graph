@@ -5,7 +5,7 @@
 ## 基线、分支与提交
 
 - 被验收基线：`46b31b6c95f582a0dc328ec1176887700ea1dd4b`（固定比较 `ff0e766...46b31b6`）。
-- 工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`。修复提交在本文件提交后列出。未合并、未覆盖 `main`、`feat/app-console` 或主工作区文件。
+- 工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`。修复提交：`6d1531b`（按会话自有游标分页 + 严格递增消息版本）；其后提交仅为文档/证据更新。未合并、未覆盖 `main`、`feat/app-console` 或主工作区文件。
 
 ## ME-R04-R3 / P2 全局序号被当作会话连续序号，分页停滞
 
