@@ -68,6 +68,18 @@ pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭
 }
 ```
 
+## 桌面 APP（开发预览）
+
+分支 `feat/app-console` 提供桌面壳：APP 以子进程方式托管现有守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](docs/planning/app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](docs/planning/app-reports.md)。
+
+```sh
+export PATH="$PWD/node_modules/.bin:$PATH"
+npx --yes electron@44.3.0 .        # 或安装 devDependencies 后：node --run app:dev
+node --run app:build               # 打包：dist/app/mac-arm64/Graph.app 与 Graph-<版本>-arm64.dmg
+```
+
+当前为 A5（桌面壳 + 向导 + 可视化增强 + 打包 + 界面重塑）：控制台采用设计系统与明暗主题，可产出本机 `.app`/`.dmg`，托盘常驻；对外分发所需的签名与公证待 Apple Developer ID（A6 提供操作手册）。
+
 ## 运行验证
 
 ```sh

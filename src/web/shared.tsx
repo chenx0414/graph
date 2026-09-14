@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nextEventCursor } from './event-cursor.ts';
+import { Button, Icon } from './ui.tsx';
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div data-testid="error" style={{ background: '#fde8e8', border: '1px solid #e0a0a0', padding: '8px 12px', margin: '8px 0' }}>
-      <strong>加载失败：</strong>{message}
-      {onRetry && <button type="button" style={{ marginLeft: 8 }} onClick={onRetry}>重试</button>}
+    <div data-testid="error" className="hint-card" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', margin: '8px 0' }}>
+      <Icon name="alert" />
+      <span><strong>加载失败：</strong>{message}</span>
+      {onRetry && <Button size="sm" variant="danger" onClick={onRetry}>重试</Button>}
     </div>
   );
 }

@@ -1,0 +1,45 @@
+# APP A4 · 打包与打包后验收（2026-09-13T12:59:44Z，项目 Node v24.20.0，electron-builder 26.15.3，Electron 44.3.0）
+=== 构建摘要 ===
+  • packaging       platform=darwin arch=arm64 electron=44.3.0 appOutDir=/Users/macmini/workspace/13-Graph/dist/app/mac-arm64
+  • skipped macOS code signing  reason=identity explicitly is set to null
+  • building        target=DMG arch=arm64 file=/Users/macmini/workspace/13-Graph/dist/app/Graph-0.1.0-arm64.dmg
+  • building block map  blockMapFile=/Users/macmini/workspace/13-Graph/dist/app/Graph-0.1.0-arm64.dmg.blockmap
+app bundle: /Users/macmini/workspace/13-Graph/dist/app/mac-arm64/Graph.app
+=== 产物 ===
+489M	dist/app/mac-arm64/Graph.app
+162M	dist/app/Graph-0.1.0-arm64.dmg
+  "CFBundleIconFile" => "icon.icns"
+  "CFBundleIdentifier" => "dev.graph.console"
+  "CFBundleName" => "Graph"
+  "CFBundleShortVersionString" => "0.1.0"
+bundle_resources:
+build
+desktop
+node_modules
+package.json
+src
+web
+tray_icons:
+icon.png
+trayTemplate.png
+trayTemplate@2x.png
+=== 打包后无 Node 环境启动（env -i，PATH=/usr/bin:/bin）===
+{"title":"Graph","origin":"http://127.0.0.1:53633","startup":{"mode":"view","configured":false,"modelCount":0,"enabledModelCount":0,"effectiveRevision":0}}
+orphans=0
+=== 打包后向导 E2E ===
+banner_wizard_link true
+status "已保存并重启守护进程：http://127.0.0.1:53893（未填写密钥，仍为仅查看模式）"
+first_origin http://127.0.0.1:53887
+second_origin http://127.0.0.1:53893
+daemon_restarted true
+startup {"mode":"view","configured":false,"modelCount":1,"enabledModelCount":0,"effectiveRevision":1}
+config_saved e2e-demo local-model revision1
+tray_ready 1
+orphans=0
+=== 截图 ===
+app-a4-window.png：打包版窗口（标题 Graph，地址 loopback，仅查看首启）
+
+## 重建（界面重塑后，2026-09-13T15:05:12Z）
+app bundle: dist/app/mac-arm64/Graph.app
+reparse-warning-lines: 0
+app-log:        0 lines, errors: 0

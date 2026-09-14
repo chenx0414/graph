@@ -16,11 +16,13 @@ export interface ResponsePlan {
 export async function openaiServer(plans: ResponsePlan[]) {
   const requests: unknown[] = [];
   const authorizations: string[] = [];
+  const headerList: Record<string, string>[] = [];
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
     requests.push(JSON.parse(Buffer.concat(chunks).toString()));
     authorizations.push(req.headers.authorization ?? '');
+    headerList.push(Object.fromEntries(Object.entries(req.headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(', ') : value ?? ''])));
     const plan = plans.shift() ?? { text: 'Unexpected extra request' };
     await plan.beforeReply?.();
     if (plan.status) {
@@ -45,5 +47,5 @@ export async function openaiServer(plans: ResponsePlan[]) {
   };
   const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false, refreshOnCreate: false });
   runtime.registerProvider('graph-openai', { baseUrl, api: 'openai-completions', apiKey: 'scripted-local-key', models: [model] });
-  return { model, runtime, requests, authorizations, async close() { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); } };
+  return { model, runtime, requests, authorizations, headerList, async close() { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); } };
 }

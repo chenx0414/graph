@@ -49,6 +49,26 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 
 确认后若要新增功能，主 Agent 会把它作为新的功能任务讨论与确认，原任务的验收范围不被静默修改。讨论阶段的主 Agent 只有读取类工具，不会修改项目文件或派发实现工作。
 
+## 桌面 APP（开发预览）
+
+A1–A2 提供 Electron 桌面壳与首次运行向导：APP 负责启动守护进程（`--port 0` 自动选端口、显式状态目录）并在窗口中加载控制台；关闭窗口不停止守护进程，再次启动 APP 会聚焦或重开窗口，退出 APP 触发与 CLI 相同的 5 秒有界停止。密钥边界不变：配置文件只保存 `secretRef`，APP 只把解密后的值放进子进程环境变量。
+
+```sh
+export PATH="$PWD/node_modules/.bin:$PATH"
+npx --yes electron@44.3.0 .        # 开发预览；已安装 devDependencies 时 node --run app:dev
+```
+
+A3 起控制台内置：任务页运行时间线与用量面板、图页 MiniMap 与状态色、`#/inbox` 问题收件箱（导航显示待处理数）；A5 起提供统一设计系统、明暗主题（默认跟随系统，可在侧边栏切换并记忆）、动效与更清晰的导航/统计/状态表达；桌面 APP 在新增待处理问题或任务完成/失败时发系统通知，Dock 角标显示开放问题总数，点击通知跳到对应任务。
+
+首次打开且未配置时，从横幅或导航进入 `#/setup` 向导：选择项目目录（原生对话框）、选模型模板、填密钥。桌面 APP 会把密钥写入系统钥匙串（不进入配置文件），保存后自动重启守护进程；未填密钥则保持仅查看模式。数据目录与配置默认在系统用户数据目录下（macOS 为 `~/Library/Application Support/Graph`），与 CLI 版的状态目录相互独立。
+
+### 安装、卸载与打包
+
+- 打包：`export PATH="$PWD/node_modules/.bin:$PATH"; node --run app:build`。产物为 `dist/app/mac-arm64/Graph.app` 与 `dist/app/Graph-<版本>-arm64.dmg`；把 `.app` 拖入“应用程序”即可安装，删除应用即卸载。当前产物为本地构建、未签名；对外分发需要 Apple Developer ID 与公证，本机首次打开无需处理 Gatekeeper 提示。
+- 数据与密钥：全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、`secrets.json` 密文）。卸载应用不会删除该目录；彻底清理时手动删除。
+- 托盘：菜单栏图标提供“打开控制台 / 待处理问题 N / 退出 Graph”；关闭窗口仅关闭窗口，守护进程继续运行，从托盘或 Dock 可重新打开。
+- 打包版本用系统浏览器组件（Electron 44.3.0，内置 Node 24.20.0），运行不依赖系统 Node 或终端环境。
+
 ## 配置
 
 配置文件为版本 1 JSON，默认 `./graph.config.json`，可用 `--config` / `GRAPH_CONFIG` 覆盖。相对项目根按配置文件所在目录解析。示例（无任何真实密钥）：
@@ -80,6 +100,28 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 | `limits.credentials` / `limits.sharedGroups` | 并发上限；上限在启动时绑定，修改后重启生效 |
 | `models.entries[].cost` | 可选价格（每百万 token）；未配置时用量费用显示未知，不按 0 计 |
 
+### 模型请求头与 OpenCode GO 示例
+
+`models.entries[].headers` 可为每个模型附加请求头，用于需要路由提示的网关（如 OpenCode GO 要求每个会话发送 `x-opencode-session`）。示例：
+
+```json
+{
+  "id": "deepseek-v4-flash",
+  "provider": "opencode-go",
+  "grade": "highest",
+  "api": "openai-completions",
+  "baseUrl": "https://opencode.ai/zen/go/v1",
+  "contextWindow": 131072,
+  "maxTokens": 8192,
+  "credentialId": "opencode-go",
+  "headers": { "x-opencode-session": "graph-console" }
+}
+```
+
+- 请求头合并到 provider 默认头之上，随每次模型调用与“测试连接”一起发送；设置页会显示每个模型已配置的请求头。
+- 密钥仍只保存环境变量名：CLI 下设置 `OPENCODE_GO_API_KEY`；桌面 APP 在设置页对应凭据行填入密钥并点“保存到钥匙串”，重启守护进程后以执行模式生效。
+- 本仓库的 `graph.config.json` 是本地用户配置（已加入 `.gitignore`），示例只引用环境变量名，不含密钥。
+
 设置页（`#/settings`）可编辑同一文档：显示“已保存 revision”与“当前运行版本”、凭据“已配置/缺失”与“待生效”，保存走版本检查（冲突时拒绝覆盖）与原子写入。保存不会热改运行中的绑定；删除未完成任务正在使用的模型会被拒绝。新任务绑定当前**运行版本**，保存后未重启的任务不会记录尚未生效的版本；连通性测试同样使用运行版本。从配置移除的项目会保留历史任务，但不能再接收新任务。解析到同一实际密钥的多个凭据别名必须属于同一共享组并采用别名中最严格的并发上限；冲突配置在保存时被拒绝（字段错误），手改文件在查看模式下仍可打开控制台但不会派发模型。
 
 ## 数据目录、端口与停止
@@ -102,6 +144,8 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 | `config_in_use` | 删除的模型被未完成任务使用；先处理任务或保留该模型 |
 | 模型不可用 | 任务记录显示 `No credential bound for model …`；检查凭据引用与环境变量 |
 | 等待 API 名额 | 同凭据并发已达上限，节点显示等待而非已发送；释放后自动继续 |
+| 任务一直显示“讨论中” | 守护进程处于仅查看模式（没有可用凭据）时任务只入队不派发；补齐凭据并重启为执行模式后，运行时会自动为这些任务补建 master 并继续 |
+| 网关返回 `MissingSessionID`（如 OpenCode GO） | 该网关要求请求头；确认模型条目带 `headers`（如 `x-opencode-session`）并使用包含该支持的版本保存配置 |
 
 ## 权限与兼容边界
 

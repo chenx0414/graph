@@ -32,3 +32,10 @@ __pycache__/
 skills-lock.json
 .worktrees/
 .agents/
+
+# App packaging staging
+.stage/
+.tooling/
+
+# Local daemon configuration (never commit user config)
+graph.config.json

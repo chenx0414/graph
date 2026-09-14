@@ -90,6 +90,20 @@ function asCost(value: unknown, path: string): ModelCost {
   return { input: field('input'), output: field('output'), cacheRead: field('cacheRead'), cacheWrite: field('cacheWrite') };
 }
 
+function asHeaders(value: unknown, path: string): Record<string, string> {
+  const entries = Object.entries(asObject(value, path));
+  if (entries.length > 20) invalid(`${path} must declare at most 20 headers`);
+  const headers: Record<string, string> = {};
+  for (const [name, headerValue] of entries) {
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) invalid(`${path}.${name} is not a valid header name`);
+    if (typeof headerValue !== 'string' || headerValue.length === 0 || headerValue.length > 512) {
+      invalid(`${path}.${name} must be a non-empty string of at most 512 characters`);
+    }
+    headers[name] = headerValue;
+  }
+  return headers;
+}
+
 function parseModel(raw: unknown, path: string, credentials: Record<string, CredentialConfig>): ConfiguredModel {
   const entry = asObject(raw, path);
   const grade = asString(entry.grade, `${path}.grade`);
@@ -107,6 +121,7 @@ function parseModel(raw: unknown, path: string, credentials: Record<string, Cred
     maxTokens: positiveInt(entry.maxTokens, `${path}.maxTokens`),
     credentialId,
     ...(entry.cost !== undefined ? { cost: asCost(entry.cost, `${path}.cost`) } : {}),
+    ...(entry.headers !== undefined ? { headers: asHeaders(entry.headers, `${path}.headers`) } : {}),
   };
 }
 

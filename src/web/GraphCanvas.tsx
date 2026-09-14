@@ -1,10 +1,31 @@
-import { ReactFlow, Background, Controls, MarkerType } from '@xyflow/react';
+import { ReactFlow, Background, Controls, Handle, MarkerType, MiniMap, Position, type NodeProps } from '@xyflow/react';
+import { NODE_TONE_COLOR, nodeTone, type NodeTone } from './insights.ts';
 
 type GraphPayload = {
   nodes: { id: string; kind: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null }[];
   containers: { id: string; parent?: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
 };
+
+type NodeData = { label: string; tone: NodeTone };
+
+/** Node card with a status dot and the original "id status" text, so both the
+ * screenshot reader and the UI tests keep working. */
+function GraphNode({ data, selected }: NodeProps) {
+  const info = data as unknown as NodeData;
+  return (
+    <div className="node-card" data-tone={info.tone} data-selected={selected ? 'true' : 'false'}>
+      <Handle type="target" position={Position.Top} style={{ opacity: 0, width: 1, height: 1 }} />
+      <div className="node-head">
+        <span className="node-dot" style={{ background: NODE_TONE_COLOR[info.tone] }} />
+        {info.label}
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, width: 1, height: 1 }} />
+    </div>
+  );
+}
+
+const nodeTypes = { graphNode: GraphNode };
 
 export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
   graph: GraphPayload;
@@ -23,22 +44,22 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
     ...graph.containers.map(container => {
       const position = graph.layout.positions[container.id] ?? { x: 0, y: 0, width: 240, height: 120 };
       return {
-        id: container.id, position: { x: position.x, y: position.y },
-        data: { label: container.id },
-        style: { width: position.width, height: position.height, background: 'transparent' },
+        id: container.id, type: 'default', position: { x: position.x, y: position.y },
+        data: { label: `${container.id}` }, className: 'container-card',
+        style: { width: position.width, height: position.height, zIndex: -1 },
         ...(container.parent ? { parentId: container.parent } : {}),
       };
     }),
     ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => {
       const position = graph.layout.positions[node.id] ?? { x: 0, y: 0, width: 180, height: 48 };
-      const selectedStyle = selected === node.id ? { border: '2px solid #2563eb', boxShadow: '0 0 0 2px rgba(37,99,235,0.2)' } : {};
+      const tone = nodeTone(node.status);
       return {
-        id: node.id, position: { x: position.x, y: position.y },
-        data: { label: `${node.id} ${node.status}` },
+        id: node.id, type: 'graphNode', position: { x: position.x, y: position.y },
+        data: { label: `${node.id} ${node.status}`, tone } satisfies NodeData,
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
-        style: { width: position.width, height: position.height, minWidth: 120, minHeight: 36, ...selectedStyle },
+        style: { width: position.width, height: position.height, minWidth: 150, minHeight: 44 },
         ...(node.container ? { parentId: node.container } : {}),
       };
     }),
@@ -48,15 +69,26 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const loop = edge.id.startsWith('loop:');
       return {
         id: edge.id, source: edge.source, target: edge.target,
-        ...(loop ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } } : {}),
+        ...(loop
+          ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } }
+          : { style: { stroke: '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c8aa5' } }),
       };
     });
   return (
-    <div style={{ height: 480 }} data-testid="flow">
-      <ReactFlow nodes={nodes} edges={edges} nodesDraggable={false} nodesConnectable={false} elementsSelectable
-        onNodeClick={(_event, node) => onSelect(node.id)} fitView>
-        <Background />
-        <Controls />
+    <div className="graph-wrap" data-testid="flow">
+      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false} nodesConnectable={false} elementsSelectable
+        onNodeClick={(_event, node) => onSelect(node.id)} fitView proOptions={{ hideAttribution: false }}>
+        <Background gap={18} size={1.4} color="#94a3b8" style={{ opacity: 0.25 }} />
+        <Controls showInteractive={false} />
+        <MiniMap
+          pannable
+          zoomable
+          maskColor="rgba(100,116,139,0.12)"
+          nodeColor={node => {
+            const info = node.data as unknown as NodeData;
+            return info.tone ? NODE_TONE_COLOR[info.tone] : 'transparent';
+          }}
+        />
       </ReactFlow>
     </div>
   );

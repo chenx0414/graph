@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { RuntimeError } from '../core/types.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 
@@ -16,13 +17,45 @@ export interface CommandResult {
   stderr: string;
 }
 
+/** Loopback resolver shim for sandboxed node checks; readable in both the
+ * repository and the packaged app (its directory joins the read grants). */
+const RESOLVER_SHIM = fileURLToPath(new URL('./check-resolver.cjs', import.meta.url));
+
+export interface ResolvedCommand {
+  executable: string;
+  args: string[];
+  /** Extra read grants and environment for the spawned process. */
+  readPaths?: string[];
+  env?: Record<string, string>;
+}
+
+/** `node` is the runtime that hosts Graph itself. Inside a packaged app that
+ * is the Electron binary, which runs Node when ELECTRON_RUN_AS_NODE is set and
+ * needs read access to the bundle's frameworks. */
+export function resolveNodeCommand(
+  args: string[],
+  runtime: { execPath: string; electron?: string | undefined } = { execPath: process.execPath, ...(process.versions.electron ? { electron: process.versions.electron } : {}) },
+): ResolvedCommand {
+  // --require makes the shim run before the check's own modules, and works in
+  // Electron's Node mode where NODE_OPTIONS is ignored. `--check` only parses
+  // a file and rejects extra options.
+  const shimArgs = args.includes('--check') ? args : ['--require', RESOLVER_SHIM, ...args];
+  if (!runtime.electron) return { executable: runtime.execPath, args: shimArgs, readPaths: [dirname(RESOLVER_SHIM)] };
+  return {
+    executable: runtime.execPath,
+    args: shimArgs,
+    readPaths: [dirname(RESOLVER_SHIM), dirname(dirname(runtime.execPath))],
+    env: { ELECTRON_RUN_AS_NODE: '1' },
+  };
+}
+
 /** A conservative allowlist: build/test commands plus read-only Git. */
-export function validateWorkspaceCommand(command: string, args: string[]) {
+export function validateWorkspaceCommand(command: string, args: string[]): ResolvedCommand {
   if (command === 'node') {
     if (args.some(arg => INLINE_NODE.has(arg) || arg.startsWith('--eval='))) {
       throw new RuntimeError('permission', 'Inline node evaluation is not allowed in a work copy');
     }
-    return { executable: process.execPath, args };
+    return resolveNodeCommand(args);
   }
   if (command === 'git') {
     if (!READ_ONLY_GIT.has(args[0] ?? '')) throw new RuntimeError('permission', 'Only read-only Git commands are allowed');
@@ -54,13 +87,14 @@ export async function openWorkspaceCommandRunner(input: {
       if (!acquired) acquired = await acquireRestrictedExecutor();
       await mkdir(input.scratchDir, { recursive: true, mode: 0o700 });
       const scratchDir = await realpath(input.scratchDir);
+      const environment = { ...(input.env ?? {}), ...(resolved.env ?? {}) };
       return acquired.executor.run({
         broker: input.gate, cwd: workspace, scratchDir,
         executable: resolved.executable, args: resolved.args,
-        readPaths: [workspace, dirname(resolved.executable), ...(input.readPaths ?? [])],
+        readPaths: [workspace, dirname(resolved.executable), ...(resolved.readPaths ?? []), ...(input.readPaths ?? [])],
         writePaths: [workspace, scratchDir],
         timeoutMs: 120_000,
-        ...(input.env ? { env: input.env } : {}),
+        ...(Object.keys(environment).length ? { env: environment } : {}),
         ...(input.localNetwork ? { localNetwork: true } : {}),
       });
     },

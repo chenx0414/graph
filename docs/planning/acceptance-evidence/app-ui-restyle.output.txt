@@ -1,0 +1,12 @@
+# APP 界面重塑 · 证据（2026-09-13T15:02:17Z，项目 Node v24.20.0）
+{
+ "overviewText": "首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请 | 打开配置向导 | ，或在 graph.config.json 中添加模型与凭据后重启。 | 概览 | 未配置模型 · 1 个项目 · 0 个模型 | 调度关闭 | 项目 | 1 | p | 模型 | 0 | 执行模式下可",
+ "darkTheme": "dark",
+ "taskTimelineEntries": 7,
+ "taskStatus": "预算不足",
+ "graphNodes": 2,
+ "inboxText": "重塑控制台界面 | p · 1 个待处理问题 | 预算不足 | reservation_exceeded | { |   \"actual\": 20, |   \"reserved\": 10 | } | 答复",
+ "settingsRevision": "0",
+ "setupSaveLabel": "保存配置"
+}
+rc=0

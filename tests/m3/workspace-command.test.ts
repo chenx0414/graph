@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
-import { openWorkspaceCommandRunner } from '../../src/runtime/workspace-command.ts';
+import { openWorkspaceCommandRunner, resolveNodeCommand, validateWorkspaceCommand } from '../../src/runtime/workspace-command.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -133,4 +133,80 @@ test('read-only Git commands still run inside the sandbox', async () => {
   expect(log.stdout).toContain('init');
   await expect(runner.run('git', ['commit', '-m', 'changed'])).rejects.toMatchObject({ code: 'permission' });
   expect(await readFile(join(workspace, 'README.md'), 'utf8')).toBe('project\n');
+});
+
+test('graph.command checks run in the project root of a non-git project', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-command-plain-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(join(workspace, 'test'), { recursive: true });
+  await writeFile(join(workspace, 'test/sample.test.js'), [
+    "import { test } from 'node:test';",
+    "import { writeFileSync } from 'node:fs';",
+    "test('writes proof', () => { writeFileSync('ran-plain.txt', 'ran'); });",
+  ].join('\n'));
+  const provider = await openaiServer([{ text: 'Done.' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: {},
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Run the tests.', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Run the tests',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--test', 'test/sample.test.js'] } },
+    ],
+  }, 'proposal');
+  const task = runtime.user.task(taskId);
+  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await runtime.host.runReady();
+    const view = await task.view();
+    if (view.phase === 'completed' || view.nodes.some(node => node.id === 'check' && node.status === 'failed')) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const view = await task.view();
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  expect(await readFile(join(workspace, 'ran-plain.txt'), 'utf8')).toBe('ran');
+  expect(view.questions.filter(question => question.kind === 'adapter_error')).toHaveLength(0);
+}, 90_000);
+
+test('node resolves to Electron in Node mode with framework read access inside a packaged app', () => {
+  const packaged = resolveNodeCommand(['--test'], { execPath: '/Applications/Graph.app/Contents/MacOS/Graph', electron: '44.3.0' });
+  expect(packaged.executable).toBe('/Applications/Graph.app/Contents/MacOS/Graph');
+  expect(packaged.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' });
+  expect(packaged.readPaths).toContain('/Applications/Graph.app/Contents');
+  expect(packaged.args[0]).toBe('--require');
+  expect(packaged.args.slice(2)).toEqual(['--test']);
+  const plain = resolveNodeCommand(['--test'], { execPath: '/usr/local/bin/node' });
+  expect(plain.executable).toBe('/usr/local/bin/node');
+  expect(plain.args.slice(2)).toEqual(['--test']);
+  expect(plain.env).toBeUndefined();
+  // --check parses a single file and rejects additional options.
+  expect(resolveNodeCommand(['--check', 'file.js'], { execPath: '/usr/local/bin/node' }).args).toEqual(['--check', 'file.js']);
+  expect(validateWorkspaceCommand('node', ['--test']).args.slice(2)).toEqual(['--test']);
+  expect(() => validateWorkspaceCommand('node', ['-e', 'x'])).toThrow(/Inline node evaluation/);
+});
+
+test('checks can resolve loopback host names inside the sandbox', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-command-dns-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, 'resolve.mjs'), [
+    "import { lookup } from 'node:dns/promises';",
+    "const { address } = await lookup('localhost');",
+    'console.log(address);',
+  ].join('\n'));
+  const runner = await openWorkspaceCommandRunner({ workspace, scratchDir: join(root, 'scratch'), localNetwork: true, gate: { dispatch: (_id, _reservation, send) => send(), settle: () => {} } });
+  cleanup.push(() => runner.close());
+  const result = await runner.run('node', ['resolve.mjs']);
+  expect(result.code, result.stderr || result.stdout).toBe(0);
+  expect(result.stdout.trim()).toMatch(/^(127\.0\.0\.1|::1)$/);
 });

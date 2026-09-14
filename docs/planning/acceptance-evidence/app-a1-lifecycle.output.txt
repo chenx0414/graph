@@ -1,0 +1,10 @@
+# APP A1 · Electron 壳生命周期（2026-09-13T12:12:54Z，项目 Node v24.20.0，Electron 
+44.3.0）
+=== smoke（GRAPH_APP_SMOKE=1，窗口 did-finish-load 后自动退出）
+APP_SMOKE_OK http://127.0.0.1:56097
+=== lifecycle（真实窗口 + CDP）
+window_url http://127.0.0.1:56489
+daemon_after_window_close 401
+http://127.0.0.1:56489second_instance_exited 0
+pages_after_second_launch 1 http://127.0.0.1:56489/
+orphans=0

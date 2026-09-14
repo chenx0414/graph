@@ -1,6 +1,7 @@
 {
   "name": "graph",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "main": "desktop/main.mjs",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -33,7 +34,11 @@
     "demo:m1": "node examples/m1-demo.ts",
     "accept:m7": "node examples/m7-acceptance.ts",
     "accept:m7:contract": "node examples/m7-contract.ts",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "app:dev": "electron desktop/main.mjs",
+    "app:smoke": "GRAPH_APP_SMOKE=1 electron desktop/main.mjs",
+    "app:icons": "node scripts/make-icons.mjs",
+    "app:build": "node scripts/make-icons.mjs && node --run build:web && node scripts/package-app.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.75",
@@ -54,6 +59,8 @@
     "playwright": "1.63.0",
     "typescript": "7.0.2",
     "vite": "8.2.2",
-    "vitest": "5.0.0"
+    "vitest": "5.0.0",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3"
   }
 }

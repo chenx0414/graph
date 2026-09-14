@@ -1,9 +1,18 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Graph</title>
+    <meta name="color-scheme" content="light dark" />
+    <title>Graph · Agent 任务编排控制台</title>
+    <script>
+      // Apply the stored theme before first paint to avoid a flash.
+      try {
+        const stored = localStorage.getItem('graph-theme');
+        const dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
