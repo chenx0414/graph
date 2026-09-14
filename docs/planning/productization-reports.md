@@ -382,3 +382,18 @@
   - 混合已知/未知：首轮已知 50 并写入文件，第二轮无 usage，第三轮发送被门拒绝 → `interrupted`，文件保留；两种答复后已知部分分别累计为 100 / 50，恢复后最终为 150 / 100，文件未被重复覆盖。
 - 你方探针 `interrupted-unknown`：`usage` 答复 `accepted:true`、随后的第二个答复按已解决拒绝；节点恢复完成。
 - 项目 Node 24.20.0（main 工作树）：全量 **47 文件 / 221 项**连续 2 次通过；双 tsc、构建、`git diff --check` 通过；八个历史探针全部 `rc=0`；其余各轮探针（零发送暂停、20 并发上限、部分执行已知用量、模型错误、别名、配置版本、实时记录、PA05）保持通过。证据：`acceptance-evidence/rework5-independent.output.txt`、`rework5-graph-full.output.txt`、`t08-probes.output.txt`。未调用付费供应商；是否关闭由独立复验决定。
+
+## 返工轮 6 · PA02-R5（返工轮次不得复用历史成功记录）
+
+基线：`b15e31d`。第六次独立验收确认首次执行的用量核对通过，但发现 `answer()` 在最后一个问题解决后按 task/node 查任何历史 succeeded 操作，把因未知用量中断的返工轮误判为成功：后继收到 `work:null`，跳过必要的模型调用即可完成任务。
+
+### 修复
+
+- 答复后的节点状态恢复只看**当前 activation 自己的操作**：只有当前轮次的操作为 succeeded 且结果为 completed 时才把节点置为 succeeded；被中断的轮次回到 pending，继续原实例会话。
+- 旧 activation 的完成记录保持历史，不再满足当前依赖；首次执行“结果已就绪、仅等待用量确认”的正常路径保持不变（`settle` 已置位，幂等）。
+
+### 复验
+
+- 新增 `tests/m8/rework.test.ts` 两轮正式回边回归（补记与保留未知各一遍）：答复后 work 仍 pending、后继 check 不运行；继续运行后第三次模型请求实际发送，后继取得本轮 `outputVersion=2` 的非空输出后才完成任务；两轮用量按 invocation 一次性累计（补记 150 / 保留未知 100），保留未知不折零，重复答复不重复累计，实例身份与旧成功操作历史保留；该回归在未修复代码上失败。
+- 你方反例 `rework-record`、`rework-keep` 转为预期行为：providerRequests 3、checks 2、答复后 pending、`finalDependencies.work` 非空。
+- 项目 Node 24.20.0：全量 **47 文件 / 222 项**连续 2 次通过；双 tsc、构建、历史八探针与各轮探针（首次执行四组合、零发送暂停、并发上限、独立 key、配置版本、实时记录、PA05）保持通过。证据：`acceptance-evidence/rework6-independent.output.txt`、`rework6-graph-full.output.txt`、`t08-probes.output.txt`。未调用付费供应商；是否关闭由独立复验决定。

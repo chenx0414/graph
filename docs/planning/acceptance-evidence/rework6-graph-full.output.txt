@@ -1,0 +1,9 @@
+
+ RUN  v5.0.0 /Users/macmini/workspace/graph-rework5-dev
+
+
+ Test Files  47 passed (47)
+      Tests  222 passed (222)
+   Start at  15:16:35
+   Duration  24.01s (tests 72%, import 26%, transform 1%)
+

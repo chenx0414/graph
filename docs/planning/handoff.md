@@ -2,7 +2,7 @@
 
 快照：2026-09-13（Asia/Shanghai）。本文件描述产品化阶段（T01–T08 及 PA01–PA04 返工）后的工作区状态与入口；早期 R1–R4 的接手说明保留在下方作为历史。
 
-**状态：监听与本地网络返工轮已由独立验收关闭（R13；见 [最终验收](r13-final-acceptance-2026-09-13.md)）。产品化待办 T01–T08 已实施，独立验收提出的 PA01–PA05 已按五轮返工修复并本地复验（含恢复时重取 Agent 名额、暂停拒绝不误报成功、部分执行后暂停可恢复、interrupted 未知用量可核对、保存期共享组冲突校验），报告与证据见 [产品化交付报告](productization-reports.md) 与各轮独立验收报告；等待独立复验，本仓库不自行宣布整体完成。Graph 全量 47 文件 / 221 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，交付测试 40/40（含真实无头 Chromium E2E）。是否合入使用者原仓库、配置 remote 或发布由使用者决定。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
+**状态：监听与本地网络返工轮已由独立验收关闭（R13；见 [最终验收](r13-final-acceptance-2026-09-13.md)）。产品化待办 T01–T08 已实施，独立验收提出的 PA01–PA05 已按六轮返工修复并本地复验（含恢复时重取 Agent 名额、暂停拒绝不误报成功、部分执行后暂停可恢复、interrupted 未知用量可核对且返工轮次不复用历史成功记录、保存期共享组冲突校验），报告与证据见 [产品化交付报告](productization-reports.md) 与各轮独立验收报告；等待独立复验，本仓库不自行宣布整体完成。Graph 全量 47 文件 / 222 项；交付副本 `main` → `001f288a5a9fc797893497764d73bfe000bb198d`，交付测试 40/40（含真实无头 Chromium E2E）。是否合入使用者原仓库、配置 remote 或发布由使用者决定。不要从 [M2 接手说明](m2-handoff.md) 恢复实施。**
 
 该旧文件若仍出现在工作区，只是未提交的历史草稿（当时 M2 未完成）。当前真相以本文件、各 `mN-results.md`、[验收跟进](acceptance-followup.md) 和 `git log` 为准。
 
@@ -17,7 +17,7 @@
    node -v                                  # v24.20.0
    tsc --noEmit
    tsc -p tsconfig.web.json --noEmit
-   vitest run                               # 47 files, 221 tests
+   vitest run                               # 47 files, 222 tests
    vite build
    git diff --check
    ```

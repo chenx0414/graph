@@ -200,8 +200,11 @@ export class Execution {
     }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
     if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, question.node_id)) {
-      const last = this.store.db.prepare("SELECT result FROM operations WHERE task_id=? AND node_id=? AND state='succeeded' ORDER BY rowid DESC LIMIT 1").get(taskId, question.node_id) as { result: string } | undefined;
-      const completed = last && (JSON.parse(last.result) as OperationResult).outcome === 'completed';
+      // Only the current activation's own finished result may lift the node to
+      // succeeded. A completed operation from an earlier rework round stays
+      // history and must not satisfy the dependency that is still pending.
+      const current = this.store.db.prepare("SELECT o.state,o.result FROM operations o JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id WHERE o.task_id=? AND o.node_id=? AND o.activation_id=n.activation_id ORDER BY o.rowid DESC LIMIT 1").get(taskId, question.node_id) as { state: string; result: string | null } | undefined;
+      const completed = current?.state === 'succeeded' && current.result !== null && (JSON.parse(current.result) as OperationResult).outcome === 'completed';
       if (!['rework', 'stalled'].includes(question.kind)) this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?').run(completed ? 'succeeded' : 'pending', taskId, question.node_id);
     }
     if (['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond')) {

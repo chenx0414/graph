@@ -1,0 +1,51 @@
+# 返工轮 6 探针复跑（2026-09-14T07:17:24Z，项目 Node v24.20.0，main + PA02-R5 修复）
+=== dev-probes/rework-record.mts ===
+{"providerRequests":3,"checks":2,"before":{"work":{"action":"work","definitionVersion":"coder@1","id":"work","kind":"agent","model":"local","instanceId":"24291240-2c58-40b9-ada5-05966708e679","activationId":"28788b0c-6cfc-44b9-9ab3-002f5fc127c7","outputVersion":1,"stallCount":1,"status":"blocked","used":50,"budget":20000000,"selectedModel":"local","boundDefinition":"coder@1","reserved":0},"workOperations":[{"state":"succeeded","activationId":"9af859b9-5579-4c7a-a23c-4535014cd4d5","result":{"outcome":"completed","output":{"text":"first incomplete implementation"},"usage":{"cacheRead":15,"cacheWrite":0,"input":25,"output":10}}},{"state":"interrupted","activationId":"28788b0c-6cfc-44b9-9ab3-002f5fc127c7","result":null}]},"answered":{"work":{"action":"work","definitionVersion":"coder@1","id":"work","kind":"agent","model":"local","instanceId":"24291240-2c58-40b9-ada5-05966708e679","activationId":"28788b0c-6cfc-44b9-9ab3-002f5fc127c7","outputVersion":1,"stallCount":1,"status":"pending","used":100,"budget":20000000,"selectedModel":"local","boundDefinition":"coder@1","reserved":0},"questions":[{"kind":"unknown_usage","status":"resolved"}]},"after":{"phase":"completed","nodes":[{"id":"work","status":"succeeded"},{"id":"check","status":"succeeded"}],"finalDependencies":{"work":{"text":"real second round completion"}}}}
+rc=0
+=== dev-probes/rework-keep.mts ===
+{"providerRequests":3,"checks":2,"before":{"work":{"action":"work","definitionVersion":"coder@1","id":"work","kind":"agent","model":"local","instanceId":"ad91a5a4-41ef-47a9-96bc-bfbf3b0cba9a","activationId":"33da1628-9806-4d08-9a51-80813768e92d","outputVersion":1,"stallCount":1,"status":"blocked","used":50,"budget":20000000,"selectedModel":"local","boundDefinition":"coder@1","reserved":0},"workOperations":[{"state":"succeeded","activationId":"cbd713dc-6fb4-4598-85c2-5f090de7b604","result":{"outcome":"completed","output":{"text":"first incomplete implementation"},"usage":{"cacheRead":15,"cacheWrite":0,"input":25,"output":10}}},{"state":"interrupted","activationId":"33da1628-9806-4d08-9a51-80813768e92d","result":null}]},"answered":{"work":{"action":"work","definitionVersion":"coder@1","id":"work","kind":"agent","model":"local","instanceId":"ad91a5a4-41ef-47a9-96bc-bfbf3b0cba9a","activationId":"33da1628-9806-4d08-9a51-80813768e92d","outputVersion":1,"stallCount":1,"status":"pending","used":50,"budget":20000000,"selectedModel":"local","boundDefinition":"coder@1","reserved":0},"questions":[{"kind":"unknown_usage","status":"resolved"}]},"after":{"phase":"completed","nodes":[{"id":"work","status":"succeeded"},{"id":"check","status":"succeeded"}],"finalDependencies":{"work":{"text":"real second round completion"}}}}
+rc=0
+=== dev-probes/unknown-answers.mts ===
+{"providerRequests":2,"operation":[{"state":"interrupted","workerActive":false,"result":null}],"questions":[{"kind":"unknown_usage","status":"open"}],"answers":[{"mode":"usage","duplicate":"invalid_question","used":50,"invocations":[{"id":"72b7617c-9ce2-434e-8ff5-0af485afddf5","operationId":"a62f5342-3cf4-4c46-b29c-6b221f9bc141","instanceId":"6eed878f-446c-495e-ae09-7a2984ed749d","model":"local","usage":{"cacheRead":0,"cacheWrite":0,"input":40,"output":10},"cost":{"unknown":true}}]}],"after":[{"id":"work","status":"succeeded","used":100},{"id":"check","status":"succeeded","used":null}],"checks":1}
+rc=0
+=== dev-probes/mixed-answers.mts ===
+{"providerRequests":3,"operation":[{"state":"interrupted","workerActive":false,"result":null}],"questions":[{"kind":"unknown_usage","status":"open"}],"answers":[{"mode":"usage","duplicate":"invalid_question","used":100,"invocations":[{"id":"1d9f4f5d-5905-4750-9f91-d57073655891","operationId":"932a7082-1c24-4da8-bf98-712640471836","instanceId":"89369b0e-3e88-44c4-959f-f4c417f98497","model":"local","usage":{"cacheRead":15,"cacheWrite":0,"input":25,"output":10},"cost":{"unknown":true}},{"id":"44dbe612-90f9-4e07-9d0f-c20dc64b58aa","operationId":"932a7082-1c24-4da8-bf98-712640471836","instanceId":"89369b0e-3e88-44c4-959f-f4c417f98497","model":"local","usage":{"cacheRead":0,"cacheWrite":0,"input":0,"output":0},"cost":{"unknown":true}},{"id":"2c6536f7-b567-4e85-bb1c-904129a0fef0","operationId":"932a7082-1c24-4da8-bf98-712640471836","instanceId":"89369b0e-3e88-44c4-959f-f4c417f98497","model":"local","usage":{"cacheRead":0,"cacheWrite":0,"input":40,"output":10},"cost":{"unknown":true}}]}],"after":[{"id":"work","status":"succeeded","used":150},{"id":"check","status":"succeeded","used":null}],"checks":1}
+rc=0
+=== dev-probes/mixed-answers.mts --keep ===
+{"providerRequests":3,"operation":[{"state":"interrupted","workerActive":false,"result":null}],"questions":[{"kind":"unknown_usage","status":"open"}],"answers":[{"mode":"reconcile_usage","duplicate":"invalid_question","used":50,"invocations":[{"id":"82896483-396f-424f-b10d-d81d5043c85d","operationId":"be98cce2-e5df-4849-8ee5-a012d009fbe7","instanceId":"ffe64c70-82b3-4293-b709-3567ebf0f3b6","model":"local","usage":{"cacheRead":15,"cacheWrite":0,"input":25,"output":10},"cost":{"unknown":true}},{"id":"62ef7cc5-bd5f-42d2-a24f-1477e16f02bf","operationId":"be98cce2-e5df-4849-8ee5-a012d009fbe7","instanceId":"ffe64c70-82b3-4293-b709-3567ebf0f3b6","model":"local","usage":{"cacheRead":0,"cacheWrite":0,"input":0,"output":0},"cost":{"unknown":true}},{"id":"3d395dec-940b-40b8-a0bb-5b33ab81859b","operationId":"be98cce2-e5df-4849-8ee5-a012d009fbe7","instanceId":"ffe64c70-82b3-4293-b709-3567ebf0f3b6","model":"local","usage":null,"cost":{"unknown":true}}]}],"after":[{"id":"work","status":"succeeded","used":100},{"id":"check","status":"succeeded","used":null}],"checks":1}
+rc=0
+=== docs/planning/acceptance-evidence/productization-rework3-independent/partial-pause.mts ===
+{"providerRequests":2,"checks":1,"paused":{"status":"paused","nodes":[{"id":"work","status":"pending","used":50},{"id":"check","status":"pending","used":null}],"operations":[{"state":"interrupted","workerActive":false,"result":null,"reserved":0}],"invocations":[{"usage":{"cacheRead":15,"cacheWrite":0,"input":25,"output":10}}],"questions":[]},"afterResume":{"drive":{"dispatched":2},"status":"completed","nodes":[{"id":"work","status":"succeeded"},{"id":"check","status":"succeeded"}],"questions":[]},"reconciliation":"accepted"}
+rc=0
+=== docs/planning/acceptance-evidence/productization-rework3-independent/after-tool-pause.mts ===
+{"partialOutput":"partial output","providerRequests":2,"checks":1,"paused":{"status":"paused","nodes":[{"id":"work","status":"pending","used":50},{"id":"check","status":"pending","used":null}],"operations":[{"state":"interrupted","workerActive":false,"result":null,"reserved":0}],"invocations":[{"usage":{"cacheRead":15,"cacheWrite":0,"input":25,"output":10}},{"usage":{"cacheRead":0,"cacheWrite":0,"input":0,"output":0}}],"questions":[]},"afterResume":{"drive":{"dispatched":2},"status":"completed","nodes":[{"id":"work","status":"succeeded"},{"id":"check","status":"succeeded"}],"questions":[]},"reconciliation":"accepted"}
+rc=0
+=== docs/planning/acceptance-evidence/productization-rework3-independent/pause-resume-verified.mts --pause ===
+{"phase":"completed","paused":true,"providerRequests":0,"maxProviderInFlight":0,"activeWorkers":0,"activeCredentialSlots":0,"queued":0,"succeeded":0}
+{"phase":"after-user-resume","providerRequests":20,"maxInFlight":10,"succeeded":20,"check":"succeeded","active":0,"queued":0}
+rc=0
+=== docs/planning/acceptance-evidence/productization-rework2-independent/product-resume-complete.mts ===
+{"phase":"parked","queued":20,"providerRequests":0}
+{"phase":"completed","paused":false,"providerRequests":20,"maxProviderInFlight":10,"activeWorkers":0,"activeCredentialSlots":0,"queued":0,"succeeded":20}
+rc=0
+=== docs/planning/acceptance-evidence/productization-rework-independent/product-resume-execution-cap.mts ===
+{"phase":"parked","queued":20,"providerRequests":0}
+{"phase":"resumed","providerRequests":10,"providerInFlight":10,"maxProviderInFlight":10,"activeWorkers":20,"limit":10}
+rc=0
+=== docs/planning/acceptance-evidence/productization-rework-independent/product-config-alias-conflict.mts ===
+{"probe":"config-save-alias-group-conflict","saveStatus":400,"saved":{"code":"invalid_config","message":"credentials.a.sharedLimitGroupId: aliases resolving to one key must share one sharedLimitGroupId (a, b)","field":"credentials.a.sharedLimitGroupId"},"persistedGroups":[null,null],"restart":{"started":true}}
+rc=0
+=== docs/planning/acceptance-evidence/productization-rework-independent/pa05-reviewer.mts ===
+
+Node.js v24.20.0
+rc=0
+=== docs/planning/acceptance-evidence/productization-independent/product-independent-key.mts ===
+{"scenario":"ten-A-waiters-independent-B","queuedA":10,"providerRequests":1,"activeWorkers":10,"nodes":[{"id":"a0","status":"running"},{"id":"a1","status":"running"},{"id":"a2","status":"running"},{"id":"a3","status":"running"},{"id":"a4","status":"running"},{"id":"a5","status":"running"},{"id":"a6","status":"running"},{"id":"a7","status":"running"},{"id":"a8","status":"running"},{"id":"a9","status":"running"},{"id":"b","status":"succeeded"},{"id":"check","status":"pending"}]}
+rc=0
+=== docs/planning/acceptance-evidence/productization-independent/product-config-revision.mts ===
+  }
+]
+rc=0
+=== docs/planning/acceptance-evidence/productization-independent/product-live-records.mts ===
+{"initial":{"graph":2,"view":2,"operations":2},"afterCounts":{"graph":3,"view":3,"operations":3},"before":"check 待执行（pending）\n\n实例 未知\n模型 未知 · 定义 未知\n用量 未知（无权威计量） · 预留 0\n尝试次数 0 · 输出版本 0\n验收证据 无\n操作记录（0）\n加载更多操作记录","after":"check 已完成（succeeded）\n\n实例 未知\n模型 未知 · 定义 未知\n用量 未知（无权威计量） · 预留 0\n尝试次数 0 · 输出版本 1\n验收证据 ok:有效 passed\n操作记录（1）\nsucceeded · 4ms · 预留 0\n{\n  \"answer\": 42\n}\n加载更多操作记录","actualOperations":["succeeded"],"actualEvidence":[{"acceptanceId":"ok","artifact":{"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","path":"/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-live-records-I04syj/ok"},"summary":"passed","nodeId":"check","operationId":"22a4cf99-78e6-4241-aa9a-c474a6e54b19","proposalVersion":1,"requirementVersion":1,"activationId":"f75b4db7-3179-4049-a8d0-94dc888e5b74","valid":true}]}
+rc=0

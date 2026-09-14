@@ -651,3 +651,96 @@ test('mixed known and unknown usage can be reconciled and continue', async () =>
   await interruptedMixed('usage');
   await interruptedMixed('reconcile');
 }, 120_000);
+
+async function interruptedRework(check: 'usage' | 'reconcile') {
+  const root = await temp(`rework-${check}`);
+  const provider = await openaiServer([
+    { text: 'first incomplete implementation' },
+    { usage: null, tools: [{ id: 'fix-1', name: 'write_file', arguments: JSON.stringify({ path: 'fix.txt', content: 'fix' }) }] },
+    { text: 'real second round completion' },
+  ]);
+  cleanup.push(() => provider.close());
+  let checks = 0;
+  const successorInputs: { dependencies: unknown; inputVersions: unknown }[] = [];
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async operation => async () => {
+          checks += 1;
+          if (checks === 1) return { outcome: 'completed', output: { kind: 'verification', outcome: 'rework', subjects: [], reports: [], blockers: [{ id: 'needs-fix', reason: 'synthetic rework required', evidence: [] }] } };
+          successorInputs.push({ dependencies: operation.dependencies, inputVersions: operation.inputVersions });
+          return { outcome: 'completed', output: { passed: true }, evidence: [{ acceptanceId: 'ok', summary: 'synthetic observing check', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] };
+        },
+      },
+    },
+  });
+  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const begun = await server.runtime.user.begin({ projectId: 'p', request: `rework ${check}`, requestId: 'begin' });
+  const userTask = server.runtime.user.task(begun.taskId);
+  await server.runtime.supervisor(begun.taskId).propose({
+    requirementVersion: 1, summary: 'rework interrupted usage',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    loops: [{ from: 'check', to: 'work' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await server.runtime.host.drive();
+  await waitFor(async () => {
+    const view = await userTask.view();
+    return view.operations.some(operation => operation.state === 'interrupted') && view.questions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
+  }, 20_000);
+  const before = await userTask.view();
+  const roundOne = before.operations.find(operation => operation.nodeId === 'work' && operation.state === 'succeeded')!;
+  const roundTwo = before.operations.find(operation => operation.nodeId === 'work' && operation.state === 'interrupted')!;
+  const work = before.nodes.find(node => node.id === 'work')!;
+  expect(roundOne.activationId).not.toBe(roundTwo.activationId);
+  expect(roundOne.result).toMatchObject({ outcome: 'completed', output: { text: 'first incomplete implementation' } });
+  expect(roundTwo.result).toBeNull();
+  expect(work.status).toBe('blocked');
+  expect(work.outputVersion).toBe(1);
+  expect(checks).toBe(1);
+  const question = before.questions.find(item => item.kind === 'unknown_usage' && item.status === 'open')!;
+  if (check === 'usage') {
+    await userTask.answer(question.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'synthetic provider bill' }, 'rework-usage');
+  } else {
+    await userTask.answer(question.id, { type: 'reconcile_usage', proof: 'provider exposes no usage' }, 'rework-reconcile');
+  }
+  const answered = await userTask.view();
+  // The interrupted round must stay pending for its own activation: the first
+  // round's success is history and cannot satisfy the waiting dependency.
+  expect(answered.questions.filter(item => item.status === 'open')).toEqual([]);
+  expect(answered.phase).toBe('running');
+  expect(answered.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending', instanceId: work.instanceId, activationId: roundTwo.activationId, outputVersion: 1, used: check === 'usage' ? 100 : 50 });
+  expect(answered.nodes.find(node => node.id === 'check')?.status).toBe('pending');
+  expect(checks).toBe(1);
+  await expect(userTask.answer(question.id, { type: 'reconcile_usage', proof: 'duplicate' }, 'rework-again')).rejects.toMatchObject({ code: 'invalid_question' });
+  expect((await userTask.view()).nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 100 : 50);
+
+  await server.runtime.host.drive();
+  const completed = await userTask.view();
+  expect(completed.phase).toBe('completed');
+  expect(provider.requests).toHaveLength(3);
+  expect(checks).toBe(2);
+  expect(successorInputs).toHaveLength(1);
+  expect(successorInputs[0]!.dependencies).toMatchObject({ work: { text: 'real second round completion' } });
+  expect(successorInputs[0]!.inputVersions).toMatchObject({ work: [{ activationId: roundTwo.activationId, outputVersion: 2 }] });
+  expect(completed.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'succeeded', instanceId: work.instanceId, outputVersion: 2, used: check === 'usage' ? 150 : 100 });
+  expect(completed.invocations.filter(invocation => invocation.operationId === roundTwo.id && invocation.usage === null)).toHaveLength(check === 'usage' ? 0 : 1);
+  expect(completed.operations.some(operation => operation.id === roundOne.id && operation.state === 'succeeded')).toBe(true);
+}
+
+test('a rework round interrupted for unknown usage continues instead of reusing the previous success', async () => {
+  await interruptedRework('usage');
+  await interruptedRework('reconcile');
+}, 180_000);

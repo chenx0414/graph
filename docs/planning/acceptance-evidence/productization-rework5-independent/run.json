@@ -1,0 +1,12 @@
+{
+  "head": "b15e31dd64c3ef4c6a8c2c5e7500fdc5a618177c",
+  "baseline": "c8a6816",
+  "worktree": "/Users/macmini/workspace/13-Graph-accept-b15e31d",
+  "node": "24.20.0",
+  "testFiles": 47,
+  "tests": 221,
+  "successfulFullSuiteRuns": 1,
+  "historicalProbes": 8,
+  "paidProviderCalls": 0,
+  "appConsoleUntouched": true
+}
