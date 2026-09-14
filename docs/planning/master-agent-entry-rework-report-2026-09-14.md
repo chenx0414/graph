@@ -5,7 +5,7 @@
 ## 基线、分支与提交
 
 - 验收基线：`c0247abd59d2e2ba3a9a6a620d0205ad64a6ced2`（独立验收固定比较 `688dd1f...c0247ab`）。
-- 工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`。返工提交接在 `c0247ab` 之后，未合并、未覆盖 `main`、`feat/app-console` 或主工作区现有文件。
+- 工作树：`/Users/macmini/workspace/graph-master-entry-dev`，分支 `feat/master-agent-entry`。返工提交：`fa38646`（ME-S01 与 ME-R01–R06 的 src/tests 修复）、`3efe95e`（返工报告与证据）、`fedea32`（提交后复验输出）。未合并、未覆盖 `main`、`feat/app-console` 或主工作区现有文件。
 
 ## 逐项修复
 
