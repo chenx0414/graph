@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
-import { openWorkspaceCommandRunner } from '../../src/runtime/workspace-command.ts';
+import { openWorkspaceCommandRunner, resolveNodeCommand, validateWorkspaceCommand } from '../../src/runtime/workspace-command.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -176,3 +176,17 @@ test('graph.command checks run in the project root of a non-git project', async 
   expect(await readFile(join(workspace, 'ran-plain.txt'), 'utf8')).toBe('ran');
   expect(view.questions.filter(question => question.kind === 'adapter_error')).toHaveLength(0);
 }, 90_000);
+
+test('node resolves to Electron in Node mode with framework read access inside a packaged app', () => {
+  const packaged = resolveNodeCommand(['--test'], { execPath: '/Applications/Graph.app/Contents/MacOS/Graph', electron: '44.3.0' });
+  expect(packaged).toEqual({
+    executable: '/Applications/Graph.app/Contents/MacOS/Graph',
+    args: ['--test'],
+    readPaths: ['/Applications/Graph.app/Contents'],
+    env: { ELECTRON_RUN_AS_NODE: '1' },
+  });
+  const plain = resolveNodeCommand(['--test'], { execPath: '/usr/local/bin/node' });
+  expect(plain).toEqual({ executable: '/usr/local/bin/node', args: ['--test'] });
+  expect(validateWorkspaceCommand('node', ['--test'])).toMatchObject({ args: ['--test'] });
+  expect(() => validateWorkspaceCommand('node', ['-e', 'x'])).toThrow(/Inline node evaluation/);
+});
