@@ -1,14 +1,15 @@
 import type { NodeSpec, Operation } from '../core/types.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
-export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions: string[]; capabilities: string[] }; graph?: NodeSpec[]; review?: { kind: string }[] }) {
+export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions: string[]; capabilities: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string }) {
   const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact => `${artifact.path} (${artifact.digest})`)));
   return [
     `Request: ${extra.request}`,
     `Requirement version: ${operation.requirementVersion}`,
     operation.context.messages?.length
-      ? `User messages:\n${operation.context.messages.map(message => `- (v${message.requirementVersion}) ${message.text}`).join('\n')}`
+      ? `User messages:\n${operation.context.messages.map(message => `- ${message.id ? `[${message.id}] ` : ''}(v${message.requirementVersion}) ${message.text}`).join('\n')}`
       : '',
+    extra.conversation ? `Conversation and execution status:\n${extra.conversation}` : '',
     extra.summary ? `Summary: ${extra.summary}` : '',
     extra.acceptance.length ? `Acceptance:\n${extra.acceptance.map(item => `- ${item.id} (check ${item.checkNode}): ${item.description}`).join('\n')}` : '',
     extra.capabilities?.length ? `Bound capabilities:\n${extra.capabilities.map(item => `- ${item.id}@${item.version}`).join('\n')}` : '',

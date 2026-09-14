@@ -21,6 +21,7 @@ export interface TaskRow {
   latest_proposal: number; accepted_proposal: number | null; target_branch: string | null;
   phase: string; paused: number; created_seq: number; graph_version: number;
   integration_branch: string | null; integration_sha: string | null; target_sha: string | null;
+  conversation_id: string | null;
 }
 
 /** SQLite and transaction details stay private to the Task Runtime module. */
@@ -31,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 10) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 11) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -142,6 +143,24 @@ export class TaskStore {
     if (version < 10) this.transaction(() => {
       // Operations waiting for a credential slot must not consume execution slots.
       this.db.exec('ALTER TABLE operations ADD COLUMN waiting_slot INTEGER NOT NULL DEFAULT 0; PRAGMA user_version=10;');
+    });
+    if (version < 11) this.transaction(() => {
+      // Conversations own a durable master message log; their anchor task keeps
+      // every master turn inside the existing operation/instance ledger.
+      this.db.exec(`
+        CREATE TABLE conversations(id TEXT PRIMARY KEY, project_id TEXT,
+          workspace_project_id TEXT NOT NULL, anchor_task_id TEXT NOT NULL, title TEXT NOT NULL,
+          created_seq INTEGER NOT NULL, created_at INTEGER NOT NULL);
+        CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id), role TEXT NOT NULL, kind TEXT NOT NULL,
+          text TEXT NOT NULL DEFAULT '', data TEXT, state TEXT NOT NULL, operation_id TEXT,
+          turn INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE INDEX messages_scope ON messages(conversation_id, seq);
+        ALTER TABLE tasks ADD COLUMN conversation_id TEXT;
+        CREATE TABLE conversation_acceptances(conversation_id TEXT NOT NULL REFERENCES conversations(id),
+          proposal_version INTEGER NOT NULL, task_id TEXT NOT NULL REFERENCES tasks(id),
+          target_branch TEXT NOT NULL, accepted_at INTEGER NOT NULL, PRIMARY KEY(conversation_id,proposal_version));
+        PRAGMA user_version=11;`);
     });
   }
   transaction<T>(action: () => T): T {

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { realpath, symlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
+import { appendMessage, conversationDigest, conversationForTask, pendingMessages, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
@@ -240,11 +241,9 @@ export class Execution {
 
   /** Dispatch newly ready work as completions land, without waiting for a slow sibling in the same batch. */
   async drive() {
-    const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
-    if (!active_task || this.stopping || this.store.task(active_task).paused) return { dispatched: 0 };
     let dispatched = 0;
     const running = new Set<Promise<boolean>>();
-    while (!this.stopping && !this.store.task(active_task).paused) {
+    while (!this.stopping) {
       const ready = this.readyNodes();
       const started: Promise<boolean>[] = [];
       for (const node of ready) {
@@ -278,28 +277,47 @@ export class Execution {
     for (const waiter of waiters) waiter();
   }
 
-  private readyNodes(): NodeRow[] {
+  /** Conversation masters are their own interactive lane, ahead of the single active task. */
+  private laneTasks(): string[] {
+    const chatting = (this.store.db.prepare("SELECT id FROM tasks WHERE phase='chatting' ORDER BY created_seq").all() as { id: string }[]).map(row => row.id);
     const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
-    if (!active_task || this.stopping || this.store.task(active_task).paused) return [];
-    const task = this.store.task(active_task);
-    if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(active_task) as NodeRow[];
+    if (active_task && !chatting.includes(active_task) && this.store.task(active_task).phase !== 'chatting') chatting.push(active_task);
+    return chatting;
+  }
+
+  private readyNodes(): NodeRow[] {
+    if (this.stopping) return [];
+    const nodes: NodeRow[] = [];
+    for (const taskId of this.laneTasks()) {
+      if (this.store.task(taskId).paused) continue;
+      nodes.push(...this.readyNodesFor(taskId));
+    }
+    return nodes;
+  }
+
+  private readyNodesFor(taskId: string): NodeRow[] {
+    const task = this.store.task(taskId);
+    if (task.phase === 'chatting') {
+      // Without a confirmed graph the conversation master is the only node that
+      // may run; one pending turn answers every message queued so far.
+      return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' AND json_extract(spec,'$.role')='master' ORDER BY rowid").all(taskId) as NodeRow[];
+    }
+    if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as NodeRow[];
     if (task.phase !== 'running') return [];
     let nodes: NodeRow[];
     let graph: ReturnType<typeof loadGraph>;
     while (true) {
-      nodes = this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(active_task) as NodeRow[];
-      graph = loadGraph(this.store, active_task);
-      // The discussion-only master node is not part of the confirmed graph.
-      nodes = nodes.filter(node => graph.plan.nodes.has(node.id));
+      nodes = this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as NodeRow[];
+      graph = loadGraph(this.store, taskId);
       // The discussion-only master node is not part of the confirmed graph.
       nodes = nodes.filter(node => graph.plan.nodes.has(node.id));
       const skipped = nodes.filter(node => graph.readiness(node.id) === 'skip');
       if (!skipped.length) break;
       this.store.transaction(() => {
         for (const node of skipped) {
-          this.store.db.prepare("UPDATE nodes SET status='skipped',output=NULL WHERE task_id=? AND id=?").run(active_task, node.id);
+          this.store.db.prepare("UPDATE nodes SET status='skipped',output=NULL WHERE task_id=? AND id=?").run(taskId, node.id);
           this.store.db.prepare("UPDATE activations SET state='skipped' WHERE id=?").run(node.activation_id);
-          this.store.event(active_task, 'node.skipped', { nodeId: node.id, reason: 'inactive_route' });
+          this.store.event(taskId, 'node.skipped', { nodeId: node.id, reason: 'inactive_route' });
         }
       });
     }
@@ -443,15 +461,19 @@ export class Execution {
     const operation = this.store.transaction(() => {
       const task = this.store.task(node.task_id);
       const attempt = (this.store.db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=? AND node_id=?').get(node.task_id, node.id) as { count: number }).count + 1;
-      const graph = task.phase === 'discussing' ? undefined : loadGraph(this.store, node.task_id);
+      const conversation = task.phase === 'chatting' ? conversationForTask(this.store, node.task_id) : undefined;
+      const chatMessages = conversation ? pendingMessages(this.store, conversation.id) : [];
+      const graph = task.phase === 'discussing' || task.phase === 'chatting' ? undefined : loadGraph(this.store, node.task_id);
       const dependencies = graph ? graph.inputs(node.id) : {};
       const dependencySources = graph ? graph.sources(node.id) : {};
       const inputVersions = Object.fromEntries(Object.entries(dependencySources).map(([id, sources]) => [id, sources.map(source => ({ activationId: source.activationId, outputVersion: source.outputVersion }))]));
       const answers = (this.store.db.prepare("SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind='waiting' AND status='resolved' ORDER BY rowid").all(node.task_id, node.id) as { id: string; answer: string }[])
         .map(row => ({ questionId: row.id, value: (JSON.parse(row.answer) as { value: Json }).value }));
-      const messages = (this.store.db.prepare("SELECT data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor").all(node.task_id) as { data: string }[])
-        .map(row => JSON.parse(row.data) as { text?: string; request?: string; requirementVersion?: number })
-        .map(message => ({ text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 }));
+      const messages = task.phase === 'chatting'
+        ? chatMessages.map(message => ({ id: message.id, text: message.text, requirementVersion: task.requirement_version }))
+        : (this.store.db.prepare("SELECT data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor").all(node.task_id) as { data: string }[])
+          .map(row => JSON.parse(row.data) as { text?: string; request?: string; requirementVersion?: number })
+          .map(message => ({ text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 }));
       const latest = this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(node.task_id, task.latest_proposal) as { spec: string } | undefined;
       const proposal = latest ? JSON.parse(latest.spec) as Proposal : undefined;
       const operation: Operation = { id: randomUUID(), taskId: node.task_id, nodeId: node.id, instanceId: node.instance_id,
@@ -464,6 +486,7 @@ export class Execution {
         : undefined;
       const verifier = graphBriefing?.find(candidate => candidate.action === 'graph.verify' && candidate.verifier?.reportNodes.includes(spec.id));
       const review = verifier?.verifier ? [{ kind: verifier.verifier.kind }] : undefined;
+      const conversationStatus = conversation ? conversationDigest(this.store, conversation.id) : undefined;
       if (this.catalog) {
         let capabilities: { id: string; version: string }[] | undefined;
         if (spec.definitionVersion) {
@@ -476,6 +499,7 @@ export class Execution {
           ...(capabilities?.length ? { capabilities } : {}),
           ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
           ...(review ? { review } : {}),
+          ...(conversationStatus ? { conversation: conversationStatus } : {}),
           ...(spec.role === 'master' ? { catalog: {
             definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
             capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
@@ -487,10 +511,17 @@ export class Execution {
           acceptance: proposal?.acceptance ?? [],
           ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
           ...(review ? { review } : {}),
+          ...(conversationStatus ? { conversation: conversationStatus } : {}),
         });
       }
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
         .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
+      if (conversation && chatMessages.length) {
+        // Consuming the queue in the same transaction as the operation makes
+        // the binding durable before any provider send can happen.
+        this.store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=? WHERE id IN (${chatMessages.map(() => '?').join(',')})`)
+          .run(operation.id, attempt, Date.now(), ...chatMessages.map(message => message.id));
+      }
       this.store.db.prepare("UPDATE activations SET input_versions=?,state='preparing' WHERE id=?").run(canonicalJson(inputVersions), node.activation_id);
       this.store.db.prepare("UPDATE nodes SET status='preparing' WHERE task_id=? AND id=?").run(node.task_id, node.id);
       this.store.event(node.task_id, 'operation.intent', operation);
@@ -503,6 +534,7 @@ export class Execution {
     } catch (error) {
       this.store.transaction(() => {
         this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0 WHERE id=?").run(operation.id);
+        releaseMessages(this.store, operation.id);
         this.block(node, 'adapter_error', { reason: String(error) }, operation.id);
       });
       return false;
@@ -511,6 +543,7 @@ export class Execution {
       this.store.transaction(() => {
         this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0 WHERE id=?").run(operation.id);
         this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(node.task_id, node.id);
+        releaseMessages(this.store, operation.id);
         this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id });
       });
       return false;
@@ -564,6 +597,7 @@ export class Execution {
             }
             this.store.event(node.task_id, 'operation.interrupted', { operationId: operation.id, reason: refusal.message, usage: unknown ? null : total, invocations: invocations.length });
           } else {
+            releaseMessages(this.store, operation.id);
             this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id, reason: refusal.message });
           }
           if (refusalCode === 'budget') this.block(node, 'budget', { reason: refusal.message, requested: reservation });
@@ -592,6 +626,37 @@ export class Execution {
     return true;
   }
 
+  /** Persist the durable side of a master turn: one assistant message plus
+   * summarized tool activity. Idempotent per operation so reconciliation and
+   * unknown-usage settlement cannot duplicate the record. */
+  private recordConversationOutput(operation: Operation, result: OperationResult) {
+    if (operation.kind !== 'agent') return;
+    const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+    if (nodeSpec.role !== 'master') return;
+    const conversation = conversationForTask(this.store, operation.taskId);
+    if (!conversation) return;
+    if (this.store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='assistant' LIMIT 1").get(operation.id)) return;
+    const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output) ? result.output as { [key: string]: Json } : undefined;
+    if (result.outcome === 'completed') {
+      const reply = typeof output?.text === 'string' ? output.text.trim() : '';
+      if (reply) appendMessage(this.store, { conversationId: conversation.id, role: 'assistant', kind: 'chat', text: reply, state: 'done', operationId: operation.id, turn: operation.attempt });
+      const activity = Array.isArray(output?.toolActivity) ? output.toolActivity : [];
+      for (const item of activity) {
+        const entry = item as { name?: unknown; summary?: unknown; state?: unknown; toolCallId?: unknown };
+        if (typeof entry.summary !== 'string' || !entry.summary.trim()) continue;
+        appendMessage(this.store, {
+          conversationId: conversation.id, role: 'tool', kind: 'tool',
+          text: typeof entry.name === 'string' ? `${entry.name}: ${entry.summary}` : entry.summary,
+          data: { tool: typeof entry.name === 'string' ? entry.name : 'tool', ...(typeof entry.toolCallId === 'string' ? { toolCallId: entry.toolCallId } : {}), ...(entry.state === 'error' ? { error: true } : {}) },
+          state: 'done', operationId: operation.id, turn: operation.attempt,
+        });
+      }
+    } else if (result.outcome === 'failed') {
+      const reason = output && 'error' in output ? JSON.stringify(output.error) : JSON.stringify(result.output);
+      appendMessage(this.store, { conversationId: conversation.id, role: 'system', kind: 'error', text: `主 Agent 本轮未完成：${(reason ?? '').slice(0, 500)}`, state: 'done', operationId: operation.id, turn: operation.attempt });
+    }
+  }
+
   private settle(operation: Operation, result: OperationResult) {
     if (!result || !['completed', 'continue', 'waiting', 'failed', 'skipped'].includes(result.outcome)) throw new RuntimeError('invalid_result', 'Unexpected operation outcome');
     canonicalJson(result);
@@ -609,6 +674,7 @@ export class Execution {
     }
     const usage = operation.kind === 'agent' ? result.usage : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     if (!usage) {
+      this.recordConversationOutput(operation, result);
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?").run(canonicalJson(result), operation.id);
       this.store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?").run(operation.taskId, operation.nodeId);
       this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND kind='recovery' AND status='open'").run(canonicalJson({ result }), operation.id);
@@ -654,8 +720,14 @@ export class Execution {
       if (result.question.grant) this.block(node, 'permission', { grant: result.question.grant }, operation.id);
       else this.block(node, 'waiting', { prompt: result.question.prompt }, operation.id);
     }
+    const conversation = nodeSpec.role === 'master' && operation.kind === 'agent' ? conversationForTask(this.store, operation.taskId) : undefined;
+    this.recordConversationOutput(operation, result);
+    // A message that arrived while the master was answering must be answered by
+    // the next turn instead of being stranded behind a succeeded node.
+    const queuedAfter = conversation ? pendingMessages(this.store, conversation.id, 1).length : 0;
+    const nextStatus = conversation && result.outcome === 'completed' && queuedAfter ? 'pending' : result.outcome === 'completed' ? 'succeeded' : result.outcome === 'continue' ? 'pending' : result.outcome;
     this.store.db.prepare('UPDATE nodes SET status=?,output=?,route=?,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?')
-      .run(result.outcome === 'completed' ? 'succeeded' : result.outcome === 'continue' ? 'pending' : result.outcome, canonicalJson(result.output), result.route ?? null, operation.id, operation.taskId, operation.nodeId);
+      .run(nextStatus, canonicalJson(result.output), result.route ?? null, operation.id, operation.taskId, operation.nodeId);
     if (result.outcome === 'failed' && !nodeSpec.optional) {
       const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as NodeRow;
       this.block(node, 'execution_failed', { output: result.output }, operation.id);
