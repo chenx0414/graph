@@ -147,3 +147,15 @@ node_modules/.bin/vitest run tests/app    # 20 项
 **修复**：`resolveDaemonMode` 与 daemon 的 `enabled` 改为“至少一个模型的凭据可解析即调度”，缺失凭据的模型保持禁用并在派发时明确拒绝；CLI 执行模式仅在**无任何**可用凭据时报错；启动时若存在“讨论中且无 master”的任务则补建 master、写 `task.master_recovered` 事件并按顺序激活第一条，使其在执行模式下自动继续；`enabledModelCount` 报告真实可用模型数；首启横幅在桌面壳内提示可用设置页保存密钥。回归：`provider-headers.test.ts` 新增部分凭据与恢复调度两用例，`desktop.test.ts` 更新模式判定；全量 52 文件 / 256 项通过。
 
 **补充（真实数据验证）**：旧项目 `demo` 的任务 `efc6e457` 保持历史不恢复；仍在配置中的任务 `b4d80558` 在真实 APP（执行模式、钥匙串密钥、无环境变量）启动后自动补建 master 并在约 200 秒内产出**提案 v1**（消耗 137,698 tokens、费用 0.03069），任务页时间线显示“恢复任务调度 → 准备调用 master → 发送调用 → 生成提案 → 调用完成”。截图：`acceptance-evidence/app-real-recovered-task.png`。
+
+## 修复 · 真实任务中的检查与审查（2026-09-13）
+
+**现象**：任务在“问题”中反复弹出 `adapter_error: RuntimeError: graph.command requires a work copy`。
+
+**根因与修复（三个提交）**
+
+1. `1cb3021`：项目不是 git 仓库，`graph.command` 却硬性要求 work copy；非 git 项目现在与 agent 实例一样在项目根目录执行确认检查，git 项目仍必须用 work copy。
+2. `29e78d5`：打包 APP 内 `process.execPath` 是 Electron 二进制，沙箱里的 node 检查因缺少 `ELECTRON_RUN_AS_NODE` 与框架读取权限而 dyld 失败；`resolveNodeCommand` 检测 Electron 运行时后注入 run-as-node 标志并授予应用 `Contents` 只读，普通 Node 行为不变。
+3. `a69fd3c`：macOS 沙箱无法访问 mDNSResponder，任何解析 `localhost` 的检查（vitest 启动即解析）都以 `getaddrinfo ENOTFOUND` 失败；为 node 检查注入 `--require` 解析垫片，仅把 `localhost`/`ip6-localhost` 映射到回环地址，其余名称回退原解析；`/etc` 加入沙箱只读授权。
+
+**真实任务验证**：重启 APP 后重试，`check-syntax` 与 `check-tests` 均 `succeeded`（证据 a1、a2，`check-tests` 输出 “Command exited 0: node”）；独立审查改用新增的 `deepseek-v4-pro`（配置 revision 10，含 `x-opencode-session` 头）运行；opencode-go 未返回 usage 时按设计弹出 `unknown_usage` 问题，选择“无法核对”后审查继续。截图：`acceptance-evidence/app-real-task-checks-passed.png`。
