@@ -349,3 +349,11 @@ test('a graph revision that keeps confirmed check inputs intact still applies', 
   expect(after.nodes.find(node => node.id === 'extra')?.status).toBe('succeeded');
   expect(after.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
 });
+
+test('a packaged app routes sandboxed helpers to the bundled node runtime', async () => {
+  const { graphNodeRuntime, resolveNodeCommand } = await import('../../src/runtime/workspace-command.ts');
+  expect(graphNodeRuntime({ GRAPH_APP_NODE: '/App/Contents/Resources/app/runtime/node' })).toEqual({ execPath: '/App/Contents/Resources/app/runtime/node' });
+  const resolved = resolveNodeCommand(['check.js'], { execPath: '/App/Contents/Resources/app/runtime/node' });
+  expect(resolved.executable).toBe('/App/Contents/Resources/app/runtime/node');
+  expect(resolved.env).toBeUndefined();
+});

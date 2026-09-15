@@ -126,8 +126,11 @@ if (!app.requestSingleInstanceLock()) {
     // The APP always starts with execute intent in dynamic mode; saved secrets
     // and config activate the bindings on the same daemon without a restart.
     const args = daemonArgs({ paths, port: 0, mode: 'execute', hasConfig, dynamic: true });
+    // Sandboxed helpers cannot start the Electron binary (no Helper apps), so
+    // the packaged app ships a real node and points every helper at it.
+    const bundledNode = join(paths.root, 'runtime/node');
     child = spawn(process.execPath, [paths.serverEntry, ...args], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...secrets },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(existsSync(bundledNode) ? { GRAPH_APP_NODE: bundledNode } : {}), ...secrets },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stdout.setEncoding('utf8');

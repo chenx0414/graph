@@ -10,6 +10,7 @@ import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, 
 import { allowedDomain, normalizeDomains } from './domains.ts';
 import { externallyGated } from './pi-instance.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
+import { graphNodeRuntime } from './workspace-command.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface CapabilityLoadFact { id: string; version: string; kind: string | null; loaded: boolean; executable: boolean; reason: string | null }
@@ -92,6 +93,14 @@ function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: str
   return httpExchange({ gate, url: url.href, headers: headerValues(manifest.headers, manifest.headersEnv), timeoutMs: 30_000 });
 }
 
+/** Read paths a sandboxed helper needs to start the Node runtime itself.
+ * Inside a packaged Electron app `process.execPath` is the bundle binary, and
+ * loading it needs the sibling `Frameworks` directory, not just `MacOS`. */
+export function nodeReadPaths(execPath = process.execPath, electron = process.versions.electron as string | undefined): string[] {
+  const macos = dirname(execPath);
+  return electron ? [macos, dirname(macos)] : [macos];
+}
+
 async function runGrants(workspace: string, scratchDir: string) {
   // The verified OS sandbox requires canonical, already-existing grants.
   const canonicalWorkspace = await realpath(workspace);
@@ -103,7 +112,9 @@ async function localConnection(input: {
   executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
   manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
 }): Promise<McpExchange> {
-  const command = input.manifest.command === 'node' ? process.execPath : input.manifest.command;
+  // Helper processes use the bundled node binary when the app is packaged.
+  const nodeCommand = graphNodeRuntime().execPath;
+  const command = input.manifest.command === 'node' ? nodeCommand : input.manifest.command;
   if (typeof command !== 'string' || !isAbsolute(command)) {
     throw new RuntimeError('capability_unavailable', 'A local MCP capability requires capability.json with an absolute command or "node"');
   }
@@ -112,7 +123,7 @@ async function localConnection(input: {
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
     command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
-    readPaths: [input.snapshot, dirname(process.execPath)],
+    readPaths: [input.snapshot, ...nodeReadPaths(nodeCommand, process.env.GRAPH_APP_NODE ? undefined : process.versions.electron as string | undefined)],
     // Discussion turns may read the business directory but only write scratch.
     writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],
   });
@@ -132,8 +143,8 @@ async function extensionConnection(input: {
   const grants = await runGrants(input.workspace, input.scratchDir);
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
-    command: process.execPath, args: [extensionWorker, await realpath(entry)],
-    readPaths: [input.snapshot, dirname(process.execPath), dirname(extensionWorker)],
+    command: graphNodeRuntime().execPath, args: [extensionWorker, await realpath(entry)],
+    readPaths: [input.snapshot, ...nodeReadPaths(graphNodeRuntime().execPath, process.env.GRAPH_APP_NODE ? undefined : process.versions.electron as string | undefined), dirname(extensionWorker)],
     // Extension register() and every tool call share this restriction, so a
     // bound extension cannot write business files during discussion.
     writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],

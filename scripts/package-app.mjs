@@ -45,6 +45,10 @@ for (const [from, to] of [
   await cp(join(root, from), join(stage, to), { recursive: true });
 }
 await cp(join(root, 'dist/web'), join(stage, 'web'), { recursive: true });
+// A real Node runtime for sandboxed helpers: packaged Electron cannot start
+// its own binary inside the OS sandbox (missing Helper apps).
+await mkdir(join(stage, 'runtime'), { recursive: true });
+await cp(process.execPath, join(stage, 'runtime/node'));
 
 console.log('installing production dependencies into .stage (flat npm tree)');
 execFileSync('npm', ['install', '--omit=dev', '--package-lock=false', '--no-audit', '--no-fund'], { cwd: stage, stdio: 'inherit' });
@@ -53,7 +57,7 @@ await writeFile(join(stage, 'electron-builder.json'), `${JSON.stringify({
   appId: 'dev.graph.console',
   productName: 'Graph',
   directories: { output: join(root, 'dist/app'), buildResources: 'build' },
-  files: ['desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'node_modules/**/*', 'package.json'],
+  files: ['desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'runtime/**/*', 'node_modules/**/*', 'package.json'],
   asar: false,
   npmRebuild: false,
   electronVersion: repo.devDependencies.electron,

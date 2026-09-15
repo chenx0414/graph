@@ -324,3 +324,12 @@ test('a remote MCP host outside the granted domains stops the node with a concre
   expect(provider.requests).toHaveLength(0);
   expect(server.calls()).toBe(0);
 });
+
+test('a packaged Electron runtime grants its own bundle frameworks to sandboxed helpers', async () => {
+  const { nodeReadPaths } = await import('../../src/runtime/capabilities.ts');
+  expect(nodeReadPaths('/Applications/Graph.app/Contents/MacOS/Graph', '44.3.0')).toEqual([
+    '/Applications/Graph.app/Contents/MacOS',
+    '/Applications/Graph.app/Contents',
+  ]);
+  expect(nodeReadPaths('/usr/local/bin/node', undefined)).toEqual(['/usr/local/bin']);
+});
