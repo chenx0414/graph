@@ -11,6 +11,7 @@ import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationForTask } from '../core/conversation.ts';
 import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
+import { recordCapabilityLoad } from '../core/node-run.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
@@ -210,6 +211,12 @@ export function createPiAdapter(options: {
             onPermissionRequired: request => { permissionRequest ??= request; },
           });
           commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
+          // Record what was actually loaded for this operation so the node
+          // projection cannot later guess from catalog status.
+          recordCapabilityLoad(options.store, {
+            taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+            operationId: operation.id, readOnly: Boolean(discussion), report: capabilities.report,
+          });
         } catch (error) {
           // A missing or unsupported bound capability stops this node with a concrete
           // reason instead of silently running without the definition's capabilities.

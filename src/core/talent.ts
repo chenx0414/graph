@@ -9,8 +9,9 @@ export interface TalentSample {
   attempts: number; reworkRounds: number;
   tokens: number | null;
   runMs: number | null;
-  cost: number | null;
-  currency: string | null;
+  /** Per-currency known amounts for this instance; an instance may have used
+   * several models/currencies across rework rounds. */
+  costs: Record<string, number>;
   costUnknown: boolean;
   startedAt: number | null;
 }
@@ -70,16 +71,15 @@ export function talentExperience(store: TaskStore, id: string, options: { versio
       ? Math.max(0, operation.settled_at - operation.dispatched_at - operation.waiting_ms)
       : null);
     const runMs = operations.length && timings.every((value): value is number => value !== null) ? timings.reduce((sum, value) => sum + value, 0) : null;
-    const currencies = [...new Set(invocations.map(invocation => {
-      if (!invocation.cost) return undefined;
-      const parsed = JSON.parse(invocation.cost) as { unknown?: boolean; currency?: string };
-      return parsed.unknown ? undefined : parsed.currency;
-    }).filter((value): value is string => Boolean(value)))];
-    const costUnknown = invocations.some(invocation => !invocation.cost || (JSON.parse(invocation.cost) as { unknown?: boolean }).unknown === true);
-    const cost = costUnknown || currencies.length > 1 ? null : invocations.reduce((sum, invocation) => {
-      const parsed = JSON.parse(invocation.cost!) as { amount?: number };
-      return sum + (typeof parsed.amount === 'number' ? parsed.amount : 0);
-    }, 0);
+    const costs: Record<string, number> = {};
+    let costUnknown = false;
+    for (const invocation of invocations) {
+      if (!invocation.cost) { costUnknown = true; continue; }
+      const parsed = JSON.parse(invocation.cost) as { unknown?: boolean; amount?: number; currency?: string };
+      if (parsed.unknown === true || typeof parsed.amount !== 'number' || !Number.isFinite(parsed.amount)) { costUnknown = true; continue; }
+      const currency = parsed.currency && parsed.currency.trim() ? parsed.currency : '?';
+      costs[currency] = (costs[currency] ?? 0) + parsed.amount;
+    }
     const attempts = operations.filter(operation => operation.state === 'succeeded').length;
     return {
       kind: spec.role === 'master' ? 'chat' : 'task',
@@ -88,26 +88,35 @@ export function talentExperience(store: TaskStore, id: string, options: { versio
       waitingMs: operations.reduce((sum, operation) => sum + operation.waiting_ms, 0),
       status: row.status, unfinished: !finished, failed: unsuccessful,
       attempts, reworkRounds: Math.max(0, attempts - 1),
-      tokens, runMs, cost, currency: currencies[0] ?? null, costUnknown,
+      tokens, runMs, costs, costUnknown,
       startedAt: null,
     };
   });
   const task = samples.filter(sample => sample.kind === 'task');
   const chat = samples.filter(sample => sample.kind === 'chat');
   const statsFor = (list: TalentSample[]): TalentStats => {
-    const currencies = [...new Set(list.map(sample => sample.currency).filter((value): value is string => value !== null))].sort();
+    const currencies = [...new Set(list.flatMap(sample => Object.keys(sample.costs)))].sort();
+    const finished = list.filter(sample => !sample.unfinished);
+    // Each currency mean uses instances that actually have a known amount in
+    // that currency; one instance can legitimately contribute to several
+    // buckets after a model/currency switch without inflating the count.
     const byCurrency: CurrencyStat[] = currencies.map(currency => {
-      const scoped = list.filter(sample => sample.currency === currency);
-      const base = metric(scoped, sample => sample.costUnknown ? null : sample.cost, sample => sample.failed);
-      return { ...base, currency };
+      const scoped = finished.filter(sample => typeof sample.costs[currency] === 'number');
+      const values = scoped.map(sample => sample.costs[currency]!);
+      return {
+        currency,
+        mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
+        samples: values.length,
+        unknown: scoped.filter(sample => sample.costUnknown).length,
+        unfinished: list.filter(sample => sample.unfinished && typeof sample.costs[currency] === 'number').length,
+        failed: scoped.filter(sample => sample.failed).length,
+      };
     });
-    // Samples whose currency is unknown are counted once in the unknown total,
-    // never folded into a currency mean.
-    const anyFinishedUnknown = list.some(sample => !sample.unfinished && (sample.costUnknown || sample.currency === null));
+    const unknown = finished.some(sample => sample.costUnknown);
     return {
       token: metric(list, sample => sample.tokens, sample => sample.failed),
       runMs: metric(list, sample => sample.runMs, sample => sample.failed),
-      cost: { byCurrency, mixedCurrency: currencies.length > 1, unknown: anyFinishedUnknown },
+      cost: { byCurrency, mixedCurrency: currencies.length > 1, unknown },
       totalSamples: list.length,
       taskSamples: list.filter(sample => sample.kind === 'task').length,
       chatSamples: list.filter(sample => sample.kind === 'chat').length,

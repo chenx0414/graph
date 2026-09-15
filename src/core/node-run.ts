@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
 
@@ -27,6 +29,14 @@ export function appendNodeEntry(store: TaskStore, input: NodeEntryInput) {
   const row = store.db.prepare('SELECT seq FROM node_entries WHERE id=?').get(id) as { seq: number };
   store.event(input.taskId, 'node.entry', { nodeId: input.nodeId, seq: row.seq, role: input.role, kind: input.kind, text: input.text });
   return row.seq;
+}
+
+export interface CapabilityLoadFact { id: string; version: string; kind: string | null; loaded: boolean; executable: boolean; reason: string | null }
+
+export function recordCapabilityLoad(store: TaskStore, input: { taskId: string; nodeId: string; instanceId?: string | null; operationId?: string | null; readOnly: boolean; report: CapabilityLoadFact[] }) {
+  store.db.prepare(`INSERT INTO node_capabilities(task_id,node_id,instance_id,operation_id,read_only,loaded,created_at)
+    VALUES(?,?,?,?,?,?,?)`)
+    .run(input.taskId, input.nodeId, input.instanceId ?? null, input.operationId ?? null, input.readOnly ? 1 : 0, canonicalJson(input.report), Date.now());
 }
 
 export function recordNodeSession(store: TaskStore, instanceId: string, sessionId: string, sessionFile: string | null) {
@@ -72,8 +82,8 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
     { id: string; spec: string; instance_id: string | null; status: string; activation_id: string; output_version: number; stall_count: number } | undefined;
   if (!node) throw new RuntimeError('not_found', `Unknown node ${nodeId}`);
   const spec = JSON.parse(node.spec) as { kind: string; action: string; definitionVersion?: string; role?: string; input?: Json };
-  // Capability view frozen against the definition version the node was bound
-  // to: bound at definition time, then the catalog's current install state.
+  // Capability view: definition binding plus the actual load fact recorded for
+  // this node. No record means "not recorded", never a guessed true.
   const capabilities = (() => {
     if (!spec.definitionVersion) return [];
     const match = /^(.*)@(\d+)$/.exec(spec.definitionVersion);
@@ -81,14 +91,41 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
     const definition = store.db.prepare('SELECT spec FROM definitions WHERE id=? AND version=?').get(match[1] ?? '', Number(match[2] ?? 0)) as { spec: string } | undefined;
     if (!definition) return [];
     const parsed = JSON.parse(definition.spec) as { capabilities?: { id: string; version: string }[] };
+    const factRow = store.db.prepare('SELECT loaded,read_only FROM node_capabilities WHERE task_id=? AND node_id=? ORDER BY seq DESC LIMIT 1').get(taskId, nodeId) as { loaded: string; read_only: number } | undefined;
+    const taskPhase = store.task(taskId).phase;
+    const facts = new Map<string, CapabilityLoadFact>();
+    if (factRow) for (const fact of JSON.parse(factRow.loaded) as CapabilityLoadFact[]) facts.set(`${fact.id}@${fact.version}`, fact);
     return (parsed.capabilities ?? []).map(bound => {
-      const record = store.db.prepare('SELECT kind,status FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as { kind: string; status: string } | undefined;
-      const installed = record?.status === 'installed';
+      const catalogRecord = store.db.prepare('SELECT kind,source FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as { kind: string; source: string } | undefined;
+      const fact = facts.get(`${bound.id}@${bound.version}`);
+      // Authoritative current-state derivation for the one case the loading
+      // code skips by contract: a remote MCP is never loaded in read-only
+      // discussion. This is not a guess from catalog status.
+      const remote = catalogRecord?.kind === 'mcp' && (() => {
+        try {
+          const manifest = JSON.parse(readFileSync(join(catalogRecord.source, 'capability.json'), 'utf8')) as { command?: unknown };
+          return typeof manifest.command !== 'string';
+        } catch { return false; }
+      })();
+      if (!fact && !factRow && remote && spec.role === 'master' && (taskPhase === 'chatting' || taskPhase === 'discussing')) {
+        return {
+          id: bound.id, version: bound.version, kind: 'mcp', bound: true as const,
+          loaded: false, executable: false, state: '禁用', reason: '只读讨论模式不加载远程能力',
+        };
+      }
+      if (!fact) {
+        return {
+          id: bound.id, version: bound.version, kind: catalogRecord?.kind ?? null,
+          bound: true as const, loaded: null, executable: null,
+          state: factRow ? '未加载' : '未记录',
+          reason: factRow ? '本次运行未加载该能力' : '该节点没有能力加载记录（历史或尚未运行）',
+        };
+      }
       return {
-        id: bound.id, version: bound.version, kind: record?.kind ?? null,
-        bound: true as const, loaded: installed, executable: installed,
-        state: installed ? '可执行' : '禁用',
-        reason: record ? (installed ? null : `能力状态：${record.status}`) : '未安装',
+        id: fact.id, version: fact.version, kind: fact.kind, bound: true as const,
+        loaded: fact.loaded, executable: fact.executable,
+        state: fact.loaded ? (fact.executable ? '可执行' : '已加载') : '禁用',
+        reason: fact.reason,
       };
     });
   })();
@@ -121,10 +158,23 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   const evidence = (store.db.prepare('SELECT acceptance_id,valid,commit_sha FROM evidence WHERE task_id=? AND node_id=? ORDER BY rowid').all(taskId, nodeId) as { acceptance_id: string; valid: number; commit_sha: string | null }[])
     .map(row => ({ acceptanceId: row.acceptance_id, valid: Boolean(row.valid), commitSha: row.commit_sha }));
   const page = listNodeEntries(store, taskId, nodeId, query);
-  const entrySpan = (() => {
-    const span = store.db.prepare('SELECT MIN(created_at) AS first, MAX(created_at) AS last FROM node_entries WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { first: number | null; last: number | null };
-    return span.first !== null && span.last !== null ? Math.max(0, span.last - span.first) : null;
-  })();
+  // Time segments come from authoritative state timestamps, never from the
+  // message span: 总历时 = first dispatch -> final settlement; run and
+  // credential waiting are summed per operation; pause/user-wait are not
+  // recorded yet and must stay "not recorded" rather than inferred.
+  const dispatched = operations.map(operation => operation.dispatchedAt).filter((value): value is number => value !== null);
+  const settledTimes = operations.map(operation => operation.settledAt).filter((value): value is number => value !== null);
+  const inProgress = operations.some(operation => operation.dispatchedAt !== null && operation.settledAt === null);
+  const timing = {
+    totalMs: dispatched.length && !inProgress && settledTimes.length === operations.length
+      ? Math.max(0, Math.max(...settledTimes) - Math.min(...dispatched))
+      : null,
+    runMs: operations.length && !inProgress ? operations.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0) : null,
+    waitingMs: operations.reduce((sum, operation) => sum + operation.waitingMs, 0),
+    pauseMs: null as number | null,
+    userWaitMs: null as number | null,
+    inProgress,
+  };
   return {
     taskId, nodeId,
     capabilities,
@@ -135,11 +185,7 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
     } : null,
     session: session ? { sessionId: session.session_id, sessionFile: session.session_file } : null,
     operations, invocations, questions, evidence,
-    timing: {
-      totalMs: entrySpan,
-      runMs: operations.some(operation => operation.runMs === null) ? null : operations.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0),
-      waitingMs: operations.reduce((sum, operation) => sum + operation.waitingMs, 0),
-    },
+    timing,
     entries: page.entries, entryCount: page.entryCount, hasOlder: page.hasOlder, hasNewer: page.hasNewer,
     phase: store.task(taskId).phase,
   };

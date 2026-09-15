@@ -12,11 +12,14 @@ import { externallyGated } from './pi-instance.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 import type { SendGate } from './controlled-openai.ts';
 
+export interface CapabilityLoadFact { id: string; version: string; kind: string | null; loaded: boolean; executable: boolean; reason: string | null }
+
 export interface LoadedCapabilities {
   skillPaths: string[];
   readRoots: string[];
   tools: ToolDefinition[];
   close(): Promise<void>;
+  report: CapabilityLoadFact[];
 }
 
 interface McpManifest { command?: unknown; args?: unknown; entry?: unknown; url?: unknown; headers?: unknown; headersEnv?: unknown }
@@ -188,11 +191,14 @@ export async function loadCapabilities(input: {
   const readRoots: string[] = [];
   const tools: ToolDefinition[] = [];
   const releases: (() => Promise<void>)[] = [];
+  // Actual load facts: later projections must never guess these from catalog
+  // status alone.
+  const report: { id: string; version: string; kind: string | null; loaded: boolean; executable: boolean; reason: string | null }[] = [];
   const close = async () => { for (const release of releases.reverse()) await release(); releases.length = 0; };
-  if (!input.definitionVersion) return { skillPaths, readRoots, tools, close };
+  if (!input.definitionVersion) return { skillPaths, readRoots, tools, close, report };
   let definition;
   try { definition = input.catalog.definition(input.definitionVersion); }
-  catch { return { skillPaths, readRoots, tools, close }; } // Unpublished definitions keep briefing-only behavior.
+  catch { return { skillPaths, readRoots, tools, close, report }; } // Unpublished definitions keep briefing-only behavior.
   try {
     for (const bound of definition.capabilities ?? []) {
       const record = input.catalog.capability(bound.id, bound.version);
@@ -204,6 +210,7 @@ export async function loadCapabilities(input: {
         if (!existsSync(join(snapshot, 'SKILL.md'))) throw new RuntimeError('capability_unavailable', `Skill ${bound.id}@${bound.version} has no SKILL.md`);
         skillPaths.push(snapshot);
         readRoots.push(snapshot);
+        report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: false, reason: '技能已加载为只读文档' });
         continue;
       }
       if (record.kind !== 'mcp' && record.kind !== 'extension') {
@@ -212,14 +219,17 @@ export async function loadCapabilities(input: {
       const manifest = await manifestOf(snapshot);
       let connection: McpExchange;
       let authorization: { grants: string[]; onPermissionRequired?: (request: CapabilityPermissionRequest) => void } | undefined;
+      let loadedReason: string | null = null;
       if (record.kind === 'extension') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
         connection = await extensionConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
+        loadedReason = input.readOnly ? '只读讨论模式：本地扩展在 scratch 只读范围加载' : null;
       } else if (typeof manifest.command === 'string') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
         connection = await localConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
+        loadedReason = input.readOnly ? '只读讨论模式：本地能力在只读范围加载' : null;
       } else {
         // HTTP is only a transport: a remote service can operate on business
         // resources and its self-reported annotations are not authorization.
@@ -227,16 +237,20 @@ export async function loadCapabilities(input: {
         // reads, capability snapshots, local capability reads with a read-only
         // business directory, and controlled retrieval); remote tools load at
         // execution time and remain grant-gated per call.
-        if (input.readOnly) continue;
+        if (input.readOnly) {
+          report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: false, executable: false, reason: '只读讨论模式不加载远程能力' });
+          continue;
+        }
         const grants = input.grants ?? [];
         authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };
         connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? []);
       }
       tools.push(...capabilityTools(connection, await listMcpTools(connection), bound, authorization));
+      report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: true, reason: loadedReason });
     }
   } catch (error) {
     await close();
     throw error;
   }
-  return { skillPaths, readRoots, tools, close };
+  return { skillPaths, readRoots, tools, close, report };
 }

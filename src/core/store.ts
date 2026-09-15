@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 17) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 18) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -215,6 +215,17 @@ export class TaskStore {
         ALTER TABLE operations ADD COLUMN waiting_since INTEGER;
         ALTER TABLE operations ADD COLUMN waiting_ms INTEGER NOT NULL DEFAULT 0;
         PRAGMA user_version=17;`);
+    });
+    if (version < 18) this.transaction(() => {
+      // Capability loading facts per operation: what was actually loaded and
+      // executable at that time, so later install/config changes never rewrite
+      // a historical node's projection.
+      this.db.exec(`
+        CREATE TABLE node_capabilities(seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+          node_id TEXT NOT NULL, instance_id TEXT, operation_id TEXT, read_only INTEGER NOT NULL,
+          loaded TEXT NOT NULL, created_at INTEGER NOT NULL);
+        CREATE INDEX node_capabilities_scope ON node_capabilities(task_id,node_id,seq);
+        PRAGMA user_version=18;`);
     });
   }
   transaction<T>(action: () => T): T {

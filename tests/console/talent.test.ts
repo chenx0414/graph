@@ -24,6 +24,7 @@ let sequence = 0;
 function addSample(db: TaskStore, input: {
   definition: string; version: number; model?: string; status?: string; role?: string;
   tokenUsage?: number | null; runMs?: number | null; attempts?: number; cost?: { amount: number; currency: string } | null | 'unknown';
+  costs?: ({ amount: number; currency: string } | 'unknown' | null)[];
 }) {
   sequence += 1;
   const taskId = `task-${sequence}`;
@@ -48,10 +49,11 @@ function addSample(db: TaskStore, input: {
       if (input.tokenUsage !== undefined) {
         const known = input.tokenUsage !== null;
         const usage = known ? { input: input.tokenUsage!, output: 0, cacheRead: 0, cacheWrite: 0 } : null;
+        const attemptCost = input.costs ? input.costs[Math.min(attempt, input.costs.length - 1)] ?? null : input.cost;
         let cost: unknown = null;
         if (known) {
-          if (input.cost === 'unknown' || input.cost === undefined) cost = { unknown: true };
-          else if (input.cost !== null) cost = { amount: input.cost.amount, currency: input.cost.currency, unit: 'per_million_tokens', priceRevision: 'r1' };
+          if (attemptCost === 'unknown' || attemptCost === undefined) cost = { unknown: true };
+          else if (attemptCost !== null) cost = { amount: attemptCost.amount, currency: attemptCost.currency, unit: 'per_million_tokens', priceRevision: 'r1' };
         }
         db.db.prepare('INSERT INTO invocations(id,operation_id,instance_id,model,usage,cost) VALUES(?,?,?,?,?,?)')
           .run(randomUUID(), opId, instanceId, input.model ?? 'm1', usage ? canonicalJson(usage) : null, cost === null ? null : canonicalJson(cost));
@@ -100,6 +102,24 @@ test('cross-missing metrics keep their own denominators and cross-version pools 
   const v1 = talentExperience(db, 'coder', { version: 1 }).task;
   expect(v1.totalSamples).toBe(1);
   expect(v1.runMs.mean).toBe(10_000);
+}, 30_000);
+
+test('one instance switching currency keeps every known amount in its own bucket (UC-R07-R1)', async () => {
+  const db = await store();
+  db.transaction(() => {
+    db.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',1,'{}')").run();
+  });
+  // One instance, two rework rounds, first CNY then USD.
+  addSample(db, { definition: 'coder', version: 1, tokenUsage: 100, runMs: 1_000, attempts: 2, costs: [{ amount: 10, currency: 'CNY' }, { amount: 20, currency: 'USD' }] });
+  const experience = talentExperience(db, 'coder');
+  expect(experience.task.totalSamples).toBe(1);
+  expect(experience.samples[0]!.costs).toEqual({ CNY: 10, USD: 20 });
+  expect(experience.task.cost.mixedCurrency).toBe(true);
+  expect(experience.task.cost.byCurrency).toEqual([
+    expect.objectContaining({ currency: 'CNY', mean: 10, samples: 1, unknown: 0 }),
+    expect.objectContaining({ currency: 'USD', mean: 20, samples: 1, unknown: 0 }),
+  ]);
+  expect(experience.task.cost.unknown).toBe(false);
 }, 30_000);
 
 test('the default experience scope matches the detail version and all-versions is explicit', async () => {

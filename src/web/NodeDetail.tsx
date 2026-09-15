@@ -17,7 +17,7 @@ export interface NodeRun {
   operations: Operation[]; invocations: Invocation[]; questions: Question[]; evidence: Evidence[];
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
   capabilities?: { id: string; version: string; kind: string | null; state: string; reason: string | null }[];
-  timing?: { totalMs: number | null; runMs: number | null; waitingMs: number };
+  timing?: { totalMs: number | null; runMs: number | null; waitingMs: number; pauseMs?: number | null; userWaitMs?: number | null; inProgress?: boolean };
   container?: { id: string; parent: string | null; outputs: string[] } | null;
   children?: { id: string; status: string }[];
 }
@@ -44,33 +44,51 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
   const [error, setError] = useState('');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const entriesRef = useRef<Entry[]>([]);
+  const generationRef = useRef(0);
+  // Every task/node pair has its own generation: an in-flight response for a
+  // previous entity must never write into the current one.
+  const scopeRef = useRef('');
   useEffect(() => { entriesRef.current = entries; }, [entries]);
 
-  const refresh = useCallback(() => {
-    // The first page is the newest tail; later refreshes continue forward from
-    // the last known seq so a disconnected gap is filled instead of skipped.
-    const last = entriesRef.current[entriesRef.current.length - 1]?.seq;
-    const query = last === undefined ? 'limit=200' : `after=${last}&limit=200`;
-    void api<NodeRun>(`/api/tasks/${taskId}/nodes/${nodeId}/run?${query}`)
-      .then(result => {
-        setData(result);
-        // Merge by stable id so a live tail never duplicates or reorders history.
-        setEntries(current => {
-          const merged = new Map(current.map(entry => [entry.id, entry]));
-          for (const entry of result.entries) merged.set(entry.id, entry);
-          return [...merged.values()].sort((left, right) => left.seq - right.seq);
-        });
-      })
-      .catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
+  const pump = useCallback(async (startAfter: number | undefined, generation: number) => {
+    const scope = `${taskId}:${nodeId}`;
+    let after = startAfter;
+    // Bounded forward paging: a burst larger than one page is drained here,
+    // without waiting for another unrelated SSE event.
+    for (let page = 0; page < 60; page += 1) {
+      const query = after === undefined ? 'limit=200' : `after=${after}&limit=200`;
+      const result = await api<NodeRun>(`/api/tasks/${taskId}/nodes/${nodeId}/run?${query}`);
+      if (scopeRef.current !== scope || generation !== generationRef.current) return;
+      setData(result);
+      setEntries(current => {
+        const merged = new Map(current.map(entry => [entry.id, entry]));
+        for (const entry of result.entries) merged.set(entry.id, entry);
+        return [...merged.values()].sort((left, right) => left.seq - right.seq);
+      });
+      const last = result.entries[result.entries.length - 1]?.seq;
+      if (last !== undefined) after = last;
+      if (!result.hasNewer) return;
+    }
   }, [taskId, nodeId]);
 
+  const refresh = useCallback(() => {
+    const generation = generationRef.current;
+    const last = entriesRef.current[entriesRef.current.length - 1]?.seq;
+    void pump(last, generation).catch(reason => {
+      if (scopeRef.current === `${taskId}:${nodeId}`) setError(reason instanceof Error ? reason.message : String(reason));
+    });
+  }, [pump, taskId, nodeId]);
+
   useEffect(() => {
+    scopeRef.current = `${taskId}:${nodeId}`;
+    generationRef.current += 1;
+    entriesRef.current = [];
     setData(null);
     setEntries([]);
     setOlderSeq(null);
     setError('');
-    refresh();
-  }, [taskId, nodeId, refresh]);
+    void pump(undefined, generationRef.current).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
+  }, [taskId, nodeId, pump]);
 
   const connected = useTaskStream(taskId, event => {
     if (!event.type.startsWith('node.') && !event.type.startsWith('operation.')) return;
@@ -84,7 +102,9 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
     if (first === undefined || olderLoading) return;
     setOlderLoading(true);
     try {
+      const generation = generationRef.current;
       const page = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${nodeId}/run?before=${first}&limit=100`);
+      if (generation !== generationRef.current) return;
       if (!page.entries.length) setOlderSeq(0);
       else {
         setEntries(current => {
@@ -103,8 +123,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
 
   if (error && !data) return <ErrorBox message={error} onRetry={refresh} />;
   if (!data) return <Spinner />;
-  const knownRunMs = data.operations.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0);
-  const unsettledRun = data.operations.some(operation => operation.runMs === null);
+  const timing = data.timing ?? { totalMs: null, runMs: null, waitingMs: 0, pauseMs: null, userWaitMs: null, inProgress: false };
   const knownTokens = data.instance
     ? data.instance.used
     : data.invocations.reduce((sum, invocation) => sum + (invocation.usage ? Object.values(invocation.usage).reduce((inner, value) => inner + value, 0) : 0), 0);
@@ -130,9 +149,10 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
       </div>
 
       <div className="stat-grid">
-        <Stat label="运行时间" value={`${formatMs(knownRunMs)}${unsettledRun ? '（含未结算时段）' : ''}`} hint={`凭据等待 ${formatMs(data.operations.reduce((sum, operation) => sum + operation.waitingMs, 0))}`} />
-        <Stat label="总历时（记录跨度）" value={data.timing?.totalMs == null ? '未知' : formatMs(data.timing.totalMs)} hint={unsettledRun ? '运行中，其他时段未结算' : '扣除运行与凭据等待后为暂停/等待用户等'} />
-        <Stat label="其他等待" value={data.timing?.totalMs == null || unsettledRun ? '未结算' : formatMs(Math.max(0, data.timing.totalMs - (data.timing.runMs ?? 0) - data.timing.waitingMs))} hint="暂停、等待用户、重启等" />
+        <Stat label="运行时间" value={timing.runMs == null ? (timing.inProgress ? '进行中' : '未记录') : formatMs(timing.runMs)} hint="实际工作时段之和，HTTP 在途计入" />
+        <Stat label="总历时" value={timing.totalMs == null ? (timing.inProgress ? '进行中' : '未记录') : formatMs(timing.totalMs)} hint="首次派发到最后结算，含等待" />
+        <Stat label="凭据等待" value={formatMs(timing.waitingMs)} hint="凭据排队，不计入运行时间" />
+        <Stat label="暂停/等待用户" value={timing.pauseMs == null && timing.userWaitMs == null ? '未记录' : `${formatMs((timing.pauseMs ?? 0) + (timing.userWaitMs ?? 0))}`} hint="状态边界未写账时显示未记录，不推测" />
         <Stat label="用量" value={data.instance?.unlimited ? `${knownTokens.toLocaleString('en-US')} · 不限` : knownTokens.toLocaleString('en-US')} hint={data.instance?.budget === null || data.instance?.budget === undefined ? '额度不限' : `预算 ${data.instance.budget.toLocaleString('en-US')}`} />
         <Stat label="费用" value={costText(costSummary)} hint={unknownCost ? '存在未知价格调用，未折零' : '按调用时价格快照，分币种合计'} />
         <Stat label="记录" value={entries.length} hint={`${data.entryCount} 条`} />

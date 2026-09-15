@@ -687,7 +687,7 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
           </ol>
           <Button size="sm" data-testid="operations-more" onClick={() => setOpsLimit(current => current + 20)}>加载更多操作记录</Button>
           <div style={{ marginTop: 14 }}>
-            <NodeRunPanel taskId={id} nodeId={selectedNode.id} />
+            <NodeRunPanel key={`${id}:${selectedNode.id}`} taskId={id} nodeId={selectedNode.id} />
           </div>
         </Card>
       )}
