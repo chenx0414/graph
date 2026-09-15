@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { RuntimeError } from '../core/types.ts';
-import type { ModelCost, ModelEntry, ModelGrade } from '../catalog/models.ts';
+import type { ModelApi, ModelCost, ModelEntry, ModelGrade, ModelPricing } from '../catalog/models.ts';
 
 /** Versioned on-disk configuration. Secrets are never stored here; a credential
  * keeps a `secretRef` naming the environment variable that holds the key. */
@@ -92,6 +92,21 @@ function asCost(value: unknown, path: string): ModelCost {
   return { input: field('input'), output: field('output'), cacheRead: field('cacheRead'), cacheWrite: field('cacheWrite') };
 }
 
+function asPricing(value: unknown, path: string): ModelPricing {
+  const raw = asObject(value, path);
+  const status = raw.status === undefined ? 'known' : asString(raw.status, `${path}.status`);
+  if (!['known', 'stale', 'unknown'].includes(status)) invalid(`${path}.status must be known, stale or unknown`);
+  if (raw.unit !== 'per_million_tokens') invalid(`${path}.unit must be "per_million_tokens"`);
+  return {
+    currency: asString(raw.currency, `${path}.currency`),
+    unit: 'per_million_tokens',
+    ...(optionalString(raw.sourceUrl, `${path}.sourceUrl`) ? { sourceUrl: asString(raw.sourceUrl, `${path}.sourceUrl`) } : {}),
+    ...(optionalString(raw.retrievedAt, `${path}.retrievedAt`) ? { retrievedAt: asString(raw.retrievedAt, `${path}.retrievedAt`) } : {}),
+    ...(optionalString(raw.catalogRevision, `${path}.catalogRevision`) ? { catalogRevision: asString(raw.catalogRevision, `${path}.catalogRevision`) } : {}),
+    status: status as ModelPricing['status'],
+  };
+}
+
 function asHeaders(value: unknown, path: string): Record<string, string> {
   const entries = Object.entries(asObject(value, path));
   if (entries.length > 20) invalid(`${path} must declare at most 20 headers`);
@@ -110,19 +125,20 @@ function parseModel(raw: unknown, path: string, credentials: Record<string, Cred
   const entry = asObject(raw, path);
   const grade = asString(entry.grade, `${path}.grade`);
   if (!GRADES.includes(grade as ModelGrade)) invalid(`${path}.grade must be one of ${GRADES.join(', ')}`);
-  if (entry.api !== 'openai-completions') invalid(`${path}.api must be "openai-completions"`);
+  if (entry.api !== 'openai-completions' && entry.api !== 'anthropic-messages') invalid(`${path}.api must be "openai-completions" or "anthropic-messages"`);
   const credentialId = asString(entry.credentialId, `${path}.credentialId`);
   if (!credentials[credentialId]) invalid(`${path}.credentialId references unknown credential "${credentialId}"`);
   return {
     id: asString(entry.id, `${path}.id`),
     provider: asString(entry.provider, `${path}.provider`),
     grade: grade as ModelGrade,
-    api: 'openai-completions',
+    api: entry.api as ModelApi,
     baseUrl: asString(entry.baseUrl, `${path}.baseUrl`),
     contextWindow: positiveInt(entry.contextWindow, `${path}.contextWindow`),
     maxTokens: positiveInt(entry.maxTokens, `${path}.maxTokens`),
     credentialId,
     ...(entry.cost !== undefined ? { cost: asCost(entry.cost, `${path}.cost`) } : {}),
+    ...(entry.pricing !== undefined ? { pricing: asPricing(entry.pricing, `${path}.pricing`) } : {}),
     ...(entry.headers !== undefined ? { headers: asHeaders(entry.headers, `${path}.headers`) } : {}),
   };
 }

@@ -53,12 +53,12 @@ export interface GraphDaemon {
   close(): Promise<void>;
 }
 
-function piModel(entry: ConfiguredModel): Model<'openai-completions'> {
+function piModel(entry: ConfiguredModel): Model<ConfiguredModel['api']> {
   return {
     id: entry.id,
     name: entry.id,
     provider: entry.provider,
-    api: 'openai-completions',
+    api: entry.api,
     baseUrl: entry.baseUrl,
     reasoning: false,
     input: ['text'],
@@ -72,15 +72,16 @@ function piModel(entry: ConfiguredModel): Model<'openai-completions'> {
 /** Group model entries by provider; sharing a provider means the same endpoint
  * and the same credential, so one registered transport is unambiguous. */
 function providerGroups(entries: ConfiguredModel[]) {
-  const groups = new Map<string, { baseUrl: string; credentialId: string; entries: ConfiguredModel[] }>();
+  const groups = new Map<string, { baseUrl: string; credentialId: string; api: ConfiguredModel['api']; entries: ConfiguredModel[] }>();
   for (const entry of entries) {
     const group = groups.get(entry.provider);
     if (!group) {
-      groups.set(entry.provider, { baseUrl: entry.baseUrl, credentialId: entry.credentialId, entries: [entry] });
+      groups.set(entry.provider, { baseUrl: entry.baseUrl, credentialId: entry.credentialId, api: entry.api, entries: [entry] });
       continue;
     }
     if (group.baseUrl !== entry.baseUrl) throw new RuntimeError('invalid_config', `Models for provider "${entry.provider}" must share one baseUrl`);
     if (group.credentialId !== entry.credentialId) throw new RuntimeError('invalid_config', `Models for provider "${entry.provider}" must share one credentialId`);
+    if (group.api !== entry.api) throw new RuntimeError('invalid_config', `Models for provider "${entry.provider}" must share one api`);
     group.entries.push(entry);
   }
   return groups;
@@ -148,7 +149,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       if (!binding) continue;
       // Re-registering the same provider name replaces its endpoint/key, so a
       // saved rotation applies to the next session opened for this provider.
-      runtime.registerProvider(provider, { baseUrl: group.baseUrl, api: 'openai-completions', apiKey: binding.apiKey, models: group.entries.map(piModel) });
+      runtime.registerProvider(provider, { baseUrl: group.baseUrl, api: group.api, apiKey: binding.apiKey, models: group.entries.map(piModel) });
     }
   };
   await syncProviders();
@@ -177,10 +178,13 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5_000);
+    const anthropic = entry.api === 'anthropic-messages';
     try {
-      const response = await fetch(`${entry.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      const response = await fetch(`${entry.baseUrl.replace(/\/$/, '')}${anthropic ? '/messages' : '/chat/completions'}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${binding.apiKey}`, ...entry.headers },
+        headers: anthropic
+          ? { 'content-type': 'application/json', 'x-api-key': binding.apiKey, 'anthropic-version': '2023-06-01', ...entry.headers }
+          : { 'content-type': 'application/json', authorization: `Bearer ${binding.apiKey}`, ...entry.headers },
         body: JSON.stringify({ model: entry.id, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
         signal: controller.signal,
       });

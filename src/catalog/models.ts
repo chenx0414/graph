@@ -2,16 +2,29 @@ import { RuntimeError, type Json } from '../core/types.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
 
 export type ModelGrade = 'low' | 'medium' | 'high' | 'highest';
+/** Transports Graph has actually verified against a provider contract. */
+export type ModelApi = 'openai-completions' | 'anthropic-messages';
 export interface ModelCost { input: number; output: number; cacheRead: number; cacheWrite: number }
+/** Price provenance. Amounts are normalized per million tokens; `unknown`
+ * means no usable price (never zero) and `stale` marks a snapshot to refresh. */
+export interface ModelPricing {
+  currency: string;
+  unit: 'per_million_tokens';
+  sourceUrl?: string;
+  retrievedAt?: string;
+  catalogRevision?: string;
+  status: 'known' | 'stale' | 'unknown';
+}
 export interface ModelEntry {
   id: string;
   provider: string;
   grade: ModelGrade;
-  api: 'openai-completions';
+  api: ModelApi;
   baseUrl: string;
   contextWindow: number;
   maxTokens: number;
   cost?: ModelCost;
+  pricing?: ModelPricing;
   /** Extra HTTP headers for gateways that require routing hints (for example
    * x-opencode-session on OpenCode GO). Merged over provider defaults. */
   headers?: Record<string, string>;
@@ -26,11 +39,16 @@ export function parseDefinitionVersion(value: string) {
   return { id: value.trim(), version: 1 };
 }
 
-export function estimateCost(usage: TokenUsage, cost?: ModelCost): Json {
+export function estimateCost(usage: TokenUsage, cost?: ModelCost, pricing?: ModelPricing): Json {
   if (!cost) return { unknown: true };
   const amount = (usage.input * cost.input + usage.output * cost.output + usage.cacheRead * cost.cacheRead + usage.cacheWrite * cost.cacheWrite) / 1_000_000;
   if (!Number.isFinite(amount)) return { unknown: true };
-  return { amount };
+  // The currency and price revision are frozen with the amount so a later
+  // catalog refresh cannot rewrite historical cost records.
+  return {
+    amount,
+    ...(pricing ? { currency: pricing.currency, unit: pricing.unit, ...(pricing.catalogRevision ? { priceRevision: pricing.catalogRevision } : {}) } : {}),
+  };
 }
 
 /** Pick a configured model; review nodes pass exclude for implementer models used this round. */

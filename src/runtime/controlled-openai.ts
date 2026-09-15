@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, type AssistantMessage, type Model } from '@earendil-works/pi-ai';
-import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
+import { streamSimple as openaiStreamSimple } from '@earendil-works/pi-ai/api/openai-completions';
+import { streamSimple as anthropicStreamSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
+import type { ModelApi } from '../catalog/models.ts';
 import type { TokenUsage } from './call-broker.ts';
 
 /** Pause and usage gate around one actual provider send. CallBroker satisfies this. */
@@ -23,7 +25,18 @@ function parseUsage(value: unknown): TokenUsage | null {
   return { input: (input as number) - (cache as number), output: output as number, cacheRead: cache as number, cacheWrite: 0 };
 }
 
-async function readUsage(response: Response): Promise<TokenUsage | null> {
+function parseAnthropicUsage(value: unknown): TokenUsage | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const input = raw.input_tokens;
+  const output = raw.output_tokens ?? 0;
+  const cacheRead = raw.cache_read_input_tokens ?? 0;
+  const cacheWrite = raw.cache_creation_input_tokens ?? 0;
+  if (![input, output, cacheRead, cacheWrite].every(item => typeof item === 'number' && Number.isSafeInteger(item) && item >= 0)) return null;
+  return { input: input as number, output: output as number, cacheRead: cacheRead as number, cacheWrite: cacheWrite as number };
+}
+
+async function readUsage(response: Response, api: 'openai-completions' | 'anthropic-messages' = 'openai-completions'): Promise<TokenUsage | null> {
   // A bounded clone observes raw evidence; an SDK's zero-filled error is not evidence.
   const reader = response.body?.getReader();
   if (!reader) return null;
@@ -37,6 +50,27 @@ async function readUsage(response: Response): Promise<TokenUsage | null> {
       if (text.length > 8_000_000) { void reader.cancel(); return null; }
     }
     text += decoder.decode();
+    if (api === 'anthropic-messages') {
+      if (response.headers.get('content-type')?.includes('application/json')) {
+        const body = JSON.parse(text) as { usage?: unknown };
+        return parseAnthropicUsage(body.usage);
+      }
+      // Anthropic streams input/cache usage once at message_start and the
+      // cumulative output tokens on each message_delta.
+      let usage: TokenUsage | null = null;
+      for (const line of text.split('\n')) {
+        if (!line.startsWith('data:')) continue;
+        let event: { type?: string; message?: { usage?: unknown }; usage?: unknown };
+        try { event = JSON.parse(line.slice(5)); } catch { continue; }
+        if (event.type === 'message_start') {
+          usage = parseAnthropicUsage(event.message?.usage) ?? usage;
+        } else if (event.type === 'message_delta' && usage) {
+          const delta = parseAnthropicUsage({ ...(event.usage as object | undefined), input_tokens: usage.input, cache_read_input_tokens: usage.cacheRead, cache_creation_input_tokens: usage.cacheWrite });
+          if (delta) usage = delta;
+        }
+      }
+      return usage;
+    }
     if (response.headers.get('content-type')?.includes('application/json')) return parseUsage(JSON.parse(text).usage);
     let usage: TokenUsage | null = null;
     for (const line of text.split('\n')) {
@@ -115,22 +149,23 @@ export interface StreamSlot {
 }
 
 /** Controlled lower-level adapter, currently verified for OpenAI chat-completions SSE. */
-export function controlledOpenAIStream(broker: SendGate, apiKey: string | (() => string), slot?: StreamSlot): StreamFn {
+export function controlledOpenAIStream(broker: SendGate, apiKey: string | (() => string), slot?: StreamSlot, api: ModelApi = 'openai-completions'): StreamFn {
+  if (api !== 'openai-completions' && api !== 'anthropic-messages') throw new Error('Unverified model transport');
   return (model, context, options) => {
     const output = createAssistantMessageEventStream();
     void (async () => {
       let evidence: Promise<void> | undefined;
       try {
-        if (model.api !== 'openai-completions') throw new Error('Unverified model transport');
+        if (model.api !== api) throw new Error('Unverified model transport');
         let sent = false;
         // Resolve the credential at actual send time so a key rotation that
         // happened while this request waited applies to unsent calls.
         const key = typeof apiKey === 'function' ? apiKey() : apiKey;
-        const stream = streamSimple(model as Model<'openai-completions'>, context, {
-          ...options, apiKey: key, maxRetries: 0, transport: 'sse',
+        const streamOptions = {
+          ...options, apiKey: key, maxRetries: 0 as const, transport: 'sse' as const,
           // Reserve an upper bound for this model's accepted context and output.
           maxTokens: Math.min(options?.maxTokens ?? model.maxTokens, model.maxTokens),
-          fetch: async (input, init) => {
+          fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
             if (sent) throw new Error('Unexpected provider retry; use a new controlled invocation');
             sent = true;
             // The slot is acquired per attempt inside gatedProviderFetch, so a
@@ -141,11 +176,14 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string | (() =>
               onResponse: (id, response, release) => {
                 // Consuming the evidence clone to the end also proves the
                 // provider finished sending, so it can release the slot too.
-                evidence = readUsage(response.clone()).then(usage => { broker.settle(id, usage); release(); }, () => { broker.settle(id, null); release(); });
+                evidence = readUsage(response.clone(), api).then(usage => { broker.settle(id, usage); release(); }, () => { broker.settle(id, null); release(); });
               },
             });
           },
-        });
+        };
+        const stream = api === 'anthropic-messages'
+          ? anthropicStreamSimple(model as Model<'anthropic-messages'>, context, streamOptions as Parameters<typeof openaiStreamSimple>[2])
+          : openaiStreamSimple(model as Model<'openai-completions'>, context, streamOptions);
         for await (const event of stream) {
           if (event.type === 'done' || event.type === 'error') await evidence;
           output.push(event);

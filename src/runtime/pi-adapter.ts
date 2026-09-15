@@ -4,7 +4,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
-import type { ModelEntry } from '../catalog/models.ts';
+import type { ModelApi, ModelEntry } from '../catalog/models.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
@@ -27,9 +27,9 @@ export interface PiAdapterChannels {
   install: (input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) => Promise<unknown>;
 }
 
-function toPiModel(entry: ModelEntry): Model<'openai-completions'> {
+function toPiModel(entry: ModelEntry): Model<ModelApi> {
   return {
-    id: entry.id, name: entry.id, provider: entry.provider, api: 'openai-completions', baseUrl: entry.baseUrl,
+    id: entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
     reasoning: false, input: ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
     // Pi's Model.cost is required numeric metadata; Graph billing uses catalog cost, never this placeholder.
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -258,7 +258,7 @@ export function createPiAdapter(options: {
           const session = await openPiInstance({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, resolveKey, slot),
+            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
             ...(conversation ? { allowWorkspaceChange: true, onEvent } : {}),
           });

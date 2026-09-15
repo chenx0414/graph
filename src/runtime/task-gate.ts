@@ -48,7 +48,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
           if (row.usage !== canonicalJson(usage)) throw new RuntimeError('result_conflict', 'Conflicting usage evidence');
           return;
         }
-        const cost = usage ? estimateCost(usage, model.cost) : { unknown: true };
+        const cost = usage ? estimateCost(usage, model.cost, model.pricing) : { unknown: true };
         store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?').run(usage ? canonicalJson(usage) : null, canonicalJson(cost), id);
         if (!usage) {
           unknown = true;

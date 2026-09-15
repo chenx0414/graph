@@ -138,7 +138,7 @@ export class Execution {
         : undefined;
       const entry = instance?.model ? this.models?.().find(model => model.id === instance.model) : undefined;
       this.store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?')
-        .run(canonicalJson(answer.usage), canonicalJson(estimateCost(answer.usage, entry?.cost)), unknown[0]!.id);
+        .run(canonicalJson(answer.usage), canonicalJson(estimateCost(answer.usage, entry?.cost, entry?.pricing)), unknown[0]!.id);
     }
     const known = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL').all(operation.id) as { usage: string }[])
       .reduce<TokenUsage>((sum, row) => {
