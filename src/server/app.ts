@@ -248,6 +248,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return { nodes: view.nodes, containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost };
   });
   app.get('/api/catalog', async () => ({ definitions: runtime.catalog.definitions(), capabilities: runtime.catalog.capabilities() }));
+  app.get('/api/catalog/definitions/:definitionId', async request => {
+    const params = request.params as { definitionId: string };
+    const query = request.query as { version?: string };
+    return runtime.talent(params.definitionId, query.version ? { version: Number(query.version) } : {});
+  });
 
   if (options.webDir) {
     app.get('/assets/*', async (request, reply) => {

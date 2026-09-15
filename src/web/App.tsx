@@ -283,7 +283,52 @@ function Overview({ settings, tasks, onTasks }: { settings: Settings_ | null; ta
   );
 }
 
+function TalentPanel({ id }: { id: string }) {
+  const { data, error } = useAsync(() => api<{
+    detail: { id: string; version: number; versions: number[]; recommendedGrade: string; review: boolean; description: string | null; traceability: Record<string, unknown>; capabilities: { id: string; version: string; kind: string | null; status: string }[] };
+    experience: { task: { token: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; runMs: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; cost: { mean: number | null; samples: number; unknown: number; currency: string | null; mixedCurrency: boolean }; totalSamples: number }; chat: { token: { mean: number | null; samples: number }; totalSamples: number }; samples: { taskId: string; nodeId: string; kind: string; status: string; tokens: number | null; runMs: number | null; reworkRounds: number }[] };
+  }>(`/api/catalog/definitions/${id}`), [id]);
+  if (error) return <ErrorBox message={error} />;
+  if (!data) return <Spinner />;
+  const stat = (label: string, value: { mean: number | null; samples: number; unknown: number }) => (
+    <li key={label}>{label}：{value.mean === null ? '暂无' : value.mean.toLocaleString('en-US', { maximumFractionDigits: 1 })}（样本 {value.samples}，未知 {value.unknown}）</li>
+  );
+  return (
+    <div data-testid={`talent-${id}`} className="stack" style={{ gap: 8 }}>
+      <div className="row">
+        <Pill tone="accent">{data.detail.id}@{data.detail.version}</Pill>
+        <Pill tone={data.detail.review ? 'warn' : 'info'}>{data.detail.review ? '独立审查' : `推荐 ${data.detail.recommendedGrade}`}</Pill>
+        <Pill tone="neutral">{String((data.detail.traceability as { origin?: string }).origin ?? 'user') === 'preset' ? '内置预设' : '用户版本'}</Pill>
+      </div>
+      {data.detail.description && <p className="muted">{data.detail.description}</p>}
+      <div>
+        <h4>绑定能力</h4>
+        <div className="chip-row">{data.detail.capabilities.map(item => <Pill key={`${item.id}@${item.version}`} tone={item.status === 'installed' ? 'success' : 'danger'}>{item.id}@{item.version} · {item.kind ?? '未知'} · {item.status}</Pill>)}</div>
+      </div>
+      <div>
+        <h4>工作经历（任务样本 {data.experience.task.totalSamples} · 对话样本 {data.experience.chat.totalSamples}）</h4>
+        <ul className="list">
+          {stat('token 均值', data.experience.task.token)}
+          {stat('运行时间均值(ms)', data.experience.task.runMs)}
+          {stat('费用均值', data.experience.task.cost)}
+          <li>费用币种：{data.experience.task.cost.currency ?? (data.experience.task.cost.mixedCurrency ? '多币种不混合' : '无记录')}</li>
+        </ul>
+        {!data.experience.samples.length && <p className="muted">暂无经历。</p>}
+        <ul className="list" data-testid={`talent-samples-${id}`}>
+          {data.experience.samples.slice(0, 20).map(sample => (
+            <li className="list-item" key={`${sample.taskId}:${sample.nodeId}`}>
+              <a className="grow" href={`#/tasks/${sample.taskId}/nodes/${sample.nodeId}`}>{sample.kind === 'chat' ? '对话工作' : '实施经历'} · {sample.status}</a>
+              <span className="muted">{sample.tokens === null ? 'token 未知' : `${sample.tokens.toLocaleString('en-US')} tokens`}{sample.runMs === null ? '' : ` · ${(sample.runMs / 1_000).toFixed(1)}s`}{sample.reworkRounds ? ` · 返工 ${sample.reworkRounds}` : ''}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 function Catalog({ settings }: { settings: Settings_ | null }) {
+  const [selected, setSelected] = useState<string | null>(null);
   return (
     <div className="stagger">
       <Card testid="catalog" title="Agent 库与能力库" icon="catalog" subtitle="可发布的定义与受限能力">
@@ -291,7 +336,9 @@ function Catalog({ settings }: { settings: Settings_ | null }) {
           <div>
             <h4>Agent 定义</h4>
             <div className="chip-row">
-              {(settings?.definitions ?? []).map(item => <Pill key={item.id} tone="accent">{item.id}@{item.version}</Pill>)}
+              {(settings?.definitions ?? []).map(item => (
+                <Button key={item.id} size="sm" variant={selected === item.id ? 'primary' : 'default'} data-testid={`definition-${item.id}`} onClick={() => setSelected(current => current === item.id ? null : item.id)}>{item.id}@{item.version}</Button>
+              ))}
               {!(settings?.definitions ?? []).length && <span className="muted">暂无定义</span>}
             </div>
           </div>
@@ -304,6 +351,7 @@ function Catalog({ settings }: { settings: Settings_ | null }) {
           </div>
         </div>
       </Card>
+      {selected && <Card title={`人才详情 ${selected}`} icon="catalog" actions={<Button size="sm" variant="ghost" onClick={() => setSelected(null)}>关闭</Button>}><TalentPanel id={selected} /></Card>}
     </div>
   );
 }

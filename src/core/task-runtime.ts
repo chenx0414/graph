@@ -9,6 +9,7 @@ import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
+import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
@@ -684,6 +685,11 @@ export async function openTaskRuntime(options: {
         WHERE t.phase IN ('discussing','running','queued') AND n.status NOT IN ('succeeded','skipped') AND i.model IS NOT NULL`).all() as { model: string }[]).map(row => row.model);
     },
     user,
+    /** Talent detail plus per-metric experience statistics from the ledger. */
+    talent(id: string, options: { version?: number } = {}) {
+      ensureOpen();
+      return { detail: talentDetail(store, id, options), experience: talentExperience(store, id, options) };
+    },
     /** Read-only node detail: real session entries, operations and usage. */
     nodeRun(taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {
       ensureOpen();
