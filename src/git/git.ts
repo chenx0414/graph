@@ -17,9 +17,9 @@ const flags = [
   '-c', 'advice.detachedHead=false',
 ];
 
-export function git(cwd: string, args: string[]) {
+function runGit(cwd: string, args: string[], input?: string) {
   const result = spawnSync('git', [...flags, ...args], {
-    cwd, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd, encoding: 'utf8', timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'], ...(input !== undefined ? { input } : {}),
     env: {
       ...process.env,
       GIT_AUTHOR_NAME: 'Graph', GIT_AUTHOR_EMAIL: 'graph@local',
@@ -29,7 +29,17 @@ export function git(cwd: string, args: string[]) {
     },
   });
   if (result.error) return { code: 1, stdout: '', stderr: result.error.message };
-  return { code: result.status ?? 1, stdout: (result.stdout ?? '').trim(), stderr: (result.stderr ?? '').trim() };
+  return { code: result.status ?? 1, stdout: result.stdout ?? '', stderr: (result.stderr ?? '').trim() };
+}
+
+export function git(cwd: string, args: string[], input?: string) {
+  const result = runGit(cwd, args, input);
+  return { ...result, stdout: result.stdout.trim() };
+}
+
+/** Untrimmed variant: porcelain parsing must not lose the leading status space. */
+function gitRaw(cwd: string, args: string[], input?: string) {
+  return runGit(cwd, args, input);
 }
 
 export function hasHead(cwd: string) {
@@ -47,6 +57,9 @@ const HOST_EXCLUDES = [
   '.env', '.env.*', 'secrets.json', '.DS_Store',
   'node_modules/', 'state/', 'dist/', 'coverage/',
   '.stage/', 'graph.config.json',
+  // Documentation examples stay visible even though every other env variant
+  // is ignored; order matters, negations must follow the exclude.
+  '!.env.example', '!.env.sample', '!.env.template', '!.env.dist', '!.env.defaults',
 ];
 
 /** A linked worktree (and a submodule) has a `.git` *file*, so the exclude
@@ -70,8 +83,15 @@ export function ensureHostExcludes(repo: string, extra: string[] = []) {
   if (missing.length) writeFileSync(file, `${existing}${existing && !existing.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
 }
 
-/** Sensitive or host-managed path that must never enter a baseline commit.
- * `.env.example` and friends are documentation and stay eligible. */
+/** Credential/documentation policy: every `.env` variant is excluded except an
+ * explicit documentation whitelist, so a new variant (`.env.production`) can
+ * never silently enter a baseline. */
+const ENV_DOC_WHITELIST = new Set(['.env.example', '.env.sample', '.env.template', '.env.dist', '.env.defaults']);
+function envLike(name: string) {
+  return name === '.env' || name.startsWith('.env.');
+}
+
+/** Sensitive or host-managed path that must never enter a baseline commit. */
 export function baselineExcluded(relPath: string, stateRel: string | null) {
   const normalized = relPath.replace(/\\/g, '/');
   if (stateRel && (normalized === stateRel || normalized.startsWith(`${stateRel}/`))) return true;
@@ -80,40 +100,89 @@ export function baselineExcluded(relPath: string, stateRel: string | null) {
   const name = segments[segments.length - 1] ?? '';
   if (name === 'graph.config.json' || name === 'secrets.json' || name === '.DS_Store') return true;
   if (/\.sqlite(-wal|-shm)?$/.test(name)) return true;
-  if (name === '.env' || name === '.env.local' || /\.env\..*\.local$/.test(name)) return true;
+  if (envLike(name) && !ENV_DOC_WHITELIST.has(name)) return true;
+  if (/\.(pem|key|p12|pfx)$/.test(name) || name === '.netrc' || name === '.git-credentials') return true;
   return false;
 }
 
-/** Explicit file list for a scoped baseline: cached plus untracked files inside
- * the project scope, with host-managed and sensitive paths removed. */
+interface StatusRecord { code: string; path: string; origPath?: string }
+
+/** Parse `git status --porcelain=v1 -z` into records (rename/copy carry the
+ * original path in the following NUL field). */
+function parseStatus(raw: string): StatusRecord[] {
+  const fields = raw.split('\0');
+  const records: StatusRecord[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index]!;
+    if (!field) continue;
+    const code = field.slice(0, 2);
+    const path = field.length > 3 ? field.slice(3) : '';
+    if (code[0] === 'R' || code[0] === 'C') {
+      const original = fields[index + 1] ?? '';
+      index += 1;
+      records.push({ code, path, ...(original ? { origPath: original } : {}) });
+    } else if (path) records.push({ code, path });
+  }
+  return records;
+}
+
+function scopeOf(options: { subdir?: string }) {
+  return options.subdir && options.subdir !== '' ? options.subdir : '.';
+}
+
+function stateRelOf(repo: string, options: { stateDir?: string }) {
+  return options.stateDir && pathInside(repo, options.stateDir)
+    ? relative(repo, real(options.stateDir)).split(sep).join('/')
+    : null;
+}
+
+function inScope(path: string, scope: string) {
+  return scope === '.' || path === scope || path.startsWith(`${scope}/`);
+}
+
+/** Status entries inside the project scope after the credential/host policy. */
+function scopedStatus(repo: string, options: { subdir?: string; stateDir?: string }) {
+  const scope = scopeOf(options);
+  const stateRel = stateRelOf(repo, options);
+  const raw = gitRaw(repo, ['status', '--porcelain=v1', '-z', '-uall', '--', scope]).stdout;
+  return parseStatus(raw).filter(record => {
+    if (!inScope(record.path, scope)) return false;
+    if (baselineExcluded(record.path, stateRel)) return false;
+    if (record.origPath !== undefined && !inScope(record.origPath, scope)) return false;
+    return true;
+  });
+}
+
+/** Explicit candidate list for a scoped baseline: the range changes from the
+ * parent tree (adds, modifications, deletions, renames), never the whole index
+ * and never a sibling directory. */
 export function baselineFiles(repo: string, options: { subdir?: string; stateDir?: string } = {}) {
-  const scope = options.subdir && options.subdir !== '' ? options.subdir : '.';
-  const listed = git(repo, ['ls-files', '-z', '-c', '-o', '--exclude-standard', '--', scope]).stdout.split('\0').filter(Boolean);
-  const stateRel = options.stateDir && pathInside(repo, options.stateDir)
-    ? relative(repo, real(options.stateDir)).split(sep).join('/')
-    : null;
-  return [...new Set(listed)].filter(file => !baselineExcluded(file, stateRel));
+  const paths = new Set<string>();
+  for (const record of scopedStatus(repo, options)) {
+    paths.add(record.path);
+    if (record.origPath) paths.add(record.origPath);
+  }
+  return [...paths].sort();
 }
 
-/** Stable fingerprint of the readiness-relevant repository state. A recorded
- * `ready` state is only a snapshot; it must be re-checked at each boundary. */
+/** Dirty entries that a scoped baseline cannot capture (sensitive excluded). */
+export function scopedDirty(repo: string, options: { subdir?: string; stateDir?: string } = {}) {
+  return scopedStatus(repo, options).map(record => `${record.code} ${record.path}${record.origPath ? ` <- ${record.origPath}` : ''}`);
+}
+
+/** Stable, content-aware fingerprint of the readiness-relevant repository
+ * state. A recorded `ready` state is only a snapshot; every boundary re-checks
+ * it, and crash recovery compares it before replaying a baseline. */
 export function repoFingerprint(repo: string, options: { subdir?: string; stateDir?: string } = {}) {
-  const scope = options.subdir && options.subdir !== '' ? options.subdir : '.';
-  const stateRel = options.stateDir && pathInside(repo, options.stateDir)
-    ? relative(repo, real(options.stateDir)).split(sep).join('/')
-    : null;
-  const status = git(repo, ['status', '--porcelain=v1', '-z', '-uall', '--', scope]).stdout
-    .split('\0').filter(Boolean)
-    .filter(line => !baselineExcluded(stripStatusPath(line), stateRel))
-    .join('\0');
+  const records = scopedStatus(repo, options);
+  const existing = records.map(record => record.path).filter(path => existsSync(join(repo, path)));
+  const hashes = existing.length
+    ? git(repo, ['hash-object', '--stdin-paths'], existing.join('\n')).stdout
+    : '';
+  const status = records.map(record => `${record.code} ${record.path}${record.origPath ? ` ${record.origPath}` : ''}`).join('\0');
   return createHash('sha256')
-    .update(`head=${revParse(repo, 'HEAD') ?? ''}\nbranch=${checkedOutBranch(repo) ?? ''}\nstatus=${status}`)
+    .update(`head=${revParse(repo, 'HEAD') ?? ''}\nbranch=${checkedOutBranch(repo) ?? ''}\nstatus=${status}\nblobs=${hashes}`)
     .digest('hex');
-}
-
-function stripStatusPath(line: string) {
-  // Porcelain v1: XY<space>path (rename entries append NUL + target).
-  return line.length > 3 ? line.slice(3).replace(/^"+|"+$/g, '') : line;
 }
 
 export function initRepo(root: string) {
@@ -136,14 +205,16 @@ export function commitBaseline(cwd: string, message: string, options: { subdir?:
     ? relative(cwd, real(options.stateDir)).split(sep).join('/')
     : undefined;
   ensureHostExcludes(cwd, stateRel ? [`${stateRel}/`] : []);
+  const head = revParse(cwd, 'HEAD');
   const files = baselineFiles(cwd, options);
   if (!files.length) {
-    // An empty baseline must not fall back to committing whatever is staged.
+    // With a parent commit an empty change set means "nothing new to record":
+    // never replace the parent tree with an empty tree, and never commit
+    // whatever else is staged. Only a truly empty repository gets a root
+    // commit built without touching the user index.
+    if (head) return head;
     const emptyTree = git(cwd, ['hash-object', '-t', 'tree', '/dev/null']).stdout;
-    const args = ['commit-tree', emptyTree, '-m', message];
-    const head = revParse(cwd, 'HEAD');
-    if (head) args.push('-p', head);
-    const created = git(cwd, args);
+    const created = git(cwd, ['commit-tree', emptyTree, '-m', message]);
     if (created.code !== 0 || !created.stdout) throw new Error(created.stderr || 'Baseline commit failed');
     const update = git(cwd, ['update-ref', 'HEAD', created.stdout]);
     if (update.code !== 0) throw new Error(update.stderr || 'Baseline ref update failed');
@@ -152,8 +223,18 @@ export function commitBaseline(cwd: string, message: string, options: { subdir?:
   const list = join(dirname(join(cwd, '.graph-tmp')), `.graph-baseline-${process.pid}-${Date.now()}`);
   writeFileSync(list, `${files.join('\0')}\0`);
   try {
-    const added = git(cwd, ['add', `--pathspec-from-file=${list}`, '--pathspec-file-nul']);
-    if (added.code !== 0) throw new Error(added.stderr || 'Baseline add failed');
+    // Stage only paths that still exist in the worktree; staged deletions are
+    // already in the index and are committed through the pathspec commit below.
+    const present = files.filter(file => existsSync(join(cwd, file)));
+    if (present.length) {
+      const added = git(cwd, ['add', '-A', `--pathspec-from-file=${list}`, '--pathspec-file-nul']);
+      if (added.code !== 0) {
+        // `git add -A` fails when the pathspec selects only removals; retry
+        // with the existing paths only.
+        const fallback = git(cwd, ['add', '--', ...present]);
+        if (fallback.code !== 0) throw new Error(fallback.stderr || 'Baseline add failed');
+      }
+    }
     const committed = git(cwd, ['commit', '--no-verify', '-m', message, `--pathspec-from-file=${list}`, '--pathspec-file-nul']);
     if (committed.code !== 0) throw new Error(committed.stderr || 'Baseline commit failed');
     return revParse(cwd, 'HEAD')!;
@@ -165,14 +246,14 @@ export function commitBaseline(cwd: string, message: string, options: { subdir?:
 /** Porcelain status entries that are not host-excluded, with their kind. */
 export function dirtyEntries(cwd: string, ignore: string[] = [], scope = '.') {
   const prefixes = ignore.map(real);
-  return git(cwd, ['status', '--porcelain', '-uall', '--', scope]).stdout.split('\n').filter(Boolean).filter(line => {
-    const file = real(resolve(cwd, stripStatusPath(line)));
+  return parseStatus(gitRaw(cwd, ['status', '--porcelain=v1', '-z', '-uall', '--', scope]).stdout).filter(record => {
+    const file = real(resolve(cwd, record.path));
     return !prefixes.some(prefix => file === prefix || file.startsWith(`${prefix}/`));
-  });
+  }).map(record => `${record.code} ${record.path}`);
 }
 
 export function hostExcludePaths(root: string) {
-  return HOST_EXCLUDES.filter(line => !line.startsWith('#')).map(line => resolve(root, line.replace(/\/$/, '')));
+  return HOST_EXCLUDES.filter(line => !line.startsWith('#') && !line.startsWith('!')).map(line => resolve(root, line.replace(/\/$/, '')));
 }
 
 export function detectRepo(root: string) {

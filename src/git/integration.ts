@@ -5,8 +5,8 @@ import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json, type NodeSpec, type Operation } from '../core/types.ts';
 import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
-  abortMerge, commitAll, commitBaseline, detectRepo, dirtyEntries, ensureWorktree, fastForwardCheckout,
-  hasHead, hostExcludePaths, initRepo, isClean, mergeRef, pathInside, repoFingerprint, resetHard, revParse, updateRef, worktreeList,
+  abortMerge, commitAll, commitBaseline, detectRepo, ensureWorktree, fastForwardCheckout, git,
+  hasHead, initRepo, isClean, mergeRef, pathInside, repoFingerprint, resetHard, revParse, scopedDirty, updateRef, worktreeList,
   checkedOutBranch,
 } from './git.ts';
 
@@ -118,7 +118,7 @@ export class GitIntegration {
     }
     // Host-managed paths are relative to the project root; when the project is
     // a repository subdirectory they may also sit under the repository root.
-    const dirty = dirtyEntries(repo, [...hostExcludePaths(repo), ...hostExcludePaths(root), this.stateDir], subdir || '.');
+    const dirty = scopedDirty(repo, scope);
     if (dirty.length && input.createBaseline) {
       this.recordPreparation(projectId, 'initializing', { repoRoot: repo, projectSubdir: subdir });
       try {
@@ -131,6 +131,44 @@ export class GitIntegration {
       }
     }
     return record(dirty.length ? 'detected' : 'ready', dirty.length ? { dirty: dirty.length, sample: dirty.slice(0, 20) } : { dirty: 0 });
+  }
+
+  /** Current HEAD of the project's repository (null when absent/uninitialized). */
+  projectHead(projectId: string) {
+    const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(projectId) as { root: string } | undefined;
+    if (!project) return null;
+    const root = (() => { try { return realpathSync(resolve(project.root)); } catch { return resolve(project.root); } })();
+    const repo = detectRepo(root);
+    if (!repo) return null;
+    return revParse(repo, 'HEAD') ?? null;
+  }
+
+  /** Content-aware fingerprint used to decide whether an interrupted baseline
+   * may be replayed (same worktree) or must be surfaced as unresolved. */
+  projectFingerprint(projectId: string) {
+    const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(projectId) as { root: string } | undefined;
+    if (!project) return null;
+    const root = (() => { try { return realpathSync(resolve(project.root)); } catch { return resolve(project.root); } })();
+    const repo = detectRepo(root);
+    if (!repo) return null;
+    const subdir = relative(repo, root).split(sep).join('/').replace(/^\.$/, '');
+    return repoFingerprint(repo, { subdir, stateDir: this.stateDir });
+  }
+
+  /** Last commit subject/parents, used to recognize our own concluded effect. */
+  lastCommit(projectId: string) {
+    const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(projectId) as { root: string } | undefined;
+    if (!project) return null;
+    const root = (() => { try { return realpathSync(resolve(project.root)); } catch { return resolve(project.root); } })();
+    const repo = detectRepo(root);
+    if (!repo || !hasHead(repo)) return null;
+    const subject = git(repo, ['log', '-1', '--format=%s']).stdout;
+    const parents = git(repo, ['log', '-1', '--format=%P']).stdout.split(' ').filter(Boolean);
+    return { subject, parents };
+  }
+
+  markPrepareUnresolved(projectId: string, reason: string) {
+    this.recordPreparation(projectId, 'failed', { projectSubdir: this.preparation(projectId)?.projectSubdir ?? null, detail: { reason } });
   }
 
   /** Re-check the recorded readiness against the current repository at every

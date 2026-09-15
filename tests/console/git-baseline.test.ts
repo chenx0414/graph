@@ -107,3 +107,60 @@ test('a user commit after ready is re-recorded instead of trusted blindly', asyn
   expect(next.baselineSha).toBe(git(root, ['rev-parse', 'HEAD']));
   expect((next.detail as { fingerprint?: string }).fingerprint).toBeDefined();
 }, 30_000);
+
+test('every env credential variant is excluded, including staged ones (UC-S02-R1)', async () => {
+  const root = await temp('env-variants');
+  await writeFile(join(root, 'app.txt'), 'hello\n');
+  await writeFile(join(root, '.env.production'), 'PROD=secret\n');
+  await writeFile(join(root, '.env.staging'), 'STAGE=secret\n');
+  await writeFile(join(root, '.env.example'), 'EXAMPLE=placeholder\n');
+  await mkdir(join(root, 'config'), { recursive: true });
+  await writeFile(join(root, 'config', '.env.ci'), 'CI=secret\n');
+  git(root, ['init', '-q', '-b', 'main']);
+  git(root, ['add', '.env.production', 'config/.env.ci']);
+  const { integration } = await makeProject(root, join(root, '.state'));
+  expect(integration.prepareProject('p', { initialize: true, createBaseline: true }).state).toBe('ready');
+  const tree = git(root, ['ls-tree', '-r', '--name-only', 'HEAD']).split('\n');
+  expect(tree).toContain('app.txt');
+  expect(tree).toContain('.env.example');
+  expect(tree.some(path => path.includes('.env.production') || path.includes('.env.staging') || path.includes('.env.ci'))).toBe(false);
+  // User credentials stay on disk and staged state is preserved.
+  expect(await readFile(join(root, '.env.production'), 'utf8')).toContain('PROD=secret');
+  expect(git(root, ['status', '--porcelain'])).toContain('.env.production');
+}, 30_000);
+
+test('deleting files in a selected subdirectory never changes sibling trees (UC-S03-R1)', async () => {
+  const parent = await temp('subdir-delete');
+  const selected = join(parent, 'selected');
+  await mkdir(selected);
+  await writeFile(join(selected, 'app.txt'), 'selected\n');
+  await writeFile(join(selected, 'other.txt'), 'other\n');
+  await writeFile(join(parent, 'sibling.txt'), 'sibling\n');
+  git(parent, ['init', '-q', '-b', 'main']);
+  git(parent, ['add', '-A']);
+  git(parent, ['-c', 'user.name=G', '-c', 'user.email=g@l', 'commit', '-q', '-m', 'init']);
+  const { integration } = await makeProject(selected, join(parent, '.state'));
+
+  // Removal is already staged through git rm: the parent tree must survive.
+  git(parent, ['rm', '-q', 'selected/app.txt']);
+  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
+  let tree = git(parent, ['ls-tree', '-r', '--name-only', 'HEAD']).split('\n');
+  expect(tree).toContain('sibling.txt');
+  expect(tree).toContain('selected/other.txt');
+  expect(tree).not.toContain('selected/app.txt');
+
+  // Unstaged deletion of the last file in scope: same rule, no empty tree.
+  const headBefore = git(parent, ['rev-parse', 'HEAD']);
+  await rm(join(selected, 'other.txt'));
+  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
+  tree = git(parent, ['ls-tree', '-r', '--name-only', 'HEAD']).split('\n');
+  expect(tree).toContain('sibling.txt');
+  expect(tree).not.toContain('selected/other.txt');
+  expect(git(parent, ['rev-parse', 'HEAD'])).not.toBe(headBefore);
+  expect(existsSync(join(parent, 'sibling.txt'))).toBe(true);
+
+  // With nothing to commit in scope, HEAD does not move and no empty tree lands.
+  const settled = git(parent, ['rev-parse', 'HEAD']);
+  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
+  expect(git(parent, ['rev-parse', 'HEAD'])).toBe(settled);
+}, 30_000);

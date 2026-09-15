@@ -134,6 +134,23 @@ export async function openTaskRuntime(options: {
       return created;
     });
   };
+  /** Persist the settled prepare receipt idempotently; shared by the normal
+   * path and crash recovery so a retried requestId returns the same receipt. */
+  const settlePrepare = (opId: string, requestId: string, payload: { projectId: string }, prep: { state: string; baselineSha?: string | null }, result: Record<string, unknown>) => {
+    const encoded = canonicalJson(payload);
+    return store.transaction(() => {
+      store.db.prepare('UPDATE git_ops SET state=?, result=? WHERE id=?').run('succeeded', canonicalJson(result as Json), opId);
+      const duplicate = store.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get('projects', requestId) as { payload: string; receipt: string } | undefined;
+      if (duplicate) {
+        if (duplicate.payload !== encoded) throw new RuntimeError('idempotency_conflict', 'requestId was already used with different content');
+        return JSON.parse(duplicate.receipt) as Record<string, unknown>;
+      }
+      const receipt = { ...prep, cursor: store.event(null, 'project.prepared', { projectId: payload.projectId, state: prep.state, baselineSha: prep.baselineSha }) };
+      store.db.prepare('INSERT INTO commands VALUES(?,?,?,?)').run('projects', requestId, encoded, canonicalJson(receipt));
+      return receipt as Record<string, unknown>;
+    });
+  };
+
   try {
     if (defaultBudgetTokens !== null && (!Number.isSafeInteger(defaultBudgetTokens) || defaultBudgetTokens <= 0)) {
       throw new RuntimeError('invalid_input', 'limits.defaultBudgetTokens must be a positive integer or null');
@@ -188,17 +205,52 @@ export async function openTaskRuntime(options: {
     // driveable again; queued conversation messages stay pending until then.
     // The same scan runs after a hot configuration apply.
     if (options.master && masterModel()) recoverMasterNodes();
-    // Recognize prepare intents interrupted by a crash: re-running preparation
-    // is idempotent (a clean baseline is a no-op) and settles the record.
+    // Recognize prepare intents interrupted by a crash. The original external
+    // effect is verified first: a concluded Graph baseline is restored as the
+    // receipt, an unchanged worktree may be replayed, and anything else is
+    // surfaced as unresolved instead of committing whatever is on disk now.
     for (const intent of store.db.prepare("SELECT id,spec FROM git_ops WHERE kind='prepare' AND state='intent'").all() as { id: string; spec: string }[]) {
+      const fail = (reason: string, state: 'failed' | 'unresolved' = 'unresolved') => {
+        store.db.prepare('UPDATE git_ops SET state=?, result=? WHERE id=?').run(state, canonicalJson({ reason }), intent.id);
+      };
       try {
-        const parsed = JSON.parse(intent.spec) as { projectId: string; initialize?: boolean; createBaseline?: boolean };
-        if (store.db.prepare('SELECT id FROM projects WHERE id=?').get(parsed.projectId)) {
-          git.prepareProject(parsed.projectId, { initialize: parsed.initialize ?? true, createBaseline: parsed.createBaseline ?? false });
+        const parsed = JSON.parse(intent.spec) as {
+          payload?: { type: string; projectId: string; initialize: boolean; createBaseline: boolean };
+          requestId?: string; headBefore?: string | null; fingerprintBefore?: string | null;
+        };
+        const payload = parsed.payload;
+        if (!payload?.projectId || !parsed.requestId) { fail('Unrecognized interrupted prepare intent', 'failed'); continue; }
+        if (!store.db.prepare('SELECT id FROM projects WHERE id=?').get(payload.projectId)) { fail('Project no longer exists', 'failed'); continue; }
+        const headBefore = parsed.headBefore ?? null;
+        const nowHead = git.projectHead(payload.projectId);
+        const last = git.lastCommit(payload.projectId);
+        const concludedByGraph = last?.subject === 'graph: local baseline'
+          && nowHead !== headBefore
+          && (headBefore === null ? last.parents.length === 0 : last.parents[0] === headBefore);
+        if (concludedByGraph) {
+          // The baseline commit already happened before the crash. Never run
+          // Git again: later user edits must not become part of that receipt.
+          const prep = git.prepareProject(payload.projectId, {});
+          settlePrepare(intent.id, parsed.requestId, payload, prep, { reconciled: true, alreadyApplied: true });
+          continue;
         }
-        store.db.prepare("UPDATE git_ops SET state='succeeded', result=? WHERE id=?").run(canonicalJson({ reconciled: true }), intent.id);
-      } catch {
-        store.db.prepare("UPDATE git_ops SET state='failed', result=? WHERE id=?").run(canonicalJson({ reconciled: false }), intent.id);
+        if (nowHead !== headBefore) {
+          const reason = 'Interrupted prepare cannot be attributed: HEAD moved without a matching Graph baseline';
+          git.markPrepareUnresolved(payload.projectId, reason);
+          fail(reason);
+          continue;
+        }
+        const current = git.projectFingerprint(payload.projectId);
+        if (current !== (parsed.fingerprintBefore ?? null)) {
+          const reason = 'Interrupted prepare left the worktree changed; run prepare again to authorize the new content';
+          git.markPrepareUnresolved(payload.projectId, reason);
+          fail(reason);
+          continue;
+        }
+        const prep = git.prepareProject(payload.projectId, { initialize: payload.initialize, createBaseline: payload.createBaseline });
+        settlePrepare(intent.id, parsed.requestId, payload, prep, { reconciled: true });
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
       }
     }
   } catch (error) {
@@ -749,8 +801,13 @@ export async function openTaskRuntime(options: {
         // the intent is durable first, the effect runs outside, the result is
         // settled separately so a crash can be recognized after restart.
         const opId = randomUUID();
+        // Snapshot the identity before the effect so crash recovery can tell
+        // "our commit already happened" from "the worktree changed later".
+        const headBefore = git.projectHead(input.projectId);
+        const fingerprintBefore = git.projectFingerprint(input.projectId);
         store.transaction(() => {
-          store.db.prepare('INSERT INTO git_ops VALUES(?,?,?,?,?,?)').run(opId, `project:${input.projectId}`, 'prepare', 'intent', encoded, null);
+          store.db.prepare('INSERT INTO git_ops VALUES(?,?,?,?,?,?)').run(opId, `project:${input.projectId}`, 'prepare', 'intent',
+            canonicalJson({ payload, requestId: input.requestId, headBefore, fingerprintBefore }), null);
         });
         let prep;
         try {
@@ -763,17 +820,7 @@ export async function openTaskRuntime(options: {
           });
           throw error;
         }
-        return store.transaction(() => {
-          store.db.prepare("UPDATE git_ops SET state='succeeded', result=? WHERE id=?").run(canonicalJson({ state: prep.state, baselineSha: prep.baselineSha }), opId);
-          const duplicate = store.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get('projects', input.requestId) as { payload: string; receipt: string } | undefined;
-          if (duplicate) {
-            if (duplicate.payload !== encoded) throw new RuntimeError('idempotency_conflict', 'requestId was already used with different content');
-            return JSON.parse(duplicate.receipt) as { state: string } & Record<string, unknown>;
-          }
-          const receipt = { ...prep, cursor: store.event(null, 'project.prepared', { projectId: input.projectId, state: prep.state, baselineSha: prep.baselineSha }) };
-          store.db.prepare('INSERT INTO commands VALUES(?,?,?,?)').run('projects', input.requestId, encoded, canonicalJson(receipt));
-          return receipt;
-        });
+        return settlePrepare(opId, input.requestId, payload, prep, { state: prep.state, baselineSha: prep.baselineSha });
       },
       preparation(projectId: string) {
         ensureOpen();
