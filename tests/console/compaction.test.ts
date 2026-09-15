@@ -67,12 +67,30 @@ async function compactionProvider(plan: (input: { index: number; tools: string[]
   return { baseUrl, modelRuntime, requests };
 }
 
-function modelEntry(baseUrl: string) {
+function modelEntry(baseUrl: string, modelId?: string) {
   return {
     id: 'local', provider: 'local', grade: 'high' as const, api: 'openai-completions' as const, baseUrl,
     contextWindow: 2_048, maxTokens: 256, credentialId: 'c',
+    ...(modelId ? { modelId } : {}),
     cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
   };
+}
+
+/** Every instance total must equal the sum of its own invocations, so a
+ * summary can never be charged twice or dropped from `used`. */
+function instanceTotals(root: string) {
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
+  try {
+    const instances = db.prepare('SELECT id,used FROM instances ORDER BY id').all() as { id: string; used: number }[];
+    const invocations = db.prepare('SELECT instance_id,usage FROM invocations').all() as { instance_id: string; usage: string | null }[];
+    const sums = new Map<string, number>();
+    for (const row of invocations) {
+      if (!row.usage) continue;
+      const tokens = Object.values(JSON.parse(row.usage) as Record<string, number>).reduce((sum, value) => sum + value, 0);
+      sums.set(row.instance_id, (sums.get(row.instance_id) ?? 0) + tokens);
+    }
+    return instances.map(instance => ({ id: instance.id, used: instance.used, expected: sums.get(instance.id) ?? 0 }));
+  } finally { db.close(); }
 }
 
 function purposes(root: string) {
@@ -147,6 +165,7 @@ test('a real auto-compaction is booked as its own invocation and keeps the origi
   expect(view.invocations.filter(invocation => invocation.purpose === 'compaction').length).toBe(compaction.length);
   expect(view.entries.some(entry => entry.kind === 'compaction')).toBe(true);
   expect(view.entries.some(entry => entry.role === 'assistant' && entry.text.includes('worker keeps going'))).toBe(true);
+  console.log(`[compaction-fixture] worker requests=${provider.requests.length} summaries=${provider.requests.filter(request => request.summary).length} purposes=${JSON.stringify(purposes(root).map(row => row.purpose))}`);
   // Pi drops nothing from the Graph ledger: history only grows.
   expect(view.entryCount).toBe(view.entries.length);
 
@@ -185,6 +204,9 @@ test('a split turn books two compaction invocations and still shows both to the 
   expect(summaries).toBe(2);
   const compaction = purposes(root).filter(row => row.purpose === 'compaction');
   expect(compaction).toHaveLength(2);
+  // Both summary calls are charged exactly once into the instance total.
+  expect(instanceTotals(root).every(instance => instance.used === instance.expected)).toBe(true);
+  console.log(`[compaction-fixture] split-turn requests=${provider.requests.length} summaries=${provider.requests.filter(request => request.summary).length} purposes=${JSON.stringify(purposes(root).map(row => row.purpose))}`);
   // Chatting has no node entry surface, so history must survive in the message table.
   const view = await runtime.conversations.view(created.conversationId);
   const texts = view.messages.filter(message => message.role === 'user').map(message => message.text);
@@ -192,14 +214,14 @@ test('a split turn books two compaction invocations and still shows both to the 
   expect(view.messages.some(message => message.text === '第一轮回复')).toBe(true);
 });
 
-async function workerRuntime(root: string, provider: Awaited<ReturnType<typeof compactionProvider>>, extra: { defaultBudgetTokens?: number } = {}) {
+async function workerRuntime(root: string, provider: Awaited<ReturnType<typeof compactionProvider>>, extra: { defaultBudgetTokens?: number; modelId?: string } = {}) {
   const workspace = join(root, 'project');
   await mkdir(workspace, { recursive: true });
   await writeFile(join(workspace, 'check.js'), 'console.log("ok");\n');
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
     actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) } },
-    models: { entries: [modelEntry(provider.baseUrl)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
+    models: { entries: [modelEntry(provider.baseUrl, extra.modelId)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
     ...(extra.defaultBudgetTokens !== undefined ? { limits: { defaultBudgetTokens: extra.defaultBudgetTokens } } : {}),
   });
   cleanup.push(() => runtime.close());
@@ -252,6 +274,21 @@ test('a summary without usage opens the unknown-usage hold like any other send',
   const before = provider.requests.length;
   await runtime.host.runReady();
   expect(provider.requests.length).toBe(before);
+}, 60_000);
+
+test('summary invocations keep the frozen upstream identity, not the connection id', async () => {
+  const root = await temp('identity');
+  const provider = await compactionProvider(({ summary }) => summary
+    ? { text: '## Goal\ncompacted', usage: { prompt_tokens: 300, completion_tokens: 20 } }
+    : { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 } });
+  const { runtime, taskId } = await workerRuntime(root, provider, { modelId: 'original-model' });
+  await runtime.host.runReady();
+  const rows = purposes(root);
+  expect(rows.length).toBeGreaterThanOrEqual(2);
+  expect(rows.some(row => row.purpose === 'compaction')).toBe(true);
+  // R08: history keeps the upstream identity even for summarization sends.
+  expect(rows.every(row => row.model === 'original-model')).toBe(true);
+  expect(runtime.nodeRun(taskId, 'work').invocations.every(invocation => invocation.model === 'original-model')).toBe(true);
 }, 60_000);
 
 test('a pause during auto-compaction stops the summary request through the task gate', async () => {
