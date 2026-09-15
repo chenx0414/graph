@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
+import { NodeRunPanel } from './NodeDetail.tsx';
 import { ConversationList, ConversationPanel } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
@@ -107,6 +108,7 @@ export function App() {
   }, []);
   const questionTotal = openQuestionTotal(tasks);
   const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(path);
+  const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(path);
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(path);
   const modeTone = !startup?.configured ? 'danger' : startup.mode === 'execute' ? 'success' : 'warn';
   const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
@@ -116,7 +118,8 @@ export function App() {
         : path === '/setup' ? '配置向导'
           : path === '/settings' ? '设置'
             : conversationMatch ? '与主 Agent 对话'
-              : taskMatch?.[2] ? '任务图' : taskMatch ? '任务详情' : 'Graph';
+              : nodeMatch ? '节点详情'
+                : taskMatch?.[2] ? '任务图' : taskMatch ? '任务详情' : 'Graph';
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -179,6 +182,11 @@ export function App() {
             {path === '/setup' && <Setup />}
             {path === '/settings' && <Settings />}
             {conversationMatch && <ConversationPanel key={conversationMatch[1]} id={conversationMatch[1]!} settings={settings} />}
+            {nodeMatch && (
+              <Card title={`节点 ${nodeMatch[2]}`} icon="box" actions={<a className="btn" href={`#/tasks/${nodeMatch[1]}/graph`}>返回任务图</a>}>
+                <NodeRunPanel key={`${nodeMatch[1]}:${nodeMatch[2]}`} taskId={nodeMatch[1]!} nodeId={nodeMatch[2]!} full />
+              </Card>
+            )}
             {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} settings={settings} startup={startup} />}
             {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
           </div>
@@ -611,6 +619,9 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
             ))}
           </ol>
           <Button size="sm" data-testid="operations-more" onClick={() => setOpsLimit(current => current + 20)}>加载更多操作记录</Button>
+          <div style={{ marginTop: 14 }}>
+            <NodeRunPanel taskId={id} nodeId={selectedNode.id} />
+          </div>
         </Card>
       )}
     </div>
