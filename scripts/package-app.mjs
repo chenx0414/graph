@@ -38,6 +38,9 @@ for (const [from, to] of [
   ['desktop', 'desktop'],
   ['src', 'src'],
   ['build', 'build'],
+  // The built-in skills/MCP/talent pack must ship with the app: the daemon
+  // installs definitions from this directory on first start.
+  ['presets', 'presets'],
 ]) {
   await cp(join(root, from), join(stage, to), { recursive: true });
 }
@@ -50,7 +53,7 @@ await writeFile(join(stage, 'electron-builder.json'), `${JSON.stringify({
   appId: 'dev.graph.console',
   productName: 'Graph',
   directories: { output: join(root, 'dist/app'), buildResources: 'build' },
-  files: ['desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'node_modules/**/*', 'package.json'],
+  files: ['desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'node_modules/**/*', 'package.json'],
   asar: false,
   npmRebuild: false,
   electronVersion: repo.devDependencies.electron,

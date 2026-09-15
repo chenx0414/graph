@@ -1,0 +1,54 @@
+{
+  "readyThenDirty": {
+    "prepared": "ready",
+    "rejected": {
+      "code": "project_dirty",
+      "message": "Project p has uncommitted changes; review them and create a local baseline before dispatch"
+    },
+    "dispatched": false,
+    "workerFile": null,
+    "originalFile": "user new uncommitted work\n",
+    "gitStatus": "M app.txt"
+  },
+  "customStateBaseline": {
+    "prepared": "ready",
+    "stateFilesCommitted": []
+  },
+  "subdirBaseline": {
+    "projectSubdir": "selected",
+    "filesCommitted": [
+      "selected/app.txt"
+    ],
+    "siblingCommitted": false
+  },
+  "preStagedExclusions": {
+    "prepared": "ready",
+    "excludedEnvCommitted": false,
+    "filesCommitted": [
+      ".env",
+      "app.txt"
+    ]
+  },
+  "worktreeBaseline": {
+    "preparation": {
+      "projectId": "p",
+      "state": "ready",
+      "repoRoot": "/private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-independent-git-SFrHNH/linked-worktree",
+      "projectSubdir": "",
+      "branch": "linked",
+      "baselineSha": "6b55f482bf73ba0cd2f6467335792e877fc47fe6",
+      "detail": {
+        "baselineCreated": true,
+        "dirty": 1,
+        "fingerprint": "2fa1464be6ea235219e42abc16e3796d3aa22aaa070d2a39d4c6691d35fc5e48",
+        "sample": [
+          "M app.txt"
+        ]
+      },
+      "updatedAt": 1789448251661,
+      "cursor": 1
+    },
+    "error": null,
+    "fileUnchanged": true
+  }
+}

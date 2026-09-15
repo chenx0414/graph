@@ -308,6 +308,14 @@ export function Settings() {
                   if (event.target.value === '' || !Number.isFinite(value)) { delete entry.cost; return; }
                   entry.cost = { input: entry.cost?.input ?? 0, output: value, cacheRead: entry.cost?.cacheRead ?? 0, cacheWrite: entry.cost?.cacheWrite ?? 0 };
                 })} /></Field>
+                <Field label="币种"><input className="input" style={{ width: 90 }} placeholder="USD" data-testid={`model-${index}-cost-currency`} value={(model as { pricing?: { currency?: string } }).pricing?.currency ?? ''} onChange={event => mutate(next => {
+                  const entry = next.models!.entries[index]! as { pricing?: { currency?: string } };
+                  const currency = event.target.value.trim().toUpperCase();
+                  if (!currency) { delete entry.pricing; return; }
+                  // Manual override freezes its own provenance so historical
+                  // calls keep the price snapshot they were estimated with.
+                  entry.pricing = { currency, unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' } as never;
+                })} /></Field>
               </div>
               <div className="row">
                 <Button size="sm" icon="bolt" data-testid={`model-${index}-test`} onClick={() => void testConnection(model)}>测试连接（可能产生用量）</Button>
