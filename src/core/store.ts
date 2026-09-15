@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 15) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 16) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -190,6 +190,14 @@ export class TaskStore {
           state TEXT NOT NULL, repo_root TEXT, project_subdir TEXT, branch TEXT, baseline_sha TEXT,
           detail TEXT, updated_at INTEGER NOT NULL);
         PRAGMA user_version=15;`);
+    });
+    if (version < 16) this.transaction(() => {
+      // Built-in preset installations are recorded by content hash so a normal
+      // restart never republishes a new version of an unchanged preset.
+      this.db.exec(`
+        CREATE TABLE presets(id TEXT PRIMARY KEY, version TEXT NOT NULL, hash TEXT NOT NULL,
+          detail TEXT, installed_at INTEGER NOT NULL);
+        PRAGMA user_version=16;`);
     });
   }
   transaction<T>(action: () => T): T {

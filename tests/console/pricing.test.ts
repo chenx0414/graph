@@ -62,7 +62,9 @@ test('a price refresh changes future invocations and leaves recorded cost snapsh
     const deadline = Date.now() + 10_000;
     for (;;) {
       const view = await (await fetch(`${daemon.url}/api/tasks/${created.taskId}`, { headers })).json() as { invocations: { usage: unknown; cost: unknown }[]; nodes: { status: string }[] };
-      if (view.invocations.length) return { ...view, taskId: created.taskId };
+      // Wait for settlement: a dispatched invocation may not have its frozen
+      // cost snapshot yet under parallel test load.
+      if (view.invocations.length && view.invocations.every(invocation => invocation.cost !== null)) return { ...view, taskId: created.taskId };
       if (Date.now() > deadline) throw new Error('invocation not recorded');
       await new Promise(resolve => setTimeout(resolve, 25));
     }

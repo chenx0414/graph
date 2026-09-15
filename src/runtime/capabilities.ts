@@ -100,14 +100,15 @@ async function localConnection(input: {
   executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
   manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
 }): Promise<McpExchange> {
-  if (typeof input.manifest.command !== 'string' || !isAbsolute(input.manifest.command)) {
-    throw new RuntimeError('capability_unavailable', 'A local MCP capability requires capability.json with an absolute command');
+  const command = input.manifest.command === 'node' ? process.execPath : input.manifest.command;
+  if (typeof command !== 'string' || !isAbsolute(command)) {
+    throw new RuntimeError('capability_unavailable', 'A local MCP capability requires capability.json with an absolute command or "node"');
   }
   const args = Array.isArray(input.manifest.args) && input.manifest.args.every(value => typeof value === 'string') ? input.manifest.args as string[] : [];
   const grants = await runGrants(input.workspace, input.scratchDir);
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
-    command: input.manifest.command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
+    command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
     readPaths: [input.snapshot, dirname(process.execPath)],
     // Discussion turns may read the business directory but only write scratch.
     writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],

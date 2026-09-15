@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "license": "MIT",
+  "source": "Graph built-in preset pack",
+  "presets": [
+    { "id": "skill-project-investigation", "kind": "skill", "version": "1.0.0", "path": "skills/project-investigation", "description": "只读项目调查：读代码与证据、澄清目标、区分事实与假设" },
+    { "id": "skill-implement-and-verify", "kind": "skill", "version": "1.0.0", "path": "skills/implement-and-verify", "description": "按确认范围实现并交付可复核的验证结果" },
+    { "id": "skill-independent-review", "kind": "skill", "version": "1.0.0", "path": "skills/independent-review", "description": "独立审查：对照需求产出有证据的问题，不扩权" },
+    { "id": "skill-test-and-deliver", "kind": "skill", "version": "1.0.0", "path": "skills/test-and-deliver", "description": "执行确认检查、整理产物与验收证据" },
+    { "id": "mcp-project-index", "kind": "mcp", "version": "1.0.0", "path": "mcp/project-index", "description": "随 APP 打包的本地只读项目检索（离线、零账号）" },
+    {
+      "id": "agent-master", "kind": "agent", "version": "1.0.0", "definition": "master", "recommendedGrade": "high",
+      "description": "主 Agent：与用户对话、调查、提出并维护策略草稿",
+      "capabilities": [{ "id": "skill-project-investigation", "version": "1.0.0" }]
+    },
+    {
+      "id": "agent-coder", "kind": "agent", "version": "1.0.0", "definition": "coder", "recommendedGrade": "medium",
+      "description": "实现 Agent：在确认范围内实现并交付可验证结果",
+      "capabilities": [{ "id": "skill-implement-and-verify", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }]
+    },
+    {
+      "id": "agent-reviewer", "kind": "agent", "version": "1.0.0", "definition": "reviewer", "recommendedGrade": "high", "review": true,
+      "description": "独立审查 Agent：对照需求检查实现与证据",
+      "capabilities": [{ "id": "skill-independent-review", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }]
+    },
+    {
+      "id": "agent-tester", "kind": "agent", "version": "1.0.0", "definition": "tester", "recommendedGrade": "medium",
+      "description": "测试与交付 Agent：执行确认检查并整理证据",
+      "capabilities": [{ "id": "skill-test-and-deliver", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }]
+    }
+  ]
+}

@@ -796,7 +796,10 @@ export async function openTaskRuntime(options: {
       },
       definitions() { ensureOpen(); return catalog.listDefinitions(); },
       capabilities() { ensureOpen(); return catalog.capabilities(); },
-      capability(id: string) { ensureOpen(); return catalog.capability(id); },
+      capability(id: string, version?: string) { ensureOpen(); return catalog.capability(id, version); },
+      preset(id: string) { ensureOpen(); return catalog.preset(id); },
+      definitionSpec(id: string, version: number) { ensureOpen(); return catalog.definition(`${id}@${version}`); },
+      recordPreset(id: string, version: string, hash: string, detail: Json) { ensureOpen(); return catalog.recordPreset(id, version, hash, detail); },
       async install(input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) {
         ensureOpen();
         const payload = { type: 'install', id: input.id, kind: input.kind, source: input.source, version: input.version };

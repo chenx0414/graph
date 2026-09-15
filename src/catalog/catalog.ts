@@ -37,6 +37,14 @@ export class Catalog {
     return { id: parsed.id, version: parsed.version, ...JSON.parse(row.spec) as DefinitionSpec };
   }
 
+  preset(id: string) {
+    return this.store.db.prepare('SELECT id,version,hash,detail,installed_at FROM presets WHERE id=?').get(id) as { id: string; version: string; hash: string; detail: string | null; installed_at: number } | undefined;
+  }
+
+  recordPreset(id: string, version: string, hash: string, detail: Json) {
+    this.store.db.prepare('INSERT OR REPLACE INTO presets VALUES(?,?,?,?,?)').run(id, version, hash, canonicalJson(detail), Date.now());
+  }
+
   recordInstall(record: CapabilityRecord) {
     this.store.db.prepare('INSERT OR IGNORE INTO capabilities(id,kind,source,version,snapshot,status) VALUES(?,?,?,?,?,?)')
       .run(record.id, record.kind, record.source, record.version, canonicalJson(record.snapshot), record.status);

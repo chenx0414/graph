@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -8,6 +9,7 @@ import { RuntimeError } from '../core/types.ts';
 import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
 import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
+import { installPresets } from '../catalog/presets.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
 
@@ -23,6 +25,8 @@ export interface DaemonOptions {
   /** Permit execute intent before any model resolves; the APP applies the
    * configuration live. The CLI keeps the strict startup errors. */
   dynamic?: boolean;
+  /** Built-in preset pack directory; defaults to the repository `presets/`. */
+  presetsDir?: string;
 }
 
 export interface ApplyConfigResult {
@@ -160,13 +164,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     server.startDrive();
     server.runtime.host.recoverMasters();
   };
-  const publishDefinitions = (server: Awaited<ReturnType<typeof openGraphServer>>) => {
-    if (definitionsPublished || !live.enabled()) return;
-    definitionsPublished = true;
-    server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
-    server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
-    server.runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
-  };
+  // Replaced after the server exists: preset-driven definitions replace the
+  // minimal built-ins when the pack is available.
+  let presetsAvailable = false;
+  let publishDefinitions = () => {};
 
   // Explicit connectivity check. Only runs when the settings page asks for it;
   // ordinary config reads and saves never touch a provider.
@@ -245,7 +246,21 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       }),
     },
   });
-  publishDefinitions(server);
+  const presetResult = await installPresets(
+    server.runtime.catalog,
+    options.presetsDir ?? fileURLToPath(new URL('../../presets', import.meta.url)),
+    log,
+  );
+  presetsAvailable = presetResult.available;
+  publishDefinitions = () => {
+    if (presetsAvailable || definitionsPublished || !live.enabled()) return;
+    definitionsPublished = true;
+    server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+    server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
+    server.runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
+  };
+  publishDefinitions();
+  if (presetsAvailable) log(`Presets: ${presetResult.installed.length} installed, ${presetResult.skipped.length} unchanged${presetResult.failed.length ? `, ${presetResult.failed.length} failed` : ''}.`);
 
   const applyConfig = async (document: unknown, expectedRevision: number): Promise<ApplyConfigResult> => {
     if (!configStore) throw new RuntimeError('invalid_config', 'The daemon was started without a configuration file');
@@ -254,7 +269,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     if (result.applied) {
       await syncProviders();
       scheduler.wake();
-      publishDefinitions(server);
+      publishDefinitions();
       activateDispatch(server);
     }
     return {
@@ -274,7 +289,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     if (result.applied) {
       await syncProviders();
       scheduler.wake();
-      publishDefinitions(server);
+      publishDefinitions();
       activateDispatch(server);
     }
     return {
