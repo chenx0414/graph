@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
@@ -286,6 +287,10 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         return store.command('user', requestId, { type: paused ? 'pause' : 'resume', taskId }, () => {
           store.db.prepare('UPDATE tasks SET paused=? WHERE id=?').run(Number(paused), taskId);
+          // Pause/resume are explicit state boundaries: accumulate the ledger
+          // here instead of inferring durations from event or message times.
+          if (paused) openPause(store, taskId);
+          else closePause(store, taskId);
           return { taskId, cursor: store.event(taskId, paused ? 'task.pause_requested' : 'task.resumed', {}) };
         });
       };
@@ -307,6 +312,7 @@ export async function openTaskRuntime(options: {
             const resolved = store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'")
               .run(canonicalJson({ type: 'set_budget', tokens: input.tokens }), taskId, input.nodeId);
             if (resolved.changes) {
+              closeUserWait(store, taskId, input.nodeId);
               const stillOpen = store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, input.nodeId);
               if (!stillOpen) store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(taskId, input.nodeId);
             }

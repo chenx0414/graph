@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
+import { openUserWait } from '../core/time-ledger.ts';
 import type { TokenUsage } from './call-broker.ts';
 import type { SendGate } from './controlled-openai.ts';
 
@@ -59,6 +60,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
             const data = { reason: 'Agent returned no authoritative usage' };
             store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
               .run(questionId, operation.taskId, nodeId, operation.id, 'unknown_usage', canonicalJson(data));
+            openUserWait(store, operation.taskId, nodeId);
             // The stream must see the question even though no node status changed.
             store.event(operation.taskId, 'question.opened', { nodeId, kind: 'unknown_usage', data, operationId: operation.id });
           }

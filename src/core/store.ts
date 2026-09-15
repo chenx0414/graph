@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 18) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 19) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -226,6 +226,16 @@ export class TaskStore {
           loaded TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE INDEX node_capabilities_scope ON node_capabilities(task_id,node_id,seq);
         PRAGMA user_version=18;`);
+    });
+    if (version < 19) this.transaction(() => {
+      // Pause / user-wait time ledger on the node (C02). NULL columns mean the
+      // segment was never recorded, so history keeps showing "未记录".
+      this.db.exec(`
+        ALTER TABLE nodes ADD COLUMN pause_ms INTEGER;
+        ALTER TABLE nodes ADD COLUMN pause_since INTEGER;
+        ALTER TABLE nodes ADD COLUMN user_wait_ms INTEGER;
+        ALTER TABLE nodes ADD COLUMN user_wait_since INTEGER;
+        PRAGMA user_version=19;`);
     });
   }
   transaction<T>(action: () => T): T {

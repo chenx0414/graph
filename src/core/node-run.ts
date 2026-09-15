@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { nodeTimeLedger } from './time-ledger.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
@@ -165,12 +166,15 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   const active = operations.filter(operation => operation.workerActive || ['dispatched', 'running'].includes(operation.state));
   const inProgress = !nodeTerminal && active.length > 0;
   const settled = operations.filter(operation => operation.dispatchedAt !== null && operation.settledAt !== null);
+  const ledger = nodeTimeLedger(store, taskId, nodeId);
   const timing = {
     totalMs: settled.length ? Math.max(0, Math.max(...settled.map(operation => operation.settledAt!)) - Math.min(...settled.map(operation => operation.dispatchedAt!))) : null,
     runMs: settled.length ? settled.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0) : null,
     waitingMs: operations.reduce((sum, operation) => sum + operation.waitingMs, 0),
-    pauseMs: null as number | null,
-    userWaitMs: null as number | null,
+    // Recorded pause / user-wait segments; a historical node without ledger
+    // facts stays "未记录" instead of being inferred from message times.
+    pauseMs: ledger.pauseMs ?? null,
+    userWaitMs: ledger.userWaitMs ?? null,
     inProgress,
   };
   return {

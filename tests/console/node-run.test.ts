@@ -246,3 +246,56 @@ test('a terminal node is not in progress because of a historical not_sent attemp
   expect(view.operations).toHaveLength(2);
   expect(view.timing).toMatchObject({ inProgress: false, totalMs: 1_000, runMs: 1_000 });
 });
+
+test('pause and user-wait accumulate only at state boundaries with recorded facts (C02)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-time-ledger-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  const { openPause, closePause, openUserWait, closeUserWait } = await import('../../src/core/time-ledger.ts');
+  store.transaction(() => {
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('t','p','ledger',1,'running')").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,status,activation_id,output_version,stall_count) VALUES('t','work','{\"id\":\"work\",\"kind\":\"agent\",\"action\":\"work\"}','running','act',1,0)").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,status,activation_id,output_version,stall_count) VALUES('t','old','{\"id\":\"old\",\"kind\":\"agent\",\"action\":\"work\"}','succeeded','old-act',1,0)").run();
+  });
+  store.transaction(() => {
+    openPause(store, 't', 1_000);
+    closePause(store, 't', 2_000);
+    openUserWait(store, 't', 'work', 1_000);
+    closeUserWait(store, 't', 'work', 1_500);
+  });
+  const recorded = nodeRun(store, 't', 'work');
+  expect(recorded.timing.pauseMs).toBe(1_000);
+  expect(recorded.timing.userWaitMs).toBe(500);
+  // A second close inside the same segment must not double count.
+  store.transaction(() => { closePause(store, 't', 9_999); closeUserWait(store, 't', 'work', 9_999); openPause(store, 't', 10_000); closePause(store, 't', 10_100); });
+  expect(nodeRun(store, 't', 'work').timing.pauseMs).toBe(1_100);
+  // Historical nodes keep NULL columns and must still read as "未记录".
+  const historical = nodeRun(store, 't', 'old');
+  expect(historical.timing.pauseMs).toBeNull();
+  expect(historical.timing.userWaitMs).toBeNull();
+  // An open segment is counted live while the node is active ...
+  const now = Date.now();
+  store.transaction(() => openUserWait(store, 't', 'work', now - 300));
+  expect(nodeRun(store, 't', 'work').timing.userWaitMs).toBeGreaterThanOrEqual(300);
+  // ... but a terminal node does not grow an unclosed segment forever.
+  store.transaction(() => { store.db.prepare("UPDATE nodes SET status='succeeded' WHERE task_id='t' AND id='work'").run(); });
+  const frozen = nodeRun(store, 't', 'work').timing.userWaitMs!;
+  expect(frozen).toBeGreaterThanOrEqual(300);
+  expect(nodeRun(store, 't', 'work').timing.userWaitMs).toBe(frozen);
+});
+
+test('the task pause boundary writes the ledger through the public API (C02)', async () => {
+  const { taskId, task, runtime, options } = await workerFixture('pause-ledger', [{ text: 'done' }]);
+  void task;
+  await runtime().user.task(taskId).pause('pause-ledger');
+  await new Promise(resolve => setTimeout(resolve, 150));
+  await runtime().user.task(taskId).resume('resume-ledger');
+  const store = new TaskStore(join(options.stateDir, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  const view = nodeRun(store, taskId, 'work');
+  expect(view.timing.pauseMs).not.toBeNull();
+  expect(view.timing.pauseMs!).toBeGreaterThanOrEqual(100);
+  expect(view.timing.userWaitMs).toBeNull();
+});

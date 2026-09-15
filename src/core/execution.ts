@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { closeUserWait, closeUserWaitForOperation, openUserWait } from './time-ledger.ts';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { realpath, symlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
@@ -107,6 +108,7 @@ export class Execution {
           if (!evidence.quiescent || current.result) throw new RuntimeError('invalid_reconciliation', 'Cannot retry an operation with a known result or a live worker');
           this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0,settled_at=COALESCE(settled_at,?) WHERE id=?").run(Date.now(), id);
           this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'").run(canonicalJson(evidence), id);
+          closeUserWaitForOperation(this.store, id);
           this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(operation.taskId, operation.nodeId);
         } else {
           this.store.db.prepare('UPDATE operations SET worker_active=? WHERE id=?').run(Number(!evidence.quiescent), id);
@@ -201,6 +203,7 @@ export class Execution {
       throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
     }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
+    closeUserWait(this.store, taskId, question.node_id);
     if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, question.node_id)) {
       // Only the current activation's own finished result may lift the node to
       // succeeded. A completed operation from an earlier rework round stays
@@ -230,6 +233,7 @@ export class Execution {
     this.store.db.prepare("UPDATE activations SET state='blocked' WHERE id=?").run(node.activation_id);
     this.store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
       .run(randomUUID(), node.task_id, node.id, operationId, kind, canonicalJson(data));
+    openUserWait(this.store, node.task_id, node.id);
     this.store.event(node.task_id, 'question.opened', { nodeId: node.id, kind, data, operationId });
   }
 
@@ -709,9 +713,11 @@ export class Execution {
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?").run(canonicalJson(result), operation.id);
       this.store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?").run(operation.taskId, operation.nodeId);
       this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND kind='recovery' AND status='open'").run(canonicalJson({ result }), operation.id);
+      closeUserWaitForOperation(this.store, operation.id);
       if (!this.store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
         this.store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
           .run(randomUUID(), operation.taskId, operation.nodeId, operation.id, 'unknown_usage', canonicalJson({ reason: 'Agent returned no authoritative usage' }));
+        openUserWait(this.store, operation.taskId, operation.nodeId);
         this.store.event(operation.taskId, 'operation.unknown', { operationId: operation.id, reason: 'unknown_usage' });
       }
       return;
@@ -743,6 +749,7 @@ export class Execution {
       if (account.model && !used.includes(account.model)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...used, account.model]), operation.instanceId);
     }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'").run(canonicalJson({ result }), operation.id);
+    closeUserWaitForOperation(this.store, operation.id);
     if (result.outcome === 'waiting') {
       if (!result.question?.prompt.trim()) throw new RuntimeError('invalid_result', 'Waiting requires a question');
       const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as NodeRow;

@@ -152,7 +152,8 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
         <Stat label="运行时间" value={timing.runMs == null ? (timing.inProgress ? '进行中' : '未记录') : formatMs(timing.runMs)} hint="实际工作时段之和，HTTP 在途计入" />
         <Stat label="总历时" value={timing.totalMs == null ? (timing.inProgress ? '进行中' : '未记录') : formatMs(timing.totalMs)} hint="首次派发到最后结算，含等待" />
         <Stat label="凭据等待" value={formatMs(timing.waitingMs)} hint="凭据排队，不计入运行时间" />
-        <Stat label="暂停/等待用户" value={timing.pauseMs == null && timing.userWaitMs == null ? '未记录' : `${formatMs((timing.pauseMs ?? 0) + (timing.userWaitMs ?? 0))}`} hint="状态边界未写账时显示未记录，不推测" />
+        <Stat label="暂停" value={timing.pauseMs == null ? '未记录' : formatMs(timing.pauseMs)} hint="任务暂停期间累计，按状态边界写账" />
+        <Stat label="等待用户" value={timing.userWaitMs == null ? '未记录' : formatMs(timing.userWaitMs)} hint="问题未答期间累计，按状态边界写账" />
         <Stat label="用量" value={data.instance?.unlimited ? `${knownTokens.toLocaleString('en-US')} · 不限` : knownTokens.toLocaleString('en-US')} hint={data.instance?.budget === null || data.instance?.budget === undefined ? '额度不限' : `预算 ${data.instance.budget.toLocaleString('en-US')}`} />
         <Stat label="费用" value={costText(costSummary)} hint={unknownCost ? '存在未知价格调用，未折零' : '按调用时价格快照，分币种合计'} />
         <Stat label="记录" value={entries.length} hint={`${data.entryCount} 条`} />
