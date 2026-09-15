@@ -14,7 +14,7 @@ const coder = { definitionVersion: 'coder@1', model: 'scripted' };
 async function setup(actions: Record<string, ActionAdapter>, nodes: NodeSpec[], extra: Partial<Proposal> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-revision-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions };
+  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions, limits: { defaultBudgetTokens: 20_000_000 } };
   const runtime = await openTaskRuntime(options); cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Revise the graph', requestId: 'begin' });
   const proposed = await runtime.supervisor(taskId).propose({

@@ -15,6 +15,8 @@ export interface CredentialConfig {
 export interface LimitsConfig {
   credentials: Record<string, number>;
   sharedGroups: Record<string, number>;
+  /** Default cumulative token cap for new instances; null means unlimited. */
+  defaultBudgetTokens: number | null;
 }
 
 export interface ConfiguredModel extends ModelEntry {
@@ -34,7 +36,7 @@ const GRADES: ModelGrade[] = ['low', 'medium', 'high', 'highest'];
 const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function emptyGraphConfig(): GraphConfig {
-  return { path: null, configured: false, projects: [], models: null, credentials: {}, limits: { credentials: {}, sharedGroups: {} } };
+  return { path: null, configured: false, projects: [], models: null, credentials: {}, limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null } };
 }
 
 export function defaultConfigPath(cwd: string) {
@@ -147,7 +149,7 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
     }
   }
 
-  const limits: LimitsConfig = { credentials: {}, sharedGroups: {} };
+  const limits: LimitsConfig = { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null };
   if (root.limits !== undefined) {
     const rawLimits = asObject(root.limits, 'limits');
     for (const [id, value] of Object.entries(rawLimits.credentials !== undefined ? asObject(rawLimits.credentials, 'limits.credentials') : {})) {
@@ -156,6 +158,9 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
     }
     for (const [id, value] of Object.entries(rawLimits.sharedGroups !== undefined ? asObject(rawLimits.sharedGroups, 'limits.sharedGroups') : {})) {
       limits.sharedGroups[id] = positiveInt(value, `limits.sharedGroups.${id}`);
+    }
+    if (rawLimits.defaultBudgetTokens !== undefined && rawLimits.defaultBudgetTokens !== null) {
+      limits.defaultBudgetTokens = positiveInt(rawLimits.defaultBudgetTokens, 'limits.defaultBudgetTokens');
     }
   }
 

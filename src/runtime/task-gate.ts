@@ -27,9 +27,11 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
         if (nodeId && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
           throw new RuntimeError('unknown_usage', 'Instance paused for unknown usage');
         }
-        const account = store.db.prepare('SELECT budget,used FROM instances WHERE id=?').get(operation.instanceId) as { budget: number; used: number };
+        const account = store.db.prepare('SELECT budget,used,unlimited FROM instances WHERE id=?').get(operation.instanceId) as { budget: number; used: number; unlimited: number };
         const inFlight = inFlightUsage(store, operation.instanceId);
-        if (account.used + inFlight + reservation > account.budget || (reservation === 0 && account.used + inFlight >= account.budget)) {
+        // Unlimited instances still record every invocation; only the
+        // cumulative cap comparison is skipped.
+        if (!account.unlimited && (account.used + inFlight + reservation > account.budget || (reservation === 0 && account.used + inFlight >= account.budget))) {
           throw new RuntimeError('budget', 'Token budget exhausted');
         }
         if (store.db.prepare('SELECT id FROM invocations WHERE id=?').get(id)) throw new RuntimeError('invalid_input', 'Invocation already dispatched');

@@ -149,6 +149,7 @@ test('unknown usage on a production request blocks the next provider call', asyn
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) } },
+    limits: { defaultBudgetTokens: 20_000_000 },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
@@ -181,6 +182,7 @@ test('reconciling unknown usage accumulates the known calls and applies the resu
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) } },
+    limits: { defaultBudgetTokens: 20_000_000 },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
@@ -221,6 +223,7 @@ test('a production request that exceeds the budget cannot send a follow-up call'
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) } },
+    limits: { defaultBudgetTokens: 20_000_000 },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');

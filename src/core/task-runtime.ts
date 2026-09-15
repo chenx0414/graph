@@ -40,6 +40,9 @@ export async function openTaskRuntime(options: {
   config?: { revision(): number };
   master?: { action: string; definitionVersion: string; model: string };
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
+  /** Default per-instance budget for new instances. null/absent means no
+   * cumulative token cap; a positive integer keeps the finite-budget gate. */
+  limits?: { defaultBudgetTokens?: number | null };
   /** Host-selected grants and environment for confirmed program checks only. */
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
 }) {
@@ -60,7 +63,7 @@ export async function openTaskRuntime(options: {
     const spec: NodeSpec = { id: 'master', kind: 'agent', action: master.action, definitionVersion: master.definitionVersion, model: master.model, role: 'master' };
     const instanceId = randomUUID();
     store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, spec.id, canonicalJson(spec), instanceId);
-    store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,?,?)').run(instanceId, taskId, spec.id, spec.definitionVersion ?? null, spec.model ?? null);
+    insertInstance(instanceId, taskId, spec.id, spec.definitionVersion, spec.model);
     createActivation(store, taskId, spec.id, 0);
     return instanceId;
   };
@@ -70,7 +73,17 @@ export async function openTaskRuntime(options: {
   // they are removed from the config.
   const configuredProjects = options.projects;
   const allowedProjects = new Set((configuredProjects ?? []).map(project => project.id));
+  const defaultBudgetTokens = options.limits?.defaultBudgetTokens ?? null;
+  // The node row must exist first: instances(task_id,node_id) references nodes.
+  const insertInstance = (id: string, taskId: string, nodeId: string, definitionVersion?: string | null, model?: string | null) => {
+    store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model,budget,unlimited) VALUES(?,?,?,?,?,?,?)')
+      .run(id, taskId, nodeId, definitionVersion ?? null, model ?? null, defaultBudgetTokens ?? 0, defaultBudgetTokens === null ? 1 : 0);
+    return id;
+  };
   try {
+    if (defaultBudgetTokens !== null && (!Number.isSafeInteger(defaultBudgetTokens) || defaultBudgetTokens <= 0)) {
+      throw new RuntimeError('invalid_input', 'limits.defaultBudgetTokens must be a positive integer or null');
+    }
     store.transaction(() => {
       for (const project of options.projects ?? []) {
         if (!project.id.trim() || !project.root.trim() || project.grants?.some(grant => typeof grant !== 'string' || !grant.trim())) throw new RuntimeError('invalid_input', 'Project identity, root and grants must be nonempty strings');
@@ -150,7 +163,7 @@ export async function openTaskRuntime(options: {
           const spec: NodeSpec = { id: 'master', kind: 'agent', action: options.master.action, definitionVersion: options.master.definitionVersion, model: options.master.model, role: 'master' };
           const instanceId = randomUUID();
           store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, spec.id, canonicalJson(spec), instanceId);
-          store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,?,?)').run(instanceId, taskId, spec.id, spec.definitionVersion ?? null, spec.model ?? null);
+          insertInstance(instanceId, taskId, spec.id, spec.definitionVersion, spec.model);
           createActivation(store, taskId, spec.id, 0);
           const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
           if (!active_task) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
@@ -170,6 +183,29 @@ export async function openTaskRuntime(options: {
       return {
         async pause(requestId: string) { return setPaused(true, requestId); },
         async resume(requestId: string) { return setPaused(false, requestId); },
+        /** User-owned budget policy change: a finite cap or explicit unlimited.
+         * Instance identity, used total and every other gate stay untouched. */
+        async setBudget(input: { nodeId: string; tokens: number | null; requestId: string }): Promise<Receipt> {
+          ensureOpen();
+          if (typeof input.nodeId !== 'string' || !input.nodeId.trim()) throw new RuntimeError('invalid_input', 'A nodeId is required');
+          if (input.tokens !== null && (!Number.isSafeInteger(input.tokens) || input.tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
+          const receipt = store.command('user', input.requestId, { type: 'set_budget', taskId, nodeId: input.nodeId, tokens: input.tokens }, () => {
+            const instance = store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?').get(taskId, input.nodeId) as { id: string } | undefined;
+            if (!instance) throw new RuntimeError('not_found', 'Unknown agent node');
+            store.db.prepare('UPDATE instances SET budget=?,unlimited=? WHERE id=?').run(input.tokens ?? 0, input.tokens === null ? 1 : 0, instance.id);
+            // An explicit policy change resolves the budget question that
+            // blocked this node. Permission and unknown-usage questions stay.
+            const resolved = store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'")
+              .run(canonicalJson({ type: 'set_budget', tokens: input.tokens }), taskId, input.nodeId);
+            if (resolved.changes) {
+              const stillOpen = store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, input.nodeId);
+              if (!stillOpen) store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(taskId, input.nodeId);
+            }
+            return { taskId, cursor: store.event(taskId, 'instance.budget_changed', { nodeId: input.nodeId, tokens: input.tokens }) };
+          });
+          execution.finish(taskId);
+          return receipt;
+        },
         async answer(questionId: string, answer: Answer, requestId: string): Promise<Receipt> {
           ensureOpen();
           const receipt = store.command('user', requestId, { type: 'answer', taskId, questionId, answer }, () => {
@@ -216,7 +252,7 @@ export async function openTaskRuntime(options: {
               }
               const instanceId = node.kind === 'agent' ? randomUUID() : null;
               store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
-              if (instanceId) store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,?,?)').run(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
+              if (instanceId) insertInstance(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
               createActivation(store, taskId, node.id, 1);
             }
             const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
@@ -232,7 +268,7 @@ export async function openTaskRuntime(options: {
         async view() {
           ensureOpen();
           const task = store.task(taskId);
-          const rows = store.db.prepare('SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,i.used,i.budget,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(taskId) as { id: string; spec: string; instance_id: string | null; status: string; used: number | null; budget: number | null; activation_id: string; output_version: number; stall_count: number; model: string | null; definition_version: string | null }[];
+          const rows = store.db.prepare('SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(taskId) as { id: string; spec: string; instance_id: string | null; status: string; used: number | null; budget: number | null; unlimited: number | null; activation_id: string; output_version: number; stall_count: number; model: string | null; definition_version: string | null }[];
           const invocations = invocationRows(store, taskId);
           const unknownCost = invocations.some(item => item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && item.cost.unknown === true);
           const cost = unknownCost ? { unknown: true as const } : { amount: invocations.reduce((sum, item) => {
@@ -265,7 +301,7 @@ export async function openTaskRuntime(options: {
             worktrees: (store.db.prepare('SELECT instance_id,node_id,path,branch FROM worktrees WHERE task_id=?').all(taskId) as { instance_id: string; node_id: string; path: string; branch: string }[])
               .map(row => ({ instanceId: row.instance_id, nodeId: row.node_id, path: row.path, branch: row.branch })),
             integrationSha: task.integration_sha,
-            nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, budget: row.budget,
+            nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget,
               ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
               reserved: operations.filter(op => op.node_id === row.id).reduce((sum, op) => sum + op.reserved, 0) })),
             evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid), ...(row.commit_sha ? { commitSha: row.commit_sha } : {}) })),
@@ -402,13 +438,13 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
-      const master = store.db.prepare("SELECT n.status,i.used,i.budget,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; used: number | null; budget: number | null; model: string | null; definition_version: string | null } | undefined;
+      const master = store.db.prepare("SELECT n.status,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null } | undefined;
       const proposalRow = anchor.latest_proposal
         ? store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?').get(anchor.id, anchor.latest_proposal) as { version: number; requirement_version: number; spec: string; decision_snapshot: string | null } | undefined
         : undefined;
       const accepted = store.db.prepare('SELECT proposal_version,task_id,target_branch,accepted_at FROM conversation_acceptances WHERE conversation_id=? ORDER BY accepted_at').all(conversationId) as { proposal_version: number; task_id: string; target_branch: string; accepted_at: number }[];
       const tasks = (store.db.prepare("SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; request: string; phase: string; paused: number; target_branch: string | null; accepted_proposal: number | null; integration_sha: string | null }[]).map(task => {
-        const nodes = store.db.prepare('SELECT n.id,n.spec,n.status,n.stall_count,n.output_version,i.used,i.budget,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(task.id) as { id: string; spec: string; status: string; stall_count: number; output_version: number; used: number | null; budget: number | null; model: string | null; definition_version: string | null }[];
+        const nodes = store.db.prepare('SELECT n.id,n.spec,n.status,n.stall_count,n.output_version,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(task.id) as { id: string; spec: string; status: string; stall_count: number; output_version: number; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null }[];
         const questions = store.db.prepare('SELECT id,node_id,kind,status,data FROM questions WHERE task_id=? ORDER BY rowid').all(task.id) as { id: string; node_id: string; kind: string; status: string; data: string }[];
         const open = questions.filter(question => question.status === 'open');
         const evidence = store.db.prepare('SELECT acceptance_id,valid FROM evidence WHERE task_id=? ORDER BY rowid').all(task.id) as { acceptance_id: string; valid: number }[];
@@ -417,7 +453,7 @@ export async function openTaskRuntime(options: {
           status: task.paused ? 'paused' : open.length ? 'blocked' : task.phase,
           targetBranch: task.target_branch, acceptedProposalVersion: task.accepted_proposal, integrationSha: task.integration_sha,
           openQuestions: open.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind, data: JSON.parse(question.data) as Json })),
-          nodes: nodes.map(row => ({ id: row.id, kind: (JSON.parse(row.spec) as NodeSpec).kind, role: (JSON.parse(row.spec) as NodeSpec).role ?? null, status: row.status, used: row.used, budget: row.budget, model: row.model, definitionVersion: row.definition_version, stallCount: row.stall_count, outputVersion: row.output_version })),
+          nodes: nodes.map(row => ({ id: row.id, kind: (JSON.parse(row.spec) as NodeSpec).kind, role: (JSON.parse(row.spec) as NodeSpec).role ?? null, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget, model: row.model, definitionVersion: row.definition_version, stallCount: row.stall_count, outputVersion: row.output_version })),
           cost: taskCost(task.id),
           evidence: evidence.map(item => ({ acceptanceId: item.acceptance_id, valid: Boolean(item.valid) })),
         };
@@ -435,7 +471,8 @@ export async function openTaskRuntime(options: {
       const unknownCost = masterCost.unknown === true || unknownPending || tasks.some(task => task.cost.unknown === true);
       const cost = unknownCost ? { unknown: true as const } : { amount: (masterCost.amount ?? 0) + tasks.reduce((sum, task) => sum + (task.cost.amount ?? 0), 0) };
       const used = (master?.used ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.used ?? 0), 0), 0);
-      const budget = (master?.budget ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.budget ?? 0), 0), 0);
+      const anyUnlimited = Boolean(master?.unlimited) || tasks.some(task => task.nodes.some(node => node.unlimited));
+      const budget = anyUnlimited ? null : (master?.budget ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.budget ?? 0), 0), 0);
       const messageCount = (store.db.prepare('SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?').get(conversationId) as { count: number }).count;
       return {
         id: conversation.id, title: conversation.title, projectId: conversation.project_id, projectRoot: project?.root ?? null,
@@ -446,8 +483,8 @@ export async function openTaskRuntime(options: {
         questions: anchorQuestions,
         proposal: proposalRow ? { version: proposalRow.version, requirementVersion: proposalRow.requirement_version, stale: proposalRow.requirement_version !== anchor.requirement_version, spec: JSON.parse(proposalRow.spec) as Proposal, decisions: proposalRow.decision_snapshot } : null,
         accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at })),
-        master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, budget: master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
-        cost, usage: { used, budget },
+        master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, unlimited: Boolean(master.unlimited), budget: master.unlimited ? null : master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
+        cost, usage: { used, budget, unlimited: anyUnlimited },
         tasks,
         cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
       };
@@ -518,7 +555,7 @@ export async function openTaskRuntime(options: {
         for (const node of proposal.nodes) {
           const instanceId = node.kind === 'agent' ? randomUUID() : null;
           store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
-          if (instanceId) store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,?,?)').run(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
+          if (instanceId) insertInstance(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
           createActivation(store, taskId, node.id, 1);
         }
         if (phase === 'running') store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
@@ -641,7 +678,7 @@ export async function openTaskRuntime(options: {
         async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string }) {
           ensureOpen();
           return store.command(`supervisor:${taskId}`, input.requestId, { type: 'revise', baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, containers: input.containers, loops: input.loops }, () => {
-            const revised = applyRevision(store, taskId, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
+            const revised = applyRevision(store, taskId, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
             return { taskId, graphVersion: revised.version, cursor: revised.cursor };
           });
         },

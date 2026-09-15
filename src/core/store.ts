@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 13) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 14) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -175,6 +175,12 @@ export class TaskStore {
         ALTER TABLE proposals ADD COLUMN decision_snapshot TEXT;
         ALTER TABLE conversations ADD COLUMN binding_since_seq INTEGER NOT NULL DEFAULT 0;
         PRAGMA user_version=13;`);
+    });
+    if (version < 14) this.transaction(() => {
+      // New instances default to no cumulative token cap (unlimited=1). Every
+      // existing instance keeps its finite budget and used total untouched;
+      // migration never rewrites an old row into unlimited.
+      this.db.exec('ALTER TABLE instances ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0; PRAGMA user_version=14;');
     });
   }
   transaction<T>(action: () => T): T {

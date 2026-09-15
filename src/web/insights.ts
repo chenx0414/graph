@@ -187,12 +187,14 @@ export interface UsageNode {
   status: string;
   used?: number | null;
   budget?: number | null;
+  unlimited?: boolean;
 }
 
 export interface UsageSummary {
   used: number;
   budget: number;
   remaining: number | null;
+  unlimited: boolean;
   measuredNodes: number;
   unknownNodes: number;
   unknownCost: boolean;
@@ -207,6 +209,7 @@ export function summarizeUsage(nodes: UsageNode[], cost?: { unknown?: boolean; a
   let measuredNodes = 0;
   let unknownNodes = 0;
   let hasBudget = false;
+  let unlimited = false;
   for (const node of nodes) {
     if (typeof node.used === 'number' && Number.isFinite(node.used)) {
       used += node.used;
@@ -214,7 +217,11 @@ export function summarizeUsage(nodes: UsageNode[], cost?: { unknown?: boolean; a
     } else {
       unknownNodes += 1;
     }
-    if (typeof node.budget === 'number' && Number.isFinite(node.budget)) {
+    if (node.unlimited === true) {
+      // An unlimited node has no cap to sum or to divide against; the
+      // remaining-budget figure must not pretend a finite one exists.
+      unlimited = true;
+    } else if (typeof node.budget === 'number' && Number.isFinite(node.budget)) {
       budget += node.budget;
       hasBudget = true;
     }
@@ -222,7 +229,8 @@ export function summarizeUsage(nodes: UsageNode[], cost?: { unknown?: boolean; a
   return {
     used,
     budget,
-    remaining: hasBudget ? Math.max(0, budget - used) : null,
+    remaining: !unlimited && hasBudget ? Math.max(0, budget - used) : null,
+    unlimited,
     measuredNodes,
     unknownNodes,
     unknownCost: Boolean(cost?.unknown),
@@ -239,7 +247,8 @@ export function usageText(summary: UsageSummary): string {
   const parts = [`已计量 ${formatTokens(summary.used)} tokens`];
   if (summary.measuredNodes) parts.push(`${summary.measuredNodes} 个节点`);
   if (summary.unknownNodes) parts.push(`${summary.unknownNodes} 个节点用量未知`);
-  if (summary.remaining !== null) parts.push(`剩余预算 ${formatTokens(summary.remaining)} / ${formatTokens(summary.budget)}`);
+  if (summary.unlimited) parts.push('额度不限');
+  else if (summary.remaining !== null) parts.push(`剩余预算 ${formatTokens(summary.remaining)} / ${formatTokens(summary.budget)}`);
   if (summary.unknownCost) parts.push('费用未知');
   else if (summary.cost !== null) parts.push(`费用 ${summary.cost}`);
   return parts.join(' · ');

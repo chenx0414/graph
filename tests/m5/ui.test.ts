@@ -72,6 +72,7 @@ test('the graph follows runtime events and a budget question accepts a token inc
   const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
   const server = await openGraphServer({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
+    limits: { defaultBudgetTokens: 20_000_000 },
     actions: {
       work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
       expensive: { kind: 'agent', reserveTokens: 20_000_001, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },

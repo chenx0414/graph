@@ -10,6 +10,8 @@ export interface GraphRevisionInput {
   nodes: NodeSpec[];
   containers?: ContainerSpec[];
   loops?: LoopSpec[];
+  /** Budget policy for instances created by this revision: null = unlimited. */
+  newInstanceBudget?: number | null;
 }
 
 /** Apply a supervisor graph revision after the confirmed acceptance threshold is locked. */
@@ -69,9 +71,9 @@ export function applyRevision(store: TaskStore, taskId: string, input: GraphRevi
   const nextIds = new Set(next.nodes.map(node => node.id));
   for (const id of previous.nodes.keys()) {
     if (nextIds.has(id) || replacements.has(id)) continue;
-    const instance = store.db.prepare('SELECT used,budget FROM instances WHERE task_id=? AND node_id=?').get(taskId, id) as { used: number; budget: number } | undefined;
+    const instance = store.db.prepare('SELECT used,budget,unlimited FROM instances WHERE task_id=? AND node_id=?').get(taskId, id) as { used: number; budget: number; unlimited: number } | undefined;
     const status = (store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(taskId, id) as { status: string }).status;
-    if (instance && instance.used >= instance.budget && !['succeeded', 'skipped'].includes(status)) {
+    if (instance && !instance.unlimited && instance.used >= instance.budget && !['succeeded', 'skipped'].includes(status)) {
       throw new RuntimeError('invalid_proposal', 'Exhausted incomplete work cannot disappear from the graph');
     }
   }
@@ -115,7 +117,10 @@ export function applyRevision(store: TaskStore, taskId: string, input: GraphRevi
     }
     const instanceId = node.kind === 'agent' ? randomUUID() : null;
     store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
-    if (instanceId) store.db.prepare('INSERT INTO instances(id,task_id,node_id) VALUES(?,?,?)').run(instanceId, taskId, node.id);
+    if (instanceId) {
+      const policy = input.newInstanceBudget === undefined ? null : input.newInstanceBudget;
+      store.db.prepare('INSERT INTO instances(id,task_id,node_id,budget,unlimited) VALUES(?,?,?,?,?)').run(instanceId, taskId, node.id, policy ?? 0, policy === null ? 1 : 0);
+    }
     createActivation(store, taskId, node.id, version);
   }
   for (const id of previous.nodes.keys()) {

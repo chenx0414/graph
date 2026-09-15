@@ -163,7 +163,8 @@ export class Execution {
     if (!question || question.status !== 'open') throw new RuntimeError('invalid_question', 'No open question in this task');
     if (question.kind === 'budget' && answer.type === 'add_budget') {
       if (!Number.isSafeInteger(answer.tokens) || answer.tokens <= 0) throw new RuntimeError('invalid_answer', 'A positive token increment is required');
-      const instance = this.store.db.prepare('SELECT id,budget FROM instances WHERE task_id=? AND node_id=?').get(taskId, question.node_id) as { id: string; budget: number };
+      const instance = this.store.db.prepare('SELECT id,budget,unlimited FROM instances WHERE task_id=? AND node_id=?').get(taskId, question.node_id) as { id: string; budget: number; unlimited: number };
+      if (instance.unlimited) throw new RuntimeError('invalid_answer', 'An unlimited instance has no budget question to add to');
       if (!Number.isSafeInteger(instance.budget + answer.tokens)) throw new RuntimeError('invalid_answer', 'Budget exceeds the supported range');
       this.store.db.prepare('UPDATE instances SET budget=budget+? WHERE id=?').run(answer.tokens, instance.id);
     } else if (question.kind === 'unknown_usage' && answer.type === 'usage') {
@@ -451,9 +452,9 @@ export class Execution {
     const reservation = spec.kind === 'agent' ? adapter.reserveTokens : 0;
     if (reservation === undefined || !Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_adapter', 'A bounded token reservation is required');
     if (node.instance_id) {
-      const account = this.store.db.prepare('SELECT budget,used FROM instances WHERE id=?').get(node.instance_id) as { budget: number; used: number };
+      const account = this.store.db.prepare('SELECT budget,used,unlimited FROM instances WHERE id=?').get(node.instance_id) as { budget: number; used: number; unlimited: number };
       const { reserved } = this.store.db.prepare('SELECT COALESCE(SUM(reserved),0) AS reserved FROM operations WHERE instance_id=?').get(node.instance_id) as { reserved: number };
-      if (account.used >= account.budget || account.used + reserved + reservation > account.budget) {
+      if (!account.unlimited && (account.used >= account.budget || account.used + reserved + reservation > account.budget)) {
         this.store.transaction(() => this.block(node, 'budget', { budget: account.budget, used: account.used, reserved, requested: reservation }));
         return false;
       }

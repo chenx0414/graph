@@ -167,6 +167,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const body = request.body as { requestId: string };
     return runtime.user.task(params.taskId).resume(body.requestId);
   });
+  app.post('/api/tasks/:taskId/budget', async request => {
+    const params = request.params as { taskId: string };
+    const body = request.body as { nodeId: string; tokens: number | null; requestId: string };
+    return runtime.user.task(params.taskId).setBudget(body);
+  });
   app.post('/api/tasks/:taskId/answer', async request => {
     const params = request.params as { taskId: string };
     const body = request.body as { questionId: string; answer: Parameters<ReturnType<Runtime['user']['task']>['answer']>[1]; requestId: string };

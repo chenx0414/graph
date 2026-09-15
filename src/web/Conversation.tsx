@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
+import { formatTokens } from './insights.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { QuestionReply } from './Questions.tsx';
@@ -14,7 +15,7 @@ type ConversationMessage = {
   id: string; seq: number; role: string; kind: string; text: string; data: Record<string, unknown> | null;
   state: string; operationId: string | null; turn: number; createdAt: number; updatedAt: number;
 };
-type ConversationNode = { id: string; kind: string; role: string | null; status: string; used: number | null; budget: number | null; model: string | null; definitionVersion: string | null; stallCount: number; outputVersion: number };
+type ConversationNode = { id: string; kind: string; role: string | null; status: string; used: number | null; budget: number | null; unlimited?: boolean; model: string | null; definitionVersion: string | null; stallCount: number; outputVersion: number };
 type ConversationTask = {
   id: string; request: string; phase: string; status: string; paused: boolean; targetBranch: string | null;
   acceptedProposalVersion: number | null; integrationSha: string | null;
@@ -37,9 +38,9 @@ type ConversationView = {
   questions: AnchorQuestion[];
   proposal: { version: number; requirementVersion: number; stale: boolean; decisions: string | null; spec: { summary: string; acceptance: { id: string; description: string; checkNode: string }[]; nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[]; loops?: { from: string; to: string }[] } } | null;
   accepted: { proposalVersion: number; taskId: string; targetBranch: string; acceptedAt: number }[];
-  master: { nodeId: string; status: string; model: string | null; used: number | null; budget: number | null; definitionVersion: string | null; cost: { unknown?: boolean; amount?: number } } | null;
+  master: { nodeId: string; status: string; model: string | null; used: number | null; budget: number | null; unlimited?: boolean; definitionVersion: string | null; cost: { unknown?: boolean; amount?: number } } | null;
   cost: { unknown?: boolean; amount?: number };
-  usage: { used: number; budget: number };
+  usage: { used: number; budget: number | null; unlimited?: boolean };
   tasks: ConversationTask[];
   cursor: number;
 };
@@ -364,7 +365,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
             {confirmable && !view.projectId && <p data-testid="draft-needs-project">确认前需要先绑定项目。</p>}
             {confirmable && view.projectId && (
               <div>
-                <p data-testid="draft-budget" style={{ color: '#666' }}>额度：主管已用 {view.master?.used ?? 0} / {view.master?.budget ?? 20_000_000} tokens；确认后每个 Agent 实例默认额度 20,000,000 tokens，由执行内核逐调用预留与结算。</p>
+                <p data-testid="draft-budget" style={{ color: '#666' }}>额度：主管已用 {formatTokens(view.master?.used ?? 0)} tokens；{!view.master || view.master.unlimited || view.master.budget === null ? '当前不设累计上限' : `当前上限 ${formatTokens(view.master.budget)}`}。确认后新实例默认不设累计 token 上限，由执行内核逐调用预留与结算；有限额度可在高级设置中配置。</p>
                 <label>目标分支 <input data-testid="accept-branch" value={branch} onChange={event => setBranch(event.target.value)} /></label>
                 <button type="button" data-testid="confirm-draft" onClick={() => void act(() => api(`/api/conversations/${id}/confirm`, { method: 'POST', body: JSON.stringify({ proposalVersion: proposal.version, targetBranch: branch, requestId: `confirm-${crypto.randomUUID()}` }) }))}>确认草稿并开始执行</button>
               </div>

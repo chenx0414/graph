@@ -214,6 +214,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       },
       master: { action: 'master', definitionVersion: 'master@1', model: first!.id },
     } : {}),
+    limits: { defaultBudgetTokens: config.limits.defaultBudgetTokens },
     config: { revision: () => effectiveRevision },
     autoDrive: options.mode === 'execute',
     port: options.port,

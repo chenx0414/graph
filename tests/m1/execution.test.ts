@@ -60,7 +60,9 @@ function deferred<T>() {
 async function singleAgent(actions: Record<string, ActionAdapter>) {
   const root = await mkdtemp(join(tmpdir(), 'graph-execution-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions };
+  // This suite verifies the finite-budget acceptance path; new instances are
+  // unlimited by default, so pin the legacy cap explicitly.
+  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions, limits: { defaultBudgetTokens: 20_000_000 } };
   const runtime = await openTaskRuntime(options);
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Work', requestId: 'begin' });

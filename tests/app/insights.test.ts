@@ -61,7 +61,7 @@ describe('usage summary', () => {
       { id: 'b', status: 'running', used: null, budget: 2_000 },
       { id: 'c', status: 'pending', budget: null },
     ], { unknown: true });
-    expect(summary).toMatchObject({ used: 100, budget: 3_000, remaining: 2_900, measuredNodes: 1, unknownNodes: 2, unknownCost: true, cost: null });
+    expect(summary).toMatchObject({ used: 100, budget: 3_000, remaining: 2_900, unlimited: false, measuredNodes: 1, unknownNodes: 2, unknownCost: true, cost: null });
     const text = usageText(summary);
     expect(text).toContain('已计量 100 tokens');
     expect(text).toContain('2 个节点用量未知');

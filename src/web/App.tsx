@@ -31,7 +31,7 @@ type TaskView = {
   } | null;
 };
 type NodeView = {
-  id: string; kind: string; status: string; container?: string; used?: number | null; budget?: number | null;
+  id: string; kind: string; status: string; container?: string; used?: number | null; budget?: number | null; unlimited?: boolean;
   reserved?: number; instanceId?: string | null; selectedModel?: string; boundDefinition?: string;
   activationId?: string; outputVersion?: number; stallCount?: number;
 };
@@ -404,8 +404,9 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
         </p>
         <Stat label="已计量 tokens" value={formatTokens(usage.used)} hint={`${usage.measuredNodes} 个节点有权威计量`} />
         <Stat label="未知用量节点" value={usage.unknownNodes} tone={usage.unknownNodes ? 'warn' : undefined} hint={usage.unknownNodes ? '不计入 0，需核对' : '全部节点可计量'} />
-        <Stat label="剩余预算" value={usage.remaining === null ? '未知' : formatTokens(usage.remaining)} hint={usage.remaining === null ? '无预算绑定' : `总预算 ${formatTokens(usage.budget)}`}
-          progress={usage.budget > 0 ? (usage.used / usage.budget) * 100 : undefined} />
+        <Stat label="剩余预算" value={usage.unlimited ? '不限' : usage.remaining === null ? '未知' : formatTokens(usage.remaining)}
+          hint={usage.unlimited ? `已计量 ${formatTokens(usage.used)} tokens` : usage.remaining === null ? '无预算绑定' : `总预算 ${formatTokens(usage.budget)}`}
+          progress={!usage.unlimited && usage.budget > 0 ? (usage.used / usage.budget) * 100 : undefined} />
         <Stat label="费用" value={usage.unknownCost ? '未知' : (usage.cost ?? 0)} tone={usage.unknownCost ? 'warn' : undefined} hint={usage.unknownCost ? '未配置价格，不按 0 计' : '按已配置单价估算'} />
       </div>
 
@@ -593,7 +594,7 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
           <div className="stack" style={{ gap: 4 }}>
             <div><span className="muted">实例 </span><span className="mono">{selectedNode.instanceId ?? '未知'}</span></div>
             <div><span className="muted">模型 </span>{selectedNode.selectedModel ?? '未知'} · 定义 {selectedNode.boundDefinition ?? '未知'}</div>
-            <div><span className="muted">用量 </span>{selectedNode.used == null ? '未知（无权威计量）' : formatTokens(selectedNode.used)}{selectedNode.budget == null ? '' : ` / 预算 ${formatTokens(selectedNode.budget)}`} · 预留 {selectedNode.reserved ?? 0}</div>
+            <div><span className="muted">用量 </span>{selectedNode.used == null ? '未知（无权威计量）' : formatTokens(selectedNode.used)}{selectedNode.unlimited ? ' · 额度不限' : selectedNode.budget == null ? '' : ` / 预算 ${formatTokens(selectedNode.budget)}`} · 预留 {selectedNode.reserved ?? 0}</div>
             <div><span className="muted">尝试次数 </span>{selectedNode.stallCount ?? 0} · 输出版本 {selectedNode.outputVersion ?? 0}</div>
             <div><span className="muted">验收证据 </span>{nodeEvidence.length ? nodeEvidence.map(item => `${item.acceptanceId}:${item.valid ? '有效' : '无效或过期'} ${item.summary}`).join(' / ') : '无'}</div>
           </div>
