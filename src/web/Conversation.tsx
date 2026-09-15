@@ -383,7 +383,10 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
             <p>{task.targetBranch ? `目标分支 ${task.targetBranch}` : '目标分支未确认'}{task.integrationSha ? ` · 集成提交 ${task.integrationSha.slice(0, 10)}` : ''} · {task.cost.unknown ? '费用未知' : `费用 ${task.cost.amount ?? 0}`}{task.paused ? ' · 已暂停' : ''}</p>
             <ul data-testid={`conversation-nodes-${task.id}`}>
               {task.nodes.map(node => (
-                <li key={node.id} data-node={node.id} data-status={node.status}>{node.id} · {NODE_LABEL[node.status] ?? node.status}{node.used != null ? ` · 用量 ${node.used}` : ''}{node.model ? ` · ${node.model}` : ''}</li>
+                <li key={node.id} data-node={node.id} data-status={node.status}>
+                  <a href={`#/tasks/${task.id}/nodes/${node.id}`} data-testid={`conversation-node-link-${task.id}-${node.id}`}>{node.id}</a>
+                  {' · '}{NODE_LABEL[node.status] ?? node.status}{node.used != null ? ` · 用量 ${node.used}` : ''}{node.model ? ` · ${node.model}` : ''}
+                </li>
               ))}
             </ul>
             {task.openQuestions.length > 0 && (
