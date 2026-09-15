@@ -42,14 +42,26 @@ export function listNodeEntries(store: TaskStore, taskId: string, nodeId: string
     data: row.data ? JSON.parse(row.data) as Json : null, operationId: row.operation_id, createdAt: row.created_at,
   }));
   if (query.before !== undefined) {
+    // Backward page: the entries directly before the cursor, oldest-first.
     const rows = store.db.prepare(`SELECT seq,id,role,kind,text,data,operation_id,created_at FROM node_entries
       WHERE task_id=? AND node_id=? AND seq<? ORDER BY seq DESC LIMIT ?`).all(taskId, nodeId, query.before, limit) as Parameters<typeof map>[0];
-    return { entries: map(rows.reverse()), entryCount, limit };
+    return { entries: map(rows.reverse()), entryCount, limit, hasOlder: true, hasNewer: false };
   }
-  const after = Number.isSafeInteger(query.after) && (query.after ?? 0) >= 0 ? query.after! : 0;
+  if (query.after !== undefined) {
+    // Forward page from a known cursor.
+    const after = Number.isSafeInteger(query.after) && query.after >= 0 ? query.after : 0;
+    const rows = store.db.prepare(`SELECT seq,id,role,kind,text,data,operation_id,created_at FROM node_entries
+      WHERE task_id=? AND node_id=? AND seq>? ORDER BY seq LIMIT ?`).all(taskId, nodeId, after, limit) as Parameters<typeof map>[0];
+    const hasNewer = rows.length === limit && entryCount > 0 && rows[rows.length - 1]!.seq < (store.db.prepare('SELECT MAX(seq) AS seq FROM node_entries WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { seq: number | null }).seq!;
+    return { entries: map(rows), entryCount, limit, hasOlder: true, hasNewer };
+  }
+  // No cursor: the newest page. The initial view must show the live tail; the
+  // UI then pages backward with `before` until it reaches the first entry.
   const rows = store.db.prepare(`SELECT seq,id,role,kind,text,data,operation_id,created_at FROM node_entries
-    WHERE task_id=? AND node_id=? AND seq>? ORDER BY seq LIMIT ?`).all(taskId, nodeId, after, limit) as Parameters<typeof map>[0];
-  return { entries: map(rows), entryCount, limit };
+    WHERE task_id=? AND node_id=? ORDER BY seq DESC LIMIT ?`).all(taskId, nodeId, limit) as Parameters<typeof map>[0];
+  const oldest = rows.length ? rows[rows.length - 1]!.seq : 0;
+  const first = (store.db.prepare('SELECT MIN(seq) AS seq FROM node_entries WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { seq: number | null }).seq;
+  return { entries: map(rows.reverse()), entryCount, limit, hasOlder: first !== null && oldest > first, hasNewer: false };
 }
 
 /** Read-only node detail: definition identity, session reference, entries and
@@ -60,6 +72,26 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
     { id: string; spec: string; instance_id: string | null; status: string; activation_id: string; output_version: number; stall_count: number } | undefined;
   if (!node) throw new RuntimeError('not_found', `Unknown node ${nodeId}`);
   const spec = JSON.parse(node.spec) as { kind: string; action: string; definitionVersion?: string; role?: string; input?: Json };
+  // Capability view frozen against the definition version the node was bound
+  // to: bound at definition time, then the catalog's current install state.
+  const capabilities = (() => {
+    if (!spec.definitionVersion) return [];
+    const match = /^(.*)@(\d+)$/.exec(spec.definitionVersion);
+    if (!match) return [];
+    const definition = store.db.prepare('SELECT spec FROM definitions WHERE id=? AND version=?').get(match[1] ?? '', Number(match[2] ?? 0)) as { spec: string } | undefined;
+    if (!definition) return [];
+    const parsed = JSON.parse(definition.spec) as { capabilities?: { id: string; version: string }[] };
+    return (parsed.capabilities ?? []).map(bound => {
+      const record = store.db.prepare('SELECT kind,status FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as { kind: string; status: string } | undefined;
+      const installed = record?.status === 'installed';
+      return {
+        id: bound.id, version: bound.version, kind: record?.kind ?? null,
+        bound: true as const, loaded: installed, executable: installed,
+        state: installed ? '可执行' : '禁用',
+        reason: record ? (installed ? null : `能力状态：${record.status}`) : '未安装',
+      };
+    });
+  })();
   const instance = node.instance_id
     ? store.db.prepare('SELECT id,model,definition_version,used,budget,unlimited,models_used FROM instances WHERE id=?').get(node.instance_id) as
       { id: string; model: string | null; definition_version: string | null; used: number; budget: number; unlimited: number; models_used: string } | undefined
@@ -89,8 +121,13 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   const evidence = (store.db.prepare('SELECT acceptance_id,valid,commit_sha FROM evidence WHERE task_id=? AND node_id=? ORDER BY rowid').all(taskId, nodeId) as { acceptance_id: string; valid: number; commit_sha: string | null }[])
     .map(row => ({ acceptanceId: row.acceptance_id, valid: Boolean(row.valid), commitSha: row.commit_sha }));
   const page = listNodeEntries(store, taskId, nodeId, query);
+  const entrySpan = (() => {
+    const span = store.db.prepare('SELECT MIN(created_at) AS first, MAX(created_at) AS last FROM node_entries WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { first: number | null; last: number | null };
+    return span.first !== null && span.last !== null ? Math.max(0, span.last - span.first) : null;
+  })();
   return {
     taskId, nodeId,
+    capabilities,
     node: { id: node.id, kind: spec.kind, action: spec.action, role: spec.role ?? null, status: node.status, activationId: node.activation_id, outputVersion: node.output_version, stallCount: node.stall_count, ...(spec.definitionVersion ? { definitionVersion: spec.definitionVersion } : {}), ...(spec.input !== undefined ? { input: spec.input } : {}) },
     instance: instance ? {
       id: instance.id, model: instance.model, definitionVersion: instance.definition_version, used: instance.used,
@@ -98,7 +135,12 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
     } : null,
     session: session ? { sessionId: session.session_id, sessionFile: session.session_file } : null,
     operations, invocations, questions, evidence,
-    entries: page.entries, entryCount: page.entryCount,
+    timing: {
+      totalMs: entrySpan,
+      runMs: operations.some(operation => operation.runMs === null) ? null : operations.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0),
+      waitingMs: operations.reduce((sum, operation) => sum + operation.waitingMs, 0),
+    },
+    entries: page.entries, entryCount: page.entryCount, hasOlder: page.hasOlder, hasNewer: page.hasNewer,
     phase: store.task(taskId).phase,
   };
 }

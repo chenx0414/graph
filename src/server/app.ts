@@ -250,8 +250,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   app.get('/api/catalog', async () => ({ definitions: runtime.catalog.definitions(), capabilities: runtime.catalog.capabilities() }));
   app.get('/api/catalog/definitions/:definitionId', async request => {
     const params = request.params as { definitionId: string };
-    const query = request.query as { version?: string };
-    return runtime.talent(params.definitionId, query.version ? { version: Number(query.version) } : {});
+    const query = request.query as { version?: string; scope?: string };
+    return runtime.talent(params.definitionId, {
+      ...(query.version ? { version: Number(query.version) } : {}),
+      ...(query.scope === 'all' ? { allVersions: true } : {}),
+    });
   });
 
   if (options.webDir) {

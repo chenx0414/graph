@@ -5,7 +5,7 @@ import { NodeRunPanel } from './NodeDetail.tsx';
 import { ConversationList, ConversationPanel } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
-import { ErrorBox, useAsync, useTaskStream } from './shared.tsx';
+import { ErrorBox, costText, useAsync, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
@@ -24,7 +24,7 @@ type TaskView = {
   nodes: NodeView[];
   evidence: { nodeId: string; acceptanceId: string; summary: string; valid: boolean; artifact?: { path: string; digest: string } }[];
   operations: { nodeId: string; state: string; result?: { output?: unknown } | null }[];
-  cost: { unknown?: boolean; amount?: number };
+  cost: { unknown?: boolean; amount?: number | null; amounts?: Record<string, number> };
   integrationSha: string | null;
   proposal: {
     summary?: string; acceptance: { id: string; description: string; checkNode: string }[];
@@ -45,7 +45,7 @@ type GraphPayload = {
   loops: { from: string; to: string; reason?: string }[];
   revisions: { version: number; reason: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
-  cost: { unknown?: boolean; amount?: number };
+  cost: { unknown?: boolean; amount?: number | null; amounts?: Record<string, number> };
 };
 
 const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
@@ -284,10 +284,14 @@ function Overview({ settings, tasks, onTasks }: { settings: Settings_ | null; ta
 }
 
 function TalentPanel({ id }: { id: string }) {
+  const [version, setVersion] = useState<string>('');
+  const [allVersions, setAllVersions] = useState(false);
+  const [sampleLimit, setSampleLimit] = useState(20);
+  const query = allVersions ? '?scope=all' : version ? `?version=${version}` : '';
   const { data, error } = useAsync(() => api<{
     detail: { id: string; version: number; versions: number[]; recommendedGrade: string; review: boolean; description: string | null; traceability: Record<string, unknown>; capabilities: { id: string; version: string; kind: string | null; status: string }[] };
-    experience: { task: { token: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; runMs: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; cost: { mean: number | null; samples: number; unknown: number; currency: string | null; mixedCurrency: boolean }; totalSamples: number }; chat: { token: { mean: number | null; samples: number }; totalSamples: number }; samples: { taskId: string; nodeId: string; kind: string; status: string; tokens: number | null; runMs: number | null; reworkRounds: number }[] };
-  }>(`/api/catalog/definitions/${id}`), [id]);
+    experience: { scope: { version: number | null; allVersions: boolean }; task: { token: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; runMs: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; cost: { byCurrency: { currency: string; mean: number | null; samples: number; unknown: number }[]; mixedCurrency: boolean; unknown: boolean }; totalSamples: number }; chat: { token: { mean: number | null; samples: number }; totalSamples: number }; samples: { taskId: string; nodeId: string; kind: string; status: string; request: string | null; model: string | null; tokens: number | null; runMs: number | null; waitingMs: number; reworkRounds: number }[] };
+  }>(`/api/catalog/definitions/${id}${query}`), [id, query]);
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Spinner />;
   const stat = (label: string, value: { mean: number | null; samples: number; unknown: number }) => (
@@ -306,22 +310,37 @@ function TalentPanel({ id }: { id: string }) {
         <div className="chip-row">{data.detail.capabilities.map(item => <Pill key={`${item.id}@${item.version}`} tone={item.status === 'installed' ? 'success' : 'danger'}>{item.id}@{item.version} · {item.kind ?? '未知'} · {item.status}</Pill>)}</div>
       </div>
       <div>
-        <h4>工作经历（任务样本 {data.experience.task.totalSamples} · 对话样本 {data.experience.chat.totalSamples}）</h4>
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <h4 style={{ margin: 0 }}>工作经历</h4>
+          <select className="input" style={{ width: 150 }} data-testid={`talent-version-${id}`} value={allVersions ? 'all' : version || String(data.detail.version)} disabled={allVersions}
+            onChange={event => { setVersion(event.target.value); setAllVersions(false); }}>
+            {data.detail.versions.map(item => <option key={item} value={String(item)}>版本 {item}</option>)}
+          </select>
+          <Button size="sm" variant={allVersions ? 'primary' : 'default'} data-testid={`talent-all-versions-${id}`} onClick={() => setAllVersions(current => !current)}>所有版本</Button>
+          <span className="muted" data-testid={`talent-scope-${id}`}>统计范围：{data.experience.scope.allVersions ? '所有版本合并' : `v${data.experience.scope.version}`}</span>
+        </div>
         <ul className="list">
           {stat('token 均值', data.experience.task.token)}
           {stat('运行时间均值(ms)', data.experience.task.runMs)}
-          {stat('费用均值', data.experience.task.cost)}
-          <li>费用币种：{data.experience.task.cost.currency ?? (data.experience.task.cost.mixedCurrency ? '多币种不混合' : '无记录')}</li>
+          {data.experience.task.cost.byCurrency.map(entry => (
+            <li key={entry.currency}>{`费用均值：${entry.currency} ${entry.mean === null ? '暂无' : entry.mean.toFixed(6)}（样本 ${entry.samples}，未知 ${entry.unknown}）`}</li>
+          ))}
+          {!data.experience.task.cost.byCurrency.length && <li>费用均值：无记录{data.experience.task.cost.unknown ? '（存在未知价格调用）' : ''}</li>}
+          <li>费用币种：{data.experience.task.cost.mixedCurrency ? '多币种分列，不合并' : '单一币种'}</li>
+          <li>经历样本：任务 {data.experience.task.totalSamples} · 对话 {data.experience.chat.totalSamples}</li>
         </ul>
         {!data.experience.samples.length && <p className="muted">暂无经历。</p>}
         <ul className="list" data-testid={`talent-samples-${id}`}>
-          {data.experience.samples.slice(0, 20).map(sample => (
+          {data.experience.samples.slice(0, sampleLimit).map(sample => (
             <li className="list-item" key={`${sample.taskId}:${sample.nodeId}`}>
-              <a className="grow" href={`#/tasks/${sample.taskId}/nodes/${sample.nodeId}`}>{sample.kind === 'chat' ? '对话工作' : '实施经历'} · {sample.status}</a>
-              <span className="muted">{sample.tokens === null ? 'token 未知' : `${sample.tokens.toLocaleString('en-US')} tokens`}{sample.runMs === null ? '' : ` · ${(sample.runMs / 1_000).toFixed(1)}s`}{sample.reworkRounds ? ` · 返工 ${sample.reworkRounds}` : ''}</span>
+              <a className="grow" href={`#/tasks/${sample.taskId}/nodes/${sample.nodeId}`}>{sample.request ?? (sample.kind === 'chat' ? '对话工作' : '实施经历')} · {sample.status}</a>
+              <span className="muted">{sample.model ?? '模型未知'}{sample.tokens === null ? ' · token 未知' : ` · ${sample.tokens.toLocaleString('en-US')} tokens`}{sample.runMs === null ? '' : ` · ${(sample.runMs / 1_000).toFixed(1)}s`}{sample.waitingMs ? ` · 凭据等待 ${(sample.waitingMs / 1_000).toFixed(1)}s` : ''}{sample.reworkRounds ? ` · 返工 ${sample.reworkRounds}` : ''}</span>
             </li>
           ))}
         </ul>
+        {data.experience.samples.length > sampleLimit && (
+          <Button size="sm" data-testid={`talent-samples-more-${id}`} onClick={() => setSampleLimit(limit => limit + 50)}>载入更多经历（已显示 {Math.min(sampleLimit, data.experience.samples.length)} / {data.experience.samples.length}）</Button>
+        )}
       </div>
     </div>
   );
@@ -456,14 +475,14 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
           已计量 {formatTokens(usage.used)} tokens
           {usage.unknownNodes ? ` · ${usage.unknownNodes} 个节点用量未知` : ''}
           {usage.remaining === null ? '' : ` · 剩余预算 ${formatTokens(usage.remaining)}`}
-          {usage.unknownCost ? ' · 费用未知' : ` · 费用 ${usage.cost ?? 0}`}
+          {` · 费用 ${costText(view.cost)}`}
         </p>
         <Stat label="已计量 tokens" value={formatTokens(usage.used)} hint={`${usage.measuredNodes} 个节点有权威计量`} />
         <Stat label="未知用量节点" value={usage.unknownNodes} tone={usage.unknownNodes ? 'warn' : undefined} hint={usage.unknownNodes ? '不计入 0，需核对' : '全部节点可计量'} />
         <Stat label="剩余预算" value={usage.unlimited ? '不限' : usage.remaining === null ? '未知' : formatTokens(usage.remaining)}
           hint={usage.unlimited ? `已计量 ${formatTokens(usage.used)} tokens` : usage.remaining === null ? '无预算绑定' : `总预算 ${formatTokens(usage.budget)}`}
           progress={!usage.unlimited && usage.budget > 0 ? (usage.used / usage.budget) * 100 : undefined} />
-        <Stat label="费用" value={usage.unknownCost ? '未知' : (usage.cost ?? 0)} tone={usage.unknownCost ? 'warn' : undefined} hint={usage.unknownCost ? '未配置价格，不按 0 计' : '按已配置单价估算'} />
+        <Stat label="费用" value={costText(view.cost)} tone={view.cost.unknown ? 'warn' : undefined} hint={view.cost.unknown ? '存在未知价格，不按 0 计' : '按已配置单价估算，分币种合计'} />
       </div>
 
       <Card title="运行时间线" icon="clock" subtitle={timeline.length ? `${timeline.length} 条事件` : undefined}>
@@ -556,7 +575,7 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
           <dl className="kv">
             <dt>集成提交</dt><dd className="mono">{view.integrationSha ?? '尚无集成提交'}</dd>
             <dt>交付目录</dt><dd className="mono">{settings?.projects.find(project => project.id === view.projectId)?.root ?? '未知'}</dd>
-            <dt>费用</dt><dd data-testid="cost">{view.cost.unknown ? '费用未知' : `费用 ${view.cost.amount ?? 0}`}</dd>
+            <dt>费用</dt><dd data-testid="cost">{costText(view.cost)}</dd>
           </dl>
           <ul className="list" style={{ marginTop: 10 }}>
             {view.proposal?.acceptance?.map(item => {
@@ -612,7 +631,7 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
         <div className="row-between">
           <div className="row">
             <a href={`#/tasks/${id}`} className="btn"><Icon name="task" size={15} /><span style={{ marginLeft: 6 }}>返回任务</span></a>
-            <Pill tone="accent" testid="cost">{graph.cost.unknown ? '费用未知' : `费用 ${graph.cost.amount ?? 0}`}</Pill>
+            <Pill tone="accent" testid="cost">{costText(graph.cost)}</Pill>
             <Pill testid="revisions">图修订 {graph.revisions.map(item => `v${item.version} ${item.reason}`).join(' / ') || '无'}</Pill>
             <span className="faint" data-testid="connection">{connected ? '已连接' : '重连中…'}</span>
           </div>

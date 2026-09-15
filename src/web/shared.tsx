@@ -2,6 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { nextEventCursor } from './event-cursor.ts';
 import { Button, Icon } from './ui.tsx';
 
+/** One unambiguous rendering for possibly multi-currency costs. */
+export function costText(cost: { unknown?: boolean; amounts?: Record<string, number>; amount?: number | null } | null | undefined) {
+  if (!cost) return '无记录';
+  const amounts = cost.amounts ?? (typeof cost.amount === 'number' ? { '': cost.amount } : {});
+  const entries = Object.entries(amounts).filter(([, value]) => value !== 0 || Object.keys(amounts).length === 1);
+  const body = entries.map(([currency, value]) => `${Number(value.toFixed(6))}${currency ? ` ${currency}` : ''}`).join(' + ');
+  if (cost.unknown && !body) return '费用未知';
+  if (cost.unknown) return `${body}（另有未知价格调用）`;
+  return body || '无记录';
+}
+
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div data-testid="error" className="hint-card" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', margin: '8px 0' }}>

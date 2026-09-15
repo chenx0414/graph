@@ -67,14 +67,17 @@ test('experience uses complete samples per metric and never disguises unknown as
     db.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',1,'{}')").run();
     db.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',2,'{}')").run();
   });
-  addSample(db, { definition: 'coder', version: 1, tokenUsage: 100, runMs: 10_000, cost: { amount: 0.1, currency: 'USD' } });
-  addSample(db, { definition: 'coder', version: 1, tokenUsage: 300, runMs: 30_000, cost: { amount: 0.2, currency: 'USD' } });
-  addSample(db, { definition: 'coder', version: 1, tokenUsage: null, runMs: null, cost: 'unknown' });
+  addSample(db, { definition: 'coder', version: 2, tokenUsage: 100, runMs: 10_000, cost: { amount: 0.1, currency: 'USD' } });
+  addSample(db, { definition: 'coder', version: 2, tokenUsage: 300, runMs: 30_000, cost: { amount: 0.2, currency: 'USD' } });
+  addSample(db, { definition: 'coder', version: 2, tokenUsage: null, runMs: null, cost: 'unknown' });
   const stats = talentExperience(db, 'coder').task;
   expect(stats.token).toMatchObject({ mean: 200, samples: 2, unknown: 1 });
   expect(stats.runMs).toMatchObject({ mean: 20_000, samples: 2, unknown: 1 });
-  expect(stats.cost).toMatchObject({ samples: 2, unknown: 1, currency: 'USD', mixedCurrency: false });
-  expect(stats.cost.mean).toBeCloseTo(0.15, 10);
+  expect(stats.cost.mixedCurrency).toBe(false);
+  // The currency-less unknown sample is reported at the summary level; the
+  // USD bucket only contains attributed samples.
+  expect(stats.cost.unknown).toBe(true);
+  expect(stats.cost.byCurrency).toEqual([expect.objectContaining({ currency: 'USD', samples: 2, unknown: 0, mean: expect.closeTo(0.15, 10) })]);
   expect(stats.totalSamples).toBe(3);
 }, 30_000);
 
@@ -88,14 +91,50 @@ test('cross-missing metrics keep their own denominators and cross-version pools 
   addSample(db, { definition: 'coder', version: 1, tokenUsage: 100, runMs: 10_000, cost: 'unknown' });
   // token unknown, price unknown, time known
   addSample(db, { definition: 'coder', version: 2, tokenUsage: null, runMs: 30_000, cost: 'unknown' });
-  const all = talentExperience(db, 'coder').all;
+  const all = talentExperience(db, 'coder', { allVersions: true }).all;
   expect(all.token).toMatchObject({ mean: 100, samples: 1, unknown: 1 });
   expect(all.runMs).toMatchObject({ mean: 20_000, samples: 2, unknown: 0 });
-  expect(all.cost.mean).toBeNull();
+  expect(all.cost.byCurrency).toEqual([]);
+  expect(all.cost.unknown).toBe(true);
   // Per-version view only includes that version.
   const v1 = talentExperience(db, 'coder', { version: 1 }).task;
   expect(v1.totalSamples).toBe(1);
   expect(v1.runMs.mean).toBe(10_000);
+}, 30_000);
+
+test('the default experience scope matches the detail version and all-versions is explicit', async () => {
+  const db = await store();
+  db.transaction(() => {
+    db.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',1,'{}')").run();
+    db.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',2,'{}')").run();
+  });
+  addSample(db, { definition: 'coder', version: 1, tokenUsage: 100, runMs: 1_000 });
+  addSample(db, { definition: 'coder', version: 2, tokenUsage: 900, runMs: 9_000 });
+  const scoped = talentExperience(db, 'coder');
+  expect(scoped.scope).toEqual({ version: 2, allVersions: false });
+  expect(scoped.task.token).toMatchObject({ mean: 900, samples: 1 });
+  const all = talentExperience(db, 'coder', { allVersions: true });
+  expect(all.scope).toEqual({ version: null, allVersions: true });
+  expect(all.task.token).toMatchObject({ mean: 500, samples: 2 });
+  const explicit = talentExperience(db, 'coder', { version: 1 });
+  expect(explicit.task.token.mean).toBe(100);
+  const detail = talentDetail(db, 'coder');
+  expect(detail.version).toBe(2);
+}, 30_000);
+
+test('multi-currency experience keeps per-currency means and no mixed number', async () => {
+  const db = await store();
+  db.transaction(() => {
+    db.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',1,'{}')").run();
+  });
+  addSample(db, { definition: 'coder', version: 1, tokenUsage: 100, runMs: 1_000, cost: { amount: 10, currency: 'USD' } });
+  addSample(db, { definition: 'coder', version: 1, tokenUsage: 100, runMs: 1_000, cost: { amount: 10, currency: 'CNY' } });
+  const stats = talentExperience(db, 'coder').task;
+  expect(stats.cost.mixedCurrency).toBe(true);
+  expect(stats.cost.byCurrency).toEqual([
+    expect.objectContaining({ currency: 'CNY', mean: 10, samples: 1 }),
+    expect.objectContaining({ currency: 'USD', mean: 10, samples: 1 }),
+  ]);
 }, 30_000);
 
 test('rework counts once per instance and master chat is a separate series', async () => {

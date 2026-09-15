@@ -8,6 +8,8 @@ import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import { TaskStore } from '../../src/core/store.ts';
+import { appendNodeEntry } from '../../src/core/node-run.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -74,4 +76,65 @@ test('node detail renders real entries, operations and a program command, and st
   await page.goto(`${server.url}/#/tasks/${taskId}/nodes/check`);
   await page.getByTestId('node-run-check').waitFor();
   expect(await page.getByTestId('program-input').innerText()).toContain('"node"');
+}, 120_000);
+
+test('two interleaved nodes with more than 500 entries stay fully reachable in the UI', async () => {
+  const provider = await openaiServer([{ text: 'unused' }]);
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-node-paging-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  const stateDir = join(root, 'state');
+  const server = await openGraphServer({
+    stateDir, projects: [{ id: 'p', root: workspace }], actions: {}, webDir,
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'key', modelRuntime: provider.runtime },
+  });
+  cleanup.push(() => server.close());
+  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'paging', requestId: 'paging-begin' });
+  await server.runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'paging',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'a', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'b', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['a'], input: { command: 'node', args: ['-v'] } },
+    ],
+  }, 'paging-proposal');
+  await server.runtime.projects.prepare({ projectId: 'p', requestId: 'paging-prepare', initialize: true, createBaseline: true });
+  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'paging-accept' });
+  // Seed the real projection table on a second SQLite connection (WAL) so the
+  // UI is exercised against the same storage the adapter writes.
+  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  for (let index = 0; index < 501; index += 1) {
+    appendNodeEntry(store, { taskId, nodeId: 'a', role: 'system', kind: 'note', text: `a-${String(index).padStart(3, '0')}` });
+    appendNodeEntry(store, { taskId, nodeId: 'b', role: 'system', kind: 'note', text: `b-${String(index).padStart(3, '0')}` });
+  }
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/tasks/${taskId}/nodes/a`);
+  await page.getByTestId('node-run-a').waitFor();
+  const rows = page.locator('[data-testid^="node-entry-"]');
+  await expect.poll(async () => rows.count(), { timeout: 10_000 }).toBe(200);
+  // The first page is the live tail, not the oldest window.
+  expect(await page.getByTestId('node-run-a').innerText()).toContain('a-500');
+  for (let click = 0; click < 6; click += 1) {
+    const more = page.getByTestId('node-entries-more');
+    if (!(await more.count())) break;
+    await more.click();
+    await page.waitForTimeout(120);
+  }
+  expect(await rows.count()).toBe(501);
+  const text = await page.getByTestId('node-run-a').innerText();
+  expect(text).toContain('a-000');
+  expect(text).toContain('a-500');
+  expect(text).not.toContain('b-000');
+  expect(text).not.toContain('b-500');
+  // The other node is an independent projection.
+  await page.goto(`${server.url}/#/tasks/${taskId}/nodes/b`);
+  await page.getByTestId('node-run-b').waitFor();
+  expect(await page.getByTestId('node-run-b').innerText()).toContain('b-500');
+  expect(await page.getByTestId('node-run-b').innerText()).not.toContain('a-500');
 }, 120_000);

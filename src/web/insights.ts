@@ -203,7 +203,7 @@ export interface UsageSummary {
 
 /** Unknown usage is never folded to zero: it is counted separately and the
  * console shows it as 未知. */
-export function summarizeUsage(nodes: UsageNode[], cost?: { unknown?: boolean; amount?: number } | null): UsageSummary {
+export function summarizeUsage(nodes: UsageNode[], cost?: { unknown?: boolean; amount?: number | null; amounts?: Record<string, number> } | null): UsageSummary {
   let used = 0;
   let budget = 0;
   let measuredNodes = 0;

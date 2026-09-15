@@ -11,7 +11,7 @@ import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
-import type { ModelEntry } from '../catalog/models.ts';
+import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
@@ -428,14 +428,7 @@ export async function openTaskRuntime(options: {
     },
   };
 
-  const taskCost = (id: string) => {
-    const invocations = invocationRows(store, id);
-    const unknownCost = invocations.some(item => item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && item.cost.unknown === true);
-    return unknownCost ? { unknown: true as const } : { amount: invocations.reduce((sum, item) => {
-      const value = item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && typeof item.cost.amount === 'number' ? item.cost.amount : 0;
-      return sum + value;
-    }, 0) };
-  };
+  const taskCost = (id: string) => sumCosts(invocationRows(store, id).map(item => item.cost));
 
   /** The anchor plus every feature task created from this conversation. */
   const conversationTaskIds = (store: TaskStore, conversationId: string) => {
@@ -529,9 +522,9 @@ export async function openTaskRuntime(options: {
       // unknown_usage question is authoritative that the cost is not known.
       const masterUnknown = anchorQuestions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
       const unknownPending = masterUnknown || tasks.some(task => task.openQuestions.some(question => question.kind === 'unknown_usage'));
-      const masterCost = masterUnknown && ledgerCost.unknown !== true ? { unknown: true as const } : ledgerCost;
-      const unknownCost = masterCost.unknown === true || unknownPending || tasks.some(task => task.cost.unknown === true);
-      const cost = unknownCost ? { unknown: true as const } : { amount: (masterCost.amount ?? 0) + tasks.reduce((sum, task) => sum + (task.cost.amount ?? 0), 0) };
+      const masterCost = masterUnknown && ledgerCost.unknown !== true ? { ...ledgerCost, unknown: true } : ledgerCost;
+      const cost = mergeCosts([masterCost, ...tasks.map(task => task.cost)]);
+      if (unknownPending) cost.unknown = true;
       const used = (master?.used ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.used ?? 0), 0), 0);
       const anyUnlimited = Boolean(master?.unlimited) || tasks.some(task => task.nodes.some(node => node.unlimited));
       const budget = anyUnlimited ? null : (master?.budget ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.budget ?? 0), 0), 0);
@@ -704,14 +697,40 @@ export async function openTaskRuntime(options: {
     },
     user,
     /** Talent detail plus per-metric experience statistics from the ledger. */
-    talent(id: string, options: { version?: number } = {}) {
+    talent(id: string, options: { version?: number; allVersions?: boolean } = {}) {
       ensureOpen();
       return { detail: talentDetail(store, id, options), experience: talentExperience(store, id, options) };
     },
     /** Read-only node detail: real session entries, operations and usage. */
     nodeRun(taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {
       ensureOpen();
-      return nodeRunView(store, taskId, nodeId, query);
+      try {
+        return nodeRunView(store, taskId, nodeId, query);
+      } catch (error) {
+        if (!(error instanceof RuntimeError) || error.code !== 'not_found') throw error;
+        // A container has no instance of its own: summarize its children so the
+        // graph view can drill into the group without a dead route.
+        const graph = loadGraph(store, taskId);
+        if (!graph.containers().some(item => item.id === nodeId)) throw error;
+        const container = graph.containers().find(item => item.id === nodeId)!;
+        const rows = store.db.prepare('SELECT id,spec,status FROM nodes WHERE task_id=?').all(taskId) as { id: string; spec: string; status: string }[];
+        const children = rows.map(row => ({ id: row.id, status: row.status, spec: JSON.parse(row.spec) as { container?: string } }))
+          .filter(row => row.spec.container === nodeId)
+          .map(row => ({ id: row.id, status: row.status }));
+        const childIds = new Set(children.map(child => child.id));
+        for (const nested of graph.containers()) if (nested.parent === nodeId) childIds.add(nested.id);
+        return {
+          taskId, nodeId,
+          node: { id: nodeId, kind: 'container', action: 'container', role: null, status: children.every(child => child.status === 'succeeded') ? 'succeeded' : 'running', activationId: '', outputVersion: 0, stallCount: 0 },
+          instance: null, session: null, capabilities: [],
+          operations: [], invocations: [], questions: [], evidence: [],
+          entries: [], entryCount: 0, hasOlder: false, hasNewer: false,
+          childContainers: [...childIds], children,
+          timing: { totalMs: null, runMs: null, waitingMs: 0 },
+          phase: store.task(taskId).phase,
+          container: { id: container.id, parent: container.parent ?? null, outputs: container.outputs },
+        };
+      }
     },
     /** Business project Git admission: explicit preparation and state reads. */
     projects: {

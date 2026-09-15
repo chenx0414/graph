@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { NODE_LABEL, when } from './labels.ts';
-import { ErrorBox, useTaskStream } from './shared.tsx';
+import { costText, ErrorBox, useTaskStream } from './shared.tsx';
 import { Button, Empty, Pill, Spinner, Stat } from './ui.tsx';
 
 interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
@@ -15,7 +15,11 @@ export interface NodeRun {
   instance: { id: string; model: string | null; definitionVersion: string | null; used: number; budget: number | null; unlimited: boolean; modelsUsed: string[] } | null;
   session: { sessionId: string; sessionFile: string | null } | null;
   operations: Operation[]; invocations: Invocation[]; questions: Question[]; evidence: Evidence[];
-  entries: Entry[]; entryCount: number; phase: string;
+  entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
+  capabilities?: { id: string; version: string; kind: string | null; state: string; reason: string | null }[];
+  timing?: { totalMs: number | null; runMs: number | null; waitingMs: number };
+  container?: { id: string; parent: string | null; outputs: string[] } | null;
+  children?: { id: string; status: string }[];
 }
 
 function formatMs(value: number | null) {
@@ -39,9 +43,15 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
   const [olderLoading, setOlderLoading] = useState(false);
   const [error, setError] = useState('');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const entriesRef = useRef<Entry[]>([]);
+  useEffect(() => { entriesRef.current = entries; }, [entries]);
 
   const refresh = useCallback(() => {
-    void api<NodeRun>(`/api/tasks/${taskId}/nodes/${nodeId}/run?limit=200`)
+    // The first page is the newest tail; later refreshes continue forward from
+    // the last known seq so a disconnected gap is filled instead of skipped.
+    const last = entriesRef.current[entriesRef.current.length - 1]?.seq;
+    const query = last === undefined ? 'limit=200' : `after=${last}&limit=200`;
+    void api<NodeRun>(`/api/tasks/${taskId}/nodes/${nodeId}/run?${query}`)
       .then(result => {
         setData(result);
         // Merge by stable id so a live tail never duplicates or reorders history.
@@ -93,12 +103,21 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
 
   if (error && !data) return <ErrorBox message={error} onRetry={refresh} />;
   if (!data) return <Spinner />;
-  const runMs = data.operations.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0);
+  const knownRunMs = data.operations.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0);
+  const unsettledRun = data.operations.some(operation => operation.runMs === null);
   const knownTokens = data.instance
     ? data.instance.used
     : data.invocations.reduce((sum, invocation) => sum + (invocation.usage ? Object.values(invocation.usage).reduce((inner, value) => inner + value, 0) : 0), 0);
-  const unknownCost = data.invocations.some(invocation => invocation.cost?.unknown === true) || data.invocations.some(invocation => invocation.cost === null);
-  const hasOlder = data.entryCount > entries.length && olderSeq !== 0;
+  const costAmounts: Record<string, number> = {};
+  let unknownCost = false;
+  for (const invocation of data.invocations) {
+    const cost = invocation.cost as { unknown?: boolean; amount?: number; currency?: string } | null;
+    if (!cost || cost.unknown === true || typeof cost.amount !== 'number') { unknownCost = true; continue; }
+    const currency = cost.currency ?? '';
+    costAmounts[currency] = (costAmounts[currency] ?? 0) + cost.amount;
+  }
+  const costSummary = { unknown: unknownCost, amounts: costAmounts };
+  const hasOlder = data.hasOlder && data.entryCount > entries.length && olderSeq !== 0;
 
   return (
     <div className="stack" data-testid={`node-run-${nodeId}`} style={{ gap: 12 }}>
@@ -111,13 +130,46 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
       </div>
 
       <div className="stat-grid">
-        <Stat label="运行时间" value={formatMs(runMs)} hint={`凭据等待 ${formatMs(data.operations.reduce((sum, operation) => sum + operation.waitingMs, 0))}`} />
+        <Stat label="运行时间" value={`${formatMs(knownRunMs)}${unsettledRun ? '（含未结算时段）' : ''}`} hint={`凭据等待 ${formatMs(data.operations.reduce((sum, operation) => sum + operation.waitingMs, 0))}`} />
+        <Stat label="总历时（记录跨度）" value={data.timing?.totalMs == null ? '未知' : formatMs(data.timing.totalMs)} hint={unsettledRun ? '运行中，其他时段未结算' : '扣除运行与凭据等待后为暂停/等待用户等'} />
+        <Stat label="其他等待" value={data.timing?.totalMs == null || unsettledRun ? '未结算' : formatMs(Math.max(0, data.timing.totalMs - (data.timing.runMs ?? 0) - data.timing.waitingMs))} hint="暂停、等待用户、重启等" />
         <Stat label="用量" value={data.instance?.unlimited ? `${knownTokens.toLocaleString('en-US')} · 不限` : knownTokens.toLocaleString('en-US')} hint={data.instance?.budget === null || data.instance?.budget === undefined ? '额度不限' : `预算 ${data.instance.budget.toLocaleString('en-US')}`} />
-        <Stat label="费用" value={unknownCost ? '未知' : (data.invocations.reduce((sum, invocation) => sum + (typeof invocation.cost?.amount === 'number' ? invocation.cost.amount : 0), 0)).toFixed(6)} hint={unknownCost ? '存在未知价格调用' : '按调用时价格快照'} />
+        <Stat label="费用" value={costText(costSummary)} hint={unknownCost ? '存在未知价格调用，未折零' : '按调用时价格快照，分币种合计'} />
         <Stat label="记录" value={entries.length} hint={`${data.entryCount} 条`} />
       </div>
 
-      {data.node.kind === 'program' && (
+      {(data.capabilities ?? []).length > 0 && (
+        <section>
+          <h4 className="section-title">能力（按节点绑定的定义版本）</h4>
+          <ul className="list" data-testid="node-capabilities">
+            {data.capabilities!.map(capability => (
+              <li key={`${capability.id}@${capability.version}`} className="list-item">
+                <span className="grow">{capability.id}@{capability.version}{capability.kind ? ` · ${capability.kind}` : ''}</span>
+                <Pill tone={capability.state === '可执行' ? 'success' : capability.state === '禁用' ? 'danger' : 'neutral'}>{`已绑定/${capability.state}`}</Pill>
+                {capability.reason && <span className="muted">{capability.reason}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {data.container && (
+        <section>
+          <h4 className="section-title">容器 {data.container.id}</h4>
+          <p className="muted">父容器：{data.container.parent ?? '无'} · 输出：{data.container.outputs.join(', ') || '无'}</p>
+          <ul className="list" data-testid="container-children">
+            {(data.children ?? []).map(child => (
+              <li key={child.id} className="list-item">
+                <a className="grow" href={`#/tasks/${taskId}/nodes/${child.id}`}>{child.id}</a>
+                <Pill tone={child.status === 'succeeded' ? 'success' : child.status === 'failed' ? 'danger' : 'info'}>{NODE_LABEL[child.status] ?? child.status}</Pill>
+              </li>
+            ))}
+          </ul>
+          {!(data.children ?? []).length && <p className="muted">容器暂无子节点。</p>}
+        </section>
+      )}
+
+      {!data.container && data.node.kind === 'program' && (
         <section>
           <h4 className="section-title">程序节点</h4>
           {data.node.input !== undefined && <pre data-testid="program-input">{JSON.stringify(data.node.input, null, 2)}</pre>}
@@ -136,7 +188,10 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
                 <Pill tone={entry.role === 'assistant' ? 'info' : entry.role === 'tool' ? 'neutral' : 'accent'}>{entry.role === 'user' ? '任务说明' : entry.role === 'assistant' ? '主/工人回复' : entry.role === 'tool' ? `工具${entry.kind === 'call' ? '调用' : '结果'}` : entry.role}</Pill>
                 <span className="muted">{when(entry.createdAt)}</span>
               </div>
-              <pre style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{entry.text.length > 4_000 ? `${entry.text.slice(0, 4_000)}…` : entry.text}</pre>
+              {entry.text.length > 4_000
+                ? <details data-testid="entry-full"><summary className="muted">查看完整内容（共 {entry.text.length.toLocaleString('en-US')} 字）</summary><pre style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{entry.text}</pre></details>
+                : <pre style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{entry.text}</pre>}
+              {entry.text.length > 4_000 && <pre className="faint" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{entry.text.slice(0, 4_000)}…</pre>}
             </li>
           ))}
         </ol>

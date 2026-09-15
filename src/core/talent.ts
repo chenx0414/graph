@@ -4,8 +4,8 @@ import { RuntimeError, type Json } from './types.ts';
 export interface TalentSample {
   kind: 'task' | 'chat';
   taskId: string; nodeId: string; instanceId: string;
-  definitionVersion: string | null; model: string | null;
-  status: string; unfinished: boolean; failed: boolean;
+  definitionVersion: string | null; model: string | null; request: string | null;
+  status: string; unfinished: boolean; failed: boolean; waitingMs: number;
   attempts: number; reworkRounds: number;
   tokens: number | null;
   runMs: number | null;
@@ -16,10 +16,13 @@ export interface TalentSample {
 }
 
 export interface MetricStat { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }
+export interface CurrencyStat extends MetricStat { currency: string }
 export interface TalentStats {
   token: MetricStat;
   runMs: MetricStat;
-  cost: MetricStat & { currency: string | null; mixedCurrency: boolean };
+  /** One entry per currency; a mixed-currency sample set never yields one
+   * meaningless mean, it yields per-currency means plus `mixedCurrency`. */
+  cost: { byCurrency: CurrencyStat[]; mixedCurrency: boolean; unknown: boolean };
   totalSamples: number;
   taskSamples: number;
   chatSamples: number;
@@ -40,16 +43,20 @@ function metric(samples: TalentSample[], read: (sample: TalentSample) => number 
 
 /** Per-definition experience from the recorded ledger. One instance is one
  * experience; rework rounds on the same instance never inflate the count. */
-export function talentExperience(store: TaskStore, id: string, options: { version?: number } = {}) {
-  const like = options.version === undefined ? `${id}@%` : `${id}@${options.version}`;
+export function talentExperience(store: TaskStore, id: string, options: { version?: number; allVersions?: boolean } = {}) {
+  // Default scope is the same version the detail view shows (the latest
+  // published one); mixing versions into one mean is an explicit opt-in.
+  const latest = (store.db.prepare('SELECT MAX(version) AS version FROM definitions WHERE id=?').get(id) as { version: number | null }).version;
+  const scopeVersion = options.allVersions ? undefined : (options.version ?? latest ?? undefined);
+  const like = scopeVersion === undefined ? `${id}@%` : `${id}@${scopeVersion}`;
   const rows = store.db.prepare(`SELECT i.id AS instance_id, i.definition_version, i.model, i.used,
     n.task_id, n.id AS node_id, n.status, n.spec,
-    t.phase, t.created_seq
+    t.phase, t.created_seq, t.request
     FROM instances i JOIN nodes n ON n.instance_id=i.id JOIN tasks t ON t.id=n.task_id
     WHERE i.definition_version ${options.version === undefined ? 'LIKE ?' : '=?'}
     ORDER BY t.created_seq, n.rowid`).all(like) as {
     instance_id: string; definition_version: string | null; model: string | null; used: number;
-    task_id: string; node_id: string; status: string; spec: string; phase: string; created_seq: number;
+    task_id: string; node_id: string; status: string; spec: string; phase: string; created_seq: number; request: string;
   }[];
   const samples: TalentSample[] = rows.map(row => {
     const spec = JSON.parse(row.spec) as { role?: string };
@@ -77,7 +84,8 @@ export function talentExperience(store: TaskStore, id: string, options: { versio
     return {
       kind: spec.role === 'master' ? 'chat' : 'task',
       taskId: row.task_id, nodeId: row.node_id, instanceId: row.instance_id,
-      definitionVersion: row.definition_version, model: row.model,
+      definitionVersion: row.definition_version, model: row.model, request: row.request,
+      waitingMs: operations.reduce((sum, operation) => sum + operation.waiting_ms, 0),
       status: row.status, unfinished: !finished, failed: unsuccessful,
       attempts, reworkRounds: Math.max(0, attempts - 1),
       tokens, runMs, cost, currency: currencies[0] ?? null, costUnknown,
@@ -86,19 +94,26 @@ export function talentExperience(store: TaskStore, id: string, options: { versio
   });
   const task = samples.filter(sample => sample.kind === 'task');
   const chat = samples.filter(sample => sample.kind === 'chat');
-  const statsFor = (list: TalentSample[]): TalentStats => ({
-    token: metric(list, sample => sample.tokens, sample => sample.failed),
-    runMs: metric(list, sample => sample.runMs, sample => sample.failed),
-    cost: (() => {
-      const currencies = [...new Set(list.filter(sample => !sample.unfinished && sample.cost !== null).map(sample => sample.currency!))];
-      const base = metric(list, sample => sample.costUnknown ? null : sample.cost, sample => sample.failed);
-      return { ...base, currency: currencies.length === 1 ? currencies[0]! : null, mixedCurrency: currencies.length > 1 };
-    })(),
-    totalSamples: list.length,
-    taskSamples: list.filter(sample => sample.kind === 'task').length,
-    chatSamples: list.filter(sample => sample.kind === 'chat').length,
-  });
-  return { samples, task: statsFor(task), chat: statsFor(chat), all: statsFor(samples) };
+  const statsFor = (list: TalentSample[]): TalentStats => {
+    const currencies = [...new Set(list.map(sample => sample.currency).filter((value): value is string => value !== null))].sort();
+    const byCurrency: CurrencyStat[] = currencies.map(currency => {
+      const scoped = list.filter(sample => sample.currency === currency);
+      const base = metric(scoped, sample => sample.costUnknown ? null : sample.cost, sample => sample.failed);
+      return { ...base, currency };
+    });
+    // Samples whose currency is unknown are counted once in the unknown total,
+    // never folded into a currency mean.
+    const anyFinishedUnknown = list.some(sample => !sample.unfinished && (sample.costUnknown || sample.currency === null));
+    return {
+      token: metric(list, sample => sample.tokens, sample => sample.failed),
+      runMs: metric(list, sample => sample.runMs, sample => sample.failed),
+      cost: { byCurrency, mixedCurrency: currencies.length > 1, unknown: anyFinishedUnknown },
+      totalSamples: list.length,
+      taskSamples: list.filter(sample => sample.kind === 'task').length,
+      chatSamples: list.filter(sample => sample.kind === 'chat').length,
+    };
+  };
+  return { scope: { version: scopeVersion ?? null, allVersions: scopeVersion === undefined }, samples, task: statsFor(task), chat: statsFor(chat), all: statsFor(samples) };
 }
 
 /** Definition detail with versions, bound capabilities and their install state. */

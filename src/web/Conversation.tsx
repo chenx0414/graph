@@ -4,7 +4,7 @@ import { formatTokens } from './insights.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { QuestionReply } from './Questions.tsx';
-import { ErrorBox, useAsync, useEventStream } from './shared.tsx';
+import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
 
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[] };
 type ConversationSummary = {
@@ -380,7 +380,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
         {view.tasks.map(task => (
           <div key={task.id} data-testid={`conversation-task-${task.id}`}>
             <h4><a href={`#/tasks/${task.id}`}>{task.request}</a> · {TASK_LABEL[task.status] ?? task.status}</h4>
-            <p>{task.targetBranch ? `目标分支 ${task.targetBranch}` : '目标分支未确认'}{task.integrationSha ? ` · 集成提交 ${task.integrationSha.slice(0, 10)}` : ''} · {task.cost.unknown ? '费用未知' : `费用 ${task.cost.amount ?? 0}`}{task.paused ? ' · 已暂停' : ''}</p>
+            <p>{task.targetBranch ? `目标分支 ${task.targetBranch}` : '目标分支未确认'}{task.integrationSha ? ` · 集成提交 ${task.integrationSha.slice(0, 10)}` : ''} · {costText(task.cost)}{task.paused ? ' · 已暂停' : ''}</p>
             <ul data-testid={`conversation-nodes-${task.id}`}>
               {task.nodes.map(node => (
                 <li key={node.id} data-node={node.id} data-status={node.status}>
