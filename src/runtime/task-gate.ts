@@ -14,9 +14,16 @@ function inFlightUsage(store: TaskStore, instanceId: string) {
   return rows.reduce((sum, row) => sum + tokens(JSON.parse(row.usage) as TokenUsage), 0);
 }
 
+/** What one provider send is for. Pi compaction and branch summaries are real
+ * billed requests and must be attributable separately from normal turns. */
+export type InvocationPurpose = 'completion' | 'compaction' | 'branch_summary';
+
+export const INVOCATION_PURPOSES: readonly InvocationPurpose[] = ['completion', 'compaction', 'branch_summary'];
+
 /** Task-store invocation gate: pause, unknown usage, and budget are checked before every provider send. */
-export function taskGate(store: TaskStore, operation: { id: string; taskId: string; instanceId: string; nodeId?: string }, model: ModelEntry): SendGate & { total(): TokenUsage | null } {
+export function taskGate(store: TaskStore, operation: { id: string; taskId: string; instanceId: string; nodeId?: string }, model: ModelEntry): SendGate & { total(): TokenUsage | null; setPurpose(purpose: InvocationPurpose): void } {
   let unknown = false;
+  let purpose: InvocationPurpose = 'completion';
   const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const nodeId = operation.nodeId ?? (store.db.prepare('SELECT node_id FROM operations WHERE id=?').get(operation.id) as { node_id: string } | undefined)?.node_id;
   return {
@@ -38,7 +45,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
         if (store.db.prepare('SELECT id FROM invocations WHERE id=?').get(id)) throw new RuntimeError('invalid_input', 'Invocation already dispatched');
         // Freeze the underlying upstream identity, not just the mutable
         // connection id: review independence reads this history later.
-        store.db.prepare('INSERT INTO invocations(id,operation_id,instance_id,model) VALUES(?,?,?,?)').run(id, operation.id, operation.instanceId, model.modelId ?? model.id);
+        store.db.prepare('INSERT INTO invocations(id,operation_id,instance_id,model,purpose) VALUES(?,?,?,?,?)').run(id, operation.id, operation.instanceId, model.modelId ?? model.id, purpose);
       });
       try { return send(); }
       catch (error) { this.settle(id, null); throw error; }
@@ -68,6 +75,10 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
           total.input += usage.input; total.output += usage.output; total.cacheRead += usage.cacheRead; total.cacheWrite += usage.cacheWrite;
         }
       });
+    },
+    setPurpose(next: InvocationPurpose) {
+      if (!INVOCATION_PURPOSES.includes(next)) throw new RuntimeError('invalid_input', `Unknown invocation purpose ${next}`);
+      purpose = next;
     },
     total() { return unknown ? null : total; },
   };

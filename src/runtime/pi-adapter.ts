@@ -12,6 +12,7 @@ import { agentTools } from './agent-tools.ts';
 import { conversationForTask } from '../core/conversation.ts';
 import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
+import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
@@ -285,6 +286,37 @@ export function createPiAdapter(options: {
               text: event.isError ? '工具执行失败' : '工具执行完成', data: { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError },
             });
           }
+          // Pi context summarization is billed like any other send: tag the
+          // invocations it emits while compacting, then record the summary as
+          // its own line without touching the conversation/tool entries.
+          if (event.type === 'compaction_start') {
+            gate.setPurpose('compaction');
+            options.store.event(operation.taskId, 'session.compaction_started', {
+              nodeId: operation.nodeId, operationId: operation.id, reason: event.reason,
+            });
+            return;
+          }
+          if (event.type === 'compaction_end') {
+            gate.setPurpose('completion');
+            if (!event.aborted && event.result) {
+              const data = {
+                reason: event.reason, operationId: operation.id,
+                tokensBefore: event.result.tokensBefore,
+                ...(event.result.estimatedTokensAfter !== undefined ? { tokensAfter: event.result.estimatedTokensAfter } : {}),
+              };
+              if (persistEntries) {
+                appendNodeEntry(options.store, {
+                  taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                  activationId: operation.activationId, operationId: operation.id, role: 'system', kind: 'compaction',
+                  text: event.result.summary, data,
+                });
+              }
+              // A conversation keeps its messages untouched; the compaction is
+              // reported as a session event instead of overwriting history.
+              options.store.event(operation.taskId, 'session.compacted', { nodeId: operation.nodeId, ...data });
+            }
+            return;
+          }
           if (!conversation) return;
           if (event.type === 'tool_execution_start') {
             const summary = summarizeToolCall(event.toolName, event.args);
@@ -302,6 +334,9 @@ export function createPiAdapter(options: {
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
+            // Auto-compaction stays on for workers, reviewers and the master;
+            // thresholds follow the model that will receive the summary.
+            compaction: compactionSettings(entry),
             onEvent,
             ...(conversation ? { allowWorkspaceChange: true } : {}),
           });

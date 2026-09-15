@@ -6,7 +6,7 @@ import { Button, Empty, Pill, Spinner, Stat } from './ui.tsx';
 
 interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
 interface Operation { id: string; state: string; runMs: number | null; waitingMs: number; waitingSlot: boolean; result: { output?: unknown } | null; usage: Record<string, number> | null }
-interface Invocation { id: string; model: string; usage: Record<string, number> | null; cost: { unknown?: boolean; amount?: number; currency?: string } | null }
+interface Invocation { id: string; model: string; purpose?: string; usage: Record<string, number> | null; cost: { unknown?: boolean; amount?: number; currency?: string } | null }
 interface Question { id: string; kind: string; status: string }
 interface Evidence { acceptanceId: string; valid: boolean; commitSha: string | null }
 export interface NodeRun {
@@ -136,6 +136,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
     costAmounts[currency] = (costAmounts[currency] ?? 0) + cost.amount;
   }
   const costSummary = { unknown: unknownCost, amounts: costAmounts };
+  const summaryCalls = data.invocations.filter(invocation => invocation.purpose === 'compaction').length;
   const hasOlder = data.hasOlder && data.entryCount > entries.length && olderSeq !== 0;
 
   return (
@@ -204,9 +205,10 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
         {!entries.length && <Empty title="暂无记录" hint="该节点还没有产生 Pi 会话条目，或记录不可得。" />}
         <ol className="list" data-testid="node-entries">
           {entries.map(entry => (
-            <li key={entry.id} className="list-item" style={{ display: 'block', alignItems: 'flex-start' }} data-testid={`node-entry-${entry.role}`}>
+            <li key={entry.id} className="list-item" style={{ display: 'block', alignItems: 'flex-start' }} data-testid={`node-entry-${entry.role}`} data-kind={entry.kind}>
               <div className="row">
-                <Pill tone={entry.role === 'assistant' ? 'info' : entry.role === 'tool' ? 'neutral' : 'accent'}>{entry.role === 'user' ? '任务说明' : entry.role === 'assistant' ? '主/工人回复' : entry.role === 'tool' ? `工具${entry.kind === 'call' ? '调用' : '结果'}` : entry.role}</Pill>
+                <Pill tone={entry.kind === 'compaction' ? 'warn' : entry.role === 'assistant' ? 'info' : entry.role === 'tool' ? 'neutral' : 'accent'}>{entry.kind === 'compaction' ? '上下文摘要' : entry.role === 'user' ? '任务说明' : entry.role === 'assistant' ? '主/工人回复' : entry.role === 'tool' ? `工具${entry.kind === 'call' ? '调用' : '结果'}` : entry.role}</Pill>
+                {entry.kind === 'compaction' && <span className="muted" data-testid="entry-compaction">窗口写满后的自动摘要，原始记录仍保留</span>}
                 <span className="muted">{when(entry.createdAt)}</span>
               </div>
               {entry.text.length > 4_000
@@ -235,11 +237,11 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
       </section>
 
       <section>
-        <h4 className="section-title">供应商调用（{data.invocations.length}）</h4>
+        <h4 className="section-title">供应商调用（{data.invocations.length}{summaryCalls ? `，含 ${summaryCalls} 次摘要调用` : ''}）</h4>
         <ul className="list" data-testid="node-invocations">
           {data.invocations.map(invocation => (
             <li key={invocation.id} className="list-item">
-              <span className="grow">{invocation.model} · {usageText(invocation.usage)}</span>
+              <span className="grow">{invocation.model} · {usageText(invocation.usage)}{invocation.purpose === 'compaction' ? ' · 上下文摘要' : ''}</span>
               <span className="muted">{invocation.cost === null || invocation.cost.unknown ? '费用未知' : `${invocation.cost.amount?.toFixed(6) ?? '?'} ${invocation.cost.currency ?? ''}`}</span>
             </li>
           ))}

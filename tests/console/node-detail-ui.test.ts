@@ -50,6 +50,13 @@ test('node detail renders real entries, operations and a program command, and st
   }, 'proposal');
   await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await server.runtime.host.drive();
+  // A compaction is its own display line plus a tagged invocation. The row is
+  // written through the same projection API the adapter uses; purpose is what
+  // the real gate writes at dispatch time.
+  const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  cleanup.push(async () => projection.close());
+  appendNodeEntry(projection, { taskId, nodeId: 'work', role: 'system', kind: 'compaction', text: '## Goal\n窗口写满后的摘要', data: { reason: 'threshold', tokensBefore: 1_200 } });
+  projection.db.prepare("UPDATE invocations SET purpose='compaction' WHERE id=(SELECT i.id FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=? AND o.node_id='work' LIMIT 1)").run(taskId);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -65,6 +72,9 @@ test('node detail renders real entries, operations and a program command, and st
   expect(await page.getByTestId('node-run-work').innerText()).toContain('对话与工具');
   expect(await page.getByTestId('node-run-work').innerText()).toContain('Read the note');
   expect(await page.getByTestId('node-entry-assistant').count()).toBeGreaterThan(0);
+  expect(await page.getByTestId('entry-compaction').count()).toBe(1);
+  expect(await page.getByTestId('node-run-work').innerText()).toContain('上下文摘要');
+  expect(await page.getByTestId('node-run-work').innerText()).toContain('含 1 次摘要调用');
   // Read-only: no customer-action controls inside the detail panel.
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '发送' }).count()).toBe(0);
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '答复' }).count()).toBe(0);

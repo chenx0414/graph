@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 19) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 20) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -236,6 +236,13 @@ export class TaskStore {
         ALTER TABLE nodes ADD COLUMN user_wait_ms INTEGER;
         ALTER TABLE nodes ADD COLUMN user_wait_since INTEGER;
         PRAGMA user_version=19;`);
+    });
+    if (version < 20) this.transaction(() => {
+      // Every provider send is an invocation; Pi context summarization is not
+      // a free side effect and must be attributable in the ledger.
+      this.db.exec(`
+        ALTER TABLE invocations ADD COLUMN purpose TEXT NOT NULL DEFAULT 'completion';
+        PRAGMA user_version=20;`);
     });
   }
   transaction<T>(action: () => T): T {
