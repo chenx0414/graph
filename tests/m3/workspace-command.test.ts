@@ -55,9 +55,12 @@ test('a worker can run an allowed build/test command inside the sandbox', async 
     { text: 'Ran the test suite.' },
   ]);
   await runtime.host.drive();
-  expect(await readFile(join(workspace, 'ran.txt'), 'utf8')).toBe('ran');
-  expect(JSON.stringify(provider.requests[1])).toContain('exit 0');
   const view = await task.view();
+  // The worker runs in its isolated work copy; the file lands there until the
+  // reviewed delivery merges it into the target checkout.
+  const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(await readFile(join(workerTree, 'ran.txt'), 'utf8')).toBe('ran');
+  expect(JSON.stringify(provider.requests[1])).toContain('exit 0');
   expect(view.invocations.some(row => row.usage && row.usage.input === 0 && row.usage.output === 0)).toBe(true);
 });
 
@@ -135,7 +138,7 @@ test('read-only Git commands still run inside the sandbox', async () => {
   expect(await readFile(join(workspace, 'README.md'), 'utf8')).toBe('project\n');
 });
 
-test('graph.command checks run in the project root of a non-git project', async () => {
+test('a plain directory is prepared by the host and its graph.command check runs in the worktree', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-command-plain-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'project');
@@ -173,7 +176,10 @@ test('graph.command checks run in the project root of a non-git project', async 
   }
   const view = await task.view();
   expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
-  expect(await readFile(join(workspace, 'ran-plain.txt'), 'utf8')).toBe('ran');
+  // The host initialized Git for the plain directory and the program check
+  // ran inside the integration work copy, not the primary checkout.
+  const integrationTree = view.worktrees.find(item => item.nodeId === 'integration')!.path;
+  expect(await readFile(join(integrationTree, 'ran-plain.txt'), 'utf8')).toBe('ran');
   expect(view.questions.filter(question => question.kind === 'adapter_error')).toHaveLength(0);
 }, 90_000);
 

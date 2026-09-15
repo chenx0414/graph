@@ -346,8 +346,11 @@ test('a production worker writes the workspace through tools', async () => {
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   const view = await runtime.user.task(taskId).view();
-  expect(view.phase).toBe('completed');
-  expect(await readFile(join(root, 'feature.txt'), 'utf8')).toBe('done');
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'succeeded' });
+  // The Pi worker wrote through its tools into the isolated work copy.
+  const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(await readFile(join(workerTree, 'feature.txt'), 'utf8')).toBe('done');
 });
 
 test('HTTP production master can discuss then propose through the adapter', async () => {

@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json, type NodeSpec, type Operation } from '../core/types.ts';
 import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
-  abortMerge, commitAll, detectRepo, ensureWorktree, fastForwardCheckout,
-  isClean, mergeRef, pathInside, resetHard, revParse, updateRef, worktreeList,
+  abortMerge, commitAll, commitBaseline, detectRepo, dirtyEntries, ensureWorktree, fastForwardCheckout,
+  hasHead, hostExcludePaths, initRepo, isClean, mergeRef, pathInside, resetHard, revParse, updateRef, worktreeList,
+  checkedOutBranch,
 } from './git.ts';
+
+interface PreparationFields {
+  repoRoot?: string | null | undefined; projectSubdir?: string | null | undefined; branch?: string | null | undefined;
+  baselineSha?: string | null | undefined; detail?: Json | null | undefined;
+}
 
 /** Task integration branch and per-instance work copies. Git effects stay outside SQLite transactions. */
 export class GitIntegration {
@@ -25,16 +32,137 @@ export class GitIntegration {
 
   repoRoot(taskId: string) {
     const task = this.store.task(taskId);
-    if (this.repos.has(task.project_id)) return this.repos.get(task.project_id);
+    const cached = this.repos.get(task.project_id);
+    if (cached) return cached;
     const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string };
     const root = detectRepo(project.root);
-    this.repos.set(task.project_id, root);
+    // Only positive detection is cached: a project that becomes a repository
+    // after initialization must not stay negative forever.
+    if (root) this.repos.set(task.project_id, root);
     return root;
   }
 
+  preparation(projectId: string) {
+    const row = this.store.db.prepare('SELECT * FROM project_preparation WHERE project_id=?').get(projectId) as {
+      project_id: string; state: string; repo_root: string | null; project_subdir: string | null;
+      branch: string | null; baseline_sha: string | null; detail: string | null; updated_at: number;
+    } | undefined;
+    if (!row) return null;
+    return {
+      projectId: row.project_id, state: row.state, repoRoot: row.repo_root, projectSubdir: row.project_subdir,
+      branch: row.branch, baselineSha: row.baseline_sha, detail: row.detail ? JSON.parse(row.detail) as Json : null, updatedAt: row.updated_at,
+    };
+  }
+
+  private recordPreparation(projectId: string, state: string, fields: PreparationFields = {}) {
+    // Single-statement write: callers may already hold the store transaction
+    // (the projects command) or run outside one (formal-dispatch preflight).
+    this.store.db.prepare(`INSERT OR REPLACE INTO project_preparation(project_id,state,repo_root,project_subdir,branch,baseline_sha,detail,updated_at)
+      VALUES(?,?,?,?,?,?,?,?)`)
+      .run(projectId, state, fields.repoRoot ?? null, fields.projectSubdir ?? null, fields.branch ?? null,
+        fields.baselineSha ?? null, fields.detail === undefined || fields.detail === null ? null : canonicalJson(fields.detail), Date.now());
+  }
+
+  /** Detect, initialize and baseline a business project. A plain directory is
+   * initialized on explicit prepare or before a formal dispatch; an existing
+   * dirty repository is reported, never silently committed or reset. */
+  prepareProject(projectId: string, input: { initialize?: boolean; createBaseline?: boolean } = {}) {
+    const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(projectId) as { root: string } | undefined;
+    if (!project) throw new RuntimeError('not_found', `Unknown project ${projectId}`);
+    // Canonicalize so a symlinked temp path cannot turn into a bogus
+    // repository-relative subdirectory.
+    const root = (() => { try { return realpathSync(resolve(project.root)); } catch { return resolve(project.root); } })();
+    const repo = detectRepo(root);
+    if (!repo) {
+      if (!input.initialize) {
+        this.recordPreparation(projectId, 'detected', { detail: { reason: 'not_a_repository' } });
+        return this.preparation(projectId)!;
+      }
+      this.recordPreparation(projectId, 'initializing', {});
+      try {
+        initRepo(root);
+        const baselineSha = commitBaseline(root, 'graph: local baseline');
+        this.repos.set(projectId, root);
+        this.recordPreparation(projectId, 'ready', {
+          repoRoot: root, projectSubdir: '', branch: checkedOutBranch(root) ?? null, baselineSha,
+          detail: { initialized: true, baselineCreated: true, files: (revParse(root, 'HEAD') ? 1 : 0) },
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.recordPreparation(projectId, 'failed', { detail: { reason } });
+        throw new RuntimeError('project_prepare_failed', `Failed to initialize Git in ${root}: ${reason}`);
+      }
+      return this.preparation(projectId)!;
+    }
+    const subdir = relative(repo, root).split(sep).join('/').replace(/^\.$/, '');
+    this.repos.set(projectId, repo);
+    if (!hasHead(repo)) {
+      this.recordPreparation(projectId, 'initializing', { repoRoot: repo, projectSubdir: subdir });
+      try {
+        const baselineSha = commitBaseline(repo, 'graph: local baseline');
+        this.recordPreparation(projectId, 'ready', {
+          repoRoot: repo, projectSubdir: subdir, branch: checkedOutBranch(repo) ?? null, baselineSha,
+          detail: { initialized: false, baselineCreated: true },
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.recordPreparation(projectId, 'failed', { repoRoot: repo, projectSubdir: subdir, detail: { reason } });
+        throw new RuntimeError('project_prepare_failed', `Failed to create a Git baseline in ${repo}: ${reason}`);
+      }
+      return this.preparation(projectId)!;
+    }
+    const baselineSha = revParse(repo, 'HEAD')!;
+    // Host-managed paths are relative to the project root; when the project is
+    // a repository subdirectory they may also sit under the repository root.
+    const dirty = dirtyEntries(repo, [...hostExcludePaths(repo), ...hostExcludePaths(root)]);
+    if (dirty.length && input.createBaseline) {
+      this.recordPreparation(projectId, 'initializing', { repoRoot: repo, projectSubdir: subdir });
+      try {
+        const created = commitBaseline(repo, 'graph: local baseline');
+        this.recordPreparation(projectId, 'ready', {
+          repoRoot: repo, projectSubdir: subdir, branch: checkedOutBranch(repo) ?? null, baselineSha: created,
+          detail: { dirty: dirty.length, baselineCreated: true, sample: dirty.slice(0, 20) },
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.recordPreparation(projectId, 'failed', { repoRoot: repo, projectSubdir: subdir, detail: { reason } });
+        throw new RuntimeError('project_prepare_failed', `Failed to create a Git baseline in ${repo}: ${reason}`);
+      }
+      return this.preparation(projectId)!;
+    }
+    this.recordPreparation(projectId, dirty.length ? 'detected' : 'ready', {
+      repoRoot: repo, projectSubdir: subdir, branch: checkedOutBranch(repo) ?? null, baselineSha,
+      detail: dirty.length ? { dirty: dirty.length, sample: dirty.slice(0, 20) } : { dirty: 0 },
+    });
+    return this.preparation(projectId)!;
+  }
+
+  /** Auto-prepare a plain directory and require a ready, clean Git project;
+   * used before formal dispatch and before binding a conversation to a project. */
+  requirePrepared(projectId: string) {
+    let prep = this.preparation(projectId);
+    if (!prep || prep.state !== 'ready') prep = this.prepareProject(projectId, { initialize: true });
+    if (prep.state !== 'ready') {
+      const reason = (prep.detail as { reason?: string } | null)?.reason;
+      if (reason === 'not_a_repository') throw new RuntimeError('git_required', `Project ${projectId} is not a Git repository; prepare it from the console first`);
+      if (prep.state === 'failed') throw new RuntimeError('project_prepare_failed', `Project ${projectId} Git preparation failed`);
+      throw new RuntimeError('project_dirty', `Project ${projectId} has uncommitted changes; review them and create a local baseline before dispatch`);
+    }
+    return prep;
+  }
+
+  /** Preflight for formal acceptance: the project must be ready and the
+   * target branch must exist before any official state is committed. */
+  requireTargetBranch(projectId: string, branch: string) {
+    const prep = this.requirePrepared(projectId);
+    if (!revParse(prep.repoRoot!, branch)) throw new RuntimeError('invalid_input', `Unknown target branch ${branch}`);
+    return prep;
+  }
+
   prepareTask(taskId: string, targetBranch: string) {
-    const repo = this.repoRoot(taskId);
-    if (!repo) return;
+    const task = this.store.task(taskId);
+    const prep = this.requirePrepared(task.project_id);
+    const repo = prep.repoRoot!;
     const targetSha = revParse(repo, targetBranch);
     if (!targetSha) throw new RuntimeError('invalid_input', `Unknown target branch ${targetBranch}`);
     const branch = `graph/task/${taskId}`;
@@ -55,18 +183,21 @@ export class GitIntegration {
     if (!task.integration_branch) return;
     const repo = this.repoRoot(taskId);
     if (!repo) return;
+    // A project that is a repository subdirectory keeps its scope: workers and
+    // checks start inside that subdirectory while the worktree covers the repo.
+    const subdir = this.preparation(task.project_id)?.projectSubdir ?? '';
     if (kind !== 'agent' || !instanceId) {
       const row = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${taskId}`) as { path: string } | undefined;
-      return row?.path;
+      return row?.path ? (subdir ? join(row.path, subdir) : row.path) : undefined;
     }
     const existing = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(instanceId) as { path: string } | undefined;
-    if (existing) return existing.path;
+    if (existing) return subdir ? join(existing.path, subdir) : existing.path;
     const branch = `graph/copy/${taskId}/${nodeId}`;
     const path = join(this.stateDir, 'worktrees', taskId, instanceId);
     const start = task.integration_sha ?? revParse(repo, task.integration_branch)!;
     ensureWorktree(repo, path, branch, start);
     this.store.db.prepare('INSERT OR IGNORE INTO worktrees VALUES(?,?,?,?,?)').run(instanceId, taskId, nodeId, path, branch);
-    return path;
+    return subdir ? join(path, subdir) : path;
   }
 
   integrate(operation: Operation) {

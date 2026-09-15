@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 function real(path: string) {
   try { return realpathSync(path); } catch { return resolve(path); }
@@ -29,6 +29,66 @@ export function git(cwd: string, args: string[]) {
   });
   if (result.error) return { code: 1, stdout: '', stderr: result.error.message };
   return { code: result.status ?? 1, stdout: (result.stdout ?? '').trim(), stderr: (result.stderr ?? '').trim() };
+}
+
+export function hasHead(cwd: string) {
+  return git(cwd, ['rev-parse', '--verify', '-q', 'HEAD']).code === 0;
+}
+
+export function headSha(cwd: string) {
+  return revParse(cwd, 'HEAD');
+}
+
+/** Host-managed local excludes. `.git/info/exclude` is repository-local and is
+ * never committed, so initializing a plain directory cannot alter user files. */
+const HOST_EXCLUDES = [
+  '# Graph host-managed excludes (local only)',
+  '.env', '.env.*', 'secrets.json', '.DS_Store',
+  'node_modules/', 'state/', 'dist/', 'coverage/',
+  '.stage/', 'graph.config.json',
+];
+
+export function ensureHostExcludes(repo: string) {
+  const dir = join(repo, '.git', 'info');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'exclude');
+  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const lines = new Set(existing.split('\n'));
+  const missing = HOST_EXCLUDES.filter(line => !lines.has(line));
+  if (missing.length) writeFileSync(file, `${existing}${existing && !existing.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+}
+
+export function initRepo(root: string) {
+  const result = git(root, ['init', '-b', 'main']);
+  if (result.code !== 0) {
+    // Older Git without `-b` falls back to the configured default branch.
+    const fallback = git(root, ['init']);
+    if (fallback.code !== 0) throw new Error(fallback.stderr || result.stderr || 'git init failed');
+  }
+  ensureHostExcludes(root);
+}
+
+/** Commit the current visible tree as a local baseline, excluding host-managed
+ * sensitive/generated paths; an empty tree produces an empty commit. */
+export function commitBaseline(cwd: string, message: string) {
+  ensureHostExcludes(cwd);
+  git(cwd, ['add', '-A', '--', '.']);
+  const committed = git(cwd, ['commit', '--no-verify', '--allow-empty', '-m', message]);
+  if (committed.code !== 0) throw new Error(committed.stderr || 'Baseline commit failed');
+  return revParse(cwd, 'HEAD')!;
+}
+
+/** Porcelain status entries that are not host-excluded, with their kind. */
+export function dirtyEntries(cwd: string, ignore: string[] = []) {
+  const prefixes = ignore.map(real);
+  return git(cwd, ['status', '--porcelain', '-u']).stdout.split('\n').filter(Boolean).filter(line => {
+    const file = real(resolve(cwd, line.slice(3).replace(/^"+|"+$/g, '')));
+    return !prefixes.some(prefix => file === prefix || file.startsWith(`${prefix}/`));
+  });
+}
+
+export function hostExcludePaths(root: string) {
+  return HOST_EXCLUDES.filter(line => !line.startsWith('#')).map(line => resolve(root, line.replace(/\/$/, '')));
 }
 
 export function detectRepo(root: string) {

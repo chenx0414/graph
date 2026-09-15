@@ -235,6 +235,9 @@ export async function openTaskRuntime(options: {
         },
         async accept(input: { proposalVersion: number; targetBranch: string; requestId: string }): Promise<Receipt> {
           ensureOpen();
+          // Formal acceptance requires a ready Git project and an existing
+          // target branch; this fails before any official state is written.
+          git.requireTargetBranch(store.task(taskId).project_id, input.targetBranch);
           const receipt = store.command('user', input.requestId, { type: 'accept', taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }, () => {
             const task = store.task(taskId);
             const row = store.db.prepare('SELECT requirement_version,spec FROM proposals WHERE task_id=? AND version=?')
@@ -358,11 +361,12 @@ export async function openTaskRuntime(options: {
     },
     async projects() {
       ensureOpen();
+      const withPreparation = <T extends { id: string }>(project: T) => ({ ...project, preparation: git.preparation(project.id) });
       if (configuredProjects !== undefined) {
-        return configuredProjects.map(project => ({ id: project.id, root: resolve(project.root), grants: [...new Set(project.grants ?? [])].sort() }));
+        return configuredProjects.map(project => withPreparation({ id: project.id, root: resolve(project.root), grants: [...new Set(project.grants ?? [])].sort() }));
       }
       return (store.db.prepare('SELECT id,root,grants FROM projects ORDER BY id').all() as { id: string; root: string; grants: string }[])
-        .map(row => ({ id: row.id, root: row.root, grants: JSON.parse(row.grants) as string[] }));
+        .map(row => withPreparation({ id: row.id, root: row.root, grants: JSON.parse(row.grants) as string[] }));
     },
   };
 
@@ -509,6 +513,9 @@ export async function openTaskRuntime(options: {
       const conversation = conversationRow(store, conversationId);
       if (!store.db.prepare('SELECT id FROM projects WHERE id=?').get(input.projectId)) throw new RuntimeError('invalid_input', 'A known project is required');
       if (configuredProjects !== undefined && !allowedProjects.has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
+      // Investigation binds to a Git-ready project: plain directories are
+      // initialized here, dirty repositories stop with an explicit reason.
+      git.requirePrepared(input.projectId);
       return store.command(`conversation:${conversationId}`, input.requestId, { type: 'bind', projectId: input.projectId }, () => {
         const previous = conversation.project_id;
         if (previous === input.projectId) return { conversationId, taskId: conversation.anchor_task_id, changed: false, cursor: null as number | null };
@@ -531,6 +538,10 @@ export async function openTaskRuntime(options: {
     },
     async confirm(conversationId: string, input: { proposalVersion: number; targetBranch: string; requestId: string }) {
       ensureOpen();
+      const bound = conversationRow(store, conversationId);
+      if (!bound.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
+      if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
+      git.requireTargetBranch(bound.project_id, input.targetBranch);
       const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'confirm', proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }, () => {
         const conversation = conversationRow(store, conversationId);
         if (!conversation.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
@@ -634,6 +645,23 @@ export async function openTaskRuntime(options: {
         WHERE t.phase IN ('discussing','running','queued') AND n.status NOT IN ('succeeded','skipped') AND i.model IS NOT NULL`).all() as { model: string }[]).map(row => row.model);
     },
     user,
+    /** Business project Git admission: explicit preparation and state reads. */
+    projects: {
+      async prepare(input: { projectId: string; requestId: string; initialize?: boolean; createBaseline?: boolean }) {
+        ensureOpen();
+        const payload = { type: 'prepare', projectId: input.projectId, initialize: input.initialize ?? true, createBaseline: input.createBaseline ?? false };
+        return store.command('projects', input.requestId, payload, () => {
+          const prep = git.prepareProject(input.projectId, { initialize: payload.initialize, createBaseline: payload.createBaseline });
+          return { ...prep, cursor: store.event(null, 'project.prepared', { projectId: input.projectId, state: prep.state, baselineSha: prep.baselineSha }) };
+        });
+      },
+      preparation(projectId: string) {
+        ensureOpen();
+        const prep = git.preparation(projectId);
+        if (!prep) throw new RuntimeError('not_found', `No preparation recorded for ${projectId}`);
+        return prep;
+      },
+    },
     conversations,
     host: {
       async runReady() { ensureOpen(); return execution.runReady(); },

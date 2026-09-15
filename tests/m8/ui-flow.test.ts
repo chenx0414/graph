@@ -1,10 +1,12 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
+import { withIndependentReview } from '../fixtures/review-gate.ts';
+import { git as runGit } from '../../src/git/git.ts';
 import { nextEventCursor } from '../../src/web/event-cursor.ts';
 import type { NodeSpec } from '../../src/core/types.ts';
 
@@ -60,10 +62,21 @@ test('cursor helpers ignore duplicates and out-of-order frames', () => {
 test('the console completes the main flow, keeps projects separate, and restores a direct graph URL', async () => {
   const rootA = await temp('flow-a');
   const rootB = await temp('flow-b');
+  // The target branch must exist before acceptance; create a real local repo
+  // with the feature branch the UI will type.
+  runGit(rootA, ['init', '-b', 'main']);
+  await writeFile(join(rootA, 'README.md'), 'project a\n');
+  runGit(rootA, ['add', 'README.md']);
+  runGit(rootA, ['commit', '-m', 'init']);
+  runGit(rootA, ['branch', 'feature-a']);
+  const reviewedA = withIndependentReview(actions(rootA), [
+    { id: 'implement', kind: 'agent', action: 'implement', definitionVersion: 'coder@1', model: 'scripted' },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['implement'] },
+  ]);
   const server = await openGraphServer({
     stateDir: join(rootA, 'state'),
     projects: [{ id: 'project-a', root: rootA }, { id: 'project-b', root: rootB }],
-    actions: actions(rootA),
+    actions: reviewedA.actions,
     autoDrive: true,
     webDir,
     startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
@@ -83,10 +96,7 @@ test('the console completes the main flow, keeps projects separate, and restores
   await server.runtime.supervisor(taskA).propose({
     requirementVersion: 1, summary: '任务 A 提案',
     acceptance: [{ id: 'works', description: '搜索可用', checkNode: 'check' }],
-    nodes: [
-      { id: 'implement', kind: 'agent', action: 'implement', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['implement'] },
-    ],
+    nodes: reviewedA.nodes,
   }, 'proposal-a');
   await page.getByTestId('queue').getByText('任务 A：实现搜索').waitFor();
   await page.getByTestId('queue').getByText('任务 A：实现搜索').click();

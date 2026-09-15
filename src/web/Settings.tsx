@@ -43,6 +43,62 @@ function toDraft(config: ConfigResponse['config']): RawConfig {
   };
 }
 
+type Preparation = { state: string; repoRoot: string | null; projectSubdir: string | null; baselineSha: string | null; detail: { dirty?: number; reason?: string } | null };
+type ProjectRow = { id: string; root: string; preparation: Preparation | null };
+
+/** Git admission entry: ordinary directories are initialized by the host and a
+ * dirty repository needs an explicit local baseline before formal dispatch. */
+function ProjectGitCard() {
+  const [projects, setProjects] = useState<ProjectRow[] | null>(null);
+  const [busy, setBusy] = useState('');
+  const load = useCallback(async () => {
+    const data = await api<{ projects: ProjectRow[] }>('/api/settings');
+    setProjects(data.projects.filter(project => !project.id.startsWith('conversation:')));
+  }, []);
+  useEffect(() => { void load().catch(() => undefined); }, [load]);
+  const prepare = async (project: ProjectRow, createBaseline: boolean) => {
+    setBusy(project.id);
+    try {
+      const result = await api<{ state: string }>(`/api/projects/${encodeURIComponent(project.id)}/prepare`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `prepare-${project.id}-${crypto.randomUUID()}`, initialize: true, createBaseline }),
+      });
+      toast(result.state === 'ready' ? 'Git 准备完成' : '需要处理未提交修改', result.state === 'ready' ? 'success' : 'info');
+    } catch (reason) {
+      toast(`准备失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    } finally {
+      setBusy('');
+      await load().catch(() => undefined);
+    }
+  };
+  const label = (state: string | undefined) => state === 'ready' ? '已准备' : state === 'detected' ? '待处理' : state === 'failed' ? '失败' : '未准备';
+  return (
+    <Card title="项目 Git 准备" icon="box" subtitle="正式派发前必须准备好 Git 与本地基线；普通目录由宿主初始化并建立本地版本记录">
+      {projects === null && <Spinner />}
+      {projects?.length === 0 && <p className="muted">尚未配置项目。</p>}
+      {projects?.map(project => {
+        const prep = project.preparation;
+        const dirty = prep?.detail?.dirty ?? 0;
+        return (
+          <div className="list-item" key={project.id} data-testid={`git-project-${project.id}`}>
+            <div className="row grow" style={{ alignItems: 'center' }}>
+              <Pill tone={prep?.state === 'ready' ? 'success' : prep?.state === 'failed' ? 'danger' : prep?.state === 'detected' ? 'warn' : 'neutral'}>{label(prep?.state)}</Pill>
+              <span className="grow">{project.id} <span className="muted">{project.root}</span></span>
+              {prep?.projectSubdir && <span className="muted">子目录 {prep.projectSubdir}</span>}
+              {prep?.baselineSha && <code className="faint">{prep.baselineSha.slice(0, 10)}</code>}
+            </div>
+            {prep?.state === 'detected' && <span className="muted">{dirty ? `${dirty} 项未提交修改；创建基线将把这些改动纳入本地快照` : prep.detail?.reason === 'not_a_repository' ? '尚未初始化 Git' : '需要准备'}</span>}
+            {prep?.state === 'failed' && <span className="muted">{prep.detail?.reason ?? '准备失败'}</span>}
+            <Button size="sm" data-testid={`git-prepare-${project.id}`} disabled={busy === project.id} onClick={() => void prepare(project, prep?.state === 'detected' && dirty > 0)}>
+              {prep?.state === 'detected' && dirty > 0 ? '创建本地基线提交' : '准备 Git'}
+            </Button>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
 export function Settings() {
   const [draft, setDraft] = useState<RawConfig | null>(null);
   const [credentialState, setCredentialState] = useState<Record<string, boolean>>({});
@@ -155,6 +211,8 @@ export function Settings() {
           </div>
         ))}
       </Card>
+
+      <ProjectGitCard />
 
       <Card title="凭据引用" icon="link" subtitle="只保存环境变量名；密钥从不进入配置文件、接口响应或页面"
         actions={<Button size="sm" icon="plus" data-testid="credential-add" onClick={() => mutate(next => { next.credentials = { ...(next.credentials ?? {}), 'new-credential': { secretRef: 'GRAPH_NEW_KEY' } }; })}>添加凭据</Button>}>

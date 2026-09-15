@@ -894,7 +894,13 @@ export class Execution {
     const evidence = this.store.db.prepare('SELECT acceptance_id,commit_sha FROM evidence WHERE task_id=? AND proposal_version=? AND requirement_version=? AND valid=1').all(taskId, task.accepted_proposal, task.requirement_version) as { acceptance_id: string; commit_sha: string | null }[];
     const sha = task.integration_sha;
     if (!proposal.acceptance.every(item => evidence.some(row => row.acceptance_id === item.id && (!sha || row.commit_sha === sha)))) return false;
-    if (task.integration_branch && !this.independentReviewReady(taskId)) return false;
+    if (task.integration_branch && !this.independentReviewReady(taskId)) {
+      // Independent review guards a real code delivery. When the integrated
+      // tree is identical to the recorded target there is nothing to merge,
+      // so a no-op delivery does not need a reviewer; the acceptance evidence
+      // and node completion checks above still apply.
+      if (!task.integration_sha || task.integration_sha !== task.target_sha) return false;
+    }
     return true;
   }
 

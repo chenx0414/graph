@@ -152,10 +152,12 @@ test('a definition-bound MCP tool is callable, metered, and confined by the sand
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
 
-  expect(await readFile(join(workspace, 'mcp-capability.txt'), 'utf8')).toBe('mcp capability write');
+  const view = await task.view();
+  // Capability writes land in the worker's isolated work copy.
+  const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(await readFile(join(workerTree, 'mcp-capability.txt'), 'utf8')).toBe('mcp capability write');
   expect(await readFile(outside, 'utf8')).toBe('formal');
   expect(JSON.stringify(provider.requests[1])).toContain('outsideDenied');
-  const view = await task.view();
   const measurements = view.invocations.filter(row => row.usage && row.usage.input === 0 && row.usage.output === 0 && row.usage.cacheRead === 0);
   expect(measurements.length).toBeGreaterThanOrEqual(2); // one tools/list plus one tools/call
   expect(view.cost).toMatchObject({ amount: expect.any(Number) });
@@ -252,10 +254,11 @@ test('a definition-bound extension loads in the restricted worker and its tool i
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
 
-  expect(await readFile(join(workspace, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
+  const view = await task.view();
+  const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(await readFile(join(workerTree, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
   expect(await readFile(outside, 'utf8')).toBe('formal');
   expect(JSON.stringify(provider.requests[1])).toContain('outsideDenied');
-  const view = await task.view();
   expect(view.questions).toEqual([]);
   const measurements = view.invocations.filter(row => row.usage && row.usage.input === 0 && row.usage.output === 0);
   expect(measurements.length).toBeGreaterThanOrEqual(2); // one tools/list plus one tools/call

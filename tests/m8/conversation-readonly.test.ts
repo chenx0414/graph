@@ -75,7 +75,11 @@ test('a bound extension cannot write business files during discussion but a work
   }, 'draft');
   await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
   await runtime.host.runReady();
-  expect(await readFile(join(workspace, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
+  const confirmed = await runtime.conversations.view(created.conversationId);
+  const feature = confirmed.tasks[0]!;
+  const taskView = await runtime.user.task(feature.id).view();
+  const tree = taskView.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(await readFile(join(tree, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
 }, 60_000);
 
 test('a remote HTTP MCP tool is not offered during discussion even with a write grant', async () => {

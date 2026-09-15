@@ -84,7 +84,7 @@ test('the v14 migration keeps existing finite instances finite and untouched', a
   await runtime.close();
   // Rewind the database to the v13 shape with a finite instance carrying usage.
   const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
-  db.exec('ALTER TABLE instances DROP COLUMN unlimited; PRAGMA user_version=13;');
+  db.exec('ALTER TABLE instances DROP COLUMN unlimited; DROP TABLE project_preparation; PRAGMA user_version=13;');
   db.prepare('UPDATE instances SET budget=20000000, used=17').run();
   db.close();
 

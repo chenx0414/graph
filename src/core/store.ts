@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 14) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 15) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -182,6 +182,15 @@ export class TaskStore {
       // migration never rewrites an old row into unlimited.
       this.db.exec('ALTER TABLE instances ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0; PRAGMA user_version=14;');
     });
+    if (version < 15) this.transaction(() => {
+      // Business projects must be Git-ready before formal dispatch; this row
+      // records detection/initialization, the baseline commit and scope.
+      this.db.exec(`
+        CREATE TABLE project_preparation(project_id TEXT PRIMARY KEY REFERENCES projects(id),
+          state TEXT NOT NULL, repo_root TEXT, project_subdir TEXT, branch TEXT, baseline_sha TEXT,
+          detail TEXT, updated_at INTEGER NOT NULL);
+        PRAGMA user_version=15;`);
+    });
   }
   transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -204,7 +213,7 @@ export class TaskStore {
       return result;
     });
   }
-  event(taskId: string, type: string, data: unknown) {
+  event(taskId: string | null, type: string, data: unknown) {
     const cursor = Number(this.db.prepare('INSERT INTO events(task_id,type,data,timestamp) VALUES(?,?,?,?)')
       .run(taskId, type, canonicalJson(data), Date.now()).lastInsertRowid);
     // Some writers record events outside a transaction; wake stream watchers

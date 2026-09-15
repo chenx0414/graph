@@ -214,7 +214,10 @@ test('unknown usage is reconciled with an explicit reason and the delivery panel
   await page.waitForFunction(() => document.querySelector('[data-testid="delivery"]'));
   const delivery = await page.getByTestId('delivery').innerText();
   expect(delivery).toContain('目标分支 main');
-  expect(delivery).toContain('尚无集成提交');
+  // Acceptance prepares the Git integration branch, so the panel shows its
+  // commit instead of the old no-Git placeholder.
+  expect(delivery).toContain('集成提交');
+  expect(delivery).not.toContain('尚无集成提交');
   expect(delivery).toContain('检查通过');
   expect(delivery).not.toContain('无效或过期证据');
   expect(await page.evaluate(() => (window as unknown as { __pwned?: boolean }).__pwned)).toBeUndefined();

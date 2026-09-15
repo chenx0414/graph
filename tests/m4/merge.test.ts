@@ -44,7 +44,6 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 
 test('a dirty target checkout is not overwritten and waits for the user', async () => {
   const root = await repo();
-  await writeFile(join(root, 'dirty.txt'), 'unstaged');
   const { runtime, task } = await start(root, {
     work: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
       await writeFile(join(operation.workspace!, 'feature.txt'), 'done');
@@ -58,6 +57,9 @@ test('a dirty target checkout is not overwritten and waits for the user', async 
     { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
     { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
   ]);
+  // The target checkout becomes dirty after acceptance; delivery must stop
+  // instead of overwriting the user's uncommitted work.
+  await writeFile(join(root, 'dirty.txt'), 'unstaged');
   await runtime.host.drive();
   const view = await task.view();
   expect(view.phase).toBe('running');

@@ -283,7 +283,9 @@ test('a graph.command check keeps fixed loopback ports, concurrent listeners and
 
 test('a graph.command check resolves host-provided dependencies and environment', async () => {
   const root = await repo();
-  const modules = join(root, 'deps');
+  // Host-provided dependencies live outside the tracked project tree so the
+  // project stays clean for Git admission.
+  const modules = join(root, 'state', 'deps');
   await mkdir(join(modules, 'probe'), { recursive: true });
   await writeFile(join(modules, 'probe', 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', type: 'module', exports: './index.js' }));
   await writeFile(join(modules, 'probe', 'index.js'), 'export const value = "probe-dependency";\n');

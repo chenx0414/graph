@@ -495,7 +495,8 @@ test('a pause after partial work keeps the operation interrupted and resumable',
   expect(paused.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending', used: 50 });
   expect(paused.nodes.find(node => node.id === 'check')?.status).toBe('pending');
   expect(paused.questions).toEqual([]);
-  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+  const partialTree = paused.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
+  expect(await readFile(join(partialTree, 'partial.txt'), 'utf8')).toBe('partial output');
 
   await userTask.resume('resume-partial');
   await server.runtime.host.drive();
@@ -504,7 +505,8 @@ test('a pause after partial work keeps the operation interrupted and resumable',
   expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
   // Two real calls (first tool turn + resumed turn), each counted exactly once.
   expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(100);
-  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+  const completedTree = completed.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
+  expect(await readFile(join(completedTree, 'partial.txt'), 'utf8')).toBe('partial output');
 }, 90_000);
 
 async function interruptedUnknown(check: 'usage' | 'reconcile') {
@@ -625,7 +627,8 @@ async function interruptedMixed(check: 'usage' | 'reconcile') {
     return view.operations[0]?.state === 'interrupted' && view.questions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
   }, 20_000);
   const before = await userTask.view();
-  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+  const partialTree = before.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
+  expect(await readFile(join(partialTree, 'partial.txt'), 'utf8')).toBe('partial output');
   expect(before.invocations.filter(invocation => invocation.usage === null)).toHaveLength(1);
   // The known model call is preserved; the zero-usage tool invocation adds nothing.
   expect(before.invocations.some(invocation => invocation.usage !== null && invocation.usage.input > 0)).toBe(true);
@@ -644,7 +647,8 @@ async function interruptedMixed(check: 'usage' | 'reconcile') {
   const completed = await userTask.view();
   expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
   expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 150 : 100);
-  expect(await readFile(join(root, 'partial.txt'), 'utf8')).toBe('partial output');
+  const completedTree = completed.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
+  expect(await readFile(join(completedTree, 'partial.txt'), 'utf8')).toBe('partial output');
 }
 
 test('mixed known and unknown usage can be reconciled and continue', async () => {
