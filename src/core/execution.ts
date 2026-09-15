@@ -565,7 +565,7 @@ export class Execution {
       return false;
     }
     this.store.transaction(() => {
-      this.store.db.prepare("UPDATE operations SET state='dispatched',worker_active=1 WHERE id=?").run(operation.id);
+      this.store.db.prepare("UPDATE operations SET state='dispatched',worker_active=1,dispatched_at=COALESCE(dispatched_at,?) WHERE id=?").run(Date.now(), operation.id);
       this.store.db.prepare("UPDATE nodes SET status='running' WHERE task_id=? AND id=?").run(node.task_id, node.id);
       this.store.db.prepare("UPDATE activations SET state='running' WHERE id=?").run(node.activation_id);
       this.store.event(node.task_id, 'operation.dispatched', { operationId: operation.id });
@@ -719,8 +719,8 @@ export class Execution {
       if (!evidence.summary.trim() || !isAbsolute(evidence.artifact.path) || !/^[a-f0-9]{64}$/.test(evidence.artifact.digest)) throw new RuntimeError('invalid_evidence', 'Evidence requires a summary, absolute artifact path and SHA-256 digest');
       this.store.db.prepare('INSERT INTO evidence(id,task_id,node_id,operation_id,acceptance_id,proposal_version,requirement_version,data,activation_id,commit_sha) VALUES(?,?,?,?,?,?,?,?,?,?)').run(randomUUID(), operation.taskId, operation.nodeId, operation.id, evidence.acceptanceId, operation.proposalVersion, operation.requirementVersion, canonicalJson(evidence), operation.activationId, this.store.task(operation.taskId).integration_sha);
     }
-    this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0,result=?,usage=? WHERE id=?")
-      .run(canonicalJson(result), canonicalJson(usage), operation.id);
+    this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?) WHERE id=?")
+      .run(canonicalJson(result), canonicalJson(usage), Date.now(), operation.id);
     if (operation.instanceId) {
       this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instanceId);
       const account = this.store.db.prepare('SELECT model,models_used FROM instances WHERE id=?').get(operation.instanceId) as { model: string | null; models_used: string };

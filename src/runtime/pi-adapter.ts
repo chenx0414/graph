@@ -5,6 +5,7 @@ import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelApi, ModelEntry } from '../catalog/models.ts';
+import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
@@ -113,7 +114,12 @@ export function createPiAdapter(options: {
       // waiting_slot is what keeps a parked operation out of execution
       // accounting; a failed write must fail the operation, not be hidden.
       const setWaitingSlot = (waiting: boolean) => {
-        options.store.db.prepare('UPDATE operations SET waiting_slot=? WHERE id=?').run(Number(waiting), operation.id);
+        const now = Date.now();
+        if (waiting) {
+          options.store.db.prepare('UPDATE operations SET waiting_slot=1,waiting_since=COALESCE(waiting_since,?) WHERE id=?').run(now, operation.id);
+        } else {
+          options.store.db.prepare('UPDATE operations SET waiting_slot=0,waiting_ms=waiting_ms + MAX(0,?-COALESCE(waiting_since,?)),waiting_since=NULL WHERE id=?').run(now, now, operation.id);
+        }
       };
       const slot = binding && scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)
         ? {
@@ -236,12 +242,41 @@ export function createPiAdapter(options: {
         };
         const toolSummaries = new Map<string, string>();
         const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
+        const persistEntries = !conversation;
+        let sawAssistantMessageEnd = false;
         const onEvent = (event: AgentSessionEvent) => {
           if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
             streamed.text += event.assistantMessageEvent.delta;
             streamed.buffer += event.assistantMessageEvent.delta;
             flushDeltas(false);
             return;
+          }
+          if (persistEntries && event.type === 'message_end') {
+            // Real assistant message from the Pi session, not a fabricated
+            // summary of the final output.
+            const message = (event as unknown as { message?: { role?: string; content?: { type?: string; text?: string }[] } }).message;
+            const text = (message?.content ?? []).filter(part => part.type === 'text' && typeof part.text === 'string').map(part => part.text!).join('');
+            if (message?.role === 'assistant' && text.trim()) {
+              sawAssistantMessageEnd = true;
+              appendNodeEntry(options.store, {
+                taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                activationId: operation.activationId, operationId: operation.id, role: 'assistant', kind: 'message', text,
+              });
+            }
+          }
+          if (persistEntries && event.type === 'tool_execution_start') {
+            appendNodeEntry(options.store, {
+              taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+              activationId: operation.activationId, operationId: operation.id, role: 'tool', kind: 'call',
+              text: summarizeToolCall(event.toolName, event.args), data: { toolCallId: event.toolCallId, toolName: event.toolName },
+            });
+          }
+          if (persistEntries && event.type === 'tool_execution_end') {
+            appendNodeEntry(options.store, {
+              taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+              activationId: operation.activationId, operationId: operation.id, role: 'tool', kind: 'result',
+              text: event.isError ? '工具执行失败' : '工具执行完成', data: { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError },
+            });
           }
           if (!conversation) return;
           if (event.type === 'tool_execution_start') {
@@ -260,8 +295,13 @@ export function createPiAdapter(options: {
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
-            ...(conversation ? { allowWorkspaceChange: true, onEvent } : {}),
+            onEvent,
+            ...(conversation ? { allowWorkspaceChange: true } : {}),
           });
+          if (persistEntries) {
+            const inspected = session.inspect();
+            recordNodeSession(options.store, operation.instanceId!, inspected.sessionId, inspected.sessionFile);
+          }
           try {
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
             // Order matches the harness directory: implementation first, independent review second.
@@ -290,6 +330,13 @@ export function createPiAdapter(options: {
                   ' "decisions": ["<binding constraint the user confirmed>"]}',
                 ].join('\n')
               : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
+            if (persistEntries) {
+              appendNodeEntry(options.store, {
+                taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                activationId: operation.activationId, operationId: operation.id, role: 'user', kind: 'briefing',
+                text: `${briefing}${hint}`.slice(0, 20_000),
+              });
+            }
             await session.prompt(`${briefing}${hint}`);
             flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
@@ -309,6 +356,12 @@ export function createPiAdapter(options: {
             }
             const text = assistantText(session.inspect().messages);
             const reply = text.trim() ? text : streamed.text;
+            if (persistEntries && !sawAssistantMessageEnd && reply.trim()) {
+              appendNodeEntry(options.store, {
+                taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                activationId: operation.activationId, operationId: operation.id, role: 'assistant', kind: 'message', text: reply,
+              });
+            }
             // The conversation output always carries the visible reply; worker
             // output keeps its existing submitted-or-text shape.
             const output: Json = conversation

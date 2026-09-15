@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 16) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 17) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -198,6 +198,23 @@ export class TaskStore {
         CREATE TABLE presets(id TEXT PRIMARY KEY, version TEXT NOT NULL, hash TEXT NOT NULL,
           detail TEXT, installed_at INTEGER NOT NULL);
         PRAGMA user_version=16;`);
+    });
+    if (version < 17) this.transaction(() => {
+      // Node detail projection: real Pi session entries per node plus timing
+      // facts that keep credential-slot waiting out of the run duration.
+      this.db.exec(`
+        CREATE TABLE node_entries(seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+          task_id TEXT NOT NULL, node_id TEXT NOT NULL, instance_id TEXT, activation_id TEXT, operation_id TEXT,
+          role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', data TEXT,
+          created_at INTEGER NOT NULL);
+        CREATE INDEX node_entries_scope ON node_entries(task_id,node_id,seq);
+        CREATE TABLE node_sessions(instance_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+          session_file TEXT, updated_at INTEGER NOT NULL);
+        ALTER TABLE operations ADD COLUMN dispatched_at INTEGER;
+        ALTER TABLE operations ADD COLUMN settled_at INTEGER;
+        ALTER TABLE operations ADD COLUMN waiting_since INTEGER;
+        ALTER TABLE operations ADD COLUMN waiting_ms INTEGER NOT NULL DEFAULT 0;
+        PRAGMA user_version=17;`);
     });
   }
   transaction<T>(action: () => T): T {

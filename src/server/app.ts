@@ -227,6 +227,15 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       }
     } finally { request.raw.off('close', abort); await watch.return?.(); reply.raw.end(); }
   });
+  app.get('/api/tasks/:taskId/nodes/:nodeId/run', async request => {
+    const params = request.params as { taskId: string; nodeId: string };
+    const query = request.query as { after?: string; before?: string; limit?: string };
+    return runtime.nodeRun(params.taskId, params.nodeId, {
+      ...(query.after !== undefined ? { after: Number(query.after) } : {}),
+      ...(query.before !== undefined ? { before: Number(query.before) } : {}),
+      ...(query.limit ? { limit: Number(query.limit) } : {}),
+    });
+  });
   app.get('/api/tasks/:taskId/operations', async request => {
     const params = request.params as { taskId: string };
     const query = request.query as { after?: string; limit?: string };

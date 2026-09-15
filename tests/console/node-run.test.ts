@@ -1,0 +1,229 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, expect, test } from 'vitest';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { TaskStore } from '../../src/core/store.ts';
+import { appendNodeEntry, listNodeEntries } from '../../src/core/node-run.ts';
+import { installPresets } from '../../src/catalog/presets.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
+
+const cleanup: (() => Promise<void>)[] = [];
+afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
+const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
+
+async function workerFixture(name: string, plans: Parameters<typeof openaiServer>[0]) {
+  const root = await mkdtemp(join(tmpdir(), `graph-node-run-${name}-`));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const provider = await openaiServer(plans);
+  cleanup.push(() => provider.close());
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, 'note.txt'), 'node-run marker line\n');
+  const options = {
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }], actions: {},
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    limits: { defaultBudgetTokens: 20_000_000 },
+  };
+  let runtime = await openTaskRuntime(options);
+  cleanup.push(() => runtime.close());
+  await installPresets(runtime.catalog, presetsRoot);
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Node detail', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Node detail',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  return { root, options, provider, workspace, taskId, task: runtime.user.task(taskId), runtime: () => runtime,
+    actions: { check: { kind: 'program' as const, prepare: async () => async () => ({ outcome: 'completed' as const, output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }] }) } } };
+}
+
+test('a worker node projects real Pi entries, its session reference and operation timing', async () => {
+  const provider = await openaiServer([
+    { tools: [{ id: 'r1', name: 'read', arguments: JSON.stringify({ path: 'note.txt' }) }] },
+    { text: 'Read the note and finished.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-node-run-projection-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, 'note.txt'), 'node-run marker line\n');
+  const check = { kind: 'program' as const, prepare: async () => async () => ({ outcome: 'completed' as const, output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }] }) };
+  const options = {
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }], actions: { check },
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    limits: { defaultBudgetTokens: 20_000_000 },
+  };
+  let runtime = await openTaskRuntime(options);
+  cleanup.push(() => runtime.close());
+  await installPresets(runtime.catalog, presetsRoot);
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Node detail', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Node detail',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  const first = await runtime.nodeRun(taskId, 'work');
+  expect(first.node).toMatchObject({ id: 'work', kind: 'agent', status: 'succeeded' });
+  expect(first.instance?.definitionVersion).toBe('coder@1');
+  expect(first.session?.sessionId).toBeTruthy();
+  const roles = first.entries.map(entry => `${entry.role}:${entry.kind}`);
+  expect(roles[0]).toBe('user:briefing');
+  expect(roles).toContain('tool:call');
+  expect(roles).toContain('tool:result');
+  expect(roles).toContain('assistant:message');
+  expect(first.entries.find(entry => entry.role === 'tool' && entry.kind === 'call')?.data).toMatchObject({ toolName: 'read' });
+  expect(first.entries.find(entry => entry.role === 'assistant')?.text).toContain('Read the note');
+  // Real operations carry timing; credential waiting is a separate field.
+  expect(first.operations.length).toBeGreaterThanOrEqual(1);
+  expect(first.operations[0]).toMatchObject({ state: 'succeeded', waitingMs: 0 });
+  expect(first.operations[0]!.runMs).not.toBeNull();
+  expect(first.invocations.length).toBeGreaterThanOrEqual(2);
+  expect(first.entryCount).toBe(first.entries.length);
+
+  // Restarting the daemon keeps the same projection.
+  await runtime.close();
+  runtime = await openTaskRuntime(options);
+  cleanup.push(() => runtime.close());
+  const restored = await runtime.nodeRun(taskId, 'work');
+  expect(restored.entries).toEqual(first.entries);
+  expect(restored.session?.sessionId).toBe(first.session?.sessionId);
+  expect(restored.operations.map(operation => operation.runMs)).toEqual(first.operations.map(operation => operation.runMs));
+}, 120_000);
+
+test('entry pagination stays stable when two nodes interleave more than 500 records', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-node-run-paging-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  store.transaction(() => {
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq) VALUES('t','p','x',1)").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,activation_id,status) VALUES('t','a','{}','x','succeeded')").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,activation_id,status) VALUES('t','b','{}','y','succeeded')").run();
+  });
+  for (let index = 0; index < 600; index += 1) {
+    appendNodeEntry(store, { taskId: 't', nodeId: 'a', role: 'assistant', kind: 'message', text: `a-${index}` });
+    appendNodeEntry(store, { taskId: 't', nodeId: 'b', role: 'assistant', kind: 'message', text: `b-${index}` });
+  }
+  const forward: string[] = [];
+  let cursor = 0;
+  for (;;) {
+    const page = listNodeEntries(store, 't', 'a', { after: cursor, limit: 77 });
+    if (!page.entries.length) break;
+    forward.push(...page.entries.map(entry => entry.text));
+    cursor = page.entries[page.entries.length - 1]!.seq;
+  }
+  expect(forward).toHaveLength(600);
+  expect(new Set(forward).size).toBe(600);
+  expect(forward[0]).toBe('a-0');
+  expect(forward.at(-1)).toBe('a-599');
+  // Backward paging from the end reaches the first record without duplicates.
+  const backward: string[] = [];
+  let before = 10_000;
+  for (;;) {
+    const page = listNodeEntries(store, 't', 'a', { before, limit: 100 });
+    if (!page.entries.length) break;
+    backward.unshift(...page.entries.map(entry => entry.text));
+    before = page.entries[0]!.seq;
+  }
+  expect(backward).toEqual(forward);
+  // Node b is untouched by node a paging.
+  const other = listNodeEntries(store, 't', 'b', { limit: 500 });
+  expect(other.entryCount).toBe(600);
+  expect(other.entries.every(entry => entry.text.startsWith('b-'))).toBe(true);
+}, 60_000);
+
+test('a credential slot wait is recorded apart from the run duration', async () => {
+  let releaseFirst!: () => void;
+  const firstReleased = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const provider = await openaiServer([
+    { text: 'first done', beforeReply: () => firstReleased },
+    { text: 'second done' },
+  ]);
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-node-run-wait-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }], actions: {},
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }], apiKey: '', credentialFor: () => ({ credentialId: 'local', apiKey: 'k', limit: 1 }), modelRuntime: provider.runtime },
+    live: {
+      revision: () => 0,
+      entries: () => [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      preferences: () => ({}),
+      credentialFor: () => ({ credentialId: 'local', apiKey: 'k', limit: 1 }),
+      masterModel: () => 'local',
+      defaultBudgetTokens: () => null,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(async () => { releaseFirst(); await runtime.close(); });
+  await installPresets(runtime.catalog, presetsRoot);
+  const first = await runtime.conversations.create({ text: '第一个会话。', requestId: 'conv-one' });
+  const second = await runtime.conversations.create({ text: '第二个会话。', requestId: 'conv-two' });
+  // Drive both chatting masters at once; the second send queues behind the
+  // single credential slot while the first provider response is delayed.
+  const driving = runtime.host.drive();
+  // The second master waits for the single credential slot while the first is
+  // still in flight; the wait must be recorded apart from run time.
+  // Either master may win the race for the single slot; the other one parks.
+  const deadline = Date.now() + 8_000;
+  let waitingTask: string | undefined;
+  for (;;) {
+    waitingTask = [first.taskId, second.taskId].find(taskId => runtime.nodeRun(taskId, 'master').operations.some(operation => operation.waitingSlot));
+    if (waitingTask) break;
+    if (Date.now() > deadline) throw new Error(`no master recorded a slot wait (${provider.requests.length} provider requests)`);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  releaseFirst();
+  await driving;
+  const detail = runtime.nodeRun(waitingTask, 'master');
+  expect(detail.operations.length).toBeGreaterThanOrEqual(1);
+  expect(detail.operations[0]!.runMs).not.toBeNull();
+  expect(detail.operations[0]!.waitingMs).toBeGreaterThanOrEqual(0);
+}, 120_000);
+
+test('the node detail API serves the projection over HTTP', async () => {
+  const provider = await openaiServer([{ text: 'hello' }]);
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-node-run-http-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  const { openGraphServer } = await import('../../src/server/host.ts');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }], actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }] }) } },
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+  });
+  cleanup.push(() => server.close());
+  await installPresets(server.runtime.catalog, presetsRoot);
+  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'Node HTTP', requestId: 'begin' });
+  await server.runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'Node HTTP', acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }], nodes: [{ id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' }, { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] }] }, 'proposal');
+  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await server.runtime.host.drive();
+  const home = await fetch(server.url, { headers: { origin: server.url } });
+  const headers = { origin: server.url, cookie: home.headers.get('set-cookie') ?? '' };
+  const response = await fetch(`${server.url}/api/tasks/${taskId}/nodes/work/run?limit=2`, { headers });
+  expect(response.status).toBe(200);
+  const body = await response.json() as { entries: unknown[]; entryCount: number; session: { sessionId: string } | null };
+  expect(body.entryCount).toBeGreaterThan(0);
+  expect(body.entries.length).toBeLessThanOrEqual(2);
+  expect(body.session?.sessionId).toBeTruthy();
+  const missing = await fetch(`${server.url}/api/tasks/${taskId}/nodes/nope/run`, { headers });
+  expect(missing.status).toBe(400);
+}, 120_000);
