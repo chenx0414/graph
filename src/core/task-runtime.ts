@@ -184,6 +184,19 @@ export async function openTaskRuntime(options: {
     // driveable again; queued conversation messages stay pending until then.
     // The same scan runs after a hot configuration apply.
     if (options.master && masterModel()) recoverMasterNodes();
+    // Recognize prepare intents interrupted by a crash: re-running preparation
+    // is idempotent (a clean baseline is a no-op) and settles the record.
+    for (const intent of store.db.prepare("SELECT id,spec FROM git_ops WHERE kind='prepare' AND state='intent'").all() as { id: string; spec: string }[]) {
+      try {
+        const parsed = JSON.parse(intent.spec) as { projectId: string; initialize?: boolean; createBaseline?: boolean };
+        if (store.db.prepare('SELECT id FROM projects WHERE id=?').get(parsed.projectId)) {
+          git.prepareProject(parsed.projectId, { initialize: parsed.initialize ?? true, createBaseline: parsed.createBaseline ?? false });
+        }
+        store.db.prepare("UPDATE git_ops SET state='succeeded', result=? WHERE id=?").run(canonicalJson({ reconciled: true }), intent.id);
+      } catch {
+        store.db.prepare("UPDATE git_ops SET state='failed', result=? WHERE id=?").run(canonicalJson({ reconciled: false }), intent.id);
+      }
+    }
   } catch (error) {
     try { store.close(); } finally { releaseOwner(); }
     throw error;
@@ -700,9 +713,40 @@ export async function openTaskRuntime(options: {
       async prepare(input: { projectId: string; requestId: string; initialize?: boolean; createBaseline?: boolean }) {
         ensureOpen();
         const payload = { type: 'prepare', projectId: input.projectId, initialize: input.initialize ?? true, createBaseline: input.createBaseline ?? false };
-        return store.command('projects', input.requestId, payload, () => {
-          const prep = git.prepareProject(input.projectId, { initialize: payload.initialize, createBaseline: payload.createBaseline });
-          return { ...prep, cursor: store.event(null, 'project.prepared', { projectId: input.projectId, state: prep.state, baselineSha: prep.baselineSha }) };
+        const encoded = canonicalJson(payload);
+        const previous = store.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get('projects', input.requestId) as { payload: string; receipt: string } | undefined;
+        if (previous) {
+          if (previous.payload !== encoded) throw new RuntimeError('idempotency_conflict', 'requestId was already used with different content');
+          return JSON.parse(previous.receipt) as { state: string } & Record<string, unknown>;
+        }
+        // External Git effects are never executed inside the SQLite transaction:
+        // the intent is durable first, the effect runs outside, the result is
+        // settled separately so a crash can be recognized after restart.
+        const opId = randomUUID();
+        store.transaction(() => {
+          store.db.prepare('INSERT INTO git_ops VALUES(?,?,?,?,?,?)').run(opId, `project:${input.projectId}`, 'prepare', 'intent', encoded, null);
+        });
+        let prep;
+        try {
+          prep = git.prepareProject(input.projectId, { initialize: payload.initialize, createBaseline: payload.createBaseline });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          store.transaction(() => {
+            store.db.prepare("UPDATE git_ops SET state='failed', result=? WHERE id=?").run(canonicalJson({ reason }), opId);
+            store.db.prepare('INSERT OR REPLACE INTO commands VALUES(?,?,?,?)').run('projects', input.requestId, encoded, canonicalJson({ state: 'failed', reason, retryable: true }));
+          });
+          throw error;
+        }
+        return store.transaction(() => {
+          store.db.prepare("UPDATE git_ops SET state='succeeded', result=? WHERE id=?").run(canonicalJson({ state: prep.state, baselineSha: prep.baselineSha }), opId);
+          const duplicate = store.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get('projects', input.requestId) as { payload: string; receipt: string } | undefined;
+          if (duplicate) {
+            if (duplicate.payload !== encoded) throw new RuntimeError('idempotency_conflict', 'requestId was already used with different content');
+            return JSON.parse(duplicate.receipt) as { state: string } & Record<string, unknown>;
+          }
+          const receipt = { ...prep, cursor: store.event(null, 'project.prepared', { projectId: input.projectId, state: prep.state, baselineSha: prep.baselineSha }) };
+          store.db.prepare('INSERT INTO commands VALUES(?,?,?,?)').run('projects', input.requestId, encoded, canonicalJson(receipt));
+          return receipt;
         });
       },
       preparation(projectId: string) {

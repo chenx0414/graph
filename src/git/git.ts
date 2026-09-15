@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 function real(path: string) {
   try { return realpathSync(path); } catch { return resolve(path); }
@@ -48,14 +49,71 @@ const HOST_EXCLUDES = [
   '.stage/', 'graph.config.json',
 ];
 
-export function ensureHostExcludes(repo: string) {
-  const dir = join(repo, '.git', 'info');
+/** A linked worktree (and a submodule) has a `.git` *file*, so the exclude
+ * file must be located through Git, not by assuming a directory layout. */
+export function gitPaths(repo: string) {
+  const dir = git(repo, ['rev-parse', '--absolute-git-dir']).stdout;
+  const common = git(repo, ['rev-parse', '--path-format=absolute', '--git-common-dir']).stdout;
+  return { gitDir: dir || undefined, commonDir: common || dir || undefined };
+}
+
+export function ensureHostExcludes(repo: string, extra: string[] = []) {
+  const paths = gitPaths(repo);
+  const base = paths.commonDir ?? paths.gitDir;
+  if (!base) return;
+  const dir = join(base, 'info');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, 'exclude');
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
   const lines = new Set(existing.split('\n'));
-  const missing = HOST_EXCLUDES.filter(line => !lines.has(line));
+  const missing = [...HOST_EXCLUDES, ...extra].filter(line => !lines.has(line));
   if (missing.length) writeFileSync(file, `${existing}${existing && !existing.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+}
+
+/** Sensitive or host-managed path that must never enter a baseline commit.
+ * `.env.example` and friends are documentation and stay eligible. */
+export function baselineExcluded(relPath: string, stateRel: string | null) {
+  const normalized = relPath.replace(/\\/g, '/');
+  if (stateRel && (normalized === stateRel || normalized.startsWith(`${stateRel}/`))) return true;
+  const segments = normalized.split('/');
+  if (segments.some(segment => ['node_modules', 'dist', 'coverage', '.stage', '.git'].includes(segment))) return true;
+  const name = segments[segments.length - 1] ?? '';
+  if (name === 'graph.config.json' || name === 'secrets.json' || name === '.DS_Store') return true;
+  if (/\.sqlite(-wal|-shm)?$/.test(name)) return true;
+  if (name === '.env' || name === '.env.local' || /\.env\..*\.local$/.test(name)) return true;
+  return false;
+}
+
+/** Explicit file list for a scoped baseline: cached plus untracked files inside
+ * the project scope, with host-managed and sensitive paths removed. */
+export function baselineFiles(repo: string, options: { subdir?: string; stateDir?: string } = {}) {
+  const scope = options.subdir && options.subdir !== '' ? options.subdir : '.';
+  const listed = git(repo, ['ls-files', '-z', '-c', '-o', '--exclude-standard', '--', scope]).stdout.split('\0').filter(Boolean);
+  const stateRel = options.stateDir && pathInside(repo, options.stateDir)
+    ? relative(repo, real(options.stateDir)).split(sep).join('/')
+    : null;
+  return [...new Set(listed)].filter(file => !baselineExcluded(file, stateRel));
+}
+
+/** Stable fingerprint of the readiness-relevant repository state. A recorded
+ * `ready` state is only a snapshot; it must be re-checked at each boundary. */
+export function repoFingerprint(repo: string, options: { subdir?: string; stateDir?: string } = {}) {
+  const scope = options.subdir && options.subdir !== '' ? options.subdir : '.';
+  const stateRel = options.stateDir && pathInside(repo, options.stateDir)
+    ? relative(repo, real(options.stateDir)).split(sep).join('/')
+    : null;
+  const status = git(repo, ['status', '--porcelain=v1', '-z', '-uall', '--', scope]).stdout
+    .split('\0').filter(Boolean)
+    .filter(line => !baselineExcluded(stripStatusPath(line), stateRel))
+    .join('\0');
+  return createHash('sha256')
+    .update(`head=${revParse(repo, 'HEAD') ?? ''}\nbranch=${checkedOutBranch(repo) ?? ''}\nstatus=${status}`)
+    .digest('hex');
+}
+
+function stripStatusPath(line: string) {
+  // Porcelain v1: XY<space>path (rename entries append NUL + target).
+  return line.length > 3 ? line.slice(3).replace(/^"+|"+$/g, '') : line;
 }
 
 export function initRepo(root: string) {
@@ -70,19 +128,45 @@ export function initRepo(root: string) {
 
 /** Commit the current visible tree as a local baseline, excluding host-managed
  * sensitive/generated paths; an empty tree produces an empty commit. */
-export function commitBaseline(cwd: string, message: string) {
-  ensureHostExcludes(cwd);
-  git(cwd, ['add', '-A', '--', '.']);
-  const committed = git(cwd, ['commit', '--no-verify', '--allow-empty', '-m', message]);
-  if (committed.code !== 0) throw new Error(committed.stderr || 'Baseline commit failed');
-  return revParse(cwd, 'HEAD')!;
+/** Commit a baseline of exactly the given paths, never the whole index and
+ * never a path outside the project scope. Files already staged by the user
+ * (for example a synthetic `.env`) stay staged and uncommitted. */
+export function commitBaseline(cwd: string, message: string, options: { subdir?: string; stateDir?: string } = {}) {
+  const stateRel = options.stateDir && pathInside(cwd, options.stateDir)
+    ? relative(cwd, real(options.stateDir)).split(sep).join('/')
+    : undefined;
+  ensureHostExcludes(cwd, stateRel ? [`${stateRel}/`] : []);
+  const files = baselineFiles(cwd, options);
+  if (!files.length) {
+    // An empty baseline must not fall back to committing whatever is staged.
+    const emptyTree = git(cwd, ['hash-object', '-t', 'tree', '/dev/null']).stdout;
+    const args = ['commit-tree', emptyTree, '-m', message];
+    const head = revParse(cwd, 'HEAD');
+    if (head) args.push('-p', head);
+    const created = git(cwd, args);
+    if (created.code !== 0 || !created.stdout) throw new Error(created.stderr || 'Baseline commit failed');
+    const update = git(cwd, ['update-ref', 'HEAD', created.stdout]);
+    if (update.code !== 0) throw new Error(update.stderr || 'Baseline ref update failed');
+    return created.stdout;
+  }
+  const list = join(dirname(join(cwd, '.graph-tmp')), `.graph-baseline-${process.pid}-${Date.now()}`);
+  writeFileSync(list, `${files.join('\0')}\0`);
+  try {
+    const added = git(cwd, ['add', `--pathspec-from-file=${list}`, '--pathspec-file-nul']);
+    if (added.code !== 0) throw new Error(added.stderr || 'Baseline add failed');
+    const committed = git(cwd, ['commit', '--no-verify', '-m', message, `--pathspec-from-file=${list}`, '--pathspec-file-nul']);
+    if (committed.code !== 0) throw new Error(committed.stderr || 'Baseline commit failed');
+    return revParse(cwd, 'HEAD')!;
+  } finally {
+    rmSync(list, { force: true });
+  }
 }
 
 /** Porcelain status entries that are not host-excluded, with their kind. */
-export function dirtyEntries(cwd: string, ignore: string[] = []) {
+export function dirtyEntries(cwd: string, ignore: string[] = [], scope = '.') {
   const prefixes = ignore.map(real);
-  return git(cwd, ['status', '--porcelain', '-u']).stdout.split('\n').filter(Boolean).filter(line => {
-    const file = real(resolve(cwd, line.slice(3).replace(/^"+|"+$/g, '')));
+  return git(cwd, ['status', '--porcelain', '-uall', '--', scope]).stdout.split('\n').filter(Boolean).filter(line => {
+    const file = real(resolve(cwd, stripStatusPath(line)));
     return !prefixes.some(prefix => file === prefix || file.startsWith(`${prefix}/`));
   });
 }

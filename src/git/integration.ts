@@ -6,7 +6,7 @@ import { RuntimeError, type Json, type NodeSpec, type Operation } from '../core/
 import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
   abortMerge, commitAll, commitBaseline, detectRepo, dirtyEntries, ensureWorktree, fastForwardCheckout,
-  hasHead, hostExcludePaths, initRepo, isClean, mergeRef, pathInside, resetHard, revParse, updateRef, worktreeList,
+  hasHead, hostExcludePaths, initRepo, isClean, mergeRef, pathInside, repoFingerprint, resetHard, revParse, updateRef, worktreeList,
   checkedOutBranch,
 } from './git.ts';
 
@@ -63,9 +63,9 @@ export class GitIntegration {
         fields.baselineSha ?? null, fields.detail === undefined || fields.detail === null ? null : canonicalJson(fields.detail), Date.now());
   }
 
-  /** Detect, initialize and baseline a business project. A plain directory is
-   * initialized on explicit prepare or before a formal dispatch; an existing
-   * dirty repository is reported, never silently committed or reset. */
+  /** Scoped, exclusion-aware preparation. A plain directory is initialized on
+   * explicit prepare or before a formal dispatch; an existing dirty repository
+   * is reported, never silently committed into the user's index. */
   prepareProject(projectId: string, input: { initialize?: boolean; createBaseline?: boolean } = {}) {
     const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(projectId) as { root: string } | undefined;
     if (!project) throw new RuntimeError('not_found', `Unknown project ${projectId}`);
@@ -81,11 +81,11 @@ export class GitIntegration {
       this.recordPreparation(projectId, 'initializing', {});
       try {
         initRepo(root);
-        const baselineSha = commitBaseline(root, 'graph: local baseline');
+        const baselineSha = commitBaseline(root, 'graph: local baseline', { stateDir: this.stateDir });
         this.repos.set(projectId, root);
         this.recordPreparation(projectId, 'ready', {
           repoRoot: root, projectSubdir: '', branch: checkedOutBranch(root) ?? null, baselineSha,
-          detail: { initialized: true, baselineCreated: true, files: (revParse(root, 'HEAD') ? 1 : 0) },
+          detail: { initialized: true, baselineCreated: true, fingerprint: repoFingerprint(root, { stateDir: this.stateDir }) },
         });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -96,52 +96,63 @@ export class GitIntegration {
     }
     const subdir = relative(repo, root).split(sep).join('/').replace(/^\.$/, '');
     this.repos.set(projectId, repo);
+    const scope = { subdir, stateDir: this.stateDir };
+    const record = (state: string, extra: Record<string, Json>) => {
+      this.recordPreparation(projectId, state, {
+        repoRoot: repo, projectSubdir: subdir, branch: checkedOutBranch(repo) ?? null,
+        baselineSha: revParse(repo, 'HEAD') ?? null,
+        detail: { ...extra, fingerprint: repoFingerprint(repo, scope) },
+      });
+      return this.preparation(projectId)!;
+    };
     if (!hasHead(repo)) {
       this.recordPreparation(projectId, 'initializing', { repoRoot: repo, projectSubdir: subdir });
       try {
-        const baselineSha = commitBaseline(repo, 'graph: local baseline');
-        this.recordPreparation(projectId, 'ready', {
-          repoRoot: repo, projectSubdir: subdir, branch: checkedOutBranch(repo) ?? null, baselineSha,
-          detail: { initialized: false, baselineCreated: true },
-        });
+        commitBaseline(repo, 'graph: local baseline', scope);
+        return record('ready', { initialized: false, baselineCreated: true });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.recordPreparation(projectId, 'failed', { repoRoot: repo, projectSubdir: subdir, detail: { reason } });
         throw new RuntimeError('project_prepare_failed', `Failed to create a Git baseline in ${repo}: ${reason}`);
       }
-      return this.preparation(projectId)!;
     }
-    const baselineSha = revParse(repo, 'HEAD')!;
     // Host-managed paths are relative to the project root; when the project is
     // a repository subdirectory they may also sit under the repository root.
-    const dirty = dirtyEntries(repo, [...hostExcludePaths(repo), ...hostExcludePaths(root)]);
+    const dirty = dirtyEntries(repo, [...hostExcludePaths(repo), ...hostExcludePaths(root), this.stateDir], subdir || '.');
     if (dirty.length && input.createBaseline) {
       this.recordPreparation(projectId, 'initializing', { repoRoot: repo, projectSubdir: subdir });
       try {
-        const created = commitBaseline(repo, 'graph: local baseline');
-        this.recordPreparation(projectId, 'ready', {
-          repoRoot: repo, projectSubdir: subdir, branch: checkedOutBranch(repo) ?? null, baselineSha: created,
-          detail: { dirty: dirty.length, baselineCreated: true, sample: dirty.slice(0, 20) },
-        });
+        commitBaseline(repo, 'graph: local baseline', scope);
+        return record('ready', { dirty: dirty.length, baselineCreated: true, sample: dirty.slice(0, 20) });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.recordPreparation(projectId, 'failed', { repoRoot: repo, projectSubdir: subdir, detail: { reason } });
         throw new RuntimeError('project_prepare_failed', `Failed to create a Git baseline in ${repo}: ${reason}`);
       }
-      return this.preparation(projectId)!;
     }
-    this.recordPreparation(projectId, dirty.length ? 'detected' : 'ready', {
-      repoRoot: repo, projectSubdir: subdir, branch: checkedOutBranch(repo) ?? null, baselineSha,
-      detail: dirty.length ? { dirty: dirty.length, sample: dirty.slice(0, 20) } : { dirty: 0 },
-    });
-    return this.preparation(projectId)!;
+    return record(dirty.length ? 'detected' : 'ready', dirty.length ? { dirty: dirty.length, sample: dirty.slice(0, 20) } : { dirty: 0 });
+  }
+
+  /** Re-check the recorded readiness against the current repository at every
+   * boundary; a stale `ready` snapshot never authorizes dispatch. */
+  private refreshPrepared(projectId: string) {
+    const prep = this.preparation(projectId);
+    if (!prep || prep.state === 'initializing' || prep.state === 'failed') return this.prepareProject(projectId, { initialize: true });
+    if (prep.state !== 'ready' && prep.state !== 'detected') return prep;
+    if (!prep.repoRoot) return this.prepareProject(projectId, {});
+    const current = repoFingerprint(prep.repoRoot, { subdir: prep.projectSubdir ?? '', stateDir: this.stateDir });
+    const recorded = prep.state === 'ready' || prep.state === 'detected'
+      ? (prep.detail as { fingerprint?: string } | null)?.fingerprint
+      : undefined;
+    if (recorded === current) return prep;
+    // The snapshot is stale (dirty, new commit, branch switch, deletion).
+    return this.prepareProject(projectId, {});
   }
 
   /** Auto-prepare a plain directory and require a ready, clean Git project;
    * used before formal dispatch and before binding a conversation to a project. */
   requirePrepared(projectId: string) {
-    let prep = this.preparation(projectId);
-    if (!prep || prep.state !== 'ready') prep = this.prepareProject(projectId, { initialize: true });
+    const prep = this.refreshPrepared(projectId);
     if (prep.state !== 'ready') {
       const reason = (prep.detail as { reason?: string } | null)?.reason;
       if (reason === 'not_a_repository') throw new RuntimeError('git_required', `Project ${projectId} is not a Git repository; prepare it from the console first`);
