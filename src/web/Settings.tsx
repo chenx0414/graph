@@ -237,6 +237,18 @@ export function Settings() {
             {bridge && <>
               <input className="input" style={{ width: 180 }} type="password" placeholder="API 密钥" data-testid={`credential-${index}-key`}
                 value={keys[id] ?? ''} onChange={event => setKeys(current => ({ ...current, [id]: event.target.value }))} />
+              <Button size="sm" variant="danger" data-testid={`credential-${index}-disable`} title="撤销推送的密钥并禁止该连接新发送"
+                onClick={async () => {
+                  try {
+                    const result = await bridge.saveSecret(credential.secretRef, null);
+                    if (!result?.stored || !result?.applied) throw new Error(result?.message ?? '撤销未生效');
+                    setCredentialState(current => ({ ...current, [id]: false }));
+                    setKeys(current => ({ ...current, [id]: '' }));
+                    toast('连接已禁用；重新保存密钥即可恢复', 'success');
+                  } catch (reason) {
+                    toast(`禁用失败：${(reason as Error).message}`, 'danger');
+                  }
+                }}>禁用连接</Button>
               <Button size="sm" icon="link" data-testid={`credential-${index}-key-save`} disabled={!(keys[id] ?? '').trim()}
                 onClick={() => void (async () => {
                   const stored = await bridge.saveSecret(credential.secretRef, (keys[id] ?? '').trim());

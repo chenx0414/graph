@@ -19,7 +19,7 @@ export interface SetupForm {
 export interface DesktopBridge {
   isDesktop: boolean;
   pickDirectory(): Promise<string | null>;
-  saveSecret(ref: string, value: string): Promise<{ stored: boolean; applied?: boolean; message?: string }>;
+  saveSecret(ref: string, value: string | null): Promise<{ stored: boolean; applied?: boolean; message?: string }>;
   secretStatus(refs: string[]): Promise<Record<string, boolean>>;
   relaunch(): Promise<{ url: string }>;
 }
@@ -93,7 +93,7 @@ export function buildConfigDocument(existing: unknown, form: SetupForm): Record<
   document.projects = upsertById(base.projects, form.projectId, { id: form.projectId, root: form.projectRoot.trim() });
   const models = (base.models && typeof base.models === 'object' ? base.models : {}) as Record<string, unknown>;
   const entry: Record<string, unknown> = {
-    id: form.modelId.trim(), provider: form.provider.trim(), grade: form.grade,
+    id: form.modelId.trim(), modelId: form.modelId.trim(), provider: form.provider.trim(), grade: form.grade,
     api: 'openai-completions', baseUrl: form.baseUrl.trim(),
     contextWindow: form.contextWindow, maxTokens: form.maxTokens,
     credentialId: form.credentialId,
@@ -116,6 +116,16 @@ export interface TemplateSetupInput {
   models: TemplateSetupModel[];
 }
 
+function uniqueModelId(entries: Record<string, unknown>[], base: string, providerId: string) {
+  const taken = new Set(entries.map(item => String(item?.id ?? '')));
+  const stem = `${base}-${providerId}`;
+  if (!taken.has(stem)) return stem;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${stem}-${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 /** One-action provider connection: merge the chosen transport, credential and
  * models into the current document without dropping other platforms. */
 export function buildTemplateConfigDocument(existing: unknown, input: TemplateSetupInput, templateModels: TemplateSetupModel[] = []): Record<string, unknown> {
@@ -126,8 +136,19 @@ export function buildTemplateConfigDocument(existing: unknown, input: TemplateSe
   for (const model of input.models) {
     const preset = templateModels.find(item => item.id === model.id);
     const merged = preset ? { ...preset, ...model } : model;
+    // The upstream model id is the provider identity; the config id is the
+    // connection identity. A second platform exposing the same upstream id
+    // must get its own entry instead of overwriting the first connection.
+    const index = entries.findIndex(item => (item as { id?: unknown }).id === merged.id);
+    const existing = index >= 0 ? entries[index] as Record<string, unknown> : undefined;
+    const sameConnection = existing
+      && existing.provider === input.providerId
+      && existing.baseUrl === input.baseUrl
+      && existing.credentialId === input.credentialId;
+    const id = existing && !sameConnection ? uniqueModelId(entries, merged.id, input.providerId) : merged.id;
     const entry = {
-      id: merged.id,
+      id,
+      modelId: merged.id,
       provider: input.providerId,
       grade: merged.grade,
       api: input.api,
@@ -136,8 +157,8 @@ export function buildTemplateConfigDocument(existing: unknown, input: TemplateSe
       maxTokens: merged.maxTokens,
       credentialId: input.credentialId,
     };
-    const index = entries.findIndex(item => (item as { id?: unknown }).id === merged.id);
-    if (index >= 0) entries[index] = entry;
+    if (existing && !sameConnection) entries.push(entry);
+    else if (index >= 0) entries[index] = entry;
     else entries.push(entry);
   }
   document.models = { ...models, entries };

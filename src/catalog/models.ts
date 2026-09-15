@@ -30,6 +30,9 @@ export interface ModelEntry {
   headers?: Record<string, string>;
   /** Credential binding from the daemon configuration; absent in legacy entries. */
   credentialId?: string;
+  /** Upstream model id sent to the provider when `id` is a local connection
+   * identity (same provider model id on two platforms must not overwrite). */
+  modelId?: string;
 }
 
 export function parseDefinitionVersion(value: string) {

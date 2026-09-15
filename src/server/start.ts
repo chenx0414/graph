@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
@@ -114,7 +114,14 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   }
   const config = options.configPath ? await loadGraphConfig(options.configPath) : emptyGraphConfig();
   const configStore = options.configPath ? await openConfigStore(options.configPath) : null;
-  const live: LiveConfig = createLiveConfig({ env: options.env, log, initial: { config, revision: configStore?.revision() ?? 0 } });
+  // Explicit revocations survive a restart: the APP may re-inject a keychain
+  // value into the environment, but a disabled connection must stay disabled.
+  const revokedPath = join(options.stateDir, 'revoked-secrets.json');
+  const revokedRefs = await readFile(revokedPath, 'utf8').then((text: string) => {
+    const parsed = JSON.parse(text) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((ref): ref is string => typeof ref === 'string') : [];
+  }).catch(() => [] as string[]);
+  const live: LiveConfig = createLiveConfig({ env: options.env, log, initial: { config, revision: configStore?.revision() ?? 0 }, revoked: revokedRefs });
   const entries = live.entries();
   const conflict = live.snapshot().conflict;
 
@@ -186,7 +193,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
         headers: anthropic
           ? { 'content-type': 'application/json', 'x-api-key': binding.apiKey, 'anthropic-version': '2023-06-01', ...entry.headers }
           : { 'content-type': 'application/json', authorization: `Bearer ${binding.apiKey}`, ...entry.headers },
-        body: JSON.stringify({ model: entry.id, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
+        body: JSON.stringify({ model: entry.modelId ?? entry.id, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
         signal: controller.signal,
       });
       const ok = response.status >= 200 && response.status < 300;
@@ -223,6 +230,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       credentialFor: entry => live.credentialFor(entry),
       masterModel: () => live.masterModel(),
       defaultBudgetTokens: () => live.defaultBudgetTokens(),
+      projects: () => live.projects(),
     },
     master: { action: 'master', definitionVersion: 'master@1', model: () => live.masterModel() },
     limits: { defaultBudgetTokens: live.defaultBudgetTokens() },
@@ -264,10 +272,24 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
 
   const applyConfig = async (document: unknown, expectedRevision: number): Promise<ApplyConfigResult> => {
     if (!configStore) throw new RuntimeError('invalid_config', 'The daemon was started without a configuration file');
-    const saved = await configStore.save(document, expectedRevision, options.env);
+    // Validate against the merged view (env + APP-pushed secrets - revoked
+    // refs) and approve the live candidate *before* touching the file.
+    const saved = await configStore.save(document, expectedRevision, options.env, (candidate, revision) => live.check(candidate, revision));
+    if (!saved.applied) {
+      return {
+        revision: saved.revision,
+        effectiveRevision: live.revision(),
+        applied: false,
+        ...(saved.reason ? { reason: saved.reason } : {}),
+        configured: live.enabled(),
+        modelCount: live.entries().length,
+        enabledModelCount: live.status().enabledModelCount,
+      };
+    }
     const result = live.apply(saved.config, saved.revision);
     if (result.applied) {
       await syncProviders();
+      server.runtime.host.syncProjects();
       scheduler.wake();
       publishDefinitions();
       activateDispatch(server);
@@ -287,6 +309,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     if (value !== null && (!value.trim() || value.length > 8_192)) throw new RuntimeError('invalid_input', 'A nonempty bounded secret value is required');
     const result = live.pushSecret(ref, value === null ? null : value.trim());
     if (result.applied) {
+      await writeFile(revokedPath, `${JSON.stringify(live.revoked(), null, 2)}\n`, { mode: 0o600 }).catch(() => undefined);
       await syncProviders();
       scheduler.wake();
       publishDefinitions();

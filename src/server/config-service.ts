@@ -48,7 +48,7 @@ export async function openConfigStore(path: string) {
       revision = current.revision;
       return { revision, config: await loadGraphConfig(path) };
     },
-    async save(document: unknown, expectedRevision: number, env?: Record<string, string | undefined>) {
+    async save(document: unknown, expectedRevision: number, env?: Record<string, string | undefined>, approve?: (config: GraphConfig, revision: number) => { applied: boolean; reason?: string | undefined }) {
       let lock;
       for (let attempt = 0; attempt < 40; attempt += 1) {
         try {
@@ -70,11 +70,18 @@ export async function openConfigStore(path: string) {
         // Resolvable credential conflicts must fail before the atomic replace,
         // so a bad save never leaves a config the daemon cannot start from.
         if (env) assertCredentialGroups(parsed, env);
+        // The live candidate is approved against the merged secret view before
+        // anything reaches disk: a rejected edit leaves both the file bytes
+        // and the effective revision at their previous values.
+        const verdict = approve?.(parsed, next.revision);
+        if (verdict && !verdict.applied) {
+          return { revision: current.revision, config: parsed, applied: false, ...(verdict.reason ? { reason: verdict.reason } : {}) };
+        }
         const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
         await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
         await rename(temporary, path);
         revision = next.revision;
-        return { revision, config: parsed };
+        return { revision, config: parsed, applied: true };
       } finally {
         await lock.close();
         await rm(lockPath, { force: true });

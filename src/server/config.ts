@@ -137,6 +137,9 @@ function parseModel(raw: unknown, path: string, credentials: Record<string, Cred
     contextWindow: positiveInt(entry.contextWindow, `${path}.contextWindow`),
     maxTokens: positiveInt(entry.maxTokens, `${path}.maxTokens`),
     credentialId,
+    // Provider-side model identity when the config identity differs (for
+    // example two platforms exposing the same upstream model id).
+    ...(entry.modelId !== undefined ? { modelId: asString(entry.modelId, `${path}.modelId`) } : {}),
     ...(entry.cost !== undefined ? { cost: asCost(entry.cost, `${path}.cost`) } : {}),
     ...(entry.pricing !== undefined ? { pricing: asPricing(entry.pricing, `${path}.pricing`) } : {}),
     ...(entry.headers !== undefined ? { headers: asHeaders(entry.headers, `${path}.headers`) } : {}),

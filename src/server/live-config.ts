@@ -42,16 +42,25 @@ export interface LiveConfig {
   /** Compute a candidate from the current secret view; a conflict keeps the
    * previous effective state and reports why instead of half-applying. */
   apply(config: GraphConfig, revision: number): ApplyResult;
-  /** APP-supplied secret values override the environment for the same ref. */
+  /** Dry-run of the same computation `apply` performs; never mutates state. */
+  check(config: GraphConfig, revision: number): ApplyResult;
+  /** APP-supplied secret values override the environment for the same ref.
+   * `null` marks the ref explicitly revoked: it must not fall back to env. */
   pushSecret(ref: string, value: string | null): ApplyResult;
   secrets(): Record<string, string>;
+  /** Refs explicitly revoked through the bridge; env values are ignored. */
+  revoked(): string[];
+  projects(): GraphConfig['projects'];
   snapshot(): LiveConfigState;
   subscribe(listener: () => void): () => void;
 }
 
-function mergedValue(config: GraphConfig, env: Record<string, string | undefined>, secrets: Record<string, string>, credentialId: string) {
+function mergedValue(config: GraphConfig, env: Record<string, string | undefined>, secrets: Record<string, string>, revoked: ReadonlySet<string>, credentialId: string) {
   const credential = config.credentials[credentialId];
   if (!credential) return undefined;
+  // An explicit revocation wins over both a pushed value and the environment:
+  // "no override" and "revoked" are different states.
+  if (revoked.has(credential.secretRef)) return { secretRef: credential.secretRef, value: undefined };
   const pushed = secrets[credential.secretRef];
   const fromEnv = env[credential.secretRef]?.trim();
   const value = pushed ?? (fromEnv || undefined);
@@ -60,10 +69,10 @@ function mergedValue(config: GraphConfig, env: Record<string, string | undefined
 
 /** Validate that aliases resolving to one actual key agree on their shared
  * group, using the same merged (pushed over env) secret view the runtime sees. */
-function groupConflict(config: GraphConfig, env: Record<string, string | undefined>, secrets: Record<string, string>) {
+function groupConflict(config: GraphConfig, env: Record<string, string | undefined>, secrets: Record<string, string>, revoked: ReadonlySet<string>) {
   const byValue = new Map<string, string[]>();
   for (const id of Object.keys(config.credentials)) {
-    const resolved = mergedValue(config, env, secrets, id);
+    const resolved = mergedValue(config, env, secrets, revoked, id);
     if (!resolved?.value) continue;
     byValue.set(resolved.value, [...(byValue.get(resolved.value) ?? []), id]);
   }
@@ -78,13 +87,13 @@ function groupConflict(config: GraphConfig, env: Record<string, string | undefin
   return undefined;
 }
 
-function compute(config: GraphConfig, revision: number, env: Record<string, string | undefined>, secrets: Record<string, string>): ApplyResult | { state: LiveConfigState } {
-  const conflict = groupConflict(config, env, secrets);
+function compute(config: GraphConfig, revision: number, env: Record<string, string | undefined>, secrets: Record<string, string>, revoked: ReadonlySet<string>): ApplyResult | { state: LiveConfigState } {
+  const conflict = groupConflict(config, env, secrets, revoked);
   if (conflict) return { applied: false, reason: conflict.message };
   const entries = config.models?.entries ?? [];
   const bySecretValue = new Map<string, string[]>();
   for (const id of Object.keys(config.credentials)) {
-    const resolved = mergedValue(config, env, secrets, id);
+    const resolved = mergedValue(config, env, secrets, revoked, id);
     if (!resolved?.value) continue;
     bySecretValue.set(resolved.value, [...(bySecretValue.get(resolved.value) ?? []), id]);
   }
@@ -105,7 +114,7 @@ function compute(config: GraphConfig, revision: number, env: Record<string, stri
   }
   const credentials = new Map<string, ResolvedCredential>();
   for (const entry of entries) {
-    const resolved = mergedValue(config, env, secrets, entry.credentialId);
+    const resolved = mergedValue(config, env, secrets, revoked, entry.credentialId);
     if (!resolved?.value) continue;
     const identity = identities.get(entry.credentialId);
     if (!identity) continue;
@@ -138,13 +147,14 @@ function isState(result: ApplyResult | { state: LiveConfigState }): result is { 
 
 /** Immutable-snapshot configuration owner for the daemon. A save either
  * activates a complete candidate or leaves the previous one effective. */
-export function createLiveConfig(options: { env: Record<string, string | undefined>; log?: (line: string) => void; initial: { config: GraphConfig; revision: number }; secrets?: Record<string, string> }): LiveConfig {
+export function createLiveConfig(options: { env: Record<string, string | undefined>; log?: (line: string) => void; initial: { config: GraphConfig; revision: number }; secrets?: Record<string, string>; revoked?: string[] }): LiveConfig {
   const env = options.env;
   const log = options.log ?? (() => {});
   let secrets = { ...(options.secrets ?? {}) };
+  const revoked = new Set(options.revoked ?? []);
   let state: LiveConfigState;
   const listeners = new Set<() => void>();
-  const initial = compute(options.initial.config, options.initial.revision, env, secrets);
+  const initial = compute(options.initial.config, options.initial.revision, env, secrets, revoked);
   state = isState(initial)
     ? initial.state
     : {
@@ -154,7 +164,7 @@ export function createLiveConfig(options: { env: Record<string, string | undefin
       };
   const notify = () => { for (const listener of [...listeners]) listener(); };
   const recompute = (config: GraphConfig, revision: number): ApplyResult => {
-    const candidate = compute(config, revision, env, secrets);
+    const candidate = compute(config, revision, env, secrets, revoked);
     if (!isState(candidate)) {
       // Keep the previous effective state; the caller reports the pending reason.
       log(`Configuration not applied: ${candidate.reason}`);
@@ -182,19 +192,27 @@ export function createLiveConfig(options: { env: Record<string, string | undefin
       limitAliases: state.limitAliases,
     }),
     apply: (config, revision) => recompute(config, revision),
+    check: (config, revision) => {
+      const candidate = compute(config, revision, env, secrets, revoked);
+      return isState(candidate) ? { applied: true } : { applied: false, reason: candidate.reason };
+    },
     pushSecret: (ref, value) => {
-      const previous = secrets[ref];
-      if (value === null || value === '') delete secrets[ref];
-      else secrets = { ...secrets, [ref]: value };
+      const previousSecret = secrets[ref];
+      const wasRevoked = revoked.has(ref);
+      if (value === null || value === '') { revoked.add(ref); delete secrets[ref]; }
+      else { revoked.delete(ref); secrets = { ...secrets, [ref]: value }; }
       const result = recompute(state.config, state.revision);
       if (!result.applied) {
-        // The push must not corrupt the effective binding; restore the previous value.
-        if (previous === undefined) delete secrets[ref];
-        else secrets = { ...secrets, [ref]: previous };
+        // The push must not corrupt the effective binding; restore the previous view.
+        if (wasRevoked) revoked.add(ref); else revoked.delete(ref);
+        if (previousSecret === undefined) delete secrets[ref];
+        else secrets = { ...secrets, [ref]: previousSecret };
       }
       return result;
     },
     secrets: () => ({ ...secrets }),
+    revoked: () => [...revoked],
+    projects: () => state.config.projects ?? [],
     snapshot: () => state,
     subscribe(listener) {
       listeners.add(listener);

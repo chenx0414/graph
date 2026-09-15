@@ -220,7 +220,8 @@ if (!app.requestSingleInstanceLock()) {
         encryptString: input => safeStorage.encryptString(input),
         decryptString: input => safeStorage.decryptString(input),
       };
-      secrets[ref] = value.trim();
+      if (value === null) delete secrets[ref];
+      else secrets[ref] = value.trim();
       const stored = saveSecrets(secretsPath, codec, secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
       let applied = false;
       let message;
@@ -232,7 +233,7 @@ if (!app.requestSingleInstanceLock()) {
           const response = await fetch(`${readyUrl}/api/app/secret`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', 'x-graph-app-token': token, origin: readyUrl },
-            body: JSON.stringify({ ref, value: value.trim() }),
+            body: JSON.stringify({ ref, value: value === null ? null : value.trim() }),
           });
           const body = await response.json().catch(() => ({}));
           applied = response.ok && body.applied === true;

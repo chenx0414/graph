@@ -30,7 +30,7 @@ export interface PiAdapterChannels {
 
 function toPiModel(entry: ModelEntry): Model<ModelApi> {
   return {
-    id: entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
+    id: entry.modelId ?? entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
     reasoning: false, input: ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
     // Pi's Model.cost is required numeric metadata; Graph billing uses catalog cost, never this placeholder.
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

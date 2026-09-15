@@ -46,8 +46,8 @@ export async function openTaskRuntime(options: {
    * cumulative token cap; a positive integer keeps the finite-budget gate. */
   limits?: { defaultBudgetTokens?: number | null };
   /** Hot-reloadable configuration view. When present, entries, preferences,
-   * credential bindings, master model and default budget are read per use
-   * instead of from the static `models` option captured at startup. */
+   * credential bindings, master model, projects and default budget are read
+   * per use instead of from the static options captured at startup. */
   live?: {
     revision(): number;
     entries(): ModelEntry[];
@@ -55,6 +55,7 @@ export async function openTaskRuntime(options: {
     credentialFor(entry: ModelEntry): { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
     masterModel(): string | undefined;
     defaultBudgetTokens(): number | null;
+    projects?(): ProjectConfig[];
   };
   /** Host-selected grants and environment for confirmed program checks only. */
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
@@ -85,15 +86,18 @@ export async function openTaskRuntime(options: {
   const modelScheduler: ModelScheduler = options.models?.modelScheduler ? options.models.modelScheduler : createModelScheduler();
   // The current configuration is the source of truth for what can be started;
   // persisted projects stay for history but cannot receive new tasks after
-  // they are removed from the config.
-  const configuredProjects = options.projects;
-  const allowedProjects = new Set((configuredProjects ?? []).map(project => project.id));
+  // they are removed from the config. A hot apply updates this view in the
+  // same process, so the wizard does not need a restart.
+  const configuredProjects = (): ProjectConfig[] | undefined => options.live?.projects ? options.live.projects() : options.projects;
+  const allowedProjects = () => new Set((configuredProjects() ?? []).map(project => project.id));
   // Live getters: hot configuration changes must affect the next use without
   // reopening the runtime; static options remain for unit tests.
   const liveEntries = () => options.live?.entries() ?? options.models?.entries ?? [];
   const livePreferences = (): Partial<Record<ModelEntry['grade'], string[]>> | undefined =>
     options.live ? options.live.preferences() : options.models?.preferences;
-  const liveBudget = () => options.live?.defaultBudgetTokens() ?? options.limits?.defaultBudgetTokens ?? null;
+  // `null` is the legitimate unlimited default: it must never fall back to a
+  // stale finite startup value when live configuration is present.
+  const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : options.limits?.defaultBudgetTokens ?? null;
   const masterModel = () => {
     const master = options.master;
     if (!master) return undefined;
@@ -115,7 +119,7 @@ export async function openTaskRuntime(options: {
         // A task whose project was removed from the configuration keeps its
         // history but is not brought back to life. Conversation workspaces
         // are host-owned and stay addressable.
-        .filter(task => task.phase === 'chatting' || configuredProjects === undefined || allowedProjects.has(task.project_id));
+        .filter(task => task.phase === 'chatting' || configuredProjects() === undefined || allowedProjects().has(task.project_id));
       let created = 0;
       for (const task of pending) {
         const nodes = store.db.prepare('SELECT spec FROM nodes WHERE task_id=?').all(task.id) as { spec: string }[];
@@ -135,7 +139,7 @@ export async function openTaskRuntime(options: {
       throw new RuntimeError('invalid_input', 'limits.defaultBudgetTokens must be a positive integer or null');
     }
     store.transaction(() => {
-      for (const project of options.projects ?? []) {
+      for (const project of options.live?.projects ? options.live.projects() : options.projects ?? []) {
         if (!project.id.trim() || !project.root.trim() || project.grants?.some(grant => typeof grant !== 'string' || !grant.trim())) throw new RuntimeError('invalid_input', 'Project identity, root and grants must be nonempty strings');
         const root = resolve(project.root);
         const grants = canonicalJson([...new Set(project.grants ?? [])].sort());
@@ -208,7 +212,7 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       return store.command('user', input.requestId, { type: 'begin', projectId: input.projectId, request: input.request }, () => {
         if (!input.request.trim() || !store.db.prepare('SELECT id FROM projects WHERE id=?').get(input.projectId)) throw new RuntimeError('invalid_input', 'A known project and nonempty request are required');
-        if (configuredProjects !== undefined && !allowedProjects.has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
+        if (configuredProjects() !== undefined && !allowedProjects().has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
         const taskId = randomUUID();
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         store.db.prepare('INSERT INTO tasks(id,project_id,request,created_seq) VALUES(?,?,?,?)').run(taskId, input.projectId, input.request, sequence);
@@ -415,8 +419,9 @@ export async function openTaskRuntime(options: {
     async projects() {
       ensureOpen();
       const withPreparation = <T extends { id: string }>(project: T) => ({ ...project, preparation: git.preparation(project.id) });
-      if (configuredProjects !== undefined) {
-        return configuredProjects.map(project => withPreparation({ id: project.id, root: resolve(project.root), grants: [...new Set(project.grants ?? [])].sort() }));
+      const configured = configuredProjects();
+      if (configured !== undefined) {
+        return configured.map(project => withPreparation({ id: project.id, root: resolve(project.root), grants: [...new Set(project.grants ?? [])].sort() }));
       }
       return (store.db.prepare('SELECT id,root,grants FROM projects ORDER BY id').all() as { id: string; root: string; grants: string }[])
         .map(row => withPreparation({ id: row.id, root: row.root, grants: JSON.parse(row.grants) as string[] }));
@@ -452,7 +457,7 @@ export async function openTaskRuntime(options: {
         let workspaceProjectId: string;
         if (projectId !== null) {
           if (!store.db.prepare('SELECT id FROM projects WHERE id=?').get(projectId)) throw new RuntimeError('invalid_input', 'A known project is required');
-          if (configuredProjects !== undefined && !allowedProjects.has(projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
+          if (configuredProjects() !== undefined && !allowedProjects().has(projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
           workspaceProjectId = projectId;
         } else {
           // The host-owned scratch workspace keeps an unbound conversation on
@@ -565,7 +570,7 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       if (!store.db.prepare('SELECT id FROM projects WHERE id=?').get(input.projectId)) throw new RuntimeError('invalid_input', 'A known project is required');
-      if (configuredProjects !== undefined && !allowedProjects.has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
+      if (configuredProjects() !== undefined && !allowedProjects().has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
       // Investigation binds to a Git-ready project: plain directories are
       // initialized here, dirty repositories stop with an explicit reason.
       git.requirePrepared(input.projectId);
@@ -712,6 +717,8 @@ export async function openTaskRuntime(options: {
     projects: {
       async prepare(input: { projectId: string; requestId: string; initialize?: boolean; createBaseline?: boolean }) {
         ensureOpen();
+        const configured = configuredProjects();
+        if (configured !== undefined && !allowedProjects().has(input.projectId)) throw new RuntimeError('invalid_input', 'The project is no longer part of the current configuration');
         const payload = { type: 'prepare', projectId: input.projectId, initialize: input.initialize ?? true, createBaseline: input.createBaseline ?? false };
         const encoded = canonicalJson(payload);
         const previous = store.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get('projects', input.requestId) as { payload: string; receipt: string } | undefined;
@@ -759,6 +766,30 @@ export async function openTaskRuntime(options: {
     conversations,
     host: {
       async runReady() { ensureOpen(); return execution.runReady(); },
+      /** Register hot-added projects and reject root moves while tasks are in
+       * flight. Removed projects keep their history but lose new dispatch. */
+      syncProjects() {
+        ensureOpen();
+        const configured = configuredProjects();
+        if (!configured) return;
+        store.transaction(() => {
+          for (const project of configured) {
+            if (!project.id.trim() || !project.root.trim()) throw new RuntimeError('invalid_input', 'Project identity and root must be nonempty strings');
+            const root = resolve(project.root);
+            const grants = canonicalJson([...new Set(project.grants ?? [])].sort());
+            const previous = store.db.prepare('SELECT root FROM projects WHERE id=?').get(project.id) as { root: string } | undefined;
+            if (!previous) {
+              store.db.prepare('INSERT INTO projects VALUES(?,?,?)').run(project.id, root, grants);
+              continue;
+            }
+            if (previous.root !== root) {
+              const active = (store.db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id=? AND phase IN ('discussing','running','queued')").get(project.id) as { count: number }).count;
+              if (active) throw new RuntimeError('project_conflict', `Project ${project.id} has tasks in flight; its root cannot change until they finish`);
+              store.db.prepare('UPDATE projects SET root=? WHERE id=?').run(root, project.id);
+            }
+          }
+        });
+      },
       async drive() { ensureOpen(); return execution.drive(); },
       async report(id: string, generation: number, result: OperationResult) { ensureOpen(); execution.report(id, generation, result); },
       async reconcile(id: string) { ensureOpen(); await execution.reconcile(id); },
