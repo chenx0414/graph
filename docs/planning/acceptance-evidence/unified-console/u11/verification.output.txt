@@ -1,0 +1,14 @@
+=== U11 final dc3b5c57d481c4148b8dc960ff6b592100d68c68 2026年 9月15日 星期二 09时15分46秒 CST node=v24.20.0 ===
+tsc main rc=0
+tsc web rc=0
+✓ built in 75ms
+run1
+      Tests  329 passed (329)
+   Start at  09:15:47
+   Duration  38.51s (tests 85%, import 14%, transform 1%)
+
+run2
+      Tests  329 passed (329)
+   Start at  09:16:26
+   Duration  38.15s (tests 86%, import 14%, transform 1%)
+
