@@ -5,7 +5,7 @@ import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json, type NodeSpec, type Operation } from '../core/types.ts';
 import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
-  abortMerge, commitAll, commitBaseline, detectRepo, ensureWorktree, fastForwardCheckout, git,
+  abortMerge, commitAll, commitBaseline, detectRepo, directoryFingerprint, ensureWorktree, fastForwardCheckout, git,
   hasHead, initRepo, isClean, mergeRef, pathInside, repoFingerprint, resetHard, revParse, scopedDirty, updateRef, worktreeList,
   checkedOutBranch,
 } from './git.ts';
@@ -150,7 +150,9 @@ export class GitIntegration {
     if (!project) return null;
     const root = (() => { try { return realpathSync(resolve(project.root)); } catch { return resolve(project.root); } })();
     const repo = detectRepo(root);
-    if (!repo) return null;
+    // A plain directory still gets a meaningful content fingerprint: crash
+    // recovery must not treat "no repository" as "unchanged".
+    if (!repo) return directoryFingerprint(root, { stateDir: this.stateDir });
     const subdir = relative(repo, root).split(sep).join('/').replace(/^\.$/, '');
     return repoFingerprint(repo, { subdir, stateDir: this.stateDir });
   }

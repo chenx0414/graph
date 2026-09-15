@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import { appendNodeEntry, listNodeEntries } from '../../src/core/node-run.ts';
+import { appendNodeEntry, listNodeEntries, nodeRun } from '../../src/core/node-run.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -227,3 +227,22 @@ test('the node detail API serves the projection over HTTP', async () => {
   const missing = await fetch(`${server.url}/api/tasks/${taskId}/nodes/nope/run`, { headers });
   expect(missing.status).toBe(400);
 }, 120_000);
+
+test('a terminal node is not in progress because of a historical not_sent attempt (UC-R13-R1)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-node-timing-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  store.transaction(() => {
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('t','p','timing',1,'running')").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,status,activation_id,output_version,stall_count) VALUES('t','work','{\"id\":\"work\",\"kind\":\"agent\",\"action\":\"work\"}','succeeded','act',1,0)").run();
+    const insert = store.db.prepare(`INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,worker_active,result,usage,activation_id,dispatched_at,settled_at,waiting_ms)
+      VALUES(?,?,?,?,0,'{}',?,0,?,?,NULL,'act',?,?,0)`);
+    insert.run('o1', 't', 'work', null, 'not_sent', 0, '{}', 1_000, 1_000);
+    insert.run('o2', 't', 'work', null, 'succeeded', 0, '{}', 1_000, 2_000);
+  });
+  const view = nodeRun(store, 't', 'work');
+  expect(view.operations).toHaveLength(2);
+  expect(view.timing).toMatchObject({ inProgress: false, totalMs: 1_000, runMs: 1_000 });
+});

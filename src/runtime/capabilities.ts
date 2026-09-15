@@ -245,8 +245,22 @@ export async function loadCapabilities(input: {
         authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };
         connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? []);
       }
-      tools.push(...capabilityTools(connection, await listMcpTools(connection), bound, authorization));
-      report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: true, reason: loadedReason });
+      const discovered = await listMcpTools(connection);
+      tools.push(...capabilityTools(connection, discovered, bound, authorization));
+      // "Loaded" is discovery; "executable" needs the actual task grants.
+      // Reporting true without them would contradict the permission gate.
+      let executable = true;
+      let grantReason: string | null = null;
+      if (authorization && discovered.length) {
+        const granted = discovered.filter(tool => authorization.grants.includes(mcpGrant(bound.id, tool.name)));
+        executable = granted.length > 0;
+        if (!granted.length) grantReason = `已加载 ${discovered.length} 个工具，当前无任务授权（例如 ${mcpGrant(bound.id, discovered[0]!.name)}），调用会被权限门拒绝`;
+        else if (granted.length < discovered.length) grantReason = `已加载 ${discovered.length} 个工具，其中 ${granted.length} 个获授权，其余调用会被权限门拒绝`;
+      } else if (authorization && !discovered.length) {
+        executable = false;
+        grantReason = '能力已连接但没有可调用工具';
+      }
+      report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable, reason: grantReason ?? loadedReason });
     }
   } catch (error) {
     await close();

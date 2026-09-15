@@ -296,7 +296,16 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   publishDefinitions();
   if (presetsAvailable) log(`Presets: ${presetResult.installed.length} installed, ${presetResult.skipped.length} unchanged${presetResult.failed.length ? `, ${presetResult.failed.length} failed` : ''}.`);
 
-  const applyConfig = async (document: unknown, expectedRevision: number): Promise<ApplyConfigResult> => {
+  // Configuration/secret changes must be serialized as a whole (read the
+  // current revocation view, validate, persist, activate/rollback): two
+  // concurrent revocations previously overwrote each other's persisted refs.
+  let configQueue: Promise<unknown> = Promise.resolve();
+  const serialized = <T>(action: () => Promise<T>): Promise<T> => {
+    const run = configQueue.then(action, action);
+    configQueue = run.then(() => undefined, () => undefined);
+    return run;
+  };
+  const applyConfigNow = async (document: unknown, expectedRevision: number): Promise<ApplyConfigResult> => {
     if (!configStore) throw new RuntimeError('invalid_config', 'The daemon was started without a configuration file');
     // Validate against the merged view (env + APP-pushed secrets - revoked
     // refs) and approve the live candidate *before* touching the file.
@@ -341,7 +350,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       enabledModelCount: live.status().enabledModelCount,
     };
   };
-  const pushSecret = async (ref: string, value: string | null): Promise<ApplyConfigResult> => {
+  const pushSecretNow = async (ref: string, value: string | null): Promise<ApplyConfigResult> => {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) throw new RuntimeError('invalid_input', 'secretRef must be an environment variable name');
     if (value !== null && (!value.trim() || value.length > 8_192)) throw new RuntimeError('invalid_input', 'A nonempty bounded secret value is required');
     const revoking = value === null || value.trim() === '';
@@ -379,6 +388,9 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       enabledModelCount: live.status().enabledModelCount,
     };
   };
+
+  const applyConfig = (document: unknown, expectedRevision: number) => serialized(() => applyConfigNow(document, expectedRevision));
+  const pushSecret = (ref: string, value: string | null) => serialized(() => pushSecretNow(ref, value));
 
   return {
     url: server.url,

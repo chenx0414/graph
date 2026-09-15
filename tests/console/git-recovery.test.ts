@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -96,5 +97,26 @@ test('crash before the commit with an unchanged worktree replays exactly once (U
   const op = db.db.prepare("SELECT state,result FROM git_ops WHERE id='intent-crash'").get() as { state: string; result: string };
   expect(op.state).toBe('succeeded');
   expect(JSON.parse(op.result)).toMatchObject({ reconciled: true });
+  db.close();
+}, 60_000);
+
+test('a plain-directory intent without usable evidence is unresolved, never replayed (UC-S04-R2)', async () => {
+  const root = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'graph-recovery-plain-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await (await import('node:fs/promises')).mkdir(project, { recursive: true });
+  await writeFile(join(project, 'app.txt'), 'authorized\n');
+  const stateDir = join(root, 'state');
+  // Old-style intent: no head and no directory fingerprint (null == null must
+  // not be accepted as proof that the selected files are unchanged).
+  insertIntent(stateDir, { payload: { type: 'prepare', projectId: 'p', initialize: true, createBaseline: true }, requestId: 'crash-plain', headBefore: null, fingerprintBefore: null });
+  await writeFile(join(project, 'app.txt'), 'new unapproved content after crash\n');
+  const runtime = await openTaskRuntime({ stateDir, projects: [{ id: 'p', root: project }], actions: {} });
+  cleanup.push(() => runtime.close());
+  expect(existsSync(join(project, '.git'))).toBe(false);
+  const db = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  const op = db.db.prepare("SELECT state,result FROM git_ops WHERE id='intent-crash'").get() as { state: string; result: string };
+  expect(op.state).toBe('unresolved');
+  expect(JSON.parse(op.result).reason).toMatch(/changed|attributed/);
   db.close();
 }, 60_000);

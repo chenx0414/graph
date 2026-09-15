@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 function real(path: string) {
@@ -183,6 +183,33 @@ export function repoFingerprint(repo: string, options: { subdir?: string; stateD
   return createHash('sha256')
     .update(`head=${revParse(repo, 'HEAD') ?? ''}\nbranch=${checkedOutBranch(repo) ?? ''}\nstatus=${status}\nblobs=${hashes}`)
     .digest('hex');
+}
+
+/** Content fingerprint for a directory that is not (yet) a Git repository:
+ * recovery must prove the selected files are unchanged, never null==null. */
+export function directoryFingerprint(root: string, options: { stateDir?: string } = {}) {
+  const stateRel = options.stateDir && pathInside(root, options.stateDir)
+    ? relative(root, real(options.stateDir)).split(sep).join('/')
+    : null;
+  const hash = createHash('sha256');
+  let count = 0;
+  const walk = (dir: string, base: string) => {
+    if (count > 5_000) return;
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      const rel = base ? `${base}/${entry.name}` : entry.name;
+      if (baselineExcluded(rel, stateRel)) continue;
+      if (entry.isDirectory()) { walk(join(dir, entry.name), rel); continue; }
+      if (!entry.isFile()) continue;
+      count += 1;
+      hash.update(rel).update('\0');
+      try { hash.update(readFileSync(join(dir, entry.name))); } catch { hash.update('unreadable'); }
+      hash.update('\0');
+    }
+  };
+  walk(root, '');
+  return `dir:${count}:${hash.digest('hex')}`;
 }
 
 export function initRepo(root: string) {

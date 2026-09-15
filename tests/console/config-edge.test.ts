@@ -326,3 +326,26 @@ test('aliases sharing one upstream model cannot act as an independent reviewer (
   // Only aliases of the implementer model: no independent reviewer exists.
   expect(selectModel({ grade: 'high', directory: [writer, alias], exclude: ['same-upstream'] })).toBeUndefined();
 }, 30_000);
+
+test('concurrent revocations of two connections persist both refs (UC-R09-R2)', async () => {
+  const { daemon, api, stateDir, configPath, env, token } = await fixture('revoke-concurrent', {
+    document: {
+      models: { entries: [modelEntry('http://127.0.0.1:9', { id: 'm1', provider: 'graph-openai-a', credentialId: 'c1' }), modelEntry('http://127.0.0.1:9', { id: 'm2', provider: 'graph-openai-b', credentialId: 'c2' })] },
+      credentials: { c1: { secretRef: 'KEY_A' }, c2: { secretRef: 'KEY_B' } },
+    },
+    env: { KEY_A: 'key-a', KEY_B: 'key-b' },
+  });
+  const bridge = (ref: string) => fetch(`${daemon.url}/api/app/secret`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-graph-app-token': token, origin: daemon.url },
+    body: JSON.stringify({ ref, value: null }),
+  }).then(response => response.json() as Promise<Record<string, unknown>>);
+  const results = await Promise.all([bridge('KEY_A'), bridge('KEY_B')]);
+  expect(results.every(result => result.applied === true)).toBe(true);
+  expect(JSON.parse(await readFile(join(stateDir, 'revoked-secrets.json'), 'utf8'))).toEqual(['KEY_A', 'KEY_B']);
+  await daemon.close();
+  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
+  cleanup.push(() => restarted.close());
+  const restartedSession = await session(restarted.url);
+  const startup = await (await fetch(`${restarted.url}/api/startup`, { headers: restartedSession.headers })).json() as { enabledModelCount: number };
+  expect(startup.enabledModelCount).toBe(0);
+}, 30_000);

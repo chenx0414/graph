@@ -159,17 +159,15 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
     .map(row => ({ acceptanceId: row.acceptance_id, valid: Boolean(row.valid), commitSha: row.commit_sha }));
   const page = listNodeEntries(store, taskId, nodeId, query);
   // Time segments come from authoritative state timestamps, never from the
-  // message span: 总历时 = first dispatch -> final settlement; run and
-  // credential waiting are summed per operation; pause/user-wait are not
-  // recorded yet and must stay "not recorded" rather than inferred.
-  const dispatched = operations.map(operation => operation.dispatchedAt).filter((value): value is number => value !== null);
-  const settledTimes = operations.map(operation => operation.settledAt).filter((value): value is number => value !== null);
-  const inProgress = operations.some(operation => operation.dispatchedAt !== null && operation.settledAt === null);
+  // message span. "Still running" is a property of the current lifecycle:
+  // a terminal node is never in progress because of a historical attempt.
+  const nodeTerminal = ['succeeded', 'skipped', 'retired', 'failed'].includes(node.status);
+  const active = operations.filter(operation => operation.workerActive || ['dispatched', 'running'].includes(operation.state));
+  const inProgress = !nodeTerminal && active.length > 0;
+  const settled = operations.filter(operation => operation.dispatchedAt !== null && operation.settledAt !== null);
   const timing = {
-    totalMs: dispatched.length && !inProgress && settledTimes.length === operations.length
-      ? Math.max(0, Math.max(...settledTimes) - Math.min(...dispatched))
-      : null,
-    runMs: operations.length && !inProgress ? operations.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0) : null,
+    totalMs: settled.length ? Math.max(0, Math.max(...settled.map(operation => operation.settledAt!)) - Math.min(...settled.map(operation => operation.dispatchedAt!))) : null,
+    runMs: settled.length ? settled.reduce((sum, operation) => sum + (operation.runMs ?? 0), 0) : null,
     waitingMs: operations.reduce((sum, operation) => sum + operation.waitingMs, 0),
     pauseMs: null as number | null,
     userWaitMs: null as number | null,

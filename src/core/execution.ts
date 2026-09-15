@@ -8,7 +8,7 @@ import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
-import { modelIdentity as upstreamIdentity, estimateCost, selectModel, type ModelEntry } from '../catalog/models.ts';
+import { estimateCost, selectModel, type ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
 import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
@@ -47,7 +47,7 @@ export class Execution {
       const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
       for (const row of store.db.prepare("SELECT * FROM operations WHERE state IN ('intent','dispatched')").all() as OperationRow[]) {
         if (row.state === 'intent') {
-          store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0,waiting_slot=0 WHERE id=?").run(row.id);
+          store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?) WHERE id=?").run(Date.now(), row.id);
           store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
           store.event(row.task_id, 'operation.not_sent', { operationId: row.id, reason: 'Recovered before dispatch' });
         } else {
@@ -105,7 +105,7 @@ export class Execution {
           this.settle(operation, evidence.result);
         } else if (evidence.state === 'not_started') {
           if (!evidence.quiescent || current.result) throw new RuntimeError('invalid_reconciliation', 'Cannot retry an operation with a known result or a live worker');
-          this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0 WHERE id=?").run(id);
+          this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,worker_active=0,settled_at=COALESCE(settled_at,?) WHERE id=?").run(Date.now(), id);
           this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'").run(canonicalJson(evidence), id);
           this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(operation.taskId, operation.nodeId);
         } else {
@@ -343,18 +343,6 @@ export class Execution {
     return selectModel({ ...(spec.model ? { requested: spec.model } : {}), grade: definition.recommendedGrade, directory, ...(preferences ? { preferences } : {}), ...(exclude.length ? { exclude } : {}) });
   }
 
-  /** Map a stored config model id to its upstream identity, using the live
-   * directory first and the persisted snapshot for models since removed. */
-  private modelIdentity(id: string) {
-    const entry = this.models?.().find(model => model.id === id);
-    if (entry) return upstreamIdentity(entry);
-    const row = this.store.db.prepare('SELECT data FROM models WHERE id=?').get(id) as { data: string } | undefined;
-    if (row) {
-      try { return upstreamIdentity(JSON.parse(row.data) as ModelEntry); } catch { /* fall through */ }
-    }
-    return id;
-  }
-
   private implementerModels(spec: NodeSpec, node: NodeRow) {
     const graph = loadGraph(this.store, node.task_id);
     const models: string[] = [];
@@ -369,10 +357,20 @@ export class Execution {
       const target = graph.plan.nodes.get(id);
       if (!target) return;
       if (target.kind === 'agent') {
+        // The frozen identity of every actual provider call is the invocation
+        // row written at dispatch time (the wire model id). Interpreting
+        // historical config ids against the *current* directory would let a hot
+        // configuration change rewrite what the implementer actually used.
+        const calls = this.store.db.prepare(`SELECT DISTINCT i.model AS model FROM invocations i JOIN operations o ON o.id=i.operation_id
+          WHERE o.task_id=? AND o.node_id=? AND i.model IS NOT NULL`).all(node.task_id, id) as { model: string }[];
+        if (calls.length) {
+          models.push(...calls.map(call => call.model));
+          return;
+        }
+        // Legacy instances created before any invocation (setup failure) fall
+        // back to the recorded connection ids, still never re-mapped live.
         const row = this.store.db.prepare('SELECT models_used FROM instances WHERE task_id=? AND node_id=?').get(node.task_id, id) as { models_used: string } | undefined;
-        // History stores the config connection id; independence is enforced on
-        // the underlying upstream model, so aliases can never bypass review.
-        if (row) models.push(...(JSON.parse(row.models_used) as string[]).map(modelId => this.modelIdentity(modelId)));
+        if (row) models.push(...(JSON.parse(row.models_used) as string[]));
         return;
       }
       for (const dependency of graph.plan.dependencies.get(id) ?? []) walk(dependency);
@@ -454,6 +452,14 @@ export class Execution {
         return false;
       }
       this.store.db.prepare('UPDATE instances SET model=?,definition_version=? WHERE id=?').run(selected.id, spec.definitionVersion ?? null, node.instance_id);
+      // Freeze the underlying identity at selection time: scripted/local
+      // adapters create no invocation rows, yet review independence still
+      // needs the model this implementer was actually bound to. Later config
+      // edits must never rewrite this record.
+      const identity = selected.modelId ?? selected.id;
+      const account = this.store.db.prepare('SELECT models_used FROM instances WHERE id=?').get(node.instance_id) as { models_used: string };
+      const usedModels = JSON.parse(account.models_used) as string[];
+      if (!usedModels.includes(identity)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...usedModels, identity]), node.instance_id);
       if (spec.model && spec.model !== selected.id) this.store.event(node.task_id, 'model.switched', { nodeId: node.id, from: spec.model, to: selected.id, instanceId: node.instance_id });
     }
     const baseGrants = JSON.parse((this.store.db.prepare('SELECT grants FROM projects WHERE id=?').get(this.store.task(node.task_id).project_id) as { grants: string }).grants) as string[];
@@ -563,7 +569,7 @@ export class Execution {
       if (typeof dispatch !== 'function') throw new RuntimeError('invalid_adapter', 'prepare must return a dispatch callback');
     } catch (error) {
       this.store.transaction(() => {
-        this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0 WHERE id=?").run(operation.id);
+        this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,settled_at=COALESCE(settled_at,?) WHERE id=?").run(Date.now(), operation.id);
         releaseMessages(this.store, operation.id);
         this.block(node, 'adapter_error', { reason: String(error) }, operation.id);
       });
@@ -571,7 +577,7 @@ export class Execution {
     }
     if (this.stopping || this.store.task(node.task_id).paused) {
       this.store.transaction(() => {
-        this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0 WHERE id=?").run(operation.id);
+        this.store.db.prepare("UPDATE operations SET state='not_sent',reserved=0,settled_at=COALESCE(settled_at,?) WHERE id=?").run(Date.now(), operation.id);
         this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(node.task_id, node.id);
         releaseMessages(this.store, operation.id);
         this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id });
@@ -617,7 +623,7 @@ export class Execution {
           const unknown = known.some(value => value === null);
           const total = known.reduce((sum, value) => sum + (value ? value.input + value.output + value.cacheRead + value.cacheWrite : 0), 0);
           const state = invocations.length ? 'interrupted' : 'not_sent';
-          this.store.db.prepare('UPDATE operations SET state=?,reserved=0,worker_active=0,waiting_slot=0 WHERE id=?').run(state, operation.id);
+          this.store.db.prepare('UPDATE operations SET state=?,reserved=0,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?) WHERE id=?').run(state, Date.now(), operation.id);
           if (state === 'interrupted') {
             if (!unknown && total > 0 && operation.instanceId) {
               this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instanceId);
