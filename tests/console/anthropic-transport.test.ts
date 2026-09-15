@@ -122,12 +122,19 @@ test('provider templates only use verified transports and never invent zero pric
     expect(['openai-completions', 'anthropic-messages']).toContain(template.api);
     for (const model of template.models) {
       expect(model.contextWindow).toBeGreaterThan(model.maxTokens);
+      // A price exists only together with its provenance; an unverified model
+      // stays unknown instead of being zero-filled.
       if (!model.cost) expect(model.pricing).toBeUndefined();
-      if (model.cost) expect(model.cost.input + model.cost.output).toBeGreaterThan(0);
+      if (model.cost) {
+        expect(model.pricing?.sourceUrl).toMatch(/^https:\/\//);
+        expect(model.pricing?.retrievedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(model.cost.input + model.cost.output).toBeGreaterThan(0);
+      }
     }
   }
   const entry = templateModelEntry(providerTemplate('anthropic')!, providerTemplate('anthropic')!.models[0]!, 'anthropic-key');
   expect(entry).toMatchObject({ api: 'anthropic-messages', provider: 'anthropic', credentialId: 'anthropic-key' });
-  expect(entry.cost).toBeUndefined();
-  expect(entry.pricing).toBeUndefined();
+  // The first Anthropic template model now ships the archived 2026-09-15 snapshot.
+  expect(entry.cost).toMatchObject({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 });
+  expect(entry.pricing).toMatchObject({ currency: 'USD', status: 'known', retrievedAt: '2026-09-15', sourceUrl: 'https://www.anthropic.com/pricing' });
 });

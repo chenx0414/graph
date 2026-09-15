@@ -10,6 +10,7 @@ import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type Config
 import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
 import { installPresets } from '../catalog/presets.ts';
+import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
 
@@ -27,6 +28,8 @@ export interface DaemonOptions {
   dynamic?: boolean;
   /** Built-in preset pack directory; defaults to the repository `presets/`. */
   presetsDir?: string;
+  /** Re-verification hook for a price refresh; tests inject a deterministic one. */
+  priceVerify?: (snapshot: PriceSnapshot) => boolean;
 }
 
 export interface ApplyConfigResult {
@@ -54,6 +57,8 @@ export interface GraphDaemon {
   server: Awaited<ReturnType<typeof openGraphServer>>;
   applyConfig(document: unknown, expectedRevision: number): Promise<ApplyConfigResult>;
   pushSecret(ref: string, value: string | null): Promise<ApplyConfigResult>;
+  /** Explicit archived-price refresh (C01); failure keeps old values as stale. */
+  refreshPrices(expectedRevision: number): Promise<ApplyConfigResult & { results: PriceRefreshResult[] }>;
   close(): Promise<void>;
 }
 
@@ -273,6 +278,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
       pushSecret: (ref, value) => pushSecret(ref, value),
+      refreshPrices: (expectedRevision: number) => refreshPrices(expectedRevision),
       appToken,
       snapshot: () => ({
         revision: live.revision(), effectiveRevision: live.revision(), applied: true,
@@ -389,8 +395,44 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     };
   };
 
+  /** Verify an archived price entry by fetching its official page and checking
+   * the model id is still mentioned. Network/parse failures are a verification
+   * failure, never a silent re-stamp. */
+  const defaultPriceVerify = async (snapshot: PriceSnapshot): Promise<boolean> => {
+    try {
+      const response = await fetch(snapshot.sourceUrl, { signal: AbortSignal.timeout(15_000), headers: { 'user-agent': 'graph-price-refresh/1' } });
+      if (!response.ok) return false;
+      const text = await response.text();
+      return text.includes(snapshot.modelId);
+    } catch {
+      return false;
+    }
+  };
+
+  const refreshPricesNow = async (expectedRevision: number): Promise<ApplyConfigResult & { results: PriceRefreshResult[] }> => {
+    if (!configStore || !config.path) throw new RuntimeError('invalid_config', 'The daemon was started without a configuration file');
+    const raw = JSON.parse(await readFile(config.path, 'utf8')) as unknown;
+    // Resolve every archived entry before mutating the document: an
+    // unverifiable entry keeps its old amount and is marked stale.
+    const verify = options.priceVerify ?? defaultPriceVerify;
+    const decisions = new Map<string, boolean>();
+    for (const snapshot of PRICE_SNAPSHOT) {
+      decisions.set(`${snapshot.provider}:${snapshot.modelId}`, Boolean(await verify(snapshot)));
+    }
+    const retrievedAt = new Date().toISOString().slice(0, 10);
+    const { document, results } = applyPriceSnapshot(raw, {
+      verify: snapshot => decisions.get(`${snapshot.provider}:${snapshot.modelId}`) ?? false,
+      revision: `${PRICE_SNAPSHOT_BASE}.refresh.${retrievedAt}`,
+      retrievedAt,
+    });
+    const applied = await applyConfigNow(document, expectedRevision);
+    // A rejected candidate must not look like a successful refresh.
+    return applied.applied ? { ...applied, results } : { ...applied, results, reason: applied.reason ?? 'refresh rejected' };
+  };
+
   const applyConfig = (document: unknown, expectedRevision: number) => serialized(() => applyConfigNow(document, expectedRevision));
   const pushSecret = (ref: string, value: string | null) => serialized(() => pushSecretNow(ref, value));
+  const refreshPrices = (expectedRevision: number) => serialized(() => refreshPricesNow(expectedRevision));
 
   return {
     url: server.url,
@@ -405,6 +447,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     server,
     applyConfig,
     pushSecret,
+    refreshPrices,
     async close() { await server.close(); },
   };
 }

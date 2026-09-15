@@ -107,6 +107,8 @@ export function Settings() {
   const [error, setError] = useState<ApiError | null>(null);
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [priceStatus, setPriceStatus] = useState('');
   const [results, setResults] = useState<Record<string, TestResult>>({});
   const [effectiveRevision, setEffectiveRevision] = useState<number | null>(null);
   const [keys, setKeys] = useState<Record<string, string>>({});
@@ -162,6 +164,28 @@ export function Settings() {
       setSaving(false);
     }
   };
+  const refreshPrices = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const response = await api<{ revision: number; applied: boolean; reason?: string; results?: { modelId: string; status: string; reason?: string }[] }>('/api/pricing/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ expectedRevision: revision }),
+      });
+      const known = response.results?.filter(result => result.status === 'known').length ?? 0;
+      const stale = response.results?.filter(result => result.status === 'stale').length ?? 0;
+      const unknown = response.results?.filter(result => result.status === 'unknown').length ?? 0;
+      const manual = response.results?.filter(result => result.status === 'manual').length ?? 0;
+      setPriceStatus(`价格快照已刷新 revision ${response.revision}：已核对 ${known}，过期保留旧值 ${stale}，未知 ${unknown}${manual ? `，手动覆盖 ${manual}` : ''}${response.applied === false ? `（未生效：${response.reason ?? '被拒绝'}）` : ''}`);
+      toast(response.applied === false ? '价格刷新未生效' : '价格快照已刷新', response.applied === false ? 'danger' : 'success');
+      await load();
+    } catch (reason) {
+      setError(reason as ApiError);
+      toast(`价格刷新失败：${(reason as Error).message}`, 'danger');
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const testConnection = async (model: RawModel) => {
     setResults(current => ({ ...current, [model.id]: { ok: false, message: '测试中…' } as TestResult }));
     try {
@@ -182,8 +206,9 @@ export function Settings() {
 
   return (
     <div className="stagger" data-testid="settings-page">
-      <Card title="设置" icon="settings" subtitle="保存后需重启守护进程生效"
+      <Card title="设置" icon="settings" subtitle="保存并应用；价格快照仅在你点击刷新时更新"
         actions={<>
+          <Button data-testid="pricing-refresh" icon="refresh" disabled={refreshing || dirty} onClick={() => void refreshPrices()}>{refreshing ? '刷新中…' : '刷新价格快照'}</Button>
           <Button data-testid="settings-reload" icon="refresh" onClick={() => void load()}>重新加载</Button>
           <Button variant="primary" data-testid="settings-save" icon="check" disabled={saving || !dirty} onClick={() => void save()}>{saving ? '保存中…' : '保存配置'}</Button>
         </>}>
@@ -194,6 +219,7 @@ export function Settings() {
         </div>
         {error && <p data-testid="config-error" style={{ color: 'var(--danger)', marginTop: 10 }}>{error.message}{error.code ? `（${error.code}）` : ''}</p>}
         {status && <p data-testid="config-status" className="muted" style={{ marginTop: 10 }}>{status}</p>}
+        {priceStatus && <p data-testid="pricing-status" className="muted" style={{ marginTop: 10 }}>{priceStatus}</p>}
         {status.includes('等待生效') && <div data-testid="restart-required" className="hint-card">待生效：当前守护进程仍使用上一份有效绑定；修正配置后可再次保存。</div>}
       </Card>
 
@@ -330,7 +356,7 @@ export function Settings() {
         ))}
       </Card>
 
-      <Card title="并发限制" icon="clock" subtitle="上限在守护进程启动时绑定；修改后重启生效，不会中断在途请求">
+      <Card title="并发限制" icon="clock" subtitle="保存后立即对新请求生效；已有调用保留计数，不会中断在途请求">
         {!Object.keys(draft.limits?.credentials ?? {}).length && !Object.keys(draft.limits?.sharedGroups ?? {}).length && <p className="muted">尚未配置并发上限，使用运行时默认值。</p>}
         <div className="row">
           {Object.entries(draft.limits?.credentials ?? {}).map(([id, value], index) => (

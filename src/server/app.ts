@@ -85,6 +85,17 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       const saved = await options.config!.store.save(body.document, body.expectedRevision, options.config!.env);
       return { revision: saved.revision, restartRequired: current.revision !== saved.revision };
     });
+    if (options.appServices?.refreshPrices) {
+      // Explicit refresh only: saving a config must never fetch prices.
+      app.post('/api/pricing/refresh', async request => {
+        const body = request.body as { expectedRevision?: unknown } | undefined;
+        if (typeof body?.expectedRevision !== 'number' || !Number.isInteger(body.expectedRevision) || body.expectedRevision < 0) {
+          throw new RuntimeError('invalid_input', 'expectedRevision must be a nonnegative integer');
+        }
+        const refreshed = await options.appServices!.refreshPrices!(body.expectedRevision);
+        return { ...refreshed, restartRequired: false };
+      });
+    }
     if (options.configTest) {
       app.post('/api/config/test', async request => {
         const body = request.body as { modelId?: unknown };

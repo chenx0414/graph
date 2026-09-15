@@ -19,6 +19,9 @@ export interface AppServices {
   pushSecret(ref: string, value: string | null): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number }>;
   appToken: string;
   snapshot(): { revision: number; effectiveRevision: number; applied: boolean; configured: boolean; modelCount: number; enabledModelCount: number };
+  /** Explicit price snapshot refresh (C01): re-verify archived entries against
+   * their official pages and persist/activate through the same live path. */
+  refreshPrices?(expectedRevision: number): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number; results: { modelId: string; provider: string; status: string; sourceUrl?: string; reason?: string }[] }>;
 }
 
 export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices }) {

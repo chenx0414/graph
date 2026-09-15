@@ -1,4 +1,5 @@
 import type { ModelApi, ModelGrade, ModelPricing } from './models.ts';
+import { snapshotFor, snapshotPricing } from './price-snapshot.ts';
 
 /** One first-class connection template: a provider label, the transport Graph
  * has verified for it and a small set of model defaults. Templates are not
@@ -51,8 +52,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://platform.claude.com/docs/en/api/overview',
     notes: ['API key 登录；使用原生 Messages 传输，不复用 OpenAI 请求格式。'],
     models: [
-      { id: 'claude-3-5-sonnet-latest', grade: 'highest', contextWindow: 200_000, maxTokens: 8_192 },
-      { id: 'claude-3-5-haiku-latest', grade: 'medium', contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'claude-sonnet-4-5', grade: 'highest', contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'claude-haiku-4-5', grade: 'medium', contextWindow: 200_000, maxTokens: 8_192 },
     ],
   },
   {
@@ -76,7 +77,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://api-docs.deepseek.com/guides/function_calling',
     notes: ['使用官方兼容传输；以厂商实际支持的字段与契约为准。'],
     models: [
-      { id: 'deepseek-chat', grade: 'high', contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'deepseek-flash', grade: 'high', contextWindow: 1_048_576, maxTokens: 65_536 },
+      { id: 'deepseek-v4-pro', grade: 'highest', contextWindow: 1_048_576, maxTokens: 65_536 },
     ],
   },
   {
@@ -102,6 +104,17 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     models: [],
   },
 ];
+
+// Attach only archived, source-dated prices. Models without a verified entry
+// keep `cost`/`pricing` absent so the wizard shows "价格未知" instead of zero.
+for (const template of PROVIDER_TEMPLATES) {
+  for (const model of template.models) {
+    const snapshot = snapshotFor(template.id, model.id);
+    if (!snapshot) continue;
+    model.cost = { ...snapshot.cost };
+    model.pricing = snapshotPricing(snapshot);
+  }
+}
 
 export function providerTemplate(id: string): ProviderTemplate | undefined {
   return PROVIDER_TEMPLATES.find(template => template.id === id);

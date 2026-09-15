@@ -209,7 +209,7 @@ export function Setup() {
           {template.models.map(model => (
             <label key={model.id} className="list-item" style={{ cursor: 'pointer' }}>
               <input type="checkbox" data-testid={`setup-model-${model.id}`} checked={Boolean(selected[model.id])} onChange={() => toggleModel(model.id)} />
-              <span className="grow">{model.id} <span className="muted">{model.grade} · 上下文 {model.contextWindow.toLocaleString('en-US')} · 输出 {model.maxTokens.toLocaleString('en-US')} · {model.pricing ? `${model.pricing.currency}（${model.pricing.status}）` : '价格未知'}</span></span>
+              <span className="grow">{model.id} <span className="muted">{model.grade} · 上下文 {model.contextWindow.toLocaleString('en-US')} · 输出 {model.maxTokens.toLocaleString('en-US')} · {model.pricing ? `${model.pricing.currency} 参考价（${model.pricing.status}${model.pricing.retrievedAt ? ` · ${model.pricing.retrievedAt}` : ''}${model.pricing.sourceUrl ? ` · ${(() => { try { return new URL(model.pricing.sourceUrl!).host; } catch { return model.pricing.sourceUrl; } })()}` : ''}）` : '价格未知'}</span></span>
             </label>
           ))}
         </div>
