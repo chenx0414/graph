@@ -349,3 +349,32 @@ test('concurrent revocations of two connections persist both refs (UC-R09-R2)', 
   const startup = await (await fetch(`${restarted.url}/api/startup`, { headers: restartedSession.headers })).json() as { enabledModelCount: number };
   expect(startup.enabledModelCount).toBe(0);
 }, 30_000);
+
+test('provider invocations freeze the upstream identity, not the connection id (UC-R08-R3)', async () => {
+  const { taskGate } = await import('../../src/runtime/task-gate.ts');
+  const root = await mkdtemp(join(tmpdir(), 'graph-invocation-identity-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  const entry = {
+    id: 'writer', modelId: 'original-model', provider: 'p', grade: 'high' as const,
+    api: 'openai-completions' as const, baseUrl: 'https://a.example/v1', contextWindow: 32_000, maxTokens: 256, credentialId: 'c',
+  };
+  store.transaction(() => {
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('t','p','identity',1,'running')").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,instance_id,activation_id,status) VALUES('t','work','{\"id\":\"work\",\"kind\":\"agent\",\"action\":\"work\"}','i1','a1','running')").run();
+    store.db.prepare("INSERT INTO instances(id,task_id,node_id,model,budget,used,unlimited,models_used) VALUES('i1','t','work','writer',0,0,1,'[]')").run();
+    store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,worker_active,activation_id) VALUES('op1','t','work','i1',0,'{}','intent',0,0,'a1')").run();
+  });
+  const gate = taskGate(store, { id: 'op1', taskId: 't', instanceId: 'i1', nodeId: 'work' }, entry);
+  gate.dispatch('inv1', 100, () => 'sent');
+  const row = store.db.prepare("SELECT model FROM invocations WHERE id='inv1'").get() as { model: string };
+  expect(row.model).toBe('original-model');
+  // A legacy entry without modelId still records a usable identity (its id).
+  const { modelId: _modelId, ...legacyEntry } = entry;
+  const legacyGate = taskGate(store, { id: 'op1', taskId: 't', instanceId: 'i1', nodeId: 'work' }, { ...legacyEntry, id: 'legacy' });
+  legacyGate.dispatch('inv2', 100, () => 'sent');
+  const legacyRow = store.db.prepare("SELECT model FROM invocations WHERE id='inv2'").get() as { model: string };
+  expect(legacyRow.model).toBe('legacy');
+}, 30_000);

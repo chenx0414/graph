@@ -357,18 +357,13 @@ export class Execution {
       const target = graph.plan.nodes.get(id);
       if (!target) return;
       if (target.kind === 'agent') {
-        // The frozen identity of every actual provider call is the invocation
-        // row written at dispatch time (the wire model id). Interpreting
-        // historical config ids against the *current* directory would let a hot
-        // configuration change rewrite what the implementer actually used.
+        // Union of both frozen facts: invocation rows (wire identity for new
+        // rows, connection id for legacy ones) and the identity recorded at
+        // selection time in models_used. Never reinterpret a historical id
+        // against the current directory, which hot configuration can change.
         const calls = this.store.db.prepare(`SELECT DISTINCT i.model AS model FROM invocations i JOIN operations o ON o.id=i.operation_id
           WHERE o.task_id=? AND o.node_id=? AND i.model IS NOT NULL`).all(node.task_id, id) as { model: string }[];
-        if (calls.length) {
-          models.push(...calls.map(call => call.model));
-          return;
-        }
-        // Legacy instances created before any invocation (setup failure) fall
-        // back to the recorded connection ids, still never re-mapped live.
+        models.push(...calls.map(call => call.model));
         const row = this.store.db.prepare('SELECT models_used FROM instances WHERE task_id=? AND node_id=?').get(node.task_id, id) as { models_used: string } | undefined;
         if (row) models.push(...(JSON.parse(row.models_used) as string[]));
         return;

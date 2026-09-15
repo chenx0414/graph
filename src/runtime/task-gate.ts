@@ -35,7 +35,9 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
           throw new RuntimeError('budget', 'Token budget exhausted');
         }
         if (store.db.prepare('SELECT id FROM invocations WHERE id=?').get(id)) throw new RuntimeError('invalid_input', 'Invocation already dispatched');
-        store.db.prepare('INSERT INTO invocations(id,operation_id,instance_id,model) VALUES(?,?,?,?)').run(id, operation.id, operation.instanceId, model.id);
+        // Freeze the underlying upstream identity, not just the mutable
+        // connection id: review independence reads this history later.
+        store.db.prepare('INSERT INTO invocations(id,operation_id,instance_id,model) VALUES(?,?,?,?)').run(id, operation.id, operation.instanceId, model.modelId ?? model.id);
       });
       try { return send(); }
       catch (error) { this.settle(id, null); throw error; }
