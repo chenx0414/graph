@@ -1,0 +1,10 @@
+{
+  "note": "Real legacy state created by the historical store code at the recorded commits, then used unmodified by tests/console/schema-upgrade.test.ts. Not built by current code and not patched via PRAGMA user_version.",
+  "fixtures": [
+    { "file": "v13-tasks.sqlite", "schemaVersion": 13, "sourceCommit": "8cd1523", "sourceCommitSubject": "docs: ... (U00 baseline, last revision with schema v13)" },
+    { "file": "v17-tasks.sqlite", "schemaVersion": 17, "sourceCommit": "790af5e", "sourceCommitSubject": "feat: node projection (U07, last revision before v18 node_capabilities)" }
+  ],
+  "creation": "git archive <commit> | tar -x -C /tmp/c03/vN && node /tmp/c03/make.mjs /tmp/c03/vN <db> <project-dir>",
+  "rows": { "projects": 1, "tasks": 1, "nodes": 1, "instances": 1, "operations": 1, "invocations": 1 },
+  "preservedExpectation": { "instances.budget": 20000000, "instances.used": 12345, "instances.unlimited": 0, "invocations.cost": "{\"amount\":0.001,\"currency\":\"USD\"}" }
+}
