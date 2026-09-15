@@ -1,0 +1,34 @@
+{
+  "scope": "Real core runtime and scripted adapter; no provider calls; timestamps written only by production runtime",
+  "attempts": 2,
+  "paused": [
+    {
+      "state": "not_sent",
+      "workerActive": false
+    }
+  ],
+  "finalNode": "succeeded",
+  "operations": [
+    {
+      "state": "not_sent",
+      "workerActive": false,
+      "dispatchedAt": 1789467862892,
+      "settledAt": 1789467862892
+    },
+    {
+      "state": "succeeded",
+      "workerActive": false,
+      "dispatchedAt": 1789467862893,
+      "settledAt": 1789467862961
+    }
+  ],
+  "timing": {
+    "totalMs": 69,
+    "runMs": 68,
+    "waitingMs": 0,
+    "pauseMs": null,
+    "userWaitMs": null,
+    "inProgress": false
+  },
+  "passed": true
+}

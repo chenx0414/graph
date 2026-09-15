@@ -1,0 +1,8 @@
+=== final verification dd89228a17f626a7873c3268b4af02f9ad296630 2026年 9月15日 星期二 18时25分44秒 CST ===
+tsc main rc=0
+tsc web rc=0
+vite build rc=0
+      Tests  356 passed (356)
+   Start at  18:25:45
+   Duration  45.79s (tests 88%, import 11%, transform 1%)
+

@@ -1,0 +1,71 @@
+{
+  "node": "v24.20.0",
+  "sourceRevision": "73bc1d0",
+  "results": [
+    {
+      "grants": [],
+      "report": [
+        {
+          "id": "remote",
+          "version": "1",
+          "kind": "mcp",
+          "loaded": true,
+          "executable": false,
+          "reason": "已加载 1 个工具，当前无任务授权（例如 mcp:remote:write_record），调用会被权限门拒绝"
+        }
+      ],
+      "projected": {
+        "id": "remote",
+        "version": "1",
+        "kind": "mcp",
+        "bound": true,
+        "loaded": true,
+        "executable": false,
+        "state": "已加载",
+        "reason": "已加载 1 个工具，当前无任务授权（例如 mcp:remote:write_record），调用会被权限门拒绝"
+      },
+      "error": "Error: Permission required: remote MCP tool write_record needs the task grant mcp:remote:write_record",
+      "permissions": [
+        {
+          "grant": "mcp:remote:write_record",
+          "capabilityId": "remote",
+          "tool": "write_record",
+          "description": "Write a controlled fixture record"
+        }
+      ],
+      "actualEffects": 0,
+      "authorizationCorrect": true,
+      "passed": true
+    },
+    {
+      "grants": [
+        "mcp:remote:write_record"
+      ],
+      "report": [
+        {
+          "id": "remote",
+          "version": "1",
+          "kind": "mcp",
+          "loaded": true,
+          "executable": true,
+          "reason": null
+        }
+      ],
+      "projected": {
+        "id": "remote",
+        "version": "1",
+        "kind": "mcp",
+        "bound": true,
+        "loaded": true,
+        "executable": true,
+        "state": "可执行",
+        "reason": null
+      },
+      "error": null,
+      "permissions": [],
+      "actualEffects": 1,
+      "authorizationCorrect": true,
+      "passed": true
+    }
+  ]
+}
