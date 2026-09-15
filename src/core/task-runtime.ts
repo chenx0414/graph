@@ -832,15 +832,29 @@ export async function openTaskRuntime(options: {
     conversations,
     host: {
       async runReady() { ensureOpen(); return execution.runReady(); },
+      /** Read-only candidate check: a hot config that moves the root of a
+       * project with tasks in flight must be rejected before anything is
+       * persisted or activated. */
+      checkProjects(projects: ProjectConfig[]) {
+        ensureOpen();
+        for (const project of projects) {
+          if (!project.id.trim() || !project.root.trim()) throw new RuntimeError('invalid_input', 'Project identity and root must be nonempty strings');
+          const root = resolve(project.root);
+          const previous = store.db.prepare('SELECT root FROM projects WHERE id=?').get(project.id) as { root: string } | undefined;
+          if (!previous || previous.root === root) continue;
+          const active = (store.db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id=? AND phase IN ('discussing','running','queued')").get(project.id) as { count: number }).count;
+          if (active) throw new RuntimeError('project_conflict', `Project ${project.id} has tasks in flight; its root cannot change until they finish`);
+        }
+      },
       /** Register hot-added projects and reject root moves while tasks are in
        * flight. Removed projects keep their history but lose new dispatch. */
       syncProjects() {
         ensureOpen();
         const configured = configuredProjects();
         if (!configured) return;
+        this.checkProjects(configured);
         store.transaction(() => {
           for (const project of configured) {
-            if (!project.id.trim() || !project.root.trim()) throw new RuntimeError('invalid_input', 'Project identity and root must be nonempty strings');
             const root = resolve(project.root);
             const grants = canonicalJson([...new Set(project.grants ?? [])].sort());
             const previous = store.db.prepare('SELECT root FROM projects WHERE id=?').get(project.id) as { root: string } | undefined;
@@ -848,11 +862,7 @@ export async function openTaskRuntime(options: {
               store.db.prepare('INSERT INTO projects VALUES(?,?,?)').run(project.id, root, grants);
               continue;
             }
-            if (previous.root !== root) {
-              const active = (store.db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id=? AND phase IN ('discussing','running','queued')").get(project.id) as { count: number }).count;
-              if (active) throw new RuntimeError('project_conflict', `Project ${project.id} has tasks in flight; its root cannot change until they finish`);
-              store.db.prepare('UPDATE projects SET root=? WHERE id=?').run(root, project.id);
-            }
+            if (previous.root !== root) store.db.prepare('UPDATE projects SET root=? WHERE id=?').run(root, project.id);
           }
         });
       },

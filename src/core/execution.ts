@@ -8,7 +8,7 @@ import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
-import { estimateCost, selectModel, type ModelEntry } from '../catalog/models.ts';
+import { modelIdentity as upstreamIdentity, estimateCost, selectModel, type ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
 import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
@@ -343,6 +343,18 @@ export class Execution {
     return selectModel({ ...(spec.model ? { requested: spec.model } : {}), grade: definition.recommendedGrade, directory, ...(preferences ? { preferences } : {}), ...(exclude.length ? { exclude } : {}) });
   }
 
+  /** Map a stored config model id to its upstream identity, using the live
+   * directory first and the persisted snapshot for models since removed. */
+  private modelIdentity(id: string) {
+    const entry = this.models?.().find(model => model.id === id);
+    if (entry) return upstreamIdentity(entry);
+    const row = this.store.db.prepare('SELECT data FROM models WHERE id=?').get(id) as { data: string } | undefined;
+    if (row) {
+      try { return upstreamIdentity(JSON.parse(row.data) as ModelEntry); } catch { /* fall through */ }
+    }
+    return id;
+  }
+
   private implementerModels(spec: NodeSpec, node: NodeRow) {
     const graph = loadGraph(this.store, node.task_id);
     const models: string[] = [];
@@ -358,7 +370,9 @@ export class Execution {
       if (!target) return;
       if (target.kind === 'agent') {
         const row = this.store.db.prepare('SELECT models_used FROM instances WHERE task_id=? AND node_id=?').get(node.task_id, id) as { models_used: string } | undefined;
-        if (row) models.push(...JSON.parse(row.models_used) as string[]);
+        // History stores the config connection id; independence is enforced on
+        // the underlying upstream model, so aliases can never bypass review.
+        if (row) models.push(...(JSON.parse(row.models_used) as string[]).map(modelId => this.modelIdentity(modelId)));
         return;
       }
       for (const dependency of graph.plan.dependencies.get(id) ?? []) walk(dependency);

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
@@ -117,11 +117,37 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   // Explicit revocations survive a restart: the APP may re-inject a keychain
   // value into the environment, but a disabled connection must stay disabled.
   const revokedPath = join(options.stateDir, 'revoked-secrets.json');
-  const revokedRefs = await readFile(revokedPath, 'utf8').then((text: string) => {
-    const parsed = JSON.parse(text) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((ref): ref is string => typeof ref === 'string') : [];
-  }).catch(() => [] as string[]);
+  const revocation = await (async (): Promise<{ refs: string[]; failure?: string }> => {
+    let text: string;
+    try {
+      text = await readFile(revokedPath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { refs: [] };
+      return { refs: [], failure: error instanceof Error ? error.message : String(error) };
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (!Array.isArray(parsed) || parsed.some(ref => typeof ref !== 'string')) throw new Error('expected a JSON array of secret refs');
+      return { refs: parsed as string[] };
+    } catch (error) {
+      return { refs: [], failure: error instanceof Error ? error.message : String(error) };
+    }
+  })();
+  // An unusable revocation file is never treated as "nothing was revoked":
+  // start fail-closed with every configured credential revoked, so no key is
+  // silently re-enabled; an explicit push (disable/restore) repairs the state.
+  const revokedRefs = revocation.failure
+    ? [...new Set(Object.values(config.credentials).map(credential => credential.secretRef))]
+    : revocation.refs;
+  if (revocation.failure) log(`Revocation file unusable (${revocation.failure}); all configured credentials start revoked. Disable or restore a connection to repair it.`);
   const live: LiveConfig = createLiveConfig({ env: options.env, log, initial: { config, revision: configStore?.revision() ?? 0 }, revoked: revokedRefs });
+  /** Atomic multi-ref revocation persistence: a temp file plus rename means a
+   * crash never leaves a half-written list, and errors reach the caller. */
+  const persistRevoked = async (refs: string[]) => {
+    const temporary = `${revokedPath}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify([...new Set(refs)].sort(), null, 2)}\n`, { mode: 0o600 });
+    await rename(temporary, revokedPath);
+  };
   const entries = live.entries();
   const conflict = live.snapshot().conflict;
 
@@ -274,7 +300,18 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     if (!configStore) throw new RuntimeError('invalid_config', 'The daemon was started without a configuration file');
     // Validate against the merged view (env + APP-pushed secrets - revoked
     // refs) and approve the live candidate *before* touching the file.
-    const saved = await configStore.save(document, expectedRevision, options.env, (candidate, revision) => live.check(candidate, revision));
+    const saved = await configStore.save(document, expectedRevision, options.env, (candidate, revision) => {
+      const liveResult = live.check(candidate, revision);
+      if (!liveResult.applied) return liveResult;
+      // Project root/in-flight checks belong to the candidate phase: a known
+      // rejection must not reach the file or the active bindings.
+      try {
+        server.runtime.host.checkProjects(candidate.projects ?? []);
+        return { applied: true };
+      } catch (error) {
+        return { applied: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+    });
     if (!saved.applied) {
       return {
         revision: saved.revision,
@@ -307,9 +344,26 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   const pushSecret = async (ref: string, value: string | null): Promise<ApplyConfigResult> => {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) throw new RuntimeError('invalid_input', 'secretRef must be an environment variable name');
     if (value !== null && (!value.trim() || value.length > 8_192)) throw new RuntimeError('invalid_input', 'A nonempty bounded secret value is required');
-    const result = live.pushSecret(ref, value === null ? null : value.trim());
+    const revoking = value === null || value.trim() === '';
+    const previousRevoked = live.revoked();
+    const nextRefs = revoking ? [...previousRevoked, ref] : previousRevoked.filter(item => item !== ref);
+    const sameSet = previousRevoked.length === nextRefs.length && previousRevoked.every(item => nextRefs.includes(item));
+    if (!sameSet) {
+      try {
+        await persistRevoked(nextRefs);
+      } catch (error) {
+        // Do not claim success and do not change the effective binding when the
+        // revocation cannot survive a restart.
+        return {
+          revision: live.revision(), effectiveRevision: live.revision(), applied: false,
+          reason: `撤销未能持久化（${error instanceof Error ? error.message : String(error)}）；连接保持原状态`,
+          configured: live.enabled(), modelCount: live.entries().length, enabledModelCount: live.status().enabledModelCount,
+        };
+      }
+    }
+    const result = live.pushSecret(ref, revoking ? null : value.trim());
+    if (!result.applied && !sameSet) await persistRevoked(previousRevoked).catch(() => undefined);
     if (result.applied) {
-      await writeFile(revokedPath, `${JSON.stringify(live.revoked(), null, 2)}\n`, { mode: 0o600 }).catch(() => undefined);
       await syncProviders();
       scheduler.wake();
       publishDefinitions();

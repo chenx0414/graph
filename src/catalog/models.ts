@@ -99,6 +99,13 @@ export function estimateCost(usage: TokenUsage, cost?: ModelCost, pricing?: Mode
   };
 }
 
+/** Underlying provider model identity: two config connections sharing one
+ * upstream model (different id/endpoint/key) are the same model for review
+ * independence, and history stored the config id. */
+export function modelIdentity(entry: Pick<ModelEntry, 'id' | 'modelId'>) {
+  return entry.modelId ?? entry.id;
+}
+
 /** Pick a configured model; review nodes pass exclude for implementer models used this round. */
 export function selectModel(input: {
   requested?: string;
@@ -108,7 +115,7 @@ export function selectModel(input: {
   exclude?: string[];
 }) {
   const blocked = new Set(input.exclude ?? []);
-  const usable = input.directory.filter(model => !blocked.has(model.id));
+  const usable = input.directory.filter(model => !blocked.has(modelIdentity(model)) && !blocked.has(model.id));
   const requested = input.requested ? usable.find(model => model.id === input.requested) : undefined;
   if (requested) return requested;
   const preferred = (input.preferences?.[input.grade] ?? []).map(id => usable.find(model => model.id === id)).find(model => model);

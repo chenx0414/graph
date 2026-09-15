@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
+import { TaskStore } from '../../src/core/store.ts';
 import { buildTemplateConfigDocument } from '../../src/web/setup.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -227,4 +228,101 @@ test('each connection sends its own endpoint with the upstream model id (UC-R08)
   expect((platformB.requests[0] as { model?: string }).model).toBe('same-model');
   expect(platformA.requests).toHaveLength(0);
   expect(api.cookie).toBeTruthy();
+}, 30_000);
+
+test('a root move for a project with active tasks is rejected before any write (UC-R02-R1)', async () => {
+  const { daemon, api, configPath, stateDir, projectRoot } = await fixture('project-candidate', {
+    document: {
+      models: { entries: [modelEntry('http://127.0.0.1:9')] },
+      credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+    },
+    env: { GRAPH_LOCAL_KEY: 'key' },
+  });
+  await daemon.server.runtime.user.begin({ projectId: 'p', request: 'active work', requestId: 'active-1' });
+  const moved = join(projectRoot, '..', 'moved-root');
+  await mkdir(moved, { recursive: true });
+  const bytesBefore = await readFile(configPath, 'utf8');
+  const applied = await post(daemon, api, '/api/config', {
+    expectedRevision: 0,
+    document: {
+      version: 1,
+      projects: [{ id: 'p', root: moved }],
+      models: { entries: [modelEntry('http://127.0.0.1:9')] },
+      credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+    },
+  });
+  const body = applied.body as { applied?: boolean; reason?: string; code?: string };
+  expect(applied.status === 400 || body.applied === false).toBe(true);
+  expect(JSON.stringify(body)).toMatch(/tasks in flight/);
+  expect(await readFile(configPath, 'utf8')).toBe(bytesBefore);
+  const settings = await (await fetch(`${daemon.url}/api/settings`, { headers: api.headers })).json() as { projects: { id: string; root: string }[] };
+  expect(settings.projects[0]!.root).toBe(projectRoot);
+  const db = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  const row = db.db.prepare("SELECT root FROM projects WHERE id='p'").get() as { root: string };
+  expect(row.root).toBe(projectRoot);
+  db.close();
+}, 30_000);
+
+test('revocation persistence failure is reported and never silently re-enables a key (UC-R09-R1)', async () => {
+  const { daemon, api, stateDir, token, configPath, env } = await fixture('revoke-persist', {
+    document: { models: { entries: [modelEntry('http://127.0.0.1:9')] }, credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } } },
+    env: { GRAPH_LOCAL_KEY: 'real-key' },
+  });
+  // A directory at the revocation path makes the atomic write fail.
+  await mkdir(join(stateDir, 'revoked-secrets.json'), { recursive: true });
+  const bridge = (body: unknown) => fetch(`${daemon.url}/api/app/secret`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-graph-app-token': token, origin: daemon.url }, body: JSON.stringify(body),
+  }).then(response => response.json() as Promise<Record<string, unknown>>);
+  const failed = await bridge({ ref: 'GRAPH_LOCAL_KEY', value: null });
+  expect(failed).toMatchObject({ applied: false });
+  expect(String(failed.reason)).toMatch(/持久化/);
+  const startup = await (await fetch(`${daemon.url}/api/startup`, { headers: api.headers })).json() as { configured: boolean };
+  expect(startup.configured).toBe(true);
+  await daemon.close();
+  // With the obstruction removed, revocation reports success and survives restart.
+  await rm(join(stateDir, 'revoked-secrets.json'), { recursive: true, force: true });
+  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
+  cleanup.push(() => restarted.close());
+  const token2 = (await readFile(join(stateDir, 'app-token'), 'utf8')).trim();
+  const ok = await fetch(`${restarted.url}/api/app/secret`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-graph-app-token': token2, origin: restarted.url },
+    body: JSON.stringify({ ref: 'GRAPH_LOCAL_KEY', value: null }),
+  }).then(response => response.json() as Promise<Record<string, unknown>>);
+  expect(ok).toMatchObject({ applied: true });
+  await restarted.close();
+  const again = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env: { ...env, GRAPH_LOCAL_KEY: 'real-key' }, log: () => undefined });
+  cleanup.push(() => again.close());
+  const session2 = await session(again.url);
+  const startup2 = await (await fetch(`${again.url}/api/startup`, { headers: session2.headers })).json() as { configured: boolean };
+  expect(startup2.configured).toBe(false);
+}, 30_000);
+
+test('a corrupt revocation file starts fail-closed instead of re-enabling keys (UC-R09-R1)', async () => {
+  const { daemon, configPath, stateDir, env } = await fixture('revoke-corrupt', {
+    document: { models: { entries: [modelEntry('http://127.0.0.1:9')] }, credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } } },
+    env: { GRAPH_LOCAL_KEY: 'real-key' },
+  });
+  await daemon.close();
+  await writeFile(join(stateDir, 'revoked-secrets.json'), '{"not":"an array"}\n');
+  const logs: string[] = [];
+  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: line => logs.push(line) });
+  cleanup.push(() => restarted.close());
+  const api = await session(restarted.url);
+  const startup = await (await fetch(`${restarted.url}/api/startup`, { headers: api.headers })).json() as { configured: boolean };
+  // Fail-closed: the unusable file does not silently re-enable the key.
+  expect(startup.configured).toBe(false);
+  expect(logs.some(line => line.includes('Revocation file unusable'))).toBe(true);
+}, 30_000);
+
+test('aliases sharing one upstream model cannot act as an independent reviewer (UC-R08-R1)', async () => {
+  const { modelIdentity, selectModel } = await import('../../src/catalog/models.ts');
+  const base = { provider: 'p', grade: 'high' as const, api: 'openai-completions' as const, contextWindow: 32_000, maxTokens: 256 };
+  const writer = { ...base, id: 'writer', modelId: 'same-upstream', baseUrl: 'https://a.example/v1' };
+  const alias = { ...base, id: 'writer-alias', modelId: 'same-upstream', baseUrl: 'https://b.example/v1' };
+  const reviewer = { ...base, id: 'reviewer', modelId: 'other-upstream', baseUrl: 'https://c.example/v1' };
+  expect(modelIdentity(writer)).toBe('same-upstream');
+  expect(modelIdentity({ id: 'legacy' })).toBe('legacy');
+  expect(selectModel({ grade: 'high', directory: [writer, alias, reviewer], exclude: ['same-upstream'] })?.id).toBe('reviewer');
+  // Only aliases of the implementer model: no independent reviewer exists.
+  expect(selectModel({ grade: 'high', directory: [writer, alias], exclude: ['same-upstream'] })).toBeUndefined();
 }, 30_000);
