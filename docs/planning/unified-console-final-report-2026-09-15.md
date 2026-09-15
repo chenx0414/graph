@@ -17,13 +17,13 @@
 | U08 | `5975a23` | 统一节点详情面板与直接路由；程序命令、工具、运行记录、证据；只读 |
 | U09 | `5882fbc` | 人才详情与按指标的经历统计（样本/未知/未结束/失败；对话工作单列） |
 | U10 | `dc3b5c5` | 对话任务节点直达详情；组合流程验证（向导→对话→确认→节点→人才） |
-| U11 | 本文件提交 | 最终全量、探针、真实 Electron APP 冒烟与交接 |
+| U11 | `3a772ed28403559ce89cc3d929abb5eba940ccee` | 最终全量、探针、真实 Electron APP 冒烟与交接 |
 
 ## 迁移
 
 `store.ts` 依次新增：v14 `instances.unlimited`；v15 `project_preparation`；v16 `presets`；v17 `node_entries`/`node_sessions` 与 operation 计时列。所有迁移只增列/增表，不改写历史行；旧实例、旧价格记录与历史验收结论保持原样。数据库版本上限 17。
 
-## 最终验证（准确 SHA 见文末）
+## 最终验证（SHA `3a772ed28403559ce89cc3d929abb5eba940ccee`）
 
 - `tsc --noEmit`、`tsc -p tsconfig.web.json --noEmit`、`vite build`：rc=0。
 - `vitest run`：**69 文件 / 329 项**，连续两轮全部通过。
