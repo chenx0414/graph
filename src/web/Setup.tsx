@@ -1,45 +1,100 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.ts';
-import {
-  SETUP_TEMPLATES, buildConfigDocument, defaultSecretRef, defaultSetupForm,
-  setupFieldFor, validateSetup, type SetupForm, type SetupTemplate,
-} from './setup.ts';
+import { PROVIDER_TEMPLATES, providerTemplate, type ProviderTemplate } from '../catalog/providers.ts';
+import { buildTemplateConfigDocument, type TemplateSetupModel } from './setup.ts';
 import { Button, Card, Field, Pill, toast } from './ui.tsx';
 
-const fieldError = (errors: Record<string, string>, key: string) => errors[key];
+const GRADES: TemplateSetupModel['grade'][] = ['low', 'medium', 'high', 'highest'];
+const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+interface Status {
+  tone: 'info' | 'success' | 'danger';
+  text: string;
+  testid?: string;
+}
 
 export function Setup() {
-  const [form, setForm] = useState<SetupForm>(defaultSetupForm);
-  const [revision, setRevision] = useState<number | null>(null);
-  const [hasContent, setHasContent] = useState(false);
-  const [key, setKey] = useState('');
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [status, setStatus] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
+  const [providerId, setProviderId] = useState('openai');
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [customModels, setCustomModels] = useState<TemplateSetupModel[]>([]);
+  const [credentialId, setCredentialId] = useState('openai');
+  const [secretRef, setSecretRef] = useState('OPENAI_API_KEY');
+  const [key, setKey] = useState('');
+  const [advanced, setAdvanced] = useState(false);
+  const [baseUrl, setBaseUrl] = useState(PROVIDER_TEMPLATES[0]!.baseUrl);
+  const [apiType, setApiType] = useState<'openai-completions' | 'anthropic-messages'>(PROVIDER_TEMPLATES[0]!.api);
+  const [projectId, setProjectId] = useState('');
+  const [projectRoot, setProjectRoot] = useState('');
+  const [revision, setRevision] = useState<number | null>(null);
+  const [existing, setExisting] = useState<Record<string, unknown> | null>(null);
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [status, setStatus] = useState<Status | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const template: ProviderTemplate = providerTemplate(providerId) ?? PROVIDER_TEMPLATES[0]!;
+  const chosenModels = useMemo<TemplateSetupModel[]>(() => [
+    ...template.models.filter(model => selected[model.id]).map(model => ({ id: model.id, grade: model.grade, contextWindow: model.contextWindow, maxTokens: model.maxTokens })),
+    ...customModels,
+  ], [selected, customModels, template]);
 
   useEffect(() => {
-    void api<{ revision: number; effectiveRevision?: number; config: { projects?: unknown[]; models?: { entries?: unknown[] } | null; credentials?: Record<string, unknown> } }>('/api/config')
+    void api<{ revision: number; config: Record<string, unknown> }>('/api/config')
       .then(result => {
         setRevision(result.revision);
-        setHasContent(Boolean(
-          (result.config.projects?.length ?? 0) > 0
-          || (result.config.models?.entries?.length ?? 0) > 0
-          || Object.keys(result.config.credentials ?? {}).length > 0,
-        ));
+        setExisting(result.config);
       })
-      .catch(error => setStatus(`读取配置失败：${(error as Error).message}`));
+      .catch(error => setStatus({ tone: 'danger', text: `读取配置失败：${(error as Error).message}` }));
+    void api<{ configured?: boolean }>('/api/startup').then(result => setConfigured(Boolean(result.configured))).catch(() => undefined);
   }, []);
 
-  const patch = (values: Partial<SetupForm>) => setForm(current => ({ ...current, ...values }));
+  function chooseProvider(id: string) {
+    const next = providerTemplate(id)!;
+    setProviderId(id);
+    setBaseUrl(next.baseUrl);
+    setApiType(next.api);
+    setCredentialId(next.id);
+    setSecretRef(next.credentialRefHint);
+    setSelected(Object.fromEntries(next.models.map(model => [model.id, true])));
+    setCustomModels([]);
+    setErrors({});
+    setTestResult(null);
+  }
+
+  function toggleModel(id: string) {
+    setSelected(current => ({ ...current, [id]: !current[id] }));
+  }
+
+  function addCustomModel() {
+    const id = `custom-${customModels.length + 1}`;
+    setCustomModels(current => [...current, { id, grade: 'high', contextWindow: 128_000, maxTokens: 8_192 }]);
+  }
 
   async function pickRoot() {
     const picked = await bridge?.pickDirectory();
-    if (picked) patch({ projectRoot: picked, projectId: form.projectId || picked.split('/').filter(Boolean).pop()?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'demo' });
+    if (!picked) return;
+    setProjectRoot(picked);
+    if (!projectId) setProjectId(picked.split('/').filter(Boolean).pop()?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'demo');
   }
 
   async function submit() {
-    const found = validateSetup(form);
+    const found: Record<string, string> = {};
+    if (!chosenModels.length) found.models = '至少选择一个模型（或添加自定义模型）';
+    if (!SECRET_REF.test(secretRef)) found.secretRef = '凭据引用需为合法环境变量名';
+    if (!/^[a-z0-9][a-z0-9-_]*$/.test(credentialId)) found.credentialId = '凭据 id 需以小写字母或数字开头，仅含小写字母、数字、- 和 _';
+    try {
+      const url = new URL(baseUrl);
+      if (!['http:', 'https:'].includes(url.protocol)) found.baseUrl = '端点需为 http(s) URL';
+    } catch {
+      found.baseUrl = '端点需为 http(s) URL';
+    }
+    for (const model of chosenModels) {
+      if (!model.id.trim()) found.models = '模型 id 不能为空';
+      if (!(model.contextWindow > model.maxTokens)) found.models = `模型 ${model.id}：上下文窗口需大于最大输出`;
+    }
+    if (projectId && !/^[a-z0-9][a-z0-9-_]*$/.test(projectId)) found.projectId = '项目 id 规则同凭据 id';
     setErrors(found);
     setStatus(null);
     if (Object.keys(found).length) {
@@ -47,120 +102,173 @@ export function Setup() {
       return;
     }
     if (revision === null) {
-      setStatus('当前守护进程未绑定配置文件；CLI 模式下请先创建 graph.config.json 再打开本页。');
+      setStatus({ tone: 'info', text: '当前守护进程未绑定配置文件；CLI 模式下请先创建 graph.config.json 再打开本页。' });
       return;
     }
     setBusy(true);
     try {
+      // 1) Keychain + running daemon first, so the key never enters the config file.
       if (bridge && key.trim()) {
-        const stored = await bridge.saveSecret(form.secretRef, key.trim());
-        if (!stored.stored) setStatus(`密钥未写入系统钥匙串：${stored.message ?? '存储不可用'}，将依赖环境变量。`);
+        const stored = await bridge.saveSecret(secretRef, key.trim());
+        if (!stored.stored) {
+          setStatus({ tone: 'danger', text: `密钥未写入系统钥匙串：${stored.message ?? '存储不可用'}。可以改用环境变量后重试。`, testid: 'setup-secret-error' });
+          setKey('');
+          return;
+        }
+        if (stored.applied === false) {
+          setStatus({ tone: 'info', text: `密钥已写入钥匙串，但守护进程尚未应用：${stored.message ?? '等待下次连接'}`, testid: 'setup-secret-pending' });
+        }
       }
-      // Merge into the existing document so a second platform append never
-      // overwrites the first one.
-      const existing = (await api<{ config: Record<string, unknown> }>('/api/config')).config;
+      // 2) Persist and hot-apply the connection document, merging existing platforms.
+      const current = (await api<{ revision: number; config: Record<string, unknown> }>('/api/config')).config;
+      const document = buildTemplateConfigDocument(current, { providerId, api: apiType, baseUrl, credentialId, secretRef, models: chosenModels }, template.models.map(model => ({ id: model.id, grade: model.grade, contextWindow: model.contextWindow, maxTokens: model.maxTokens })));
+      if (projectId && projectRoot) {
+        const projects = Array.isArray(document.projects) ? [...document.projects as Record<string, unknown>[]] : [];
+        const index = projects.findIndex(project => (project as { id?: unknown }).id === projectId);
+        const entry = { id: projectId, root: projectRoot.trim() };
+        if (index >= 0) projects[index] = entry; else projects.push(entry);
+        document.projects = projects;
+      }
       const saved = await api<{ revision: number; effectiveRevision?: number; applied?: boolean; reason?: string; configured?: boolean }>('/api/config', {
         method: 'POST',
-        body: JSON.stringify({ expectedRevision: revision, document: buildConfigDocument(existing, form) }),
+        body: JSON.stringify({ expectedRevision: revision, document }),
       });
       setRevision(saved.effectiveRevision ?? saved.revision);
+      setConfigured(Boolean(saved.configured));
+      setKey('');
       if (saved.applied === false) {
-        setStatus(`已保存但尚未生效（revision ${saved.revision}）：${saved.reason ?? '需要重启或修正配置'}`);
+        setStatus({ tone: 'info', text: `配置已保存但未生效（revision ${saved.revision}）：${saved.reason ?? '请检查冲突后重试'}`, testid: 'setup-status' });
         toast('配置已保存，等待生效', 'info');
       } else {
-        setStatus(`已保存并生效（revision ${saved.effectiveRevision ?? saved.revision}）${saved.configured === false ? '；尚未配置可用凭据，当前为仅查看模式' : ''}`);
-        toast('配置已保存并应用', 'success');
+        setStatus({
+          tone: saved.configured === false ? 'info' : 'success',
+          text: `已保存并应用（revision ${saved.effectiveRevision ?? saved.revision}）${saved.configured === false ? '；尚未解析到可用凭据，可稍后再填 key' : '，现在就可以开始对话'}`,
+          testid: 'setup-status',
+        });
+        toast('连接已保存并应用', 'success');
       }
+      setExisting(document);
     } catch (error) {
       const failure = error as Error & { field?: string; code?: string };
-      const target = setupFieldFor(failure.field);
-      setErrors(target ? { [target]: failure.message } : {});
-      setStatus(target ? null : `保存失败（${failure.code ?? 'error'}）：${failure.message}`);
+      setStatus({ tone: 'danger', text: `保存失败（${failure.code ?? 'error'}）：${failure.message}`, testid: 'setup-status' });
       toast(`保存失败：${failure.message}`, 'danger');
     } finally {
       setBusy(false);
     }
   }
 
+  async function testConnection(modelId: string) {
+    setTestResult('测试中…');
+    try {
+      const result = await api<{ ok: boolean; status?: number; latencyMs?: number; message?: string }>('/api/config/test', { method: 'POST', body: JSON.stringify({ modelId }) });
+      setTestResult(result.ok
+        ? `连接成功：${modelId}，HTTP ${result.status ?? 200}，${result.latencyMs ?? 0}ms。这会发出一次最小模型调用并计费。`
+        : `连接失败：${result.message ?? `HTTP ${result.status ?? '未知'}`}`);
+    } catch (error) {
+      setTestResult(`连接失败：${(error as Error).message}`);
+    }
+  }
+
+  const reviewModel = chosenModels.find(model => model.grade === 'highest' || model.grade === 'high');
   return (
     <div className="stagger" data-testid="setup">
-      <Card title="配置向导" icon="wizard" subtitle={bridge ? '密钥写入系统钥匙串，保存后自动重启守护进程' : '浏览器模式：密钥通过环境变量提供'}>
-        <p className="muted">
-          填写项目与模型后保存。{bridge ? '桌面 APP 会把密钥写入系统钥匙串并自动重启守护进程。' : '命令行模式需要自己设置凭据引用的环境变量，然后以 --execute 重启。'}
+      <Card title="连接模型" icon="wizard" subtitle="选择平台、填入 API key、确认推荐模型；保存后立即生效，无需重启">
+        {status && <div data-testid={status.testid ?? 'setup-status'} className="hint-card" style={{ display: 'block', borderColor: status.tone === 'danger' ? 'var(--danger)' : undefined }}>{status.text}</div>}
+        <p className="muted" data-testid="setup-existing">
+          {existing && ((existing.models as { entries?: unknown[] } | undefined)?.entries?.length ?? 0) > 0
+            ? '已有配置。选择新平台会追加连接，不会覆盖已有平台。'
+            : '还没有配置连接。选择平台并填入 API key 即可开始。'}
         </p>
-        {status && <div data-testid="setup-status" className="hint-card" style={{ display: 'block' }}>{status}</div>}
-        {hasContent && (
-          <div data-testid="setup-existing" className="banner" style={{ borderRadius: 12, margin: '10px 0' }}>
-            已有配置。为避免覆盖，向导只用于首次配置；平时请到<a href="#/settings">设置页</a>增删项目、模型与凭据。
+
+        <h3 className="section-title">平台</h3>
+        <div className="chip-row" data-testid="setup-providers">
+          {PROVIDER_TEMPLATES.map(item => (
+            <Button key={item.id} size="sm" variant={item.id === providerId ? 'primary' : 'default'} data-testid={`setup-provider-${item.id}`} onClick={() => chooseProvider(item.id)}>{item.label}</Button>
+          ))}
+        </div>
+        {template.notes.length > 0 && <p className="muted">{template.notes.join('；')}</p>}
+
+        <h3 className="section-title">API key</h3>
+        {bridge
+          ? <Field label="API 密钥" hint="只写入系统钥匙串；不进入配置文件、日志或页面状态">
+              <input className="input" style={{ maxWidth: 'none' }} type="password" data-testid="setup-key" value={key} onChange={event => setKey(event.target.value)} placeholder="sk-…" />
+            </Field>
+          : <p className="muted">浏览器模式：请设置环境变量 <code>{secretRef}</code>，保存后重试。</p>}
+        <div className="card-grid">
+          <Field label="凭据引用" hint="配置文件中只出现这个名字" error={errors.secretRef}>
+            <input className="input" data-testid="setup-secret-ref" data-invalid={Boolean(errors.secretRef)} value={secretRef} onChange={event => setSecretRef(event.target.value)} />
+          </Field>
+          <Field label="凭据 id" error={errors.credentialId}>
+            <input className="input" data-testid="setup-credential-id" data-invalid={Boolean(errors.credentialId)} value={credentialId} onChange={event => setCredentialId(event.target.value)} />
+          </Field>
+        </div>
+
+        <h3 className="section-title">推荐模型组合</h3>
+        {template.models.length === 0 && <p className="muted">该平台需要手动填写模型（高级设置）。</p>}
+        <div data-testid="setup-models">
+          {template.models.map(model => (
+            <label key={model.id} className="list-item" style={{ cursor: 'pointer' }}>
+              <input type="checkbox" data-testid={`setup-model-${model.id}`} checked={Boolean(selected[model.id])} onChange={() => toggleModel(model.id)} />
+              <span className="grow">{model.id} <span className="muted">{model.grade} · 上下文 {model.contextWindow.toLocaleString('en-US')} · 输出 {model.maxTokens.toLocaleString('en-US')} · {model.pricing ? `${model.pricing.currency}（${model.pricing.status}）` : '价格未知'}</span></span>
+            </label>
+          ))}
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <Button size="sm" icon="plus" data-testid="setup-model-add" onClick={addCustomModel}>添加自定义模型</Button>
+        </div>
+        {customModels.map((model, index) => (
+          <div className="list-item" key={index} data-testid={`setup-custom-model-${index}`}>
+            <input className="input" style={{ width: 200 }} value={model.id} onChange={event => setCustomModels(current => current.map((item, position) => position === index ? { ...item, id: event.target.value } : item))} />
+            <select className="select" value={model.grade} onChange={event => setCustomModels(current => current.map((item, position) => position === index ? { ...item, grade: event.target.value as TemplateSetupModel['grade'] } : item))}>
+              {GRADES.map(grade => <option key={grade} value={grade}>{grade}</option>)}
+            </select>
+            <Button size="sm" variant="danger" onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>删除</Button>
+          </div>
+        ))}
+        <p className="muted">
+          主 Agent 与审查使用等级最高的模型（推荐 {reviewModel?.id ?? '（尚未选择）'}），实现使用 medium/high。
+          {chosenModels.length === 1 ? ' 当前只有一个模型：可以聊天，但需要独立审查的派发会明确提示缺少第二个模型，不会偷偷放宽审查规则。' : ''}
+        </p>
+
+        <h3 className="section-title">高级设置</h3>
+        <Button size="sm" data-testid="setup-advanced-toggle" onClick={() => setAdvanced(value => !value)}>{advanced ? '收起高级设置' : '展开高级设置'}</Button>
+        {advanced && (
+          <div style={{ marginTop: 10 }}>
+            <div className="card-grid">
+              <Field label="传输" hint="只有经验证的传输可以派发">
+                <select className="select" data-testid="setup-api" value={apiType} onChange={event => setApiType(event.target.value as typeof apiType)}>
+                  <option value="openai-completions">OpenAI Chat Completions</option>
+                  <option value="anthropic-messages">Anthropic Messages</option>
+                </select>
+              </Field>
+              <Field label="端点" error={errors.baseUrl}>
+                <input className="input" style={{ maxWidth: 'none' }} data-testid="setup-base-url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} />
+              </Field>
+            </div>
+            <h4 className="section-title">项目（可选）</h4>
+            <div className="card-grid">
+              <Field label="项目 id" error={errors.projectId}>
+                <input className="input" data-testid="setup-project-id" value={projectId} onChange={event => setProjectId(event.target.value)} placeholder="demo" />
+              </Field>
+              <Field label="项目路径">
+                <div className="row">
+                  <input className="input" style={{ flex: 1, minWidth: 220, maxWidth: 'none' }} data-testid="setup-project-root" value={projectRoot} onChange={event => setProjectRoot(event.target.value)} placeholder="/path/to/project" />
+                  {bridge && <Button icon="box" onClick={() => void pickRoot()}>选择目录</Button>}
+                </div>
+              </Field>
+            </div>
           </div>
         )}
-        {!hasContent && <>
-          <h3 className="section-title">项目</h3>
-          <Field label="项目 id" error={fieldError(errors, 'projectId')}>
-            <input className="input" data-testid="setup-project-id" data-invalid={Boolean(errors.projectId)} value={form.projectId} onChange={event => patch({ projectId: event.target.value })} placeholder="demo" />
-          </Field>
-          <Field label="项目路径" hint="被编排项目的根目录">
-            <div className="row">
-              <input className="input" style={{ flex: 1, minWidth: 260, maxWidth: 'none' }} data-testid="setup-project-root" data-invalid={Boolean(errors.projectRoot)} value={form.projectRoot} onChange={event => patch({ projectRoot: event.target.value })} placeholder="/path/to/project" />
-              {bridge && <Button icon="box" onClick={() => void pickRoot()}>选择目录</Button>}
-            </div>
-          </Field>
 
-          <h3 className="section-title">模型</h3>
-          <Field label="模板">
-            <select className="select" value={form.template} onChange={event => patch({ template: event.target.value as SetupTemplate, ...SETUP_TEMPLATES[event.target.value as SetupTemplate] })}>
-              <option value="local">本地 OpenAI 兼容（如 Ollama / LM Studio）</option>
-              <option value="custom">远程 OpenAI 兼容</option>
-            </select>
-          </Field>
-          <div className="card-grid">
-            <Field label="模型 id" error={fieldError(errors, 'modelId')}>
-              <input className="input" data-testid="setup-model-id" data-invalid={Boolean(errors.modelId)} value={form.modelId} onChange={event => patch({ modelId: event.target.value })} />
-            </Field>
-            <Field label="provider 标签" hint="同一标签共享端点与凭据" error={fieldError(errors, 'provider')}>
-              <input className="input" data-testid="setup-provider" value={form.provider} onChange={event => patch({ provider: event.target.value })} />
-            </Field>
-            <Field label="等级">
-              <select className="select" value={form.grade} onChange={event => patch({ grade: event.target.value as SetupForm['grade'] })}>
-                {['low', 'medium', 'high', 'highest'].map(grade => <option key={grade} value={grade}>{grade}</option>)}
-              </select>
-            </Field>
-            <Field label="上下文窗口" error={fieldError(errors, 'contextWindow')}>
-              <input className="input" type="number" data-testid="setup-context-window" data-invalid={Boolean(errors.contextWindow)} value={String(form.contextWindow)} onChange={event => patch({ contextWindow: Number(event.target.value) })} />
-            </Field>
-            <Field label="最大输出" error={fieldError(errors, 'maxTokens')}>
-              <input className="input" type="number" data-testid="setup-max-tokens" data-invalid={Boolean(errors.maxTokens)} value={String(form.maxTokens)} onChange={event => patch({ maxTokens: Number(event.target.value) })} />
-            </Field>
-          </div>
-          <Field label="端点" error={fieldError(errors, 'baseUrl')}>
-            <input className="input" style={{ maxWidth: 'none' }} data-testid="setup-base-url" data-invalid={Boolean(errors.baseUrl)} value={form.baseUrl} onChange={event => patch({ baseUrl: event.target.value })} />
-          </Field>
-
-          <h3 className="section-title">凭据</h3>
-          <div className="card-grid">
-            <Field label="凭据 id" error={fieldError(errors, 'credentialId')}>
-              <input className="input" data-testid="setup-credential-id" data-invalid={Boolean(errors.credentialId)} value={form.credentialId} onChange={event => {
-                const previous = defaultSecretRef(form.credentialId);
-                patch({ credentialId: event.target.value, ...(form.secretRef === previous ? { secretRef: defaultSecretRef(event.target.value) } : {}) });
-              }} />
-            </Field>
-            <Field label="凭据引用" hint="配置文件中只会出现这个名字" error={fieldError(errors, 'secretRef')}>
-              <input className="input" data-testid="setup-secret-ref" value={form.secretRef} onChange={event => patch({ secretRef: event.target.value })} />
-            </Field>
-          </div>
-          {bridge
-            ? <Field label="API 密钥" hint="仅写入系统钥匙串，不进入配置文件">
-                <input className="input" style={{ maxWidth: 'none' }} type="password" data-testid="setup-key" value={key} onChange={event => setKey(event.target.value)} placeholder="sk-…（可留空，稍后在设置中补充）" />
-              </Field>
-            : <p className="muted">请设置环境变量 <code>{form.secretRef}</code> 后重启守护进程。</p>}
-
-          <div className="row" style={{ marginTop: 16 }}>
-            <Button variant="primary" size="lg" icon="check" disabled={busy || revision === null} onClick={() => void submit()} data-testid="setup-save">
-              {busy ? '保存中…' : bridge ? '保存并重启' : '保存配置'}
-            </Button>
-            {revision !== null && <Pill>已保存 revision {revision}</Pill>}
-          </div>
-        </>}
+        <div className="row" style={{ marginTop: 16 }}>
+          <Button variant="primary" size="lg" icon="check" disabled={busy || revision === null} onClick={() => void submit()} data-testid="setup-save">
+            {busy ? '保存中…' : '保存并应用'}
+          </Button>
+          <Button size="lg" data-testid="setup-test" disabled={revision === null || configured === false} onClick={() => void testConnection(chosenModels[0]?.id ?? '')}>测试连接</Button>
+          {revision !== null && <Pill>revision {revision}</Pill>}
+          {configured !== null && <Pill tone={configured ? 'success' : 'warn'}>{configured ? '已连接' : '未连接'}</Pill>}
+        </div>
+        {testResult && <p className="muted" data-testid="setup-test-result">{testResult}</p>}
       </Card>
     </div>
   );
