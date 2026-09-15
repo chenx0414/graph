@@ -1,0 +1,74 @@
+[
+  {
+    "scenario": "active-project-root-rejection",
+    "phase": "discussing",
+    "response": {
+      "revision": 0,
+      "effectiveRevision": 0,
+      "applied": false,
+      "reason": "Project p has tasks in flight; its root cannot change until they finish",
+      "configured": true,
+      "modelCount": 1,
+      "enabledModelCount": 1
+    },
+    "savedRevision": 0,
+    "savedRoot": "/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-uc-rework-config-BPPgaK/active-project/project",
+    "visibleRoot": "/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-uc-rework-config-BPPgaK/active-project/project",
+    "ledgerRoot": "/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-uc-rework-config-BPPgaK/active-project/project",
+    "fileUnchanged": true,
+    "passed": true
+  },
+  {
+    "scenario": "revoke-persistence-failure",
+    "response": {
+      "revision": 0,
+      "effectiveRevision": 0,
+      "applied": false,
+      "reason": "撤销未能持久化（EISDIR: illegal operation on a directory, rename '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-uc-rework-config-BPPgaK/revoke-storage-failure/state/revoked-secrets.json.47744.b1f39e11-af7d-4d08-bf49-76b5a9d591ae.tmp' -> '/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-uc-rework-config-BPPgaK/revoke-storage-failure/state/revoked-secrets.json'）；连接保持原状态",
+      "configured": true,
+      "modelCount": 1,
+      "enabledModelCount": 1
+    },
+    "restartedConfigured": false,
+    "passed": true
+  },
+  {
+    "scenario": "same-upstream-independent-review",
+    "modelIds": [
+      "same-upstream",
+      "same-upstream"
+    ],
+    "reviewRuns": 0,
+    "nodes": [
+      {
+        "id": "work",
+        "status": "succeeded",
+        "selectedModel": "writer"
+      },
+      {
+        "id": "review",
+        "status": "blocked",
+        "selectedModel": "writer-alias"
+      },
+      {
+        "id": "check",
+        "status": "pending"
+      }
+    ],
+    "questions": [
+      {
+        "id": "2f03f4f4-4848-4d69-89c3-46100b54a756",
+        "nodeId": "review",
+        "operationId": null,
+        "kind": "model_unavailable",
+        "status": "open",
+        "data": {
+          "requested": "writer-alias"
+        },
+        "answer": null
+      }
+    ],
+    "passed": true,
+    "scope": "Real runtime model selection and dispatch, scripted adapters; no provider network."
+  }
+]

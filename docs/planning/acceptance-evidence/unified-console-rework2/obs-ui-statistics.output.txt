@@ -1,0 +1,128 @@
+{
+  "initialPagination": {
+    "pages": [
+      {
+        "node": "a",
+        "firstCount": 200,
+        "allCount": 501,
+        "earliest": 1,
+        "latest": 1,
+        "foreign": 0
+      },
+      {
+        "node": "b",
+        "firstCount": 200,
+        "allCount": 501,
+        "earliest": 1,
+        "latest": 1,
+        "foreign": 0
+      }
+    ],
+    "passed": true
+  },
+  "burst": {
+    "ledgerCount": 761,
+    "beforeClick": 761,
+    "afterClick": 761,
+    "latestVisible": true,
+    "passed": true
+  },
+  "graphSwitch": {
+    "aCount": 200,
+    "bCount": 200,
+    "expectedTail": 200,
+    "passed": true
+  },
+  "lateResponse": {
+    "selectedHeader": "节点 b",
+    "bPanelContainsA": 0,
+    "passed": true
+  },
+  "defaultVersion": {
+    "displayVersion": 2,
+    "scope": {
+      "version": 2,
+      "allVersions": false
+    },
+    "mean": 900,
+    "passed": true
+  },
+  "allVersions": {
+    "scope": {
+      "version": null,
+      "allVersions": true
+    },
+    "tokenMean": 500,
+    "cost": {
+      "byCurrency": [
+        {
+          "currency": "CNY",
+          "mean": 10,
+          "samples": 1,
+          "unknown": 0,
+          "unfinished": 0,
+          "failed": 0
+        },
+        {
+          "currency": "USD",
+          "mean": 10,
+          "samples": 1,
+          "unknown": 0,
+          "unfinished": 0,
+          "failed": 0
+        }
+      ],
+      "mixedCurrency": true,
+      "unknown": false
+    },
+    "passed": true
+  },
+  "mixedInstance": {
+    "sample": {
+      "kind": "task",
+      "taskId": "t",
+      "nodeId": "new",
+      "instanceId": "new",
+      "definitionVersion": "custom-observed@2",
+      "model": "m2",
+      "request": "Observation fixture",
+      "waitingMs": 0,
+      "status": "succeeded",
+      "unfinished": false,
+      "failed": false,
+      "attempts": 2,
+      "reworkRounds": 1,
+      "tokens": 1000,
+      "runMs": 2000,
+      "costs": {
+        "CNY": 10,
+        "USD": 20
+      },
+      "costUnknown": false,
+      "startedAt": null
+    },
+    "cost": {
+      "byCurrency": [
+        {
+          "currency": "CNY",
+          "mean": 10,
+          "samples": 1,
+          "unknown": 0,
+          "unfinished": 0,
+          "failed": 0
+        },
+        {
+          "currency": "USD",
+          "mean": 20,
+          "samples": 1,
+          "unknown": 0,
+          "unfinished": 0,
+          "failed": 0
+        }
+      ],
+      "mixedCurrency": true,
+      "unknown": false
+    },
+    "passed": true
+  }
+}
