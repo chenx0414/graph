@@ -204,6 +204,24 @@ export function taskNotifications(
 }
 
 /** Last non-empty lines, for bounded error dialogs. */
+/** Validate and apply one `graph:save-secret` request. `value === null` is an
+ * explicit revocation and must be expressible through the IPC bridge; an empty
+ * string is not a revocation and is rejected. */
+export function applySecretRequest(
+  secrets: Record<string, string>,
+  ref: unknown,
+  value: unknown,
+): { ok: false; message: string } | { ok: true; secrets: Record<string, string>; revoked: boolean } {
+  if (typeof ref !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) return { ok: false, message: 'invalid secret reference' };
+  if (value === null) {
+    const next = { ...secrets };
+    delete next[ref];
+    return { ok: true, secrets: next, revoked: true };
+  }
+  if (typeof value !== 'string' || !value.trim()) return { ok: false, message: 'invalid secret value' };
+  return { ok: true, secrets: { ...secrets, [ref]: value.trim() }, revoked: false };
+}
+
 export function tailText(text: string, lines: number): string {
   return text.split('\n').filter(line => line.trim().length > 0).slice(-lines).join('\n');
 }

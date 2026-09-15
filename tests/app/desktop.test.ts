@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
+  applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
   resolveDaemonMode, saveSecrets, tailText, taskNotifications, trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
@@ -150,5 +150,22 @@ describe('desktop task notifications', () => {
     ]);
     expect(result.notifications).toEqual([]);
     expect(result.openTotal).toBe(0);
+  });
+});
+
+describe('desktop secret bridge contract (C04)', () => {
+  test('null expresses an explicit revocation and empty strings do not', () => {
+    const before = { KEY_A: 'one', KEY_B: 'two' };
+    const revoked = applySecretRequest(before, 'KEY_A', null);
+    expect(revoked).toEqual({ ok: true, secrets: { KEY_B: 'two' }, revoked: true });
+    // The caller's map is untouched.
+    expect(before).toEqual({ KEY_A: 'one', KEY_B: 'two' });
+    const set = applySecretRequest(before, 'KEY_C', '  value  ');
+    expect(set).toEqual({ ok: true, secrets: { KEY_A: 'one', KEY_B: 'two', KEY_C: 'value' }, revoked: false });
+    expect(applySecretRequest(before, 'KEY_C', '   ')).toMatchObject({ ok: false });
+    expect(applySecretRequest(before, 'KEY_C', 42)).toMatchObject({ ok: false });
+    expect(applySecretRequest(before, 'bad ref', 'x')).toMatchObject({ ok: false });
+    // Revoking an unknown ref is still a valid no-op revocation.
+    expect(applySecretRequest(before, 'KEY_Z', null)).toEqual({ ok: true, secrets: { KEY_A: 'one', KEY_B: 'two' }, revoked: true });
   });
 });

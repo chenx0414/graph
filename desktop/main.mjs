@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  absolutePaths, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
+  absolutePaths, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
   parseBannerAddress, resolveAppPaths, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
@@ -211,29 +211,29 @@ if (!app.requestSingleInstanceLock()) {
       return result.canceled ? null : result.filePaths[0] ?? null;
     });
     ipcMain.handle('graph:save-secret', async (_event, ref, value) => {
-      if (typeof ref !== 'string' || typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref) || !value.trim()) {
-        return { stored: false, message: 'invalid secret reference or empty value' };
-      }
-      if (!secretsPath) return { stored: false, message: 'no secrets path' };
+      const request = applySecretRequest(secrets, ref, value);
+      if (!request.ok) return { stored: false, applied: false, message: request.message };
+      if (!secretsPath) return { stored: false, applied: false, message: 'no secrets path' };
       const codec = {
         isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
         encryptString: input => safeStorage.encryptString(input),
         decryptString: input => safeStorage.decryptString(input),
       };
-      if (value === null) delete secrets[ref];
-      else secrets[ref] = value.trim();
+      secrets = request.secrets;
+      // Keep a revocation in the encrypted map too (it removes the entry), and
+      // make the daemon state authoritative for the "revoked" gate.
       const stored = saveSecrets(secretsPath, codec, secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
       let applied = false;
       let message;
-      if (stored && readyUrl) {
-        // Hand the key to the running daemon through the token-guarded local
-        // bridge; the renderer never sees the token and no restart is needed.
+      if (readyUrl) {
+        // Hand the key/revocation to the running daemon through the
+        // token-guarded local bridge; no restart is needed.
         try {
           const token = readFileSync(join(currentPaths().stateDir, 'app-token'), 'utf8').trim();
           const response = await fetch(`${readyUrl}/api/app/secret`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', 'x-graph-app-token': token, origin: readyUrl },
-            body: JSON.stringify({ ref, value: value === null ? null : value.trim() }),
+            body: JSON.stringify({ ref, value: request.revoked ? null : request.secrets[ref] }),
           });
           const body = await response.json().catch(() => ({}));
           applied = response.ok && body.applied === true;
@@ -242,7 +242,11 @@ if (!app.requestSingleInstanceLock()) {
           message = String(error);
         }
       }
-      return { stored, applied, ...(stored && applied ? {} : { message: message ?? 'encryption unavailable; use the environment variable instead' }) };
+      // A revocation lives in the daemon's revoked-secrets file, so `applied`
+      // is the meaningful proof; key storage needs both the keychain write and
+      // the daemon applying it.
+      const ok = request.revoked ? applied : stored && applied;
+      return { stored, applied, revoked: request.revoked, ...(ok ? {} : { message: message ?? (request.revoked ? 'daemon not ready' : 'encryption unavailable; use the environment variable instead') }) };
     });
     ipcMain.handle('graph:secret-status', (_event, refs) => {
       const result = {};

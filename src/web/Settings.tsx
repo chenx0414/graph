@@ -267,7 +267,9 @@ export function Settings() {
                 onClick={async () => {
                   try {
                     const result = await bridge.saveSecret(credential.secretRef, null);
-                    if (!result?.stored || !result?.applied) throw new Error(result?.message ?? '撤销未生效');
+                    // Revocation persistence lives in the daemon state, so the
+                    // applied flag is the proof that the gate changed.
+                    if (!result?.applied) throw new Error(result?.message ?? '撤销未生效');
                     setCredentialState(current => ({ ...current, [id]: false }));
                     setKeys(current => ({ ...current, [id]: '' }));
                     toast('连接已禁用；重新保存密钥即可恢复', 'success');
