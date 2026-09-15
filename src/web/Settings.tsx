@@ -143,16 +143,18 @@ export function Settings() {
     setSaving(true);
     setError(null);
     try {
-      const response = await api<{ revision: number; restartRequired: boolean }>('/api/config', {
+      const response = await api<{ revision: number; effectiveRevision?: number; restartRequired: boolean; applied?: boolean; reason?: string; configured?: boolean }>('/api/config', {
         method: 'POST',
         body: JSON.stringify({ expectedRevision: revision, document: { ...draft, version: 1 } }),
       });
       setRevision(response.revision);
+      setEffectiveRevision(response.effectiveRevision ?? response.revision);
       setDirty(false);
       setStatus(`已保存 revision ${response.revision}`);
-      toast(`配置已保存${response.restartRequired ? '，重启后生效' : ''}`, 'success');
+      toast(`配置已保存${response.applied === false ? '，等待生效' : '并已应用'}`, 'success');
       await load();
-      setStatus(`已保存 revision ${response.revision}${response.restartRequired ? '，重启守护进程后生效' : ''}`);
+      const pending = response.applied === false;
+      setStatus(`已保存 revision ${response.revision}${pending ? `，等待生效：${response.reason ?? '需要重启守护进程'}` : '，已应用到当前守护进程'}${response.configured === false ? '（尚未配置可用凭据，仅查看模式）' : ''}`);
     } catch (reason) {
       setError(reason as ApiError);
       toast(`保存失败：${(reason as Error).message}`, 'danger');
@@ -192,7 +194,7 @@ export function Settings() {
         </div>
         {error && <p data-testid="config-error" style={{ color: 'var(--danger)', marginTop: 10 }}>{error.message}{error.code ? `（${error.code}）` : ''}</p>}
         {status && <p data-testid="config-status" className="muted" style={{ marginTop: 10 }}>{status}</p>}
-        {status.includes('重启') && <div data-testid="restart-required" className="hint-card">待生效：当前守护进程仍使用启动时的绑定，重启后应用新配置。</div>}
+        {status.includes('等待生效') && <div data-testid="restart-required" className="hint-card">待生效：当前守护进程仍使用上一份有效绑定；修正配置后可再次保存。</div>}
       </Card>
 
       <Card title="项目" icon="box" actions={<Button size="sm" icon="plus" data-testid="project-add" onClick={() => mutate(next => { next.projects = [...(next.projects ?? []), { id: 'new-project', root: '.' }]; })}>添加项目</Button>}>

@@ -19,7 +19,7 @@ export function Setup() {
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
 
   useEffect(() => {
-    void api<{ revision: number; config: { projects?: unknown[]; models?: { entries?: unknown[] } | null; credentials?: Record<string, unknown> } }>('/api/config')
+    void api<{ revision: number; effectiveRevision?: number; config: { projects?: unknown[]; models?: { entries?: unknown[] } | null; credentials?: Record<string, unknown> } }>('/api/config')
       .then(result => {
         setRevision(result.revision);
         setHasContent(Boolean(
@@ -56,18 +56,20 @@ export function Setup() {
         const stored = await bridge.saveSecret(form.secretRef, key.trim());
         if (!stored.stored) setStatus(`密钥未写入系统钥匙串：${stored.message ?? '存储不可用'}，将依赖环境变量。`);
       }
-      await api('/api/config', {
+      // Merge into the existing document so a second platform append never
+      // overwrites the first one.
+      const existing = (await api<{ config: Record<string, unknown> }>('/api/config')).config;
+      const saved = await api<{ revision: number; effectiveRevision?: number; applied?: boolean; reason?: string; configured?: boolean }>('/api/config', {
         method: 'POST',
-        body: JSON.stringify({ expectedRevision: revision, document: buildConfigDocument({ version: 1 }, form) }),
+        body: JSON.stringify({ expectedRevision: revision, document: buildConfigDocument(existing, form) }),
       });
-      if (bridge) {
-        const result = await bridge.relaunch();
-        setStatus(`已保存并重启守护进程：${result.url}${key.trim() ? '' : '（未填写密钥，仍为仅查看模式）'}`);
-        toast('配置已保存，守护进程已重启', 'success');
-        setTimeout(() => location.assign(result.url), 600);
+      setRevision(saved.effectiveRevision ?? saved.revision);
+      if (saved.applied === false) {
+        setStatus(`已保存但尚未生效（revision ${saved.revision}）：${saved.reason ?? '需要重启或修正配置'}`);
+        toast('配置已保存，等待生效', 'info');
       } else {
-        setStatus('已保存。请以 --execute 重启守护进程使配置生效；密钥需通过环境变量提供。');
-        toast('配置已保存', 'success');
+        setStatus(`已保存并生效（revision ${saved.effectiveRevision ?? saved.revision}）${saved.configured === false ? '；尚未配置可用凭据，当前为仅查看模式' : ''}`);
+        toast('配置已保存并应用', 'success');
       }
     } catch (error) {
       const failure = error as Error & { field?: string; code?: string };

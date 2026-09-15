@@ -1,13 +1,15 @@
 import { existsSync } from 'node:fs';
-import { mkdir, realpath } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
-import { assertCredentialGroups, emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
+import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
 import { openConfigStore } from './config-service.ts';
+import { createLiveConfig, type LiveConfig } from './live-config.ts';
+import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
-import type { ModelEntry } from '../catalog/models.ts';
 
 export interface DaemonOptions {
   /** Explicit config path; null starts in first-run mode with no projects or models. */
@@ -18,6 +20,19 @@ export interface DaemonOptions {
   mode: 'view' | 'execute';
   env: Record<string, string | undefined>;
   log?: (line: string) => void;
+  /** Permit execute intent before any model resolves; the APP applies the
+   * configuration live. The CLI keeps the strict startup errors. */
+  dynamic?: boolean;
+}
+
+export interface ApplyConfigResult {
+  revision: number;
+  effectiveRevision: number;
+  applied: boolean;
+  reason?: string | undefined;
+  configured: boolean;
+  modelCount: number;
+  enabledModelCount: number;
 }
 
 export interface GraphDaemon {
@@ -30,7 +45,11 @@ export interface GraphDaemon {
   configured: boolean;
   modelCount: number;
   enabledModelCount: number;
+  /** Random local token read from <stateDir>/app-token; guards the APP bridge. */
+  appToken: string;
   server: Awaited<ReturnType<typeof openGraphServer>>;
+  applyConfig(document: unknown, expectedRevision: number): Promise<ApplyConfigResult>;
+  pushSecret(ref: string, value: string | null): Promise<ApplyConfigResult>;
   close(): Promise<void>;
 }
 
@@ -77,7 +96,11 @@ function missingSecrets(config: GraphConfig, entries: ConfiguredModel[], env: Re
 }
 
 /** Start the console daemon: validate the web build, load configuration, open
- * the runtime on an explicit state directory and serve on loopback only. */
+ * the runtime on an explicit state directory and serve on loopback only.
+ *
+ * With `dynamic: true` (the desktop APP) the daemon may start with execute
+ * intent before any model resolves; later config/secret applies activate the
+ * bindings on the same process. The CLI keeps the strict startup checks. */
 export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDaemon> {
   const log = options.log ?? (() => {});
   const index = join(options.webDir, 'index.html');
@@ -85,107 +108,79 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     throw new RuntimeError('web_build_missing', `Web build not found at ${index}. Build the console first: pnpm build:web (without pnpm: node --run build:web)`);
   }
   const config = options.configPath ? await loadGraphConfig(options.configPath) : emptyGraphConfig();
-  const entries = config.models?.entries ?? [];
-  if (options.mode === 'execute' && !entries.length) {
-    throw new RuntimeError('models_missing', 'Execution mode requires a config with at least one model entry; start view-only or configure a model first');
-  }
-  const missing = missingSecrets(config, entries, options.env);
-  const resolvable = Object.keys(config.credentials).some(id => resolveCredentialSecret(config, id, options.env).configured);
-  if (entries.length && !resolvable && options.mode === 'execute') {
-    throw new RuntimeError('credentials_missing', `Execution mode requires at least one configured credential; set: ${[...missing].join(', ')}`);
-  }
-  // A conflicting hand-edited config must not prevent the console from
-  // starting; execute mode still refuses it instead of guessing limits.
-  let groupConflict: RuntimeError | undefined;
-  try { assertCredentialGroups(config, options.env); }
-  catch (error) { groupConflict = error as RuntimeError; }
-  if (groupConflict && options.mode === 'execute') throw groupConflict;
-  if (groupConflict) log(`Config problem (${groupConflict.message}); model dispatch stays disabled.`);
   const configStore = options.configPath ? await openConfigStore(options.configPath) : null;
-  // The running daemon keeps the bindings it was started with; a saved file
-  // revision only takes effect after a restart.
-  const effectiveRevision = configStore?.revision() ?? 0;
-  // Credential aliases that resolve to the same actual key must share one
-  // scheduling identity; the alias names themselves stay in the config and are
-  // never replaced by secret material.
-  const bySecretValue = new Map<string, string[]>();
-  for (const id of Object.keys(config.credentials)) {
-    const secret = resolveCredentialSecret(config, id, options.env);
-    if (!secret.configured || !secret.value) continue;
-    bySecretValue.set(secret.value, [...(bySecretValue.get(secret.value) ?? []), id]);
-  }
-  const identities = new Map<string, { canonical: string; limit?: number; sharedGroupId?: string; groupLimit?: number }>();
-  for (const aliases of groupConflict ? [] : bySecretValue.values()) {
-    const sorted = [...aliases].sort();
-    const canonical = sorted[0]!;
-    const caps = sorted.map(id => config.limits.credentials[id]).filter((value): value is number => value !== undefined);
-    const groups = [...new Set(sorted.map(id => config.credentials[id]?.sharedLimitGroupId).filter((value): value is string => Boolean(value)))];
-    const groupId = groups[0];
-    const identity = {
-      canonical,
-      ...(caps.length ? { limit: Math.min(...caps) } : {}),
-      ...(groupId ? { sharedGroupId: groupId } : {}),
-      ...(groupId && config.limits.sharedGroups[groupId] !== undefined ? { groupLimit: config.limits.sharedGroups[groupId] } : {}),
-    };
-    for (const alias of sorted) identities.set(alias, identity);
-    if (sorted.length > 1) log(`Credential aliases ${sorted.join(', ')} resolve to the same key; scheduling as "${canonical}" with the strictest limit.`);
-  }
+  const live: LiveConfig = createLiveConfig({ env: options.env, log, initial: { config, revision: configStore?.revision() ?? 0 } });
+  const entries = live.entries();
+  const conflict = live.snapshot().conflict;
 
-  // Model id to credential mapping: one model can never inherit another model's key.
-  const credentials = new Map<string, { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number }>();
-  for (const entry of entries) {
-    const secret = resolveCredentialSecret(config, entry.credentialId, options.env);
-    if (!secret.configured || !secret.value) continue;
-    const identity = identities.get(entry.credentialId);
-    if (!identity) continue;
-    credentials.set(entry.id, {
-      credentialId: identity.canonical,
-      apiKey: secret.value,
-      ...(identity.limit !== undefined ? { limit: identity.limit } : {}),
-      ...(identity.sharedGroupId ? { sharedGroupId: identity.sharedGroupId } : {}),
-      ...(identity.groupLimit !== undefined ? { groupLimit: identity.groupLimit } : {}),
-    });
+  if (!options.dynamic) {
+    if (options.mode === 'execute' && !entries.length) {
+      throw new RuntimeError('models_missing', 'Execution mode requires a config with at least one model entry; start view-only or configure a model first');
+    }
+    if (conflict && options.mode === 'execute') throw new RuntimeError('invalid_config', conflict);
+    if (options.mode === 'execute' && entries.length && live.resolvedCredentialIds().length === 0) {
+      const missing = missingSecrets(config, entries, options.env);
+      throw new RuntimeError('credentials_missing', `Execution mode requires at least one configured credential; set: ${[...missing].join(', ')}`);
+    }
   }
-  const credentialFor = (entry: ModelEntry) => credentials.get(entry.id);
-  // Dispatch needs one usable model, not a fully populated config: entries
-  // whose credential cannot resolve stay disabled and refuse dispatch cleanly.
-  const enabled = entries.length > 0 && credentials.size > 0 && !groupConflict;
+  if (conflict) log(`Config problem (${conflict}); model dispatch stays disabled.`);
+  const missing = missingSecrets(config, entries, options.env);
   if (entries.length && missing.size) {
-    log(credentials.size > 0
+    log(live.enabled()
       ? `Credentials not configured (${[...missing].join(', ')}); those models stay disabled.`
       : `Credentials not configured (${[...missing].join(', ')}); model dispatch stays disabled.`);
   }
-  const limitAliases = Object.fromEntries([...identities.entries()].filter(([alias, identity]) => alias !== identity.canonical).map(([alias, identity]) => [alias, identity.canonical]));
-  const limitSummary = [...new Set([...credentials.values()].map(binding => {
-    const parts = [binding.limit !== undefined ? `${binding.credentialId} ≤${binding.limit}` : null, binding.groupLimit !== undefined ? `组 ${binding.sharedGroupId} ≤${binding.groupLimit}` : null].filter(Boolean);
-    return parts.join(', ');
-  }).filter(Boolean))];
-  if (limitSummary.length) log(`Concurrency limits: ${limitSummary.join('; ')}`);
 
+  const scheduler = createModelScheduler();
   let modelRuntime: ModelRuntime | undefined;
-  if (enabled) {
-    modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: true, refreshOnCreate: false });
-    for (const [provider, group] of providerGroups(entries)) {
-      const secret = resolveCredentialSecret(config, group.credentialId, options.env);
-      if (!secret.configured || !secret.value) continue;
-      modelRuntime.registerProvider(provider, { baseUrl: group.baseUrl, api: 'openai-completions', apiKey: secret.value, models: group.entries.map(piModel) });
+  let definitionsPublished = false;
+  const ensureModelRuntime = async () => {
+    if (!modelRuntime) {
+      modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: true, refreshOnCreate: false });
     }
-  }
+    return modelRuntime;
+  };
+  const syncProviders = async () => {
+    if (!options.dynamic && !live.enabled()) return;
+    const runtime = await ensureModelRuntime();
+    for (const [provider, group] of providerGroups(live.entries())) {
+      const binding = live.credentialFor(group.entries[0]!);
+      if (!binding) continue;
+      // Re-registering the same provider name replaces its endpoint/key, so a
+      // saved rotation applies to the next session opened for this provider.
+      runtime.registerProvider(provider, { baseUrl: group.baseUrl, api: 'openai-completions', apiKey: binding.apiKey, models: group.entries.map(piModel) });
+    }
+  };
+  await syncProviders();
+
+  const activateDispatch = (server: Awaited<ReturnType<typeof openGraphServer>>) => {
+    // View-only CLI intent never starts dispatching because a config was saved.
+    if (options.mode !== 'execute' && !options.dynamic) return;
+    server.startDrive();
+    server.runtime.host.recoverMasters();
+  };
+  const publishDefinitions = (server: Awaited<ReturnType<typeof openGraphServer>>) => {
+    if (definitionsPublished || !live.enabled()) return;
+    definitionsPublished = true;
+    server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+    server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
+    server.runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
+  };
 
   // Explicit connectivity check. Only runs when the settings page asks for it;
   // ordinary config reads and saves never touch a provider.
   const testConnection = async (modelId: string) => {
-    const entry = config.models?.entries.find(model => model.id === modelId);
+    const entry = live.entries().find(model => model.id === modelId);
     if (!entry) throw new RuntimeError('not_found', `Unknown model ${modelId}`);
-    const secret = resolveCredentialSecret(config, entry.credentialId, options.env);
-    if (!secret.configured) return { ok: false, model: entry.id, credentialId: entry.credentialId, message: `Credential not configured: ${secret.secretRef}` };
+    const binding = live.credentialFor(entry);
+    if (!binding) return { ok: false, model: entry.id, credentialId: entry.credentialId, message: `Credential not configured: ${entry.credentialId}` };
     const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5_000);
     try {
       const response = await fetch(`${entry.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret.value}`, ...entry.headers },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${binding.apiKey}`, ...entry.headers },
         body: JSON.stringify({ model: entry.id, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
         signal: controller.signal,
       });
@@ -198,48 +193,110 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       clearTimeout(timer);
     }
   };
+
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
-  const first = enabled ? entries.find(entry => credentials.has(entry.id))! : null;
+  const appToken = randomUUID();
+  await writeFile(join(stateDir, 'app-token'), `${appToken}\n`, { mode: 0o600 });
+
+  const runtimeReady = await ensureModelRuntime();
   const server = await openGraphServer({
     stateDir,
     projects: config.projects,
-    ...(enabled && modelRuntime ? {
-      models: {
-        entries,
-        preferences: config.models!.preferences,
-        apiKey: credentials.get(first!.id)?.apiKey ?? '',
-        modelRuntime,
-        credentialFor,
-      },
-      master: { action: 'master', definitionVersion: 'master@1', model: first!.id },
-    } : {}),
-    limits: { defaultBudgetTokens: config.limits.defaultBudgetTokens },
-    config: { revision: () => effectiveRevision },
-    autoDrive: options.mode === 'execute',
+    models: {
+      entries: live.entries(),
+      preferences: live.preferences(),
+      apiKey: '',
+      modelRuntime: runtimeReady,
+      modelScheduler: scheduler,
+      credentialFor: entry => live.credentialFor(entry),
+    },
+    live: {
+      revision: () => live.revision(),
+      entries: () => live.entries(),
+      preferences: () => live.preferences(),
+      credentialFor: entry => live.credentialFor(entry),
+      masterModel: () => live.masterModel(),
+      defaultBudgetTokens: () => live.defaultBudgetTokens(),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: () => live.masterModel() },
+    limits: { defaultBudgetTokens: live.defaultBudgetTokens() },
+    config: { revision: () => live.revision() },
+    autoDrive: options.mode === 'execute' || options.dynamic === true,
     port: options.port,
     webDir: options.webDir,
-    startup: {
-      mode: options.mode, configured: enabled, modelCount: entries.length, enabledModelCount: credentials.size,
-      effectiveRevision, ...(Object.keys(limitAliases).length ? { limitAliases } : {}),
-    },
+    startupInfo: () => ({
+      mode: options.mode, configured: live.enabled(), modelCount: live.entries().length,
+      enabledModelCount: live.status().enabledModelCount, effectiveRevision: live.revision(),
+      ...(Object.keys(live.status().limitAliases).length ? { limitAliases: live.status().limitAliases } : {}),
+    }),
     ...(configStore ? { configStore, configEnv: options.env, configTest: testConnection } : {}),
+    appServices: {
+      applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
+      pushSecret: (ref, value) => pushSecret(ref, value),
+      appToken,
+      snapshot: () => ({
+        revision: live.revision(), effectiveRevision: live.revision(), applied: true,
+        configured: live.enabled(), modelCount: live.entries().length, enabledModelCount: live.status().enabledModelCount,
+      }),
+    },
   });
-  if (enabled) {
-    server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
-    server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
-    server.runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
-  }
+  publishDefinitions(server);
+
+  const applyConfig = async (document: unknown, expectedRevision: number): Promise<ApplyConfigResult> => {
+    if (!configStore) throw new RuntimeError('invalid_config', 'The daemon was started without a configuration file');
+    const saved = await configStore.save(document, expectedRevision, options.env);
+    const result = live.apply(saved.config, saved.revision);
+    if (result.applied) {
+      await syncProviders();
+      scheduler.wake();
+      publishDefinitions(server);
+      activateDispatch(server);
+    }
+    return {
+      revision: saved.revision,
+      effectiveRevision: live.revision(),
+      applied: result.applied,
+      ...(result.applied ? {} : { reason: result.reason }),
+      configured: live.enabled(),
+      modelCount: live.entries().length,
+      enabledModelCount: live.status().enabledModelCount,
+    };
+  };
+  const pushSecret = async (ref: string, value: string | null): Promise<ApplyConfigResult> => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) throw new RuntimeError('invalid_input', 'secretRef must be an environment variable name');
+    if (value !== null && (!value.trim() || value.length > 8_192)) throw new RuntimeError('invalid_input', 'A nonempty bounded secret value is required');
+    const result = live.pushSecret(ref, value === null ? null : value.trim());
+    if (result.applied) {
+      await syncProviders();
+      scheduler.wake();
+      publishDefinitions(server);
+      activateDispatch(server);
+    }
+    return {
+      revision: live.revision(),
+      effectiveRevision: live.revision(),
+      applied: result.applied,
+      ...(result.applied ? {} : { reason: result.reason }),
+      configured: live.enabled(),
+      modelCount: live.entries().length,
+      enabledModelCount: live.status().enabledModelCount,
+    };
+  };
+
   return {
     url: server.url,
     stateDir,
     webDir: options.webDir,
     configPath: config.path,
     mode: options.mode,
-    configured: enabled,
-    modelCount: entries.length,
-    enabledModelCount: credentials.size,
+    configured: live.enabled(),
+    modelCount: live.entries().length,
+    enabledModelCount: live.status().enabledModelCount,
+    appToken,
     server,
+    applyConfig,
+    pushSecret,
     async close() { await server.close(); },
   };
 }

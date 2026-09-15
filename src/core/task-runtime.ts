@@ -38,11 +38,22 @@ export async function openTaskRuntime(options: {
   };
   /** Config version recorded with new tasks so history points at its binding. */
   config?: { revision(): number };
-  master?: { action: string; definitionVersion: string; model: string };
+  master?: { action: string; definitionVersion: string; model: string | (() => string | undefined) };
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   /** Default per-instance budget for new instances. null/absent means no
    * cumulative token cap; a positive integer keeps the finite-budget gate. */
   limits?: { defaultBudgetTokens?: number | null };
+  /** Hot-reloadable configuration view. When present, entries, preferences,
+   * credential bindings, master model and default budget are read per use
+   * instead of from the static `models` option captured at startup. */
+  live?: {
+    revision(): number;
+    entries(): ModelEntry[];
+    preferences(): Partial<Record<ModelEntry['grade'], string[]>>;
+    credentialFor(entry: ModelEntry): { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
+    masterModel(): string | undefined;
+    defaultBudgetTokens(): number | null;
+  };
   /** Host-selected grants and environment for confirmed program checks only. */
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
 }) {
@@ -60,7 +71,9 @@ export async function openTaskRuntime(options: {
   const ensureOpen = () => { if (closed) throw new RuntimeError('closed', 'Runtime is closed'); };
   const createMasterNode = (taskId: string) => {
     const master = options.master!;
-    const spec: NodeSpec = { id: 'master', kind: 'agent', action: master.action, definitionVersion: master.definitionVersion, model: master.model, role: 'master' };
+    const model = masterModel();
+    if (!model) throw new RuntimeError('models_missing', 'No configured model for a master agent');
+    const spec: NodeSpec = { id: 'master', kind: 'agent', action: master.action, definitionVersion: master.definitionVersion, model, role: 'master' };
     const instanceId = randomUUID();
     store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, spec.id, canonicalJson(spec), instanceId);
     insertInstance(instanceId, taskId, spec.id, spec.definitionVersion, spec.model);
@@ -73,12 +86,47 @@ export async function openTaskRuntime(options: {
   // they are removed from the config.
   const configuredProjects = options.projects;
   const allowedProjects = new Set((configuredProjects ?? []).map(project => project.id));
+  // Live getters: hot configuration changes must affect the next use without
+  // reopening the runtime; static options remain for unit tests.
+  const liveEntries = () => options.live?.entries() ?? options.models?.entries ?? [];
+  const livePreferences = (): Partial<Record<ModelEntry['grade'], string[]>> | undefined =>
+    options.live ? options.live.preferences() : options.models?.preferences;
+  const liveBudget = () => options.live?.defaultBudgetTokens() ?? options.limits?.defaultBudgetTokens ?? null;
+  const masterModel = () => {
+    const master = options.master;
+    if (!master) return undefined;
+    const model = typeof master.model === 'function' ? master.model() : master.model;
+    return model?.trim() ? model : undefined;
+  };
   const defaultBudgetTokens = options.limits?.defaultBudgetTokens ?? null;
   // The node row must exist first: instances(task_id,node_id) references nodes.
   const insertInstance = (id: string, taskId: string, nodeId: string, definitionVersion?: string | null, model?: string | null) => {
+    const budget = liveBudget();
     store.db.prepare('INSERT INTO instances(id,task_id,node_id,definition_version,model,budget,unlimited) VALUES(?,?,?,?,?,?,?)')
-      .run(id, taskId, nodeId, definitionVersion ?? null, model ?? null, defaultBudgetTokens ?? 0, defaultBudgetTokens === null ? 1 : 0);
+      .run(id, taskId, nodeId, definitionVersion ?? null, model ?? null, budget ?? 0, budget === null ? 1 : 0);
     return id;
+  };
+  const recoverMasterNodes = () => {
+    if (!options.master || !masterModel()) return 0;
+    return store.transaction(() => {
+      const pending = (store.db.prepare("SELECT id, project_id, phase FROM tasks WHERE phase IN ('discussing','chatting') ORDER BY created_seq").all() as { id: string; project_id: string; phase: string }[])
+        // A task whose project was removed from the configuration keeps its
+        // history but is not brought back to life. Conversation workspaces
+        // are host-owned and stay addressable.
+        .filter(task => task.phase === 'chatting' || configuredProjects === undefined || allowedProjects.has(task.project_id));
+      let created = 0;
+      for (const task of pending) {
+        const nodes = store.db.prepare('SELECT spec FROM nodes WHERE task_id=?').all(task.id) as { spec: string }[];
+        if (nodes.some(row => (JSON.parse(row.spec) as NodeSpec).role === 'master')) continue;
+        createMasterNode(task.id);
+        store.event(task.id, 'task.master_recovered', { reason: 'dispatch was disabled when the task was created' });
+        created += 1;
+      }
+      const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+      const firstDiscussing = pending.find(task => task.phase === 'discussing');
+      if (!active_task && firstDiscussing) store.db.prepare('UPDATE runtime SET active_task=?').run(firstDiscussing.id);
+      return created;
+    });
   };
   try {
     if (defaultBudgetTokens !== null && (!Number.isSafeInteger(defaultBudgetTokens) || defaultBudgetTokens <= 0)) {
@@ -102,10 +150,11 @@ export async function openTaskRuntime(options: {
         for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
       });
     }
-    const fallback = options.models ? createPiAdapter({
-      store, instancesDir: join(stateDir, 'instances'), catalog, directory: () => options.models!.entries,
-      apiKey: options.models.apiKey ?? '', modelRuntime: options.models.modelRuntime,
-      ...(options.models.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
+    const fallback = options.models || options.live ? createPiAdapter({
+      store, instancesDir: join(stateDir, 'instances'), catalog, directory: liveEntries,
+      apiKey: options.models?.apiKey ?? '', modelRuntime: options.models!.modelRuntime,
+      ...(options.models?.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
+      ...(options.live ? { bindingFor: (entry: ModelEntry) => options.live!.credentialFor(entry) } : {}),
       scheduler: modelScheduler,
       ...(options.network ? { network: options.network } : {}),
       channels: {
@@ -114,36 +163,25 @@ export async function openTaskRuntime(options: {
         install: input => channels.install!(input),
       },
     }) : undefined;
+    if (options.live) {
+      store.transaction(() => {
+        for (const entry of options.live!.entries()) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
+      });
+    }
     execution = new Execution(store, options.actions ?? {}, {
       ...(fallback ? { fallback } : {}),
       catalog,
       git,
       scratchRoot: stateDir,
-      ...(options.models ? { models: () => options.models!.entries } : {}),
-      ...(options.models?.preferences ? { preferences: options.models.preferences } : {}),
+      ...(options.models || options.live ? { models: liveEntries } : {}),
+      ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
       ...(options.program ? { program: options.program } : {}),
     });
     // Tasks and conversations created while dispatch was disabled carry no
     // master node. Once a master binding exists they get one and become
     // driveable again; queued conversation messages stay pending until then.
-    if (options.master) {
-      store.transaction(() => {
-        const pending = (store.db.prepare("SELECT id, project_id, phase FROM tasks WHERE phase IN ('discussing','chatting') ORDER BY created_seq").all() as { id: string; project_id: string; phase: string }[])
-          // A task whose project was removed from the configuration keeps its
-          // history but is not brought back to life. Conversation workspaces
-          // are host-owned and stay addressable.
-          .filter(task => task.phase === 'chatting' || configuredProjects === undefined || allowedProjects.has(task.project_id));
-        for (const task of pending) {
-          const nodes = store.db.prepare('SELECT spec FROM nodes WHERE task_id=?').all(task.id) as { spec: string }[];
-          if (nodes.some(row => (JSON.parse(row.spec) as NodeSpec).role === 'master')) continue;
-          createMasterNode(task.id);
-          store.event(task.id, 'task.master_recovered', { reason: 'dispatch was disabled when the task was created' });
-        }
-        const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
-        const firstDiscussing = pending.find(task => task.phase === 'discussing');
-        if (!active_task && firstDiscussing) store.db.prepare('UPDATE runtime SET active_task=?').run(firstDiscussing.id);
-      });
-    }
+    // The same scan runs after a hot configuration apply.
+    if (options.master && masterModel()) recoverMasterNodes();
   } catch (error) {
     try { store.close(); } finally { releaseOwner(); }
     throw error;
@@ -159,8 +197,8 @@ export async function openTaskRuntime(options: {
         const taskId = randomUUID();
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         store.db.prepare('INSERT INTO tasks(id,project_id,request,created_seq) VALUES(?,?,?,?)').run(taskId, input.projectId, input.request, sequence);
-        if (options.master) {
-          const spec: NodeSpec = { id: 'master', kind: 'agent', action: options.master.action, definitionVersion: options.master.definitionVersion, model: options.master.model, role: 'master' };
+        if (options.master && masterModel()) {
+          const spec: NodeSpec = { id: 'master', kind: 'agent', action: options.master.action, definitionVersion: options.master.definitionVersion, model: masterModel()!, role: 'master' };
           const instanceId = randomUUID();
           store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, spec.id, canonicalJson(spec), instanceId);
           insertInstance(instanceId, taskId, spec.id, spec.definitionVersion, spec.model);
@@ -168,7 +206,7 @@ export async function openTaskRuntime(options: {
           const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
           if (!active_task) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
         }
-        return { taskId, cursor: store.event(taskId, 'task.created', { request: input.request, configRevision: options.config?.revision() ?? null }) };
+        return { taskId, cursor: store.event(taskId, 'task.created', { request: input.request, configRevision: options.live?.revision() ?? options.config?.revision() ?? null }) };
       });
     },
     task(taskId: string) {
@@ -413,7 +451,7 @@ export async function openTaskRuntime(options: {
         const title = (input.title?.trim() || input.text?.trim() || '新对话').slice(0, 120);
         store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,phase,created_seq,conversation_id) VALUES(?,?,?,1,?,?,?)').run(taskId, workspaceProjectId, title, 'chatting', sequence, conversationId);
         store.db.prepare('INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES(?,?,?,?,?,?,?)').run(conversationId, projectId, workspaceProjectId, taskId, title, sequence, Date.now());
-        if (options.master) createMasterNode(taskId);
+        if (options.master && masterModel()) createMasterNode(taskId);
         let cursor = store.event(taskId, 'conversation.created', { conversationId, projectId, title });
         let messageId: string | null = null;
         if (input.text !== undefined && input.text.trim()) {
@@ -575,7 +613,7 @@ export async function openTaskRuntime(options: {
         store.db.prepare('UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?').run(anchor.id);
         store.db.prepare('INSERT INTO conversation_acceptances VALUES(?,?,?,?,?)').run(conversationId, input.proposalVersion, taskId, input.targetBranch, Date.now());
         appendMessage(store, { conversationId, role: 'system', kind: 'confirmed', text: `已确认草稿 v${input.proposalVersion}，创建功能任务并${phase === 'running' ? '开始执行' : '排队'}（目标分支 ${input.targetBranch}）`, data: { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch } });
-        store.event(taskId, 'task.created', { request: proposal.summary, conversationId, configRevision: options.config?.revision() ?? null });
+        store.event(taskId, 'task.created', { request: proposal.summary, conversationId, configRevision: options.live?.revision() ?? options.config?.revision() ?? null });
         return { conversationId, taskId, targetBranch: input.targetBranch, cursor: store.event(anchor.id, 'conversation.confirmed', { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
       });
       git.prepareTask(receipt.taskId, input.targetBranch);
@@ -668,6 +706,8 @@ export async function openTaskRuntime(options: {
       async drive() { ensureOpen(); return execution.drive(); },
       async report(id: string, generation: number, result: OperationResult) { ensureOpen(); execution.report(id, generation, result); },
       async reconcile(id: string) { ensureOpen(); await execution.reconcile(id); },
+      /** Create master nodes for pending tasks after a hot configuration apply. */
+      recoverMasters() { ensureOpen(); return recoverMasterNodes(); },
     },
     supervisor(taskId: string) {
       ensureOpen(); store.task(taskId);

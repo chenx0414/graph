@@ -142,7 +142,7 @@ test('config saves are atomic, versioned and never leak secrets', async () => {
   expect(sanitized).toContain('GRAPH_SECRET_REF');
 });
 
-test('the config API round-trips a sanitized document, requires the current revision, and reports restart', async () => {
+test('the config API round-trips a sanitized document, requires the current revision, and applies live', async () => {
   const dir = await temp('config-api');
   const web = join(dir, 'web');
   const { mkdir } = await import('node:fs/promises');
@@ -168,7 +168,7 @@ test('the config API round-trips a sanitized document, requires the current revi
   expect(await stale.json()).toMatchObject({ code: 'config_conflict' });
   const saved = await fetch(`${daemon.url}/api/config`, { method: 'POST', headers, body: JSON.stringify({ expectedRevision: 0, document: { ...document, projects: [{ id: 'sample', root: dir }] } }) });
   expect(saved.status).toBe(200);
-  expect(await saved.json()).toEqual({ revision: 1, restartRequired: true });
+  expect(await saved.json()).toMatchObject({ revision: 1, effectiveRevision: 1, applied: true, restartRequired: false });
 });
 
 test('new tasks record the configuration revision that was in effect', async () => {

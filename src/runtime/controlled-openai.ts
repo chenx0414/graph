@@ -115,7 +115,7 @@ export interface StreamSlot {
 }
 
 /** Controlled lower-level adapter, currently verified for OpenAI chat-completions SSE. */
-export function controlledOpenAIStream(broker: SendGate, apiKey: string, slot?: StreamSlot): StreamFn {
+export function controlledOpenAIStream(broker: SendGate, apiKey: string | (() => string), slot?: StreamSlot): StreamFn {
   return (model, context, options) => {
     const output = createAssistantMessageEventStream();
     void (async () => {
@@ -123,8 +123,11 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string, slot?: 
       try {
         if (model.api !== 'openai-completions') throw new Error('Unverified model transport');
         let sent = false;
+        // Resolve the credential at actual send time so a key rotation that
+        // happened while this request waited applies to unsent calls.
+        const key = typeof apiKey === 'function' ? apiKey() : apiKey;
         const stream = streamSimple(model as Model<'openai-completions'>, context, {
-          ...options, apiKey, maxRetries: 0, transport: 'sse',
+          ...options, apiKey: key, maxRetries: 0, transport: 'sse',
           // Reserve an upper bound for this model's accepted context and output.
           maxTokens: Math.min(options?.maxTokens ?? model.maxTokens, model.maxTokens),
           fetch: async (input, init) => {

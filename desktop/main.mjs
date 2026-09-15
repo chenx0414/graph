@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   absolutePaths, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
-  parseBannerAddress, resolveAppPaths, resolveDaemonMode, saveSecrets, tailText,
+  parseBannerAddress, resolveAppPaths, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
 
@@ -123,8 +123,9 @@ if (!app.requestSingleInstanceLock()) {
     const config = hasConfig ? readJson(paths.configPath) : undefined;
     secrets = secretsFromKeychain(paths);
     secretsPath = paths.secretsPath;
-    const mode = resolveDaemonMode(config, process.env, secrets);
-    const args = daemonArgs({ paths, port: 0, mode, hasConfig });
+    // The APP always starts with execute intent in dynamic mode; saved secrets
+    // and config activate the bindings on the same daemon without a restart.
+    const args = daemonArgs({ paths, port: 0, mode: 'execute', hasConfig, dynamic: true });
     child = spawn(process.execPath, [paths.serverEntry, ...args], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...secrets },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -209,7 +210,7 @@ if (!app.requestSingleInstanceLock()) {
       const result = await dialog.showOpenDialog(window ?? undefined, { properties: ['openDirectory', 'createDirectory'] });
       return result.canceled ? null : result.filePaths[0] ?? null;
     });
-    ipcMain.handle('graph:save-secret', (_event, ref, value) => {
+    ipcMain.handle('graph:save-secret', async (_event, ref, value) => {
       if (typeof ref !== 'string' || typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref) || !value.trim()) {
         return { stored: false, message: 'invalid secret reference or empty value' };
       }
@@ -221,7 +222,26 @@ if (!app.requestSingleInstanceLock()) {
       };
       secrets[ref] = value.trim();
       const stored = saveSecrets(secretsPath, codec, secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
-      return { stored, ...(stored ? {} : { message: 'encryption unavailable; use the environment variable instead' }) };
+      let applied = false;
+      let message;
+      if (stored && readyUrl) {
+        // Hand the key to the running daemon through the token-guarded local
+        // bridge; the renderer never sees the token and no restart is needed.
+        try {
+          const token = readFileSync(join(currentPaths().stateDir, 'app-token'), 'utf8').trim();
+          const response = await fetch(`${readyUrl}/api/app/secret`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-graph-app-token': token, origin: readyUrl },
+            body: JSON.stringify({ ref, value: value.trim() }),
+          });
+          const body = await response.json().catch(() => ({}));
+          applied = response.ok && body.applied === true;
+          if (!response.ok || body.applied !== true) message = body.message ?? body.reason ?? `daemon bridge HTTP ${response.status}`;
+        } catch (error) {
+          message = String(error);
+        }
+      }
+      return { stored, applied, ...(stored && applied ? {} : { message: message ?? 'encryption unavailable; use the environment variable instead' }) };
     });
     ipcMain.handle('graph:secret-status', (_event, refs) => {
       const result = {};

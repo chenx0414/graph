@@ -160,7 +160,7 @@ test('the full productized flow runs from the formal start entry with a controll
     return { status: savedResponse.status, body: await savedResponse.json(), path: currentPath };
   }, configPath);
   expect(saved.status).toBe(200);
-  expect(saved.body).toMatchObject({ restartRequired: true });
+  expect(saved.body).toMatchObject({ restartRequired: false, applied: true, effectiveRevision: 1 });
 
   // Both work results have no authoritative usage, so each opens an explicit question.
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="questions"] li').length === 2, undefined, { timeout: 60_000 });

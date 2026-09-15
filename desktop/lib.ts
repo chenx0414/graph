@@ -54,6 +54,9 @@ export function daemonArgs(input: {
   port: number;
   mode: 'view' | 'execute';
   hasConfig: boolean;
+  /** Start with execute intent before credentials resolve; the bridge applies
+   * saved keychain secrets and config to the same daemon. */
+  dynamic?: boolean;
 }): string[] {
   const args = [
     '--state-dir', input.paths.stateDir,
@@ -62,6 +65,7 @@ export function daemonArgs(input: {
   ];
   if (input.hasConfig) args.push('--config', input.paths.configPath);
   if (input.mode === 'execute') args.push('--execute');
+  if (input.dynamic) args.push('--dynamic');
   return args;
 }
 

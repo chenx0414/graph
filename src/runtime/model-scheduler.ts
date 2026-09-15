@@ -18,10 +18,15 @@ export interface SlotRequest {
   sharedGroupId?: string;
   /** Shared group cap. Undefined means unlimited. */
   groupLimit?: number;
+  /** Re-resolve the live request before every grant decision, so a queued
+   * request picks up key rotation and limit changes from a hot config apply. */
+  refresh?: () => SlotRequest;
 }
 
 export interface ModelScheduler {
   acquire(request: SlotRequest, signal?: AbortSignal): Promise<() => void>;
+  /** Re-evaluate queued waiters after configuration changed. */
+  wake(): void;
   /** Current in-flight count for one credential, or the total for all. */
   active(credentialId?: string): number;
   queued(): number;
@@ -58,13 +63,18 @@ export function createModelScheduler(): ModelScheduler {
     return request.credentialId;
   };
 
-  const runnable = (waiter: Waiter) =>
-    (activeByCredential.get(identityOf(waiter.request)) ?? 0) < (waiter.request.limit ?? Infinity) &&
-    (!waiter.request.sharedGroupId || (activeByGroup.get(waiter.request.sharedGroupId) ?? 0) < (waiter.request.groupLimit ?? Infinity));
+  const current = (waiter: Waiter) => waiter.request.refresh?.() ?? waiter.request;
+
+  const runnable = (waiter: Waiter) => {
+    const request = current(waiter);
+    return (activeByCredential.get(identityOf(request)) ?? 0) < (request.limit ?? Infinity) &&
+      (!request.sharedGroupId || (activeByGroup.get(request.sharedGroupId) ?? 0) < (request.groupLimit ?? Infinity));
+  };
 
   function grant(waiter: Waiter) {
-    const credentialId = identityOf(waiter.request);
-    const { sharedGroupId } = waiter.request;
+    const request = current(waiter);
+    const credentialId = identityOf(request);
+    const { sharedGroupId } = request;
     activeByCredential.set(credentialId, (activeByCredential.get(credentialId) ?? 0) + 1);
     if (sharedGroupId) activeByGroup.set(sharedGroupId, (activeByGroup.get(sharedGroupId) ?? 0) + 1);
     let released = false;
@@ -124,13 +134,16 @@ export function createModelScheduler(): ModelScheduler {
     queued() {
       return waiters.filter(waiter => !waiter.done).length;
     },
+    wake() {
+      drain();
+    },
     snapshot() {
       const active: Record<string, number> = {};
       for (const [id, count] of activeByCredential) active[id] = count;
       const queued: Record<string, number> = {};
       for (const waiter of waiters) {
         if (waiter.done) continue;
-        const identity = identityOf(waiter.request);
+        const identity = identityOf(current(waiter));
         queued[identity] = (queued[identity] ?? 0) + 1;
       }
       return { active, queued };

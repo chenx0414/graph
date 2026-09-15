@@ -28,12 +28,12 @@ export class Execution {
   private readonly fallback?: ActionAdapter;
   private readonly catalog?: Catalog;
   private readonly models?: () => ModelEntry[];
-  private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
+  private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined);
   private readonly git?: GitIntegration;
   private readonly scratchRoot?: string;
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>>; git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string } } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string } } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -339,7 +339,8 @@ export class Execution {
       try { definition = this.catalog.definition(spec.definitionVersion); } catch { /* unpublished keys still select by requested model */ }
     }
     const exclude = definition.review ? this.implementerModels(spec, node) : [];
-    return selectModel({ ...(spec.model ? { requested: spec.model } : {}), grade: definition.recommendedGrade, directory, ...(this.preferences ? { preferences: this.preferences } : {}), ...(exclude.length ? { exclude } : {}) });
+    const preferences = typeof this.preferences === 'function' ? this.preferences() : this.preferences;
+    return selectModel({ ...(spec.model ? { requested: spec.model } : {}), grade: definition.recommendedGrade, directory, ...(preferences ? { preferences } : {}), ...(exclude.length ? { exclude } : {}) });
   }
 
   private implementerModels(spec: NodeSpec, node: NodeRow) {

@@ -110,7 +110,9 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('settings-save').click();
   await page.getByTestId('config-status').waitFor();
   expect(await page.getByTestId('config-status').innerText()).toContain('已保存 revision 1');
-  expect(await page.getByTestId('restart-required').innerText()).toContain('重启');
+  // Hot apply: the running revision advances without a restart prompt.
+  expect(await page.getByTestId('effective-revision').innerText()).toContain('1');
+  expect(await page.getByTestId('restart-required').count()).toBe(0);
 
   // Persistence across a browser reload.
   await page.reload();

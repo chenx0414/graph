@@ -10,6 +10,7 @@ export interface CliOptions {
   webDir: string;
   port: number;
   mode: 'view' | 'execute';
+  dynamic: boolean;
   help: boolean;
 }
 
@@ -23,6 +24,7 @@ Options:
   --web-dir <path>    Built web console (default: ./dist/web)
   --port <number>     Loopback port, 0 picks a free port (default: 4173)
   --execute           Enable task dispatch; requires configured models and credentials
+  --dynamic           With --execute: start before credentials resolve and activate them live
   --view-only         History, settings and graph only; never dispatches (default)
   -h, --help          Print this help
 
@@ -38,6 +40,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
   let webFlag: string | undefined;
   let portFlag: string | undefined;
   let execute = false;
+  let dynamic = false;
   let viewOnly = false;
   let help = false;
   for (let index = 0; index < argv.length; index += 1) {
@@ -53,6 +56,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
     else if (arg === '--web-dir') webFlag = value();
     else if (arg === '--port') portFlag = value();
     else if (arg === '--execute') execute = true;
+    else if (arg === '--dynamic') dynamic = true;
     else if (arg === '--view-only') viewOnly = true;
     else if (arg === '--help' || arg === '-h') help = true;
     else usageError(`Unknown argument: ${arg}`);
@@ -73,6 +77,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
     webDir: resolve(cwd, webFlag ?? env.GRAPH_WEB_DIR ?? 'dist/web'),
     port,
     mode: execute ? 'execute' : 'view',
+    dynamic,
     help,
   };
 }

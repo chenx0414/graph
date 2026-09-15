@@ -90,9 +90,25 @@ export function createPiAdapter(options: {
       const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
       const entry = options.directory().find(model => model.id === instance.model);
       if (!entry) throw new RuntimeError('model_unavailable', 'No configured model for this instance');
-      const binding = options.bindingFor?.(entry);
-      const apiKey = binding?.apiKey ?? options.apiKeyFor?.(entry) ?? options.apiKey;
-      if (!apiKey) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
+      const entryNow = () => options.directory().find(model => model.id === entry.id) ?? entry;
+      const endpointChanged = (latest: ModelEntry) => latest.baseUrl !== entry.baseUrl || latest.api !== entry.api
+        || JSON.stringify(latest.headers ?? {}) !== JSON.stringify(entry.headers ?? {});
+      const resolveBinding = () => options.bindingFor?.(entry)
+        ?? (options.apiKeyFor?.(entry) || options.apiKey ? { credentialId: entry.credentialId ?? entry.id, apiKey: (options.apiKeyFor?.(entry) ?? options.apiKey)! } : undefined);
+      const bindingLimits = (value: { limit?: number; sharedGroupId?: string; groupLimit?: number }) => ({
+        ...(value.limit !== undefined ? { limit: value.limit } : {}),
+        ...(value.sharedGroupId ? { sharedGroupId: value.sharedGroupId } : {}),
+        ...(value.groupLimit !== undefined ? { groupLimit: value.groupLimit } : {}),
+      });
+      const resolveKey = () => {
+        const latest = entryNow();
+        if (endpointChanged(latest)) throw new RuntimeError('model_changed', `Model ${entry.id} endpoint or protocol changed while this request waited; it will be re-prepared`);
+        const binding = resolveBinding();
+        if (!binding) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
+        return binding.apiKey;
+      };
+      const binding = resolveBinding();
+      if (!binding) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
       const scheduler = options.scheduler;
       // waiting_slot is what keeps a parked operation out of execution
       // accounting; a failed write must fail the operation, not be hidden.
@@ -109,13 +125,28 @@ export function createPiAdapter(options: {
               setWaitingSlot(true);
               let releaseCredential: (() => void) | undefined;
               try {
-                releaseCredential = await scheduler.acquire({
-                  credentialId: binding.credentialId,
-                  apiKey,
-                  ...(binding.limit !== undefined ? { limit: binding.limit } : {}),
-                  ...(binding.sharedGroupId ? { sharedGroupId: binding.sharedGroupId } : {}),
-                  ...(binding.groupLimit !== undefined ? { groupLimit: binding.groupLimit } : {}),
-                }, signal);
+                // The queued binding can change under a hot config apply. The
+                // waiter asks for the live key/limits on every grant decision;
+                // when the identity changed after the grant, the old slot is
+                // returned and the request re-queues under the new identity
+                // instead of sending with a stale or wrong-platform key.
+                for (;;) {
+                  if (endpointChanged(entryNow())) throw new RuntimeError('model_changed', `Model ${entry.id} endpoint or protocol changed while this request waited; it will be re-prepared`);
+                  const current = resolveBinding();
+                  if (!current) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
+                  const request = { credentialId: current.credentialId, apiKey: current.apiKey, ...bindingLimits(current) };
+                  releaseCredential = await scheduler.acquire({
+                    ...request,
+                    refresh: () => {
+                      const live = resolveBinding();
+                      return live ? { credentialId: live.credentialId, apiKey: live.apiKey, ...bindingLimits(live) } : request;
+                    },
+                  }, signal);
+                  const after = resolveBinding();
+                  if (after && after.credentialId === current.credentialId && after.apiKey === current.apiKey) break;
+                  releaseCredential();
+                  releaseCredential = undefined;
+                }
                 await waitForAgentExecutionSlot(options.store, operation.id, signal);
                 return releaseCredential;
               } catch (error) {
@@ -227,7 +258,7 @@ export function createPiAdapter(options: {
           const session = await openPiInstance({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, apiKey, slot),
+            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, resolveKey, slot),
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
             ...(conversation ? { allowWorkspaceChange: true, onEvent } : {}),
           });

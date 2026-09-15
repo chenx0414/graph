@@ -190,7 +190,7 @@ test('ten waiters on key A do not block an independent key B', async () => {
   expect(provider.state.maxByKey.get('Bearer key-a') ?? 0).toBeLessThanOrEqual(1);
 }, 60_000);
 
-test('tasks record the effective revision, not a saved-but-unrestarted one', async () => {
+test('tasks record the effective revision immediately after a hot apply', async () => {
   const root = await temp('revision');
   const web = join(root, 'web');
   await mkdir(web, { recursive: true });
@@ -203,10 +203,11 @@ test('tasks record the effective revision, not a saved-but-unrestarted one', asy
   const cookie = home.headers.get('set-cookie') ?? '';
   const headers = { origin: daemon.url, cookie, 'content-type': 'application/json' };
   const saved = await fetch(`${daemon.url}/api/config`, { method: 'POST', headers, body: JSON.stringify({ expectedRevision: 0, document: { version: 1, projects: [{ id: 'p', root }], credentials: {}, limits: {} } }) });
-  expect(await saved.json()).toMatchObject({ revision: 1, restartRequired: true });
+  expect(await saved.json()).toMatchObject({ revision: 1, effectiveRevision: 1, applied: true, restartRequired: false });
   const first = await (await fetch(`${daemon.url}/api/tasks`, { method: 'POST', headers, body: JSON.stringify({ projectId: 'p', request: 'before restart', requestId: 'begin-1' }) })).json() as { taskId: string };
   const firstEvents = await (await fetch(`${daemon.url}/api/tasks/${first.taskId}/events?after=0`, { headers })).json() as { type: string; data: { configRevision?: number } }[];
-  expect(firstEvents.find(event => event.type === 'task.created')?.data.configRevision).toBe(0);
+  // The save was applied to this daemon, so the very next task records the new revision.
+  expect(firstEvents.find(event => event.type === 'task.created')?.data.configRevision).toBe(1);
   await daemon.close();
   const restarted = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'view', env: {}, log: () => undefined });
   cleanup.push(() => restarted.close());

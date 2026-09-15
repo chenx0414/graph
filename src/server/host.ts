@@ -14,9 +14,16 @@ export interface StartupInfo {
   limitAliases?: Record<string, string>;
 }
 
-export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown> }) {
+export interface AppServices {
+  applyConfig(document: unknown, expectedRevision: number): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number }>;
+  pushSecret(ref: string, value: string | null): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number }>;
+  appToken: string;
+  snapshot(): { revision: number; effectiveRevision: number; applied: boolean; configured: boolean; modelCount: number; enabledModelCount: number };
+}
+
+export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices }) {
   const runtime = await openTaskRuntime(options);
-  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}) });
+  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}) });
   let address: string;
   try {
     address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });
@@ -29,20 +36,30 @@ export async function openGraphServer(options: Parameters<typeof openTaskRuntime
   }
   const url = typeof address === 'string' ? address : `http://127.0.0.1:${(app.addresses()[0] as { port: number }).port}`;
   let stopped = false;
-  const loop = options.autoDrive ? (async () => {
-    while (!stopped) {
-      await runtime.host.drive();
-      await new Promise(resolve => setTimeout(resolve, 40));
-    }
-  })() : Promise.resolve();
+  let driving = Boolean(options.autoDrive);
+  let loop: Promise<void> | undefined;
+  const ensureLoop = () => {
+    if (loop || stopped) return;
+    loop = (async () => {
+      while (!stopped) {
+        if (driving) await runtime.host.drive();
+        await new Promise(resolve => setTimeout(resolve, driving ? 40 : 200));
+      }
+    })();
+  };
+  ensureLoop();
   let closed = false;
   return {
     runtime, app, url,
+    /** Hot configuration apply activates the drive loop on the same process. */
+    startDrive() { driving = true; ensureLoop(); },
+    stopDrive() { driving = false; },
+    driving: () => driving,
     async close() {
       if (closed) return;
       closed = true;
       stopped = true;
-      await loop;
+      if (loop) await loop;
       // Long-lived SSE connections must not keep the daemon from stopping.
       app.server.closeAllConnections();
       await app.close();

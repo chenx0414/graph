@@ -6,12 +6,12 @@ import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
 import { layoutGraph } from './layout.ts';
 
-import type { StartupInfo } from './host.ts';
+import type { AppServices, StartupInfo } from './host.ts';
 import { sanitizeConfig, type ConfigStore } from './config-service.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 
-export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown> }) {
+export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices }) {
   const app = Fastify({ logger: false });
   const session = createSession();
   const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
@@ -25,6 +25,15 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.addHook('onRequest', async (request, reply) => {
     if (request.url === '/' || request.url.startsWith('/assets/') || request.url === '/api/health') return;
+    // The desktop bridge authenticates with the per-process token written to
+    // the state directory; the browser session cookie never reaches Electron.
+    if (request.url.startsWith('/api/app/')) {
+      const token = request.headers['x-graph-app-token'];
+      if (!options.appServices || typeof token !== 'string' || token !== options.appServices.appToken) {
+        return reply.status(403).send({ code: 'forbidden', message: 'App bridge token required' });
+      }
+      return;
+    }
     if (request.url.startsWith('/api/')) guard(session, request);
     const origin = request.headers.origin;
     if (origin && !localOrigin(origin)) {
@@ -37,12 +46,24 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     reply.type('text/html').send(html);
   });
   app.get('/api/health', async () => ({ ok: true }));
-  app.get('/api/startup', async () => options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
+  app.get('/api/startup', async () => options.startupInfo?.() ?? options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
+  app.post('/api/app/secret', async request => {
+    if (!options.appServices) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');
+    const body = request.body as { ref?: unknown; value?: unknown };
+    if (typeof body.ref !== 'string') throw new RuntimeError('invalid_input', 'secretRef is required');
+    if (body.value !== null && typeof body.value !== 'string') throw new RuntimeError('invalid_input', 'The secret value must be a string or null');
+    return options.appServices.pushSecret(body.ref, body.value as string | null);
+  });
   app.get('/api/limits', async () => runtime.modelLimits());
   if (options.config) {
     app.get('/api/config', async () => {
       const { revision, config } = await options.config!.store.snapshot();
-      return { revision, config: sanitizeConfig(config, options.config!.env) };
+      const status = options.appServices?.snapshot();
+      return {
+        revision,
+        ...(status ? { effectiveRevision: status.effectiveRevision, configured: status.configured } : {}),
+        config: sanitizeConfig(config, options.config!.env),
+      };
     });
     app.post('/api/config', async request => {
       const body = request.body as { expectedRevision?: unknown; document?: unknown };
@@ -54,6 +75,13 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       const nextIds = new Set(Array.isArray(nextModels) ? nextModels.map(entry => String(entry?.id ?? '')) : []);
       const removed = runtime.modelsInUse().filter(id => !nextIds.has(id));
       if (removed.length) throw new RuntimeError('config_in_use', `Models in use by unfinished tasks cannot be removed: ${removed.join(', ')}`);
+      if (options.appServices) {
+        // Hot apply: persist through the same atomic store, then activate the
+        // candidate on this daemon. A rejected candidate keeps the previous
+        // effective bindings and reports why instead of a false success.
+        const applied = await options.appServices.applyConfig(body.document, body.expectedRevision);
+        return { ...applied, restartRequired: false };
+      }
       const saved = await options.config!.store.save(body.document, body.expectedRevision, options.config!.env);
       return { revision: saved.revision, restartRequired: current.revision !== saved.revision };
     });
