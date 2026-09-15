@@ -1,0 +1,31 @@
+{
+  "stagedEnvProduction": {
+    "state": "ready",
+    "sensitiveCommitted": false,
+    "files": [
+      "app.txt"
+    ]
+  },
+  "subdirLastDeletion": {
+    "state": "ready",
+    "tree": "sibling.txt",
+    "siblingStillCommitted": true,
+    "siblingFileStillOnDisk": "must remain in parent HEAD\n",
+    "status": ""
+  },
+  "subdirPartialDeletion": {
+    "state": "ready",
+    "error": null,
+    "removedPathStillCommitted": false
+  },
+  "crashReplay": {
+    "childExitCode": 77,
+    "childError": null,
+    "commitsBeforeRestart": 2,
+    "commitsAfterRestart": 2,
+    "committedBeforeRestart": "explicitly approved baseline",
+    "committedAfterRestart": "explicitly approved baseline",
+    "statusAfterRestart": "M app.txt",
+    "preparation": "detected"
+  }
+}

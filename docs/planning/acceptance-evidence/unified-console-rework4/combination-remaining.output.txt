@@ -1,0 +1,103 @@
+[
+  {
+    "scenario": "plain-directory-unchanged-replays",
+    "childCode": 77,
+    "initialized": true,
+    "headContent": "approved original content",
+    "settled": {
+      "state": "succeeded",
+      "result": "{\"reconciled\":true}"
+    },
+    "passed": true
+  },
+  {
+    "scenario": "production-static-same-upstream",
+    "workStatus": "succeeded",
+    "invocationModels": [
+      "original-model"
+    ],
+    "modelsUsed": [
+      "original-model",
+      "writer"
+    ],
+    "writerCurrentModelId": "original-model",
+    "reviewerModelId": "original-model",
+    "providerRequests": 1,
+    "reviewStatus": "blocked",
+    "reviewQuestions": [
+      {
+        "id": "41ef9be8-9155-4e4e-b314-3c163589b59b",
+        "nodeId": "review",
+        "operationId": null,
+        "kind": "model_unavailable",
+        "status": "open",
+        "data": {
+          "requested": "reviewer"
+        },
+        "answer": null
+      }
+    ],
+    "passed": true,
+    "scope": "Production Pi adapter + local OpenAI fixture; invocations written by task-gate; no paid provider."
+  },
+  {
+    "scenario": "production-hot-change-writer-modelId",
+    "workStatus": "succeeded",
+    "invocationModels": [
+      "original-model"
+    ],
+    "modelsUsed": [
+      "original-model",
+      "writer"
+    ],
+    "writerCurrentModelId": "replacement-model",
+    "reviewerModelId": "original-model",
+    "providerRequests": 1,
+    "reviewStatus": "blocked",
+    "reviewQuestions": [
+      {
+        "id": "3b50fccc-4f0d-40df-879d-f9e2cb99842e",
+        "nodeId": "review",
+        "operationId": null,
+        "kind": "model_unavailable",
+        "status": "open",
+        "data": {
+          "requested": "reviewer"
+        },
+        "answer": null
+      }
+    ],
+    "passed": true,
+    "scope": "Production Pi adapter + local OpenAI fixture; invocations written by task-gate; no paid provider."
+  },
+  {
+    "scenario": "partial-mcp-grants",
+    "report": [
+      {
+        "id": "remote",
+        "version": "1",
+        "kind": "mcp",
+        "loaded": true,
+        "executable": true,
+        "reason": "已加载 2 个工具，其中 1 个获授权，其余调用会被权限门拒绝"
+      }
+    ],
+    "projected": {
+      "id": "remote",
+      "version": "1",
+      "kind": "mcp",
+      "bound": true,
+      "loaded": true,
+      "executable": true,
+      "state": "可执行",
+      "reason": "已加载 2 个工具，其中 1 个获授权，其余调用会被权限门拒绝"
+    },
+    "effects": {
+      "keep": 1,
+      "drop": 0
+    },
+    "keepError": null,
+    "dropError": "Error: Permission required: remote MCP tool drop_record needs the task grant mcp:remote:drop_record",
+    "passed": true
+  }
+]

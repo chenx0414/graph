@@ -1,0 +1,14 @@
+=== historical+entry probes b642ad6d0e42a2d5052da4da1499497d0bb28362 2026年 9月15日 星期二 21时21分29秒 CST ===
+host-listener-contract rc=0
+host-listener-paused-gate rc=0
+local-network-rework rc=0
+listen-guard-child-rework rc=0
+ipc-listener-regressions rc=0
+ipc-handoff-listening-event rc=0
+ipc-handoff-duplicate-id rc=0
+ipc-listening-order rc=0
+history-global-seq rc=0
+history-cache-consistency rc=0
+message-state-millisecond rc=0
+decision-empty-snapshot rc=0
+conversation-ui-boundaries rc=0
