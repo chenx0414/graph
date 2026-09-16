@@ -13,7 +13,7 @@ interface Status {
   testid?: string;
 }
 
-export function Setup() {
+export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) {
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const [providerId, setProviderId] = useState('openai');
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -148,6 +148,7 @@ export function Setup() {
         toast('连接已保存并应用', 'success');
       }
       setExisting(document);
+      onSaved?.();
     } catch (error) {
       const failure = error as Error & { field?: string; code?: string };
       setStatus({ tone: 'danger', text: `保存失败（${failure.code ?? 'error'}）：${failure.message}`, testid: 'setup-status' });

@@ -76,11 +76,12 @@ async function session(url: string) {
   };
 }
 
-test('the settings page edits and persists projects, models, credentials and limits without leaking secrets', async () => {
+test('settings auto-save models, credentials and limits without leaking secrets', async () => {
   const dir = await temp('edit');
   const stub = await stubProvider();
   const path = await configFile(dir, stub.baseUrl);
   const daemon = await start(dir, path);
+  const api = await session(daemon.url);
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
@@ -88,20 +89,27 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('settings-page').waitFor();
   expect(await page.getByTestId('config-revision').innerText()).toBe('0');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
+  expect(await page.getByTestId('theme-placeholder').isVisible()).toBe(true);
+  expect(await page.getByTestId('theme-system').getAttribute('data-active')).toBe('true');
+  await page.getByTestId('theme-dark').click();
+  expect(await page.getByTestId('theme-dark').getAttribute('data-active')).toBe('true');
+  await page.getByTestId('theme-system').click();
   const openPage = (label: string) => page.locator('.settings-nav-item').filter({ hasText: label }).click();
 
   await openPage('模型');
   expect(await page.locator('#settings-credentials').isVisible()).toBe(true);
   expect(await page.locator('#settings-models').isVisible()).toBe(true);
   expect(await page.locator('#settings-preferences').isVisible()).toBe(true);
+  expect(await page.locator('#settings-limits').isVisible()).toBe(true);
+  expect(await page.getByTestId('setup').isVisible()).toBe(true);
   expect(await page.locator('#settings-project').count()).toBe(0);
+  expect(await page.getByTestId('settings-save').count()).toBe(0);
+  expect(await page.getByTestId('settings-reload').count()).toBe(0);
+  expect(await page.getByTestId('settings-action-strip').count()).toBe(0);
   expect(await page.getByTestId('model-0-price').innerText()).toContain('价格未知');
   expect(await page.getByTestId('model-0-reasoning').isChecked()).toBe(true);
   expect(stub.requests).toHaveLength(0);
 
-  await openPage('项目');
-  await page.getByTestId('project-0-id').fill('edited-project');
-  await openPage('模型');
   await page.getByTestId('credential-add').click();
   await page.getByTestId('credential-1-id').fill('second');
   await page.getByTestId('credential-1-secretRef').fill('GRAPH_SYNTH_KEY_2');
@@ -116,15 +124,11 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('model-1-context').fill('4096');
   await page.getByTestId('model-1-maxTokens').fill('256');
   await page.getByTestId('model-1-reasoning').uncheck();
-  await openPage('项目');
-  expect(await page.getByTestId('project-0-id').inputValue()).toBe('edited-project');
-  await openPage('模型');
-  await openPage('并发限制');
   await page.getByTestId('limit-group-add').click();
   await page.getByTestId('limit-group-0').fill('4');
-  await page.getByTestId('settings-save').click();
+  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
   await page.getByTestId('config-status').waitFor();
-  expect(await page.getByTestId('config-status').innerText()).toContain('已保存 revision 1');
+  expect(await page.getByTestId('config-status').innerText()).toContain('已自动保存 revision 1');
   await openPage('常规');
   // Hot apply: the running revision advances without a restart prompt.
   expect(await page.getByTestId('effective-revision').innerText()).toContain('1');
@@ -133,14 +137,11 @@ test('the settings page edits and persists projects, models, credentials and lim
   // Persistence across a browser reload.
   await page.reload();
   await page.getByTestId('settings-page').waitFor();
-  await openPage('项目');
-  expect(await page.getByTestId('project-0-id').inputValue()).toBe('edited-project');
   await openPage('模型');
   expect(await page.getByTestId('model-1-id').inputValue()).toBe('second-model');
   expect(await page.getByTestId('model-1-reasoning').isChecked()).toBe(false);
   expect(await page.getByTestId('credential-1-group').inputValue()).toBe('group-1');
   expect(await page.getByTestId('credential-1-state').innerText()).toBe('缺失');
-  await openPage('并发限制');
   expect(await page.getByTestId('limit-group-0').inputValue()).toBe('4');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
 
@@ -149,7 +150,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   const restarted = await start(dir, path, 0);
   const restartedApi = await session(restarted.url);
   const configText = await (await restartedApi.get('/api/config')).text();
-  expect(JSON.parse(configText)).toMatchObject({ revision: 1, config: { projects: [{ id: 'edited-project' }] } });
+  expect(JSON.parse(configText)).toMatchObject({ revision: 1, config: { projects: [{ id: 'sample' }] } });
   expect(configText).not.toContain(SECRET);
   expect(JSON.parse(configText).config.credentials.second.configured).toBe(false);
   expect(JSON.parse(configText).config.credentials.second.secretRef).toBe('GRAPH_SYNTH_KEY_2');
@@ -170,8 +171,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   // Invalid edits are refused with a field error and never replace the saved document.
   const before = await (await restartedApi.get('/api/config')).text();
   await page.getByTestId('model-1-id').fill('local');
-  await page.getByTestId('settings-save').click();
-  await page.getByTestId('config-error').waitFor();
+  await page.getByTestId('config-error').waitFor({ timeout: 10_000 });
   expect(await page.getByTestId('config-error').innerText()).toContain('duplicate model');
   expect((await (await restartedApi.get('/api/config')).text())).toBe(before);
   await openPage('常规');

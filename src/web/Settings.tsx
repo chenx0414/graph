@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { Setup } from './Setup.tsx';
 import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
@@ -151,20 +151,54 @@ function ArchivedConversations() {
   );
 }
 
+function ThemePlaceholder() {
+  const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
+  const options = [
+    { id: 'system', label: '系统' },
+    { id: 'light', label: '浅色' },
+    { id: 'dark', label: '深色' },
+  ] as const;
+  return (
+    <section className="settings-feature" data-testid="theme-placeholder">
+      <h2>主题</h2>
+      <div className="theme-options">
+        {options.map(option => (
+          <button
+            key={option.id}
+            type="button"
+            className="theme-option"
+            data-active={theme === option.id}
+            data-testid={`theme-${option.id}`}
+            onClick={() => setTheme(option.id)}
+            aria-pressed={theme === option.id}
+          >
+            <span className={`theme-preview theme-preview-${option.id}`}>
+              <span className="theme-preview-side" />
+              <span className="theme-preview-card">
+                <span className="theme-preview-line theme-preview-line-strong" />
+                <span className="theme-preview-line" />
+                <span className="theme-preview-line theme-preview-line-short" />
+              </span>
+            </span>
+            <span className="theme-option-label">{option.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
-  const [active, setActive] = useState(openGuide ? 'settings-wizard' : 'settings-overview');
+  const [active, setActive] = useState(openGuide ? 'settings-models' : 'settings-overview');
   const [search, setSearch] = useState('');
   useEffect(() => {
-    setActive(openGuide ? 'settings-wizard' : 'settings-overview');
+    setActive(openGuide ? 'settings-models' : 'settings-overview');
   }, [openGuide]);
   const sections = [
     { id: 'settings-overview', label: '常规' },
-    { id: 'settings-project', label: '项目' },
     { id: 'settings-git', label: 'Git 准备' },
     { id: 'settings-models', label: '模型' },
-    { id: 'settings-limits', label: '并发限制' },
     { id: 'settings-archived', label: '归档对话' },
-    { id: 'settings-wizard', label: '连接与配置向导' },
   ];
   const visibleSections = sections.filter(section => section.label.toLowerCase().includes(search.trim().toLowerCase()));
   function go(id: string) {
@@ -184,7 +218,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <nav className="settings-nav" aria-label="设置导航">
           {visibleSections.map(section => (
             <button key={section.id} type="button" className="settings-nav-item" data-active={active === section.id} onClick={() => go(section.id)}>
-              <Icon name={section.id === 'settings-wizard' ? 'wizard' : section.id === 'settings-models' ? 'bolt' : section.id === 'settings-archived' ? 'archive' : section.id === 'settings-project' || section.id === 'settings-git' ? 'box' : section.id === 'settings-credentials' ? 'link' : 'settings'} size={16} />
+              <Icon name={section.id === 'settings-models' ? 'bolt' : section.id === 'settings-archived' ? 'archive' : section.id === 'settings-git' ? 'box' : 'settings'} size={16} />
               <span>{section.label}</span>
             </button>
           ))}
@@ -201,7 +235,6 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <div className="settings-content">
           <div className="settings-root">
             <SettingsAdvanced active={active} />
-            {active === 'settings-wizard' && <section id="settings-wizard" className="settings-section"><Setup /></section>}
             {active === 'settings-archived' && <section id="settings-archived" className="settings-section"><ArchivedConversations /></section>}
           </div>
         </div>
@@ -223,12 +256,24 @@ function SettingsAdvanced({ active }: { active: string }) {
   const [results, setResults] = useState<Record<string, TestResult>>({});
   const [effectiveRevision, setEffectiveRevision] = useState<number | null>(null);
   const [keys, setKeys] = useState<Record<string, string>>({});
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const saveInFlight = useRef(false);
+  const savePending = useRef(false);
+  const latestDraft = useRef<RawConfig | null>(null);
+  const latestRevision = useRef(0);
+  const editVersion = useRef(0);
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
 
   const load = useCallback(async () => {
     try {
       const response = await api<ConfigResponse>('/api/config');
-      setDraft(toDraft(response.config));
+      const next = toDraft(response.config);
+      clearTimeout(saveTimer.current);
+      editVersion.current = 0;
+      savePending.current = false;
+      latestDraft.current = next;
+      latestRevision.current = response.revision;
+      setDraft(next);
       setCredentialState(Object.fromEntries(Object.entries(response.config.credentials ?? {}).map(([id, credential]) => [id, Boolean(credential.configured)])));
       setRevision(response.revision);
       setDirty(false);
@@ -239,9 +284,13 @@ function SettingsAdvanced({ active }: { active: string }) {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => () => {
+    clearTimeout(saveTimer.current);
+    if (editVersion.current > 0) void persistDraft(editVersion.current);
+  }, []);
   useEffect(() => { void api<Startup>('/api/startup').then(startup => setEffectiveRevision(startup.effectiveRevision ?? null)).catch(() => undefined); }, []);
 
-  const configurationPage = ['settings-overview', 'settings-project', 'settings-git', 'settings-models', 'settings-limits'].includes(active);
+  const configurationPage = ['settings-overview', 'settings-git', 'settings-models'].includes(active);
   if (!configurationPage) return <div className="settings-page-empty" data-testid="settings-page" data-page={active} />;
   if (!draft) return (
     <div className="settings-page-loading" data-testid="settings-page" data-page={active}>
@@ -249,37 +298,60 @@ function SettingsAdvanced({ active }: { active: string }) {
     </div>
   );
 
-  const mutate = (change: (next: RawConfig) => void) => {
-    setDraft(current => {
-      const next = structuredClone(current!) as RawConfig;
-      change(next);
-      return next;
-    });
-    setDirty(true);
-    setStatus('');
-  };
-  const save = async () => {
+  function scheduleSave(delay = 550) {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => void persistDraft(editVersion.current), delay);
+  }
+  async function persistDraft(version: number) {
+    if (saveInFlight.current) {
+      savePending.current = true;
+      return;
+    }
+    if (version !== editVersion.current) {
+      scheduleSave(100);
+      return;
+    }
+    const document = latestDraft.current;
+    if (!document) return;
+    const expectedRevision = latestRevision.current;
+    saveInFlight.current = true;
+    savePending.current = false;
     setSaving(true);
     setError(null);
     try {
       const response = await api<{ revision: number; effectiveRevision?: number; restartRequired: boolean; applied?: boolean; reason?: string; configured?: boolean }>('/api/config', {
         method: 'POST',
-        body: JSON.stringify({ expectedRevision: revision, document: { ...draft, version: 1 } }),
+        body: JSON.stringify({ expectedRevision, document: { ...document, version: 1 } }),
       });
+      latestRevision.current = response.revision;
       setRevision(response.revision);
       setEffectiveRevision(response.effectiveRevision ?? response.revision);
-      setDirty(false);
-      setStatus(`已保存 revision ${response.revision}`);
-      toast(`配置已保存${response.applied === false ? '，等待生效' : '并已应用'}`, 'success');
-      await load();
       const pending = response.applied === false;
-      setStatus(`已保存 revision ${response.revision}${pending ? `，等待生效：${response.reason ?? '需要重启守护进程'}` : '，已应用到当前守护进程'}${response.configured === false ? '（尚未配置可用凭据，仅查看模式）' : ''}`);
+      setStatus(`已自动保存 revision ${response.revision}${pending ? `，等待生效：${response.reason ?? '需要重启守护进程'}` : '，已应用到当前守护进程'}${response.configured === false ? '（尚未配置可用凭据，仅查看模式）' : ''}`);
+      if (editVersion.current === version) setDirty(false);
+      else savePending.current = true;
     } catch (reason) {
       setError(reason as ApiError);
-      toast(`保存失败：${(reason as Error).message}`, 'danger');
+      setDirty(true);
+      toast(`自动保存失败：${(reason as Error).message}`, 'danger');
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
+      if (savePending.current || editVersion.current !== version) {
+        savePending.current = false;
+        scheduleSave(120);
+      }
     }
+  }
+  const mutate = (change: (next: RawConfig) => void) => {
+    const next = structuredClone(draft) as RawConfig;
+    change(next);
+    latestDraft.current = next;
+    editVersion.current += 1;
+    setDraft(next);
+    setDirty(true);
+    setStatus('');
+    scheduleSave();
   };
   const refreshPrices = async () => {
     setRefreshing(true);
@@ -315,16 +387,10 @@ function SettingsAdvanced({ active }: { active: string }) {
     }
   };
 
-  const projects = draft.projects ?? [];
   const models = draft.models?.entries ?? [];
   const credentials = Object.entries(draft.credentials ?? {});
   const credentialIds = credentials.map(([id]) => id);
   const invalid = (field: string) => error?.field === field ? 'true' : undefined;
-  const configurationActions = <>
-    {active === 'settings-models' && <Button data-testid="pricing-refresh" icon="refresh" disabled={refreshing || dirty} onClick={() => void refreshPrices()}>{refreshing ? '刷新中…' : '刷新价格快照'}</Button>}
-    <Button data-testid="settings-reload" icon="refresh" onClick={() => void load()}>重新加载</Button>
-    <Button variant="primary" data-testid="settings-save" icon="check" disabled={saving || !dirty} onClick={() => void save()}>{saving ? '保存中…' : '保存配置'}</Button>
-  </>;
   const configurationMessages = <>
     {error && <p data-testid="config-error" style={{ color: 'var(--danger)', margin: 0 }}>{error.message}{error.code ? `（${error.code}）` : ''}</p>}
     {status && <p data-testid="config-status" className="muted" style={{ margin: 0 }}>{status}</p>}
@@ -334,51 +400,31 @@ function SettingsAdvanced({ active }: { active: string }) {
 
   return (
     <div className="stagger" data-testid="settings-page" data-page={active}>
-      {active === 'settings-overview' ? (
+      {active === 'settings-overview' && (
         <section id="settings-overview" className="settings-section">
-          <Card title="设置" icon="settings" subtitle="保存并应用；价格快照仅在你点击刷新时更新" actions={configurationActions}>
+          <Card title="设置" icon="settings" subtitle="所有配置都会自动保存并立即生效">
             <div className="chip-row">
               <Pill>已保存 revision <span data-testid="config-revision">{revision}</span></Pill>
-              {effectiveRevision !== null && <Pill tone="info">当前运行版本 <span data-testid="effective-revision">{effectiveRevision}</span>{effectiveRevision !== revision ? '（有未生效修改）' : ''}</Pill>}
-              {dirty && <Pill tone="warn">有未保存修改</Pill>}
+              {effectiveRevision !== null && <Pill tone="info">当前运行版本 <span data-testid="effective-revision">{effectiveRevision}</span>{effectiveRevision !== revision ? '（正在同步）' : ''}</Pill>}
+              {saving && <Pill tone="info">正在保存…</Pill>}
+              {dirty && !saving && <Pill tone="warn">等待自动保存</Pill>}
             </div>
             <div className="settings-config-messages">{configurationMessages}</div>
           </Card>
+          <ThemePlaceholder />
         </section>
-      ) : (
-        <div className="settings-action-strip" data-testid="settings-action-strip">
-          <div className="settings-action-message">
-            {dirty && <Pill tone="warn">有未保存修改</Pill>}
-            <div className="settings-config-messages">{configurationMessages}</div>
-          </div>
-          <div className="settings-action-buttons">{configurationActions}</div>
-        </div>
       )}
 
-      {active === 'settings-project' && <section id="settings-project" className="settings-section">
-      <Card title="项目" icon="box" actions={<Button size="sm" icon="plus" data-testid="project-add" onClick={() => mutate(next => { next.projects = [...(next.projects ?? []), { id: 'new-project', root: '.' }]; })}>添加项目</Button>}>
-        {!projects.length && <p className="muted">尚未配置项目。</p>}
-        {projects.map((project, index) => (
-          <div className="list-item" key={index} data-testid={`project-row-${index}`} data-row={index}>
-            <div className="row grow">
-              <Field label="项目 ID">
-                <input className="input" style={{ width: 180 }} data-invalid={invalid(`projects[${index}].id`)} data-testid={`project-${index}-id`} value={project.id} onChange={event => mutate(next => { next.projects![index]!.id = event.target.value; })} />
-              </Field>
-              <Field label="根目录">
-                <input className="input" style={{ width: 380, maxWidth: 'none' }} data-invalid={invalid(`projects[${index}].root`)} data-testid={`project-${index}-root`} value={project.root} onChange={event => mutate(next => { next.projects![index]!.root = event.target.value; })} />
-              </Field>
-            </div>
-            <Button size="sm" variant="danger" onClick={() => mutate(next => { next.projects!.splice(index, 1); })}>删除</Button>
-          </div>
-        ))}
-      </Card>
-      </section>}
+      {active !== 'settings-overview' && <div className="settings-inline-messages">{configurationMessages}</div>}
 
       {active === 'settings-git' && <section id="settings-git" className="settings-section">
       <ProjectGitCard />
       </section>}
 
-      {active === 'settings-models' && <section id="settings-credentials" className="settings-section">
+      {active === 'settings-models' && <section className="settings-feature">
+      <h2>模型连接</h2>
+      <div className="settings-feature-stack">
+      <section id="settings-credentials" className="settings-section">
       <Card title="凭据引用" icon="link" subtitle="只保存环境变量名；密钥从不进入配置文件、接口响应或页面"
         actions={<Button size="sm" icon="plus" data-testid="credential-add" onClick={() => mutate(next => { next.credentials = { ...(next.credentials ?? {}), 'new-credential': { secretRef: 'GRAPH_NEW_KEY' } }; })}>添加凭据</Button>}>
         {!credentials.length && <p className="muted">尚未配置凭据。</p>}
@@ -430,11 +476,14 @@ function SettingsAdvanced({ active }: { active: string }) {
           </div>
         ))}
       </Card>
-      </section>}
+      </section>
 
-      {active === 'settings-models' && <section id="settings-models" className="settings-section">
+      <section id="settings-models" className="settings-section">
       <Card title="模型" icon="bolt" subtitle="连通性测试使用运行版本（effective revision），不读取未生效内容"
-        actions={<Button size="sm" icon="plus" data-testid="model-add" onClick={() => mutate(next => { next.models = { entries: [...(next.models?.entries ?? []), { ...emptyModel(), credentialId: credentialIds[0] ?? '' }] }; })}>添加模型</Button>}>
+        actions={<>
+          <Button size="sm" icon="refresh" data-testid="pricing-refresh" disabled={refreshing} onClick={() => void refreshPrices()}>{refreshing ? '刷新中…' : '刷新价格快照'}</Button>
+          <Button size="sm" icon="plus" data-testid="model-add" onClick={() => mutate(next => { next.models = { entries: [...(next.models?.entries ?? []), { ...emptyModel(), credentialId: credentialIds[0] ?? '' }] }; })}>添加模型</Button>
+        </>}>
         <p data-testid="test-connection-note" className="faint">连通性测试使用当前运行版本的绑定（effective revision），不读取未生效的保存内容。</p>
         {!models.length && <p className="muted">尚未配置模型。</p>}
         {models.map((model, index) => (
@@ -505,9 +554,33 @@ function SettingsAdvanced({ active }: { active: string }) {
           </div>
         ))}
       </Card>
+      </section>
+
+      <section id="settings-preferences" className="settings-section">
+      <Card title="模型偏好" icon="spark" subtitle="按等级列出首选模型 ID（逗号分隔），用于自动选择模型">
+        <div className="card-grid">
+          {GRADES.map(grade => (
+            <Field key={grade} label={grade}>
+              <input className="input" data-testid={`preference-${grade}`} value={(draft.models?.preferences?.[grade] ?? []).join(',')} placeholder="model-a, model-b" onChange={event => mutate(next => {
+                const value = event.target.value.split(',').map(item => item.trim()).filter(Boolean);
+                next.models = { entries: next.models?.entries ?? [], preferences: { ...(next.models?.preferences ?? {}), [grade]: value } };
+              })} />
+            </Field>
+          ))}
+        </div>
+      </Card>
+      </section>
+      </div>
       </section>}
 
-      {active === 'settings-limits' && <section id="settings-limits" className="settings-section">
+      {active === 'settings-models' && <section className="settings-feature">
+      <h2>连接与配置向导</h2>
+      <Setup onSaved={() => void load()} />
+      </section>}
+
+      {active === 'settings-models' && <section className="settings-feature">
+      <h2>并发控制</h2>
+      <section id="settings-limits" className="settings-section">
       <Card title="并发限制" icon="clock" subtitle="保存后立即对新请求生效；已有调用保留计数，不会中断在途请求">
         {!Object.keys(draft.limits?.credentials ?? {}).length && !Object.keys(draft.limits?.sharedGroups ?? {}).length && <p className="muted">尚未配置并发上限，使用运行时默认值。</p>}
         <div className="row">
@@ -529,22 +602,9 @@ function SettingsAdvanced({ active }: { active: string }) {
           <Button size="sm" icon="plus" data-testid="limit-group-add" onClick={() => mutate(next => { next.limits = { ...(next.limits ?? {}), sharedGroups: { ...(next.limits?.sharedGroups ?? {}), 'group-1': 4 } }; })}>添加共享组上限</Button>
         </div>
       </Card>
+      </section>
       </section>}
 
-      {active === 'settings-models' && <section id="settings-preferences" className="settings-section">
-      <Card title="模型偏好" icon="spark" subtitle="按等级列出首选模型 ID（逗号分隔），用于自动选择模型">
-        <div className="card-grid">
-          {GRADES.map(grade => (
-            <Field key={grade} label={grade}>
-              <input className="input" data-testid={`preference-${grade}`} value={(draft.models?.preferences?.[grade] ?? []).join(',')} placeholder="model-a, model-b" onChange={event => mutate(next => {
-                const value = event.target.value.split(',').map(item => item.trim()).filter(Boolean);
-                next.models = { entries: next.models?.entries ?? [], preferences: { ...(next.models?.preferences ?? {}), [grade]: value } };
-              })} />
-            </Field>
-          ))}
-        </div>
-      </Card>
-      </section>}
     </div>
   );
 }

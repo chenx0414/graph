@@ -1355,28 +1355,79 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .settings-content > .settings-root { width: min(880px, 100%); margin: 0 auto; }
 .settings-section { scroll-margin-top: 18px; }
 .settings-root { width: 100%; }
-.settings-action-strip {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+.settings-config-messages { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.settings-inline-messages { margin: 14px 0 18px; }
+.settings-inline-messages .settings-config-messages { margin-top: 0; }
+.settings-feature { margin: 22px 0 30px; }
+.settings-feature > h2 { margin: 0 0 10px; font-size: 14px; }
+.settings-feature-stack { display: flex; flex-direction: column; gap: 12px; }
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
-  margin: 14px 0 18px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-soft);
 }
-.settings-action-message {
-  flex: 1;
+.theme-option {
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.theme-option-label { display: block; margin-top: 8px; text-align: center; }
+.theme-preview {
+  position: relative;
+  display: block;
+  height: 112px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(26,28,31,0.06);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease;
+}
+.theme-option:hover .theme-preview { transform: translateY(-1px); }
+.theme-option[data-active="true"] .theme-preview {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--text);
+}
+.theme-preview-side {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 34%;
+  background: #dedede;
+}
+.theme-preview-card {
+  position: absolute;
+  left: 28%;
+  right: 9%;
+  top: 25%;
+  bottom: 10%;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 7px;
+  gap: 8px;
+  padding: 14px 12px;
+  border-radius: 8px 8px 0 0;
+  background: #fff;
 }
-.settings-config-messages { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.settings-action-strip .settings-config-messages { margin-top: 0; }
-.settings-action-buttons { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.theme-preview-line {
+  display: block;
+  width: 70%;
+  height: 5px;
+  border-radius: 999px;
+  background: #d7d7d7;
+}
+.theme-preview-line-strong { width: 82%; background: #bdbdbd; }
+.theme-preview-line-short { width: 48%; }
+.theme-preview-system { background: linear-gradient(90deg, #d8d8d8 0 50%, #555 50%); }
+.theme-preview-system .theme-preview-side { background: linear-gradient(90deg, #cfcfcf 0 50%, #454545 50%); }
+.theme-preview-system .theme-preview-card { background: linear-gradient(90deg, #fff 0 50%, #303030 50%); }
+.theme-preview-system .theme-preview-line { background: linear-gradient(90deg, #d7d7d7 0 50%, #777 50%); }
+.theme-preview-system .theme-preview-line-strong { background: linear-gradient(90deg, #bdbdbd 0 50%, #929292 50%); }
+.theme-preview-light { background: #f3f3f3; }
+.theme-preview-dark { background: #4c4c4c; }
+.theme-preview-dark .theme-preview-side { background: #3b3b3b; }
+.theme-preview-dark .theme-preview-card { background: #f7f7f7; }
 
 /* ---------- misc ---------- */
 
@@ -1451,9 +1502,8 @@ details.disclosure summary:hover { color: var(--accent); }
   .settings-main-header { padding: 18px 14px 12px; }
   [data-desktop="true"] .settings-main-header { padding-top: 18px; }
   .settings-content { padding: 0 14px 44px; }
-  .settings-action-strip { flex-direction: column; }
-  .settings-action-buttons { width: 100%; }
-  .settings-action-buttons .btn { flex: 1 1 120px; justify-content: center; }
+  .theme-options { gap: 8px; }
+  .theme-preview { height: 96px; }
   .settings-content .card-head { flex-wrap: wrap; }
   .settings-content .card-sub { flex: 1 0 100%; order: 3; }
   .settings-content .card-actions { width: 100%; margin-left: 0; order: 2; flex-wrap: wrap; }
