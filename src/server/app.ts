@@ -9,10 +9,11 @@ import { layoutGraph } from './layout.ts';
 
 import type { AppServices, StartupInfo } from './host.ts';
 import { sanitizeConfig, type ConfigStore } from './config-service.ts';
+import type { UsageService } from './usage.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 
-export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices }) {
+export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService }) {
   const app = Fastify({ logger: false });
   const session = createSession();
   const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
@@ -48,6 +49,10 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/startup', async () => options.startupInfo?.() ?? options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
+  if (options.usage) {
+    app.get('/api/usage', async () => options.usage!.get(false));
+    app.post('/api/usage/refresh', async () => options.usage!.get(true));
+  }
   app.post('/api/app/secret', async request => {
     if (!options.appServices) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');
     const body = request.body as { ref?: unknown; value?: unknown };

@@ -13,6 +13,7 @@ import { installPresets } from '../catalog/presets.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
+import { createUsageService } from './usage.ts';
 
 export interface DaemonOptions {
   /** Explicit config path; null starts in first-run mode with no projects or models. */
@@ -275,6 +276,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       ...(Object.keys(live.status().limitAliases).length ? { limitAliases: live.status().limitAliases } : {}),
     }),
     ...(configStore ? { configStore, configEnv: options.env, configTest: testConnection } : {}),
+    usage: createUsageService({
+      env: options.env,
+      home: options.env.HOME,
+      ...(configStore ? { loadConfig: async () => ({ config: (await configStore.snapshot()).config, env: options.env }) } : {}),
+    }),
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
       pushSecret: (ref, value) => pushSecret(ref, value),

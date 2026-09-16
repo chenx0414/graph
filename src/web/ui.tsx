@@ -3,7 +3,7 @@ import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from '
 /* ---------------------------------------------------------------- icons */
 
 export type IconName =
-  | 'overview' | 'inbox' | 'catalog' | 'wizard' | 'settings' | 'graph' | 'task'
+  | 'overview' | 'inbox' | 'catalog' | 'usage' | 'wizard' | 'settings' | 'graph' | 'task'
   | 'play' | 'pause' | 'check' | 'alert' | 'clock' | 'plus' | 'refresh'
   | 'link' | 'bolt' | 'spark' | 'box' | 'chevron' | 'search' | 'message' | 'send' | 'close'
   | 'folder' | 'file' | 'paperclip' | 'archive' | 'panel-left' | 'panel-right';
@@ -12,6 +12,7 @@ const PATHS: Record<IconName, ReactNode> = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
   inbox: <><path d="M4 13.5V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7.5" /><path d="M4 13.5h4l1.5 2h5L16 13.5h4V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /></>,
   catalog: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v14H6.5A2.5 2.5 0 0 0 4 19.5z" /><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H19v-5" /></>,
+  usage: <><path d="M4 19V9M10 19V4M16 19v-7M22 19H2" /><path d="m3 7 6-4 6 7 6-4" /></>,
   wizard: <><path d="M5 3v4M3 5h4M17 15v4M15 17h4" /><path d="M14.5 3.5 20.5 9.5 9.5 20.5H3.5v-6z" /></>,
   settings: <><circle cx="12" cy="12" r="3.2" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.11A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.7 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.14A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06A2 2 0 1 1 7.13 4.14l.06.06A1.7 1.7 0 0 0 9 4.54h.08A1.7 1.7 0 0 0 10.1 3V3a2 2 0 1 1 4 0v.14a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.14a1.7 1.7 0 0 0-1.46 1.03z" /></>,
   graph: <><circle cx="6" cy="6" r="2.6" /><circle cx="18" cy="7" r="2.6" /><circle cx="12" cy="18" r="2.6" /><path d="M8.2 7 10 15.6M15.8 8.2 13.9 15.6" /></>,

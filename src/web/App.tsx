@@ -10,6 +10,7 @@ import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from '
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
+import { UsagePage } from './Usage.tsx';
 import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
 import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
 
@@ -148,6 +149,7 @@ export function App() {
   const title = pathname === '/' ? '新对话'
     : pathname === '/inbox' ? '问题收件箱'
       : pathname === '/catalog' ? '资源库'
+        : pathname === '/usage' ? '用量'
         : pathname === '/setup' ? '设置'
           : pathname === '/settings' ? '设置'
             : nodeMatch ? '节点详情'
@@ -265,6 +267,7 @@ export function App() {
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {pathname === '/inbox' && <Inbox tasks={tasks} />}
             {pathname === '/catalog' && <ResourceLibrary settings={settings} />}
+            {pathname === '/usage' && <UsagePage />}
             {conversationMatch && (
               <ConversationPanel
                 key={conversationMatch[1]}
@@ -340,6 +343,7 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
           {questionTotal > 0 && <> (<span className="nav-badge">{questionTotal}</span>)</>}
         </a>
         <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" /><span className="nav-label">资源库</span></a>
+        <a href="#/usage" data-active={path === '/usage'}><Icon name="usage" /><span className="nav-label">用量</span></a>
       </nav>
       <div className="sidebar-scroll" data-testid="conversation-list">
         <div className="sidebar-label">
