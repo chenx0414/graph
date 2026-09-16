@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -61,7 +61,7 @@ async function configFile(dir: string, baseUrl: string) {
 }
 
 async function start(dir: string, path: string, port = 0): Promise<GraphDaemon> {
-  const daemon = await startGraphDaemon({ configPath: path, stateDir: join(dir, 'state'), webDir, port, mode: 'view', env: { GRAPH_SYNTH_KEY: SECRET }, log: () => undefined });
+  const daemon = await startGraphDaemon({ configPath: path, stateDir: join(dir, 'state'), webDir, port, mode: 'view', env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET }, log: () => undefined });
   cleanup.push(() => daemon.close().catch(() => undefined));
   return daemon;
 }
@@ -99,7 +99,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await openPage('模型');
   expect(await page.locator('#settings-credentials').isVisible()).toBe(true);
   expect(await page.locator('#settings-models').isVisible()).toBe(true);
-  expect(await page.locator('#settings-preferences').isVisible()).toBe(true);
+  expect(await page.locator('#settings-preferences').count()).toBe(0);
   expect(await page.locator('#settings-limits').isVisible()).toBe(true);
   expect(await page.getByTestId('setup').isVisible()).toBe(true);
   expect(await page.locator('#settings-project').count()).toBe(0);
@@ -113,11 +113,14 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.getByTestId('credential-add').click();
   await page.getByTestId('credential-1-id').fill('second');
   await page.getByTestId('credential-1-secretRef').fill('GRAPH_SYNTH_KEY_2');
+  await page.locator('[data-testid="credential-row-1"] .credential-advanced summary').click();
   await page.getByTestId('credential-1-group').fill('group-1');
+  await page.locator('[data-testid="credential-row-0"] .credential-advanced summary').click();
   await page.getByTestId('credential-0-group').fill('group-1');
   await page.getByTestId('model-add').click();
+  await page.locator('[data-testid="model-row-1"] .model-advanced summary').click();
   await page.getByTestId('model-1-id').fill('second-model');
-  await page.getByTestId('model-1-provider').fill('stub-hi');
+  await page.getByTestId('model-1-provider-manual').fill('stub-hi');
   await page.getByTestId('model-1-grade').selectOption('high');
   await page.getByTestId('model-1-credentialId').selectOption('second');
   await page.getByTestId('model-1-baseUrl').fill(stub.baseUrl);
@@ -138,8 +141,10 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.reload();
   await page.getByTestId('settings-page').waitFor();
   await openPage('模型');
+  await page.locator('[data-testid="model-row-1"] .model-advanced summary').click();
   expect(await page.getByTestId('model-1-id').inputValue()).toBe('second-model');
   expect(await page.getByTestId('model-1-reasoning').isChecked()).toBe(false);
+  await page.locator('[data-testid="credential-row-1"] .credential-advanced summary').click();
   expect(await page.getByTestId('credential-1-group').inputValue()).toBe('group-1');
   expect(await page.getByTestId('credential-1-state').innerText()).toBe('缺失');
   expect(await page.getByTestId('limit-group-0').inputValue()).toBe('4');
@@ -161,6 +166,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.goto(`${restarted.url}/#/settings`);
   await page.getByTestId('settings-page').waitFor();
   await openPage('模型');
+  await page.locator('[data-testid="model-row-0"] .model-advanced summary').click();
   expect(stub.requests).toHaveLength(0);
   await page.getByTestId('model-0-test').click();
   await page.getByTestId('connection-result-0').waitFor();
@@ -170,6 +176,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
 
   // Invalid edits are refused with a field error and never replace the saved document.
   const before = await (await restartedApi.get('/api/config')).text();
+  await page.locator('[data-testid="model-row-1"] .model-advanced summary').click();
   await page.getByTestId('model-1-id').fill('local');
   await page.getByTestId('config-error').waitFor({ timeout: 10_000 });
   expect(await page.getByTestId('config-error').innerText()).toContain('duplicate model');
@@ -205,4 +212,35 @@ test('removing a model bound to an unfinished task is refused and the daemon kee
   const view = await daemon.server.runtime.user.task(taskId).view();
   expect(view.nodes.find(node => node.id === 'work')?.selectedModel).toBe('local');
   expect((await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(0);
+}, 60_000);
+
+test('settings imports detected subscription credentials without exposing their values', async () => {
+  const dir = await temp('subscription-sync');
+  const stub = await stubProvider();
+  const path = await configFile(dir, stub.baseUrl);
+  await mkdir(join(dir, '.config', 'opencode'), { recursive: true });
+  await writeFile(join(dir, '.config', 'opencode', 'opencode.json'), JSON.stringify({
+    provider: {
+      'command-goat': {
+        options: { baseURL: 'https://api.commandcode.ai/provider/v1', apiKey: 'subscription-test-key' },
+        models: { 'deepseek/deepseek-v4-flash': { name: 'DeepSeek V4 Flash' } },
+      },
+    },
+  }));
+  const daemon = await start(dir, path);
+  const api = await session(daemon.url);
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/settings`);
+  await page.getByTestId('settings-page').waitFor();
+  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
+  const payload = await (await api.get('/api/config')).json() as {
+    config: { credentials: Record<string, { secretRef: string; configured: boolean }> };
+  };
+  expect(payload.config.credentials['command-goat']).toMatchObject({
+    secretRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY',
+    configured: true,
+  });
+  expect(JSON.stringify(payload)).not.toContain('subscription-test-key');
 }, 60_000);

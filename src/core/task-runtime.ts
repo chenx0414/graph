@@ -577,7 +577,13 @@ export async function openTaskRuntime(options: {
         const title = (input.title?.trim() || input.text?.trim() || '新对话').slice(0, 120);
         store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,phase,created_seq,conversation_id) VALUES(?,?,?,1,?,?,?)').run(taskId, workspaceProjectId, title, 'chatting', sequence, conversationId);
         store.db.prepare('INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES(?,?,?,?,?,?,?)').run(conversationId, projectId, workspaceProjectId, taskId, title, sequence, Date.now());
-        if (options.master && masterModel()) createMasterNode(taskId);
+        if (options.master && masterModel()) {
+          createMasterNode(taskId);
+          const masterEntry = liveEntries().find(model => model.id === masterModel());
+          if (masterEntry?.defaultThinkingLevel) {
+            store.db.prepare('UPDATE conversations SET thinking_level=? WHERE id=?').run(masterEntry.defaultThinkingLevel, conversationId);
+          }
+        }
         let cursor = store.event(taskId, 'conversation.created', { conversationId, projectId, title });
         let messageId: string | null = null;
         if (input.text?.trim() || attachments.length) {

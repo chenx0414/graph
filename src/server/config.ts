@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { RuntimeError } from '../core/types.ts';
-import type { ModelApi, ModelCost, ModelEntry, ModelGrade, ModelPricing } from '../catalog/models.ts';
+import { MODEL_THINKING_LEVELS, type ModelApi, type ModelCost, type ModelEntry, type ModelGrade, type ModelPricing, type ModelThinkingLevel } from '../catalog/models.ts';
 
 /** Versioned on-disk configuration. Secrets are never stored here; a credential
  * keeps a `secretRef` naming the environment variable that holds the key. */
@@ -143,6 +143,9 @@ function parseModel(raw: unknown, path: string, credentials: Record<string, Cred
     contextWindow: positiveInt(entry.contextWindow, `${path}.contextWindow`),
     maxTokens: positiveInt(entry.maxTokens, `${path}.maxTokens`),
     reasoning: optionalBoolean(entry.reasoning, `${path}.reasoning`) ?? true,
+    ...(entry.defaultThinkingLevel !== undefined
+      ? { defaultThinkingLevel: modelThinkingLevel(entry.defaultThinkingLevel, `${path}.defaultThinkingLevel`) }
+      : {}),
     credentialId,
     // Provider-side model identity when the config identity differs (for
     // example two platforms exposing the same upstream model id).
@@ -151,6 +154,14 @@ function parseModel(raw: unknown, path: string, credentials: Record<string, Cred
     ...(entry.pricing !== undefined ? { pricing: asPricing(entry.pricing, `${path}.pricing`) } : {}),
     ...(entry.headers !== undefined ? { headers: asHeaders(entry.headers, `${path}.headers`) } : {}),
   };
+}
+
+function modelThinkingLevel(value: unknown, path: string): ModelThinkingLevel {
+  const level = asString(value, path);
+  if (!MODEL_THINKING_LEVELS.includes(level as ModelThinkingLevel)) {
+    invalid(`${path} must be one of ${MODEL_THINKING_LEVELS.join(', ')}`);
+  }
+  return level as ModelThinkingLevel;
 }
 
 /** Parse a version 1 config document. Relative project roots resolve against

@@ -91,6 +91,24 @@ test('usage service normalizes the five supported subscription sources', async (
       return json({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 21, limit_window_seconds: 18_000, reset_at: Math.floor(Date.now() / 1000) + 3_600 }, secondary_window: { used_percent: 45, limit_window_seconds: 604_800, reset_at: Math.floor(Date.now() / 1000) + 86_400 } } });
     }
     if (url === 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig') return grokPayload(37.5);
+    if (url === 'https://models.dev/api.json') {
+      return json({ 'opencode-go': { models: {
+        'deepseek-v4-pro': { name: 'DeepSeek V4 Pro', reasoning: true, limit: { context: 1_000_000, output: 384_000 } },
+        'grok-4.6': { name: 'Grok 4.6', reasoning: true, limit: { context: 256_000, output: 64_000 } },
+      } } });
+    }
+    if (url === 'https://api.commandcode.ai/provider/v1/models') {
+      return json({ data: [{ id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', reasoning: true, context_window: 131_072, max_output_tokens: 8_192 }] });
+    }
+    if (url === 'https://api.deepseek.com/models') {
+      return json({ data: [{ id: 'deepseek-chat', name: 'DeepSeek Chat', reasoning: false, context_window: 65_536, max_output_tokens: 8_192 }] });
+    }
+    if (url === 'https://chatgpt.com/backend-api/codex/models') {
+      return json({ data: [{ id: 'gpt-5.6', name: 'GPT-5.6', reasoning: true, context_window: 400_000, max_output_tokens: 128_000 }] });
+    }
+    if (url === 'https://api.x.ai/v1/models') {
+      return json({ data: [{ id: 'grok-4.6', name: 'Grok 4.6', reasoning: true, context_window: 256_000, max_output_tokens: 64_000 }] });
+    }
     return new Response('not found', { status: 404 });
   };
   const service = createUsageService({
@@ -112,8 +130,27 @@ test('usage service normalizes the five supported subscription sources', async (
   expect(snapshot.plans.find(plan => plan.id === 'deepseek')?.balance).toMatchObject({ remaining: 88.5, currency: 'CNY' });
   expect(snapshot.plans.find(plan => plan.id === 'chatgpt')?.windows).toHaveLength(2);
   expect(snapshot.plans.find(plan => plan.id === 'grok')?.windows[0]?.usedPercent).toBe(37.5);
+  expect(snapshot.plans.find(plan => plan.id === 'opencode-go')?.models.map(model => model.id)).toEqual(['deepseek-v4-pro', 'grok-4.6']);
+  expect(snapshot.plans.find(plan => plan.id === 'command-goat')?.models[0]).toMatchObject({ id: 'deepseek/deepseek-v4-flash', contextWindow: 131_072 });
+  expect(snapshot.plans.find(plan => plan.id === 'deepseek')?.models[0]).toMatchObject({ id: 'deepseek-chat', reasoning: false });
+  expect(snapshot.plans.find(plan => plan.id === 'chatgpt')?.models[0]).toMatchObject({ id: 'gpt-5.6', supported: false });
+  expect(snapshot.plans.find(plan => plan.id === 'grok')?.models[0]).toMatchObject({ id: 'grok-4.6' });
   expect(snapshot.pricing.models.map(model => model.modelId)).toEqual(['deepseek-v4-pro', 'gpt-5.6']);
-  expect(requests).toHaveLength(6);
+  expect(await service.credentials()).toEqual({
+    'opencode-go': 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
+    'command-goat': 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY',
+    deepseek: 'GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY',
+    chatgpt: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN',
+    grok: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN',
+  });
+  expect(await service.secretValues()).toMatchObject({
+    GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: 'opencode-key',
+    GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY: 'command-key',
+    GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY: 'deepseek-key',
+    GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN: 'chatgpt-token',
+    GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN: 'grok-token',
+  });
+  expect(requests).toHaveLength(11);
 });
 
 test('the usage page shows subscription cards, refreshes, and keeps pricing visible', async () => {
@@ -124,20 +161,26 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
     plans: [
       {
         id: 'opencode-go', name: 'OpenCode Go', subtitle: 'openCode.ai · 5 小时滚动额度', configured: true, status: 'ok', plan: 'Go',
-        credentialSource: 'OpenCode 配置 · opencode-go', windows: [
+        credentialSource: 'OpenCode 配置 · opencode-go',
+        credential: { id: 'opencode-go', secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', source: 'OpenCode 配置 · opencode-go', configured: true },
+        models: [{ id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 1_000_000, maxTokens: 384_000, reasoning: true, supported: true }],
+        windows: [
           { id: 'rolling', label: '5 小时', usedPercent: 12, remainingPercent: 88, resetAt: Date.now() + 3_600_000 },
           { id: 'weekly', label: '本周', usedPercent: 37, remainingPercent: 63, resetAt: Date.now() + 86_400_000 },
         ], balance: null, details: {}, error: null, updatedAt: Date.now(),
       },
       {
         id: 'command-goat', name: 'Command Goat', subtitle: 'CommandCode · 月度订阅额度', configured: true, status: 'warning', plan: 'GOAT',
-        credentialSource: 'OpenCode 配置 · command-goat', windows: [
+        credentialSource: 'OpenCode 配置 · command-goat',
+        credential: { id: 'command-goat', secretRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY', source: 'OpenCode 配置 · command-goat', configured: true },
+        models: [{ id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', api: 'openai-completions', baseUrl: 'https://api.commandcode.ai/provider/v1', contextWindow: 131_072, maxTokens: 8_192, reasoning: true, supported: true }],
+        windows: [
           { id: 'monthly', label: '本月', usedPercent: 82, remainingPercent: 18, resetAt: Date.now() + 86_400_000, used: 57.4, limit: 70, unit: 'USD' },
         ], balance: { remaining: 12.6, used: 57.4, total: 70, currency: 'USD', unit: '$' }, details: {}, error: null, updatedAt: Date.now(),
       },
-      { id: 'deepseek', name: 'DeepSeek', subtitle: 'DeepSeek 官方 API · 账户余额', configured: false, status: 'unconfigured', plan: null, credentialSource: null, windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
-      { id: 'grok', name: 'Grok', subtitle: 'xAI SuperGrok · 周期额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
-      { id: 'chatgpt', name: 'ChatGPT', subtitle: 'ChatGPT Codex · 官方订阅额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
+      { id: 'deepseek', name: 'DeepSeek', subtitle: 'DeepSeek 官方 API · 账户余额', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
+      { id: 'grok', name: 'Grok', subtitle: 'xAI SuperGrok · 周期额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
+      { id: 'chatgpt', name: 'ChatGPT', subtitle: 'ChatGPT Codex · 官方订阅额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
     ],
     pricing: {
       source: '~/.cc-switch/model-pricing.json',
@@ -150,6 +193,12 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
     async get(force = false) {
       forced = force;
       return snapshot;
+    },
+    async credentials() {
+      return { 'opencode-go': 'OPENCODE_GO_API_KEY' };
+    },
+    async secretValues() {
+      return {};
     },
   };
   const server = await openGraphServer({

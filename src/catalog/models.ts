@@ -4,6 +4,8 @@ import type { TokenUsage } from '../runtime/call-broker.ts';
 export type ModelGrade = 'low' | 'medium' | 'high' | 'highest';
 /** Transports Graph has actually verified against a provider contract. */
 export type ModelApi = 'openai-completions' | 'anthropic-messages';
+export const MODEL_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ModelThinkingLevel = (typeof MODEL_THINKING_LEVELS)[number];
 export interface ModelCost { input: number; output: number; cacheRead: number; cacheWrite: number }
 /** Price provenance. Amounts are normalized per million tokens; `unknown`
  * means no usable price (never zero) and `stale` marks a snapshot to refresh. */
@@ -26,6 +28,8 @@ export interface ModelEntry {
   /** Whether the model accepts a non-off thinking level. Legacy config without
    * this field is treated as reasoning-capable. */
   reasoning?: boolean;
+  /** Default thinking strength for new conversations using this model. */
+  defaultThinkingLevel?: ModelThinkingLevel;
   cost?: ModelCost;
   pricing?: ModelPricing;
   /** Extra HTTP headers for gateways that require routing hints (for example

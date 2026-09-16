@@ -52,6 +52,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   if (options.usage) {
     app.get('/api/usage', async () => options.usage!.get(false));
     app.post('/api/usage/refresh', async () => options.usage!.get(true));
+    app.get('/api/usage/credentials', async () => ({ credentials: await options.usage!.credentials() }));
   }
   app.post('/api/app/secret', async request => {
     if (!options.appServices) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');

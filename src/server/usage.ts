@@ -5,6 +5,7 @@ import type { GraphConfig } from './config.ts';
 
 export type UsageProviderId = 'opencode-go' | 'command-goat' | 'deepseek' | 'grok' | 'chatgpt';
 export type UsageStatus = 'ok' | 'warning' | 'limited' | 'unconfigured' | 'error';
+export type SubscriptionModelApi = 'openai-completions' | 'anthropic-messages' | 'responses';
 
 export interface UsageWindow {
   id: string;
@@ -25,6 +26,28 @@ export interface UsageBalance {
   unit?: string;
 }
 
+export interface UsageCredential {
+  id: string;
+  secretRef: string;
+  source: string;
+  configured: boolean;
+}
+
+export interface SubscriptionModel {
+  id: string;
+  name: string;
+  api: SubscriptionModelApi;
+  baseUrl: string;
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+  supported: boolean;
+  inputCostPerMillion?: number;
+  outputCostPerMillion?: number;
+  cacheReadCostPerMillion?: number;
+  cacheCreationCostPerMillion?: number;
+}
+
 export interface UsagePlan {
   id: UsageProviderId;
   name: string;
@@ -33,6 +56,8 @@ export interface UsagePlan {
   status: UsageStatus;
   plan: string | null;
   credentialSource: string | null;
+  credential: UsageCredential | null;
+  models: SubscriptionModel[];
   windows: UsageWindow[];
   balance: UsageBalance | null;
   details: Record<string, string | number | null>;
@@ -68,10 +93,15 @@ export interface UsageSnapshot {
 
 export interface UsageService {
   get(force?: boolean): Promise<UsageSnapshot>;
+  /** Detected subscription providers mapped to the credential ref Graph should use. */
+  credentials(): Promise<Record<string, string>>;
+  /** Secret values imported from local subscription configuration or login files.
+   * These stay inside the daemon and are never included in an HTTP response. */
+  secretValues(): Promise<Record<string, string>>;
 }
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
-type Credential = { value: string; source: string };
+type Credential = UsageCredential & { value: string; baseUrl?: string; accountId?: string | null };
 type LoadConfig = () => Promise<{ config: GraphConfig; env: Record<string, string | undefined> }>;
 
 interface UsageServiceOptions {
@@ -97,6 +127,22 @@ const PLAN_BLUEPRINTS: Record<UsageProviderId, { name: string; subtitle: string 
   deepseek: { name: 'DeepSeek', subtitle: 'DeepSeek 官方 API · 账户余额' },
   grok: { name: 'Grok', subtitle: 'xAI SuperGrok · 周期额度' },
   chatgpt: { name: 'ChatGPT', subtitle: 'ChatGPT Codex · 官方订阅额度' },
+};
+
+const SUBSCRIPTION_SECRET_REFS: Record<UsageProviderId, string> = {
+  'opencode-go': 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
+  'command-goat': 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY',
+  deepseek: 'GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY',
+  grok: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN',
+  chatgpt: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN',
+};
+
+const DEFAULT_BASE_URLS: Record<UsageProviderId, string> = {
+  'opencode-go': 'https://opencode.ai/zen/go/v1',
+  'command-goat': 'https://api.commandcode.ai/provider/v1',
+  deepseek: 'https://api.deepseek.com',
+  grok: 'https://api.x.ai/v1',
+  chatgpt: 'https://chatgpt.com/backend-api/codex',
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -151,6 +197,8 @@ function basePlan(id: UsageProviderId, configured = false, status: UsageStatus =
     status,
     plan: null,
     credentialSource: null,
+    credential: null,
+    models: [],
     windows: [],
     balance: null,
     details: {},
@@ -184,33 +232,58 @@ async function readJson(path: string): Promise<unknown | null> {
   return JSON.parse(value) as unknown;
 }
 
-function selectedCredential(env: Record<string, string | undefined>, names: string[]): Credential | null {
+function selectedCredential(env: Record<string, string | undefined>, provider: UsageProviderId, names: string[], baseUrl?: string): Credential | null {
   for (const name of names) {
     const value = env[name]?.trim();
-    if (value) return { value, source: `环境变量 ${name}` };
+    if (value) {
+      return {
+        id: provider,
+        secretRef: SUBSCRIPTION_SECRET_REFS[provider],
+        configured: true,
+        value,
+        source: `环境变量 ${name}`,
+        ...(baseUrl ? { baseUrl } : {}),
+      };
+    }
   }
   return null;
 }
 
-function configCredential(config: GraphConfig | null, env: Record<string, string | undefined>, match: (entry: NonNullable<GraphConfig['models']>['entries'][number]) => boolean): Credential | null {
+function configCredential(config: GraphConfig | null, env: Record<string, string | undefined>, provider: UsageProviderId, match: (entry: NonNullable<GraphConfig['models']>['entries'][number]) => boolean): Credential | null {
   if (!config?.models) return null;
   for (const entry of config.models.entries) {
     if (!match(entry)) continue;
     const credential = config.credentials[entry.credentialId];
     const value = credential ? env[credential.secretRef]?.trim() : '';
-    if (value) return { value, source: `Graph 模型 · ${entry.provider}` };
+    if (value && credential) {
+      return {
+        id: entry.credentialId,
+        secretRef: credential.secretRef,
+        configured: true,
+        value,
+        source: `Graph 模型 · ${entry.provider}`,
+        baseUrl: entry.baseUrl,
+      };
+    }
   }
   return null;
 }
 
-function literalCredential(value: unknown, source: string): Credential | null {
+function literalCredential(value: unknown, provider: UsageProviderId, source: string, baseUrl?: string): Credential | null {
   if (typeof value !== 'string' || !value.trim()) return null;
   const normalized = value.trim();
   if (normalized.includes('${') || normalized.startsWith('env:') || normalized.includes('{env:')) return null;
-  return { value: normalized, source };
+  return {
+    id: provider,
+    secretRef: SUBSCRIPTION_SECRET_REFS[provider],
+    configured: true,
+    value: normalized,
+    source,
+    ...(baseUrl ? { baseUrl } : {}),
+  };
 }
 
-function openCodeProviderCredential(config: unknown, ids: string[], baseHint: string): Credential | null {
+function openCodeProviderCredential(config: unknown, providerId: UsageProviderId, ids: string[], baseHint: string): Credential | null {
   const providers = record(record(config)?.provider);
   if (!providers) return null;
   for (const [id, raw] of Object.entries(providers)) {
@@ -218,7 +291,7 @@ function openCodeProviderCredential(config: unknown, ids: string[], baseHint: st
     const options = record(provider?.options);
     const baseUrl = text(options?.baseURL) ?? '';
     if (!ids.includes(id.toLowerCase()) && !baseUrl.toLowerCase().includes(baseHint)) continue;
-    const credential = literalCredential(options?.apiKey, `OpenCode 配置 · ${id}`);
+    const credential = literalCredential(options?.apiKey, providerId, `OpenCode 配置 · ${id}`, baseUrl || DEFAULT_BASE_URLS[providerId]);
     if (credential) return credential;
   }
   return null;
@@ -226,6 +299,15 @@ function openCodeProviderCredential(config: unknown, ids: string[], baseHint: st
 
 function firstCredential(...values: (Credential | null)[]): Credential | null {
   return values.find((value): value is Credential => Boolean(value)) ?? null;
+}
+
+function credentialInfo(credential: Credential): UsageCredential {
+  return {
+    id: credential.id,
+    secretRef: credential.secretRef,
+    source: credential.source,
+    configured: credential.configured,
+  };
 }
 
 async function fetchWithTimeout(fetchImpl: FetchLike, url: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
@@ -295,19 +377,25 @@ function openCodeWindows(body: Record<string, unknown>, now: number): UsageWindo
   return windows;
 }
 
-async function fetchOpenCode(
+function openCodeCredential(
   config: GraphConfig | null,
   env: Record<string, string | undefined>,
   openCodeConfig: unknown,
+): Credential | null {
+  return firstCredential(
+    selectedCredential(env, 'opencode-go', ['OPENCODE_GO_API_KEY', 'OPENCODE_ZEN_API_KEY', 'OPENCODE_API_KEY'], DEFAULT_BASE_URLS['opencode-go']),
+    configCredential(config, env, 'opencode-go', entry => entry.baseUrl.includes('opencode.ai/zen/go') || entry.provider.toLowerCase().includes('opencode-go')),
+    openCodeProviderCredential(openCodeConfig, 'opencode-go', ['opencode-go'], 'opencode.ai/zen/go'),
+  );
+}
+
+async function fetchOpenCode(
+  credential: Credential,
   fetchImpl: FetchLike,
   now: number,
+  prices: ModelPrice[],
+  openCodeConfig: unknown,
 ): Promise<UsagePlan> {
-  const credential = firstCredential(
-    selectedCredential(env, ['OPENCODE_GO_API_KEY', 'OPENCODE_ZEN_API_KEY', 'OPENCODE_API_KEY']),
-    configCredential(config, env, entry => entry.baseUrl.includes('opencode.ai/zen/go') || entry.provider.toLowerCase().includes('opencode-go')),
-    openCodeProviderCredential(openCodeConfig, ['opencode-go'], 'opencode.ai/zen/go'),
-  );
-  if (!credential) return basePlan('opencode-go');
   const response = await fetchWithTimeout(fetchImpl, OPENCODE_USAGE_URL, {
     headers: { authorization: `Bearer ${credential.value}`, accept: 'application/json' },
   });
@@ -315,11 +403,14 @@ async function fetchOpenCode(
   const body = await responseJson(response, 'OpenCode Go 用量');
   const windows = openCodeWindows(body, now);
   if (!windows.length) throw new Error('用量响应中没有可识别的配额窗口');
+  const models = await discoverOpenCodeModels(credential, fetchImpl, prices, openCodeConfig);
   return {
     ...basePlan('opencode-go', true, statusFor(windows)),
     plan: 'Go',
     credentialSource: credential.source,
+    credential: credentialInfo(credential),
     windows,
+    models,
   };
 }
 
@@ -348,19 +439,25 @@ function commandWindow(id: string, label: string, raw: Record<string, unknown> |
   return percentWindow(id, label, (used / cap) * 100, reset === null ? null : reset, { used, limit: cap, unit: 'USD' });
 }
 
-async function fetchCommandGoat(
+function commandGoatCredential(
   config: GraphConfig | null,
   env: Record<string, string | undefined>,
   openCodeConfig: unknown,
+): Credential | null {
+  return firstCredential(
+    selectedCredential(env, 'command-goat', ['COMMANDCODE_API_KEY', 'COMMAND_GOAT_API_KEY', 'COMMANDCODE_GO_API_KEY'], DEFAULT_BASE_URLS['command-goat']),
+    configCredential(config, env, 'command-goat', entry => entry.baseUrl.includes('api.commandcode.ai') || entry.provider.toLowerCase().includes('command')),
+    openCodeProviderCredential(openCodeConfig, 'command-goat', ['command-goat', 'commandcode'], 'api.commandcode.ai'),
+  );
+}
+
+async function fetchCommandGoat(
+  credential: Credential,
   fetchImpl: FetchLike,
   now: number,
+  prices: ModelPrice[],
+  openCodeConfig: unknown,
 ): Promise<UsagePlan> {
-  const credential = firstCredential(
-    selectedCredential(env, ['COMMANDCODE_API_KEY', 'COMMAND_GOAT_API_KEY', 'COMMANDCODE_GO_API_KEY']),
-    configCredential(config, env, entry => entry.baseUrl.includes('api.commandcode.ai') || entry.provider.toLowerCase().includes('command')),
-    openCodeProviderCredential(openCodeConfig, ['command-goat', 'commandcode'], 'api.commandcode.ai'),
-  );
-  if (!credential) return basePlan('command-goat');
   const headers = { authorization: `Bearer ${credential.value}`, accept: 'application/json' };
   const [creditsResponse, subscriptionResponse] = await Promise.all([
     fetchWithTimeout(fetchImpl, `${COMMAND_CODE_BASE}/alpha/billing/credits`, { headers }),
@@ -386,11 +483,18 @@ async function fetchCommandGoat(
   ].filter((window): window is UsageWindow => Boolean(window)) : monthlyTotal !== null && monthlyUsed !== null
     ? [percentWindow('monthly', '本月', (monthlyUsed / monthlyTotal) * 100, parseDate(subscription?.currentPeriodEnd), { used: monthlyUsed, limit: monthlyTotal, unit: 'USD' })]
     : [];
+  const discovered = await discoverOpenAiCompatible('command-goat', credential, fetchImpl, prices);
+  const configuredKeys = openCodeConfiguredModelKeys(openCodeConfig, ['command-goat', 'commandcode']);
+  const models = discovered.length
+    ? discovered
+    : fallbackModels(configuredKeys, 'command-goat', credential.baseUrl ?? DEFAULT_BASE_URLS['command-goat'], prices);
   return {
     ...basePlan('command-goat', true, statusFor(windows)),
     plan: planId ? COMMAND_PLAN_NAME[planId.toLowerCase()] ?? planId : 'Coding Plan',
     credentialSource: credential.source,
+    credential: credentialInfo(credential),
     windows,
+    models,
     balance: {
       remaining: monthlyRemaining,
       ...(monthlyUsed !== null ? { used: monthlyUsed } : {}),
@@ -406,16 +510,21 @@ async function fetchCommandGoat(
   };
 }
 
-async function fetchDeepSeek(
+function deepSeekCredential(
   config: GraphConfig | null,
   env: Record<string, string | undefined>,
-  fetchImpl: FetchLike,
-): Promise<UsagePlan> {
-  const credential = firstCredential(
-    selectedCredential(env, ['DEEPSEEK_API_KEY']),
-    configCredential(config, env, entry => entry.baseUrl.includes('api.deepseek.com') || entry.provider.toLowerCase().includes('deepseek')),
+): Credential | null {
+  return firstCredential(
+    selectedCredential(env, 'deepseek', ['DEEPSEEK_API_KEY'], DEFAULT_BASE_URLS.deepseek),
+    configCredential(config, env, 'deepseek', entry => entry.baseUrl.includes('api.deepseek.com') || entry.provider.toLowerCase().includes('deepseek')),
   );
-  if (!credential) return basePlan('deepseek');
+}
+
+async function fetchDeepSeek(
+  credential: Credential,
+  fetchImpl: FetchLike,
+  prices: ModelPrice[],
+): Promise<UsagePlan> {
   const response = await fetchWithTimeout(fetchImpl, DEEPSEEK_BALANCE_URL, {
     headers: { authorization: `Bearer ${credential.value}`, accept: 'application/json' },
   });
@@ -428,10 +537,14 @@ async function fetchDeepSeek(
   const remaining = number(info?.total_balance) ?? 0;
   const currency = text(info?.currency) ?? 'CNY';
   const available = boolean(body.is_available) ?? true;
+  const discovered = await discoverOpenAiCompatible('deepseek', credential, fetchImpl, prices);
+  const models = discovered.length ? discovered : fallbackModels(prices.filter(price => /^deepseek-/i.test(price.modelId)).map(price => price.modelId), 'deepseek', credential.baseUrl ?? DEFAULT_BASE_URLS.deepseek, prices);
   return {
     ...basePlan('deepseek', true, available ? 'ok' : 'limited'),
     plan: 'API 余额',
     credentialSource: credential.source,
+    credential: credentialInfo(credential),
+    models,
     balance: { remaining, currency, unit: currency === 'CNY' ? '¥' : '$' },
     details: {
       可用状态: available ? '可用' : '余额不足',
@@ -439,12 +552,6 @@ async function fetchDeepSeek(
       充值余额: number(info?.topped_up_balance),
     },
   };
-}
-
-interface CodexAuth {
-  accessToken: string;
-  accountId: string | null;
-  planHint: string | null;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -465,9 +572,9 @@ function jwtAccountId(token: string): string | null {
   return text(payload?.chatgpt_account_id) ?? text(auth?.chatgpt_account_id) ?? text(organizations[0]?.id);
 }
 
-async function codexAuth(home: string, env: Record<string, string | undefined>): Promise<CodexAuth | null> {
-  const envToken = selectedCredential(env, ['GRAPH_CHATGPT_ACCESS_TOKEN', 'CHATGPT_ACCESS_TOKEN']);
-  if (envToken) return { accessToken: envToken.value, accountId: text(env.GRAPH_CHATGPT_ACCOUNT_ID), planHint: envToken.source };
+async function chatGptCredential(home: string, env: Record<string, string | undefined>): Promise<Credential | null> {
+  const envToken = selectedCredential(env, 'chatgpt', ['GRAPH_CHATGPT_ACCESS_TOKEN', 'CHATGPT_ACCESS_TOKEN'], DEFAULT_BASE_URLS.chatgpt);
+  if (envToken) return { ...envToken, accountId: text(env.GRAPH_CHATGPT_ACCOUNT_ID) };
   const path = env.GRAPH_CODEX_AUTH_PATH?.trim() || join(home, '.codex', 'auth.json');
   const raw = await readJson(path);
   if (raw === null) return null;
@@ -476,9 +583,13 @@ async function codexAuth(home: string, env: Record<string, string | undefined>):
   const accessToken = text(tokens?.access_token);
   if (!root || !accessToken) throw new Error('Codex auth.json 缺少 tokens.access_token');
   return {
-    accessToken,
+    id: 'chatgpt',
+    secretRef: SUBSCRIPTION_SECRET_REFS.chatgpt,
+    configured: true,
+    value: accessToken,
     accountId: text(tokens?.account_id) ?? jwtAccountId(accessToken),
-    planHint: 'Codex CLI 登录',
+    source: 'Codex CLI 登录',
+    baseUrl: DEFAULT_BASE_URLS.chatgpt,
   };
 }
 
@@ -512,15 +623,13 @@ function codexWindows(body: Record<string, unknown>): UsageWindow[] {
   return windows;
 }
 
-async function fetchChatGpt(home: string, env: Record<string, string | undefined>, fetchImpl: FetchLike): Promise<UsagePlan> {
-  const auth = await codexAuth(home, env);
-  if (!auth) return basePlan('chatgpt');
+async function fetchChatGpt(credential: Credential, fetchImpl: FetchLike, prices: ModelPrice[]): Promise<UsagePlan> {
   const response = await fetchWithTimeout(fetchImpl, CHATGPT_USAGE_URL, {
     headers: {
-      authorization: `Bearer ${auth.accessToken}`,
+      authorization: `Bearer ${credential.value}`,
       accept: 'application/json',
       'user-agent': 'codex-cli',
-      ...(auth.accountId ? { 'chatgpt-account-id': auth.accountId } : {}),
+      ...(credential.accountId ? { 'chatgpt-account-id': credential.accountId } : {}),
     },
   });
   if (response.status === 401 || response.status === 403) throw new Error('ChatGPT 登录凭据已过期，请重新登录 Codex');
@@ -529,23 +638,21 @@ async function fetchChatGpt(home: string, env: Record<string, string | undefined
   if (!windows.length) throw new Error('用量响应中没有可识别的配额窗口');
   const credits = record(body.credits);
   const creditBalance = number(credits?.balance);
+  const models = await discoverChatGptModels(credential, fetchImpl, prices);
   return {
     ...basePlan('chatgpt', true, statusFor(windows)),
     plan: text(body.plan_type) ?? 'ChatGPT',
-    credentialSource: auth.planHint,
+    credentialSource: credential.source,
+    credential: credentialInfo(credential),
+    models,
     windows,
     ...(creditBalance !== null ? { balance: { remaining: creditBalance, currency: 'USD', unit: '$' } } : {}),
   };
 }
 
-interface GrokAuth {
-  accessToken: string;
-  source: string;
-}
-
-async function grokAuth(home: string, env: Record<string, string | undefined>): Promise<GrokAuth | null> {
-  const envToken = selectedCredential(env, ['GRAPH_GROK_ACCESS_TOKEN', 'GROK_ACCESS_TOKEN']);
-  if (envToken) return { accessToken: envToken.value, source: envToken.source };
+async function grokCredential(home: string, env: Record<string, string | undefined>): Promise<Credential | null> {
+  const envToken = selectedCredential(env, 'grok', ['GRAPH_GROK_ACCESS_TOKEN', 'GROK_ACCESS_TOKEN'], DEFAULT_BASE_URLS.grok);
+  if (envToken) return envToken;
   const path = env.GRAPH_GROK_AUTH_PATH?.trim() || join(home, '.grok', 'auth.json');
   const raw = await readJson(path);
   if (raw === null) return null;
@@ -558,7 +665,14 @@ async function grokAuth(home: string, env: Record<string, string | undefined>): 
     ?? entries.find(entry => entry.scope.includes('/sign-in') && text(entry.value.key));
   const accessToken = text(selected?.value.key);
   if (!accessToken) throw new Error('Grok auth.json 中没有可用的 access token');
-  return { accessToken, source: 'Grok CLI 登录' };
+  return {
+    id: 'grok',
+    secretRef: SUBSCRIPTION_SECRET_REFS.grok,
+    configured: true,
+    value: accessToken,
+    source: 'Grok CLI 登录',
+    baseUrl: DEFAULT_BASE_URLS.grok,
+  };
 }
 
 interface ProtoScan {
@@ -661,13 +775,11 @@ function grokWindowLabel(resetAt: number | null, now: number): string {
   return '额度';
 }
 
-async function fetchGrok(home: string, env: Record<string, string | undefined>, fetchImpl: FetchLike, now: number): Promise<UsagePlan> {
-  const auth = await grokAuth(home, env);
-  if (!auth) return basePlan('grok');
+async function fetchGrok(credential: Credential, fetchImpl: FetchLike, now: number, prices: ModelPrice[]): Promise<UsagePlan> {
   const response = await fetchWithTimeout(fetchImpl, GROK_BILLING_URL, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${auth.accessToken}`,
+      authorization: `Bearer ${credential.value}`,
       origin: 'https://grok.com',
       referer: 'https://grok.com/?_s=usage',
       accept: '*/*',
@@ -686,11 +798,15 @@ async function fetchGrok(home: string, env: Record<string, string | undefined>, 
   const bytes = new Uint8Array(await response.arrayBuffer());
   const usage = parseGrokBilling(bytes, now);
   const windows = [percentWindow('credits', grokWindowLabel(usage.resetAt, now), usage.usedPercent, usage.resetAt)];
+  const discovered = await discoverOpenAiCompatible('grok', credential, fetchImpl, prices);
+  const models = discovered.length ? discovered : fallbackModels(prices.filter(price => /^grok-|grokbuild/i.test(price.modelId)).map(price => price.modelId), 'grok', credential.baseUrl ?? DEFAULT_BASE_URLS.grok, prices);
   return {
     ...basePlan('grok', true, statusFor(windows)),
     plan: 'SuperGrok',
-    credentialSource: auth.source,
+    credentialSource: credential.source,
+    credential: credentialInfo(credential),
     windows,
+    models,
   };
 }
 
@@ -718,6 +834,130 @@ function parseModelPrices(raw: unknown): ModelPrice[] {
   return prices;
 }
 
+function priceFor(modelId: string, prices: ModelPrice[]): ModelPrice | undefined {
+  const normalized = modelId.toLowerCase();
+  return prices.find(price => price.modelId.toLowerCase() === normalized)
+    ?? prices.find(price => normalized.endsWith(price.modelId.toLowerCase()) || price.modelId.toLowerCase().endsWith(normalized));
+}
+
+function subscriptionModel(
+  id: string,
+  name: string,
+  provider: UsageProviderId,
+  api: SubscriptionModelApi,
+  baseUrl: string,
+  prices: ModelPrice[],
+  values: Partial<Pick<SubscriptionModel, 'contextWindow' | 'maxTokens' | 'reasoning'>> = {},
+): SubscriptionModel {
+  const price = priceFor(id, prices);
+  return {
+    id,
+    name,
+    api,
+    baseUrl,
+    contextWindow: values.contextWindow ?? 131_072,
+    maxTokens: values.maxTokens ?? 8_192,
+    reasoning: values.reasoning ?? !/non-reasoning|flash-lite/i.test(id),
+    supported: api !== 'responses',
+    ...(price ? {
+      inputCostPerMillion: price.inputCostPerMillion,
+      outputCostPerMillion: price.outputCostPerMillion,
+      cacheReadCostPerMillion: price.cacheReadCostPerMillion,
+      cacheCreationCostPerMillion: price.cacheCreationCostPerMillion,
+    } : {}),
+  };
+}
+
+function openAiModels(body: Record<string, unknown>, provider: UsageProviderId, baseUrl: string, api: SubscriptionModelApi, prices: ModelPrice[]): SubscriptionModel[] {
+  const rows = array(body.data).length ? array(body.data) : array(body.models).length ? array(body.models) : array(body);
+  const models: SubscriptionModel[] = [];
+  for (const raw of rows) {
+    if (typeof raw === 'string') {
+      models.push(subscriptionModel(raw, raw, provider, api, baseUrl, prices));
+      continue;
+    }
+    const item = record(raw);
+    if (!item) continue;
+    const id = text(item.id) ?? text(item.model) ?? text(item.slug);
+    if (!id) continue;
+    const limit = record(item.limit);
+    const contextWindow = number(item.context_window) ?? number(item.contextWindow) ?? number(limit?.context) ?? 131_072;
+    const maxTokens = number(item.max_output_tokens) ?? number(item.maxTokens) ?? number(limit?.output) ?? 8_192;
+    const reasoning = boolean(item.reasoning) ?? !/non-reasoning|flash-lite/i.test(id);
+    models.push(subscriptionModel(id, text(item.name) ?? text(item.display_name) ?? id, provider, api, baseUrl, prices, { contextWindow, maxTokens, reasoning }));
+  }
+  return [...new Map(models.map(model => [model.id, model])).values()];
+}
+
+function fallbackModels(keys: string[], provider: UsageProviderId, baseUrl: string, prices: ModelPrice[]): SubscriptionModel[] {
+  const matches = keys.length ? keys : prices.map(price => price.modelId);
+  return [...new Set(matches)].map(id => subscriptionModel(id, priceFor(id, prices)?.displayName ?? id, provider, 'openai-completions', baseUrl, prices));
+}
+
+function openCodeConfiguredModelKeys(config: unknown, ids: string[]): string[] {
+  const providers = record(record(config)?.provider);
+  if (!providers) return [];
+  for (const [id, raw] of Object.entries(providers)) {
+    if (!ids.includes(id.toLowerCase())) continue;
+    return Object.keys(record(record(raw)?.models) ?? {});
+  }
+  return [];
+}
+
+async function discoverOpenCodeModels(credential: Credential, fetchImpl: FetchLike, prices: ModelPrice[], openCodeConfig: unknown): Promise<SubscriptionModel[]> {
+  const baseUrl = credential.baseUrl ?? DEFAULT_BASE_URLS['opencode-go'];
+  const configuredKeys = openCodeConfiguredModelKeys(openCodeConfig, ['opencode-go']);
+  try {
+    const response = await fetchWithTimeout(fetchImpl, 'https://models.dev/api.json', { headers: { accept: 'application/json' } });
+    const body = await responseJson(response, 'models.dev');
+    const models = record(record(body['opencode-go'])?.models);
+    if (!models) return fallbackModels(configuredKeys, 'opencode-go', baseUrl, prices);
+    const result: SubscriptionModel[] = [];
+    for (const [id, raw] of Object.entries(models)) {
+      const item = record(raw);
+      const limit = record(item?.limit);
+      result.push(subscriptionModel(id, text(item?.name) ?? id, 'opencode-go', 'openai-completions', baseUrl, prices, {
+        contextWindow: number(limit?.context) ?? 131_072,
+        maxTokens: number(limit?.output) ?? 8_192,
+        reasoning: boolean(item?.reasoning) ?? true,
+      }));
+    }
+    return result;
+  } catch {
+    return fallbackModels(configuredKeys, 'opencode-go', baseUrl, prices);
+  }
+}
+
+async function discoverOpenAiCompatible(provider: UsageProviderId, credential: Credential, fetchImpl: FetchLike, prices: ModelPrice[]): Promise<SubscriptionModel[]> {
+  const baseUrl = credential.baseUrl ?? DEFAULT_BASE_URLS[provider];
+  try {
+    const response = await fetchWithTimeout(fetchImpl, `${baseUrl.replace(/\/$/, '')}/models`, {
+      headers: { authorization: `Bearer ${credential.value}`, accept: 'application/json' },
+    });
+    const body = await responseJson(response, `${PLAN_BLUEPRINTS[provider].name} 模型`);
+    return openAiModels(body, provider, baseUrl, 'openai-completions', prices);
+  } catch {
+    return [];
+  }
+}
+
+async function discoverChatGptModels(credential: Credential, fetchImpl: FetchLike, prices: ModelPrice[]): Promise<SubscriptionModel[]> {
+  try {
+    const response = await fetchWithTimeout(fetchImpl, 'https://chatgpt.com/backend-api/codex/models', {
+      headers: {
+        authorization: `Bearer ${credential.value}`,
+        accept: 'application/json',
+        'user-agent': 'codex-cli',
+        ...(credential.accountId ? { 'chatgpt-account-id': credential.accountId } : {}),
+      },
+    });
+    const body = await responseJson(response, 'ChatGPT 模型');
+    return openAiModels(body, 'chatgpt', DEFAULT_BASE_URLS.chatgpt, 'responses', prices);
+  } catch {
+    return fallbackModels(prices.filter(price => /^gpt-|codex/i.test(price.modelId)).map(price => price.modelId), 'chatgpt', DEFAULT_BASE_URLS.chatgpt, prices);
+  }
+}
+
 function summarize(plans: UsagePlan[]): UsageSnapshot['summary'] {
   return {
     configured: plans.filter(plan => plan.configured).length,
@@ -738,6 +978,22 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
   let cached: UsageSnapshot | null = null;
   let inFlight: Promise<UsageSnapshot> | null = null;
 
+  async function credentialInventory(): Promise<Record<UsageProviderId, Credential | null>> {
+    const current = options.loadConfig ? await options.loadConfig() : { config: null as unknown as GraphConfig, env };
+    const openCodeConfig = await readJson(openCodeConfigPath).catch(() => null);
+    const [chatgpt, grok] = await Promise.all([
+      chatGptCredential(home, current.env).catch(() => null),
+      grokCredential(home, current.env).catch(() => null),
+    ]);
+    return {
+      'opencode-go': openCodeCredential(current.config, current.env, openCodeConfig),
+      'command-goat': commandGoatCredential(current.config, current.env, openCodeConfig),
+      deepseek: deepSeekCredential(current.config, current.env),
+      chatgpt,
+      grok,
+    };
+  }
+
   async function load(): Promise<UsageSnapshot> {
     const generatedAt = Date.now();
     const current = options.loadConfig ? await options.loadConfig() : { config: null as unknown as GraphConfig, env };
@@ -746,19 +1002,48 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
       readJson(pricingPath).catch(() => null),
       stat(pricingPath).catch(() => null),
     ]);
+    const credentials = await credentialInventory();
+    const prices = parseModelPrices(pricingRaw);
     const adapters: { id: UsageProviderId; run: () => Promise<UsagePlan> }[] = [
-      { id: 'opencode-go', run: () => fetchOpenCode(current.config, current.env, openCodeConfig, fetchImpl, generatedAt) },
-      { id: 'command-goat', run: () => fetchCommandGoat(current.config, current.env, openCodeConfig, fetchImpl, generatedAt) },
-      { id: 'deepseek', run: () => fetchDeepSeek(current.config, current.env, fetchImpl) },
-      { id: 'chatgpt', run: () => fetchChatGpt(home, current.env, fetchImpl) },
-      { id: 'grok', run: () => fetchGrok(home, current.env, fetchImpl, generatedAt) },
+      {
+        id: 'opencode-go',
+        run: () => credentials['opencode-go']
+          ? fetchOpenCode(credentials['opencode-go'], fetchImpl, generatedAt, prices, openCodeConfig)
+          : Promise.resolve(basePlan('opencode-go')),
+      },
+      {
+        id: 'command-goat',
+        run: () => credentials['command-goat']
+          ? fetchCommandGoat(credentials['command-goat'], fetchImpl, generatedAt, prices, openCodeConfig)
+          : Promise.resolve(basePlan('command-goat')),
+      },
+      {
+        id: 'deepseek',
+        run: () => credentials.deepseek
+          ? fetchDeepSeek(credentials.deepseek, fetchImpl, prices)
+          : Promise.resolve(basePlan('deepseek')),
+      },
+      {
+        id: 'chatgpt',
+        run: () => credentials.chatgpt
+          ? fetchChatGpt(credentials.chatgpt, fetchImpl, prices)
+          : Promise.resolve(basePlan('chatgpt')),
+      },
+      {
+        id: 'grok',
+        run: () => credentials.grok
+          ? fetchGrok(credentials.grok, fetchImpl, generatedAt, prices)
+          : Promise.resolve(basePlan('grok')),
+      },
     ];
     const plans = await Promise.all(adapters.map(async adapter => {
+      const credential = credentials[adapter.id];
       try {
         return await adapter.run();
       } catch (error) {
         return {
           ...basePlan(adapter.id, true, 'error'),
+          ...(credential ? { credential: credentialInfo(credential), credentialSource: credential.source } : {}),
           error: errorMessage(error),
         };
       }
@@ -769,7 +1054,7 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
       pricing: {
         source: '~/.cc-switch/model-pricing.json',
         updatedAt: pricingInfo?.mtimeMs ?? null,
-        models: parseModelPrices(pricingRaw),
+        models: prices,
       },
       summary: summarize(plans),
     };
@@ -783,6 +1068,22 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
       if (inFlight) return inFlight;
       inFlight = load().finally(() => { inFlight = null; });
       return inFlight;
+    },
+    async credentials() {
+      const inventory = await credentialInventory();
+      return Object.fromEntries(
+        Object.entries(inventory)
+          .filter((entry): entry is [string, Credential] => Boolean(entry[1]))
+          .map(([provider, credential]) => [provider, credential.secretRef]),
+      );
+    },
+    async secretValues() {
+      const inventory = await credentialInventory();
+      return Object.fromEntries(
+        Object.values(inventory)
+          .filter((credential): credential is Credential => Boolean(credential))
+          .map(credential => [credential.secretRef, credential.value]),
+      );
     },
   };
 }

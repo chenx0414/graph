@@ -117,6 +117,29 @@ test('conversation model and thinking selection applies to the next master turn'
   expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
 });
 
+test('new conversations inherit the master model default thinking level', async () => {
+  const root = await temp('default-thinking');
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })) },
+    models: {
+      entries: [{
+        id: 'm-default', provider: 'synthetic', grade: 'high', api: 'openai-completions',
+        baseUrl: 'http://127.0.0.1:1', contextWindow: 32_000, maxTokens: 256, reasoning: true,
+        defaultThinkingLevel: 'xhigh',
+      }],
+      modelRuntime: {} as never,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm-default' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '使用模型默认思考强度', requestId: 'default-thinking' });
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({
+    model: 'm-default',
+    thinkingLevel: 'xhigh',
+  });
+});
+
 test('messages sent while the master is running are answered one queued turn at a time', async () => {
   const root = await temp('queue');
   let release!: () => void;

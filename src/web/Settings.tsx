@@ -4,28 +4,104 @@ import { Setup } from './Setup.tsx';
 import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 
 type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
+type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+const THINKING_LEVELS: ModelThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 type RawModel = {
-  id: string; provider: string; grade: string; api: 'openai-completions'; baseUrl: string;
-  contextWindow: number; maxTokens: number; reasoning?: boolean; credentialId: string; cost?: Cost;
+  id: string; provider: string; modelId?: string; grade: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
+  contextWindow: number; maxTokens: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: Cost;
+  pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string };
   headers?: Record<string, string>;
 };
 type RawCredential = { secretRef: string; displayName?: string; sharedLimitGroupId?: string };
 type RawConfig = {
   version: 1;
   projects?: { id: string; root: string; grants?: string[] }[];
-  models?: { entries: RawModel[]; preferences?: Record<string, string[]> };
+  models?: { entries: RawModel[] };
   credentials?: Record<string, RawCredential>;
   limits?: { credentials?: Record<string, number>; sharedGroups?: Record<string, number> };
 };
 type ConfigResponse = { revision: number; config: RawConfig & { path: string | null; credentials?: Record<string, RawCredential & { configured?: boolean }> } };
 type TestResult = { ok: boolean; model?: string; credentialId?: string; status?: number; latencyMs?: number; message?: string };
 type Startup = { effectiveRevision?: number };
+type SubscriptionModel = {
+  id: string;
+  name: string;
+  api: 'openai-completions' | 'anthropic-messages' | 'responses';
+  baseUrl: string;
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+  supported: boolean;
+  inputCostPerMillion?: number;
+  outputCostPerMillion?: number;
+  cacheReadCostPerMillion?: number;
+  cacheCreationCostPerMillion?: number;
+};
+type SubscriptionPlan = {
+  id: string;
+  name: string;
+  configured: boolean;
+  credential?: { id: string; secretRef: string; source: string; configured: boolean } | null;
+  models: SubscriptionModel[];
+};
+type UsageResponse = { plans: SubscriptionPlan[] };
 type ApiError = Error & { code?: string; field?: string };
 
 const GRADES = ['low', 'medium', 'high', 'highest'];
 
 function emptyModel(): RawModel {
-  return { id: 'new-model', provider: 'local', grade: 'medium', api: 'openai-completions', baseUrl: 'http://127.0.0.1:8080/v1', contextWindow: 32768, maxTokens: 4096, reasoning: true, credentialId: '' };
+  return {
+    id: 'new-model',
+    provider: 'local',
+    grade: 'medium',
+    api: 'openai-completions',
+    baseUrl: 'http://127.0.0.1:8080/v1',
+    contextWindow: 32768,
+    maxTokens: 4096,
+    reasoning: true,
+    defaultThinkingLevel: 'medium',
+    credentialId: '',
+  };
+}
+
+function uniqueModelId(planId: string, modelId: string, entries: RawModel[], currentIndex?: number): string {
+  const base = `${planId}:${modelId}`;
+  let candidate = base;
+  let suffix = 2;
+  while (entries.some((entry, index) => index !== currentIndex && entry.id === candidate)) candidate = `${base}-${suffix++}`;
+  return candidate;
+}
+
+function subscriptionCost(model: SubscriptionModel): Cost | undefined {
+  if (
+    model.inputCostPerMillion === undefined
+    || model.outputCostPerMillion === undefined
+    || model.cacheReadCostPerMillion === undefined
+  ) return undefined;
+  return {
+    input: model.inputCostPerMillion,
+    output: model.outputCostPerMillion,
+    cacheRead: model.cacheReadCostPerMillion,
+    cacheWrite: model.cacheCreationCostPerMillion ?? 0,
+  };
+}
+
+function modelFromSubscription(plan: SubscriptionPlan, model: SubscriptionModel, entries: RawModel[], currentIndex?: number): RawModel {
+  const cost = subscriptionCost(model);
+  return {
+    id: uniqueModelId(plan.id, model.id, entries, currentIndex),
+    provider: plan.id,
+    modelId: model.id,
+    grade: 'medium',
+    api: model.api === 'anthropic-messages' ? 'anthropic-messages' : 'openai-completions',
+    baseUrl: model.baseUrl,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    reasoning: model.reasoning,
+    defaultThinkingLevel: model.reasoning ? 'medium' : 'off',
+    credentialId: plan.credential?.id ?? plan.id,
+    ...(cost ? { cost, pricing: { currency: 'USD', unit: 'per_million_tokens' as const, status: 'known' as const, sourceUrl: 'model-pricing.json' } } : {}),
+  };
 }
 
 /** Strip server-side display flags so the draft can be saved back verbatim. */
@@ -38,10 +114,21 @@ function toDraft(config: ConfigResponse['config']): RawConfig {
   return {
     version: 1,
     projects: config.projects ?? [],
-    ...(config.models ? { models: { entries: config.models.entries, ...(config.models.preferences ? { preferences: config.models.preferences } : {}) } } : {}),
+    ...(config.models ? { models: { entries: config.models.entries } } : {}),
     credentials,
     limits: config.limits ?? {},
   };
+}
+
+function mergeSubscriptionCredentials(config: RawConfig, detected: Record<string, string>): { config: RawConfig; changed: boolean } {
+  const credentials = { ...(config.credentials ?? {}) };
+  let changed = false;
+  for (const [provider, secretRef] of Object.entries(detected)) {
+    if (credentials[provider]) continue;
+    credentials[provider] = { secretRef, displayName: `${provider} 订阅` };
+    changed = true;
+  }
+  return changed ? { config: { ...config, credentials }, changed: true } : { config, changed: false };
 }
 
 type Preparation = { state: string; repoRoot: string | null; projectSubdir: string | null; baselineSha: string | null; detail: { dirty?: number; reason?: string } | null };
@@ -234,7 +321,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         </header>
         <div className="settings-content">
           <div className="settings-root">
-            <SettingsAdvanced active={active} />
+            <SettingsAdvanced active={active} autoSyncSubscriptions={!openGuide} />
             {active === 'settings-archived' && <section id="settings-archived" className="settings-section"><ArchivedConversations /></section>}
           </div>
         </div>
@@ -243,7 +330,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   );
 }
 
-function SettingsAdvanced({ active }: { active: string }) {
+function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; autoSyncSubscriptions: boolean }) {
   const [draft, setDraft] = useState<RawConfig | null>(null);
   const [credentialState, setCredentialState] = useState<Record<string, boolean>>({});
   const [revision, setRevision] = useState(0);
@@ -256,6 +343,9 @@ function SettingsAdvanced({ active }: { active: string }) {
   const [results, setResults] = useState<Record<string, TestResult>>({});
   const [effectiveRevision, setEffectiveRevision] = useState<number | null>(null);
   const [keys, setKeys] = useState<Record<string, string>>({});
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [plansError, setPlansError] = useState('');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saveInFlight = useRef(false);
   const savePending = useRef(false);
@@ -266,24 +356,49 @@ function SettingsAdvanced({ active }: { active: string }) {
 
   const load = useCallback(async () => {
     try {
-      const response = await api<ConfigResponse>('/api/config');
-      const next = toDraft(response.config);
+      const [response, detectedResponse] = await Promise.all([
+        api<ConfigResponse>('/api/config'),
+        autoSyncSubscriptions
+          ? api<{ credentials: Record<string, string> }>('/api/usage/credentials').catch(() => ({ credentials: {} }))
+          : Promise.resolve({ credentials: {} }),
+      ]);
+      const detected = detectedResponse.credentials;
+      const merged = mergeSubscriptionCredentials(toDraft(response.config), detected);
+      const next = merged.config;
       clearTimeout(saveTimer.current);
-      editVersion.current = 0;
+      editVersion.current = merged.changed ? 1 : 0;
       savePending.current = false;
       latestDraft.current = next;
       latestRevision.current = response.revision;
       setDraft(next);
-      setCredentialState(Object.fromEntries(Object.entries(response.config.credentials ?? {}).map(([id, credential]) => [id, Boolean(credential.configured)])));
+      setCredentialState({
+        ...Object.fromEntries(Object.entries(response.config.credentials ?? {}).map(([id, credential]) => [id, Boolean(credential.configured)])),
+        ...Object.fromEntries(Object.keys(detected).map(id => [id, true])),
+      });
       setRevision(response.revision);
-      setDirty(false);
+      setDirty(merged.changed);
       setError(null);
-      setStatus('');
+      setStatus(merged.changed ? `已同步 ${Object.keys(detected).join('、')} 的凭据引用` : '');
+      if (merged.changed) scheduleSave(0);
     } catch (reason) {
       setError(reason as ApiError);
     }
-  }, []);
+  }, [autoSyncSubscriptions]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (active !== 'settings-models') return;
+    let cancelled = false;
+    setPlansLoading(true);
+    setPlansError('');
+    void api<UsageResponse>('/api/usage').then(result => {
+      if (!cancelled) setPlans(result.plans.filter(plan => plan.configured));
+    }).catch(reason => {
+      if (!cancelled) setPlansError((reason as Error).message);
+    }).finally(() => {
+      if (!cancelled) setPlansLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [active]);
   useEffect(() => () => {
     clearTimeout(saveTimer.current);
     if (editVersion.current > 0) void persistDraft(editVersion.current);
@@ -328,8 +443,12 @@ function SettingsAdvanced({ active }: { active: string }) {
       setEffectiveRevision(response.effectiveRevision ?? response.revision);
       const pending = response.applied === false;
       setStatus(`已自动保存 revision ${response.revision}${pending ? `，等待生效：${response.reason ?? '需要重启守护进程'}` : '，已应用到当前守护进程'}${response.configured === false ? '（尚未配置可用凭据，仅查看模式）' : ''}`);
-      if (editVersion.current === version) setDirty(false);
-      else savePending.current = true;
+      if (editVersion.current === version) {
+        editVersion.current = 0;
+        setDirty(false);
+      } else {
+        savePending.current = true;
+      }
     } catch (reason) {
       setError(reason as ApiError);
       setDirty(true);
@@ -390,6 +509,47 @@ function SettingsAdvanced({ active }: { active: string }) {
   const models = draft.models?.entries ?? [];
   const credentials = Object.entries(draft.credentials ?? {});
   const credentialIds = credentials.map(([id]) => id);
+  const configuredPlans = plans.filter(plan => plan.configured);
+  const planById = new Map(plans.map(plan => [plan.id, plan]));
+  const subscriptionModels = (plan: SubscriptionPlan | undefined) => plan?.models.filter(model => model.supported) ?? [];
+  const credentialIdForPlan = (plan: SubscriptionPlan) => {
+    if (plan.credential?.id && credentialIds.includes(plan.credential.id)) return plan.credential.id;
+    if (plan.credential?.secretRef) {
+      const matched = credentials.find(([, credential]) => credential.secretRef === plan.credential?.secretRef);
+      if (matched) return matched[0];
+    }
+    return credentialIds.includes(plan.id) ? plan.id : plan.credential?.id ?? plan.id;
+  };
+  const applySubscription = (index: number, planId: string, modelId?: string) => {
+    const plan = planById.get(planId);
+    if (!plan) return;
+    const model = subscriptionModels(plan).find(item => item.id === modelId) ?? subscriptionModels(plan)[0];
+    mutate(next => {
+      const entry = next.models!.entries[index]!;
+      if (!model) {
+        entry.provider = plan.id;
+        entry.credentialId = credentialIdForPlan(plan);
+        return;
+      }
+      const replacement = modelFromSubscription(plan, model, next.models!.entries, index);
+      replacement.grade = entry.grade;
+      if (replacement.reasoning && entry.defaultThinkingLevel && entry.defaultThinkingLevel !== 'off') {
+        replacement.defaultThinkingLevel = entry.defaultThinkingLevel;
+      }
+      next.models!.entries[index] = replacement;
+    });
+  };
+  const addSubscriptionModel = () => {
+    const plan = configuredPlans[0] ?? plans[0];
+    const model = subscriptionModels(plan)[0];
+    mutate(next => {
+      const entries = next.models?.entries ?? [];
+      const entry = plan && model
+        ? modelFromSubscription(plan, model, entries)
+        : { ...emptyModel(), credentialId: credentialIds[0] ?? '' };
+      next.models = { entries: [...entries, entry] };
+    });
+  };
   const invalid = (field: string) => error?.field === field ? 'true' : undefined;
   const configurationMessages = <>
     {error && <p data-testid="config-error" style={{ color: 'var(--danger)', margin: 0 }}>{error.message}{error.code ? `（${error.code}）` : ''}</p>}
@@ -425,123 +585,171 @@ function SettingsAdvanced({ active }: { active: string }) {
       <h2>模型连接</h2>
       <div className="settings-feature-stack">
       <section id="settings-credentials" className="settings-section">
-      <Card title="凭据引用" icon="link" subtitle="只保存环境变量名；密钥从不进入配置文件、接口响应或页面"
+      <Card title="凭据引用" icon="link" subtitle="已连接订阅会自动同步到这里；只保存环境变量名，密钥从不进入配置文件、接口响应或页面"
         actions={<Button size="sm" icon="plus" data-testid="credential-add" onClick={() => mutate(next => { next.credentials = { ...(next.credentials ?? {}), 'new-credential': { secretRef: 'GRAPH_NEW_KEY' } }; })}>添加凭据</Button>}>
         {!credentials.length && <p className="muted">尚未配置凭据。</p>}
         {credentials.map(([id, credential], index) => (
-          <div className="list-item" key={id} data-testid={`credential-row-${index}`} data-id={id}>
-            <Field label="ID"><input className="input" style={{ width: 150 }} data-testid={`credential-${index}-id`} value={id} onChange={event => mutate(next => {
-              const record = next.credentials!;
-              const value = record[id]!;
-              delete record[id];
-              record[event.target.value] = value;
-            })} /></Field>
-            <Field label="环境变量"><input className="input" style={{ width: 220 }} data-testid={`credential-${index}-secretRef`} value={credential.secretRef} onChange={event => mutate(next => { next.credentials![id]!.secretRef = event.target.value; })} /></Field>
-            <Field label="共享组"><input className="input" style={{ width: 140 }} data-testid={`credential-${index}-group`} value={credential.sharedLimitGroupId ?? ''} placeholder="可选" onChange={event => mutate(next => {
-              const value = next.credentials![id]!;
-              if (event.target.value) value.sharedLimitGroupId = event.target.value;
-              else delete value.sharedLimitGroupId;
-            })} /></Field>
-            <Pill tone={credentialState[id] ? 'success' : 'warn'} testid={`credential-${index}-state`}>{credentialState[id] ? '已配置' : '缺失'}</Pill>
-            {bridge && <>
-              <input className="input" style={{ width: 180 }} type="password" placeholder="API 密钥" data-testid={`credential-${index}-key`}
-                value={keys[id] ?? ''} onChange={event => setKeys(current => ({ ...current, [id]: event.target.value }))} />
-              <Button size="sm" variant="danger" data-testid={`credential-${index}-disable`} title="撤销推送的密钥并禁止该连接新发送"
-                onClick={async () => {
-                  try {
-                    const result = await bridge.saveSecret(credential.secretRef, null);
-                    // Revocation persistence lives in the daemon state, so the
-                    // applied flag is the proof that the gate changed.
-                    if (!result?.applied) throw new Error(result?.message ?? '撤销未生效');
-                    setCredentialState(current => ({ ...current, [id]: false }));
-                    setKeys(current => ({ ...current, [id]: '' }));
-                    toast('连接已禁用；重新保存密钥即可恢复', 'success');
-                  } catch (reason) {
-                    toast(`禁用失败：${(reason as Error).message}`, 'danger');
-                  }
-                }}>禁用连接</Button>
-              <Button size="sm" icon="link" data-testid={`credential-${index}-key-save`} disabled={!(keys[id] ?? '').trim()}
-                onClick={() => void (async () => {
-                  const stored = await bridge.saveSecret(credential.secretRef, (keys[id] ?? '').trim());
-                  if (stored.stored) {
-                    setCredentialState(current => ({ ...current, [id]: true }));
-                    setKeys(current => ({ ...current, [id]: '' }));
-                    toast('密钥已写入系统钥匙串', 'success');
-                  } else {
-                    toast(`密钥保存失败：${stored.message ?? '钥匙串不可用'}`, 'danger');
-                  }
-                })()}>保存到钥匙串</Button>
-            </>}
-            <Button size="sm" variant="danger" onClick={() => mutate(next => { delete next.credentials![id]; })}>删除</Button>
+          <div className="credential-card" key={id} data-testid={`credential-row-${index}`} data-id={id}>
+            <div className="credential-main">
+              <Field label="ID"><input className="input" style={{ width: 150 }} data-testid={`credential-${index}-id`} value={id} onChange={event => mutate(next => {
+                const record = next.credentials!;
+                const value = record[id]!;
+                delete record[id];
+                record[event.target.value] = value;
+              })} /></Field>
+              <Field label="环境变量"><input className="input" style={{ width: 250 }} data-testid={`credential-${index}-secretRef`} value={credential.secretRef} onChange={event => mutate(next => { next.credentials![id]!.secretRef = event.target.value; })} /></Field>
+              <Pill tone={credentialState[id] ? 'success' : 'warn'} testid={`credential-${index}-state`}>{credentialState[id] ? '已配置' : '缺失'}</Pill>
+              {bridge && <>
+                <input className="input" style={{ width: 180 }} type="password" placeholder="API 密钥" data-testid={`credential-${index}-key`}
+                  value={keys[id] ?? ''} onChange={event => setKeys(current => ({ ...current, [id]: event.target.value }))} />
+                <Button size="sm" variant="danger" data-testid={`credential-${index}-disable`} title="撤销推送的密钥并禁止该连接新发送"
+                  onClick={async () => {
+                    try {
+                      const result = await bridge.saveSecret(credential.secretRef, null);
+                      if (!result?.applied) throw new Error(result?.message ?? '撤销未生效');
+                      setCredentialState(current => ({ ...current, [id]: false }));
+                      setKeys(current => ({ ...current, [id]: '' }));
+                      toast('连接已禁用；重新保存密钥即可恢复', 'success');
+                    } catch (reason) {
+                      toast(`禁用失败：${(reason as Error).message}`, 'danger');
+                    }
+                  }}>禁用连接</Button>
+                <Button size="sm" icon="link" data-testid={`credential-${index}-key-save`} disabled={!(keys[id] ?? '').trim()}
+                  onClick={() => void (async () => {
+                    const stored = await bridge.saveSecret(credential.secretRef, (keys[id] ?? '').trim());
+                    if (stored.stored) {
+                      setCredentialState(current => ({ ...current, [id]: true }));
+                      setKeys(current => ({ ...current, [id]: '' }));
+                      toast('密钥已写入系统钥匙串', 'success');
+                    } else {
+                      toast(`密钥保存失败：${stored.message ?? '钥匙串不可用'}`, 'danger');
+                    }
+                  })()}>保存到钥匙串</Button>
+              </>}
+              <Button size="sm" variant="danger" onClick={() => mutate(next => { delete next.credentials![id]; })}>删除</Button>
+            </div>
+            <details className="disclosure credential-advanced">
+              <summary>高级设置</summary>
+              <p className="field-hint">共享组用于把多个指向同一上游账号的凭据合并计算并发；每个订阅只出现一次时留空即可。</p>
+              <Field label="共享组"><input className="input" style={{ width: 180 }} data-testid={`credential-${index}-group`} value={credential.sharedLimitGroupId ?? ''} placeholder="可选" onChange={event => mutate(next => {
+                const value = next.credentials![id]!;
+                if (event.target.value) value.sharedLimitGroupId = event.target.value;
+                else delete value.sharedLimitGroupId;
+              })} /></Field>
+            </details>
           </div>
         ))}
       </Card>
       </section>
 
       <section id="settings-models" className="settings-section">
-      <Card title="模型" icon="bolt" subtitle="连通性测试使用运行版本（effective revision），不读取未生效内容"
+      <Card title="模型" icon="bolt" subtitle="选择已连接订阅和模型即可；端点、上下文、输出上限与价格会自动填写并可在高级设置中调整"
         actions={<>
           <Button size="sm" icon="refresh" data-testid="pricing-refresh" disabled={refreshing} onClick={() => void refreshPrices()}>{refreshing ? '刷新中…' : '刷新价格快照'}</Button>
-          <Button size="sm" icon="plus" data-testid="model-add" onClick={() => mutate(next => { next.models = { entries: [...(next.models?.entries ?? []), { ...emptyModel(), credentialId: credentialIds[0] ?? '' }] }; })}>添加模型</Button>
+          <Button size="sm" icon="plus" data-testid="model-add" disabled={plansLoading} onClick={addSubscriptionModel}>快速添加模型</Button>
         </>}>
         <p data-testid="test-connection-note" className="faint">连通性测试使用当前运行版本的绑定（effective revision），不读取未生效的保存内容。</p>
+        <div className="subscription-strip" data-testid="subscription-sync">
+          {plansLoading && <span className="muted">正在读取订阅模型…</span>}
+          {!plansLoading && configuredPlans.map(plan => <Pill key={plan.id} tone="success">{plan.name} · {plan.models.filter(model => model.supported).length} 个模型</Pill>)}
+          {!plansLoading && !configuredPlans.length && <span className="muted">还没有已连接的订阅，可在“用量”中完成连接，或继续使用下方向导。</span>}
+          {plansError && <span className="field-error">读取订阅模型失败：{plansError}</span>}
+        </div>
         {!models.length && <p className="muted">尚未配置模型。</p>}
-        {models.map((model, index) => (
-          <div className="card" style={{ margin: '10px 0' }} key={index} data-testid={`model-row-${index}`}>
+        {models.map((model, index) => {
+          const selectedPlan = planById.get(model.provider);
+          const availableModels = subscriptionModels(selectedPlan);
+          const selectedModelId = model.modelId ?? model.id;
+          const currentModelMissing = selectedModelId && !availableModels.some(item => item.id === selectedModelId);
+          return (
+          <div className="model-card" key={index} data-testid={`model-row-${index}`}>
             <div className="card-body">
-              <div className="row">
-                <Field label="ID"><input className="input" style={{ width: 150 }} data-invalid={invalid(`models.entries[${index}].id`)} data-testid={`model-${index}-id`} value={model.id} onChange={event => mutate(next => { next.models!.entries[index]!.id = event.target.value; })} /></Field>
-                <Field label="Provider"><input className="input" style={{ width: 130 }} data-testid={`model-${index}-provider`} value={model.provider} onChange={event => mutate(next => { next.models!.entries[index]!.provider = event.target.value; })} /></Field>
+              <div className="model-quick-grid">
+                <Field label="订阅方式">
+                  <select className="select" data-testid={`model-${index}-provider`} value={model.provider} onChange={event => applySubscription(index, event.target.value)}>
+                    {!planById.has(model.provider) && <option value={model.provider}>{model.provider}（手动配置）</option>}
+                    {plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}{plan.configured ? '' : '（未连接）'}</option>)}
+                  </select>
+                </Field>
+                <Field label="模型">
+                  <select className="select" data-testid={`model-${index}-modelId`} value={selectedModelId} onChange={event => applySubscription(index, model.provider, event.target.value)} disabled={!availableModels.length}>
+                    {currentModelMissing && <option value={selectedModelId}>{selectedModelId}</option>}
+                    {availableModels.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}
+                  </select>
+                </Field>
                 <Field label="等级">
                   <select className="select" style={{ width: 110 }} data-testid={`model-${index}-grade`} value={model.grade} onChange={event => mutate(next => { next.models!.entries[index]!.grade = event.target.value; })}>
                     {GRADES.map(grade => <option key={grade} value={grade}>{grade}</option>)}
                   </select>
                 </Field>
-                <Field label="凭据">
-                  <select className="select" style={{ width: 170 }} data-invalid={invalid(`models.entries[${index}].credentialId`)} data-testid={`model-${index}-credentialId`} value={model.credentialId} onChange={event => mutate(next => { next.models!.entries[index]!.credentialId = event.target.value; })}>
-                    {!credentialIds.includes(model.credentialId) && <option value={model.credentialId}>{model.credentialId || '（未选择）'}</option>}
-                    {credentialIds.map(id => <option key={id} value={id}>{id}（{credentialState[id] ? '已配置' : '缺失'}）</option>)}
+                <Field label="默认思考强度">
+                  <select className="select" data-testid={`model-${index}-thinking`} value={model.defaultThinkingLevel ?? (model.reasoning === false ? 'off' : 'medium')} disabled={model.reasoning === false} onChange={event => mutate(next => { next.models!.entries[index]!.defaultThinkingLevel = event.target.value as ModelThinkingLevel; })}>
+                    {THINKING_LEVELS.map(level => <option key={level} value={level}>{level}</option>)}
                   </select>
                 </Field>
                 <Pill tone={model.cost ? 'info' : 'warn'} testid={`model-${index}-price`}>{model.cost ? `价格 输入 ${model.cost.input}/输出 ${model.cost.output} 每百万` : '价格未知（未配置，不会按 0 计算）'}</Pill>
-                {model.headers && Object.keys(model.headers).length > 0 && (
-                  <span className="faint" data-testid={`model-${index}-headers`}>请求头 {Object.entries(model.headers).map(([name, value]) => `${name}=${value}`).join(' · ')}</span>
-                )}
               </div>
-              <div className="row">
-                <Field label="Base URL"><input className="input" style={{ width: 340, maxWidth: 'none' }} data-invalid={invalid(`models.entries[${index}].baseUrl`)} data-testid={`model-${index}-baseUrl`} value={model.baseUrl} onChange={event => mutate(next => { next.models!.entries[index]!.baseUrl = event.target.value; })} /></Field>
-                <Field label="上下文"><input className="input" style={{ width: 110 }} type="number" data-testid={`model-${index}-context`} value={model.contextWindow} onChange={event => mutate(next => { next.models!.entries[index]!.contextWindow = Number(event.target.value); })} /></Field>
-                <Field label="最大输出"><input className="input" style={{ width: 110 }} type="number" data-testid={`model-${index}-maxTokens`} value={model.maxTokens} onChange={event => mutate(next => { next.models!.entries[index]!.maxTokens = Number(event.target.value); })} /></Field>
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    data-testid={`model-${index}-reasoning`}
-                    checked={model.reasoning !== false}
-                    onChange={event => mutate(next => { next.models!.entries[index]!.reasoning = event.target.checked; })}
-                  />
-                  <span>可思考模型</span>
-                </label>
-                <Field label="输入价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={model.cost?.input ?? ''} onChange={event => mutate(next => {
-                  const entry = next.models!.entries[index]!;
-                  const value = Number(event.target.value);
-                  if (event.target.value === '' || !Number.isFinite(value)) { delete entry.cost; return; }
-                  entry.cost = { input: value, output: entry.cost?.output ?? 0, cacheRead: entry.cost?.cacheRead ?? 0, cacheWrite: entry.cost?.cacheWrite ?? 0 };
-                })} /></Field>
-                <Field label="输出价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-output-cost`} value={model.cost?.output ?? ''} onChange={event => mutate(next => {
-                  const entry = next.models!.entries[index]!;
-                  const value = Number(event.target.value);
-                  if (event.target.value === '' || !Number.isFinite(value)) { delete entry.cost; return; }
-                  entry.cost = { input: entry.cost?.input ?? 0, output: value, cacheRead: entry.cost?.cacheRead ?? 0, cacheWrite: entry.cost?.cacheWrite ?? 0 };
-                })} /></Field>
-                <Field label="币种"><input className="input" style={{ width: 90 }} placeholder="USD" data-testid={`model-${index}-cost-currency`} value={(model as { pricing?: { currency?: string } }).pricing?.currency ?? ''} onChange={event => mutate(next => {
-                  const entry = next.models!.entries[index]! as { pricing?: { currency?: string } };
-                  const currency = event.target.value.trim().toUpperCase();
-                  if (!currency) { delete entry.pricing; return; }
-                  // Manual override freezes its own provenance so historical
-                  // calls keep the price snapshot they were estimated with.
-                  entry.pricing = { currency, unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' } as never;
-                })} /></Field>
-              </div>
+              <details className="disclosure model-advanced">
+                <summary>高级设置</summary>
+                <div className="row">
+                  <Field label="配置 ID"><input className="input" style={{ width: 180 }} data-invalid={invalid(`models.entries[${index}].id`)} data-testid={`model-${index}-id`} value={model.id} onChange={event => mutate(next => { next.models!.entries[index]!.id = event.target.value; })} /></Field>
+                  <Field label="上游模型 ID"><input className="input" style={{ width: 220 }} data-testid={`model-${index}-upstream-id`} value={model.modelId ?? ''} placeholder="默认与配置 ID 相同" onChange={event => mutate(next => {
+                    const entry = next.models!.entries[index]!;
+                    if (event.target.value.trim()) entry.modelId = event.target.value;
+                    else delete entry.modelId;
+                  })} /></Field>
+                  <Field label="Provider"><input className="input" style={{ width: 140 }} data-testid={`model-${index}-provider-manual`} value={model.provider} onChange={event => mutate(next => { next.models!.entries[index]!.provider = event.target.value; })} /></Field>
+                  <Field label="传输">
+                    <select className="select" data-testid={`model-${index}-api`} value={model.api} onChange={event => mutate(next => { next.models!.entries[index]!.api = event.target.value as RawModel['api']; })}>
+                      <option value="openai-completions">OpenAI Chat Completions</option>
+                      <option value="anthropic-messages">Anthropic Messages</option>
+                    </select>
+                  </Field>
+                  <Field label="凭据">
+                    <select className="select" data-invalid={invalid(`models.entries[${index}].credentialId`)} data-testid={`model-${index}-credentialId`} value={model.credentialId} onChange={event => mutate(next => { next.models!.entries[index]!.credentialId = event.target.value; })}>
+                      {!credentialIds.includes(model.credentialId) && <option value={model.credentialId}>{model.credentialId || '（未选择）'}</option>}
+                      {credentialIds.map(id => <option key={id} value={id}>{id}（{credentialState[id] ? '已配置' : '缺失'}）</option>)}
+                    </select>
+                  </Field>
+                </div>
+                <div className="row">
+                  <Field label="Base URL"><input className="input" style={{ width: 340, maxWidth: 'none' }} data-invalid={invalid(`models.entries[${index}].baseUrl`)} data-testid={`model-${index}-baseUrl`} value={model.baseUrl} onChange={event => mutate(next => { next.models!.entries[index]!.baseUrl = event.target.value; })} /></Field>
+                  <Field label="上下文"><input className="input" style={{ width: 110 }} type="number" data-testid={`model-${index}-context`} value={model.contextWindow} onChange={event => mutate(next => { next.models!.entries[index]!.contextWindow = Number(event.target.value); })} /></Field>
+                  <Field label="最大输出"><input className="input" style={{ width: 110 }} type="number" data-testid={`model-${index}-maxTokens`} value={model.maxTokens} onChange={event => mutate(next => { next.models!.entries[index]!.maxTokens = Number(event.target.value); })} /></Field>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      data-testid={`model-${index}-reasoning`}
+                      checked={model.reasoning !== false}
+                      onChange={event => mutate(next => { next.models!.entries[index]!.reasoning = event.target.checked; })}
+                    />
+                    <span>可思考模型</span>
+                  </label>
+                </div>
+                <div className="row">
+                  <Field label="输入价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={model.cost?.input ?? ''} onChange={event => mutate(next => {
+                    const entry = next.models!.entries[index]!;
+                    const value = Number(event.target.value);
+                    if (event.target.value === '' || !Number.isFinite(value)) { delete entry.cost; return; }
+                    entry.cost = { input: value, output: entry.cost?.output ?? 0, cacheRead: entry.cost?.cacheRead ?? 0, cacheWrite: entry.cost?.cacheWrite ?? 0 };
+                  })} /></Field>
+                  <Field label="输出价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-output-cost`} value={model.cost?.output ?? ''} onChange={event => mutate(next => {
+                    const entry = next.models!.entries[index]!;
+                    const value = Number(event.target.value);
+                    if (event.target.value === '' || !Number.isFinite(value)) { delete entry.cost; return; }
+                    entry.cost = { input: entry.cost?.input ?? 0, output: value, cacheRead: entry.cost?.cacheRead ?? 0, cacheWrite: entry.cost?.cacheWrite ?? 0 };
+                  })} /></Field>
+                  <Field label="币种"><input className="input" style={{ width: 90 }} placeholder="USD" data-testid={`model-${index}-cost-currency`} value={model.pricing?.currency ?? ''} onChange={event => mutate(next => {
+                    const entry = next.models!.entries[index]!;
+                    const currency = event.target.value.trim().toUpperCase();
+                    if (!currency) { delete entry.pricing; return; }
+                    entry.pricing = { currency, unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' };
+                  })} /></Field>
+                  {model.headers && Object.keys(model.headers).length > 0 && (
+                    <span className="faint" data-testid={`model-${index}-headers`}>请求头 {Object.entries(model.headers).map(([name, value]) => `${name}=${value}`).join(' · ')}</span>
+                  )}
+                </div>
+              </details>
               <div className="row">
                 <Button size="sm" icon="bolt" data-testid={`model-${index}-test`} onClick={() => void testConnection(model)}>测试连接（可能产生用量）</Button>
                 {results[model.id] && <span data-testid={`connection-result-${index}`} className="muted">
@@ -552,22 +760,8 @@ function SettingsAdvanced({ active }: { active: string }) {
               </div>
             </div>
           </div>
-        ))}
-      </Card>
-      </section>
-
-      <section id="settings-preferences" className="settings-section">
-      <Card title="模型偏好" icon="spark" subtitle="按等级列出首选模型 ID（逗号分隔），用于自动选择模型">
-        <div className="card-grid">
-          {GRADES.map(grade => (
-            <Field key={grade} label={grade}>
-              <input className="input" data-testid={`preference-${grade}`} value={(draft.models?.preferences?.[grade] ?? []).join(',')} placeholder="model-a, model-b" onChange={event => mutate(next => {
-                const value = event.target.value.split(',').map(item => item.trim()).filter(Boolean);
-                next.models = { entries: next.models?.entries ?? [], preferences: { ...(next.models?.preferences ?? {}), [grade]: value } };
-              })} />
-            </Field>
-          ))}
-        </div>
+          );
+        })}
       </Card>
       </section>
       </div>

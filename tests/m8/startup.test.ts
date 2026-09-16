@@ -64,6 +64,12 @@ test('config parsing rejects unknown references and resolves relative project ro
   }, join(dir, 'graph.config.json'));
   expect(config.projects[0]!.root).toBe(resolve(dir, 'project'));
   expect(config.models!.entries[0]!.credentialId).toBe('local');
+  const withThinking = parseGraphConfig({
+    version: 1,
+    ...modelConfig(),
+    models: { entries: [{ ...modelConfig().models.entries[0]!, defaultThinkingLevel: 'high' }] },
+  }, join(dir, 'graph.config.json'));
+  expect(withThinking.models!.entries[0]!.defaultThinkingLevel).toBe('high');
 
   const base = { version: 1, projects: [], ...modelConfig() };
   expect(() => parseGraphConfig({ ...base, credentials: {} }, 'x')).toThrowError(/unknown credential/);
@@ -71,6 +77,7 @@ test('config parsing rejects unknown references and resolves relative project ro
   expect(() => parseGraphConfig({ ...base, credentials: { local: { secretRef: 'not a name' } } }, 'x')).toThrowError(/secretRef/);
   expect(() => parseGraphConfig({ ...base, limits: { credentials: { missing: 1 } } }, 'x')).toThrowError(/unknown credential/);
   expect(() => parseGraphConfig({ ...base, models: { entries: [modelConfig().models.entries[0]!, modelConfig().models.entries[0]!] } }, 'x')).toThrowError(/duplicate model/);
+  expect(() => parseGraphConfig({ ...base, models: { entries: [{ ...modelConfig().models.entries[0]!, defaultThinkingLevel: 'extreme' }] } }, 'x')).toThrowError(/defaultThinkingLevel/);
   expect(() => parseGraphConfig({ version: 2 }, 'x')).toThrowError(/version must be 1/);
 });
 

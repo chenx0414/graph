@@ -146,7 +146,21 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     ? [...new Set(Object.values(config.credentials).map(credential => credential.secretRef))]
     : revocation.refs;
   if (revocation.failure) log(`Revocation file unusable (${revocation.failure}); all configured credentials start revoked. Disable or restore a connection to repair it.`);
-  const live: LiveConfig = createLiveConfig({ env: options.env, log, initial: { config, revision: configStore?.revision() ?? 0 }, revoked: revokedRefs });
+  const usageService = createUsageService({
+    env: options.env,
+    home: options.env.HOME,
+    ...(configStore ? { loadConfig: async () => ({ config: (await configStore.snapshot()).config, env: options.env }) } : {}),
+  });
+  // Import credentials owned by OpenCode/Codex/Grok CLIs without sending their
+  // values to the browser or writing them into graph.config.json.
+  const importedSecrets = await usageService.secretValues().catch(() => ({}));
+  const live: LiveConfig = createLiveConfig({
+    env: options.env,
+    log,
+    initial: { config, revision: configStore?.revision() ?? 0 },
+    secrets: importedSecrets,
+    revoked: revokedRefs,
+  });
   /** Atomic multi-ref revocation persistence: a temp file plus rename means a
    * crash never leaves a half-written list, and errors reach the caller. */
   const persistRevoked = async (refs: string[]) => {
@@ -275,12 +289,8 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       enabledModelCount: live.status().enabledModelCount, effectiveRevision: live.revision(),
       ...(Object.keys(live.status().limitAliases).length ? { limitAliases: live.status().limitAliases } : {}),
     }),
-    ...(configStore ? { configStore, configEnv: options.env, configTest: testConnection } : {}),
-    usage: createUsageService({
-      env: options.env,
-      home: options.env.HOME,
-      ...(configStore ? { loadConfig: async () => ({ config: (await configStore.snapshot()).config, env: options.env }) } : {}),
-    }),
+    ...(configStore ? { configStore, configEnv: { ...options.env, ...importedSecrets }, configTest: testConnection } : {}),
+    usage: usageService,
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
       pushSecret: (ref, value) => pushSecret(ref, value),
