@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api } from './api.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { formatTokens } from './insights.ts';
@@ -94,12 +94,14 @@ function ComposerTelemetry({ telemetry, models, conversationId, onChanged }: {
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [draftLevel, setDraftLevel] = useState<ThinkingLevel>('off');
   const rootRef = useRef<HTMLDivElement>(null);
   const model = models.find(item => item.id === telemetry?.model);
   const reasoning = Boolean(model && model.reasoning !== false);
   const currentLevel = (THINKING_LEVELS.includes(telemetry?.thinkingLevel as ThinkingLevel)
     ? telemetry?.thinkingLevel
     : 'off') as ThinkingLevel;
+  useEffect(() => setDraftLevel(currentLevel), [currentLevel]);
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
@@ -114,7 +116,7 @@ function ComposerTelemetry({ telemetry, models, conversationId, onChanged }: {
     };
   }, [open]);
   async function applySelection(nextModel: Settings['models'][number] | undefined, nextLevel: ThinkingLevel) {
-    if (!nextModel || saving) return;
+    if (!nextModel || saving) return false;
     const level = nextModel.reasoning === false ? 'off' : nextLevel;
     setSaving(true);
     try {
@@ -126,14 +128,25 @@ function ComposerTelemetry({ telemetry, models, conversationId, onChanged }: {
           requestId: `model-${crypto.randomUUID()}`,
         }),
       });
-      setOpen(false);
       onChanged();
+      return true;
     } catch (reason) {
       toast(`切换失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+      return false;
     } finally {
       setSaving(false);
     }
   }
+  async function commitThinking(value: string) {
+    const level = THINKING_LEVELS[Number(value)] ?? 'off';
+    setDraftLevel(level);
+    if (!reasoning || saving || level === currentLevel) return;
+    if (!await applySelection(model, level)) setDraftLevel(currentLevel);
+  }
+  const draftIndex = THINKING_LEVELS.indexOf(draftLevel);
+  const sliderStyle = {
+    '--thinking-progress': `${(draftIndex / (THINKING_LEVELS.length - 1)) * 100}%`,
+  } as CSSProperties;
   return (
     <div className="composer-telemetry" data-testid="composer-telemetry" aria-label="当前模型运行指标">
       <span title="缓存输入占全部输入 token 的比例" data-testid="telemetry-cache">
@@ -165,40 +178,25 @@ function ComposerTelemetry({ telemetry, models, conversationId, onChanged }: {
           <div className="model-control-popover" data-testid="model-menu" role="dialog" aria-label="模型与思考强度">
             <div className="model-control-head">
               <span>思考强度</span>
-              <button
-                type="button"
-                data-testid="thinking-cycle"
-                disabled={!reasoning || saving}
-                onClick={() => {
-                  const index = THINKING_LEVELS.indexOf(currentLevel);
-                  void applySelection(model, THINKING_LEVELS[(index + 1) % THINKING_LEVELS.length]!);
-                }}
-                title="切换思考强度"
-                aria-label="切换思考强度"
-              >
-                <Icon name="chevron" size={14} />
-              </button>
+              <span data-testid="thinking-current">{thinkingLabel(draftLevel)}</span>
             </div>
             <div className="model-control-selected">{telemetry?.model ?? '未选择模型'}</div>
-            <div className="thinking-slider" role="radiogroup" aria-label="思考强度">
-              <div className="thinking-track" />
-              {THINKING_LEVELS.map(level => (
-                <button
-                  key={level}
-                  type="button"
-                  role="radio"
-                  aria-checked={currentLevel === level}
-                  className="thinking-stop"
-                  data-active={currentLevel === level}
-                  data-testid={`thinking-${level}`}
-                  disabled={!reasoning || saving}
-                  onClick={() => void applySelection(model, level)}
-                  title={thinkingLabel(level)}
-                >
-                  <span />
-                </button>
-              ))}
-            </div>
+            <input
+              className="thinking-slider"
+              data-testid="thinking-slider"
+              type="range"
+              min="0"
+              max={THINKING_LEVELS.length - 1}
+              step="1"
+              value={draftIndex}
+              style={sliderStyle}
+              disabled={!reasoning || saving}
+              aria-label="思考强度"
+              aria-valuetext={thinkingLabel(draftLevel)}
+              onChange={event => setDraftLevel(THINKING_LEVELS[Number(event.currentTarget.value)] ?? 'off')}
+              onPointerUp={event => void commitThinking(event.currentTarget.value)}
+              onKeyUp={event => void commitThinking(event.currentTarget.value)}
+            />
             <div className="thinking-labels">
               {THINKING_LEVELS.map(level => <span key={level}>{thinkingLabel(level)}</span>)}
             </div>

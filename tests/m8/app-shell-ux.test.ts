@@ -441,15 +441,25 @@ test('the composer model control switches model and thinking as one persisted se
   expect(await page.getByTestId('telemetry-thinking').evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('0px');
   await control.click();
   await page.getByTestId('model-menu').waitFor();
-  await page.getByTestId('thinking-high').click();
+  const slider = page.getByTestId('thinking-slider');
+  await slider.evaluate(element => {
+    const input = element as HTMLInputElement;
+    input.value = '3';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  });
   await expect.poll(() => selections.length).toBe(1);
   expect(selections[0]).toMatchObject({ model: 'local', thinkingLevel: 'high' });
   expect(await page.getByTestId('toasts').innerText()).not.toContain('已切换为');
+  await page.getByTestId('model-menu').waitFor();
 
-  await control.click();
   await page.getByTestId('model-option-fast').click();
   await expect.poll(() => selections.length).toBe(2);
   expect(selections[1]).toMatchObject({ model: 'fast', thinkingLevel: 'off' });
+  await page.getByTestId('model-menu').waitFor();
+  await page.getByTestId('conversation-title').click();
+  await page.getByTestId('model-menu').waitFor({ state: 'detached' });
 });
 
 test('the resource library groups reusable assets and includes graph architectures', async () => {
