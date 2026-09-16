@@ -100,7 +100,7 @@ test('the console completes the main flow, keeps projects separate, and restores
   await page.waitForFunction(() => document.querySelector('[data-testid="status"]')?.textContent?.includes('已完成'));
   await page.getByRole('link', { name: '查看任务图' }).click();
   await page.getByTestId('graph').waitFor();
-  await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('implement succeeded')));
+  await page.locator('.node-card[data-node-id="implement"][data-status="succeeded"]').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'implement' }).first().click();
   expect(await page.getByTestId('node-detail').innerText()).toContain('实例');
   await page.locator('.react-flow__node').filter({ hasText: 'check' }).first().click();

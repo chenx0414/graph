@@ -447,6 +447,7 @@ function ConversationGraphBoard({
   graphLoading,
   selectedVersion,
   selectedNodeId,
+  state,
   onSelectVersion,
   onSelectNode,
 }: {
@@ -456,6 +457,7 @@ function ConversationGraphBoard({
   graphLoading: boolean;
   selectedVersion: number;
   selectedNodeId: string | null;
+  state: { taskCount: number; evidenceCount: number; used: number; budget: number | null; unlimited?: boolean; openQuestions: number };
   onSelectVersion: (version: number) => void;
   onSelectNode: (nodeId: string | null) => void;
 }) {
@@ -477,6 +479,20 @@ function ConversationGraphBoard({
         <DraftVersionToc history={history} selectedVersion={selectedVersion} scope="board" onSelectVersion={onSelectVersion} />
       </header>
       <div className="conversation-graph-stage">
+        <aside
+          className="graph-state-summary"
+          data-testid="graph-state-summary"
+          title="任务级权威状态保存在 SQLite 账本中；节点通过依赖输入获取状态快照，不共享可变对象。"
+        >
+          <span className="graph-state-symbol">S</span>
+          <div className="graph-state-copy">
+            <strong>任务状态</strong>
+            <span>
+              {state.taskCount} 个任务 · {state.evidenceCount} 条有效证据 · {formatTokens(state.used)} tokens · 预算 {state.unlimited || state.budget === null ? '不限' : formatTokens(state.budget)}
+              {state.openQuestions > 0 ? ` · ${state.openQuestions} 个待处理问题` : ''}
+            </span>
+          </div>
+        </aside>
         {graphLoading && <div className="drawer-loading conversation-graph-empty"><Spinner label="正在加载任务图…" /></div>}
         {!graphLoading && graph && graph.nodes.length > 0 && (
           <div className="conversation-graph-canvas" data-testid="draft-graph-detail">
@@ -811,6 +827,14 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     ?? (activeProposal ? `草稿 v${activeProposal.version}` : activeProposalSummary ? `草稿 v${activeProposalSummary.version}` : '详情');
   const hasDrawerContent = drawer === 'proposal' ? Boolean(activeProposal) : Boolean(detailTask);
   const displayMessages = orderedMessages(cachedMessages.filter(message => !(message.role === 'user' && message.state === 'queued')));
+  const graphState = {
+    taskCount: tasks.length,
+    evidenceCount: tasks.reduce((count, task) => count + task.evidence.filter(item => item.valid).length, 0),
+    used: view.usage.used,
+    budget: view.usage.budget,
+    unlimited: Boolean(view.usage.unlimited),
+    openQuestions: masterQuestions.length + tasks.reduce((count, task) => count + task.openQuestions.length, 0),
+  };
   function openTaskDrawer(next: string) {
     setConversationTab('chat');
     setDrawer(next);
@@ -1115,6 +1139,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             graphLoading={draftGraphLoading}
             selectedVersion={selectedProposalVersion ?? activeProposal.version}
             selectedNodeId={selectedGraphNodeId}
+            state={graphState}
             onSelectVersion={setSelectedProposalVersion}
             onSelectNode={setSelectedGraphNodeId}
           />

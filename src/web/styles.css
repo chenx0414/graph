@@ -1052,6 +1052,39 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .conversation-graph-empty svg { color: var(--faint); }
 .conversation-graph-empty strong { color: var(--text); font-size: 14px; }
 .conversation-graph-empty span { max-width: 320px; font-size: 12px; line-height: 1.5; }
+.graph-state-summary {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 6;
+  max-width: min(380px, calc(100% - 28px));
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px 8px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: rgba(255,255,255,0.94);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+}
+.graph-state-symbol {
+  width: 25px;
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 25px;
+  border-radius: 50%;
+  background: var(--text);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+.graph-state-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.graph-state-copy strong { font-size: 11px; }
+.graph-state-copy span { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .graph-node-inspector {
   position: absolute;
   top: 16px;
@@ -1880,6 +1913,7 @@ details.disclosure summary:hover { color: var(--accent); }
   .conversation-graph-header { flex-direction: column; gap: 10px; padding: 13px 14px; }
   .conversation-graph-heading h2 { white-space: normal; }
   .conversation-graph-header .draft-toc { flex: 0 0 auto; width: 100%; }
+  .graph-state-summary { top: 8px; right: 8px; left: 8px; max-width: none; }
   .graph-node-inspector { inset: 8px; width: auto; }
   .composer-footer { align-items: stretch; flex-direction: column; }
   .composer-note { order: 2; text-align: center; }

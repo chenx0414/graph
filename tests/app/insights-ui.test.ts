@@ -103,12 +103,12 @@ test('the task page shows a run timeline, usage summary and a toned graph with a
   await page.locator('.react-flow__minimap').waitFor();
   expect(await page.locator('.react-flow__minimap').isVisible()).toBe(true);
   expect(await page.locator('.react-flow__node').count()).toBeGreaterThanOrEqual(2);
-  await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('work succeeded')));
-  const border = await page.locator('.react-flow__node').filter({ hasText: 'work succeeded' }).first()
-    .locator('.node-card').evaluate(element => getComputedStyle(element).borderColor);
+  await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
+  const border = await page.locator('.node-card[data-node-id="work"]').first()
+    .evaluate(element => getComputedStyle(element).borderColor);
   expect(border).toBe('rgb(22, 163, 74)');
   // The status dot mirrors the border tone.
-  const dot = await page.locator('.react-flow__node').filter({ hasText: 'work succeeded' }).first()
+  const dot = await page.locator('.node-card[data-node-id="work"]').first()
     .locator('.node-dot').evaluate(element => getComputedStyle(element).backgroundColor);
   expect(dot).toBe('rgb(22, 163, 74)');
 }, 90_000);

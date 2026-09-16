@@ -61,12 +61,14 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   expect(await page.getByTestId('graph').getAttribute('data-editable')).toBe('false');
   await page.getByTestId('flow').waitFor();
   const edgePath = page.locator('.react-flow__edge-path').first();
-  await edgePath.waitFor();
+  await edgePath.waitFor({ state: 'attached' });
   expect(await page.locator('.react-flow__edge.grid-edge').count()).toBeGreaterThan(0);
   expect(await edgePath.getAttribute('d')).not.toMatch(/[CQ]/);
   expect(await page.locator('.react-flow__background circle').count()).toBeGreaterThan(0);
   const implement = page.locator('.react-flow__node').filter({ hasText: 'implement' }).first();
   await implement.waitFor({ state: 'visible' });
+  expect(await page.locator('.node-card[data-node-id="implement"]').innerText()).toContain('implement agent');
+  expect(await page.locator('.node-card[data-node-id="check"]').innerText()).toContain('check tool');
   await implement.click();
   expect(await page.getByTestId('node-detail').innerText()).toContain('implement');
 }, 60_000);
@@ -100,9 +102,9 @@ test('the graph follows runtime events and a budget question accepts a token inc
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).waitFor();
-  await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('work pending')));
+  await page.locator('.node-card[data-node-id="work"][data-status="pending"]').waitFor();
   await server.runtime.host.drive();
-  await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('work succeeded')));
+  await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
   const next = await server.runtime.user.begin({ projectId: 'p', request: 'Budget question', requestId: 'two' });
   await server.runtime.supervisor(next.taskId).propose({
     requirementVersion: 1, summary: 'Budget',

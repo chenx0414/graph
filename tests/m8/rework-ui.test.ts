@@ -83,7 +83,7 @@ test('node records and evidence refresh from task events without leaving the pag
   const after = await page.getByTestId('node-detail').innerText();
   expect(after).toContain('检查通过');
   expect(after).toContain('works:有效');
-  await page.waitForFunction(() => [...document.querySelectorAll('.react-flow__node')].some(node => node.textContent?.includes('work succeeded')));
+  await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
 }, 90_000);
 
 test('a late response for task A never overwrites task B after a fast switch', async () => {

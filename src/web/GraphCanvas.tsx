@@ -5,25 +5,45 @@ const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
 
 type GraphPayload = {
-  nodes: { id: string; kind: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null }[];
+  nodes: { id: string; kind: string; action?: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null }[];
   containers: { id: string; parent?: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
 };
 
-type NodeData = { label: string; tone: NodeTone };
+type NodeData = { id: string; label: string; tone: NodeTone; status: string };
+
+function nodeSuffix(node: GraphPayload['nodes'][number]) {
+  if (node.action === 'graph.human_check' || /(^|[-_])human($|[-_])/i.test(node.id)) return 'human check';
+  if (node.kind === 'agent') return 'agent';
+  if (node.action === 'graph.verify') return 'gate';
+  if (node.action === 'graph.command') return 'tool';
+  if (node.action === 'route') return 'route';
+  if (node.action === 'join') return 'join';
+  return node.kind === 'program' ? 'tool' : node.kind;
+}
+
+function nodeLabel(node: GraphPayload['nodes'][number]) {
+  const suffix = nodeSuffix(node);
+  const prefix = node.id.toLowerCase();
+  return suffix.toLowerCase() === prefix || suffix.toLowerCase().startsWith(`${prefix} `) ? suffix : `${node.id} ${suffix}`;
+}
+
+const handleStyle = { opacity: 0, width: 1, height: 1, border: 0, background: 'transparent' };
 
 /** Node card with a status dot and the original "id status" text, so both the
  * screenshot reader and the UI tests keep working. */
 function GraphNode({ data, selected }: NodeProps) {
   const info = data as unknown as NodeData;
   return (
-    <div className="node-card" data-tone={info.tone} data-selected={selected ? 'true' : 'false'}>
-      <Handle type="target" position={Position.Top} style={{ opacity: 0, width: 1, height: 1 }} />
+    <div className="node-card" data-node-id={info.id} data-status={info.status} data-tone={info.tone} data-selected={selected ? 'true' : 'false'}>
+      <Handle id="target-top" type="target" position={Position.Top} style={handleStyle} />
+      <Handle id="target-right" type="target" position={Position.Right} style={handleStyle} />
       <div className="node-head">
         <span className="node-dot" style={{ background: NODE_TONE_COLOR[info.tone] }} />
         {info.label}
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, width: 1, height: 1 }} />
+      <Handle id="source-bottom" type="source" position={Position.Bottom} style={handleStyle} />
+      <Handle id="source-right" type="source" position={Position.Right} style={handleStyle} />
     </div>
   );
 }
@@ -40,13 +60,10 @@ function GridEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, in
 function GridLoopEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth }: EdgeProps) {
   const lane = 40 + (id.split('').reduce((sum, value) => sum + value.charCodeAt(0), 0) % 3) * GRID;
   const right = Math.max(sourceX, targetX) + lane;
-  const entry = targetY - GRID;
   const path = [
     `M ${sourceX} ${sourceY}`,
-    `L ${sourceX + GRID} ${sourceY}`,
     `L ${right} ${sourceY}`,
-    `L ${right} ${entry}`,
-    `L ${targetX} ${entry}`,
+    `L ${right} ${targetY}`,
     `L ${targetX} ${targetY}`,
   ].join(' ');
   return <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />;
@@ -92,7 +109,7 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const tone = nodeTone(node.status);
       return {
         id: node.id, type: 'graphNode', position: relativePosition(node.id, position),
-        data: { label: `${node.id} ${node.status}`, tone } satisfies NodeData,
+        data: { id: node.id, label: nodeLabel(node), tone, status: node.status } satisfies NodeData,
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
@@ -106,6 +123,8 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const loop = edge.id.startsWith('loop:');
       return {
         id: edge.id, source: edge.source, target: edge.target, type: loop ? 'gridLoop' : 'grid',
+        sourceHandle: loop ? 'source-right' : 'source-bottom',
+        targetHandle: loop ? 'target-right' : 'target-top',
         className: loop ? 'grid-edge grid-loop-edge' : 'grid-edge',
         ...(loop
           ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } }

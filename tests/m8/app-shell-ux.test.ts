@@ -139,6 +139,7 @@ test('chat and graph tabs keep proposal details and node inspection independent'
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'review', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+      { id: 'human', kind: 'program', action: 'graph.human_check', dependsOn: ['review'] },
     ],
   }, 'draft-2');
 
@@ -214,6 +215,8 @@ test('chat and graph tabs keep proposal details and node inspection independent'
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('chat-input').count()).toBe(0);
   await page.getByTestId('draft-graph-detail').waitFor();
+  expect(await page.getByTestId('graph-state-summary').innerText()).toContain('任务状态');
+  expect(await page.locator('.node-card[data-node-id="human"]').innerText()).toContain('human check');
   await expect.poll(async () => {
     const body = await page.locator('.conversation-body').boundingBox();
     const graph = await page.locator('.conversation-graph-main').boundingBox();
