@@ -142,6 +142,33 @@ function start(root: string, baseUrl: string, modelRuntime: ModelRuntime) {
 const includes = (page: import('playwright').Page, needle: string, timeout = 30_000) =>
   page.waitForFunction(text => document.body.innerText.includes(text), needle, { timeout });
 
+test('conversation telemetry comes from recorded master usage and the configured context window', async () => {
+  const root = await temp('telemetry');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const provider = await browserProvider();
+  const server = await start(root, provider.baseUrl, provider.modelRuntime);
+  cleanup.push(() => server.close());
+  server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'telemetry-master');
+
+  const created = await server.runtime.conversations.create({ text: '普通讨论', requestId: 'telemetry-conversation' });
+  await expect.poll(async () => {
+    const view = await server.runtime.conversations.view(created.conversationId);
+    return view.messages.some(message => message.role === 'assistant');
+  }, { timeout: 30_000 }).toBe(true);
+  const view = await server.runtime.conversations.view(created.conversationId);
+  expect(view.telemetry).toMatchObject({
+    model: 'local',
+    thinkingLevel: 'off',
+    cacheHitRate: 0,
+    cachedInput: 0,
+    cacheInput: 12,
+    contextTokens: 12,
+    contextLimit: 32_000,
+  });
+  expect(view.telemetry?.contextPercent).toBeCloseTo(0.0375, 4);
+});
+
 test('a first-time user chats, drafts, confirms, keeps talking, and recovers after restart', async () => {
   const root = await temp('flow');
   const project = join(root, 'project');

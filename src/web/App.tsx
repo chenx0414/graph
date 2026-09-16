@@ -4,7 +4,7 @@ import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
 import { ConversationPanel, type ConversationSummary } from './Conversation.tsx';
-import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, when } from './labels.ts';
+import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
@@ -36,7 +36,12 @@ type NodeView = {
   reserved?: number; instanceId?: string | null; selectedModel?: string; boundDefinition?: string;
   activationId?: string; outputVersion?: number; stallCount?: number;
 };
-type Settings_ = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[]; definitions: { id: string; version: number }[]; capabilities: { id: string; version: string }[] };
+type Settings_ = {
+  projects: { id: string; root: string }[];
+  models: { id: string; grade: string; credentialId?: string; contextWindow?: number }[];
+  definitions: { id: string; version: number }[];
+  capabilities: { id: string; version: string; kind?: 'skill' | 'mcp' | 'extension'; status?: string }[];
+};
 type Limits = { active: Record<string, number>; queued: Record<string, number> };
 type OperationRow = { id: string; nodeId: string; state: string; reserved: number; workerActive: boolean; result: { output?: unknown } | null; durationMs?: number };
 type GraphPayload = {
@@ -138,12 +143,22 @@ export function App() {
   const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
   const title = pathname === '/' ? '新对话'
     : pathname === '/inbox' ? '问题收件箱'
-      : pathname === '/catalog' ? '人才库'
+      : pathname === '/catalog' ? '资源库'
         : pathname === '/setup' ? '设置'
           : pathname === '/settings' ? '设置'
             : nodeMatch ? '节点详情'
               : taskMatch?.[2] ? '任务图' : taskMatch ? '任务详情' : 'Graph';
   const conversationFirst = pathname === '/' || Boolean(conversationMatch);
+  const settingsPage = pathname === '/settings' || pathname === '/setup';
+
+  if (settingsPage) {
+    return (
+      <div className="settings-app-root">
+        <Settings openGuide={pathname === '/setup'} />
+        <Toaster />
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -205,9 +220,7 @@ export function App() {
           <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`} key={path}>
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {pathname === '/inbox' && <Inbox tasks={tasks} />}
-            {pathname === '/catalog' && <Catalog settings={settings} />}
-            {pathname === '/setup' && <Settings openGuide />}
-            {pathname === '/settings' && <Settings />}
+            {pathname === '/catalog' && <ResourceLibrary settings={settings} />}
             {conversationMatch && (
               <ConversationPanel
                 key={conversationMatch[1]}
@@ -249,7 +262,7 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
           <Icon name="inbox" /><span className="nav-label">问题</span>
           {questionTotal > 0 && <> (<span className="nav-badge">{questionTotal}</span>)</>}
         </a>
-        <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" /><span className="nav-label">人才库</span></a>
+        <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" /><span className="nav-label">资源库</span></a>
       </nav>
       <div className="sidebar-scroll" data-testid="conversation-list">
         <div className="sidebar-label">
@@ -462,31 +475,68 @@ function TalentPanel({ id }: { id: string }) {
   );
 }
 
-function Catalog({ settings }: { settings: Settings_ | null }) {
+function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const capabilities = settings?.capabilities ?? [];
+  const definitions = settings?.definitions ?? [];
+  const groups = [
+    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: capabilities.filter(item => item.kind === 'skill') },
+    { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: capabilities.filter(item => item.kind === 'mcp') },
+    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: [] },
+    { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: definitions },
+  ];
+  const architectures = [
+    { name: '顺序执行', flow: 'A → B → C', description: '每一步使用前一步产物，适合依赖明确的实现与检查流程。' },
+    { name: '条件路由', flow: 'A → B / C', description: '先判断输入或状态，再把任务交给一条匹配的分支。' },
+    { name: '扇出与汇合', flow: 'A → B,C → D', description: '独立子任务并行执行，在汇合点统一等待必需结果。' },
+    { name: '流水线', flow: 'A → B → C…', description: '固定阶段持续传递产物，适合采集、转换、验证等连续工序。' },
+    { name: '主管与工人', flow: 'M ⇄ W1,W2', description: '主管拆分和协调，工人在各自上下文与工作副本中完成局部任务。' },
+    { name: '评估与优化', flow: 'A ⇄ E', description: '评估器给出可执行反馈，优化器修改后重新进入验证。' },
+    { name: '对抗式验证', flow: 'W ⇄ R', description: '审查者主动寻找反例和证据，有效反例会阻塞通过。' },
+    { name: '多视角与评委', flow: 'W → J1,J2 → J', description: '多个维度独立判断，再由评委按硬性规则汇总结果。' },
+  ];
   return (
-    <div className="stagger">
-      <Card testid="catalog" title="Agent 库与能力库" icon="catalog" subtitle="可发布的定义与受限能力">
-        <div className="stack">
-          <div>
-            <h4>Agent 定义</h4>
-            <div className="chip-row">
-              {(settings?.definitions ?? []).map(item => (
-                <Button key={item.id} size="sm" variant={selected === item.id ? 'primary' : 'default'} data-testid={`definition-${item.id}`} onClick={() => setSelected(current => current === item.id ? null : item.id)}>{item.id}@{item.version}</Button>
-              ))}
-              {!(settings?.definitions ?? []).length && <span className="muted">暂无定义</span>}
-            </div>
-          </div>
-          <div>
-            <h4>能力</h4>
-            <div className="chip-row">
-              {(settings?.capabilities ?? []).map(item => <Pill key={item.id} tone="info">{item.id}@{item.version}</Pill>)}
-              {!(settings?.capabilities ?? []).length && <span className="muted">暂无能力</span>}
-            </div>
-          </div>
+    <div className="stagger resource-library" data-testid="catalog">
+      <div className="resource-section-head">
+        <div>
+          <h1>资源库</h1>
+          <p>统一查看可复用的能力、Agent 定义与图架构参考。</p>
+        </div>
+      </div>
+      <div className="resource-grid">
+        {groups.map(group => (
+          <Card key={group.id} testid={`resource-${group.id}`} title={group.title} icon={group.icon} subtitle={`${group.items.length} 项`}>
+            {group.id === 'agents' ? (
+              <div className="chip-row">
+                {definitions.map(item => (
+                  <Button key={item.id} size="sm" variant={selected === item.id ? 'primary' : 'default'} data-testid={`definition-${item.id}`} onClick={() => setSelected(current => current === item.id ? null : item.id)}>{item.id}@{item.version}</Button>
+                ))}
+                {!definitions.length && <span className="muted">暂无 Agent 组合</span>}
+              </div>
+            ) : group.items.length ? (
+              <div className="resource-list">
+                {group.items.map(item => <div className="resource-item" key={`${item.id}@${item.version}`}><Icon name={group.icon} size={15} /><span className="grow">{item.id}</span><span className="faint">{item.version}</span></div>)}
+              </div>
+            ) : (
+              <p className="muted">{group.id === 'agent-md' ? '暂无 Agent.md 资源' : `暂无 ${group.title.replace(' 库', '')} 资源`}</p>
+            )}
+          </Card>
+        ))}
+      </div>
+      <Card title="架构库" icon="graph" subtitle="几种经典的 Graph 架构">
+        <div className="architecture-list" data-testid="architecture-library">
+          {architectures.map(item => (
+            <article className="architecture-item" key={item.name}>
+              <div className="architecture-flow mono">{item.flow}</div>
+              <div>
+                <strong>{item.name}</strong>
+                <p>{item.description}</p>
+              </div>
+            </article>
+          ))}
         </div>
       </Card>
-      {selected && <Card title={`人才详情 ${selected}`} icon="catalog" actions={<Button size="sm" variant="ghost" onClick={() => setSelected(null)}>关闭</Button>}><TalentPanel id={selected} /></Card>}
+      {selected && <Card title={`Agent 组合详情 ${selected}`} icon="catalog" actions={<Button size="sm" variant="ghost" onClick={() => setSelected(null)}>关闭</Button>}><TalentPanel id={selected} /></Card>}
     </div>
   );
 }
@@ -495,6 +545,13 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
   const pending = tasks.filter(task => (task.openQuestions ?? 0) > 0);
   const [views, setViews] = useState<Record<string, TaskView>>({});
   const [error, setError] = useState('');
+  const { data: inbox, error: historyError, loading: historyLoading } = useAsync(() => api<{
+    history: {
+      id: string; taskId: string; nodeId: string; kind: string; status: string;
+      data: Record<string, unknown>; answer: Record<string, unknown> | null;
+      request: string; projectId: string; conversationId: string | null;
+    }[];
+  }>('/api/inbox'), []);
   const pendingKey = pending.map(task => `${task.id}:${task.openQuestions}`).join(',');
   const load = useCallback(async () => {
     const next: Record<string, TaskView> = {};
@@ -511,7 +568,8 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
   return (
     <div className="stagger" data-testid="inbox">
       {error && <ErrorBox message={error} />}
-      {!pending.length && (
+      {historyError && <ErrorBox message={historyError} />}
+      {!pending.length && !(inbox?.history.length) && !historyLoading && (
         <Card title="问题收件箱" icon="inbox">
           <Empty icon="check" title="没有待处理问题" hint={<span data-testid="inbox-empty">所有任务都在正常推进；需要人工介入时会出现在这里。</span>} />
         </Card>
@@ -526,6 +584,28 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
         </Card>
       ))}
       {pending.length > 5 && <p className="muted">其余 {pending.length - 5} 个任务请进入任务页处理。</p>}
+      <Card title="已处理问题" icon="check" subtitle={inbox?.history.length ? `${inbox.history.length} 条历史记录` : undefined}>
+        {historyLoading && <Spinner />}
+        {!historyLoading && !(inbox?.history.length) && <p className="muted" data-testid="inbox-history-empty">暂无已处理问题。</p>}
+        {Boolean(inbox?.history.length) && (
+          <div className="question-history" data-testid="inbox-history">
+            {inbox!.history.map(item => (
+              <article className="question-history-item" key={item.id}>
+                <div className="row">
+                  <Pill tone="success">{describeQuestion(item.kind)}</Pill>
+                  <a className="grow truncate" href={item.conversationId ? `#/conversations/${item.conversationId}` : `#/tasks/${item.taskId}`}>{item.request}</a>
+                  <span className="faint">{item.projectId}</span>
+                </div>
+                {item.data.prompt ? <p className="muted">{String(item.data.prompt)}</p> : null}
+                <div className="question-history-answer">
+                  <strong>处理结果</strong>
+                  <span>{item.answer ? JSON.stringify(item.answer) : '已处理'}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

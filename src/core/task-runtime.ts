@@ -554,7 +554,7 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
-      const master = store.db.prepare("SELECT n.status,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null } | undefined;
+      const master = store.db.prepare("SELECT n.status,i.id AS instance_id,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; instance_id: string | null; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null } | undefined;
       const proposalRow = anchor.latest_proposal
         ? store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?').get(anchor.id, anchor.latest_proposal) as { version: number; requirement_version: number; spec: string; decision_snapshot: string | null } | undefined
         : undefined;
@@ -590,6 +590,20 @@ export async function openTaskRuntime(options: {
       const anyUnlimited = Boolean(master?.unlimited) || tasks.some(task => task.nodes.some(node => node.unlimited));
       const budget = anyUnlimited ? null : (master?.budget ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.budget ?? 0), 0), 0);
       const messageCount = (store.db.prepare('SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?').get(conversationId) as { count: number }).count;
+      const masterInvocations = master?.instance_id
+        ? (store.db.prepare('SELECT usage,purpose FROM invocations WHERE instance_id=? ORDER BY rowid').all(master.instance_id) as { usage: string | null; purpose: string }[])
+        : [];
+      const knownMasterUsage = masterInvocations
+        .map(invocation => invocation.usage ? JSON.parse(invocation.usage) as { input: number; output: number; cacheRead: number; cacheWrite: number } : null)
+        .filter((usage): usage is { input: number; output: number; cacheRead: number; cacheWrite: number } => usage !== null);
+      const cacheInput = knownMasterUsage.reduce((sum, usage) => sum + usage.input + usage.cacheRead + usage.cacheWrite, 0);
+      const cachedInput = knownMasterUsage.reduce((sum, usage) => sum + usage.cacheRead, 0);
+      const latestCompletion = [...masterInvocations].reverse().find(invocation => invocation.purpose === 'completion' && invocation.usage !== null);
+      const latestUsage = latestCompletion?.usage
+        ? JSON.parse(latestCompletion.usage) as { input: number; cacheRead: number; cacheWrite: number }
+        : null;
+      const contextLimit = master?.model ? liveEntries().find(entry => entry.id === master.model)?.contextWindow ?? null : null;
+      const contextTokens = latestUsage ? latestUsage.input + latestUsage.cacheRead + latestUsage.cacheWrite : null;
       return {
         id: conversation.id, title: conversation.title, projectId: conversation.project_id, projectRoot: project?.root ?? null,
         paused: Boolean(anchor.paused),
@@ -600,6 +614,16 @@ export async function openTaskRuntime(options: {
         proposal: proposalRow ? { version: proposalRow.version, requirementVersion: proposalRow.requirement_version, stale: proposalRow.requirement_version !== anchor.requirement_version, spec: JSON.parse(proposalRow.spec) as Proposal, decisions: proposalRow.decision_snapshot } : null,
         accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at })),
         master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, unlimited: Boolean(master.unlimited), budget: master.unlimited ? null : master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
+        telemetry: {
+          model: master?.model ?? null,
+          thinkingLevel: 'off',
+          cacheHitRate: knownMasterUsage.length && cacheInput > 0 ? cachedInput / cacheInput : null,
+          cachedInput,
+          cacheInput,
+          contextTokens,
+          contextLimit,
+          contextPercent: contextTokens !== null && contextLimit ? Math.min(100, (contextTokens / contextLimit) * 100) : null,
+        },
         cost, usage: { used, budget, unlimited: anyUnlimited },
         tasks,
         cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
@@ -759,6 +783,24 @@ export async function openTaskRuntime(options: {
         WHERE t.phase IN ('discussing','running','queued') AND n.status NOT IN ('succeeded','skipped') AND i.model IS NOT NULL`).all() as { model: string }[]).map(row => row.model);
     },
     user,
+    /** Resolved questions across feature tasks and conversation anchors. */
+    inboxHistory(limit = 100) {
+      ensureOpen();
+      const cap = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 100;
+      return (store.db.prepare(`SELECT q.id,q.task_id AS taskId,q.node_id AS nodeId,q.kind,q.status,q.data,q.answer,
+        t.request,t.project_id AS projectId,t.conversation_id AS conversationId
+        FROM questions q JOIN tasks t ON t.id=q.task_id
+        WHERE q.status='resolved'
+        ORDER BY q.rowid DESC LIMIT ?`).all(cap) as {
+        id: string; taskId: string; nodeId: string; kind: string; status: string; data: string; answer: string | null;
+        request: string; projectId: string; conversationId: string | null;
+      }[]).map(row => ({
+        id: row.id, taskId: row.taskId, nodeId: row.nodeId, kind: row.kind, status: row.status,
+        data: JSON.parse(row.data) as Json,
+        answer: row.answer ? JSON.parse(row.answer) as Json : null,
+        request: row.request, projectId: row.projectId, conversationId: row.conversationId,
+      }));
+    },
     /** Talent detail plus per-metric experience statistics from the ledger. */
     talent(id: string, options: { version?: number; allVersions?: boolean } = {}) {
       ensureOpen();

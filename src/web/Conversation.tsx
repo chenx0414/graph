@@ -43,10 +43,50 @@ type ConversationView = {
   master: { nodeId: string; status: string; model: string | null; used: number | null; budget: number | null; unlimited?: boolean; definitionVersion: string | null; cost: { unknown?: boolean; amount?: number } } | null;
   cost: { unknown?: boolean; amount?: number };
   usage: { used: number; budget: number | null; unlimited?: boolean };
+  telemetry?: {
+    model: string | null;
+    thinkingLevel: string;
+    cacheHitRate: number | null;
+    cachedInput: number;
+    cacheInput: number;
+    contextTokens: number | null;
+    contextLimit: number | null;
+    contextPercent: number | null;
+  };
   tasks: ConversationTask[];
   cursor: number;
 };
 type LiveTool = { toolCallId: string; name: string; summary: string; done: boolean };
+
+function telemetryValue(value: number | null | undefined, render: (value: number) => string) {
+  return value === null || value === undefined ? '—' : render(value);
+}
+
+function ComposerTelemetry({ telemetry }: { telemetry: ConversationView['telemetry'] }) {
+  const thinking = telemetry?.thinkingLevel === 'off' ? '关闭' : telemetry?.thinkingLevel ?? '—';
+  return (
+    <div className="composer-telemetry" data-testid="composer-telemetry" aria-label="当前模型运行指标">
+      <span title="缓存输入占全部输入 token 的比例" data-testid="telemetry-cache">
+        <Icon name="spark" size={13} />
+        缓存 {telemetryValue(telemetry?.cacheHitRate, value => `${(value * 100).toFixed(value >= 0.1 ? 0 : 1)}%`)}
+      </span>
+      <span title="最近一次完成请求使用的输入 token 与模型上下文窗口" data-testid="telemetry-context">
+        <Icon name="graph" size={13} />
+        上下文 {telemetryValue(telemetry?.contextTokens, formatTokens)}
+        {telemetry?.contextLimit ? ` / ${formatTokens(telemetry.contextLimit)}` : ''}
+        {telemetry?.contextPercent !== null && telemetry?.contextPercent !== undefined ? ` · ${telemetry.contextPercent.toFixed(telemetry.contextPercent >= 10 ? 0 : 1)}%` : ''}
+      </span>
+      <span title="当前主管使用的模型" data-testid="telemetry-model">
+        <Icon name="bolt" size={13} />
+        {telemetry?.model ?? '未选择模型'}
+      </span>
+      <span title="当前 Agent 内核的思考强度" data-testid="telemetry-thinking">
+        <Icon name="clock" size={13} />
+        思考 {thinking}
+      </span>
+    </div>
+  );
+}
 
 const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   discussing: 'info', running: 'accent', queued: 'neutral', paused: 'warn', pausing: 'warn',
@@ -528,8 +568,11 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
             <Icon name="send" size={17} />
           </button>
         </div>
-        <div className="composer-note">
-          {busy ? <span data-testid="queued-hint">主 Agent 正在处理，消息会排队。</span> : 'Enter 发送，Shift + Enter 换行'}
+        <div className="composer-footer">
+          <span className="composer-note">
+            {busy ? <span data-testid="queued-hint">主 Agent 正在处理，消息会排队。</span> : 'Enter 发送，Shift + Enter 换行'}
+          </span>
+          <ComposerTelemetry telemetry={view.telemetry} />
         </div>
       </div>
     </section>

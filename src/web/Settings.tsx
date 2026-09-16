@@ -102,20 +102,71 @@ function ProjectGitCard() {
 
 export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   const [guideOpen, setGuideOpen] = useState(openGuide);
-  useEffect(() => setGuideOpen(openGuide), [openGuide]);
+  const [active, setActive] = useState(openGuide ? 'settings-wizard' : 'settings-overview');
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    setGuideOpen(openGuide);
+    if (openGuide) setActive('settings-wizard');
+  }, [openGuide]);
+  const sections = [
+    { id: 'settings-overview', label: '常规' },
+    { id: 'settings-project', label: '项目' },
+    { id: 'settings-git', label: 'Git 准备' },
+    { id: 'settings-credentials', label: '凭据' },
+    { id: 'settings-models', label: '模型' },
+    { id: 'settings-limits', label: '并发限制' },
+    { id: 'settings-preferences', label: '模型偏好' },
+    { id: 'settings-wizard', label: '连接与配置向导' },
+  ];
+  const visibleSections = sections.filter(section => section.label.toLowerCase().includes(search.trim().toLowerCase()));
+  function go(id: string) {
+    setActive(id);
+    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
   return (
-    <div className="settings-root">
-      <details className="settings-wizard" open={guideOpen} onToggle={event => setGuideOpen(event.currentTarget.open)}>
-        <summary>
+    <div className="settings-app-shell" data-testid="settings-shell">
+      <aside className="settings-sidebar">
+        <a className="settings-back" href="#/">
+          <Icon name="chevron" className="settings-back-icon" size={16} />
+          <span>返回应用</span>
+        </a>
+        <label className="settings-search">
+          <Icon name="search" size={15} />
+          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索设置…" aria-label="搜索设置" />
+        </label>
+        <nav className="settings-nav" aria-label="设置导航">
+          {visibleSections.map(section => (
+            <button key={section.id} type="button" className="settings-nav-item" data-active={active === section.id} onClick={() => go(section.id)}>
+              <Icon name={section.id === 'settings-wizard' ? 'wizard' : section.id === 'settings-models' ? 'bolt' : section.id === 'settings-project' || section.id === 'settings-git' ? 'box' : section.id === 'settings-credentials' ? 'link' : 'settings'} size={16} />
+              <span>{section.label}</span>
+            </button>
+          ))}
+          {!visibleSections.length && <span className="settings-nav-empty">没有匹配的设置</span>}
+        </nav>
+      </aside>
+      <main className="settings-main">
+        <header className="settings-main-header">
           <div>
-            <strong>连接与配置向导</strong>
-            <span>连接模型、补充项目和凭据；保存后立即生效。</span>
+            <h1>{sections.find(section => section.id === active)?.label ?? '设置'}</h1>
+            <p>配置会在保存后立即应用到当前守护进程。</p>
           </div>
-          <Icon name="chevron" size={15} />
-        </summary>
-        <Setup />
-      </details>
-      <SettingsAdvanced />
+        </header>
+        <div className="settings-content">
+          <div className="settings-root">
+            <details id="settings-wizard" className="settings-wizard" open={guideOpen} onToggle={event => setGuideOpen(event.currentTarget.open)}>
+              <summary>
+                <div>
+                  <strong>连接与配置向导</strong>
+                  <span>连接模型、补充项目和凭据；保存后立即生效。</span>
+                </div>
+                <Icon name="chevron" size={15} />
+              </summary>
+              <Setup />
+            </details>
+            <SettingsAdvanced />
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
@@ -227,6 +278,7 @@ function SettingsAdvanced() {
 
   return (
     <div className="stagger" data-testid="settings-page">
+      <section id="settings-overview" className="settings-section">
       <Card title="设置" icon="settings" subtitle="保存并应用；价格快照仅在你点击刷新时更新"
         actions={<>
           <Button data-testid="pricing-refresh" icon="refresh" disabled={refreshing || dirty} onClick={() => void refreshPrices()}>{refreshing ? '刷新中…' : '刷新价格快照'}</Button>
@@ -243,7 +295,9 @@ function SettingsAdvanced() {
         {priceStatus && <p data-testid="pricing-status" className="muted" style={{ marginTop: 10 }}>{priceStatus}</p>}
         {status.includes('等待生效') && <div data-testid="restart-required" className="hint-card">待生效：当前守护进程仍使用上一份有效绑定；修正配置后可再次保存。</div>}
       </Card>
+      </section>
 
+      <section id="settings-project" className="settings-section">
       <Card title="项目" icon="box" actions={<Button size="sm" icon="plus" data-testid="project-add" onClick={() => mutate(next => { next.projects = [...(next.projects ?? []), { id: 'new-project', root: '.' }]; })}>添加项目</Button>}>
         {!projects.length && <p className="muted">尚未配置项目。</p>}
         {projects.map((project, index) => (
@@ -260,9 +314,13 @@ function SettingsAdvanced() {
           </div>
         ))}
       </Card>
+      </section>
 
+      <section id="settings-git" className="settings-section">
       <ProjectGitCard />
+      </section>
 
+      <section id="settings-credentials" className="settings-section">
       <Card title="凭据引用" icon="link" subtitle="只保存环境变量名；密钥从不进入配置文件、接口响应或页面"
         actions={<Button size="sm" icon="plus" data-testid="credential-add" onClick={() => mutate(next => { next.credentials = { ...(next.credentials ?? {}), 'new-credential': { secretRef: 'GRAPH_NEW_KEY' } }; })}>添加凭据</Button>}>
         {!credentials.length && <p className="muted">尚未配置凭据。</p>}
@@ -314,7 +372,9 @@ function SettingsAdvanced() {
           </div>
         ))}
       </Card>
+      </section>
 
+      <section id="settings-models" className="settings-section">
       <Card title="模型" icon="bolt" subtitle="连通性测试使用运行版本（effective revision），不读取未生效内容"
         actions={<Button size="sm" icon="plus" data-testid="model-add" onClick={() => mutate(next => { next.models = { entries: [...(next.models?.entries ?? []), { ...emptyModel(), credentialId: credentialIds[0] ?? '' }] }; })}>添加模型</Button>}>
         <p data-testid="test-connection-note" className="faint">连通性测试使用当前运行版本的绑定（effective revision），不读取未生效的保存内容。</p>
@@ -378,7 +438,9 @@ function SettingsAdvanced() {
           </div>
         ))}
       </Card>
+      </section>
 
+      <section id="settings-limits" className="settings-section">
       <Card title="并发限制" icon="clock" subtitle="保存后立即对新请求生效；已有调用保留计数，不会中断在途请求">
         {!Object.keys(draft.limits?.credentials ?? {}).length && !Object.keys(draft.limits?.sharedGroups ?? {}).length && <p className="muted">尚未配置并发上限，使用运行时默认值。</p>}
         <div className="row">
@@ -400,7 +462,9 @@ function SettingsAdvanced() {
           <Button size="sm" icon="plus" data-testid="limit-group-add" onClick={() => mutate(next => { next.limits = { ...(next.limits ?? {}), sharedGroups: { ...(next.limits?.sharedGroups ?? {}), 'group-1': 4 } }; })}>添加共享组上限</Button>
         </div>
       </Card>
+      </section>
 
+      <section id="settings-preferences" className="settings-section">
       <Card title="模型偏好" icon="spark" subtitle="按等级列出首选模型 ID（逗号分隔），用于自动选择模型">
         <div className="card-grid">
           {GRADES.map(grade => (
@@ -413,6 +477,7 @@ function SettingsAdvanced() {
           ))}
         </div>
       </Card>
+      </section>
     </div>
   );
 }

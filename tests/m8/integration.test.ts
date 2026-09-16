@@ -194,6 +194,12 @@ test('the full productized flow runs from the formal start entry with a controll
   expect(delivery).not.toContain('尚无有效证据');
   await page.screenshot({ path: join(evidenceDir, 't08-delivery.png') });
 
+  await page.goto(`${url}/#/inbox`);
+  await page.getByTestId('inbox-history').waitFor();
+  const history = await page.getByTestId('inbox-history').innerText();
+  expect(history).toContain('用量未知待核对');
+  expect(history).toContain('处理结果');
+
   await page.goto(`${url}/#/catalog`);
   await page.getByTestId('catalog').waitFor();
   expect(pageErrors).toEqual([]);

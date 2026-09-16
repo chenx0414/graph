@@ -112,6 +112,10 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return { projects, models, definitions, capabilities };
   });
   app.get('/api/tasks', async () => runtime.user.list());
+  app.get('/api/inbox', async request => {
+    const query = request.query as { limit?: string };
+    return { history: runtime.inboxHistory(query.limit ? Number(query.limit) : undefined) };
+  });
   app.get('/api/conversations', async () => runtime.conversations.list());
   app.post('/api/conversations', async request => {
     const body = request.body as { projectId?: string; title?: string; text?: string; requestId: string };
