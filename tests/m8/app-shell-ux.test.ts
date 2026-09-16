@@ -434,13 +434,19 @@ test('the composer model control switches model and thinking as one persisted se
     }),
   }));
   await page.goto(`${server.url}/#/conversations/synthetic`);
-  await page.getByTestId('model-control').click();
+  const control = page.getByTestId('model-control');
+  await control.waitFor();
+  expect(await control.evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('1px');
+  expect(await page.getByTestId('telemetry-model').evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('0px');
+  expect(await page.getByTestId('telemetry-thinking').evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('0px');
+  await control.click();
   await page.getByTestId('model-menu').waitFor();
   await page.getByTestId('thinking-high').click();
   await expect.poll(() => selections.length).toBe(1);
   expect(selections[0]).toMatchObject({ model: 'local', thinkingLevel: 'high' });
+  expect(await page.getByTestId('toasts').innerText()).not.toContain('已切换为');
 
-  await page.getByTestId('model-control').click();
+  await control.click();
   await page.getByTestId('model-option-fast').click();
   await expect.poll(() => selections.length).toBe(2);
   expect(selections[1]).toMatchObject({ model: 'fast', thinkingLevel: 'off' });

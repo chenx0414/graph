@@ -126,7 +126,6 @@ function ComposerTelemetry({ telemetry, models, conversationId, onChanged }: {
           requestId: `model-${crypto.randomUUID()}`,
         }),
       });
-      toast(`已切换为 ${nextModel.id} · 思考 ${thinkingLabel(level)}；下一次回复生效。`, 'success');
       setOpen(false);
       onChanged();
     } catch (reason) {
