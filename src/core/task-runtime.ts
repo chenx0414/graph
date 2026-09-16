@@ -75,6 +75,26 @@ function steeringText(row: MessageRow) {
   return parts.join('\n\n');
 }
 
+interface ProposalRow {
+  version: number;
+  requirement_version: number;
+  spec: string;
+  decision_snapshot: string | null;
+}
+
+function conversationProposal(store: TaskStore, taskId: string, version: number, currentRequirementVersion: number) {
+  const row = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?')
+    .get(taskId, version) as ProposalRow | undefined;
+  if (!row) return null;
+  return {
+    version: row.version,
+    requirementVersion: row.requirement_version,
+    stale: row.requirement_version !== currentRequirementVersion,
+    spec: JSON.parse(row.spec) as Proposal,
+    decisions: row.decision_snapshot,
+  };
+}
+
 export async function openTaskRuntime(options: {
   stateDir: string;
   projects?: ProjectConfig[];
@@ -676,10 +696,22 @@ export async function openTaskRuntime(options: {
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
       const master = store.db.prepare("SELECT n.status,i.id AS instance_id,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; instance_id: string | null; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null } | undefined;
-      const proposalRow = anchor.latest_proposal
-        ? store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?').get(anchor.id, anchor.latest_proposal) as { version: number; requirement_version: number; spec: string; decision_snapshot: string | null } | undefined
-        : undefined;
       const accepted = store.db.prepare('SELECT proposal_version,task_id,target_branch,accepted_at FROM conversation_acceptances WHERE conversation_id=? ORDER BY accepted_at').all(conversationId) as { proposal_version: number; task_id: string; target_branch: string; accepted_at: number }[];
+      const acceptedVersions = new Set(accepted.map(row => row.proposal_version));
+      const proposalRows = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? ORDER BY version').all(anchor.id) as unknown as ProposalRow[];
+      const proposal = anchor.latest_proposal
+        ? conversationProposal(store, anchor.id, anchor.latest_proposal, anchor.requirement_version)
+        : null;
+      const proposalHistory = proposalRows.map(row => {
+        const spec = JSON.parse(row.spec) as Proposal;
+        return {
+          version: row.version,
+          requirementVersion: row.requirement_version,
+          stale: row.requirement_version !== anchor.requirement_version,
+          summary: spec.summary,
+          accepted: acceptedVersions.has(row.version),
+        };
+      });
       const tasks = (store.db.prepare("SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; request: string; phase: string; paused: number; target_branch: string | null; accepted_proposal: number | null; integration_sha: string | null }[]).map(task => {
         const nodes = store.db.prepare('SELECT n.id,n.spec,n.status,n.stall_count,n.output_version,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(task.id) as { id: string; spec: string; status: string; stall_count: number; output_version: number; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null }[];
         const questions = store.db.prepare('SELECT id,node_id,kind,status,data FROM questions WHERE task_id=? ORDER BY rowid').all(task.id) as { id: string; node_id: string; kind: string; status: string; data: string }[];
@@ -733,7 +765,8 @@ export async function openTaskRuntime(options: {
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
         messages: listMessages(store, conversationId, query), messageCount,
         questions: anchorQuestions,
-        proposal: proposalRow ? { version: proposalRow.version, requirementVersion: proposalRow.requirement_version, stale: proposalRow.requirement_version !== anchor.requirement_version, spec: JSON.parse(proposalRow.spec) as Proposal, decisions: proposalRow.decision_snapshot } : null,
+        proposal,
+        proposalHistory,
         accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at })),
         master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, unlimited: Boolean(master.unlimited), budget: master.unlimited ? null : master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
         telemetry: {
@@ -750,6 +783,15 @@ export async function openTaskRuntime(options: {
         tasks,
         cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
       };
+    },
+    async proposal(conversationId: string, version: number) {
+      ensureOpen();
+      if (!Number.isSafeInteger(version) || version < 1) throw new RuntimeError('invalid_input', 'A positive proposal version is required');
+      const conversation = conversationRow(store, conversationId);
+      const anchor = store.task(conversation.anchor_task_id);
+      const proposal = conversationProposal(store, anchor.id, version, anchor.requirement_version);
+      if (!proposal) throw new RuntimeError('not_found', `Proposal v${version} was not found`);
+      return proposal;
     },
     async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[] }) {
       ensureOpen();

@@ -111,7 +111,7 @@ test('conversations archive from the sidebar and restore from settings', async (
   await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('需要归档的对话');
 });
 
-test('proposal and graph summaries stay in the thread while details open in the drawer', async () => {
+test('proposal details open in a paged drawer, compress the chat, and switch draft versions', async () => {
   const root = await temp('drawer');
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
@@ -122,15 +122,25 @@ test('proposal and graph summaries stay in the thread while details open in the 
   cleanup.push(() => server.close());
   const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论一下', requestId: 'conversation' });
   const view = await server.runtime.conversations.view(created.conversationId);
-  await server.runtime.supervisor(view.anchorTaskId).propose({
+  const firstProposal = {
     requirementVersion: 1,
     summary: '先做一个最小版本',
     acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
     nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program' as const, action: 'check', dependsOn: ['work'] },
     ],
-  }, 'draft');
+  };
+  await server.runtime.supervisor(view.anchorTaskId).propose(firstProposal, 'draft-1');
+  await server.runtime.supervisor(view.anchorTaskId).propose({
+    requirementVersion: 1,
+    summary: '第二版增加审查',
+    acceptance: [{ id: 'reviewed', description: '独立审查通过', checkNode: 'review' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'review', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  }, 'draft-2');
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -143,17 +153,61 @@ test('proposal and graph summaries stay in the thread while details open in the 
   expect(detailBox).not.toBeNull();
   expect(detailBox!.x).toBeGreaterThanOrEqual(pauseBox!.x + pauseBox!.width);
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
+  const beforeMain = await page.locator('.conversation-main').boundingBox();
+  const beforeComposer = await page.locator('.conversation-composer-wrap').boundingBox();
+  expect(beforeMain).not.toBeNull();
+  expect(beforeComposer).not.toBeNull();
+
   await page.getByTestId('draft-graph').click();
   await page.getByTestId('detail-drawer').waitFor();
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
   await page.getByTestId('draft-graph-detail').waitFor();
-  const drawer = await page.getByTestId('detail-drawer').innerText();
-  expect(drawer).toContain('检查通过');
-  expect(drawer).toContain('work');
-  expect(drawer).toContain('check');
+  await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
+    .toBeLessThan(beforeMain!.width - 240);
+  const afterMain = await page.locator('.conversation-main').boundingBox();
+  const afterComposer = await page.locator('.conversation-composer-wrap').boundingBox();
+  const drawerBox = await page.getByTestId('detail-drawer').boundingBox();
+  expect(afterMain).not.toBeNull();
+  expect(afterComposer).not.toBeNull();
+  expect(drawerBox).not.toBeNull();
+  expect(afterMain!.width).toBeGreaterThan(0);
+  expect(drawerBox!.width).toBeGreaterThan(300);
+  await expect.poll(async () => {
+    const main = await page.locator('.conversation-main').boundingBox();
+    const drawer = await page.getByTestId('detail-drawer').boundingBox();
+    return Boolean(main && drawer && main.x + main.width <= drawer.x + 1);
+  }).toBe(true);
+  const settledMain = await page.locator('.conversation-main').boundingBox();
+  const settledComposer = await page.locator('.conversation-composer-wrap').boundingBox();
+  const settledDrawer = await page.getByTestId('detail-drawer').boundingBox();
+  expect(settledMain).not.toBeNull();
+  expect(settledComposer).not.toBeNull();
+  expect(settledDrawer).not.toBeNull();
+  expect(settledComposer!.x + settledComposer!.width).toBeLessThanOrEqual(settledDrawer!.x + 1);
+  expect(afterComposer!.y + afterComposer!.height).toBeLessThanOrEqual(720);
   expect(await page.locator('[data-testid="detail-toggle-close"]').count()).toBe(0);
+
+  await page.getByTestId('draft-tab-acceptance').click();
+  await page.getByTestId('draft-page-acceptance').waitFor();
+  expect(await page.getByTestId('draft-page-acceptance').innerText()).toContain('独立审查通过');
+  await page.getByTestId('draft-version-1').click();
+  await expect.poll(() => page.getByTestId('draft-version-1').getAttribute('data-active')).toBe('true');
+  await expect.poll(() => page.getByTestId('draft-page-acceptance').innerText()).toContain('检查通过');
+
+  await page.getByTestId('draft-tab-nodes').click();
+  const nodes = await page.getByTestId('draft-page-nodes').innerText();
+  expect(nodes).toContain('work');
+  expect(nodes).toContain('check');
+
+  await page.getByTestId('draft-tab-graph').click();
+  await page.getByTestId('draft-graph-detail').waitFor();
+
+  await page.getByTestId('draft-tab-decisions').click();
+  await page.getByTestId('draft-decisions-empty').waitFor();
+
   await page.getByTestId('detail-toggle').click();
-  await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
+  await expect.poll(() => page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
+  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
   await page.getByTestId('detail-toggle').click();
   await page.getByTestId('detail-drawer').waitFor();
 });
@@ -212,7 +266,8 @@ test('the right drawer toggle stays available and opens an empty state', async (
   expect(await toggle.getAttribute('data-open')).toBe('true');
 
   await toggle.click();
-  await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
+  await expect.poll(() => toggle.getAttribute('data-open')).toBe('false');
+  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 });
 
 test('the composer suggestion and queue steering follow the three Enter states', async () => {

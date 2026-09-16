@@ -262,6 +262,12 @@ test('drafts version on the same requirement and only the latest can be confirme
   const drafted = await runtime.conversations.view(created.conversationId);
   expect(drafted.proposal?.version).toBe(2);
   expect(drafted.proposal?.spec.summary).toBe('新方案');
+  expect(drafted.proposalHistory.map(item => ({ version: item.version, summary: item.summary, accepted: item.accepted, stale: item.stale }))).toEqual([
+    { version: 1, summary: '旧方案', accepted: false, stale: false },
+    { version: 2, summary: '新方案', accepted: false, stale: false },
+  ]);
+  expect((await runtime.conversations.proposal(created.conversationId, 1)).spec.summary).toBe('旧方案');
+  await expect(runtime.conversations.proposal(created.conversationId, 99)).rejects.toMatchObject({ code: 'not_found' });
 
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
   await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-old' }))
@@ -274,6 +280,11 @@ test('drafts version on the same requirement and only the latest can be confirme
   expect(after.tasks[0]!.phase).toBe('running');
   expect(after.tasks[0]!.nodes.map(node => node.id)).toEqual(['work', 'check']);
   expect(after.accepted.map(item => item.proposalVersion)).toEqual([2]);
+  expect(after.proposalHistory.map(item => ({ version: item.version, accepted: item.accepted, stale: item.stale }))).toEqual([
+    { version: 1, accepted: false, stale: true },
+    { version: 2, accepted: true, stale: true },
+  ]);
+  expect((await runtime.conversations.proposal(created.conversationId, 2)).stale).toBe(true);
   // The old draft is stale after the requirement advanced.
   expect((await runtime.conversations.view(created.conversationId)).proposal?.stale).toBe(true);
   await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-again' }))

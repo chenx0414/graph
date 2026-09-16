@@ -155,14 +155,28 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/conversations/:conversationId/draft-graph', async request => {
     const params = request.params as { conversationId: string };
+    const query = request.query as { version?: string };
     const view = await runtime.conversations.view(params.conversationId, { limit: 1 });
-    const spec = view.proposal?.spec;
+    const requested = query.version === undefined ? null : Number(query.version);
+    if (requested !== null && (!Number.isSafeInteger(requested) || requested < 1)) {
+      throw new RuntimeError('invalid_input', 'version must be a positive integer');
+    }
+    const proposal = requested === null
+      ? view.proposal
+      : await runtime.conversations.proposal(params.conversationId, requested);
+    const spec = proposal?.spec;
     if (!spec) return { nodes: [], containers: [], loops: [], layout: { positions: {}, edges: [] } };
     const layout = await layoutGraph({ nodes: spec.nodes, containers: spec.containers ?? [], loops: spec.loops ?? [] });
     return {
       nodes: spec.nodes.map(node => ({ id: node.id, kind: node.kind, status: 'draft', container: node.container })),
       containers: spec.containers ?? [], loops: spec.loops ?? [], layout,
     };
+  });
+  app.get('/api/conversations/:conversationId/proposals/:version', async request => {
+    const params = request.params as { conversationId: string; version: string };
+    const version = Number(params.version);
+    if (!Number.isSafeInteger(version) || version < 1) throw new RuntimeError('invalid_input', 'version must be a positive integer');
+    return runtime.conversations.proposal(params.conversationId, version);
   });
   app.post('/api/conversations/:conversationId/messages', async request => {
     const params = request.params as { conversationId: string };
