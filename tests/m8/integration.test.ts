@@ -127,22 +127,26 @@ test('the full productized flow runs from the formal start entry with a controll
   const pageErrors: string[] = [];
   page.on('pageerror', error => pageErrors.push(String(error)));
   await page.goto(url);
-  await page.getByTestId('queue').waitFor();
-  await page.getByTestId('project-select').selectOption('integration');
-  await page.getByTestId('request-input').fill('把检查脚本跑通');
-  await page.getByRole('button', { name: '开始' }).click();
-  await page.getByTestId('queue').getByText('把检查脚本跑通').waitFor();
+  await page.getByTestId('new-conversation-input').fill('把检查脚本跑通');
+  await page.getByTestId('new-conversation-project').selectOption('integration');
+  await page.getByTestId('new-conversation-start').click();
+  await page.getByTestId('conversation').waitFor();
+  await page.getByTestId('proposal-draft').waitFor();
   await page.screenshot({ path: join(evidenceDir, 't08-overview.png') });
 
-  const taskLink = page.getByTestId('queue').locator('a', { hasText: '把检查脚本跑通' });
-  await taskLink.click();
-  await page.getByTestId('proposal').waitFor();                                                     // master proposed through the controlled provider
-  const proposalText = await page.getByTestId('proposal').innerText();
+  const proposalText = await page.getByTestId('proposal-draft').innerText();
   expect(proposalText).toContain('验收项');
-  expect(proposalText).toContain('检查节点 check');
+  expect(proposalText).toContain('任务图');
   await page.screenshot({ path: join(evidenceDir, 't08-confirm.png') });
-  await page.getByTestId('accept').click();
-  await page.getByTestId('accepted').waitFor();
+  await page.getByTestId('confirm-draft').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid^="conversation-task-"]').length === 1);
+  const taskId = await page.evaluate(async () => {
+    const conversationId = location.hash.replace('#/conversations/', '');
+    const view = await (await fetch(`/api/conversations/${conversationId}`)).json() as { tasks: { id: string }[] };
+    return view.tasks[0]!.id;
+  });
+  await page.goto(`${url}/#/tasks/${taskId}`);
+  await page.getByTestId('proposal').waitFor();
 
   // The credential cap is one, so the second work node must wait for a slot.
   await page.waitForFunction(() => document.querySelector('[data-testid="node-list"]')?.textContent?.includes('等待 API 名额'));

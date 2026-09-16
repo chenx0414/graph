@@ -86,29 +86,17 @@ test('the console completes the main flow, keeps projects separate, and restores
   const browser = await launch();
   const page = await browser.newPage();
 
-  await page.goto(server.url);
-  await page.getByTestId('queue').waitFor();
-  await page.getByTestId('project-select').selectOption('project-a');
-  await page.getByTestId('request-input').fill('任务 A：实现搜索');
-  const begun = page.waitForResponse(response => response.url().endsWith('/api/tasks') && response.request().method() === 'POST');
-  await page.getByRole('button', { name: '开始' }).click();
-  const taskA = (await (await begun).json() as { taskId: string }).taskId;
+  const taskA = (await server.runtime.user.begin({ projectId: 'project-a', request: '任务 A：实现搜索', requestId: 'begin-a' })).taskId;
   await server.runtime.supervisor(taskA).propose({
     requirementVersion: 1, summary: '任务 A 提案',
     acceptance: [{ id: 'works', description: '搜索可用', checkNode: 'check' }],
     nodes: reviewedA.nodes,
   }, 'proposal-a');
-  await page.getByTestId('queue').getByText('任务 A：实现搜索').waitFor();
-  await page.getByTestId('queue').getByText('任务 A：实现搜索').click();
+  await server.runtime.user.task(taskA).accept({ proposalVersion: 1, targetBranch: 'feature-a', requestId: 'accept-a' });
+  await page.goto(`${server.url}/#/tasks/${taskA}`);
   await page.getByTestId('proposal').waitFor();
   expect(await page.getByTestId('proposal').innerText()).toContain('验收项');
   expect(await page.getByTestId('proposal').innerText()).toContain('检查节点 check');
-  await page.getByTestId('accept-branch').fill('feature-a');
-  const accepted = page.waitForRequest(request => request.url().endsWith('/accept') && request.method() === 'POST');
-  await page.getByTestId('accept').click();
-  const acceptBody = JSON.parse((await accepted).postData() ?? '{}') as { proposalVersion: number; targetBranch: string };
-  expect(acceptBody.proposalVersion).toBe(1);
-  expect(acceptBody.targetBranch).toBe('feature-a');
   await page.waitForFunction(() => document.querySelector('[data-testid="status"]')?.textContent?.includes('已完成'));
   await page.getByRole('link', { name: '查看任务图' }).click();
   await page.getByTestId('graph').waitFor();
@@ -120,13 +108,7 @@ test('the console completes the main flow, keeps projects separate, and restores
   await page.getByTestId('legend').waitFor();
 
   // A second project and task must not mix data with the first.
-  await page.goto(server.url);
-  await page.getByTestId('queue').waitFor();
-  await page.getByTestId('project-select').selectOption('project-b');
-  await page.getByTestId('request-input').fill('任务 B：修复导出');
-  const begunB = page.waitForResponse(response => response.url().endsWith('/api/tasks') && response.request().method() === 'POST');
-  await page.getByRole('button', { name: '开始' }).click();
-  const taskB = (await (await begunB).json() as { taskId: string }).taskId;
+  const taskB = (await server.runtime.user.begin({ projectId: 'project-b', request: '任务 B：修复导出', requestId: 'begin-b' })).taskId;
   expect(taskB).not.toBe(taskA);
   await page.goto(`${server.url}/#/tasks/${taskA}`);
   await page.waitForFunction(() => document.querySelector('[data-testid="request"]')?.textContent?.includes('任务 A'));

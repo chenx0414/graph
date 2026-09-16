@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { formatTokens } from './insights.ts';
-import { NODE_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
+import { NODE_LABEL, TASK_LABEL, describeQuestion } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
+import { Button, Icon, Pill, StatusDot } from './ui.tsx';
 
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[] };
-type ConversationSummary = {
+export type ConversationSummary = {
   id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; updatedAt: number | null;
   openQuestions: number; taskCount: number; status: string;
 };
@@ -46,90 +47,43 @@ type ConversationView = {
 };
 type LiveTool = { toolCallId: string; name: string; summary: string; done: boolean };
 
-const bubble: React.CSSProperties = { border: '1px solid #d8d8d8', padding: '8px 10px', margin: '6px 0', whiteSpace: 'pre-wrap' };
-
-/** Home entry: start a conversation before any project or feature task exists. */
-export function ConversationList({ settings }: { settings: Settings | null }) {
-  const { data: conversations, error, loading, reload } = useAsync(() => api<ConversationSummary[]>('/api/conversations'), []);
-  const [text, setText] = useState('');
-  const [projectId, setProjectId] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [formError, setFormError] = useState('');
-  async function start() {
-    if (!text.trim()) { setFormError('先用一句话说说你想解决什么；之后可以随时补充。'); return; }
-    setBusy(true);
-    setFormError('');
-    try {
-      const created = await api<{ conversationId: string }>('/api/conversations', {
-        method: 'POST',
-        body: JSON.stringify({ ...(projectId ? { projectId } : {}), text, requestId: `conv-${crypto.randomUUID()}` }),
-      });
-      location.hash = `#/conversations/${created.conversationId}`;
-    } catch (reason) {
-      setFormError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <section data-testid="conversations">
-      <h2>与主 Agent 对话</h2>
-      <p>像聊天一样说清目标；主 Agent 会先调查、追问、给出方案草稿，你确认后才会开始执行。也可以先不选项目。</p>
-      <textarea data-testid="new-conversation-input" value={text} onChange={event => setText(event.target.value)} placeholder="例如：这个项目很乱，先帮我看看能从哪里改进。" style={{ width: '100%', minHeight: 60 }} />
-      <div>
-        <label>项目（可留空）
-          <select data-testid="new-conversation-project" value={projectId} onChange={event => setProjectId(event.target.value)}>
-            <option value="">暂不选择</option>
-            {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
-          </select>
-        </label>
-        <button type="button" data-testid="new-conversation-start" disabled={busy} onClick={() => void start()}>{busy ? '创建中…' : '发起对话'}</button>
-      </div>
-      {formError && <ErrorBox message={formError} />}
-      {error && <ErrorBox message={error} onRetry={reload} />}
-      {loading && !conversations && <p>加载中…</p>}
-      {conversations && !conversations.length && <p data-testid="conversation-empty">还没有对话。输入第一句话即可开始。</p>}
-      {!!conversations?.length && (
-        <ul data-testid="conversation-list">
-          {[...conversations].reverse().map(conversation => (
-            <li key={conversation.id}>
-              <a href={`#/conversations/${conversation.id}`}><strong>{conversation.title}</strong></a>
-              {' '}· {conversation.status === 'blocked' ? `${conversation.openQuestions} 个待处理问题` : conversation.taskCount ? `${conversation.taskCount} 个执行任务` : '对话中'}
-              {conversation.projectId ? ` · ${conversation.projectId}` : ' · 未绑定项目'}
-              {' '}· {when(conversation.updatedAt)}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
+const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
+  discussing: 'info', running: 'accent', queued: 'neutral', paused: 'warn', pausing: 'warn',
+  blocked: 'warn', completed: 'success', failed: 'danger', skipped: 'neutral',
+};
+const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
+  pending: 'neutral', ready: 'info', preparing: 'accent', running: 'accent',
+  succeeded: 'success', failed: 'danger', blocked: 'warn', skipped: 'neutral',
+};
 
 function MessageRow({ message }: { message: ConversationMessage }) {
   if (message.role === 'user') {
     return (
-      <div data-testid="message-user" data-state={message.state} style={{ ...bubble, background: '#eef3fb' }}>
-        <strong>你</strong>
-        {message.state === 'pending' && <small> · 已接收，等待主 Agent 处理</small>}
-        <p style={{ margin: '4px 0 0' }}>{message.text}</p>
+      <div className="message-row" data-role="user" data-testid="message-user" data-state={message.state}>
+        <div className="message-stack">
+          <div className="message-author">我{message.state === 'pending' && <span className="message-state"> · 等待处理</span>}</div>
+          <div className="message-content"><p>{message.text}</p></div>
+        </div>
       </div>
     );
   }
   if (message.role === 'assistant') {
     return (
-      <div data-testid="message-assistant" style={bubble}>
-        <strong>主 Agent</strong>
-        <p style={{ margin: '4px 0 0' }}>{message.text}</p>
+      <div className="message-row" data-role="assistant" data-testid="message-assistant">
+        <div className="message-stack">
+          <div className="message-author">主 Agent</div>
+          <div className="message-content"><p>{message.text}</p></div>
+        </div>
       </div>
     );
   }
   if (message.role === 'tool') {
-    return <div data-testid="message-tool" style={{ ...bubble, color: '#555', fontSize: 13 }}>工具 · {message.text}</div>;
+    return <div className="message-row" data-role="tool" data-testid="message-tool"><div className="message-stack"><div className="message-content">工具 · {message.text}</div></div></div>;
   }
-  return <div data-testid="message-system" style={{ ...bubble, color: '#666', fontStyle: 'italic' }}>{message.text}</div>;
+  return <div className="message-row" data-role="system" data-testid="message-system"><div className="message-stack"><div className="message-content">{message.text}</div></div></div>;
 }
 
-export function ConversationPanel({ id, settings }: { id: string; settings: Settings | null }) {
+export function ConversationPanel({ id, settings, onChanged }: { id: string; settings: Settings | null; onChanged?: () => void }) {
   const { data: view, error, loading, reload } = useAsync(() => api<ConversationView>(`/api/conversations/${id}`), [id]);
   const { data: draftGraph } = useAsync(() => api<DraftGraph>(`/api/conversations/${id}/draft-graph`), [id, view?.proposal?.version]);
   const [text, setText] = useState('');
@@ -143,6 +97,8 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   const [historyExhausted, setHistoryExhausted] = useState(false);
   const [forwardCursor, setForwardCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [drawer, setDrawer] = useState<string | null>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
   // One stable, seq-ordered cache per mounted conversation. Every source
   // (latest window, history pages, streamed message records) merges by stable
   // ID and only newer records may replace older ones, so a late history
@@ -201,6 +157,13 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
   useEffect(() => {
     if (view) mergeMessages(view.messages);
   }, [view, mergeMessages]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const thread = threadRef.current;
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [view?.messages.length, liveText, view?.proposal?.version, view?.tasks.length]);
   if (loading && !view) return <p>加载中…</p>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <p>加载中…</p>;
@@ -215,7 +178,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
 
   async function act(action: () => Promise<unknown>, after?: () => void) {
     setActionError('');
-    try { await action(); after?.(); reload(); }
+    try { await action(); after?.(); reload(); onChanged?.(); }
     catch (reason) { setActionError(reason instanceof Error ? reason.message : String(reason)); }
   }
   async function send() {
@@ -228,6 +191,7 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
       // A message typed while this send was in flight must survive.
       setText(current => current === outgoing ? '' : current);
       reload();
+      onChanged?.();
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -273,131 +237,255 @@ export function ConversationPanel({ id, settings }: { id: string; settings: Sett
       setLoadingOlder(false);
     }
   }
+  const detailTask = view.tasks.find(task => task.id === drawer);
   return (
-    <section data-testid="conversation">
-      <h2 data-testid="conversation-title">{view.title}</h2>
-      <p>
-        {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}（{view.projectRoot}）</span> : <span data-testid="conversation-project">未绑定项目</span>}
-        {' · '}主 Agent：<span data-testid="master-status">{view.paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
-        {' · '}<span data-testid="conversation-connection">{connected ? '已连接' : '重连中…'}</span>
-        {' · '}已计量 {view.usage.used} tokens{view.cost.unknown ? ' · 费用未知' : ` · 费用 ${view.cost.amount ?? 0}`}
-      </p>
-      <p>
-        <button type="button" data-testid="conversation-pause" onClick={() => void act(() => api(`/api/conversations/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>暂停主 Agent</button>
-        <button type="button" data-testid="conversation-resume" onClick={() => void act(() => api(`/api/conversations/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>继续</button>
-      </p>
-      {!view.projectId && (
-        <section data-testid="bind-project">
-          <label>把这次对话绑定到项目
-            <select data-testid="bind-select" value={bindId} onChange={event => setBindId(event.target.value)}>
-              <option value="">选择项目…</option>
-              {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
-            </select>
-          </label>
-          <button type="button" data-testid="bind-submit" disabled={!bindId} onClick={() => void act(() => api(`/api/conversations/${id}/bind`, { method: 'POST', body: JSON.stringify({ projectId: bindId, requestId: crypto.randomUUID() }) }))}>绑定</button>
-          <p style={{ color: '#666' }}>未绑定项目时主 Agent 无法读取代码；可以先聊天再选择项目。</p>
-        </section>
-      )}
+    <section className="conversation-page" data-testid="conversation">
+      <header className="conversation-header">
+        <div className="conversation-heading">
+          <h1 data-testid="conversation-title">{view.title}</h1>
+          <div className="conversation-meta">
+            {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}</span> : <span data-testid="conversation-project">未绑定项目</span>}
+            <span>·</span>
+            <span data-testid="master-status">{view.paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
+            <span>·</span>
+            <span data-testid="conversation-connection">{connected ? '已连接' : '重连中…'}</span>
+            <span>·</span>
+            <span>已计量 {formatTokens(view.usage.used)} tokens · {costText(view.cost)}</span>
+          </div>
+        </div>
+        <div className="conversation-actions">
+          <Button size="sm" icon="pause" data-testid="conversation-pause" onClick={() => void act(() => api(`/api/conversations/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>暂停</Button>
+          <Button size="sm" icon="play" variant="primary" data-testid="conversation-resume" onClick={() => void act(() => api(`/api/conversations/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>继续</Button>
+        </div>
+      </header>
 
       {masterQuestions.length > 0 && (
-        <section data-testid="master-questions" style={{ border: '1px solid #e7c66b', background: '#fff9e8', padding: '8px 12px', margin: '8px 0' }}>
-          <h3 style={{ margin: '0 0 6px' }}>主 Agent 需要你的处理</h3>
-          <ul data-testid="master-questions-list">
-            {masterQuestions.map(question => <QuestionReply key={question.id} taskId={question.taskId} question={question} onDone={() => void reload()} />)}
-          </ul>
+        <section className="conversation-alert" data-testid="master-questions">
+          <div className="thread-action-card" data-tone="warn" style={{ margin: 0 }}>
+            <div className="thread-card-title">主 Agent 需要你的处理</div>
+            <ul className="list" data-testid="master-questions-list">
+              {masterQuestions.map(question => <QuestionReply key={question.id} taskId={question.taskId} question={question} onDone={() => { void reload(); onChanged?.(); }} />)}
+            </ul>
+          </div>
         </section>
       )}
 
-      <div data-testid="message-list">
-        {hasOlder && <button type="button" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
-        {cachedMessages.map(message => <MessageRow key={message.id} message={message} />)}
-        {liveEntries.map(([operationId, chunk]) => (
-          <div key={operationId} data-testid="streaming" style={bubble}>
-            <strong>主 Agent</strong> <small>正在输入…</small>
-            <p style={{ margin: '4px 0 0' }}>{chunk}</p>
-          </div>
-        ))}
-        {liveTools.filter(tool => !durableToolIds.has(tool.toolCallId)).map(tool => (
-          <div key={tool.toolCallId} data-testid="tool-activity" style={{ ...bubble, color: '#555', fontSize: 13 }}>
-            工具 · {tool.name} {tool.summary} {tool.done ? '（完成）' : '（进行中）'}
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <textarea data-testid="chat-input" value={text} onChange={event => setText(event.target.value)} placeholder={busy ? '主 Agent 正在处理；继续输入会排队，不会被丢掉。' : '继续交流，或追问执行进度…'} style={{ width: '100%', minHeight: 60 }} />
-        <button type="button" data-testid="chat-send" disabled={sending || !text.trim()} onClick={() => void send()}>{sending ? '发送中…' : '发送'}</button>
-        {busy && <span data-testid="queued-hint" style={{ marginLeft: 8, color: '#666' }}>主 Agent 正在处理，消息会排队。</span>}
-      </div>
-      {actionError && <ErrorBox message={actionError} />}
-
-      <section data-testid="strategy">
-        <h3>策略与图</h3>
-        {!proposal && <p data-testid="no-draft">还没有草稿。继续讨论，主 Agent 认为可行时会提出可确认的草稿。</p>}
-        {proposal && (
-          <div data-testid="proposal-draft">
-            <h4>草稿 v{proposal.version}{proposal.stale ? '（已过期）' : ''}</h4>
-            <p>{proposal.spec.summary}</p>
-            <h5>验收项</h5>
-            <ul>{proposal.spec.acceptance.map(item => <li key={item.id}>{item.id}：{item.description}（检查节点 {item.checkNode}）</li>)}</ul>
-            <h5>节点</h5>
-            <ul>{proposal.spec.nodes.map(node => (
-              <li key={node.id}>{node.id} · {node.kind}{node.action ? ` · ${node.action}` : ''}{node.model ? ` · 模型 ${node.model}` : ''}{node.definitionVersion ? ` · ${node.definitionVersion}` : ''}{node.dependsOn?.length ? ` · 依赖 ${node.dependsOn.join(',')}` : ''}</li>
-            ))}</ul>
-            {draftGraph && draftGraph.nodes.length > 0 && (
-              <div data-testid="draft-graph" style={{ height: 480, border: '1px solid #d8d8d8', marginTop: 8, position: 'relative' }}>
-                <GraphCanvas graph={{ nodes: draftGraph.nodes, containers: draftGraph.containers, layout: draftGraph.layout }} collapsed={{}} onSelect={() => undefined} />
+      <div className="conversation-body" data-drawer={Boolean(drawer)}>
+        <div className="conversation-thread" data-testid="message-list" ref={threadRef}>
+          {hasOlder && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
+          {cachedMessages.map(message => <MessageRow key={message.id} message={message} />)}
+          {liveEntries.map(([operationId, chunk]) => (
+            <div key={operationId} className="message-row" data-role="assistant" data-testid="streaming">
+              <div className="message-stack">
+                <div className="message-author">主 Agent · 正在输入…</div>
+                <div className="message-content streaming-card">{chunk}</div>
               </div>
-            )}
-            {(proposal.spec.loops?.length ?? 0) > 0 && (
-              <p data-testid="draft-loops">返工回边：{proposal.spec.loops!.map(loop => `${loop.from} → ${loop.to}`).join('，')}</p>
-            )}
-            {proposal.decisions !== null && (
-              <div data-testid="draft-decisions">
-                <h5>确认后原样交给工人的决策/约束</h5>
-                {proposal.decisions.trim()
-                  ? <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0' }}>{proposal.decisions}</pre>
-                  : <p data-testid="draft-decisions-empty" style={{ margin: '4px 0', color: '#666' }}>主管已声明本任务没有需要传递的决策或约束。</p>}
-              </div>
-            )}
-            {proposal.stale && <p data-testid="draft-stale">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}
-            {acceptedVersions.has(proposal.version) && <p data-testid="draft-accepted">此草稿已确认，执行任务见下方。</p>}
-            {confirmable && !view.projectId && <p data-testid="draft-needs-project">确认前需要先绑定项目。</p>}
-            {confirmable && view.projectId && (
-              <div>
-                <p data-testid="draft-budget" style={{ color: '#666' }}>额度：主管已用 {formatTokens(view.master?.used ?? 0)} tokens；{!view.master || view.master.unlimited || view.master.budget === null ? '当前不设累计上限' : `当前上限 ${formatTokens(view.master.budget)}`}。确认后新实例默认不设累计 token 上限，由执行内核逐调用预留与结算；有限额度可在高级设置中配置。</p>
-                <label>目标分支 <input data-testid="accept-branch" value={branch} onChange={event => setBranch(event.target.value)} /></label>
-                <button type="button" data-testid="confirm-draft" onClick={() => void act(() => api(`/api/conversations/${id}/confirm`, { method: 'POST', body: JSON.stringify({ proposalVersion: proposal.version, targetBranch: branch, requestId: `confirm-${crypto.randomUUID()}` }) }))}>确认草稿并开始执行</button>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+            </div>
+          ))}
+          {liveTools.filter(tool => !durableToolIds.has(tool.toolCallId)).map(tool => (
+            <div key={tool.toolCallId} className="message-row" data-role="tool" data-testid="tool-activity">
+              <div className="message-stack"><div className="message-content">工具 · {tool.name} {tool.summary} {tool.done ? '（完成）' : '（进行中）'}</div></div>
+            </div>
+          ))}
 
-      <section data-testid="conversation-tasks">
-        <h3>执行中的功能任务</h3>
-        {!view.tasks.length && <p data-testid="no-conversation-tasks">尚无功能任务。确认草稿后才会创建并开始执行。</p>}
-        {view.tasks.map(task => (
-          <div key={task.id} data-testid={`conversation-task-${task.id}`}>
-            <h4><a href={`#/tasks/${task.id}`}>{task.request}</a> · {TASK_LABEL[task.status] ?? task.status}</h4>
-            <p>{task.targetBranch ? `目标分支 ${task.targetBranch}` : '目标分支未确认'}{task.integrationSha ? ` · 集成提交 ${task.integrationSha.slice(0, 10)}` : ''} · {costText(task.cost)}{task.paused ? ' · 已暂停' : ''}</p>
-            <ul data-testid={`conversation-nodes-${task.id}`}>
-              {task.nodes.map(node => (
-                <li key={node.id} data-node={node.id} data-status={node.status}>
-                  <a href={`#/tasks/${task.id}/nodes/${node.id}`} data-testid={`conversation-node-link-${task.id}-${node.id}`}>{node.id}</a>
-                  {' · '}{NODE_LABEL[node.status] ?? node.status}{node.used != null ? ` · 用量 ${node.used}` : ''}{node.model ? ` · ${node.model}` : ''}
-                </li>
-              ))}
-            </ul>
-            {task.openQuestions.length > 0 && (
-              <ul data-testid={`conversation-questions-${task.id}`}>
-                {task.openQuestions.map(question => <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => void reload()} />)}
+          {!view.tasks.length && (
+            <div className="thread-action-card" data-testid="no-conversation-tasks">
+              <div className="thread-card-title">尚无功能任务</div>
+              <div className="thread-card-copy">确认草稿后才会创建并开始执行。</div>
+            </div>
+          )}
+
+          {proposal && (
+            <article className="thread-action-card" data-testid="proposal-draft">
+              <div className="thread-card-head">
+                <div className="grow">
+                  <div className="thread-card-title">
+                    草稿 v{proposal.version}
+                    {proposal.stale ? '（已过期）' : acceptedVersions.has(proposal.version) ? '（已确认）' : ''}
+                  </div>
+                  <div className="thread-card-copy">{proposal.spec.summary}</div>
+                </div>
+                <Pill tone={proposal.stale ? 'warn' : acceptedVersions.has(proposal.version) ? 'success' : 'info'}>
+                  {proposal.stale ? '需重新讨论' : acceptedVersions.has(proposal.version) ? `已确认草稿 v${proposal.version}` : '待确认'}
+                </Pill>
+              </div>
+              <div className="thread-card-actions">
+                <button type="button" className="summary-graph-preview" data-testid="draft-graph" onClick={() => setDrawer('proposal')}>
+                  <Icon name="graph" size={14} />
+                  任务图 · {proposal.spec.nodes.length} 个节点
+                </button>
+                <button type="button" className="summary-graph-preview" onClick={() => setDrawer('proposal')}>
+                  <Icon name="check" size={14} />
+                  验收项 · {proposal.spec.acceptance.length}
+                </button>
+              </div>
+              {proposal.stale && <p data-testid="draft-stale" className="muted">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}
+              {acceptedVersions.has(proposal.version) && <p data-testid="draft-accepted" className="muted">已确认草稿 v{proposal.version}，执行状态见下方任务摘要。</p>}
+              {confirmable && !view.projectId && <p data-testid="draft-needs-project" className="muted">确认前需要先绑定项目。</p>}
+              {confirmable && view.projectId && (
+                <>
+                  <p data-testid="draft-budget" className="muted" style={{ fontSize: 12 }}>
+                    主管已用 {formatTokens(view.master?.used ?? 0)} tokens；{!view.master || view.master.unlimited || view.master.budget === null ? '当前不设累计上限' : `当前上限 ${formatTokens(view.master.budget)}`}。
+                  </p>
+                  <div className="thread-card-actions">
+                    <label className="row" style={{ gap: 6 }}>
+                      <span className="muted">目标分支</span>
+                      <input className="input" style={{ width: 150, maxWidth: 150 }} data-testid="accept-branch" value={branch} onChange={event => setBranch(event.target.value)} />
+                    </label>
+                    <Button variant="primary" icon="check" data-testid="confirm-draft" onClick={() => void act(() => api(`/api/conversations/${id}/confirm`, { method: 'POST', body: JSON.stringify({ proposalVersion: proposal.version, targetBranch: branch, requestId: `confirm-${crypto.randomUUID()}` }) }))}>确认草稿并开始执行</Button>
+                  </div>
+                </>
+              )}
+            </article>
+          )}
+
+          {view.tasks.map(task => (
+            <article className="thread-action-card" key={task.id} data-testid={`conversation-task-${task.id}`}>
+              <div className="thread-card-head">
+                <div className="grow">
+                  <div className="thread-card-title">{task.request}</div>
+                  <div className="thread-card-copy">
+                    {task.targetBranch ? `目标分支 ${task.targetBranch}` : '目标分支未确认'}
+                    {task.integrationSha ? ` · 集成提交 ${task.integrationSha.slice(0, 10)}` : ''}
+                    {' · '}{costText(task.cost)}{task.paused ? ' · 已暂停' : ''}
+                  </div>
+                </div>
+                <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
+                <button type="button" className="icon-button" onClick={() => setDrawer(task.id)} title="查看执行详情" aria-label="查看执行详情">
+                  <Icon name="chevron" size={15} />
+                </button>
+              </div>
+              <ul className="node-summary-list" data-testid={`conversation-nodes-${task.id}`}>
+                {task.nodes.map(node => (
+                  <li key={node.id} data-node={node.id} data-status={node.status}>
+                    <span className="dot" data-tone={NODE_TONE[node.status] ?? 'neutral'} />
+                    <a href={`#/tasks/${task.id}/nodes/${node.id}`} data-testid={`conversation-node-link-${task.id}-${node.id}`}>{node.id}</a>
+                    <span>{NODE_LABEL[node.status] ?? node.status}</span>
+                  </li>
+                ))}
               </ul>
+              {task.openQuestions.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="muted">{task.openQuestions.map(question => describeQuestion(question.kind)).join('、')}</div>
+                  <ul className="list" data-testid={`conversation-questions-${task.id}`}>
+                    {task.openQuestions.map(question => <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => { void reload(); onChanged?.(); }} />)}
+                  </ul>
+                </div>
+              )}
+            </article>
+          ))}
+
+          {!view.projectId && (
+            <section className="thread-action-card binding-card" data-testid="bind-project">
+              <div className="thread-card-title">绑定项目</div>
+              <div className="thread-card-copy">未绑定项目时主 Agent 无法读取代码；可以先聊天再选择项目。</div>
+              <div className="thread-card-actions">
+                <select className="select" style={{ width: 220 }} data-testid="bind-select" value={bindId} onChange={event => setBindId(event.target.value)}>
+                  <option value="">选择项目…</option>
+                  {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
+                </select>
+                <Button size="sm" data-testid="bind-submit" disabled={!bindId} onClick={() => void act(() => api(`/api/conversations/${id}/bind`, { method: 'POST', body: JSON.stringify({ projectId: bindId, requestId: crypto.randomUUID() }) }))}>绑定</Button>
+              </div>
+            </section>
+          )}
+        </div>
+
+        {drawer && (
+          <aside className="detail-drawer" data-testid="detail-drawer">
+            <div className="drawer-head">
+              <h2>{detailTask?.request ?? `草稿 v${proposal?.version ?? ''}`}</h2>
+              <button type="button" className="icon-button" onClick={() => setDrawer(null)} aria-label="关闭详情">
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+            {drawer === 'proposal' && proposal && (
+              <>
+                <section className="drawer-section" data-testid="strategy">
+                  <h3>验收项</h3>
+                  <ul className="list">
+                    {proposal.spec.acceptance.map(item => <li className="list-item" key={item.id}>{item.id}：{item.description}<small>检查节点 {item.checkNode}</small></li>)}
+                  </ul>
+                  <h3 style={{ marginTop: 14 }}>节点</h3>
+                  <ul className="list">
+                    {proposal.spec.nodes.map(node => (
+                      <li className="list-item" key={node.id}>
+                        <span className="grow">{node.id} · {node.kind}{node.action ? ` · ${node.action}` : ''}</span>
+                        <small>{node.model ?? ''}{node.definitionVersion ? ` · ${node.definitionVersion}` : ''}{node.dependsOn?.length ? ` · 依赖 ${node.dependsOn.join(',')}` : ''}</small>
+                      </li>
+                    ))}
+                  </ul>
+                  {draftGraph && draftGraph.nodes.length > 0 && (
+                    <div className="drawer-graph" data-testid="draft-graph-detail">
+                      <GraphCanvas graph={{ nodes: draftGraph.nodes, containers: draftGraph.containers, layout: draftGraph.layout }} collapsed={{}} onSelect={() => undefined} />
+                    </div>
+                  )}
+                  {(proposal.spec.loops?.length ?? 0) > 0 && (
+                    <p data-testid="draft-loops">返工回边：{proposal.spec.loops!.map(loop => `${loop.from} → ${loop.to}`).join('，')}</p>
+                  )}
+                  {proposal.decisions !== null && (
+                    <div data-testid="draft-decisions">
+                      <h3 style={{ marginTop: 14 }}>决策与约束</h3>
+                      {proposal.decisions.trim()
+                        ? <pre>{proposal.decisions}</pre>
+                        : <p data-testid="draft-decisions-empty" className="muted">主管已声明本任务没有需要传递的决策或约束。</p>}
+                    </div>
+                  )}
+                </section>
+              </>
             )}
-            {task.openQuestions.length > 0 && <p style={{ color: '#8a6d00' }}>{task.openQuestions.map(question => describeQuestion(question.kind)).join('、')}</p>}
-          </div>
-        ))}
-      </section>
+            {detailTask && (
+              <section className="drawer-section" data-testid="conversation-tasks">
+                <h3>执行详情</h3>
+                <dl className="kv">
+                  <dt>状态</dt><dd>{TASK_LABEL[detailTask.status] ?? detailTask.status}</dd>
+                  <dt>目标分支</dt><dd>{detailTask.targetBranch ?? '未确认'}</dd>
+                  <dt>集成提交</dt><dd className="mono">{detailTask.integrationSha ?? '尚无'}</dd>
+                  <dt>费用</dt><dd>{costText(detailTask.cost)}</dd>
+                </dl>
+                <ul className="list" style={{ marginTop: 12 }}>
+                  {detailTask.nodes.map(node => (
+                    <li className="list-item" key={node.id}>
+                      <StatusDot tone={NODE_TONE[node.status] ?? 'neutral'} />
+                      <div className="grow">
+                        <a href={`#/tasks/${detailTask.id}/nodes/${node.id}`}>{node.id}</a>
+                        <div className="muted">{NODE_LABEL[node.status] ?? node.status}{node.used != null ? ` · 用量 ${node.used}` : ' · 用量未知'}{node.model ? ` · ${node.model}` : ''}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="row" style={{ marginTop: 12 }}>
+                  <a className="btn btn-sm" href={`#/tasks/${detailTask.id}`}>打开任务</a>
+                  <a className="btn btn-sm" href={`#/tasks/${detailTask.id}/graph`}>打开任务图</a>
+                </div>
+              </section>
+            )}
+          </aside>
+        )}
+      </div>
+
+      <div className="conversation-composer-wrap">
+        {actionError && <ErrorBox message={actionError} />}
+        <div className="conversation-composer">
+          <textarea
+            data-testid="chat-input"
+            value={text}
+            onChange={event => setText(event.target.value)}
+            placeholder={busy ? '主 Agent 正在处理；继续输入会排队，不会被丢掉。' : '继续交流，或追问执行进度…'}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void send();
+              }
+            }}
+          />
+          <button type="button" className="icon-button primary" data-testid="chat-send" disabled={sending || !text.trim()} onClick={() => void send()} aria-label="发送消息">
+            <Icon name="send" size={17} />
+          </button>
+        </div>
+        <div className="composer-note">
+          {busy ? <span data-testid="queued-hint">主 Agent 正在处理，消息会排队。</span> : 'Enter 发送，Shift + Enter 换行'}
+        </div>
+      </div>
     </section>
   );
 }

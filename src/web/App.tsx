@@ -2,14 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
-import { ConversationList, ConversationPanel } from './Conversation.tsx';
+import { ConversationPanel, type ConversationSummary } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
-import { Setup } from './Setup.tsx';
 import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
-import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast, useTheme } from './ui.tsx';
+import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
@@ -95,68 +94,73 @@ export function App() {
   const [settings, setSettings] = useState<Settings_ | null>(null);
   const [startup, setStartup] = useState<Startup | null>(null);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
-  const [theme, toggleTheme] = useTheme();
+  const { data: conversations, reload: reloadConversations } = useAsync(() => api<ConversationSummary[]>('/api/conversations'), []);
+
+  const refreshTasks = useCallback(async () => {
+    setTasks(await api<TaskSummary[]>('/api/tasks'));
+  }, []);
   useEffect(() => {
     const onHash = () => setPath(route());
+    const onConversationsChanged = () => void reloadConversations();
     window.addEventListener('hashchange', onHash);
+    window.addEventListener('graph:conversations-changed', onConversationsChanged);
     void api<Settings_>('/api/settings').then(setSettings);
     void api<Startup>('/api/startup').then(setStartup);
-    void api<TaskSummary[]>('/api/tasks').then(setTasks);
-    // The inbox badge must reflect new questions from any page.
-    const poll = setInterval(() => { void api<TaskSummary[]>('/api/tasks').then(setTasks).catch(() => undefined); }, 4_000);
-    return () => { window.removeEventListener('hashchange', onHash); clearInterval(poll); };
-  }, []);
+    void refreshTasks().catch(() => undefined);
+    const poll = setInterval(() => {
+      void refreshTasks().catch(() => undefined);
+      void reloadConversations();
+    }, 4_000);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('graph:conversations-changed', onConversationsChanged);
+      clearInterval(poll);
+    };
+  }, [refreshTasks, reloadConversations]);
+
+  const [pathname, query = ''] = path.split('?');
+  const queryParams = new URLSearchParams(query);
   const questionTotal = openQuestionTotal(tasks);
-  const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(path);
-  const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(path);
-  const conversationMatch = /^\/conversations\/([^/]+)$/.exec(path);
+  const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(pathname ?? '/');
+  const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
+  const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
   const modeTone = !startup?.configured ? 'danger' : startup.mode === 'execute' ? 'success' : 'warn';
   const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
-  const title = path === '/' ? '概览'
-    : path === '/inbox' ? '问题收件箱'
-      : path === '/catalog' ? '人才库'
-        : path === '/setup' ? '配置向导'
-          : path === '/settings' ? '设置'
-            : conversationMatch ? '与主 Agent 对话'
-              : nodeMatch ? '节点详情'
-                : taskMatch?.[2] ? '任务图' : taskMatch ? '任务详情' : 'Graph';
+  const title = pathname === '/' ? '新对话'
+    : pathname === '/inbox' ? '问题收件箱'
+      : pathname === '/catalog' ? '人才库'
+        : pathname === '/setup' ? '设置'
+          : pathname === '/settings' ? '设置'
+            : nodeMatch ? '节点详情'
+              : taskMatch?.[2] ? '任务图' : taskMatch ? '任务详情' : 'Graph';
+  const conversationFirst = pathname === '/' || Boolean(conversationMatch);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
+        <a className="brand" href="#/" title="新对话">
           <div className="brand-mark" />
           <div>
             <div className="brand-name">Graph</div>
             <div className="brand-sub">Agent 任务编排控制台</div>
           </div>
-        </div>
-        <nav className="nav">
-          <a href="#/" data-active={path === '/'}><Icon name="overview" />概览</a>
-          <a href="#/inbox" data-active={path === '/inbox'}>
-            <Icon name="inbox" />问题
-            {questionTotal > 0 && <> (<span className="nav-badge">{questionTotal}</span>)</>}
-          </a>
-          <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" />人才库</a>
-          <a href="#/setup" data-active={path === '/setup'}><Icon name="wizard" />向导</a>
-          <a href="#/settings" data-active={path === '/settings'}><Icon name="settings" />设置</a>
-        </nav>
-        <div className="sidebar-spacer" />
-        <div className="sidebar-footer">
-          <div className="sidebar-status"><StatusDot tone={modeTone} pulse={modeTone === 'success'} />{modeText}</div>
-          <div className="sidebar-actions">
-            <Button className="btn-sm" onClick={toggleTheme} icon={theme === 'dark' ? 'sun' : 'moon'} title="切换主题">
-              {theme === 'dark' ? '浅色' : '深色'}
-            </Button>
-          </div>
-        </div>
+        </a>
+        <Sidebar
+          path={pathname ?? '/'}
+          settings={settings}
+          conversations={conversations ?? []}
+          questionTotal={questionTotal}
+          modeText={modeText}
+          modeTone={modeTone}
+        />
       </aside>
       <main className="main">
         {startup && !startup.configured && (
           <div className="banner" data-testid="banner">
             <Icon name="alert" />
             {startup.modelCount === 0
-              ? <>首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请<a href="#/setup">打开配置向导</a>；保存后立即生效，无需重启。</>
-              : <>模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请<a href="#/setup">打开配置向导</a>检查凭据，或设置凭据引用的环境变量。{typeof window !== 'undefined' && window.graph && '桌面 APP 也可在设置页保存密钥到钥匙串，保存后立即对该守护进程生效，无需重启。'}</>}
+              ? <>首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请<a href="#/settings">打开设置</a>连接模型；保存后立即生效，无需重启。</>
+              : <>模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请<a href="#/settings">打开设置</a>检查凭据，或设置凭据引用的环境变量。{typeof window !== 'undefined' && window.graph && '桌面 APP 也可在设置页保存密钥到钥匙串，保存后立即对该守护进程生效，无需重启。'}</>}
           </div>
         )}
         {startup?.mode === 'view' && startup.configured && (
@@ -165,23 +169,32 @@ export function App() {
             仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。
           </div>
         )}
-        <header className="topbar">
-          <h1>{title}</h1>
-          <span className="topbar-sub">
-            {modeText}
-            {settings && ` · ${settings.projects.length} 个项目 · ${settings.models.length} 个模型`}
-          </span>
-          <div className="topbar-spacer" />
-          <Pill tone={modeTone}>{startup?.mode === 'execute' ? '调度开启' : '调度关闭'}</Pill>
-        </header>
-        <div className="content">
-          <div className="page" key={path}>
-            {path === '/' && <Overview settings={settings} tasks={tasks} onTasks={setTasks} />}
-            {path === '/inbox' && <Inbox tasks={tasks} />}
-            {path === '/catalog' && <Catalog settings={settings} />}
-            {path === '/setup' && <Setup />}
-            {path === '/settings' && <Settings />}
-            {conversationMatch && <ConversationPanel key={conversationMatch[1]} id={conversationMatch[1]!} settings={settings} />}
+        {!conversationFirst && (
+          <header className="topbar">
+            <h1>{title}</h1>
+            <span className="topbar-sub">
+              {modeText}
+              {settings && ` · ${settings.projects.length} 个项目 · ${settings.models.length} 个模型`}
+            </span>
+            <div className="topbar-spacer" />
+            <Pill tone={modeTone}>{startup?.mode === 'execute' ? '调度开启' : '调度关闭'}</Pill>
+          </header>
+        )}
+        <div className={`content ${conversationFirst ? 'conversation-content' : ''}`}>
+          <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`} key={path}>
+            {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
+            {pathname === '/inbox' && <Inbox tasks={tasks} />}
+            {pathname === '/catalog' && <Catalog settings={settings} />}
+            {pathname === '/setup' && <Settings openGuide />}
+            {pathname === '/settings' && <Settings />}
+            {conversationMatch && (
+              <ConversationPanel
+                key={conversationMatch[1]}
+                id={conversationMatch[1]!}
+                settings={settings}
+                onChanged={reloadConversations}
+              />
+            )}
             {nodeMatch && (
               <Card title={`节点 ${nodeMatch[2]}`} icon="box" actions={<a className="btn" href={`#/tasks/${nodeMatch[1]}/graph`}>返回任务图</a>}>
                 <NodeRunPanel key={`${nodeMatch[1]}:${nodeMatch[2]}`} taskId={nodeMatch[1]!} nodeId={nodeMatch[2]!} full />
@@ -197,89 +210,159 @@ export function App() {
   );
 }
 
-function Overview({ settings, tasks, onTasks }: { settings: Settings_ | null; tasks: TaskSummary[]; onTasks: (tasks: TaskSummary[]) => void }) {
-  const [projectId, setProjectId] = useState('');
-  const [request, setRequest] = useState('');
-  const [error, setError] = useState('');
+function Sidebar({ path, settings, conversations, questionTotal, modeText, modeTone }: {
+  path: string;
+  settings: Settings_ | null;
+  conversations: ConversationSummary[];
+  questionTotal: number;
+  modeText: string;
+  modeTone: 'success' | 'warn' | 'danger';
+}) {
+  const [projectOpen, setProjectOpen] = useState<Record<string, boolean>>({});
+  const ordered = [...conversations].sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt));
+  const unbound = ordered.filter(conversation => !conversation.projectId);
+  return (
+    <>
+      <nav className="nav">
+        <a href="#/inbox" data-active={path === '/inbox'}>
+          <Icon name="inbox" />问题
+          {questionTotal > 0 && <> (<span className="nav-badge">{questionTotal}</span>)</>}
+        </a>
+        <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" />人才库</a>
+      </nav>
+      <div className="sidebar-scroll" data-testid="conversation-list">
+        <div className="sidebar-label">项目</div>
+        <div className="sidebar-section">
+          {(settings?.projects ?? []).map(project => {
+            const items = ordered.filter(conversation => conversation.projectId === project.id);
+            return (
+              <details
+                className="sidebar-project"
+                open={projectOpen[project.id] ?? true}
+                key={project.id}
+                onToggle={event => {
+                  const open = event.currentTarget.open;
+                  setProjectOpen(current => current[project.id] === open ? current : { ...current, [project.id]: open });
+                }}
+              >
+                <summary>
+                  <Icon name="chevron" size={13} className="sidebar-chevron" />
+                  <span className="sidebar-project-name" title={project.root}>{project.id}</span>
+                  <a
+                    className="sidebar-new-chat"
+                    href={`#/?project=${encodeURIComponent(project.id)}`}
+                    data-testid={`new-conversation-project-${project.id}`}
+                    title={`在 ${project.id} 中新建对话`}
+                    aria-label={`在 ${project.id} 中新建对话`}
+                    onClick={event => event.stopPropagation()}
+                  >
+                    <Icon name="plus" size={15} />
+                  </a>
+                </summary>
+                <div className="sidebar-conversations">
+                  {items.map(conversation => <SidebarConversation key={conversation.id} conversation={conversation} active={path === `/conversations/${conversation.id}`} />)}
+                  {!items.length && <span className="sidebar-empty">暂无对话</span>}
+                </div>
+              </details>
+            );
+          })}
+          {!settings?.projects.length && <span className="sidebar-empty">尚未配置项目</span>}
+        </div>
+        <div className="sidebar-label">最近</div>
+        <div className="sidebar-section">
+          <div className="sidebar-conversations" style={{ paddingLeft: 0 }}>
+            {unbound.map(conversation => <SidebarConversation key={conversation.id} conversation={conversation} active={path === `/conversations/${conversation.id}`} />)}
+            <a className="sidebar-conversation" href="#/" data-testid="new-conversation-recent">
+              <Icon name="plus" size={15} />
+              <span className="sidebar-conversation-title">新对话</span>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div className="sidebar-footer">
+        <nav className="nav">
+          <a href="#/settings" data-active={path === '/settings' || path === '/setup'}><Icon name="settings" />设置</a>
+        </nav>
+        <div className="sidebar-status"><StatusDot tone={modeTone} pulse={modeTone === 'success'} />{modeText}</div>
+      </div>
+    </>
+  );
+}
+
+function SidebarConversation({ conversation, active }: { conversation: ConversationSummary; active: boolean }) {
+  return (
+    <a className="sidebar-conversation" href={`#/conversations/${conversation.id}`} data-active={active} title={conversation.title}>
+      <Icon name="message" size={14} />
+      <span className="sidebar-conversation-title">{conversation.title}</span>
+      {conversation.openQuestions > 0 && <span className="sidebar-conversation-badge">{conversation.openQuestions}</span>}
+    </a>
+  );
+}
+
+function NewConversation({ settings, initialProjectId }: { settings: Settings_ | null; initialProjectId: string }) {
+  const [text, setText] = useState('');
+  const [projectId, setProjectId] = useState(initialProjectId);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!projectId && settings?.projects[0]) setProjectId(settings.projects[0].id);
-  }, [settings, projectId]);
-  async function begin() {
-    if (!projectId || !request.trim()) { setError('请选择项目并填写需求'); return; }
+  const [error, setError] = useState('');
+
+  useEffect(() => { setProjectId(initialProjectId); }, [initialProjectId]);
+  async function start() {
+    if (!text.trim()) { setError('先用一句话说说你想解决什么。'); return; }
     setBusy(true);
     setError('');
     try {
-      await api('/api/tasks', { method: 'POST', body: JSON.stringify({ projectId, request, requestId: `begin-${crypto.randomUUID()}` }) });
-      setRequest('');
-      toast('任务已创建，主管开始讨论需求', 'success');
-      onTasks(await api<TaskSummary[]>('/api/tasks'));
+      const created = await api<{ conversationId: string }>('/api/conversations', {
+        method: 'POST',
+        body: JSON.stringify({ ...(projectId ? { projectId } : {}), text, requestId: `conv-${crypto.randomUUID()}` }),
+      });
+      window.dispatchEvent(new Event('graph:conversations-changed'));
+      location.hash = `#/conversations/${created.conversationId}`;
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : String(reason);
-      setError(message);
-      toast(`创建任务失败：${message}`, 'danger');
+      setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setBusy(false);
     }
   }
-  const openTasks = tasks.filter(task => (task.openQuestions ?? 0) > 0).length;
   return (
-    <div className="stagger">
-      <div className="stat-grid">
-        <Stat label="项目" value={settings?.projects.length ?? '—'} hint={settings?.projects.map(project => project.id).slice(0, 3).join(' · ') || '尚未配置'} />
-        <Stat label="模型" value={settings?.models.length ?? '—'} hint="执行模式下可派发" />
-        <Stat label="任务" value={tasks.length} hint={tasks.length ? `最近更新 ${when(tasks[tasks.length - 1]?.updatedAt ?? null)}` : '暂无任务'} />
-        <Stat label="待处理问题" value={openTasks} tone={openTasks ? 'warn' : undefined} hint={openTasks ? '前往问题收件箱' : '没有阻塞项'} />
+    <section className="new-chat-page" data-testid="conversations">
+      <div className="new-chat-intro">
+        <div className="new-chat-mark" />
+        <h1>开始新对话</h1>
+        <p>说清目标即可。主 Agent 会先调查、追问并给出方案草稿，确认后才开始执行。</p>
       </div>
-
-      <ConversationList settings={settings} />
-
-      <div data-testid="queue">
-      <Card title="提交新任务" icon="play" subtitle="选择项目并描述需求，主管会先讨论再拆解">
-        <div data-testid="settings" className="chip-row" style={{ marginBottom: 12 }}>
-          {(settings?.projects ?? []).map(project => <Pill key={project.id} tone="info">{project.id}</Pill>)}
-          {(settings?.models ?? []).map(model => <Pill key={model.id}>{model.id} · {model.grade}</Pill>)}
+      <div className="new-chat-composer">
+        <textarea
+          data-testid="new-conversation-input"
+          value={text}
+          onChange={event => setText(event.target.value)}
+          placeholder="例如：这个项目很乱，先帮我看看能从哪里改进。"
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              void start();
+            }
+          }}
+          autoFocus
+        />
+        <div className="composer-toolbar">
+          <select
+            className="composer-project"
+            data-testid="new-conversation-project"
+            value={projectId}
+            onChange={event => setProjectId(event.target.value)}
+            aria-label="对话项目"
+          >
+            <option value="">未绑定项目</option>
+            {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
+          </select>
+          <div className="composer-spacer" />
+          <button type="button" className="icon-button primary" data-testid="new-conversation-start" disabled={busy || !text.trim()} onClick={() => void start()} aria-label="发送并开始对话">
+            <Icon name="send" size={17} />
+          </button>
         </div>
-        <div className="inline-form">
-          <label className="field" style={{ margin: 0 }}>
-            <span className="field-label">项目</span>
-            <select className="select" data-testid="project-select" value={projectId} onChange={event => setProjectId(event.target.value)} style={{ minWidth: 180 }}>
-              {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
-            </select>
-          </label>
-          <label className="field" style={{ margin: 0, flex: 1, minWidth: 280 }}>
-            <span className="field-label">需求</span>
-            <input className="input" data-testid="request-input" placeholder="例如：为项目添加搜索接口并补测试" value={request}
-              onChange={event => setRequest(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) void begin(); }} style={{ maxWidth: 'none' }} />
-          </label>
-          <Button variant="primary" data-testid="begin" disabled={busy} onClick={() => void begin()}>
-            {busy ? '提交中…' : '开始'}
-          </Button>
-        </div>
-        {error && <ErrorBox message={error} />}
-      </Card>
-
-      <Card title="任务队列" icon="task" subtitle={`${tasks.length} 个任务`}>
-        {!tasks.length
-          ? <Empty icon="task" title="暂无任务" hint={<span data-testid="empty">暂无任务。选择项目并提交需求即可开始。</span>} />
-          : (
-            <ul className="list" data-testid="task-list">
-              {[...tasks].reverse().map(task => (
-                <li key={task.id} className="list-item">
-                  <StatusDot tone={TASK_TONE[task.status] === 'neutral' ? 'info' : TASK_TONE[task.status] ?? 'info'} />
-                  <div className="grow">
-                    <a href={`#/tasks/${task.id}`} className="truncate" style={{ display: 'block', fontWeight: 600 }}>{task.request.slice(0, 90)}</a>
-                    <small>{task.projectId} · {when(task.updatedAt)}{(task.openQuestions ?? 0) > 0 ? ` · ${task.openQuestions} 个待处理问题` : ''}</small>
-                  </div>
-                  <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
-                  <Icon name="chevron" size={14} />
-                </li>
-              ))}
-            </ul>
-          )}
-      </Card>
       </div>
-    </div>
+      {error && <ErrorBox message={error} />}
+    </section>
   );
 }
 

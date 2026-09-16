@@ -49,8 +49,8 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(server.url);
-  await page.getByTestId('settings').waitFor();
-  await page.getByTestId('queue').waitFor();
+  await page.getByTestId('new-conversation-input').waitFor();
+  await page.getByTestId('conversation-list').waitFor();
   await page.goto(`${server.url}/#/catalog`);
   await page.getByTestId('catalog').waitFor();
   expect(await page.getByTestId('catalog').innerText()).toContain('coder@1');

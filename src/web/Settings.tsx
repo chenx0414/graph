@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
-import { Button, Card, Field, Pill, Spinner, toast } from './ui.tsx';
+import { Setup } from './Setup.tsx';
+import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 
 type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type RawModel = {
@@ -99,7 +100,27 @@ function ProjectGitCard() {
   );
 }
 
-export function Settings() {
+export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
+  const [guideOpen, setGuideOpen] = useState(openGuide);
+  useEffect(() => setGuideOpen(openGuide), [openGuide]);
+  return (
+    <div className="settings-root">
+      <details className="settings-wizard" open={guideOpen} onToggle={event => setGuideOpen(event.currentTarget.open)}>
+        <summary>
+          <div>
+            <strong>连接与配置向导</strong>
+            <span>连接模型、补充项目和凭据；保存后立即生效。</span>
+          </div>
+          <Icon name="chevron" size={15} />
+        </summary>
+        <Setup />
+      </details>
+      <SettingsAdvanced />
+    </div>
+  );
+}
+
+function SettingsAdvanced() {
   const [draft, setDraft] = useState<RawConfig | null>(null);
   const [credentialState, setCredentialState] = useState<Record<string, boolean>>({});
   const [revision, setRevision] = useState(0);

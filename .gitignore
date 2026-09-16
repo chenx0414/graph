@@ -39,3 +39,20 @@ skills-lock.json
 
 # Local daemon configuration (never commit user config)
 graph.config.json
+
+# Independent-reviewer local artifacts left in this worktree (not product source).
+docs/planning/acceptance-evidence/*-independent/
+docs/planning/compaction-accounting-2026-09-15.md
+docs/planning/compaction-accounting-acceptance-2026-09-16.md
+docs/planning/compaction-accounting-handoff-2026-09-15.md
+docs/planning/master-agent-entry-acceptance-2026-09-14.md
+docs/planning/master-agent-entry-rework-acceptance-2026-09-14.md
+docs/planning/master-agent-entry-rework2-acceptance-2026-09-14.md
+docs/planning/master-agent-entry-rework3-acceptance-2026-09-14.md
+docs/planning/master-agent-entry-rework4-acceptance-2026-09-14.md
+docs/planning/unified-console-acceptance-2026-09-15.md
+docs/planning/unified-console-closeout-acceptance-2026-09-15.md
+docs/planning/unified-console-rework-acceptance-2026-09-15.md
+docs/planning/unified-console-rework2-acceptance-2026-09-15.md
+docs/planning/unified-console-rework3-acceptance-2026-09-15.md
+docs/planning/unified-console-rework4-acceptance-2026-09-15.md

@@ -5,7 +5,7 @@ import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from '
 export type IconName =
   | 'overview' | 'inbox' | 'catalog' | 'wizard' | 'settings' | 'graph' | 'task'
   | 'play' | 'pause' | 'check' | 'alert' | 'clock' | 'plus' | 'refresh'
-  | 'sun' | 'moon' | 'link' | 'bolt' | 'spark' | 'box' | 'chevron' | 'search';
+  | 'link' | 'bolt' | 'spark' | 'box' | 'chevron' | 'search' | 'message' | 'send' | 'close';
 
 const PATHS: Record<IconName, ReactNode> = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -22,19 +22,20 @@ const PATHS: Record<IconName, ReactNode> = {
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5.2l3.4 2" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
   refresh: <><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" /><path d="M20 4v4h-4" /><path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" /><path d="M4 20v-4h4" /></>,
-  sun: <><circle cx="12" cy="12" r="4.2" /><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7" /></>,
-  moon: <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" />,
   link: <><path d="M10.5 13.5a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.3 1.3" /><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.3-1.3" /></>,
   bolt: <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5z" />,
   spark: <><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /><path d="m5.6 5.6 2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" /></>,
   box: <><path d="M12 3 3 7.5v9L12 21l9-4.5v-9z" /><path d="m3 7.5 9 4.5 9-4.5M12 12v9" /></>,
   chevron: <path d="m9 6 6 6-6 6" />,
   search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></>,
+  message: <><path d="M5 18.5 3.5 21l3.7-1a8 8 0 1 0-2.2-1.5" /><path d="M8 10.5h8M8 14h5" /></>,
+  send: <><path d="m4 4 17 8-17 8 3.2-8z" /><path d="M7.2 12H21" /></>,
+  close: <><path d="m6 6 12 12M18 6 6 18" /></>,
 };
 
-export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
+export function Icon({ name, size = 16, className = '' }: { name: IconName; size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {PATHS[name]}
     </svg>
@@ -158,22 +159,4 @@ export function Toaster() {
       ))}
     </div>
   );
-}
-
-/* ---------------------------------------------------------------- theme */
-
-export type Theme = 'light' | 'dark';
-
-export function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'light';
-    const stored = window.localStorage.getItem('graph-theme');
-    if (stored === 'light' || stored === 'dark') return stored;
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  });
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem('graph-theme', theme);
-  }, [theme]);
-  return [theme, () => setTheme(current => (current === 'dark' ? 'light' : 'dark'))];
 }
