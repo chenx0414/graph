@@ -18,7 +18,7 @@ export interface MessageRow {
   data: string | null; state: string; operation_id: string | null; turn: number; created_at: number; updated_at: number;
 }
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
-export type MessageState = 'pending' | 'delivered' | 'done' | 'failed';
+export type MessageState = 'pending' | 'queued' | 'delivered' | 'done' | 'failed';
 
 export function conversationRow(store: TaskStore, conversationId: string): ConversationRow {
   const row = store.db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId) as ConversationRow | undefined;
@@ -64,7 +64,25 @@ export function appendMessage(store: TaskStore, input: {
 
 /** Messages the next master turn must answer; consumed atomically with the operation. */
 export function pendingMessages(store: TaskStore, conversationId: string, limit = 50): MessageRow[] {
-  return store.db.prepare("SELECT * FROM messages WHERE conversation_id=? AND state='pending' ORDER BY seq LIMIT ?").all(conversationId, limit) as unknown as MessageRow[];
+  return store.db.prepare("SELECT * FROM messages WHERE conversation_id=? AND state IN ('pending','queued') ORDER BY seq LIMIT ?").all(conversationId, limit) as unknown as MessageRow[];
+}
+
+/** Move accepted queued messages to the current end of the stream before
+ * marking them delivered. This keeps a queued turn after the assistant reply
+ * that preceded it instead of reusing the timestamp at which the user typed. */
+export function deliverMessages(store: TaskStore, operationId: string, turn: number, messages: MessageRow[]) {
+  for (const message of messages) {
+    if (message.state === 'queued') {
+      const next = (store.db.prepare('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM messages').get() as { seq: number }).seq;
+      store.db.prepare(`UPDATE messages SET seq=?,state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1)
+        WHERE id=? AND state='queued'`).run(next, operationId, turn, Date.now(), message.id);
+      store.db.prepare("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='messages'").run(next);
+    } else {
+      store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1)
+        WHERE id=? AND state='pending'`).run(operationId, turn, Date.now(), message.id);
+    }
+    publishMessageUpdate(store, message.id);
+  }
 }
 
 /** Messages bound to one operation, used by failure paths to requeue or report. */

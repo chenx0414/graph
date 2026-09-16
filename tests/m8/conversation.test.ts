@@ -61,7 +61,7 @@ test('a conversation starts and chats without a project or feature task', async 
   expect(await runtime.user.list()).toEqual([]);
 });
 
-test('messages sent while the master is running queue into exactly one next turn', async () => {
+test('messages sent while the master is running are answered one queued turn at a time', async () => {
   const root = await temp('queue');
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -77,17 +77,26 @@ test('messages sent while the master is running queue into exactly one next turn
   await runtime.conversations.chat(created.conversationId, { text: '第二条', requestId: 'chat-2' });
   await runtime.conversations.chat(created.conversationId, { text: '第三条', requestId: 'chat-3' });
   const queued = await runtime.conversations.view(created.conversationId);
-  expect(queued.messages.filter(message => message.role === 'user').map(message => message.state)).toEqual(['delivered', 'pending', 'pending']);
+  expect(queued.messages.filter(message => message.role === 'user').map(message => message.state)).toEqual(['delivered', 'queued', 'queued']);
   release();
   await first;
   await runtime.host.runReady();
   expect(seen).toHaveLength(2);
-  // The second turn answers both queued messages once, in order.
-  expect(seen[1]!.context.messages?.map(message => message.text)).toEqual(['第二条', '第三条']);
+  expect(seen[1]!.context.messages?.map(message => message.text)).toEqual(['第二条']);
+  const middle = await runtime.conversations.view(created.conversationId);
+  expect(middle.messages.find(message => message.text === '第二条')?.state).toBe('delivered');
+  expect(middle.messages.find(message => message.text === '第三条')?.state).toBe('queued');
+  await runtime.host.runReady();
+  expect(seen).toHaveLength(3);
+  expect(seen[2]!.context.messages?.map(message => message.text)).toEqual(['第三条']);
   const after = await runtime.conversations.view(created.conversationId);
   expect(after.messages.filter(message => message.role === 'user').every(message => message.state === 'delivered')).toBe(true);
-  expect(after.messages.filter(message => message.role === 'assistant')).toHaveLength(2);
-  expect(after.messages.filter(message => message.role === 'assistant')[1]!.text).toBe('答：第二条 / 第三条');
+  expect(after.messages.filter(message => message.role === 'assistant')).toHaveLength(3);
+  expect(after.messages.filter(message => message.role === 'assistant').map(message => message.text)).toEqual([
+    '答：第一条',
+    '答：第二条',
+    '答：第三条',
+  ]);
 });
 
 test('the master prompt suggestion is stored with the assistant reply', async () => {

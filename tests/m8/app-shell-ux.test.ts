@@ -216,7 +216,7 @@ test('the composer suggestion and queue steering follow the three Enter states',
   // State 2: a nonempty prompt sent during output is queued.
   await input.fill('优先检查失败分支。');
   await input.press('Enter');
-  await page.locator('[data-testid="message-user"][data-state="pending"]').filter({ hasText: '优先检查失败分支。' }).waitFor();
+  await page.getByTestId('queued-message').filter({ hasText: '优先检查失败分支。' }).waitFor();
 
   // State 3: an empty composer with a queued message sends that queue as steering.
   await input.press('Enter');

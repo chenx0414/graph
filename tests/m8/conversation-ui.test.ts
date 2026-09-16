@@ -256,7 +256,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await includes(page, '已暂停');
   await page.getByTestId('chat-input').fill('重启后处理的消息。');
   await page.getByTestId('chat-send').click();
-  await page.waitForFunction(() => document.querySelector('[data-testid="message-user"][data-state="pending"]')?.textContent?.includes('重启后处理的消息'));
+  await page.getByTestId('queued-message').filter({ hasText: '重启后处理的消息' }).waitFor();
   await server.close();
   server = await start(root, provider.baseUrl, provider.modelRuntime);
   cleanup.push(() => server.close());

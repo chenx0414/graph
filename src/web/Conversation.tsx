@@ -374,7 +374,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
   const cachedMessages = Object.values(cache).sort((left, right) => left.seq - right.seq);
   const currentMessages = view.messages;
-  const queuedMessages = currentMessages.filter(message => message.role === 'user' && message.state === 'pending');
+  const queuedMessages = currentMessages.filter(message => message.role === 'user' && message.state === 'queued');
   const latestAssistant = [...cachedMessages].reverse().find(message => message.role === 'assistant');
   const promptSuggestion = !busy && !queuedMessages.length && typeof latestAssistant?.data?.suggestedPrompt === 'string'
     ? latestAssistant.data.suggestedPrompt.trim().slice(0, 500)
@@ -418,7 +418,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const detailTask = tasks.find(task => task.id === drawer);
   const drawerTitle = detailTask?.request ?? (drawer === 'proposal' && proposal ? `草稿 v${proposal.version}` : '详情');
   const hasDrawerContent = drawer === 'proposal' ? Boolean(proposal) : Boolean(detailTask);
-  const displayMessages = orderedMessages(cachedMessages);
+  const displayMessages = orderedMessages(cachedMessages.filter(message => !(message.role === 'user' && message.state === 'queued')));
   function openDrawer(next: string) {
     setDrawer(next);
     setDrawerOpen(true);
@@ -698,6 +698,31 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
 
       <div className="conversation-composer-wrap">
         {actionError && <ErrorBox message={actionError} />}
+        {queuedMessages.length > 0 && (
+          <div className="queued-messages" data-testid="queued-messages">
+            {queuedMessages.map((message, index) => {
+              const attachments = messageAttachments(message);
+              return (
+                <div className="queued-message" data-testid="queued-message" key={message.id}>
+                  <div className="queued-message-body">
+                    {message.text && <p>{message.text}</p>}
+                    {attachments.length > 0 && (
+                      <div className="queued-message-attachments">
+                        {attachments.map(attachment => (
+                          <span key={`${attachment.name}:${attachment.size}`}>
+                            <Icon name="paperclip" size={11} />
+                            {attachment.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <span className="queued-message-order">{index + 1}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <ChatComposer
           className="conversation-composer"
           value={text}

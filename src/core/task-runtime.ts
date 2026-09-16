@@ -3,7 +3,7 @@ import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
-import { appendMessage, conversationForTask, conversationRow, listMessages, pendingMessages, publishMessageUpdate, type MessageRow } from './conversation.ts';
+import { appendMessage, conversationForTask, conversationRow, deliverMessages, listMessages, pendingMessages, type MessageRow } from './conversation.ts';
 import { Execution } from './execution.ts';
 import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
@@ -682,17 +682,19 @@ export async function openTaskRuntime(options: {
       const attachments = cleanAttachments(input.attachments);
       const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'chat', text: input.text, attachments }, () => {
         if (!input.text.trim() && !attachments.length) throw new RuntimeError('invalid_input', 'A nonempty message or attachment is required');
+        const node = store.db.prepare("SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string } | undefined;
+        const anchor = store.task(conversation.anchor_task_id);
+        const state = anchor.paused || (node && ['preparing', 'running', 'blocked'].includes(node.status)) ? 'queued' : 'pending';
         const message = appendMessage(store, {
-          conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state: 'pending',
+          conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state,
           ...(attachments.length ? { data: { attachments } as unknown as Json } : {}),
         });
-        const node = store.db.prepare("SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string } | undefined;
         // A running turn picks the message up when it settles; a blocked one
         // waits for its open question; everything else queues a next turn now.
         if (node && !['preparing', 'running', 'blocked'].includes(node.status)) {
           store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id='master'").run(conversation.anchor_task_id);
         }
-        return { conversationId, messageId: message.id, state: 'pending', cursor: message.cursor, pending: node ? ['preparing', 'running'].includes(node.status) : false };
+        return { conversationId, messageId: message.id, state, cursor: message.cursor, pending: state === 'queued' };
       });
       if (options.autoWake) execution.kick();
       return receipt;
@@ -720,11 +722,7 @@ export async function openTaskRuntime(options: {
 
       const receipt = store.transaction(() => {
         const ids = messages.map(message => message.id);
-        const placeholders = ids.map(() => '?').join(',');
-        store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1)
-          WHERE id IN (${placeholders}) AND state='pending'`)
-          .run(active.id, operation.attempt, Date.now(), ...ids);
-        for (const id of ids) publishMessageUpdate(store, id);
+        deliverMessages(store, active.id, operation.attempt, messages);
         const cursor = store.event(conversation.anchor_task_id, 'message.steered', {
           operationId: active.id, messageIds: ids, requestId: input.requestId,
         });

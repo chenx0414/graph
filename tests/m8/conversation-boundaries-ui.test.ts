@@ -73,7 +73,7 @@ test('the conversation page surfaces master questions, live worker status, costs
   // A message queued behind the blocked master survives the reconciliation.
   await page.getByTestId('chat-input').fill('queued second message');
   await page.getByTestId('chat-send').click();
-  await page.waitForFunction(() => document.querySelector('[data-testid="message-user"][data-state="pending"]')?.textContent?.includes('queued second message'));
+  await page.getByTestId('queued-message').filter({ hasText: 'queued second message' }).waitFor();
   await page.getByTestId('usage-proof').fill('local fixture proof');
   await page.getByTestId('usage-input').fill('10');
   await page.getByTestId('usage-output').fill('5');

@@ -135,14 +135,14 @@ test('processed history messages update from pending to delivered without a relo
     return element?.getAttribute('data-state') === 'pending';
   });
 
-  // The master consumes the queue in normal kernel batches and every state
-  // change must reach the cache that loaded the record earlier.
+  // The master consumes one queued turn at a time and every state change must
+  // reach the cache that loaded the record earlier.
   for (let batch = 0; batch < 6; batch++) await runtime.host.runReady();
   await page.waitForFunction(() => {
     const element = [...document.querySelectorAll('[data-testid="message-user"]')].find(candidate => candidate.textContent?.includes('PENDING-000'));
     return element?.getAttribute('data-state') === 'delivered';
   }, undefined, { timeout: 15_000 });
-  const first = (await runtime.conversations.view(created.conversationId, { before: 5 })).messages[0]!;
+  const first = (await runtime.conversations.view(created.conversationId, { before: 5 })).messages.find(message => message.text === 'PENDING-000')!;
   expect(first.text).toBe('PENDING-000');
   expect(first.state).toBe('delivered');
 }, 120_000);

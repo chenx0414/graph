@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { realpath, symlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
-import { appendMessage, conversationDigest, conversationForTask, pendingMessages, publishMessageUpdate, releaseMessages } from './conversation.ts';
+import { appendMessage, conversationDigest, conversationForTask, deliverMessages, pendingMessages, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
@@ -337,7 +337,7 @@ export class Execution {
     const task = this.store.task(taskId);
     if (task.phase === 'chatting') {
       // Without a confirmed graph the conversation master is the only node that
-      // may run; one pending turn answers every message queued so far.
+      // may run; each turn consumes exactly one pending or queued user message.
       return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' AND json_extract(spec,'$.role')='master' ORDER BY rowid").all(taskId) as NodeRow[];
     }
     if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as NodeRow[];
@@ -516,7 +516,7 @@ export class Execution {
       const task = this.store.task(node.task_id);
       const attempt = (this.store.db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=? AND node_id=?').get(node.task_id, node.id) as { count: number }).count + 1;
       const conversation = task.phase === 'chatting' ? conversationForTask(this.store, node.task_id) : undefined;
-      const chatMessages = conversation ? pendingMessages(this.store, conversation.id) : [];
+      const chatMessages = conversation ? pendingMessages(this.store, conversation.id, 1) : [];
       const graph = task.phase === 'discussing' || task.phase === 'chatting' ? undefined : loadGraph(this.store, node.task_id);
       const dependencies = graph ? graph.inputs(node.id) : {};
       const dependencySources = graph ? graph.sources(node.id) : {};
@@ -586,9 +586,7 @@ export class Execution {
         // MAX(?, updated_at+1) keeps every state transition strictly newer
         // than the previous record even when two changes land in the same
         // millisecond, so incremental caches can order them reliably.
-        this.store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1) WHERE id IN (${chatMessages.map(() => '?').join(',')})`)
-          .run(operation.id, attempt, Date.now(), ...chatMessages.map(message => message.id));
-        for (const message of chatMessages) publishMessageUpdate(this.store, message.id);
+        deliverMessages(this.store, operation.id, attempt, chatMessages);
       }
       this.store.db.prepare("UPDATE activations SET input_versions=?,state='preparing' WHERE id=?").run(canonicalJson(inputVersions), node.activation_id);
       this.store.db.prepare("UPDATE nodes SET status='preparing' WHERE task_id=? AND id=?").run(node.task_id, node.id);

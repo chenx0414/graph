@@ -38,7 +38,7 @@
 
 ### 7. 重启与排队语义
 
-消息在操作创建事务内被标记 `delivered` 并绑定 `operation_id`；若操作在派发前失败（`not_sent`，如暂停/预算/适配器准备失败），消息回到 `pending` 以便重试；若已派发但结果未知（`interrupted`/`unknown`），消息保持绑定，由既有未知用量/恢复问题路径处理，不重复发送。主管运行期间到达的消息保持 `pending`，本轮结束后自动触发下一轮；`settle` 只在无待处理消息时把节点置为 `succeeded`。进程重启后 anchor 任务的 pending 消息与未完成操作按同一规则恢复。
+消息在操作创建事务内被标记 `delivered` 并绑定 `operation_id`；若操作在派发前失败（`not_sent`，如暂停/预算/适配器准备失败），消息回到 `pending` 以便重试；若已派发但结果未知（`interrupted`/`unknown`），消息保持绑定，由既有未知用量/恢复问题路径处理，不重复发送。主管运行、暂停或阻塞期间到达的消息标记为 `queued`，在界面右侧等待，按创建顺序每轮只消费一条，形成一问一答；本轮结束后自动触发队首消息的下一轮，`settle` 只在没有 pending/queued 消息时把节点置为 `succeeded`。进程重启后 anchor 任务的 pending/queued 消息与未完成操作按同一规则恢复。
 
 ## 后果与限制
 
