@@ -344,6 +344,48 @@ test('the composer inserts project file mentions and carries text attachments in
   await expect.poll(() => page.getByTestId('message-user').last().innerText()).toContain('notes.md');
 });
 
+test('the new-chat composer supports project mentions and attachments before submitting', async () => {
+  const root = await temp('new-chat-composer');
+  await mkdir(join(root, 'src'), { recursive: true });
+  await writeFile(join(root, 'src', 'index.ts'), 'export const value = 1;\n');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/?project=alpha`);
+  const input = page.getByTestId('new-conversation-input');
+  await input.waitFor();
+  await input.fill('先看 @src');
+  await page.getByTestId('mention-popover').waitFor();
+  await page.getByTestId('mention-file-src/index.ts').waitFor();
+  await page.getByTestId('mention-file-src/index.ts').click();
+  expect(await input.inputValue()).toBe('先看 @src/index.ts ');
+
+  await page.getByTestId('new-conversation-attachment-input').setInputFiles({
+    name: 'brief.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Brief\n\nNew chat attachment.\n'),
+  });
+  await page.getByTestId('composer-attachments').waitFor();
+  await page.getByTestId('new-conversation-start').click();
+  await page.waitForFunction(() => location.hash.startsWith('#/conversations/'));
+
+  const conversationId = await page.evaluate(() => location.hash.split('/').at(-1)!);
+  const view = await server.runtime.conversations.view(conversationId);
+  const message = view.messages.find(item => item.role === 'user')!;
+  expect(message.text).toContain('@src/index.ts');
+  expect((message.data as { attachments?: unknown } | null)?.attachments).toEqual([
+    { name: 'brief.md', type: 'text/markdown', size: 30, text: '# Brief\n\nNew chat attachment.\n' },
+  ]);
+});
+
 test('settings opens as a second page with its own navigation and return control', async () => {
   const root = await temp('settings-shell');
   const server = await openGraphServer({

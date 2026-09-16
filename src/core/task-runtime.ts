@@ -24,6 +24,28 @@ import type { OperationRow } from './execution.ts';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError, type AttachmentInput, type ProjectConfig, type Proposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
 
+function cleanAttachments(input: AttachmentInput[] | undefined) {
+  const attachments = input ?? [];
+  if (attachments.length > 5) throw new RuntimeError('invalid_input', 'A message can contain at most five attachments');
+  let totalBytes = 0;
+  return attachments.map(attachment => {
+    if (!attachment || typeof attachment.name !== 'string' || !attachment.name.trim() || attachment.name.length > 240) {
+      throw new RuntimeError('invalid_input', 'Attachment names must be nonempty and bounded');
+    }
+    if (typeof attachment.type !== 'string' || attachment.type.length > 160 || typeof attachment.text !== 'string') {
+      throw new RuntimeError('invalid_input', 'Attachment type and text are required');
+    }
+    const bytes = Buffer.byteLength(attachment.text, 'utf8');
+    if (!Number.isSafeInteger(attachment.size) || attachment.size < 0 || attachment.size > 262_144 || bytes > 262_144) {
+      throw new RuntimeError('invalid_input', `Attachment ${attachment.name} exceeds the 256 KiB text limit`);
+    }
+    totalBytes += bytes;
+    if (totalBytes > 524_288) throw new RuntimeError('invalid_input', 'Combined text attachments exceed 512 KiB');
+    if (attachment.text.includes('\0')) throw new RuntimeError('invalid_input', `Attachment ${attachment.name} is not a text file`);
+    return { name: attachment.name.trim(), type: attachment.type, size: attachment.size, text: attachment.text };
+  });
+}
+
 export async function openTaskRuntime(options: {
   stateDir: string;
   projects?: ProjectConfig[];
@@ -501,12 +523,13 @@ export async function openTaskRuntime(options: {
   // Conversation entry: chat messages are durable and queue behind the master
   // turn, while every formal change (bind, confirm) is a validated command.
   const conversations = {
-    async create(input: { projectId?: string; title?: string; text?: string; requestId: string }) {
+    async create(input: { projectId?: string; title?: string; text?: string; attachments?: AttachmentInput[]; requestId: string }) {
       ensureOpen();
       const conversationId = randomUUID();
       if (!input.projectId) await mkdir(join(stateDir, 'conversations', conversationId), { recursive: true, mode: 0o700 });
-      return store.command('conversations', input.requestId, { type: 'create', projectId: input.projectId ?? null, title: input.title ?? null, text: input.text ?? null }, () => {
-        if (input.text !== undefined && !input.text.trim()) throw new RuntimeError('invalid_input', 'A nonempty first message is required');
+      const attachments = cleanAttachments(input.attachments);
+      return store.command('conversations', input.requestId, { type: 'create', projectId: input.projectId ?? null, title: input.title ?? null, text: input.text ?? null, attachments }, () => {
+        if (!input.text?.trim() && !attachments.length) throw new RuntimeError('invalid_input', 'A nonempty first message or attachment is required');
         const projectId = input.projectId ?? null;
         let workspaceProjectId: string;
         if (projectId !== null) {
@@ -528,8 +551,11 @@ export async function openTaskRuntime(options: {
         if (options.master && masterModel()) createMasterNode(taskId);
         let cursor = store.event(taskId, 'conversation.created', { conversationId, projectId, title });
         let messageId: string | null = null;
-        if (input.text !== undefined && input.text.trim()) {
-          const message = appendMessage(store, { conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state: 'pending' });
+        if (input.text?.trim() || attachments.length) {
+          const message = appendMessage(store, {
+            conversationId, role: 'user', kind: 'chat', text: input.text?.trim() ?? '', state: 'pending',
+            ...(attachments.length ? { data: { attachments } as unknown as Json } : {}),
+          });
           messageId = message.id;
           if (options.master) store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id='master'").run(taskId);
           if (typeof message.cursor === 'number') cursor = message.cursor;
@@ -632,30 +658,12 @@ export async function openTaskRuntime(options: {
     async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[] }) {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
-      const attachments = input.attachments ?? [];
-      if (attachments.length > 5) throw new RuntimeError('invalid_input', 'A message can contain at most five attachments');
-      let totalBytes = 0;
-      const cleanAttachments = attachments.map(attachment => {
-        if (!attachment || typeof attachment.name !== 'string' || !attachment.name.trim() || attachment.name.length > 240) {
-          throw new RuntimeError('invalid_input', 'Attachment names must be nonempty and bounded');
-        }
-        if (typeof attachment.type !== 'string' || attachment.type.length > 160 || typeof attachment.text !== 'string') {
-          throw new RuntimeError('invalid_input', 'Attachment type and text are required');
-        }
-        const bytes = Buffer.byteLength(attachment.text, 'utf8');
-        if (!Number.isSafeInteger(attachment.size) || attachment.size < 0 || attachment.size > 262_144 || bytes > 262_144) {
-          throw new RuntimeError('invalid_input', `Attachment ${attachment.name} exceeds the 256 KiB text limit`);
-        }
-        totalBytes += bytes;
-        if (totalBytes > 524_288) throw new RuntimeError('invalid_input', 'Combined text attachments exceed 512 KiB');
-        if (attachment.text.includes('\0')) throw new RuntimeError('invalid_input', `Attachment ${attachment.name} is not a text file`);
-        return { name: attachment.name.trim(), type: attachment.type, size: attachment.size, text: attachment.text };
-      });
-      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'chat', text: input.text, attachments: cleanAttachments }, () => {
-        if (!input.text.trim() && !cleanAttachments.length) throw new RuntimeError('invalid_input', 'A nonempty message or attachment is required');
+      const attachments = cleanAttachments(input.attachments);
+      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'chat', text: input.text, attachments }, () => {
+        if (!input.text.trim() && !attachments.length) throw new RuntimeError('invalid_input', 'A nonempty message or attachment is required');
         const message = appendMessage(store, {
           conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state: 'pending',
-          ...(cleanAttachments.length ? { data: { attachments: cleanAttachments } as unknown as Json } : {}),
+          ...(attachments.length ? { data: { attachments } as unknown as Json } : {}),
         });
         const node = store.db.prepare("SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string } | undefined;
         // A running turn picks the message up when it settles; a blocked one

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
+import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { formatTokens } from './insights.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { Markdown } from './Markdown.tsx';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
-import { Button, Icon, Pill, StatusDot, toast } from './ui.tsx';
+import { Button, Icon, Pill, StatusDot } from './ui.tsx';
 
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[] };
 export type ConversationSummary = {
@@ -57,34 +58,8 @@ type ConversationView = {
   cursor: number;
 };
 type LiveTool = { toolCallId: string; name: string; summary: string; done: boolean };
-type Attachment = { name: string; type: string; size: number; text: string };
-type MentionEntry = { path: string; kind: 'file' | 'directory' };
-type Mention = { start: number; end: number; query: string };
 
-function mentionAt(value: string, cursor: number): Mention | null {
-  const match = /(?:^|\s)@([^\s@]*)$/.exec(value.slice(0, cursor));
-  if (!match) return null;
-  const query = match[1] ?? '';
-  return { start: cursor - query.length - 1, end: cursor, query };
-}
-
-const TEXT_ATTACHMENT_EXTENSIONS = new Set([
-  'md', 'markdown', 'txt', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'csv', 'tsv',
-  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'css', 'scss', 'html', 'xml', 'svg',
-  'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'sh', 'zsh', 'fish', 'sql', 'graphql',
-]);
-
-function isTextAttachment(file: File) {
-  if (file.type.startsWith('text/') || ['application/json', 'application/xml', 'image/svg+xml'].includes(file.type)) return true;
-  const extension = file.name.split('.').at(-1)?.toLowerCase() ?? '';
-  return TEXT_ATTACHMENT_EXTENSIONS.has(extension);
-}
-
-function attachmentSize(bytes: number) {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(bytes < 102_400 ? 1 : 0)} KB`;
-}
-
-function messageAttachments(message: ConversationMessage): Attachment[] {
+function messageAttachments(message: ConversationMessage): ChatAttachment[] {
   const value = message.data?.attachments;
   if (!Array.isArray(value)) return [];
   return value.flatMap(item => {
@@ -206,12 +181,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const { data: view, error, loading, reload } = useAsync(() => api<ConversationView>(`/api/conversations/${id}`), [id]);
   const { data: draftGraph } = useAsync(() => api<DraftGraph>(`/api/conversations/${id}/draft-graph`), [id, view?.proposal?.version]);
   const [text, setText] = useState('');
-  const [cursor, setCursor] = useState(0);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionEntries, setMentionEntries] = useState<MentionEntry[]>([]);
-  const [mentionLoading, setMentionLoading] = useState(false);
-  const [mentionIndex, setMentionIndex] = useState(0);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
@@ -225,9 +195,6 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const [drawer, setDrawer] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
-  const attachmentInputRef = useRef<HTMLInputElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const activeMention = mentionAt(text, cursor);
   // One stable, seq-ordered cache per mounted conversation. Every source
   // (latest window, history pages, streamed message records) merges by stable
   // ID and only newer records may replace older ones, so a late history
@@ -284,27 +251,6 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
     if (latest?.targetBranch) setBranch(latest.targetBranch);
   }, [view?.accepted]);
   useEffect(() => {
-    const mention = mentionAt(text, cursor);
-    if (!mentionOpen || !mention || !view?.projectId) {
-      setMentionEntries([]);
-      setMentionLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setMentionLoading(true);
-    const timer = setTimeout(() => {
-      void api<{ entries: MentionEntry[] }>(`/api/projects/${encodeURIComponent(view.projectId!)}/entries?q=${encodeURIComponent(mention.query)}&limit=40`)
-        .then(result => {
-          if (cancelled) return;
-          setMentionEntries(result.entries);
-          setMentionIndex(0);
-        })
-        .catch(() => { if (!cancelled) setMentionEntries([]); })
-        .finally(() => { if (!cancelled) setMentionLoading(false); });
-    }, 100);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [mentionOpen, text, cursor, view?.projectId]);
-  useEffect(() => {
     if (view) mergeMessages(view.messages);
   }, [view, mergeMessages]);
   useEffect(() => {
@@ -331,47 +277,12 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
     try { await action(); after?.(); reload(); onChanged?.(); }
     catch (reason) { setActionError(reason instanceof Error ? reason.message : String(reason)); }
   }
-  async function addAttachments(files: File[]) {
-    const next = [...attachments];
-    let rejected = 0;
-    for (const file of files) {
-      if (next.length >= 5) { rejected += 1; continue; }
-      if (!isTextAttachment(file) || file.size > 262_144) { rejected += 1; continue; }
-      try {
-        const body = await file.text();
-        if (body.includes('\0')) { rejected += 1; continue; }
-        if (!next.some(item => item.name === file.name && item.size === file.size)) {
-          next.push({ name: file.name, type: file.type || 'text/plain', size: file.size, text: body });
-        }
-      } catch {
-        rejected += 1;
-      }
-    }
-    setAttachments(next);
-    if (rejected) toast(`已忽略 ${rejected} 个不支持的附件；仅支持 256 KiB 以内的文本文件`, 'info');
-  }
-  function chooseMention(entry: MentionEntry) {
-    const mention = mentionAt(text, cursor);
-    if (!mention) return;
-    const token = `@${entry.path}${entry.kind === 'directory' ? '/' : ' '}`;
-    const next = `${text.slice(0, mention.start)}${token}${text.slice(mention.end)}`;
-    const nextCursor = mention.start + token.length;
-    setText(next);
-    setCursor(nextCursor);
-    setMentionIndex(0);
-    setMentionOpen(entry.kind === 'directory');
-    requestAnimationFrame(() => {
-      composerRef.current?.focus();
-      composerRef.current?.setSelectionRange(nextCursor, nextCursor);
-    });
-  }
   async function send() {
     const outgoing = text.trim();
     const outgoingAttachments = attachments;
     if (!outgoing && !outgoingAttachments.length) return;
     setText('');
     setAttachments([]);
-    setMentionOpen(false);
     setSending(true);
     setActionError('');
     try {
@@ -677,119 +588,17 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
 
       <div className="conversation-composer-wrap">
         {actionError && <ErrorBox message={actionError} />}
-        <div className="composer-positioner">
-          {mentionOpen && activeMention && (
-            <div className="mention-popover" data-testid="mention-popover">
-              <div className="mention-popover-head">
-                <span>项目文件与文件夹</span>
-                <span className="faint">@ {activeMention.query || '全部'}</span>
-              </div>
-              {!view.projectId ? (
-                <div className="mention-empty">当前对话未绑定项目</div>
-              ) : mentionLoading ? (
-                <div className="mention-empty">正在读取项目路径…</div>
-              ) : mentionEntries.length ? (
-                <div className="mention-list" role="listbox">
-                  {mentionEntries.map((entry, index) => (
-                    <button
-                      key={`${entry.kind}:${entry.path}`}
-                      type="button"
-                      className="mention-item"
-                      data-active={mentionIndex === index}
-                      role="option"
-                      aria-selected={mentionIndex === index}
-                      data-testid={`mention-${entry.kind}-${entry.path}`}
-                      onMouseDown={event => event.preventDefault()}
-                      onClick={() => chooseMention(entry)}
-                    >
-                      <Icon name={entry.kind === 'directory' ? 'folder' : 'file'} size={14} />
-                      <span className="grow truncate">{entry.path}{entry.kind === 'directory' ? '/' : ''}</span>
-                      <span className="faint">{entry.kind === 'directory' ? '文件夹' : '文件'}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="mention-empty">没有匹配的项目路径</div>
-              )}
-            </div>
-          )}
-          {attachments.length > 0 && (
-            <div className="composer-attachments" data-testid="composer-attachments">
-              {attachments.map(attachment => (
-                <span className="composer-attachment" key={`${attachment.name}:${attachment.size}`}>
-                  <Icon name="paperclip" size={12} />
-                  <span className="truncate">{attachment.name}</span>
-                  <span className="faint">{attachmentSize(attachment.size)}</span>
-                  <button type="button" onClick={() => setAttachments(current => current.filter(item => item !== attachment))} aria-label={`移除附件 ${attachment.name}`}>
-                    <Icon name="close" size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="conversation-composer">
-            <button type="button" className="icon-button composer-attach" data-testid="chat-attach" onClick={() => attachmentInputRef.current?.click()} aria-label="选择附件" title="选择附件">
-              <Icon name="paperclip" size={16} />
-            </button>
-            <input
-              ref={attachmentInputRef}
-              className="visually-hidden"
-              data-testid="chat-attachment-input"
-              type="file"
-              multiple
-              onChange={event => {
-                void addAttachments(Array.from(event.currentTarget.files ?? []));
-                event.currentTarget.value = '';
-              }}
-            />
-            <textarea
-              ref={composerRef}
-              data-testid="chat-input"
-              value={text}
-              onChange={event => {
-                const next = event.target.value;
-                const position = event.target.selectionStart ?? next.length;
-                setText(next);
-                setCursor(position);
-                setMentionOpen(Boolean(mentionAt(next, position)));
-              }}
-              onSelect={event => setCursor(event.currentTarget.selectionStart ?? text.length)}
-              onClick={event => setCursor(event.currentTarget.selectionStart ?? text.length)}
-              placeholder={busy ? '主 Agent 正在处理；继续输入会排队，不会被丢掉。' : '继续交流，输入 @ 引用项目文件…'}
-              onKeyDown={event => {
-                if (mentionOpen && activeMention) {
-                  if (event.key === 'ArrowDown' && mentionEntries.length) {
-                    event.preventDefault();
-                    setMentionIndex(index => (index + 1) % mentionEntries.length);
-                    return;
-                  }
-                  if (event.key === 'ArrowUp' && mentionEntries.length) {
-                    event.preventDefault();
-                    setMentionIndex(index => (index - 1 + mentionEntries.length) % mentionEntries.length);
-                    return;
-                  }
-                  if (event.key === 'Enter' || event.key === 'Tab') {
-                    event.preventDefault();
-                    if (mentionEntries.length) chooseMention(mentionEntries[mentionIndex] ?? mentionEntries[0]!);
-                    return;
-                  }
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setMentionOpen(false);
-                    return;
-                  }
-                }
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void send();
-                }
-              }}
-            />
-            <button type="button" className="icon-button primary" data-testid="chat-send" disabled={!text.trim() && !attachments.length} aria-busy={sending} onClick={() => void send()} aria-label="发送消息">
-              <Icon name="send" size={17} />
-            </button>
-          </div>
-        </div>
+        <ChatComposer
+          className="conversation-composer"
+          value={text}
+          onChange={setText}
+          attachments={attachments}
+          onAttachmentsChange={setAttachments}
+          projectId={view.projectId}
+          placeholder={busy ? '主 Agent 正在处理；继续输入会排队，不会被丢掉。' : '继续交流，输入 @ 引用项目文件…'}
+          onSend={() => void send()}
+          sendDisabled={!text.trim() && !attachments.length}
+        />
         <div className="composer-footer">
           <span className="composer-note">
             {busy ? <span data-testid="queued-hint">主 Agent 正在处理，消息会排队。</span> : 'Enter 发送，Shift + Enter 换行'}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api.ts';
+import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
@@ -348,19 +349,26 @@ function SidebarConversation({ conversation, active }: { conversation: Conversat
 
 function NewConversation({ settings, initialProjectId }: { settings: Settings_ | null; initialProjectId: string }) {
   const [text, setText] = useState('');
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [projectId, setProjectId] = useState(initialProjectId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => { setProjectId(initialProjectId); }, [initialProjectId]);
   async function start() {
-    if (!text.trim()) { setError('先用一句话说说你想解决什么。'); return; }
+    if (busy) return;
+    if (!text.trim() && !attachments.length) { setError('先说说你想解决什么，或添加一个附件。'); return; }
     setBusy(true);
     setError('');
     try {
       const created = await api<{ conversationId: string }>('/api/conversations', {
         method: 'POST',
-        body: JSON.stringify({ ...(projectId ? { projectId } : {}), text, requestId: `conv-${crypto.randomUUID()}` }),
+        body: JSON.stringify({
+          ...(projectId ? { projectId } : {}),
+          ...(text.trim() ? { text: text.trim() } : {}),
+          ...(attachments.length ? { attachments } : {}),
+          requestId: `conv-${crypto.randomUUID()}`,
+        }),
       });
       window.dispatchEvent(new Event('graph:conversations-changed'));
       location.hash = `#/conversations/${created.conversationId}`;
@@ -377,21 +385,22 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
         <h1>开始新对话</h1>
         <p>说清目标即可。主 Agent 会先调查、追问并给出方案草稿，确认后才开始执行。</p>
       </div>
-      <div className="new-chat-composer">
-        <textarea
-          data-testid="new-conversation-input"
-          value={text}
-          onChange={event => setText(event.target.value)}
-          placeholder="例如：这个项目很乱，先帮我看看能从哪里改进。"
-          onKeyDown={event => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              void start();
-            }
-          }}
-          autoFocus
-        />
-        <div className="composer-toolbar">
+      <ChatComposer
+        className="new-chat-composer"
+        value={text}
+        onChange={setText}
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        projectId={projectId || null}
+        placeholder="例如：这个项目很乱，先帮我看看能从哪里改进。"
+        onSend={() => void start()}
+        sendDisabled={busy || (!text.trim() && !attachments.length)}
+        autoFocus
+        inputTestId="new-conversation-input"
+        sendTestId="new-conversation-start"
+        attachTestId="new-conversation-attach"
+        attachmentInputTestId="new-conversation-attachment-input"
+        leftActions={(
           <select
             className="composer-project"
             data-testid="new-conversation-project"
@@ -402,12 +411,8 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
             <option value="">未绑定项目</option>
             {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
           </select>
-          <div className="composer-spacer" />
-          <button type="button" className="icon-button primary" data-testid="new-conversation-start" disabled={busy || !text.trim()} onClick={() => void start()} aria-label="发送并开始对话">
-            <Icon name="send" size={17} />
-          </button>
-        </div>
-      </div>
+        )}
+      />
       {error && <ErrorBox message={error} />}
     </section>
   );

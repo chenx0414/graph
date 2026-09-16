@@ -125,8 +125,14 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/conversations', async () => runtime.conversations.list());
   app.post('/api/conversations', async request => {
-    const body = request.body as { projectId?: string; title?: string; text?: string; requestId: string };
-    return runtime.conversations.create({ ...(body.projectId ? { projectId: body.projectId } : {}), ...(body.title ? { title: body.title } : {}), ...(body.text ? { text: body.text } : {}), requestId: body.requestId });
+    const body = request.body as { projectId?: string; title?: string; text?: string; attachments?: AttachmentInput[]; requestId: string };
+    return runtime.conversations.create({
+      ...(body.projectId ? { projectId: body.projectId } : {}),
+      ...(body.title ? { title: body.title } : {}),
+      ...(body.text ? { text: body.text } : {}),
+      ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
+      requestId: body.requestId,
+    });
   });
   app.get('/api/conversations/:conversationId', async request => {
     const params = request.params as { conversationId: string };
