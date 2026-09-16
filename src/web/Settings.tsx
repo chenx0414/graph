@@ -152,28 +152,23 @@ function ArchivedConversations() {
 }
 
 export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
-  const [guideOpen, setGuideOpen] = useState(openGuide);
   const [active, setActive] = useState(openGuide ? 'settings-wizard' : 'settings-overview');
   const [search, setSearch] = useState('');
   useEffect(() => {
-    setGuideOpen(openGuide);
-    if (openGuide) setActive('settings-wizard');
+    setActive(openGuide ? 'settings-wizard' : 'settings-overview');
   }, [openGuide]);
   const sections = [
     { id: 'settings-overview', label: '常规' },
     { id: 'settings-project', label: '项目' },
     { id: 'settings-git', label: 'Git 准备' },
-    { id: 'settings-credentials', label: '凭据' },
     { id: 'settings-models', label: '模型' },
     { id: 'settings-limits', label: '并发限制' },
-    { id: 'settings-preferences', label: '模型偏好' },
     { id: 'settings-archived', label: '归档对话' },
     { id: 'settings-wizard', label: '连接与配置向导' },
   ];
   const visibleSections = sections.filter(section => section.label.toLowerCase().includes(search.trim().toLowerCase()));
   function go(id: string) {
     setActive(id);
-    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
   return (
     <div className="settings-app-shell" data-testid="settings-shell">
@@ -205,20 +200,9 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         </header>
         <div className="settings-content">
           <div className="settings-root">
-            <details id="settings-wizard" className="settings-wizard" open={guideOpen} onToggle={event => setGuideOpen(event.currentTarget.open)}>
-              <summary>
-                <div>
-                  <strong>连接与配置向导</strong>
-                  <span>连接模型、补充项目和凭据；保存后立即生效。</span>
-                </div>
-                <Icon name="chevron" size={15} />
-              </summary>
-              <Setup />
-            </details>
-            <SettingsAdvanced />
-            <section id="settings-archived" className="settings-section">
-              <ArchivedConversations />
-            </section>
+            <SettingsAdvanced active={active} />
+            {active === 'settings-wizard' && <section id="settings-wizard" className="settings-section"><Setup /></section>}
+            {active === 'settings-archived' && <section id="settings-archived" className="settings-section"><ArchivedConversations /></section>}
           </div>
         </div>
       </main>
@@ -226,7 +210,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   );
 }
 
-function SettingsAdvanced() {
+function SettingsAdvanced({ active }: { active: string }) {
   const [draft, setDraft] = useState<RawConfig | null>(null);
   const [credentialState, setCredentialState] = useState<Record<string, boolean>>({});
   const [revision, setRevision] = useState(0);
@@ -257,7 +241,13 @@ function SettingsAdvanced() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void api<Startup>('/api/startup').then(startup => setEffectiveRevision(startup.effectiveRevision ?? null)).catch(() => undefined); }, []);
 
-  if (!draft) return <Card testid="settings-page"><p data-testid="settings-loading"><Spinner label="加载配置中…" /></p>{error && <p data-testid="config-error" style={{ color: 'var(--danger)' }}>{error.message}</p>}</Card>;
+  const configurationPage = ['settings-overview', 'settings-project', 'settings-git', 'settings-models', 'settings-limits'].includes(active);
+  if (!configurationPage) return <div className="settings-page-empty" data-testid="settings-page" data-page={active} />;
+  if (!draft) return (
+    <div className="settings-page-loading" data-testid="settings-page" data-page={active}>
+      <Card><p data-testid="settings-loading"><Spinner label="加载配置中…" /></p>{error && <p data-testid="config-error" style={{ color: 'var(--danger)' }}>{error.message}</p>}</Card>
+    </div>
+  );
 
   const mutate = (change: (next: RawConfig) => void) => {
     setDraft(current => {
@@ -332,7 +322,7 @@ function SettingsAdvanced() {
   const invalid = (field: string) => error?.field === field ? 'true' : undefined;
 
   return (
-    <div className="stagger" data-testid="settings-page">
+    <div className="stagger" data-testid="settings-page" data-page={active}>
       <section id="settings-overview" className="settings-section">
       <Card title="设置" icon="settings" subtitle="保存并应用；价格快照仅在你点击刷新时更新"
         actions={<>
@@ -352,7 +342,7 @@ function SettingsAdvanced() {
       </Card>
       </section>
 
-      <section id="settings-project" className="settings-section">
+      {active === 'settings-project' && <section id="settings-project" className="settings-section">
       <Card title="项目" icon="box" actions={<Button size="sm" icon="plus" data-testid="project-add" onClick={() => mutate(next => { next.projects = [...(next.projects ?? []), { id: 'new-project', root: '.' }]; })}>添加项目</Button>}>
         {!projects.length && <p className="muted">尚未配置项目。</p>}
         {projects.map((project, index) => (
@@ -369,13 +359,13 @@ function SettingsAdvanced() {
           </div>
         ))}
       </Card>
-      </section>
+      </section>}
 
-      <section id="settings-git" className="settings-section">
+      {active === 'settings-git' && <section id="settings-git" className="settings-section">
       <ProjectGitCard />
-      </section>
+      </section>}
 
-      <section id="settings-credentials" className="settings-section">
+      {active === 'settings-models' && <section id="settings-credentials" className="settings-section">
       <Card title="凭据引用" icon="link" subtitle="只保存环境变量名；密钥从不进入配置文件、接口响应或页面"
         actions={<Button size="sm" icon="plus" data-testid="credential-add" onClick={() => mutate(next => { next.credentials = { ...(next.credentials ?? {}), 'new-credential': { secretRef: 'GRAPH_NEW_KEY' } }; })}>添加凭据</Button>}>
         {!credentials.length && <p className="muted">尚未配置凭据。</p>}
@@ -427,9 +417,9 @@ function SettingsAdvanced() {
           </div>
         ))}
       </Card>
-      </section>
+      </section>}
 
-      <section id="settings-models" className="settings-section">
+      {active === 'settings-models' && <section id="settings-models" className="settings-section">
       <Card title="模型" icon="bolt" subtitle="连通性测试使用运行版本（effective revision），不读取未生效内容"
         actions={<Button size="sm" icon="plus" data-testid="model-add" onClick={() => mutate(next => { next.models = { entries: [...(next.models?.entries ?? []), { ...emptyModel(), credentialId: credentialIds[0] ?? '' }] }; })}>添加模型</Button>}>
         <p data-testid="test-connection-note" className="faint">连通性测试使用当前运行版本的绑定（effective revision），不读取未生效的保存内容。</p>
@@ -502,9 +492,9 @@ function SettingsAdvanced() {
           </div>
         ))}
       </Card>
-      </section>
+      </section>}
 
-      <section id="settings-limits" className="settings-section">
+      {active === 'settings-limits' && <section id="settings-limits" className="settings-section">
       <Card title="并发限制" icon="clock" subtitle="保存后立即对新请求生效；已有调用保留计数，不会中断在途请求">
         {!Object.keys(draft.limits?.credentials ?? {}).length && !Object.keys(draft.limits?.sharedGroups ?? {}).length && <p className="muted">尚未配置并发上限，使用运行时默认值。</p>}
         <div className="row">
@@ -526,9 +516,9 @@ function SettingsAdvanced() {
           <Button size="sm" icon="plus" data-testid="limit-group-add" onClick={() => mutate(next => { next.limits = { ...(next.limits ?? {}), sharedGroups: { ...(next.limits?.sharedGroups ?? {}), 'group-1': 4 } }; })}>添加共享组上限</Button>
         </div>
       </Card>
-      </section>
+      </section>}
 
-      <section id="settings-preferences" className="settings-section">
+      {active === 'settings-models' && <section id="settings-preferences" className="settings-section">
       <Card title="模型偏好" icon="spark" subtitle="按等级列出首选模型 ID（逗号分隔），用于自动选择模型">
         <div className="card-grid">
           {GRADES.map(grade => (
@@ -541,7 +531,7 @@ function SettingsAdvanced() {
           ))}
         </div>
       </Card>
-      </section>
+      </section>}
     </div>
   );
 }

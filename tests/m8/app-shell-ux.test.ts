@@ -93,6 +93,7 @@ test('conversations archive from the sidebar and restore from settings', async (
   await expect.poll(() => sidebar.innerText()).not.toContain('需要归档的对话');
 
   await page.goto(`${server.url}/#/settings`);
+  await page.locator('.settings-nav-item').filter({ hasText: '归档对话' }).click();
   await page.getByTestId(`archived-conversation-${created.conversationId}`).waitFor();
   expect(await page.getByTestId(`archived-conversation-${created.conversationId}`).innerText()).toContain('alpha');
   await page.getByTestId(`archived-conversation-${created.conversationId}`).getByRole('button', { name: '取消归档' }).click();
@@ -650,9 +651,19 @@ test('settings opens as a second page with its own navigation and return control
   await page.goto(`${server.url}/#/settings`);
   await page.getByTestId('settings-shell').waitFor();
   expect(await page.locator('.settings-back').getAttribute('href')).toBe('#/');
-  expect(await page.locator('.settings-nav').innerText()).toContain('项目');
-  expect(await page.locator('.settings-nav').innerText()).toContain('模型');
+  const nav = page.locator('.settings-nav');
+  expect(await nav.innerText()).toContain('项目');
+  expect(await nav.innerText()).toContain('模型');
+  expect(await nav.innerText()).not.toContain('凭据');
+  expect(await nav.innerText()).not.toContain('模型偏好');
   expect(await page.locator('.app-shell').count()).toBe(0);
+
+  await nav.getByRole('button', { name: '模型' }).click();
+  expect(await page.getByTestId('settings-page').getAttribute('data-page')).toBe('settings-models');
+  expect(await nav.getByRole('button', { name: '模型' }).getAttribute('data-active')).toBe('true');
+  await nav.getByRole('button', { name: '项目' }).click();
+  expect(await page.getByTestId('settings-page').getAttribute('data-page')).toBe('settings-project');
+  expect(await nav.getByRole('button', { name: '项目' }).getAttribute('data-active')).toBe('true');
 });
 
 test('the compact shell keeps the new-chat composer inside the viewport', async () => {

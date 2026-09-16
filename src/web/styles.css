@@ -1355,29 +1355,6 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .settings-content > .settings-root { width: min(880px, 100%); margin: 0 auto; }
 .settings-section { scroll-margin-top: 18px; }
 .settings-root { width: 100%; }
-.settings-wizard {
-  scroll-margin-top: 18px;
-  margin: 14px 0 18px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel-soft);
-  overflow: hidden;
-}
-.settings-wizard > summary {
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 15px;
-  cursor: pointer;
-}
-.settings-wizard > summary::-webkit-details-marker { display: none; }
-.settings-wizard > summary > div { flex: 1; min-width: 0; }
-.settings-wizard > summary strong { display: block; font-size: 14px; }
-.settings-wizard > summary span { display: block; color: var(--muted); font-size: 12px; }
-.settings-wizard[open] > summary svg { transform: rotate(90deg); }
-.settings-wizard .stagger { padding: 0 12px 12px; }
-
 /* ---------- misc ---------- */
 
 .section-title { display: flex; align-items: center; gap: 8px; margin: 22px 0 6px; }

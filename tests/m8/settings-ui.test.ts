@@ -88,11 +88,20 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('settings-page').waitFor();
   expect(await page.getByTestId('config-revision').innerText()).toBe('0');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
+  const openPage = (label: string) => page.locator('.settings-nav-item').filter({ hasText: label }).click();
+
+  await openPage('模型');
+  expect(await page.locator('#settings-credentials').isVisible()).toBe(true);
+  expect(await page.locator('#settings-models').isVisible()).toBe(true);
+  expect(await page.locator('#settings-preferences').isVisible()).toBe(true);
+  expect(await page.locator('#settings-project').count()).toBe(0);
   expect(await page.getByTestId('model-0-price').innerText()).toContain('价格未知');
   expect(await page.getByTestId('model-0-reasoning').isChecked()).toBe(true);
   expect(stub.requests).toHaveLength(0);
 
+  await openPage('项目');
   await page.getByTestId('project-0-id').fill('edited-project');
+  await openPage('模型');
   await page.getByTestId('credential-add').click();
   await page.getByTestId('credential-1-id').fill('second');
   await page.getByTestId('credential-1-secretRef').fill('GRAPH_SYNTH_KEY_2');
@@ -107,6 +116,10 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('model-1-context').fill('4096');
   await page.getByTestId('model-1-maxTokens').fill('256');
   await page.getByTestId('model-1-reasoning').uncheck();
+  await openPage('项目');
+  expect(await page.getByTestId('project-0-id').inputValue()).toBe('edited-project');
+  await openPage('模型');
+  await openPage('并发限制');
   await page.getByTestId('limit-group-add').click();
   await page.getByTestId('limit-group-0').fill('4');
   await page.getByTestId('settings-save').click();
@@ -119,12 +132,15 @@ test('the settings page edits and persists projects, models, credentials and lim
   // Persistence across a browser reload.
   await page.reload();
   await page.getByTestId('settings-page').waitFor();
+  await openPage('项目');
   expect(await page.getByTestId('project-0-id').inputValue()).toBe('edited-project');
+  await openPage('模型');
   expect(await page.getByTestId('model-1-id').inputValue()).toBe('second-model');
   expect(await page.getByTestId('model-1-reasoning').isChecked()).toBe(false);
   expect(await page.getByTestId('credential-1-group').inputValue()).toBe('group-1');
-  expect(await page.getByTestId('limit-group-0').inputValue()).toBe('4');
   expect(await page.getByTestId('credential-1-state').innerText()).toBe('缺失');
+  await openPage('并发限制');
+  expect(await page.getByTestId('limit-group-0').inputValue()).toBe('4');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
 
   // Persistence across a daemon restart on the same state and config.
@@ -142,6 +158,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   // The connection test only runs on an explicit click and reaches the right model and credential.
   await page.goto(`${restarted.url}/#/settings`);
   await page.getByTestId('settings-page').waitFor();
+  await openPage('模型');
   expect(stub.requests).toHaveLength(0);
   await page.getByTestId('model-0-test').click();
   await page.getByTestId('connection-result-0').waitFor();
