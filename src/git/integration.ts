@@ -7,7 +7,7 @@ import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
   abortMerge, commitAll, commitBaseline, detectRepo, directoryFingerprint, ensureWorktree, fastForwardCheckout, git,
   hasHead, initRepo, isClean, mergeRef, pathInside, repoFingerprint, resetHard, revParse, scopedDirty, updateRef, worktreeList,
-  checkedOutBranch,
+  checkedOutBranch, projectPathEntries,
 } from './git.ts';
 
 interface PreparationFields {
@@ -52,6 +52,13 @@ export class GitIntegration {
       projectId: row.project_id, state: row.state, repoRoot: row.repo_root, projectSubdir: row.project_subdir,
       branch: row.branch, baselineSha: row.baseline_sha, detail: row.detail ? JSON.parse(row.detail) as Json : null, updatedAt: row.updated_at,
     };
+  }
+
+  /** Read-only project paths for chat @-references. */
+  visiblePaths(projectId: string, query = '', limit = 80) {
+    const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(projectId) as { root: string } | undefined;
+    if (!project) throw new RuntimeError('not_found', `Unknown project ${projectId}`);
+    return projectPathEntries(project.root, { stateDir: this.stateDir, query, limit });
   }
 
   private recordPreparation(projectId: string, state: string, fields: PreparationFields = {}) {

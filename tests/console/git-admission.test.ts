@@ -101,6 +101,28 @@ test('sensitive and generated files stay out of the baseline but on disk', async
   expect(await stat(join(rootPath, 'node_modules', 'pkg', 'index.js'))).toBeTruthy();
 }, 60_000);
 
+test('project path completion returns visible files and folders without sensitive paths', async () => {
+  const { rootPath } = await project('path-completion');
+  await mkdir(join(rootPath, 'src', 'components'), { recursive: true });
+  await writeFile(join(rootPath, 'src', 'index.ts'), 'export {};\n');
+  await writeFile(join(rootPath, 'src', 'components', 'Button.tsx'), 'export const Button = 1;\n');
+  await writeFile(join(rootPath, 'README.md'), '# project\n');
+  await writeFile(join(rootPath, '.env'), 'SECRET=1\n');
+  await mkdir(join(rootPath, 'node_modules', 'pkg'), { recursive: true });
+  await writeFile(join(rootPath, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+  const runtime = await runtimeFor(rootPath, {});
+
+  const all = runtime.projectEntries('p', '', 100);
+  expect(all).toContainEqual({ path: 'src', kind: 'directory' });
+  expect(all).toContainEqual({ path: 'src/index.ts', kind: 'file' });
+  expect(all).toContainEqual({ path: 'src/components', kind: 'directory' });
+  expect(all).toContainEqual({ path: 'README.md', kind: 'file' });
+  expect(all.some(entry => entry.path.includes('.env'))).toBe(false);
+  expect(all.some(entry => entry.path.includes('node_modules'))).toBe(false);
+  expect(all.some(entry => entry.path.startsWith('state'))).toBe(false);
+  expect(runtime.projectEntries('p', 'button', 20)).toEqual([{ path: 'src/components/Button.tsx', kind: 'file' }]);
+}, 60_000);
+
 test('a clean repository with HEAD is ready without a new commit', async () => {
   const { rootPath } = await project('clean', { git: true });
   const before = shell(rootPath, ['rev-parse', 'HEAD']);

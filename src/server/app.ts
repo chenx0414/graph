@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Fastify from 'fastify';
-import { RuntimeError } from '../core/types.ts';
+import { RuntimeError, type AttachmentInput } from '../core/types.ts';
 import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
 import { layoutGraph } from './layout.ts';
@@ -116,6 +116,13 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const query = request.query as { limit?: string };
     return { history: runtime.inboxHistory(query.limit ? Number(query.limit) : undefined) };
   });
+  app.get('/api/projects/:projectId/entries', async request => {
+    const params = request.params as { projectId: string };
+    const query = request.query as { q?: string; limit?: string };
+    return {
+      entries: runtime.projectEntries(params.projectId, query.q ?? '', query.limit ? Number(query.limit) : 80),
+    };
+  });
   app.get('/api/conversations', async () => runtime.conversations.list());
   app.post('/api/conversations', async request => {
     const body = request.body as { projectId?: string; title?: string; text?: string; requestId: string };
@@ -143,8 +150,12 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.post('/api/conversations/:conversationId/messages', async request => {
     const params = request.params as { conversationId: string };
-    const body = request.body as { text: string; requestId: string };
-    return runtime.conversations.chat(params.conversationId, { text: body.text, requestId: body.requestId });
+    const body = request.body as { text: string; requestId: string; attachments?: AttachmentInput[] };
+    return runtime.conversations.chat(params.conversationId, {
+      text: body.text,
+      requestId: body.requestId,
+      ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
+    });
   });
   app.post('/api/conversations/:conversationId/bind', async request => {
     const params = request.params as { conversationId: string };

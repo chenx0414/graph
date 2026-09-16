@@ -3,12 +3,20 @@ import type { NodeSpec, Operation } from '../core/types.ts';
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
 export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions: string[]; capabilities: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string }) {
   const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact => `${artifact.path} (${artifact.digest})`)));
+  const attachments = (operation.context.messages ?? []).flatMap(message =>
+    (message.attachments ?? []).map(attachment => [
+      `- ${attachment.name} (${attachment.size} bytes, ${attachment.type || 'text/plain'})`,
+      '```text',
+      attachment.text,
+      '```',
+    ].join('\n')));
   return [
     `Request: ${extra.request}`,
     `Requirement version: ${operation.requirementVersion}`,
     operation.context.messages?.length
       ? `User messages:\n${operation.context.messages.map(message => `- ${message.id ? `[${message.id}] ` : ''}(v${message.requirementVersion}) ${message.text}`).join('\n')}`
       : '',
+    attachments.length ? `Attachments supplied by the user:\n${attachments.join('\n')}` : '',
     extra.conversation ? `Conversation and execution status:\n${extra.conversation}` : '',
     extra.decisions ? `Decisions and constraints from the conversation:\n${extra.decisions}` : '',
     extra.summary ? `Summary: ${extra.summary}` : '',

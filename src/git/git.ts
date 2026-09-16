@@ -105,6 +105,75 @@ export function baselineExcluded(relPath: string, stateRel: string | null) {
   return false;
 }
 
+export interface ProjectPathEntry { path: string; kind: 'file' | 'directory' }
+
+/** Visible project paths for chat references. The same exclusion policy as a
+ * local baseline applies, so credentials, Git metadata and generated trees
+ * never enter the suggestion list. */
+export function projectPathEntries(root: string, options: { stateDir?: string; query?: string; limit?: number } = {}): ProjectPathEntry[] {
+  const projectRoot = real(root);
+  const repo = detectRepo(projectRoot);
+  const files = new Set<string>();
+  const directories = new Set<string>();
+  const addFile = (path: string) => {
+    const normalized = path.replace(/\\/g, '/').replace(/^\.\//, '');
+    if (!normalized) return;
+    files.add(normalized);
+    const parts = normalized.split('/');
+    for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join('/'));
+  };
+  if (repo) {
+    const scope = relative(repo, projectRoot).split(sep).join('/').replace(/^\.$/, '');
+    const prefix = scope ? `${scope}/` : '';
+    const stateRel = options.stateDir && pathInside(repo, options.stateDir)
+      ? relative(repo, real(options.stateDir)).split(sep).join('/')
+      : null;
+    const raw = gitRaw(repo, ['ls-files', '-co', '--exclude-standard', '-z', '--', scope || '.']).stdout;
+    for (const item of raw.split('\0')) {
+      const repoPath = item.replace(/\\/g, '/');
+      if (!repoPath || !inScope(repoPath, scope || '.') || baselineExcluded(repoPath, stateRel)) continue;
+      addFile(prefix && repoPath.startsWith(prefix) ? repoPath.slice(prefix.length) : repoPath);
+    }
+  } else {
+    const stateRel = options.stateDir && pathInside(projectRoot, options.stateDir)
+      ? relative(projectRoot, real(options.stateDir)).split(sep).join('/')
+      : null;
+    let count = 0;
+    const walk = (dir: string, base: string) => {
+      if (count > 5_000) return;
+      let entries;
+      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+        const path = base ? `${base}/${entry.name}` : entry.name;
+        if (baselineExcluded(path, stateRel)) continue;
+        if (entry.isDirectory()) {
+          directories.add(path);
+          walk(join(dir, entry.name), path);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        count += 1;
+        addFile(path);
+      }
+    };
+    walk(projectRoot, '');
+  }
+  const query = (options.query ?? '').trim().replace(/\\/g, '/').toLowerCase();
+  const entries: ProjectPathEntry[] = [
+    ...[...directories].map(path => ({ path, kind: 'directory' as const })),
+    ...[...files].map(path => ({ path, kind: 'file' as const })),
+  ].filter(entry => !query || entry.path.toLowerCase().includes(query));
+  entries.sort((left, right) => {
+    const score = (entry: ProjectPathEntry) => {
+      const lower = entry.path.toLowerCase();
+      const base = lower.split('/').at(-1) ?? lower;
+      return query ? (lower.startsWith(query) ? 0 : base.startsWith(query) ? 1 : 2) : 0;
+    };
+    return score(left) - score(right) || left.path.length - right.path.length || left.path.localeCompare(right.path);
+  });
+  return entries.slice(0, Math.min(Math.max(options.limit ?? 80, 1), 200));
+}
+
 interface StatusRecord { code: string; path: string; origPath?: string }
 
 /** Parse `git status --porcelain=v1 -z` into records (rename/copy carry the

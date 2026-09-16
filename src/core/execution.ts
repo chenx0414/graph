@@ -14,7 +14,7 @@ import type { GitIntegration } from '../git/integration.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
 import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
 import type { RestrictedGate } from '../runtime/restricted-process.ts';
-import { RuntimeError, type ActionAdapter, type Answer, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal, type TokenUsage } from './types.ts';
+import { RuntimeError, type ActionAdapter, type Answer, type AttachmentInput, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal, type TokenUsage } from './types.ts';
 
 type NodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
 export type OperationRow = { id: string; task_id: string; node_id: string; instance_id: string | null; generation: number; spec: string; state: string; reserved: number; worker_active: number; result: string | null; usage: string | null; activation_id: string };
@@ -513,7 +513,13 @@ export class Execution {
       const answers = (this.store.db.prepare("SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind='waiting' AND status='resolved' ORDER BY rowid").all(node.task_id, node.id) as { id: string; answer: string }[])
         .map(row => ({ questionId: row.id, value: (JSON.parse(row.answer) as { value: Json }).value }));
       const messages = task.phase === 'chatting'
-        ? chatMessages.map(message => ({ id: message.id, text: message.text, requirementVersion: task.requirement_version }))
+        ? chatMessages.map(message => {
+            const data = message.data ? JSON.parse(message.data) as { attachments?: AttachmentInput[] } : null;
+            return {
+              id: message.id, text: message.text, requirementVersion: task.requirement_version,
+              ...(data?.attachments?.length ? { attachments: data.attachments } : {}),
+            };
+          })
         : (this.store.db.prepare("SELECT data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor").all(node.task_id) as { data: string }[])
           .map(row => JSON.parse(row.data) as { text?: string; request?: string; requirementVersion?: number })
           .map(message => ({ text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 }));

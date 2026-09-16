@@ -297,6 +297,53 @@ test('the inbox keeps resolved questions in history', async () => {
   expect(history).toContain('处理结果');
 });
 
+test('the composer inserts project file mentions and carries text attachments into the message ledger', async () => {
+  const root = await temp('composer-context');
+  await mkdir(join(root, 'src'), { recursive: true });
+  await writeFile(join(root, 'src', 'index.ts'), 'export const value = 1;\n');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论', requestId: 'composer-context' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  const input = page.getByTestId('chat-input');
+  await input.waitFor();
+  await input.fill('请看 @src');
+  await page.getByTestId('mention-popover').waitFor();
+  await page.getByTestId('mention-file-src/index.ts').waitFor();
+  await input.press('ArrowDown');
+  await input.press('Enter');
+  expect(await input.inputValue()).toBe('请看 @src/index.ts ');
+
+  await page.getByTestId('chat-attachment-input').setInputFiles({
+    name: 'notes.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Notes\n\nAttachment body.\n'),
+  });
+  await page.getByTestId('composer-attachments').waitFor();
+  expect(await page.getByTestId('composer-attachments').innerText()).toContain('notes.md');
+  await page.getByTestId('chat-send').click();
+  await expect.poll(async () => {
+    const view = await server.runtime.conversations.view(created.conversationId);
+    return ((view.messages.at(-1)?.data as { attachments?: unknown } | null)?.attachments) instanceof Array;
+  }).toBe(true);
+  const view = await server.runtime.conversations.view(created.conversationId);
+  const message = view.messages.at(-1)!;
+  expect(message.text).toContain('@src/index.ts');
+  expect((message.data as { attachments?: unknown } | null)?.attachments).toEqual([
+    { name: 'notes.md', type: 'text/markdown', size: 26, text: '# Notes\n\nAttachment body.\n' },
+  ]);
+  await expect.poll(() => page.getByTestId('message-user').last().innerText()).toContain('notes.md');
+});
+
 test('settings opens as a second page with its own navigation and return control', async () => {
   const root = await temp('settings-shell');
   const server = await openGraphServer({

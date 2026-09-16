@@ -46,13 +46,19 @@ export interface Operation {
   id: string; taskId: string; nodeId: string; instanceId: string | null; generation: number;
   attempt: number; kind: NodeSpec['kind']; action: string; input: Json; dependencies: Record<string, Json>;
   proposalVersion: number; requirementVersion: number;
-  context: { previousOutput: Json; answers: { questionId: string; value: Json }[]; messages?: { id?: string; text: string; requirementVersion: number }[]; briefing?: string };
+  context: {
+    previousOutput: Json;
+    answers: { questionId: string; value: Json }[];
+    messages?: { id?: string; text: string; requirementVersion: number; attachments?: AttachmentInput[] }[];
+    briefing?: string;
+  };
   grants: string[];
   activationId: string; graphVersion: number;
   dependencySources: Record<string, DependencySource[]>;
   inputVersions: Record<string, { activationId: string; outputVersion: number }[]>;
   workspace?: string;
 }
+export interface AttachmentInput { name: string; type: string; size: number; text: string }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
   question?: { prompt: string; grant?: string };
