@@ -96,3 +96,15 @@ GitHub Issue：当前仓库没有 remote，本文件是 Issue 草稿。指定目
 - 会话 telemetry 会从真实主管 invocation 的 cache/input/context 用量生成，并受配置的 contextWindow 限制。
 - 收件箱历史在主流程完成问题答复后可见。
 - 设置页在宽屏和窄屏均无横向溢出。
+
+## 第三轮细节调整
+
+- 问题页始终先显示“当前没有待处理问题”卡片；即使已有历史记录，也不会用历史卡替换当前状态卡。
+- Skills、MCP、Agent.md 三个资源卡片增加访达图标。桌面桥只接受这三种固定资源类型，不接受页面传入任意路径；Skills 与 MCP 打开实际 capabilities 安装根目录，Agent.md 使用 `stateDir/agent-md`。
+- Agent 组合条目改为明确的按钮行，详情在右侧抽屉中打开。抽屉立即显示并保留原有版本、能力、经历和统计内容，避免详情渲染在页面下方而被误认为点击无响应。
+
+第三轮补充验证：
+
+- 资源目录解析仅映射到两个白名单根目录，非法类型由 IPC 处理器拒绝。
+- 即使收件箱已有历史，当前状态卡仍可见。
+- 点击 Agent 组合会打开 `resource-detail-drawer` 并加载对应详情。

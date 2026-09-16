@@ -132,6 +132,7 @@ test('the project picker adds a local project to the sidebar', async () => {
     window.graph = {
       isDesktop: true,
       pickDirectory: async () => path,
+      openResource: async () => ({ opened: true }),
       saveSecret: async () => ({ stored: true, applied: true }),
       secretStatus: async () => ({}),
       relaunch: async () => ({ url: location.origin }),
@@ -222,16 +223,41 @@ test('the resource library groups reusable assets and includes graph architectur
     startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
   });
   cleanup.push(() => server.close());
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'resource-coder');
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  await page.addInitScript(() => {
+    (window as Window & { __openedResourceKinds?: string[] }).__openedResourceKinds = [];
+    window.graph = {
+      isDesktop: true,
+      pickDirectory: async () => null,
+      openResource: async kind => {
+        (window as Window & { __openedResourceKinds?: string[] }).__openedResourceKinds!.push(kind);
+        return { opened: true, path: `/tmp/${kind}` };
+      },
+      saveSecret: async () => ({ stored: true, applied: true }),
+      secretStatus: async () => ({}),
+      relaunch: async () => ({ url: location.origin }),
+    };
+  });
   await page.goto(`${server.url}/#/catalog`);
   await page.getByTestId('catalog').waitFor();
   expect(await page.getByTestId('resource-skills').innerText()).toContain('Skills 库');
   expect(await page.getByTestId('resource-mcp').innerText()).toContain('MCP 库');
   expect(await page.getByTestId('resource-agent-md').innerText()).toContain('Agent.md 库');
   expect(await page.getByTestId('resource-agents').innerText()).toContain('Agent 组合库');
+  await page.getByTestId('resource-open-skills').click();
+  await page.getByTestId('resource-open-mcp').click();
+  await page.getByTestId('resource-open-agent-md').click();
+  expect(await page.evaluate(() => (window as Window & { __openedResourceKinds?: string[] }).__openedResourceKinds)).toEqual(['skills', 'mcp', 'agent-md']);
+  await page.getByTestId('definition-coder').click();
+  await page.getByTestId('resource-detail-drawer').waitFor();
+  expect(await page.getByTestId('resource-detail-drawer').innerText()).toContain('coder');
+  await page.getByTestId('talent-coder').waitFor();
+  await page.getByTestId('resource-detail-close').click();
+  await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
   const architectures = await page.getByTestId('architecture-library').innerText();
   expect(architectures).toContain('主管与工人');
   expect(architectures).toContain('评估与优化');
@@ -264,6 +290,7 @@ test('the inbox keeps resolved questions in history', async () => {
   }));
   await page.goto(`${server.url}/#/inbox`);
   await page.getByTestId('inbox-history').waitFor();
+  expect(await page.getByTestId('inbox-empty').isVisible()).toBe(true);
   const history = await page.getByTestId('inbox-history').innerText();
   expect(history).toContain('检查项目结构');
   expect(history).toContain('允许读取项目目录');

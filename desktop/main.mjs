@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   absolutePaths, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
-  parseBannerAddress, resolveAppPaths, saveSecrets, tailText,
+  parseBannerAddress, resolveAppPaths, resourceDirectory, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
 
@@ -212,6 +212,15 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('graph:pick-directory', async () => {
       const result = await dialog.showOpenDialog(window ?? undefined, { properties: ['openDirectory', 'createDirectory'] });
       return result.canceled ? null : result.filePaths[0] ?? null;
+    });
+    ipcMain.handle('graph:open-resource', async (_event, kind) => {
+      if (kind !== 'skills' && kind !== 'mcp' && kind !== 'agent-md') {
+        return { opened: false, message: 'unknown resource library' };
+      }
+      const path = resourceDirectory(currentPaths().stateDir, kind);
+      mkdirSync(path, { recursive: true });
+      const message = await shell.openPath(path);
+      return message ? { opened: false, path, message } : { opened: true, path };
     });
     ipcMain.handle('graph:save-secret', async (_event, ref, value) => {
       const request = applySecretRequest(secrets, ref, value);

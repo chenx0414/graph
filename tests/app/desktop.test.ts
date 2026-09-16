@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
-  resolveDaemonMode, saveSecrets, tailText, taskNotifications, trayIconPath, trayMenuItems,
+  resolveDaemonMode, resourceDirectory, saveSecrets, tailText, taskNotifications, trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
 
@@ -41,6 +41,12 @@ describe('desktop app paths', () => {
     expect(resolved.root).toBe('/Applications/Graph.app/Contents/Resources/app');
     expect(resolved.webDir).toBe('/Applications/Graph.app/Contents/Resources/app/web');
     expect(resolved.serverEntry).toBe('/Applications/Graph.app/Contents/Resources/app/src/server/cli.ts');
+  });
+
+  test('resource libraries resolve to allowlisted local storage roots', () => {
+    expect(resourceDirectory('/state', 'skills')).toBe('/state/capabilities');
+    expect(resourceDirectory('/state', 'mcp')).toBe('/state/capabilities');
+    expect(resourceDirectory('/state', 'agent-md')).toBe('/state/agent-md');
   });
 });
 

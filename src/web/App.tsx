@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
@@ -477,6 +478,7 @@ function TalentPanel({ id }: { id: string }) {
 
 function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const capabilities = settings?.capabilities ?? [];
   const definitions = settings?.definitions ?? [];
   const groups = [
@@ -495,6 +497,14 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
     { name: '对抗式验证', flow: 'W ⇄ R', description: '审查者主动寻找反例和证据，有效反例会阻塞通过。' },
     { name: '多视角与评委', flow: 'W → J1,J2 → J', description: '多个维度独立判断，再由评委按硬性规则汇总结果。' },
   ];
+  async function openResource(kind: 'skills' | 'mcp' | 'agent-md') {
+    if (!bridge?.openResource) {
+      toast('请在桌面 APP 中使用访达打开资源目录', 'info');
+      return;
+    }
+    const result = await bridge.openResource(kind);
+    if (!result.opened) toast(`打开目录失败：${result.message ?? '系统未返回原因'}`, 'danger');
+  }
   return (
     <div className="stagger resource-library" data-testid="catalog">
       <div className="resource-section-head">
@@ -505,11 +515,26 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
       </div>
       <div className="resource-grid">
         {groups.map(group => (
-          <Card key={group.id} testid={`resource-${group.id}`} title={group.title} icon={group.icon} subtitle={`${group.items.length} 项`}>
+          <Card
+            key={group.id}
+            testid={`resource-${group.id}`}
+            title={group.title}
+            icon={group.icon}
+            subtitle={`${group.items.length} 项`}
+            actions={['skills', 'mcp', 'agent-md'].includes(group.id) ? (
+              <button type="button" className="icon-button" data-testid={`resource-open-${group.id}`} onClick={() => void openResource(group.id as 'skills' | 'mcp' | 'agent-md')} title={`在访达中打开${group.title}目录`} aria-label={`在访达中打开${group.title}目录`}>
+                <Icon name="folder" size={16} />
+              </button>
+            ) : undefined}
+          >
             {group.id === 'agents' ? (
-              <div className="chip-row">
+              <div className="resource-agent-list">
                 {definitions.map(item => (
-                  <Button key={item.id} size="sm" variant={selected === item.id ? 'primary' : 'default'} data-testid={`definition-${item.id}`} onClick={() => setSelected(current => current === item.id ? null : item.id)}>{item.id}@{item.version}</Button>
+                  <button key={item.id} type="button" className="resource-agent-row" data-testid={`definition-${item.id}`} onClick={() => setSelected(item.id)}>
+                    <Icon name="catalog" size={16} />
+                    <span className="grow">{item.id}@{item.version}</span>
+                    <Icon name="chevron" size={14} />
+                  </button>
                 ))}
                 {!definitions.length && <span className="muted">暂无 Agent 组合</span>}
               </div>
@@ -536,7 +561,25 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
           ))}
         </div>
       </Card>
-      {selected && <Card title={`Agent 组合详情 ${selected}`} icon="catalog" actions={<Button size="sm" variant="ghost" onClick={() => setSelected(null)}>关闭</Button>}><TalentPanel id={selected} /></Card>}
+      {selected && createPortal(
+        <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelected(null); }}>
+          <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`Agent 组合详情 ${selected}`}>
+            <header className="resource-detail-head">
+              <div>
+                <h2>{selected}</h2>
+                <p>Agent 组合详情</p>
+              </div>
+              <button type="button" className="icon-button" data-testid="resource-detail-close" onClick={() => setSelected(null)} aria-label="关闭详情">
+                <Icon name="close" size={16} />
+              </button>
+            </header>
+            <div className="resource-detail-body">
+              <TalentPanel id={selected} />
+            </div>
+          </aside>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -569,7 +612,7 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
     <div className="stagger" data-testid="inbox">
       {error && <ErrorBox message={error} />}
       {historyError && <ErrorBox message={historyError} />}
-      {!pending.length && !(inbox?.history.length) && !historyLoading && (
+      {!pending.length && (
         <Card title="问题收件箱" icon="inbox">
           <Empty icon="check" title="没有待处理问题" hint={<span data-testid="inbox-empty">所有任务都在正常推进；需要人工介入时会出现在这里。</span>} />
         </Card>
