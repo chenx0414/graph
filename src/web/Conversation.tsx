@@ -3,6 +3,7 @@ import { api } from './api.ts';
 import { formatTokens } from './insights.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
+import { Markdown } from './Markdown.tsx';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
 import { Button, Icon, Pill, StatusDot } from './ui.tsx';
@@ -72,7 +73,7 @@ function MessageRow({ message }: { message: ConversationMessage }) {
       <div className="message-row" data-role="assistant" data-testid="message-assistant">
         <div className="message-stack">
           <div className="message-author">主 Agent</div>
-          <div className="message-content"><p>{message.text}</p></div>
+          <div className="message-content"><Markdown text={message.text} /></div>
         </div>
       </div>
     );
@@ -81,6 +82,29 @@ function MessageRow({ message }: { message: ConversationMessage }) {
     return <div className="message-row" data-role="tool" data-testid="message-tool"><div className="message-stack"><div className="message-content">工具 · {message.text}</div></div></div>;
   }
   return <div className="message-row" data-role="system" data-testid="message-system"><div className="message-stack"><div className="message-content">{message.text}</div></div></div>;
+}
+
+/** Tool activity belongs to the assistant turn, but the final answer should
+ * close that turn. Move adjacent tool records ahead of the answer they support
+ * without changing the order of independent turns. */
+function orderedMessages(messages: ConversationMessage[]) {
+  const ordered: ConversationMessage[] = [];
+  for (let index = 0; index < messages.length;) {
+    if (messages[index]!.role !== 'assistant') {
+      ordered.push(messages[index]!);
+      index += 1;
+      continue;
+    }
+    const answers: ConversationMessage[] = [];
+    const tools: ConversationMessage[] = [];
+    while (index < messages.length && (messages[index]!.role === 'assistant' || messages[index]!.role === 'tool')) {
+      if (messages[index]!.role === 'assistant') answers.push(messages[index]!);
+      else tools.push(messages[index]!);
+      index += 1;
+    }
+    ordered.push(...tools, ...answers);
+  }
+  return ordered;
 }
 
 export function ConversationPanel({ id, settings, onChanged }: { id: string; settings: Settings | null; onChanged?: () => void }) {
@@ -98,6 +122,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const [forwardCursor, setForwardCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   // One stable, seq-ordered cache per mounted conversation. Every source
   // (latest window, history pages, streamed message records) merges by stable
@@ -182,17 +207,17 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
     catch (reason) { setActionError(reason instanceof Error ? reason.message : String(reason)); }
   }
   async function send() {
-    const outgoing = text;
-    if (!outgoing.trim()) return;
+    const outgoing = text.trim();
+    if (!outgoing) return;
+    setText('');
     setSending(true);
     setActionError('');
     try {
       await api(`/api/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ text: outgoing, requestId: `msg-${crypto.randomUUID()}` }) });
-      // A message typed while this send was in flight must survive.
-      setText(current => current === outgoing ? '' : current);
       reload();
       onChanged?.();
     } catch (reason) {
+      setText(current => current || outgoing);
       setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setSending(false);
@@ -237,7 +262,23 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
       setLoadingOlder(false);
     }
   }
-  const detailTask = view.tasks.find(task => task.id === drawer);
+  const tasks = view.tasks;
+  const detailTask = tasks.find(task => task.id === drawer);
+  const detailAvailable = Boolean(proposal || tasks.length);
+  const displayMessages = orderedMessages(cachedMessages);
+  function openDrawer(next: string) {
+    setDrawer(next);
+    setDrawerOpen(true);
+  }
+  function toggleDrawer() {
+    if (drawerOpen) { setDrawerOpen(false); return; }
+    const next = drawer === 'proposal' && proposal
+      ? 'proposal'
+      : drawer && tasks.some(task => task.id === drawer)
+        ? drawer
+        : proposal ? 'proposal' : tasks[0]?.id;
+    if (next) openDrawer(next);
+  }
   return (
     <section className="conversation-page" data-testid="conversation">
       <header className="conversation-header">
@@ -256,6 +297,11 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
         <div className="conversation-actions">
           <Button size="sm" icon="pause" data-testid="conversation-pause" onClick={() => void act(() => api(`/api/conversations/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>暂停</Button>
           <Button size="sm" icon="play" variant="primary" data-testid="conversation-resume" onClick={() => void act(() => api(`/api/conversations/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>继续</Button>
+          {detailAvailable && !drawerOpen && (
+            <button type="button" className="icon-button" data-testid="detail-toggle" onClick={toggleDrawer} title="展开右侧抽屉" aria-label="展开右侧抽屉">
+              <Icon name="panel-right" size={16} />
+            </button>
+          )}
         </div>
       </header>
 
@@ -270,21 +316,21 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
         </section>
       )}
 
-      <div className="conversation-body" data-drawer={Boolean(drawer)}>
+      <div className="conversation-body" data-drawer={drawerOpen}>
         <div className="conversation-thread" data-testid="message-list" ref={threadRef}>
           {hasOlder && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
-          {cachedMessages.map(message => <MessageRow key={message.id} message={message} />)}
+          {displayMessages.map(message => <MessageRow key={message.id} message={message} />)}
+          {liveTools.filter(tool => !durableToolIds.has(tool.toolCallId)).map(tool => (
+            <div key={tool.toolCallId} className="message-row" data-role="tool" data-testid="tool-activity">
+              <div className="message-stack"><div className="message-content">工具 · {tool.name} {tool.summary} {tool.done ? '（完成）' : '（进行中）'}</div></div>
+            </div>
+          ))}
           {liveEntries.map(([operationId, chunk]) => (
             <div key={operationId} className="message-row" data-role="assistant" data-testid="streaming">
               <div className="message-stack">
                 <div className="message-author">主 Agent · 正在输入…</div>
-                <div className="message-content streaming-card">{chunk}</div>
+                <div className="message-content streaming-card"><Markdown text={chunk} /></div>
               </div>
-            </div>
-          ))}
-          {liveTools.filter(tool => !durableToolIds.has(tool.toolCallId)).map(tool => (
-            <div key={tool.toolCallId} className="message-row" data-role="tool" data-testid="tool-activity">
-              <div className="message-stack"><div className="message-content">工具 · {tool.name} {tool.summary} {tool.done ? '（完成）' : '（进行中）'}</div></div>
             </div>
           ))}
 
@@ -310,11 +356,11 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
                 </Pill>
               </div>
               <div className="thread-card-actions">
-                <button type="button" className="summary-graph-preview" data-testid="draft-graph" onClick={() => setDrawer('proposal')}>
+                <button type="button" className="summary-graph-preview" data-testid="draft-graph" onClick={() => openDrawer('proposal')}>
                   <Icon name="graph" size={14} />
                   任务图 · {proposal.spec.nodes.length} 个节点
                 </button>
-                <button type="button" className="summary-graph-preview" onClick={() => setDrawer('proposal')}>
+                <button type="button" className="summary-graph-preview" onClick={() => openDrawer('proposal')}>
                   <Icon name="check" size={14} />
                   验收项 · {proposal.spec.acceptance.length}
                 </button>
@@ -351,7 +397,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
                   </div>
                 </div>
                 <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
-                <button type="button" className="icon-button" onClick={() => setDrawer(task.id)} title="查看执行详情" aria-label="查看执行详情">
+                <button type="button" className="icon-button" onClick={() => openDrawer(task.id)} title="查看执行详情" aria-label="查看执行详情">
                   <Icon name="chevron" size={15} />
                 </button>
               </div>
@@ -390,12 +436,12 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           )}
         </div>
 
-        {drawer && (
+        {drawerOpen && drawer && (
           <aside className="detail-drawer" data-testid="detail-drawer">
             <div className="drawer-head">
               <h2>{detailTask?.request ?? `草稿 v${proposal?.version ?? ''}`}</h2>
-              <button type="button" className="icon-button" onClick={() => setDrawer(null)} aria-label="关闭详情">
-                <Icon name="close" size={16} />
+              <button type="button" className="icon-button" data-testid="detail-toggle-close" onClick={() => setDrawerOpen(false)} aria-label="收起右侧抽屉" title="收起右侧抽屉">
+                <Icon name="panel-right" size={16} />
               </button>
             </div>
             {drawer === 'proposal' && proposal && (
@@ -478,7 +524,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
               }
             }}
           />
-          <button type="button" className="icon-button primary" data-testid="chat-send" disabled={sending || !text.trim()} onClick={() => void send()} aria-label="发送消息">
+          <button type="button" className="icon-button primary" data-testid="chat-send" disabled={!text.trim()} aria-busy={sending} onClick={() => void send()} aria-label="发送消息">
             <Icon name="send" size={17} />
           </button>
         </div>

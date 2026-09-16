@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
+import { startGraphDaemon } from '../../src/server/start.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -58,6 +59,12 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   await page.waitForFunction(() => location.hash.includes('project=alpha'));
   await page.waitForFunction(() => (document.querySelector('[data-testid="new-conversation-project"]') as HTMLSelectElement | null)?.value === 'alpha');
   expect(await page.getByTestId('new-conversation-project').inputValue()).toBe('alpha');
+
+  await page.getByTestId('sidebar-toggle').click();
+  await page.waitForFunction(() => document.querySelector('.sidebar')?.getAttribute('data-collapsed') === 'true');
+  expect(await sidebar.isHidden()).toBe(true);
+  await page.getByTestId('sidebar-toggle').click();
+  await sidebar.waitFor({ state: 'visible' });
 });
 
 test('proposal and graph summaries stay in the thread while details open in the drawer', async () => {
@@ -93,6 +100,103 @@ test('proposal and graph summaries stay in the thread while details open in the 
   expect(drawer).toContain('检查通过');
   expect(drawer).toContain('work');
   expect(drawer).toContain('check');
+  await page.getByTestId('detail-toggle-close').click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
+  await page.getByTestId('detail-toggle').click();
+  await page.getByTestId('detail-drawer').waitFor();
+});
+
+test('the project picker adds a local project to the sidebar', async () => {
+  const root = await temp('project-dialog');
+  const initial = join(root, 'initial');
+  const picked = join(root, 'picked');
+  await mkdir(initial, { recursive: true });
+  await mkdir(picked, { recursive: true });
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'initial', root: initial }] }, null, 2));
+  const daemon = await startGraphDaemon({
+    configPath,
+    stateDir: join(root, 'state'),
+    webDir,
+    port: 0,
+    mode: 'view',
+    env: {},
+    log: () => undefined,
+  });
+  cleanup.push(() => daemon.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.addInitScript(path => {
+    window.graph = {
+      isDesktop: true,
+      pickDirectory: async () => path,
+      saveSecret: async () => ({ stored: true, applied: true }),
+      secretStatus: async () => ({}),
+      relaunch: async () => ({ url: location.origin }),
+    };
+  }, picked);
+  await page.goto(daemon.url);
+  await page.getByTestId('project-create-open').click();
+  const dialog = page.getByTestId('create-project-dialog');
+  await dialog.waitFor();
+  await page.getByTestId('project-pick').click();
+  await page.waitForFunction(() => (document.querySelector('[data-testid="project-name"]') as HTMLInputElement | null)?.value === 'picked');
+  const createButton = page.getByTestId('project-create');
+  await createButton.click();
+  await page.getByTestId('create-project-dialog').waitFor({ state: 'detached' });
+  await page.getByTestId('new-conversation-project-picked').waitFor();
+}, 30_000);
+
+test('agent markdown renders and tool activity appears before the final answer', async () => {
+  const root = await temp('markdown');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/api/conversations/synthetic', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 'synthetic',
+      title: 'Markdown',
+      projectId: 'alpha',
+      projectRoot: root,
+      workspaceProjectId: 'alpha',
+      anchorTaskId: 'anchor',
+      createdAt: Date.now(),
+      requirementVersion: 1,
+      paused: false,
+      messages: [
+        { id: 'answer', seq: 2, role: 'assistant', kind: 'chat', text: '## 结果\n\n- **完成**\n\n`code`', data: null, state: 'done', operationId: 'op', turn: 1, createdAt: Date.now(), updatedAt: Date.now() },
+        { id: 'tool', seq: 3, role: 'tool', kind: 'tool', text: 'read README.md', data: { toolCallId: 'tool-1' }, state: 'done', operationId: 'op', turn: 1, createdAt: Date.now(), updatedAt: Date.now() },
+      ],
+      messageCount: 2,
+      questions: [],
+      proposal: null,
+      accepted: [],
+      master: null,
+      cost: { unknown: false, amount: 0 },
+      usage: { used: 0, budget: null, unlimited: true },
+      tasks: [],
+      cursor: 1,
+    }),
+  }));
+  await page.goto(`${server.url}/#/conversations/synthetic`);
+  await page.getByTestId('conversation').waitFor();
+  await page.locator('.markdown-body h2').waitFor();
+  expect(await page.locator('.markdown-body strong').innerText()).toBe('完成');
+  expect(await page.locator('.markdown-body code').innerText()).toBe('code');
+  const order = await page.locator('.conversation-thread').innerText();
+  expect(order.indexOf('工具 · read README.md')).toBeLessThan(order.indexOf('主 Agent'));
 });
 
 test('the compact shell keeps the new-chat composer inside the viewport', async () => {

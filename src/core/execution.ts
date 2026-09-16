@@ -22,6 +22,7 @@ export type OperationRow = { id: string; task_id: string; node_id: string; insta
 /** Private execution state machine. Every mutation shares the task command/event transaction. */
 export class Execution {
   private readonly pending = new Set<Promise<unknown>>();
+  private driveActive = 0;
   private stopping = false;
   private readonly driveWaiters: (() => void)[] = [];
   private readonly store: TaskStore;
@@ -33,8 +34,9 @@ export class Execution {
   private readonly git?: GitIntegration;
   private readonly scratchRoot?: string;
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
+  private readonly autoWake: boolean;
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string } } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -43,6 +45,7 @@ export class Execution {
     if (extras.git) this.git = extras.git;
     if (extras.scratchRoot) this.scratchRoot = extras.scratchRoot;
     if (extras.program) this.program = extras.program;
+    this.autoWake = Boolean(extras.autoWake);
     this.generation = store.transaction(() => {
       store.db.prepare('UPDATE runtime SET generation=generation+1').run();
       const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
@@ -78,7 +81,10 @@ export class Execution {
       taskId = operation.taskId;
       this.settle(operation, result);
     });
-    if (taskId) this.deliver(taskId);
+    if (taskId) {
+      this.deliver(taskId);
+      if (this.autoWake) this.kick();
+    }
   }
 
   async reconcile(id: string) {
@@ -252,31 +258,41 @@ export class Execution {
 
   /** Dispatch newly ready work as completions land, without waiting for a slow sibling in the same batch. */
   async drive() {
-    let dispatched = 0;
-    const running = new Set<Promise<boolean>>();
-    while (!this.stopping) {
-      const ready = this.readyNodes();
-      const started: Promise<boolean>[] = [];
-      for (const node of ready) {
-        const spec = JSON.parse(node.spec) as NodeSpec;
-        if (this.remainingSlots(spec.kind) <= 0) continue;
-        const work = this.run(node);
-        started.push(work);
-        running.add(work);
-        work.finally(() => running.delete(work));
+    this.driveActive += 1;
+    try {
+      let dispatched = 0;
+      const running = new Set<Promise<boolean>>();
+      while (!this.stopping) {
+        const ready = this.readyNodes();
+        const started: Promise<boolean>[] = [];
+        for (const node of ready) {
+          const spec = JSON.parse(node.spec) as NodeSpec;
+          if (this.remainingSlots(spec.kind) <= 0) continue;
+          const work = this.run(node);
+          started.push(work);
+          running.add(work);
+          work.finally(() => running.delete(work));
+        }
+        dispatched += started.length;
+        if (running.size === 0) break;
+        if (started.length < ready.length) {
+          // The execution cap was hit; some operations may now be parked waiting
+          // for a credential slot. Re-scan shortly so a node on a free credential
+          // is not held behind waiters, which no longer consume execution slots.
+          await new Promise(resolve => setTimeout(resolve, 20));
+          continue;
+        }
+        await Promise.race([...running, new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
       }
-      dispatched += started.length;
-      if (running.size === 0) break;
-      if (started.length < ready.length) {
-        // The execution cap was hit; some operations may now be parked waiting
-        // for a credential slot. Re-scan shortly so a node on a free credential
-        // is not held behind waiters, which no longer consume execution slots.
-        await new Promise(resolve => setTimeout(resolve, 20));
-        continue;
-      }
-      await Promise.race([...running, new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
+      return { dispatched };
+    } finally {
+      this.driveActive -= 1;
     }
-    return { dispatched };
+  }
+
+  /** Ensure a newly queued message is dispatched even if no drive loop is active. */
+  kick() {
+    if (this.driveActive === 0) void this.drive().catch(() => undefined);
   }
 
   private remainingSlots(kind: NodeSpec['kind']) {

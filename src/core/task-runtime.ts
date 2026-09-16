@@ -60,6 +60,8 @@ export async function openTaskRuntime(options: {
   };
   /** Host-selected grants and environment for confirmed program checks only. */
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
+  /** UI-hosted daemons wake dispatch as soon as a conversation message is queued. */
+  autoWake?: boolean;
 }) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
@@ -200,6 +202,7 @@ export async function openTaskRuntime(options: {
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
       ...(options.program ? { program: options.program } : {}),
+      autoWake: Boolean(options.autoWake),
     });
     // Tasks and conversations created while dispatch was disabled carry no
     // master node. Once a master binding exists they get one and become
@@ -605,7 +608,7 @@ export async function openTaskRuntime(options: {
     async chat(conversationId: string, input: { text: string; requestId: string }) {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
-      return store.command(`conversation:${conversationId}`, input.requestId, { type: 'chat', text: input.text }, () => {
+      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'chat', text: input.text }, () => {
         if (!input.text.trim()) throw new RuntimeError('invalid_input', 'A nonempty message is required');
         const message = appendMessage(store, { conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state: 'pending' });
         const node = store.db.prepare("SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string } | undefined;
@@ -616,6 +619,8 @@ export async function openTaskRuntime(options: {
         }
         return { conversationId, messageId: message.id, state: 'pending', cursor: message.cursor, pending: node ? ['preparing', 'running'].includes(node.status) : false };
       });
+      if (options.autoWake) execution.kick();
+      return receipt;
     },
     async bind(conversationId: string, input: { projectId: string; requestId: string }) {
       ensureOpen();

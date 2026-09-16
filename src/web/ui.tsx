@@ -5,7 +5,8 @@ import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from '
 export type IconName =
   | 'overview' | 'inbox' | 'catalog' | 'wizard' | 'settings' | 'graph' | 'task'
   | 'play' | 'pause' | 'check' | 'alert' | 'clock' | 'plus' | 'refresh'
-  | 'link' | 'bolt' | 'spark' | 'box' | 'chevron' | 'search' | 'message' | 'send' | 'close';
+  | 'link' | 'bolt' | 'spark' | 'box' | 'chevron' | 'search' | 'message' | 'send' | 'close'
+  | 'folder' | 'panel-left' | 'panel-right';
 
 const PATHS: Record<IconName, ReactNode> = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -31,6 +32,9 @@ const PATHS: Record<IconName, ReactNode> = {
   message: <><path d="M5 18.5 3.5 21l3.7-1a8 8 0 1 0-2.2-1.5" /><path d="M8 10.5h8M8 14h5" /></>,
   send: <><path d="m4 4 17 8-17 8 3.2-8z" /><path d="M7.2 12H21" /></>,
   close: <><path d="m6 6 12 12M18 6 6 18" /></>,
+  folder: <path d="M3.5 6.5A2.5 2.5 0 0 1 6 4h3l2 2h7A2.5 2.5 0 0 1 20.5 8.5v8A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5z" />,
+  'panel-left': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
+  'panel-right': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>,
 };
 
 export function Icon({ name, size = 16, className = '' }: { name: IconName; size?: number; className?: string }) {

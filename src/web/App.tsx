@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
+import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
 import { ConversationPanel, type ConversationSummary } from './Conversation.tsx';
@@ -94,17 +95,23 @@ export function App() {
   const [settings, setSettings] = useState<Settings_ | null>(null);
   const [startup, setStartup] = useState<Startup | null>(null);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('graph-sidebar-collapsed') === 'true'; } catch { return false; }
+  });
   const { data: conversations, reload: reloadConversations } = useAsync(() => api<ConversationSummary[]>('/api/conversations'), []);
 
   const refreshTasks = useCallback(async () => {
     setTasks(await api<TaskSummary[]>('/api/tasks'));
+  }, []);
+  const reloadSettings = useCallback(async () => {
+    setSettings(await api<Settings_>('/api/settings'));
   }, []);
   useEffect(() => {
     const onHash = () => setPath(route());
     const onConversationsChanged = () => void reloadConversations();
     window.addEventListener('hashchange', onHash);
     window.addEventListener('graph:conversations-changed', onConversationsChanged);
-    void api<Settings_>('/api/settings').then(setSettings);
+    void reloadSettings();
     void api<Startup>('/api/startup').then(setStartup);
     void refreshTasks().catch(() => undefined);
     const poll = setInterval(() => {
@@ -116,7 +123,10 @@ export function App() {
       window.removeEventListener('graph:conversations-changed', onConversationsChanged);
       clearInterval(poll);
     };
-  }, [refreshTasks, reloadConversations]);
+  }, [refreshTasks, reloadConversations, reloadSettings]);
+  useEffect(() => {
+    try { localStorage.setItem('graph-sidebar-collapsed', String(sidebarCollapsed)); } catch { /* local persistence is optional */ }
+  }, [sidebarCollapsed]);
 
   const [pathname, query = ''] = path.split('?');
   const queryParams = new URLSearchParams(query);
@@ -137,21 +147,32 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <a className="brand" href="#/" title="新对话">
-          <div className="brand-mark" />
-          <div>
-            <div className="brand-name">Graph</div>
-            <div className="brand-sub">Agent 任务编排控制台</div>
-          </div>
-        </a>
+      <aside className="sidebar" data-collapsed={sidebarCollapsed}>
+        <div className="brand-row">
+          <a className="brand" href="#/" title="新对话">
+            <div className="brand-mark" />
+            <div className="brand-copy">
+              <div className="brand-name">Graph</div>
+              <div className="brand-sub">Agent 任务编排控制台</div>
+            </div>
+          </a>
+          <button
+            type="button"
+            className="icon-button drawer-toggle"
+            data-testid="sidebar-toggle"
+            onClick={() => setSidebarCollapsed(value => !value)}
+            title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+            aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+          >
+            <Icon name="panel-left" size={16} />
+          </button>
+        </div>
         <Sidebar
           path={pathname ?? '/'}
           settings={settings}
           conversations={conversations ?? []}
           questionTotal={questionTotal}
-          modeText={modeText}
-          modeTone={modeTone}
+          onSettingsChanged={reloadSettings}
         />
       </aside>
       <main className="main">
@@ -210,28 +231,33 @@ export function App() {
   );
 }
 
-function Sidebar({ path, settings, conversations, questionTotal, modeText, modeTone }: {
+function Sidebar({ path, settings, conversations, questionTotal, onSettingsChanged }: {
   path: string;
   settings: Settings_ | null;
   conversations: ConversationSummary[];
   questionTotal: number;
-  modeText: string;
-  modeTone: 'success' | 'warn' | 'danger';
+  onSettingsChanged: () => void;
 }) {
   const [projectOpen, setProjectOpen] = useState<Record<string, boolean>>({});
+  const [createProject, setCreateProject] = useState(false);
   const ordered = [...conversations].sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt));
   const unbound = ordered.filter(conversation => !conversation.projectId);
   return (
     <>
       <nav className="nav">
         <a href="#/inbox" data-active={path === '/inbox'}>
-          <Icon name="inbox" />问题
+          <Icon name="inbox" /><span className="nav-label">问题</span>
           {questionTotal > 0 && <> (<span className="nav-badge">{questionTotal}</span>)</>}
         </a>
-        <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" />人才库</a>
+        <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" /><span className="nav-label">人才库</span></a>
       </nav>
       <div className="sidebar-scroll" data-testid="conversation-list">
-        <div className="sidebar-label">项目</div>
+        <div className="sidebar-label">
+          <span>项目</span>
+          <button type="button" className="sidebar-add" data-testid="project-create-open" onClick={() => setCreateProject(true)} aria-label="新建项目" title="新建项目">
+            <Icon name="plus" size={15} />
+          </button>
+        </div>
         <div className="sidebar-section">
           {(settings?.projects ?? []).map(project => {
             const items = ordered.filter(conversation => conversation.projectId === project.id);
@@ -281,10 +307,17 @@ function Sidebar({ path, settings, conversations, questionTotal, modeText, modeT
       </div>
       <div className="sidebar-footer">
         <nav className="nav">
-          <a href="#/settings" data-active={path === '/settings' || path === '/setup'}><Icon name="settings" />设置</a>
+          <a href="#/settings" data-active={path === '/settings' || path === '/setup'} title="设置">
+            <Icon name="settings" /><span className="nav-label">设置</span>
+          </a>
         </nav>
-        <div className="sidebar-status"><StatusDot tone={modeTone} pulse={modeTone === 'success'} />{modeText}</div>
       </div>
+      {createProject && (
+        <CreateProjectDialog
+          onClose={() => setCreateProject(false)}
+          onCreated={onSettingsChanged}
+        />
+      )}
     </>
   );
 }
