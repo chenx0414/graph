@@ -65,6 +65,14 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   expect(await sidebar.isHidden()).toBe(true);
   await page.getByTestId('sidebar-toggle').click();
   await sidebar.waitFor({ state: 'visible' });
+
+  const mainDetailToggle = page.getByTestId('detail-toggle');
+  await mainDetailToggle.waitFor();
+  await mainDetailToggle.click();
+  await page.getByTestId('detail-drawer').waitFor();
+  expect(await page.getByTestId('detail-empty').innerText()).toContain('暂无详情');
+  await mainDetailToggle.click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
 });
 
 test('conversations archive from the sidebar and restore from settings', async () => {
@@ -143,7 +151,8 @@ test('proposal and graph summaries stay in the thread while details open in the 
   expect(drawer).toContain('检查通过');
   expect(drawer).toContain('work');
   expect(drawer).toContain('check');
-  await page.getByTestId('detail-toggle-close').click();
+  expect(await page.locator('[data-testid="detail-toggle-close"]').count()).toBe(0);
+  await page.getByTestId('detail-toggle').click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
   await page.getByTestId('detail-toggle').click();
   await page.getByTestId('detail-drawer').waitFor();

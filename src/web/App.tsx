@@ -105,6 +105,7 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('graph-sidebar-collapsed') === 'true'; } catch { return false; }
   });
+  const [detailOpen, setDetailOpen] = useState(false);
   const { data: conversations, reload: reloadConversations } = useAsync(() => api<ConversationSummary[]>('/api/conversations'), []);
 
   const refreshTasks = useCallback(async () => {
@@ -134,6 +135,7 @@ export function App() {
   useEffect(() => {
     try { localStorage.setItem('graph-sidebar-collapsed', String(sidebarCollapsed)); } catch { /* local persistence is optional */ }
   }, [sidebarCollapsed]);
+  useEffect(() => { setDetailOpen(false); }, [path]);
 
   const [pathname, query = ''] = path.split('?');
   const queryParams = new URLSearchParams(query);
@@ -173,16 +175,6 @@ export function App() {
               <div className="brand-sub">Agent 任务编排控制台</div>
             </div>
           </a>
-          <button
-            type="button"
-            className="icon-button drawer-toggle"
-            data-testid="sidebar-toggle"
-            onClick={() => setSidebarCollapsed(value => !value)}
-            title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-            aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-          >
-            <Icon name="panel-left" size={16} />
-          </button>
         </div>
         <Sidebar
           path={pathname ?? '/'}
@@ -193,6 +185,34 @@ export function App() {
         />
       </aside>
       <main className="main">
+        {conversationFirst && !conversationMatch && (
+          <header className="topbar conversation-topbar">
+            <button
+              type="button"
+              className="icon-button drawer-toggle"
+              data-testid="sidebar-toggle"
+              onClick={() => setSidebarCollapsed(value => !value)}
+              title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+              aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+            >
+              <Icon name="panel-left" size={16} />
+            </button>
+            <h1>{title}</h1>
+            <div className="topbar-spacer" />
+            <button
+              type="button"
+              className="icon-button drawer-toggle detail-toggle"
+              data-testid="detail-toggle"
+              data-open={detailOpen}
+              onClick={() => setDetailOpen(value => !value)}
+              title={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-label={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-expanded={detailOpen}
+            >
+              <Icon name="panel-right" size={16} />
+            </button>
+          </header>
+        )}
         {startup && !startup.configured && (
           <div className="banner" data-testid="banner">
             <Icon name="alert" />
@@ -209,6 +229,16 @@ export function App() {
         )}
         {!conversationFirst && (
           <header className="topbar">
+            <button
+              type="button"
+              className="icon-button drawer-toggle"
+              data-testid="sidebar-toggle"
+              onClick={() => setSidebarCollapsed(value => !value)}
+              title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+              aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+            >
+              <Icon name="panel-left" size={16} />
+            </button>
             <h1>{title}</h1>
             <span className="topbar-sub">
               {modeText}
@@ -216,6 +246,18 @@ export function App() {
             </span>
             <div className="topbar-spacer" />
             <Pill tone={modeTone}>{startup?.mode === 'execute' ? '调度开启' : '调度关闭'}</Pill>
+            <button
+              type="button"
+              className="icon-button drawer-toggle detail-toggle"
+              data-testid="detail-toggle"
+              data-open={detailOpen}
+              onClick={() => setDetailOpen(value => !value)}
+              title={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-label={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-expanded={detailOpen}
+            >
+              <Icon name="panel-right" size={16} />
+            </button>
           </header>
         )}
         <div className={`content ${conversationFirst ? 'conversation-content' : ''}`}>
@@ -229,6 +271,10 @@ export function App() {
                 id={conversationMatch[1]!}
                 settings={settings}
                 onChanged={reloadConversations}
+                sidebarCollapsed={sidebarCollapsed}
+                onSidebarToggle={() => setSidebarCollapsed(value => !value)}
+                drawerOpen={detailOpen}
+                onDrawerOpenChange={setDetailOpen}
               />
             )}
             {nodeMatch && (
@@ -240,6 +286,17 @@ export function App() {
             {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
           </div>
         </div>
+        {!conversationMatch && detailOpen && (
+          <aside className="detail-drawer app-empty-drawer" data-testid="detail-drawer" role="complementary">
+            <div className="drawer-head">
+              <h2>详情</h2>
+            </div>
+            <div className="drawer-empty" data-testid="detail-empty">
+              <strong>暂无详情</strong>
+              <span>出现草稿、任务图或执行进度后，详情会显示在这里。</span>
+            </div>
+          </aside>
+        )}
       </main>
       <Toaster />
     </div>

@@ -116,7 +116,7 @@ small { color: var(--muted); }
 .sidebar .btn { background: transparent; color: var(--sidebar-text); border-color: transparent; }
 .sidebar .btn:hover { background: rgba(26,28,31,0.06); color: var(--sidebar-text); }
 
-.main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; overflow: hidden; }
 
 .topbar {
   display: flex; align-items: center; gap: 12px;
@@ -638,8 +638,8 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .conversation-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .conversation-actions > .btn,
 .conversation-actions > .icon-button { flex: 0 0 auto; }
-.conversation-detail-toggle { width: 30px; height: 30px; }
-.conversation-detail-toggle[data-open="true"] { background: var(--panel-soft); color: var(--text); }
+.detail-toggle { width: 30px; height: 30px; }
+.detail-toggle[data-open="true"] { background: var(--panel-soft); color: var(--text); }
 .conversation-alert { padding: 8px 22px 10px; border-bottom: 1px solid var(--border); }
 .conversation-pause-note {
   display: flex;
@@ -776,6 +776,16 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   background: #fbfbfc;
   padding: 16px;
   animation: drawer-in 0.18s ease both;
+}
+.app-empty-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 19;
+  width: min(370px, 100%);
+  padding-top: 72px;
+  box-shadow: -12px 0 32px rgba(26,28,31,0.08);
 }
 @keyframes drawer-in {
   from { opacity: 0; transform: translateX(10px); }

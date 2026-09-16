@@ -298,7 +298,15 @@ function orderedMessages(messages: ConversationMessage[]) {
   return ordered;
 }
 
-export function ConversationPanel({ id, settings, onChanged }: { id: string; settings: Settings | null; onChanged?: () => void }) {
+export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, onSidebarToggle, drawerOpen, onDrawerOpenChange }: {
+  id: string;
+  settings: Settings | null;
+  onChanged?: () => void;
+  sidebarCollapsed: boolean;
+  onSidebarToggle: () => void;
+  drawerOpen: boolean;
+  onDrawerOpenChange: (open: boolean) => void;
+}) {
   const { data: view, error, loading, reload } = useAsync(() => api<ConversationView>(`/api/conversations/${id}`), [id]);
   const { data: draftGraph } = useAsync(() => api<DraftGraph>(`/api/conversations/${id}/draft-graph`), [id, view?.proposal?.version]);
   const [text, setText] = useState('');
@@ -315,7 +323,6 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const [forwardCursor, setForwardCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -542,21 +549,21 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const displayMessages = orderedMessages(cachedMessages.filter(message => !(message.role === 'user' && message.state === 'queued')));
   function openDrawer(next: string) {
     setDrawer(next);
-    setDrawerOpen(true);
-  }
-  function toggleDrawer() {
-    if (drawerOpen) { setDrawerOpen(false); return; }
-    const next = drawer === 'proposal' && proposal
-      ? 'proposal'
-      : drawer && tasks.some(task => task.id === drawer)
-        ? drawer
-        : proposal ? 'proposal' : tasks[0]?.id;
-    setDrawer(next ?? null);
-    setDrawerOpen(true);
+    onDrawerOpenChange(true);
   }
   return (
     <section className="conversation-page" data-testid="conversation">
       <header className="conversation-header">
+        <button
+          type="button"
+          className="icon-button drawer-toggle"
+          data-testid="sidebar-toggle"
+          onClick={onSidebarToggle}
+          title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+          aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+        >
+          <Icon name="panel-left" size={16} />
+        </button>
         <div className="conversation-heading">
           <h1 data-testid="conversation-title">{view.title}</h1>
           <div className="conversation-meta">
@@ -584,10 +591,10 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           </Button>
           <button
             type="button"
-            className="icon-button conversation-detail-toggle"
+            className="icon-button drawer-toggle detail-toggle"
             data-testid="detail-toggle"
             data-open={drawerOpen}
-            onClick={toggleDrawer}
+            onClick={() => onDrawerOpenChange(!drawerOpen)}
             title={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
             aria-label={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
             aria-expanded={drawerOpen}
@@ -741,13 +748,9 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           <aside className="detail-drawer" data-testid="detail-drawer">
             <div className="drawer-head">
               <h2>{drawerTitle}</h2>
-              <button type="button" className="icon-button" data-testid="detail-toggle-close" onClick={() => setDrawerOpen(false)} aria-label="收起右侧抽屉" title="收起右侧抽屉">
-                <Icon name="panel-right" size={16} />
-              </button>
             </div>
             {!hasDrawerContent && (
               <div className="drawer-empty" data-testid="detail-empty">
-                <Icon name="panel-right" size={22} />
                 <strong>暂无详情</strong>
                 <span>出现草稿、任务图或执行进度后，详情会显示在这里。</span>
               </div>
