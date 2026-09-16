@@ -9,7 +9,7 @@ import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
 import { Button, Icon, Pill, StatusDot, toast } from './ui.tsx';
 
-type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[] };
+type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean }[] };
 export type ConversationSummary = {
   id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; updatedAt: number | null;
   openQuestions: number; taskCount: number; status: string;
@@ -79,8 +79,62 @@ function telemetryValue(value: number | null | undefined, render: (value: number
   return value === null || value === undefined ? '—' : render(value);
 }
 
-function ComposerTelemetry({ telemetry }: { telemetry: ConversationView['telemetry'] }) {
-  const thinking = telemetry?.thinkingLevel === 'off' ? '关闭' : telemetry?.thinkingLevel ?? '—';
+const THINKING_LEVELS = ['off', 'low', 'medium', 'high'] as const;
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+function thinkingLabel(level: string | undefined) {
+  return ({ off: '关闭', minimal: '最小', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大' } as Record<string, string>)[level ?? ''] ?? level ?? '—';
+}
+
+function ComposerTelemetry({ telemetry, models, conversationId, onChanged }: {
+  telemetry: ConversationView['telemetry'];
+  models: Settings['models'];
+  conversationId: string;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const model = models.find(item => item.id === telemetry?.model);
+  const reasoning = Boolean(model && model.reasoning !== false);
+  const currentLevel = (THINKING_LEVELS.includes(telemetry?.thinkingLevel as ThinkingLevel)
+    ? telemetry?.thinkingLevel
+    : 'off') as ThinkingLevel;
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+  async function applySelection(nextModel: Settings['models'][number] | undefined, nextLevel: ThinkingLevel) {
+    if (!nextModel || saving) return;
+    const level = nextModel.reasoning === false ? 'off' : nextLevel;
+    setSaving(true);
+    try {
+      await api(`/api/conversations/${conversationId}/model`, {
+        method: 'POST',
+        body: JSON.stringify({
+          model: nextModel.id,
+          thinkingLevel: level,
+          requestId: `model-${crypto.randomUUID()}`,
+        }),
+      });
+      toast(`已切换为 ${nextModel.id} · 思考 ${thinkingLabel(level)}；下一次回复生效。`, 'success');
+      setOpen(false);
+      onChanged();
+    } catch (reason) {
+      toast(`切换失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <div className="composer-telemetry" data-testid="composer-telemetry" aria-label="当前模型运行指标">
       <span title="缓存输入占全部输入 token 的比例" data-testid="telemetry-cache">
@@ -93,14 +147,84 @@ function ComposerTelemetry({ telemetry }: { telemetry: ConversationView['telemet
         {telemetry?.contextLimit ? ` / ${formatTokens(telemetry.contextLimit)}` : ''}
         {telemetry?.contextPercent !== null && telemetry?.contextPercent !== undefined ? ` · ${telemetry.contextPercent.toFixed(telemetry.contextPercent >= 10 ? 0 : 1)}%` : ''}
       </span>
-      <span title="当前主管使用的模型" data-testid="telemetry-model">
-        <Icon name="bolt" size={13} />
-        {telemetry?.model ?? '未选择模型'}
-      </span>
-      <span title="当前 Agent 内核的思考强度" data-testid="telemetry-thinking">
-        <Icon name="clock" size={13} />
-        思考 {thinking}
-      </span>
+      <div className="composer-model-control" ref={rootRef}>
+        <button
+          type="button"
+          className="composer-model-trigger"
+          data-testid="model-control"
+          data-open={open}
+          disabled={saving}
+          onClick={() => setOpen(value => !value)}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+        >
+          <span title="当前主管使用的模型" data-testid="telemetry-model"><Icon name="bolt" size={13} />{telemetry?.model ?? '未选择模型'}</span>
+          <span title="当前 Agent 内核的思考强度" data-testid="telemetry-thinking"><Icon name="clock" size={13} />思考 {thinkingLabel(telemetry?.thinkingLevel)}</span>
+          <Icon name="chevron" size={12} className="composer-model-chevron" />
+        </button>
+        {open && (
+          <div className="model-control-popover" data-testid="model-menu" role="dialog" aria-label="模型与思考强度">
+            <div className="model-control-head">
+              <span>思考强度</span>
+              <button
+                type="button"
+                data-testid="thinking-cycle"
+                disabled={!reasoning || saving}
+                onClick={() => {
+                  const index = THINKING_LEVELS.indexOf(currentLevel);
+                  void applySelection(model, THINKING_LEVELS[(index + 1) % THINKING_LEVELS.length]!);
+                }}
+                title="切换思考强度"
+                aria-label="切换思考强度"
+              >
+                <Icon name="chevron" size={14} />
+              </button>
+            </div>
+            <div className="model-control-selected">{telemetry?.model ?? '未选择模型'}</div>
+            <div className="thinking-slider" role="radiogroup" aria-label="思考强度">
+              <div className="thinking-track" />
+              {THINKING_LEVELS.map(level => (
+                <button
+                  key={level}
+                  type="button"
+                  role="radio"
+                  aria-checked={currentLevel === level}
+                  className="thinking-stop"
+                  data-active={currentLevel === level}
+                  data-testid={`thinking-${level}`}
+                  disabled={!reasoning || saving}
+                  onClick={() => void applySelection(model, level)}
+                  title={thinkingLabel(level)}
+                >
+                  <span />
+                </button>
+              ))}
+            </div>
+            <div className="thinking-labels">
+              {THINKING_LEVELS.map(level => <span key={level}>{thinkingLabel(level)}</span>)}
+            </div>
+            <div className="model-options" role="listbox" aria-label="选择模型">
+              {models.length === 0 && <span className="model-option-empty">没有可用模型</span>}
+              {models.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="option"
+                  aria-selected={option.id === telemetry?.model}
+                  data-active={option.id === telemetry?.model}
+                  data-testid={`model-option-${option.id}`}
+                  disabled={saving}
+                  onClick={() => void applySelection(option, currentLevel)}
+                >
+                  <span className="grow truncate">{option.id}</span>
+                  <span className="faint">{option.reasoning === false ? '标准' : '可思考'}</span>
+                  {option.id === telemetry?.model && <Icon name="check" size={13} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -741,7 +865,12 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
               ? <span data-testid="queued-hint">主 Agent 正在处理，{queuedMessages.length ? `已有 ${queuedMessages.length} 条队列消息。` : '消息会排队。'}</span>
               : 'Enter 发送，Shift + Enter 换行'}
           </span>
-          <ComposerTelemetry telemetry={view.telemetry} />
+          <ComposerTelemetry
+            telemetry={view.telemetry}
+            models={settings?.models ?? []}
+            conversationId={id}
+            onChanged={() => { reload(); onChanged?.(); }}
+          />
         </div>
       </div>
     </section>

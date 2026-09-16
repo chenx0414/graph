@@ -6,7 +6,7 @@ import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type RawModel = {
   id: string; provider: string; grade: string; api: 'openai-completions'; baseUrl: string;
-  contextWindow: number; maxTokens: number; credentialId: string; cost?: Cost;
+  contextWindow: number; maxTokens: number; reasoning?: boolean; credentialId: string; cost?: Cost;
   headers?: Record<string, string>;
 };
 type RawCredential = { secretRef: string; displayName?: string; sharedLimitGroupId?: string };
@@ -25,7 +25,7 @@ type ApiError = Error & { code?: string; field?: string };
 const GRADES = ['low', 'medium', 'high', 'highest'];
 
 function emptyModel(): RawModel {
-  return { id: 'new-model', provider: 'local', grade: 'medium', api: 'openai-completions', baseUrl: 'http://127.0.0.1:8080/v1', contextWindow: 32768, maxTokens: 4096, credentialId: '' };
+  return { id: 'new-model', provider: 'local', grade: 'medium', api: 'openai-completions', baseUrl: 'http://127.0.0.1:8080/v1', contextWindow: 32768, maxTokens: 4096, reasoning: true, credentialId: '' };
 }
 
 /** Strip server-side display flags so the draft can be saved back verbatim. */
@@ -100,6 +100,57 @@ function ProjectGitCard() {
   );
 }
 
+type ArchivedConversation = {
+  id: string; title: string; projectId: string | null; createdAt: number; archivedAt: number | null;
+};
+
+function ArchivedConversations() {
+  const [items, setItems] = useState<ArchivedConversation[] | null>(null);
+  const [busy, setBusy] = useState('');
+  const load = useCallback(async () => {
+    const data = await api<ArchivedConversation[]>('/api/conversations?archived=true');
+    setItems(data);
+  }, []);
+  useEffect(() => { void load().catch(() => setItems([])); }, [load]);
+  async function restore(conversation: ArchivedConversation) {
+    if (busy) return;
+    setBusy(conversation.id);
+    try {
+      await api(`/api/conversations/${conversation.id}/unarchive`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `unarchive-${crypto.randomUUID()}` }),
+      });
+      toast('对话已取消归档并回到原项目。', 'success');
+      window.dispatchEvent(new Event('graph:conversations-changed'));
+      await load();
+    } catch (reason) {
+      toast(`取消归档失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    } finally {
+      setBusy('');
+    }
+  }
+  return (
+    <Card title="归档对话" icon="archive" subtitle="归档不会删除消息或任务记录；取消归档后会回到原来的项目或“最近”">
+      {items === null && <Spinner />}
+      {items?.length === 0 && <p className="muted" data-testid="archived-empty">还没有归档对话。</p>}
+      {items?.map(conversation => (
+        <div className="list-item" key={conversation.id} data-testid={`archived-conversation-${conversation.id}`}>
+          <div className="grow">
+            <a href={`#/conversations/${conversation.id}`}>{conversation.title}</a>
+            <div className="muted">
+              {conversation.projectId ?? '最近'}
+              {conversation.archivedAt ? ` · 归档于 ${new Date(conversation.archivedAt).toLocaleString()}` : ''}
+            </div>
+          </div>
+          <Button size="sm" icon="refresh" disabled={busy === conversation.id} onClick={() => void restore(conversation)}>
+            {busy === conversation.id ? '恢复中…' : '取消归档'}
+          </Button>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   const [guideOpen, setGuideOpen] = useState(openGuide);
   const [active, setActive] = useState(openGuide ? 'settings-wizard' : 'settings-overview');
@@ -116,6 +167,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
     { id: 'settings-models', label: '模型' },
     { id: 'settings-limits', label: '并发限制' },
     { id: 'settings-preferences', label: '模型偏好' },
+    { id: 'settings-archived', label: '归档对话' },
     { id: 'settings-wizard', label: '连接与配置向导' },
   ];
   const visibleSections = sections.filter(section => section.label.toLowerCase().includes(search.trim().toLowerCase()));
@@ -137,7 +189,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <nav className="settings-nav" aria-label="设置导航">
           {visibleSections.map(section => (
             <button key={section.id} type="button" className="settings-nav-item" data-active={active === section.id} onClick={() => go(section.id)}>
-              <Icon name={section.id === 'settings-wizard' ? 'wizard' : section.id === 'settings-models' ? 'bolt' : section.id === 'settings-project' || section.id === 'settings-git' ? 'box' : section.id === 'settings-credentials' ? 'link' : 'settings'} size={16} />
+              <Icon name={section.id === 'settings-wizard' ? 'wizard' : section.id === 'settings-models' ? 'bolt' : section.id === 'settings-archived' ? 'archive' : section.id === 'settings-project' || section.id === 'settings-git' ? 'box' : section.id === 'settings-credentials' ? 'link' : 'settings'} size={16} />
               <span>{section.label}</span>
             </button>
           ))}
@@ -164,6 +216,9 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
               <Setup />
             </details>
             <SettingsAdvanced />
+            <section id="settings-archived" className="settings-section">
+              <ArchivedConversations />
+            </section>
           </div>
         </div>
       </main>
@@ -405,6 +460,15 @@ function SettingsAdvanced() {
                 <Field label="Base URL"><input className="input" style={{ width: 340, maxWidth: 'none' }} data-invalid={invalid(`models.entries[${index}].baseUrl`)} data-testid={`model-${index}-baseUrl`} value={model.baseUrl} onChange={event => mutate(next => { next.models!.entries[index]!.baseUrl = event.target.value; })} /></Field>
                 <Field label="上下文"><input className="input" style={{ width: 110 }} type="number" data-testid={`model-${index}-context`} value={model.contextWindow} onChange={event => mutate(next => { next.models!.entries[index]!.contextWindow = Number(event.target.value); })} /></Field>
                 <Field label="最大输出"><input className="input" style={{ width: 110 }} type="number" data-testid={`model-${index}-maxTokens`} value={model.maxTokens} onChange={event => mutate(next => { next.models!.entries[index]!.maxTokens = Number(event.target.value); })} /></Field>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    data-testid={`model-${index}-reasoning`}
+                    checked={model.reasoning !== false}
+                    onChange={event => mutate(next => { next.models!.entries[index]!.reasoning = event.target.checked; })}
+                  />
+                  <span>可思考模型</span>
+                </label>
                 <Field label="输入价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={model.cost?.input ?? ''} onChange={event => mutate(next => {
                   const entry = next.models!.entries[index]!;
                   const value = Number(event.target.value);

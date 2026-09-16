@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Fastify from 'fastify';
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { RuntimeError, type AttachmentInput } from '../core/types.ts';
 import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
@@ -123,7 +124,10 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       entries: runtime.projectEntries(params.projectId, query.q ?? '', query.limit ? Number(query.limit) : 80),
     };
   });
-  app.get('/api/conversations', async () => runtime.conversations.list());
+  app.get('/api/conversations', async request => {
+    const query = request.query as { archived?: string };
+    return runtime.conversations.list({ archived: query.archived === 'true' });
+  });
   app.post('/api/conversations', async request => {
     const body = request.body as { projectId?: string; title?: string; text?: string; attachments?: AttachmentInput[]; requestId: string };
     return runtime.conversations.create({
@@ -162,6 +166,25 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       requestId: body.requestId,
       ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
     });
+  });
+  app.post('/api/conversations/:conversationId/model', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { model: string; thinkingLevel: string; requestId: string };
+    return runtime.conversations.selectModel(params.conversationId, {
+      model: body.model,
+      thinkingLevel: body.thinkingLevel as ThinkingLevel,
+      requestId: body.requestId,
+    });
+  });
+  app.post('/api/conversations/:conversationId/archive', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.archive(params.conversationId, body.requestId);
+  });
+  app.post('/api/conversations/:conversationId/unarchive', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.unarchive(params.conversationId, body.requestId);
   });
   app.post('/api/conversations/:conversationId/bind', async request => {
     const params = request.params as { conversationId: string };

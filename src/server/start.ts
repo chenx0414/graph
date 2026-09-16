@@ -69,7 +69,7 @@ function piModel(entry: ConfiguredModel): Model<ConfiguredModel['api']> {
     provider: entry.provider,
     api: entry.api,
     baseUrl: entry.baseUrl,
-    reasoning: false,
+    reasoning: entry.reasoning !== false,
     input: ['text'],
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens,

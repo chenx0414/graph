@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
 import { TaskStore } from '../../src/core/store.ts';
+import { parseGraphConfig } from '../../src/server/config.ts';
 import { buildTemplateConfigDocument } from '../../src/web/setup.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -40,6 +41,22 @@ async function fixture(name: string, options: { document: Record<string, unknown
 const modelEntry = (baseUrl: string, extra: Record<string, unknown> = {}) => ({
   id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
   baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local', ...extra,
+});
+
+test('legacy models default to reasoning-capable and explicit opt-out is preserved', () => {
+  const parsed = parseGraphConfig({
+    version: 1,
+    projects: [],
+    credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+    models: { entries: [
+      { ...modelEntry('http://127.0.0.1:1'), id: 'legacy' },
+      { ...modelEntry('http://127.0.0.1:1'), id: 'standard', reasoning: false },
+    ] },
+  }, '/tmp/graph.config.json');
+  expect(parsed.models?.entries.map(model => [model.id, model.reasoning])).toEqual([
+    ['legacy', true],
+    ['standard', false],
+  ]);
 });
 
 async function post(daemon: GraphDaemon, api: Session, path: string, body: unknown) {

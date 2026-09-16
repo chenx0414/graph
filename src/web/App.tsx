@@ -255,8 +255,26 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
 }) {
   const [projectOpen, setProjectOpen] = useState<Record<string, boolean>>({});
   const [createProject, setCreateProject] = useState(false);
+  const [archiving, setArchiving] = useState('');
   const ordered = [...conversations].sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt));
   const unbound = ordered.filter(conversation => !conversation.projectId);
+  async function archiveConversation(conversation: ConversationSummary) {
+    if (archiving) return;
+    setArchiving(conversation.id);
+    try {
+      await api(`/api/conversations/${conversation.id}/archive`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `archive-${crypto.randomUUID()}` }),
+      });
+      toast('对话已归档，可在设置的“归档对话”中恢复。', 'success');
+      window.dispatchEvent(new Event('graph:conversations-changed'));
+      if (path === `/conversations/${conversation.id}`) location.hash = '#/';
+    } catch (reason) {
+      toast(`归档失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    } finally {
+      setArchiving('');
+    }
+  }
   return (
     <>
       <nav className="nav">
@@ -301,7 +319,15 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
                   </a>
                 </summary>
                 <div className="sidebar-conversations">
-                  {items.map(conversation => <SidebarConversation key={conversation.id} conversation={conversation} active={path === `/conversations/${conversation.id}`} />)}
+                  {items.map(conversation => (
+                    <SidebarConversation
+                      key={conversation.id}
+                      conversation={conversation}
+                      active={path === `/conversations/${conversation.id}`}
+                      archiving={archiving === conversation.id}
+                      onArchive={() => void archiveConversation(conversation)}
+                    />
+                  ))}
                   {!items.length && <span className="sidebar-empty">暂无对话</span>}
                 </div>
               </details>
@@ -312,7 +338,15 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
         <div className="sidebar-label">最近</div>
         <div className="sidebar-section">
           <div className="sidebar-conversations" style={{ paddingLeft: 0 }}>
-            {unbound.map(conversation => <SidebarConversation key={conversation.id} conversation={conversation} active={path === `/conversations/${conversation.id}`} />)}
+            {unbound.map(conversation => (
+              <SidebarConversation
+                key={conversation.id}
+                conversation={conversation}
+                active={path === `/conversations/${conversation.id}`}
+                archiving={archiving === conversation.id}
+                onArchive={() => void archiveConversation(conversation)}
+              />
+            ))}
             <a className="sidebar-conversation" href="#/" data-testid="new-conversation-recent">
               <Icon name="plus" size={15} />
               <span className="sidebar-conversation-title">新对话</span>
@@ -337,13 +371,31 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
   );
 }
 
-function SidebarConversation({ conversation, active }: { conversation: ConversationSummary; active: boolean }) {
+function SidebarConversation({ conversation, active, archiving, onArchive }: {
+  conversation: ConversationSummary;
+  active: boolean;
+  archiving: boolean;
+  onArchive: () => void;
+}) {
   return (
-    <a className="sidebar-conversation" href={`#/conversations/${conversation.id}`} data-active={active} title={conversation.title}>
-      <Icon name="message" size={14} />
-      <span className="sidebar-conversation-title">{conversation.title}</span>
-      {conversation.openQuestions > 0 && <span className="sidebar-conversation-badge">{conversation.openQuestions}</span>}
-    </a>
+    <div className="sidebar-conversation-row" data-active={active}>
+      <a className="sidebar-conversation" href={`#/conversations/${conversation.id}`} data-active={active} title={conversation.title}>
+        <Icon name="message" size={14} />
+        <span className="sidebar-conversation-title">{conversation.title}</span>
+        {conversation.openQuestions > 0 && <span className="sidebar-conversation-badge">{conversation.openQuestions}</span>}
+      </a>
+      <button
+        type="button"
+        className="sidebar-conversation-archive"
+        data-testid={`archive-conversation-${conversation.id}`}
+        disabled={archiving}
+        onClick={onArchive}
+        title="归档对话"
+        aria-label={`归档对话 ${conversation.title}`}
+      >
+        <Icon name="archive" size={14} />
+      </button>
+    </div>
   );
 }
 

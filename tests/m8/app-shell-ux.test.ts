@@ -67,6 +67,41 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   await sidebar.waitFor({ state: 'visible' });
 });
 
+test('conversations archive from the sidebar and restore from settings', async () => {
+  const root = await temp('archive-ui');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '需要归档的对话', requestId: 'archive-ui' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(server.url);
+  const sidebar = page.getByTestId('conversation-list');
+  await expect.poll(() => sidebar.innerText()).toContain('需要归档的对话');
+  const row = page.locator('.sidebar-conversation-row').filter({ hasText: '需要归档的对话' });
+  const archive = page.getByTestId(`archive-conversation-${created.conversationId}`);
+  expect(await archive.evaluate(element => getComputedStyle(element).opacity)).toBe('0');
+  await row.hover();
+  await expect.poll(() => archive.evaluate(element => getComputedStyle(element).opacity)).toBe('1');
+  await archive.click();
+  await expect.poll(() => sidebar.innerText()).not.toContain('需要归档的对话');
+
+  await page.goto(`${server.url}/#/settings`);
+  await page.getByTestId(`archived-conversation-${created.conversationId}`).waitFor();
+  expect(await page.getByTestId(`archived-conversation-${created.conversationId}`).innerText()).toContain('alpha');
+  await page.getByTestId(`archived-conversation-${created.conversationId}`).getByRole('button', { name: '取消归档' }).click();
+  await page.getByTestId('archived-empty').waitFor();
+
+  await page.goto(server.url);
+  await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('需要归档的对话');
+});
+
 test('proposal and graph summaries stay in the thread while details open in the drawer', async () => {
   const root = await temp('drawer');
   const server = await openGraphServer({
@@ -350,6 +385,65 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
   expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
   expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('关闭');
+});
+
+test('the composer model control switches model and thinking as one persisted selection', async () => {
+  const root = await temp('model-control');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 2, enabledModelCount: 2 },
+  });
+  cleanup.push(() => server.close());
+  const selections: { model?: string; thinkingLevel?: string }[] = [];
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/api/settings', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      projects: [{ id: 'alpha', root }],
+      models: [
+        { id: 'local', grade: 'high', credentialId: 'local', contextWindow: 32_000, reasoning: true },
+        { id: 'fast', grade: 'medium', credentialId: 'local', contextWindow: 16_000, reasoning: false },
+      ],
+      definitions: [],
+      capabilities: [],
+    }),
+  }));
+  await page.route('**/api/conversations/synthetic/model', async route => {
+    selections.push(JSON.parse(route.request().postData() ?? '{}') as { model?: string; thinkingLevel?: string });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ changed: true }) });
+  });
+  await page.route('**/api/conversations/synthetic', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 'synthetic', title: 'Model control', projectId: 'alpha', projectRoot: root,
+      workspaceProjectId: 'alpha', anchorTaskId: 'anchor', createdAt: Date.now(), requirementVersion: 1, paused: false,
+      messages: [], messageCount: 0, questions: [], proposal: null, accepted: [], master: null,
+      cost: { unknown: false, amount: 0 }, usage: { used: 0, budget: null, unlimited: true },
+      telemetry: {
+        model: 'local', thinkingLevel: 'off', cacheHitRate: null, cachedInput: 0, cacheInput: 0,
+        contextTokens: null, contextLimit: 32_000, contextPercent: null,
+      },
+      tasks: [], cursor: 1,
+    }),
+  }));
+  await page.goto(`${server.url}/#/conversations/synthetic`);
+  await page.getByTestId('model-control').click();
+  await page.getByTestId('model-menu').waitFor();
+  await page.getByTestId('thinking-high').click();
+  await expect.poll(() => selections.length).toBe(1);
+  expect(selections[0]).toMatchObject({ model: 'local', thinkingLevel: 'high' });
+
+  await page.getByTestId('model-control').click();
+  await page.getByTestId('model-option-fast').click();
+  await expect.poll(() => selections.length).toBe(2);
+  expect(selections[1]).toMatchObject({ model: 'fast', thinkingLevel: 'off' });
 });
 
 test('the resource library groups reusable assets and includes graph architectures', async () => {

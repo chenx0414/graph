@@ -23,6 +23,9 @@ export interface ModelEntry {
   baseUrl: string;
   contextWindow: number;
   maxTokens: number;
+  /** Whether the model accepts a non-off thinking level. Legacy config without
+   * this field is treated as reasoning-capable. */
+  reasoning?: boolean;
   cost?: ModelCost;
   pricing?: ModelPricing;
   /** Extra HTTP headers for gateways that require routing hints (for example

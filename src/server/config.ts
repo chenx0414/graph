@@ -77,6 +77,12 @@ function optionalString(value: unknown, path: string): string | undefined {
   return asString(value, path);
 }
 
+function optionalBoolean(value: unknown, path: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') invalid(`${path} must be a boolean`);
+  return value;
+}
+
 function positiveInt(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) invalid(`${path} must be a positive integer`);
   return value;
@@ -136,6 +142,7 @@ function parseModel(raw: unknown, path: string, credentials: Record<string, Cred
     baseUrl: asString(entry.baseUrl, `${path}.baseUrl`),
     contextWindow: positiveInt(entry.contextWindow, `${path}.contextWindow`),
     maxTokens: positiveInt(entry.maxTokens, `${path}.maxTokens`),
+    reasoning: optionalBoolean(entry.reasoning, `${path}.reasoning`) ?? true,
     credentialId,
     // Provider-side model identity when the config identity differs (for
     // example two platforms exposing the same upstream model id).

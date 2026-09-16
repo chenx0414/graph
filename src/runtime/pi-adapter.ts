@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import type { Model } from '@earendil-works/pi-ai';
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
@@ -33,7 +34,7 @@ export interface PiAdapterChannels {
 function toPiModel(entry: ModelEntry): Model<ModelApi> {
   return {
     id: entry.modelId ?? entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
-    reasoning: false, input: ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
+    reasoning: entry.reasoning !== false, input: ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
     // Pi's Model.cost is required numeric metadata; Graph billing uses catalog cost, never this placeholder.
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     // Gateway routing headers (for example x-opencode-session) must travel
@@ -343,6 +344,7 @@ export function createPiAdapter(options: {
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
+            thinkingLevel: (conversation?.thinking_level ?? 'off') as ThinkingLevel,
             tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
             // Auto-compaction stays on for workers, reviewers and the master;
             // thresholds follow the model that will receive the summary.

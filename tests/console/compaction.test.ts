@@ -110,11 +110,11 @@ test('compaction settings derive from the model window and response budget', asy
   expect(tiny).toEqual({ enabled: true, reserveTokens: 256, keepRecentTokens: 1_024 });
 });
 
-test('schema v20 tags every invocation with a purpose and keeps completion as the default', async () => {
+test('schema v21 tags every invocation with a purpose and keeps completion as the default', async () => {
   const root = await temp('schema');
   const store = new TaskStore(join(root, 'tasks.sqlite'));
   cleanup.push(() => store.close());
-  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(20);
+  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(21);
   const columns = store.db.prepare('PRAGMA table_info(invocations)').all() as { name: string; dflt_value: string | null }[];
   expect(columns.find(column => column.name === 'purpose')).toMatchObject({ dflt_value: "'completion'" });
 });

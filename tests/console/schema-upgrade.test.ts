@@ -43,6 +43,7 @@ async function inspect(dbPath: string) {
       instance: store.db.prepare("SELECT budget,used,unlimited,models_used FROM instances WHERE id='legacy-instance'").get() as { budget: number; used: number; unlimited: number; models_used: string },
       cost: store.db.prepare("SELECT cost FROM invocations WHERE id='legacy-inv'").get() as { cost: string },
       pauseColumns: (store.db.prepare('PRAGMA table_info(nodes)').all() as { name: string }[]).map(column => column.name).filter(column => column.startsWith('pause') || column.startsWith('user_wait')),
+      conversationColumns: (store.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]).map(column => column.name),
       preparation: store.db.prepare("SELECT state,repo_root,baseline_sha FROM project_preparation WHERE project_id='legacy'").get() as { state: string; repo_root: string; baseline_sha: string } | undefined,
       newNodes: store.db.prepare("SELECT COUNT(*) AS count FROM node_entries WHERE task_id<>'legacy-task'").get() as { count: number },
     };
@@ -91,10 +92,11 @@ for (const fixture of ['v13', 'v17'] as const) {
     await daemon.close();
 
     const upgraded = await inspect(dbPath);
-    expect(upgraded.version).toBe(20);
+    expect(upgraded.version).toBe(21);
     expect(upgraded.instance).toMatchObject({ budget: 20_000_000, used: 12_345, unlimited: 0, models_used: '["legacy-model"]' });
     expect(JSON.parse(upgraded.cost.cost)).toEqual({ amount: 0.001, currency: 'USD' });
     expect(upgraded.pauseColumns.sort()).toEqual(['pause_ms', 'pause_since', 'user_wait_ms', 'user_wait_since']);
+    expect(upgraded.conversationColumns).toEqual(expect.arrayContaining(['archived_at', 'thinking_level']));
 
     // Phase B: the same file runs a scripted worker through Git preparation.
     const runtime = await openTaskRuntime({

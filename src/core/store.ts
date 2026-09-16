@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 20) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 21) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -243,6 +243,16 @@ export class TaskStore {
       this.db.exec(`
         ALTER TABLE invocations ADD COLUMN purpose TEXT NOT NULL DEFAULT 'completion';
         PRAGMA user_version=20;`);
+    });
+    if (version < 21) this.transaction(() => {
+      // Conversation-level presentation state stays with the conversation, not
+      // with a particular master operation. Archived rows remain readable and
+      // can be restored without deleting messages or task history.
+      this.db.exec(`
+        ALTER TABLE conversations ADD COLUMN archived_at INTEGER;
+        ALTER TABLE conversations ADD COLUMN thinking_level TEXT NOT NULL DEFAULT 'off';
+        CREATE INDEX conversations_archived ON conversations(archived_at);
+        PRAGMA user_version=21;`);
     });
   }
   transaction<T>(action: () => T): T {

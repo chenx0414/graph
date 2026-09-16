@@ -61,6 +61,62 @@ test('a conversation starts and chats without a project or feature task', async 
   expect(await runtime.user.list()).toEqual([]);
 });
 
+test('conversations can be archived and restored without deleting their history', async () => {
+  const root = await temp('archive');
+  const runtime = await withRuntime(root, () => ({ outcome: 'completed', output: { text: 'ok' }, usage }));
+  const created = await runtime.conversations.create({ text: '稍后继续', requestId: 'archive-create' });
+
+  expect((await runtime.conversations.list()).map(item => item.id)).toContain(created.conversationId);
+  const archived = await runtime.conversations.archive(created.conversationId, 'archive-1');
+  expect(archived).toMatchObject({ archived: true, conversationId: created.conversationId });
+  expect(await runtime.conversations.list()).toEqual([]);
+  expect((await runtime.conversations.list({ archived: true }))[0]).toMatchObject({
+    id: created.conversationId,
+    archivedAt: archived.archivedAt,
+  });
+  expect((await runtime.conversations.view(created.conversationId)).archived).toBe(true);
+
+  const restored = await runtime.conversations.unarchive(created.conversationId, 'archive-2');
+  expect(restored).toMatchObject({ archived: false, archivedAt: null });
+  expect((await runtime.conversations.list()).map(item => item.id)).toContain(created.conversationId);
+  expect((await runtime.conversations.view(created.conversationId)).messages).toHaveLength(1);
+});
+
+test('conversation model and thinking selection applies to the next master turn', async () => {
+  const root = await temp('model-selection');
+  const entries = [
+    {
+      id: 'm1', provider: 'synthetic', grade: 'medium' as const, api: 'openai-completions' as const,
+      baseUrl: 'http://127.0.0.1:1', contextWindow: 32_000, maxTokens: 256, reasoning: false,
+    },
+    {
+      id: 'm2', provider: 'synthetic', grade: 'high' as const, api: 'openai-completions' as const,
+      baseUrl: 'http://127.0.0.1:1', contextWindow: 32_000, maxTokens: 256, reasoning: true,
+    },
+  ];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })) },
+    models: { entries, modelRuntime: {} as never },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm1' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '切换模型', requestId: 'model-create' });
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
+
+  const selected = await runtime.conversations.selectModel(created.conversationId, {
+    model: 'm2', thinkingLevel: 'high', requestId: 'model-select',
+  });
+  expect(selected).toMatchObject({ model: 'm2', thinkingLevel: 'high', changed: true });
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm2', thinkingLevel: 'high' });
+
+  const clamped = await runtime.conversations.selectModel(created.conversationId, {
+    model: 'm1', thinkingLevel: 'high', requestId: 'model-select-clamped',
+  });
+  expect(clamped).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
+});
+
 test('messages sent while the master is running are answered one queued turn at a time', async () => {
   const root = await temp('queue');
   let release!: () => void;

@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
   type ModelRuntime, type ToolDefinition, type AgentSessionEvent,
@@ -29,6 +30,7 @@ export interface PiInstanceOptions {
   model: Model<Api>;
   modelRuntime: ModelRuntime;
   stream: StreamFn;
+  thinkingLevel?: ThinkingLevel;
   tools?: ToolDefinition[];
   skillPaths?: string[];
   broker?: SendGate;
@@ -116,7 +118,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const { session } = await createAgentSession({
     cwd: workspace, agentDir: stateDir, model: options.model,
     modelRuntime: options.modelRuntime, resourceLoader: loader,
-    sessionManager: manager, settingsManager: settings, noTools: 'all', thinkingLevel: 'off',
+    sessionManager: manager, settingsManager: settings, noTools: 'all', thinkingLevel: options.thinkingLevel ?? 'off',
     tools: customTools.map(tool => tool.name), customTools,
   });
   session.agent.streamFunction = options.stream;

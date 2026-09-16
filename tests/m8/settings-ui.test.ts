@@ -89,6 +89,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   expect(await page.getByTestId('config-revision').innerText()).toBe('0');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
   expect(await page.getByTestId('model-0-price').innerText()).toContain('价格未知');
+  expect(await page.getByTestId('model-0-reasoning').isChecked()).toBe(true);
   expect(stub.requests).toHaveLength(0);
 
   await page.getByTestId('project-0-id').fill('edited-project');
@@ -105,6 +106,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('model-1-baseUrl').fill(stub.baseUrl);
   await page.getByTestId('model-1-context').fill('4096');
   await page.getByTestId('model-1-maxTokens').fill('256');
+  await page.getByTestId('model-1-reasoning').uncheck();
   await page.getByTestId('limit-group-add').click();
   await page.getByTestId('limit-group-0').fill('4');
   await page.getByTestId('settings-save').click();
@@ -119,6 +121,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('settings-page').waitFor();
   expect(await page.getByTestId('project-0-id').inputValue()).toBe('edited-project');
   expect(await page.getByTestId('model-1-id').inputValue()).toBe('second-model');
+  expect(await page.getByTestId('model-1-reasoning').isChecked()).toBe(false);
   expect(await page.getByTestId('credential-1-group').inputValue()).toBe('group-1');
   expect(await page.getByTestId('limit-group-0').inputValue()).toBe('4');
   expect(await page.getByTestId('credential-1-state').innerText()).toBe('缺失');
@@ -133,6 +136,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   expect(configText).not.toContain(SECRET);
   expect(JSON.parse(configText).config.credentials.second.configured).toBe(false);
   expect(JSON.parse(configText).config.credentials.second.secretRef).toBe('GRAPH_SYNTH_KEY_2');
+  expect(JSON.parse(configText).config.models.entries[1].reasoning).toBe(false);
   expect(JSON.parse(configText).config.limits.sharedGroups['group-1']).toBe(4);
 
   // The connection test only runs on an explicit click and reaches the right model and credential.

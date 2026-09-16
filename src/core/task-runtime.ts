@@ -21,8 +21,16 @@ import { createModelScheduler, type ModelScheduler } from '../runtime/model-sche
 import { openRestrictedExecutor } from '../runtime/restricted-process.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { OperationRow } from './execution.ts';
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError, type AttachmentInput, type ProjectConfig, type Proposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
+
+const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+function asThinkingLevel(value: string): ThinkingLevel {
+  if (!THINKING_LEVELS.includes(value as ThinkingLevel)) throw new RuntimeError('invalid_input', 'A valid thinking level is required');
+  return value as ThinkingLevel;
+}
 
 function cleanAttachments(input: AttachmentInput[] | undefined) {
   const attachments = input ?? [];
@@ -584,18 +592,78 @@ export async function openTaskRuntime(options: {
         return { conversationId, taskId, title, messageId, cursor };
       });
     },
-    async list() {
+    async list(input: { archived?: boolean } = {}) {
       ensureOpen();
+      const archived = Boolean(input.archived);
       const rows = store.db.prepare(`SELECT c.id,c.title,c.project_id AS projectId,c.anchor_task_id AS anchorTaskId,c.created_at AS createdAt,
+        c.archived_at AS archivedAt,
         (SELECT MAX(e.timestamp) FROM events e JOIN tasks t ON t.id=e.task_id WHERE t.conversation_id=c.id) AS updatedAt,
         (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open') AS openQuestions,
         (SELECT COUNT(*) FROM tasks t WHERE t.conversation_id=c.id AND t.phase!='chatting') AS taskCount
-        FROM conversations c ORDER BY c.created_seq`).all() as { id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; updatedAt: number | null; openQuestions: number; taskCount: number }[];
+        FROM conversations c WHERE c.archived_at IS ${archived ? 'NOT NULL' : 'NULL'}
+        ORDER BY c.created_seq`).all() as { id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; archivedAt: number | null; updatedAt: number | null; openQuestions: number; taskCount: number }[];
       return rows.map(row => ({
         id: row.id, title: row.title, projectId: row.projectId, anchorTaskId: row.anchorTaskId, createdAt: row.createdAt,
-        updatedAt: row.updatedAt, openQuestions: row.openQuestions, taskCount: row.taskCount,
+        archivedAt: row.archivedAt, updatedAt: row.updatedAt, openQuestions: row.openQuestions, taskCount: row.taskCount,
         status: row.openQuestions > 0 ? 'blocked' : row.taskCount > 0 ? 'executing' : 'chatting',
       }));
+    },
+    archive(conversationId: string, requestId: string) {
+      ensureOpen();
+      const conversation = conversationRow(store, conversationId);
+      return store.command(`conversation:${conversationId}`, requestId, { type: 'archive' }, () => {
+        const now = Date.now();
+        if (conversation.archived_at === null) store.db.prepare('UPDATE conversations SET archived_at=? WHERE id=?').run(now, conversationId);
+        return {
+          conversationId,
+          archived: true,
+          archivedAt: conversation.archived_at ?? now,
+          cursor: store.event(conversation.anchor_task_id, 'conversation.archived', { conversationId }),
+        };
+      });
+    },
+    unarchive(conversationId: string, requestId: string) {
+      ensureOpen();
+      const conversation = conversationRow(store, conversationId);
+      return store.command(`conversation:${conversationId}`, requestId, { type: 'unarchive' }, () => {
+        if (conversation.archived_at !== null) store.db.prepare('UPDATE conversations SET archived_at=NULL WHERE id=?').run(conversationId);
+        return {
+          conversationId,
+          archived: false,
+          archivedAt: null,
+          cursor: store.event(conversation.anchor_task_id, 'conversation.unarchived', { conversationId }),
+        };
+      });
+    },
+    selectModel(conversationId: string, input: { model: string; thinkingLevel: ThinkingLevel; requestId: string }) {
+      ensureOpen();
+      conversationRow(store, conversationId);
+      if (!input.model.trim()) throw new RuntimeError('invalid_input', 'A model is required');
+      const requestedThinking = asThinkingLevel(input.thinkingLevel);
+      return store.command(`conversation:${conversationId}`, input.requestId, {
+        type: 'select_model', model: input.model.trim(), thinkingLevel: requestedThinking,
+      }, () => {
+        const entry = liveEntries().find(model => model.id === input.model.trim());
+        if (!entry) throw new RuntimeError('model_unavailable', 'The selected model is not configured');
+        const thinkingLevel = entry.reasoning === false ? 'off' : requestedThinking;
+        const master = store.db.prepare(`
+          SELECT n.instance_id,n.spec
+          FROM nodes n
+          WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'
+        `).get(conversationRow(store, conversationId).anchor_task_id) as { instance_id: string; spec: string } | undefined;
+        if (!master?.instance_id) throw new RuntimeError('model_unavailable', 'This conversation has no master Agent instance');
+        const spec = JSON.parse(master.spec) as NodeSpec;
+        const changed = spec.model !== entry.id || conversationRow(store, conversationId).thinking_level !== thinkingLevel;
+        spec.model = entry.id;
+        store.db.prepare('UPDATE nodes SET spec=? WHERE task_id=? AND id=?')
+          .run(canonicalJson(spec), conversationRow(store, conversationId).anchor_task_id, spec.id);
+        store.db.prepare('UPDATE instances SET model=? WHERE id=?').run(entry.id, master.instance_id);
+        store.db.prepare('UPDATE conversations SET thinking_level=? WHERE id=?').run(thinkingLevel, conversationId);
+        if (changed) store.event(conversationRow(store, conversationId).anchor_task_id, 'conversation.model_selected', {
+          model: entry.id, thinkingLevel,
+        });
+        return { conversationId, model: entry.id, thinkingLevel, changed };
+      });
     },
     async view(conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
       ensureOpen();
@@ -653,6 +721,7 @@ export async function openTaskRuntime(options: {
       const contextTokens = latestUsage ? latestUsage.input + latestUsage.cacheRead + latestUsage.cacheWrite : null;
       return {
         id: conversation.id, title: conversation.title, projectId: conversation.project_id, projectRoot: project?.root ?? null,
+        archived: conversation.archived_at !== null, archivedAt: conversation.archived_at,
         paused: Boolean(anchor.paused),
         workspaceProjectId: conversation.workspace_project_id, anchorTaskId: conversation.anchor_task_id,
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
@@ -663,7 +732,7 @@ export async function openTaskRuntime(options: {
         master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, unlimited: Boolean(master.unlimited), budget: master.unlimited ? null : master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
         telemetry: {
           model: master?.model ?? null,
-          thinkingLevel: 'off',
+          thinkingLevel: conversation.thinking_level,
           cacheHitRate: knownMasterUsage.length && cacheInput > 0 ? cachedInput / cacheInput : null,
           cachedInput,
           cacheInput,

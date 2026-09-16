@@ -10,6 +10,7 @@ import { RuntimeError, type Json } from './types.ts';
 export interface ConversationRow {
   id: string; project_id: string | null; workspace_project_id: string; anchor_task_id: string;
   title: string; created_seq: number; created_at: number;
+  archived_at: number | null; thinking_level: string;
   /** Messages after this seq belong to the current project binding. */
   binding_since_seq: number;
 }
