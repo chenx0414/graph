@@ -85,9 +85,15 @@ export function createPiAdapter(options: {
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   channels?: PiAdapterChannels;
 }): ActionAdapter {
+  const activeInstances = new Map<string, Awaited<ReturnType<typeof openPiInstance>>>();
   return {
     kind: 'agent',
     reserveTokens: PI_SESSION_RESERVE,
+    async steer(operation, text) {
+      const active = activeInstances.get(operation.id);
+      if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting steering messages');
+      await active.steer(text);
+    },
     prepare: async operation => {
       if (!operation.instanceId) throw new RuntimeError('invalid_adapter', 'Agents require an instance');
       const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
@@ -232,6 +238,7 @@ export function createPiAdapter(options: {
             ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
             ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog, install: channels.install } : {}),
             onSubmit: output => { submitted = output; },
+            ...(conversation && spec.role === 'master' ? { onSuggestedPrompt: prompt => { suggestedPrompt = prompt; } } : {}),
           }),
           ...capabilities.tools,
         ];
@@ -250,6 +257,7 @@ export function createPiAdapter(options: {
         };
         const toolSummaries = new Map<string, string>();
         const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
+        let suggestedPrompt: string | undefined;
         const persistEntries = !conversation;
         let sawAssistantMessageEnd = false;
         const onEvent = (event: AgentSessionEvent) => {
@@ -319,10 +327,12 @@ export function createPiAdapter(options: {
           }
           if (!conversation) return;
           if (event.type === 'tool_execution_start') {
+            if (event.toolName === 'suggest_prompt') return;
             const summary = summarizeToolCall(event.toolName, event.args);
             toolSummaries.set(event.toolCallId, summary);
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary });
           } else if (event.type === 'tool_execution_end') {
+            if (event.toolName === 'suggest_prompt') return;
             const summary = toolSummaries.get(event.toolCallId) ?? event.toolName;
             toolActivity.push({ toolCallId: event.toolCallId, name: event.toolName, summary, state: event.isError ? 'error' : 'done' });
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError });
@@ -340,6 +350,7 @@ export function createPiAdapter(options: {
             onEvent,
             ...(conversation ? { allowWorkspaceChange: true } : {}),
           });
+          activeInstances.set(operation.id, session);
           if (persistEntries) {
             const inspected = session.inspect();
             recordNodeSession(options.store, operation.instanceId!, inspected.sessionId, inspected.sessionFile);
@@ -355,7 +366,8 @@ export function createPiAdapter(options: {
                     'propose_graph creates a draft version for the user to confirm; nothing is dispatched before confirmation. When the user changes direction, propose a new draft instead of arguing for the old one (only the latest draft on the current requirement can be confirmed).',
                     'Each proposal should include a short decisions list of the binding constraints the user confirmed (for example "do not touch login.ts"); update or drop entries when the user revises them. The list is frozen with the draft and shown on the confirmation card, so workers receive exactly what the user reviewed.',
                     'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
-                    'Write normal prose replies for chat; use tools only to investigate or to submit a draft.',
+                    'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',
+                    'After writing the normal reply, call suggest_prompt with one concise and specific message the user is most likely to send next. Omit the suggestion when there is no useful follow-up. The suggestion is only a composer hint and must never be sent automatically.',
                   ] : []),
                   'Use propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands (including a headless browser test), graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.',
                   `Configured models: ${models || '(none)'}. Implementation nodes must use the implementation model and review nodes must use the review model, both from the briefing catalog (for example coder@1, reviewer@1).`,
@@ -407,10 +419,13 @@ export function createPiAdapter(options: {
             // The conversation output always carries the visible reply; worker
             // output keeps its existing submitted-or-text shape.
             const output: Json = conversation
-              ? { text: reply, ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
+              ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
               : (submitted ?? { text });
             return { outcome: 'completed', output, usage: gate.total() };
-          } finally { await session.close(); }
+          } finally {
+            activeInstances.delete(operation.id);
+            await session.close();
+          }
         } finally { await capabilities.close(); await commands.close(); }
       };
     },

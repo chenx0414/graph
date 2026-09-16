@@ -38,6 +38,7 @@ export function ChatComposer({
   placeholder,
   onSend,
   sendDisabled,
+  suggestion,
   leftActions,
   className = '',
   autoFocus = false,
@@ -54,6 +55,7 @@ export function ChatComposer({
   placeholder: string;
   onSend: () => void;
   sendDisabled: boolean;
+  suggestion?: string | null;
   leftActions?: ReactNode;
   className?: string;
   autoFocus?: boolean;
@@ -70,6 +72,8 @@ export function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const activeMention = mentionAt(value, cursor);
+  const availableSuggestion = suggestion?.trim() ?? '';
+  const showingSuggestion = Boolean(availableSuggestion) && value.length === 0 && attachments.length === 0 && !mentionOpen;
 
   useEffect(() => {
     const mention = mentionAt(value, cursor);
@@ -193,7 +197,8 @@ export function ChatComposer({
         }}
         onSelect={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
         onClick={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
-        placeholder={placeholder}
+        placeholder={showingSuggestion ? availableSuggestion : placeholder}
+        data-suggestion={showingSuggestion ? availableSuggestion : undefined}
         autoFocus={autoFocus}
         onKeyDown={event => {
           if (mentionOpen && activeMention) {
@@ -217,6 +222,17 @@ export function ChatComposer({
               setMentionOpen(false);
               return;
             }
+          }
+          if (event.key === 'Tab' && showingSuggestion) {
+            event.preventDefault();
+            onChange(availableSuggestion);
+            setCursor(availableSuggestion.length);
+            requestAnimationFrame(() => {
+              const input = textareaRef.current;
+              input?.focus();
+              input?.setSelectionRange(availableSuggestion.length, availableSuggestion.length);
+            });
+            return;
           }
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();

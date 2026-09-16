@@ -183,6 +183,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
+  const [steering, setSteering] = useState(false);
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
   const [branch, setBranch] = useState('main');
@@ -319,9 +320,9 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
       setPauseAction(null);
     }
   }
-  async function send() {
-    const outgoing = text.trim();
-    const outgoingAttachments = attachments;
+  async function send(outgoingOverride?: string) {
+    const outgoing = (outgoingOverride ?? text).trim();
+    const outgoingAttachments = outgoingOverride === undefined ? attachments : [];
     if (!outgoing && !outgoingAttachments.length) return;
     setText('');
     setAttachments([]);
@@ -342,10 +343,42 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
       setSending(false);
     }
   }
+  async function steerQueued() {
+    if (steering || !queuedMessages.length) return;
+    setSteering(true);
+    setActionError('');
+    try {
+      const result = await api<{ state: 'empty' | 'queued' | 'steered'; steered: number }>(`/api/conversations/${id}/steer`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `steer-${crypto.randomUUID()}` }),
+      });
+      if (result.state === 'steered') toast(`已将 ${result.steered} 条队列消息作为打断引导发送给主 Agent。`, 'success');
+      else if (result.state === 'queued') toast('当前回复已经结束，队列消息会作为下一轮继续处理。', 'info');
+      reload();
+      onChanged?.();
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setActionError(message);
+      toast(message, 'danger');
+    } finally {
+      setSteering(false);
+    }
+  }
+  async function submitComposer() {
+    if (sending || steering) return;
+    if (text.trim() || attachments.length) return send();
+    if (busy && queuedMessages.length) return steerQueued();
+    if (!busy && promptSuggestion) return send(promptSuggestion);
+  }
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
   const cachedMessages = Object.values(cache).sort((left, right) => left.seq - right.seq);
   const currentMessages = view.messages;
+  const queuedMessages = currentMessages.filter(message => message.role === 'user' && message.state === 'pending');
+  const latestAssistant = [...cachedMessages].reverse().find(message => message.role === 'assistant');
+  const promptSuggestion = !busy && !queuedMessages.length && typeof latestAssistant?.data?.suggestedPrompt === 'string'
+    ? latestAssistant.data.suggestedPrompt.trim().slice(0, 500)
+    : '';
   const totalMessages = view.messageCount;
   const hasOlder = !historyExhausted && totalMessages > cachedMessages.length;
   async function loadOlder() {
@@ -673,12 +706,15 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           onAttachmentsChange={setAttachments}
           projectId={view.projectId}
           placeholder={busy ? '主 Agent 正在处理；继续输入会排队，不会被丢掉。' : '继续交流，输入 @ 引用项目文件…'}
-          onSend={() => void send()}
-          sendDisabled={!text.trim() && !attachments.length}
+          suggestion={promptSuggestion}
+          onSend={() => void submitComposer()}
+          sendDisabled={sending || steering || (!text.trim() && !attachments.length && !(busy && queuedMessages.length) && !promptSuggestion)}
         />
         <div className="composer-footer">
           <span className="composer-note">
-            {busy ? <span data-testid="queued-hint">主 Agent 正在处理，消息会排队。</span> : 'Enter 发送，Shift + Enter 换行'}
+            {busy
+              ? <span data-testid="queued-hint">主 Agent 正在处理，{queuedMessages.length ? `已有 ${queuedMessages.length} 条队列消息。` : '消息会排队。'}</span>
+              : 'Enter 发送，Shift + Enter 换行'}
           </span>
           <ComposerTelemetry telemetry={view.telemetry} />
         </div>

@@ -70,3 +70,19 @@ test('a workspace tool still creates nested files and lists directories inside t
   expect((await call('read', { path: 'src/web/index.html' })).content[0]).toMatchObject({ text: '<html>ok</html>' });
   expect((await call('read', { path: join(await realpath(scope), 'src/web/index.html') })).content[0]).toMatchObject({ text: '<html>ok</html>' });
 });
+
+test('a master can record one bounded prompt suggestion', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-suggestion-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const suggestions: string[] = [];
+  const tools = agentTools({
+    workspace: root,
+    role: 'master',
+    supervisor: { propose: async () => ({}), revise: async () => ({}) },
+    onSuggestedPrompt: prompt => suggestions.push(prompt),
+  });
+  const execute = tools.find(tool => tool.name === 'suggest_prompt')!.execute as unknown as (id: string, params: unknown) => Promise<unknown>;
+  await execute('probe', { prompt: '继续检查测试覆盖。' });
+  expect(suggestions).toEqual(['继续检查测试覆盖。']);
+  await expect(execute('probe', { prompt: '' })).rejects.toThrow('between 1 and 500');
+});

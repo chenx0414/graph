@@ -3,7 +3,7 @@ import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
-import { appendMessage, conversationForTask, conversationRow, listMessages } from './conversation.ts';
+import { appendMessage, conversationForTask, conversationRow, listMessages, pendingMessages, publishMessageUpdate, type MessageRow } from './conversation.ts';
 import { Execution } from './execution.ts';
 import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
@@ -44,6 +44,27 @@ function cleanAttachments(input: AttachmentInput[] | undefined) {
     if (attachment.text.includes('\0')) throw new RuntimeError('invalid_input', `Attachment ${attachment.name} is not a text file`);
     return { name: attachment.name.trim(), type: attachment.type, size: attachment.size, text: attachment.text };
   });
+}
+
+function steeringText(row: MessageRow) {
+  const parts = row.text.trim() ? [row.text.trim()] : [];
+  if (row.data) {
+    try {
+      const data = JSON.parse(row.data) as { attachments?: unknown };
+      if (Array.isArray(data.attachments)) {
+        for (const value of data.attachments) {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+          const attachment = value as { name?: unknown; text?: unknown };
+          if (typeof attachment.name === 'string' && typeof attachment.text === 'string') {
+            parts.push(`附件 ${attachment.name}:\n${attachment.text}`);
+          }
+        }
+      }
+    } catch {
+      // A malformed legacy data field must not make a textual steering message unusable.
+    }
+  }
+  return parts.join('\n\n');
 }
 
 export async function openTaskRuntime(options: {
@@ -674,6 +695,41 @@ export async function openTaskRuntime(options: {
         return { conversationId, messageId: message.id, state: 'pending', cursor: message.cursor, pending: node ? ['preparing', 'running'].includes(node.status) : false };
       });
       if (options.autoWake) execution.kick();
+      return receipt;
+    },
+    async steer(conversationId: string, input: { requestId: string }) {
+      ensureOpen();
+      const conversation = conversationRow(store, conversationId);
+      const active = store.db.prepare(`
+        SELECT o.id,o.spec
+        FROM operations o
+        JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+        JOIN tasks t ON t.id=o.task_id
+        WHERE t.conversation_id=? AND json_extract(n.spec,'$.role')='master'
+          AND o.state='dispatched' AND o.worker_active=1
+        ORDER BY o.rowid DESC LIMIT 1
+      `).get(conversationId) as { id: string; spec: string } | undefined;
+      const messages = pendingMessages(store, conversationId, 50);
+      if (!messages.length) return { conversationId, state: 'empty' as const, steered: 0, cursor: null as number | null };
+      if (!active) return { conversationId, state: 'queued' as const, steered: 0, cursor: null as number | null };
+
+      const operation = JSON.parse(active.spec) as Operation;
+      const combined = messages.map(steeringText).filter(Boolean).join('\n\n');
+      if (!combined) throw new RuntimeError('invalid_input', 'Queued messages do not contain steerable text');
+      await execution.steer(active.id, combined);
+
+      const receipt = store.transaction(() => {
+        const ids = messages.map(message => message.id);
+        const placeholders = ids.map(() => '?').join(',');
+        store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1)
+          WHERE id IN (${placeholders}) AND state='pending'`)
+          .run(active.id, operation.attempt, Date.now(), ...ids);
+        for (const id of ids) publishMessageUpdate(store, id);
+        const cursor = store.event(conversation.anchor_task_id, 'message.steered', {
+          operationId: active.id, messageIds: ids, requestId: input.requestId,
+        });
+        return { conversationId, state: 'steered' as const, steered: ids.length, cursor };
+      });
       return receipt;
     },
     async bind(conversationId: string, input: { projectId: string; requestId: string }) {

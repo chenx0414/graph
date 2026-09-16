@@ -158,6 +158,7 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
     expect(request.tools).not.toContain('write_file');
     expect(request.tools).not.toContain('run_command');
     expect(request.tools).toContain('read');
+    expect(request.tools).toContain('suggest_prompt');
   }
   expect(JSON.stringify(masterRequests[0]!.messages)).toContain('ongoing conversation');
   // The post-confirmation briefing carries recorded execution facts.

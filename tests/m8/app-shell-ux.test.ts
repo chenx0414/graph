@@ -170,6 +170,80 @@ test('the right drawer toggle stays available and opens an empty state', async (
   await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
 });
 
+test('the composer suggestion and queue steering follow the three Enter states', async () => {
+  const root = await temp('composer-enter-states');
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const steered: string[] = [];
+  let runs = 0;
+  const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    actions: {
+      master: {
+        kind: 'agent',
+        reserveTokens: 100,
+        prepare: async () => async () => {
+          runs += 1;
+          if (runs === 1) await gate;
+          return {
+            outcome: 'completed',
+            output: runs === 1
+              ? { text: '第一轮检查完成。', suggestedPrompt: '继续检查测试覆盖和失败分支。' }
+              : { text: '已按候选提示继续。' },
+            usage,
+          };
+        },
+        steer: async (_operation, text) => { steered.push(text); },
+      },
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    autoDrive: true,
+    webDir,
+    startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ text: '开始检查。', requestId: 'enter-states' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  const input = page.getByTestId('chat-input');
+  await input.waitFor();
+  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status).toBe('running');
+
+  // State 2: a nonempty prompt sent during output is queued.
+  await input.fill('优先检查失败分支。');
+  await input.press('Enter');
+  await page.locator('[data-testid="message-user"][data-state="pending"]').filter({ hasText: '优先检查失败分支。' }).waitFor();
+
+  // State 3: an empty composer with a queued message sends that queue as steering.
+  await input.press('Enter');
+  await expect.poll(() => steered.length).toBe(1);
+  expect(steered[0]).toContain('优先检查失败分支。');
+  await expect.poll(async () => {
+    const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
+    return messages.find(message => message.text === '优先检查失败分支。')?.state;
+  }).toBe('delivered');
+
+  release();
+  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status).toBe('succeeded');
+  await expect.poll(() => input.getAttribute('data-suggestion')).toBe('继续检查测试覆盖和失败分支。');
+
+  // Tab fills the grey suggestion.
+  await input.press('Tab');
+  expect(await input.inputValue()).toBe('继续检查测试覆盖和失败分支。');
+
+  // State 1: with the composer empty again, Enter sends the suggestion directly.
+  await input.fill('');
+  await input.press('Enter');
+  await expect.poll(async () => {
+    const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
+    return messages.some(message => message.role === 'user' && message.text === '继续检查测试覆盖和失败分支。');
+  }).toBe(true);
+});
+
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');
   const initial = join(root, 'initial');

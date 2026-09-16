@@ -127,6 +127,9 @@ export async function openPiInstance(options: PiInstanceOptions) {
 
   return {
     async prompt(text: string) { await session.prompt(text); },
+    async steer(text: string) {
+      await session.prompt(text, { streamingBehavior: 'steer', expandPromptTemplates: false });
+    },
     async setModel(model: Model<Api>) { await session.setModel(model); },
     async compact() { return session.compact(); },
     async navigate(entryId: string, summarize: boolean) { return session.navigateTree(entryId, { summarize }); },

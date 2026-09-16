@@ -553,6 +553,7 @@ small { color: var(--muted); }
   color: var(--text);
   background: transparent;
 }
+.chat-composer textarea::placeholder { color: var(--faint); opacity: 1; }
 .chat-composer-controls { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 8px; }
 .composer-project {
   border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px;

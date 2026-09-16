@@ -127,6 +127,17 @@ export class Execution {
     try { await work; } finally { this.pending.delete(work); }
   }
 
+  async steer(operationId: string, text: string) {
+    const row = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(operationId) as OperationRow | undefined;
+    if (!row || row.state !== 'dispatched' || !row.worker_active) {
+      throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting steering messages');
+    }
+    const operation = JSON.parse(row.spec) as Operation;
+    const adapter = Object.hasOwn(this.actions, operation.action) ? this.actions[operation.action] : undefined;
+    if (!adapter?.steer) throw new RuntimeError('steering_unavailable', 'The active Agent does not support steering messages');
+    await adapter.steer(operation, text);
+  }
+
   /** Release an interrupted operation's unknown usage through the
    * authenticated answer path. Recording fills the single unknown invocation;
    * keeping it unknown leaves that record and applies only the known part.
@@ -696,7 +707,11 @@ export class Execution {
     const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output) ? result.output as { [key: string]: Json } : undefined;
     if (result.outcome === 'completed') {
       const reply = typeof output?.text === 'string' ? output.text.trim() : '';
-      if (reply) appendMessage(this.store, { conversationId: conversation.id, role: 'assistant', kind: 'chat', text: reply, state: 'done', operationId: operation.id, turn: operation.attempt });
+      const suggestedPrompt = typeof output?.suggestedPrompt === 'string' ? output.suggestedPrompt.trim().slice(0, 500) : '';
+      if (reply) appendMessage(this.store, {
+        conversationId: conversation.id, role: 'assistant', kind: 'chat', text: reply, state: 'done', operationId: operation.id, turn: operation.attempt,
+        ...(suggestedPrompt ? { data: { suggestedPrompt } } : {}),
+      });
       const activity = Array.isArray(output?.toolActivity) ? output.toolActivity : [];
       for (const item of activity) {
         const entry = item as { name?: unknown; summary?: unknown; state?: unknown; toolCallId?: unknown };

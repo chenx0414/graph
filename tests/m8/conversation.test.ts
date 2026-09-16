@@ -90,6 +90,60 @@ test('messages sent while the master is running queue into exactly one next turn
   expect(after.messages.filter(message => message.role === 'assistant')[1]!.text).toBe('答：第二条 / 第三条');
 });
 
+test('the master prompt suggestion is stored with the assistant reply', async () => {
+  const root = await temp('suggestion');
+  const runtime = await withRuntime(root, () => ({
+    outcome: 'completed',
+    output: { text: '第一阶段检查完成。', suggestedPrompt: '继续检查测试覆盖和失败分支。' },
+    usage,
+  }));
+  const created = await runtime.conversations.create({ text: '先检查项目。', requestId: 'suggestion' });
+  await runtime.host.runReady();
+  const conversation = await runtime.conversations.view(created.conversationId);
+  const assistant = conversation.messages.find(message => message.role === 'assistant')!;
+  expect((assistant.data as { suggestedPrompt?: unknown } | null)?.suggestedPrompt).toBe('继续检查测试覆盖和失败分支。');
+});
+
+test('queued messages can steer the active master turn', async () => {
+  const root = await temp('steer');
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const steered: string[] = [];
+  const adapter: ActionAdapter = {
+    kind: 'agent',
+    reserveTokens: 100,
+    prepare: async () => async () => {
+      await gate;
+      return { outcome: 'completed', output: { text: '已根据引导继续完成。' }, usage };
+    },
+    steer: async (_operation, text) => { steered.push(text); },
+  };
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: adapter },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '开始检查。', requestId: 'steer' });
+  const firstTurn = runtime.host.runReady();
+  await expect.poll(async () => (await runtime.conversations.view(created.conversationId)).master?.status).toBe('running');
+  await runtime.conversations.chat(created.conversationId, { text: '先看测试覆盖。', requestId: 'steer-1' });
+  await runtime.conversations.chat(created.conversationId, { text: '再看失败分支。', requestId: 'steer-2' });
+
+  const steeredReceipt = await runtime.conversations.steer(created.conversationId, { requestId: 'steer-guide' });
+  expect(steeredReceipt).toMatchObject({ state: 'steered', steered: 2 });
+  expect(steered).toEqual(['先看测试覆盖。\n\n再看失败分支。']);
+  const guided = await runtime.conversations.view(created.conversationId);
+  expect(guided.messages.filter(message => message.role === 'user').map(message => message.state)).toEqual(['delivered', 'delivered', 'delivered']);
+  expect(guided.messages.filter(message => message.role === 'user').slice(1).every(message => message.operationId)).toBe(true);
+
+  release();
+  await firstTurn;
+  const completed = await runtime.conversations.view(created.conversationId);
+  expect(completed.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
+  expect(completed.messages.at(-1)?.text).toBe('已根据引导继续完成。');
+});
+
 test('drafts version on the same requirement and only the latest can be confirmed', async () => {
   const root = await temp('draft');
   const project = join(root, 'project');

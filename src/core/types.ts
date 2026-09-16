@@ -76,6 +76,8 @@ export type Reconciliation =
 export interface ActionAdapter {
   kind: NodeSpec['kind']; reserveTokens?: number; grant?: string;
   prepare(operation: Operation): Promise<() => Promise<OperationResult>>;
+  /** Deliver a steering message into an already dispatched operation. */
+  steer?(operation: Operation, text: string): Promise<void>;
   reconcile?(operation: Operation): Promise<Reconciliation>;
 }
 

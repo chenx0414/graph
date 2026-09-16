@@ -183,6 +183,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const body = request.body as { requestId: string };
     return runtime.conversations.resume(params.conversationId, body.requestId);
   });
+  app.post('/api/conversations/:conversationId/steer', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.steer(params.conversationId, { requestId: body.requestId });
+  });
   app.get('/api/conversations/:conversationId/events', async request => {
     const params = request.params as { conversationId: string };
     const query = request.query as { after?: string; limit?: string };
