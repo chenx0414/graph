@@ -82,7 +82,15 @@ test('every template including back-edges receives layout positions', async () =
   ];
   for (const graph of graphs) {
     const layout = await layoutGraph(graph);
-    for (const node of graph.nodes) expect(layout.positions[node.id], node.id).toBeDefined();
+    for (const node of graph.nodes) {
+      const position = layout.positions[node.id];
+      expect(position, node.id).toBeDefined();
+      if (!position) continue;
+      expect(Math.abs(position.x % 16), `${node.id} x`).toBe(0);
+      expect(Math.abs(position.y % 16), `${node.id} y`).toBe(0);
+      expect(position.width, `${node.id} width`).toBe(192);
+      expect(position.height, `${node.id} height`).toBe(48);
+    }
     for (const loop of graph.loops ?? []) expect(layout.edges.some(edge => edge.source === loop.from && edge.target === loop.to)).toBe(true);
   }
 });

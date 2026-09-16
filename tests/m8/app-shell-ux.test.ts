@@ -162,6 +162,7 @@ test('proposal details open in a paged drawer, compress the chat, and switch dra
   await page.getByTestId('detail-drawer').waitFor();
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
   await page.getByTestId('draft-graph-detail').waitFor();
+  await page.waitForTimeout(260);
   await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
     .toBeLessThan(beforeMain!.width - 240);
   const afterMain = await page.locator('.conversation-main').boundingBox();

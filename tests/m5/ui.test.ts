@@ -60,6 +60,11 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   await page.getByTestId('graph').waitFor();
   expect(await page.getByTestId('graph').getAttribute('data-editable')).toBe('false');
   await page.getByTestId('flow').waitFor();
+  const edgePath = page.locator('.react-flow__edge-path').first();
+  await edgePath.waitFor();
+  expect(await page.locator('.react-flow__edge.grid-edge').count()).toBeGreaterThan(0);
+  expect(await edgePath.getAttribute('d')).not.toMatch(/[CQ]/);
+  expect(await page.locator('.react-flow__background circle').count()).toBeGreaterThan(0);
   const implement = page.locator('.react-flow__node').filter({ hasText: 'implement' }).first();
   await implement.waitFor({ state: 'visible' });
   await implement.click();

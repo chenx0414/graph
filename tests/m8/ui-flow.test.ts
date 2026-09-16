@@ -151,6 +151,18 @@ test('parallel branches, subgraphs and rework back-edges render and errors are e
   await page.getByTestId('graph').waitFor();
   await page.waitForFunction(() => document.querySelectorAll('.react-flow__node').length >= 4);
   expect(await page.locator('.react-flow__edge').evaluateAll(edges => edges.some(edge => (edge.getAttribute('data-testid') ?? '').includes('loop:')))).toBe(true);
+  const loopPath = page.locator('.react-flow__edge.grid-loop-edge .react-flow__edge-path').first();
+  await loopPath.waitFor();
+  expect(await loopPath.getAttribute('d')).not.toMatch(/[CQ]/);
+  await expect.poll(async () => {
+    const container = await page.locator('.react-flow__node').filter({ hasText: 'grp' }).first().boundingBox();
+    const left = await page.locator('.react-flow__node').filter({ hasText: 'left' }).first().boundingBox();
+    return Boolean(container && left
+      && container.x <= left.x
+      && container.y <= left.y
+      && container.x + container.width >= left.x + left.width
+      && container.y + container.height >= left.y + left.height);
+  }).toBe(true);
   await page.getByTestId('container-grp').click();
   await page.waitForFunction(() => !document.body.innerText.includes('left'));
   await page.getByTestId('container-grp').click();

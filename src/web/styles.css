@@ -372,8 +372,9 @@ small { color: var(--muted); }
 .react-flow__node-default,
 .react-flow__node-graphNode {
   padding: 0 !important; border: none !important; background: transparent !important;
-  box-shadow: none !important; width: auto !important;
+  box-shadow: none !important;
 }
+.react-flow__node-graphNode { width: auto !important; }
 .node-card {
   min-width: 150px; background: var(--panel); border: 1.5px solid var(--border-strong);
   border-radius: 12px; padding: 8px 11px; text-align: left;
@@ -391,6 +392,7 @@ small { color: var(--muted); }
 .node-meta { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; gap: 8px; }
 .node-card[data-tone="active"] .node-dot { animation: pulse-ring 1.6s ease-out infinite; }
 .container-card {
+  width: 100%; height: 100%; box-sizing: border-box;
   border: 1.5px dashed var(--border-strong) !important; border-radius: 16px !important;
   background: var(--accent-weak) !important; color: var(--muted) !important; font-weight: 600;
 }
@@ -403,7 +405,9 @@ small { color: var(--muted); }
   background: var(--panel) !important; border-color: var(--border) !important; fill: var(--muted) !important;
 }
 .react-flow__controls-button:hover { background: var(--panel-soft) !important; }
-.react-flow__background { background: var(--panel-soft); }
+.react-flow { background: #fbfcfe; }
+.react-flow__background { background: #fbfcfe; }
+.react-flow__edge-path { stroke-linecap: square; stroke-linejoin: miter; }
 .react-flow__attribution { background: transparent !important; opacity: 0.4; }
 
 /* ---------- conversation-first shell ---------- */
