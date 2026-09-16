@@ -7,7 +7,7 @@ import { GraphCanvas } from './GraphCanvas.tsx';
 import { Markdown } from './Markdown.tsx';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
-import { Button, Icon, Pill, StatusDot } from './ui.tsx';
+import { Button, Icon, Pill, StatusDot, toast } from './ui.tsx';
 
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string }[] };
 export type ConversationSummary = {
@@ -194,6 +194,8 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
+  const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   // One stable, seq-ordered cache per mounted conversation. Every source
   // (latest window, history pages, streamed message records) merges by stable
@@ -251,6 +253,13 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
     if (latest?.targetBranch) setBranch(latest.targetBranch);
   }, [view?.accepted]);
   useEffect(() => {
+    setPauseAction(null);
+    setPausedOverride(null);
+  }, [id]);
+  useEffect(() => {
+    if (view && pausedOverride !== null && view.paused === pausedOverride) setPausedOverride(null);
+  }, [view, pausedOverride]);
+  useEffect(() => {
     if (view) mergeMessages(view.messages);
   }, [view, mergeMessages]);
   useEffect(() => {
@@ -268,6 +277,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   const proposal = view.proposal;
   const confirmable = Boolean(proposal && !proposal.stale && !acceptedVersions.has(proposal.version));
   const busy = view.master?.status === 'preparing' || view.master?.status === 'running';
+  const paused = pausedOverride ?? view.paused;
   const durableAssistantOps = new Set(view.messages.filter(message => message.role === 'assistant' && message.operationId).map(message => message.operationId!));
   const durableToolIds = new Set(view.messages.filter(message => message.role === 'tool' && typeof message.data?.toolCallId === 'string').map(message => String(message.data!.toolCallId)));
   const liveEntries = Object.entries(liveText).filter(([operationId]) => !durableAssistantOps.has(operationId));
@@ -276,6 +286,33 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
     setActionError('');
     try { await action(); after?.(); reload(); onChanged?.(); }
     catch (reason) { setActionError(reason instanceof Error ? reason.message : String(reason)); }
+  }
+  async function changePaused(nextPaused: boolean) {
+    if (pauseAction) return;
+    const action = nextPaused ? 'pause' : 'resume';
+    setPauseAction(action);
+    setActionError('');
+    try {
+      await api(`/api/conversations/${id}/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: crypto.randomUUID() }),
+      });
+      setPausedOverride(nextPaused);
+      toast(
+        nextPaused
+          ? '主 Agent 对话已暂停。已发出的调用会结束，新消息会排队保留。'
+          : '主 Agent 对话已继续，排队消息会开始处理。',
+        nextPaused ? 'info' : 'success',
+      );
+      reload();
+      onChanged?.();
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setActionError(message);
+      toast(message, 'danger');
+    } finally {
+      setPauseAction(null);
+    }
   }
   async function send() {
     const outgoing = text.trim();
@@ -364,7 +401,7 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           <div className="conversation-meta">
             {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}</span> : <span data-testid="conversation-project">未绑定项目</span>}
             <span>·</span>
-            <span data-testid="master-status">{view.paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
+            <span data-testid="master-status">{paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
             <span>·</span>
             <span data-testid="conversation-connection">{connected ? '已连接' : '重连中…'}</span>
             <span>·</span>
@@ -372,15 +409,43 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           </div>
         </div>
         <div className="conversation-actions">
-          <Button size="sm" icon="pause" data-testid="conversation-pause" onClick={() => void act(() => api(`/api/conversations/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>暂停</Button>
-          <Button size="sm" icon="play" variant="primary" data-testid="conversation-resume" onClick={() => void act(() => api(`/api/conversations/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }))}>继续</Button>
-          {detailAvailable && !drawerOpen && (
-            <button type="button" className="icon-button" data-testid="detail-toggle" onClick={toggleDrawer} title="展开右侧抽屉" aria-label="展开右侧抽屉">
+          <Button
+            size="sm"
+            icon={pauseAction ? 'refresh' : paused ? 'play' : 'pause'}
+            variant={paused ? 'primary' : 'default'}
+            data-testid={paused ? 'conversation-resume' : 'conversation-pause'}
+            data-busy={pauseAction ? 'true' : 'false'}
+            disabled={pauseAction !== null}
+            onClick={() => void changePaused(!paused)}
+            title={paused ? '继续主 Agent 的对话处理' : '暂停主 Agent 的对话处理，不影响正在执行的功能任务'}
+          >
+            {pauseAction === 'pause' ? '正在暂停…' : pauseAction === 'resume' ? '正在继续…' : paused ? '继续' : '暂停'}
+          </Button>
+          {detailAvailable && (
+            <button
+              type="button"
+              className="icon-button conversation-detail-toggle"
+              data-testid="detail-toggle"
+              data-open={drawerOpen}
+              onClick={toggleDrawer}
+              title={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-label={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-expanded={drawerOpen}
+            >
               <Icon name="panel-right" size={16} />
             </button>
           )}
         </div>
       </header>
+
+      {paused && (
+        <section className="conversation-alert" data-testid="conversation-paused-notice">
+          <div className="conversation-pause-note">
+            <Icon name="pause" size={15} />
+            <span><strong>主 Agent 对话已暂停。</strong> 已发出的调用会结束，新消息会保留并排队；正在执行的功能任务仍按自身状态继续。继续后会处理排队消息。</span>
+          </div>
+        </section>
+      )}
 
       {masterQuestions.length > 0 && (
         <section className="conversation-alert" data-testid="master-questions">

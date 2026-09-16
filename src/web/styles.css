@@ -601,8 +601,26 @@ small { color: var(--muted); }
   display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
   margin-top: 3px; color: var(--muted); font-size: 12px;
 }
-.conversation-actions { display: flex; align-items: center; gap: 6px; }
+.conversation-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.conversation-actions > .btn,
+.conversation-actions > .icon-button { flex: 0 0 auto; }
+.conversation-detail-toggle { width: 30px; height: 30px; }
+.conversation-detail-toggle[data-open="true"] { background: var(--panel-soft); color: var(--text); }
 .conversation-alert { padding: 8px 22px 10px; border-bottom: 1px solid var(--border); }
+.conversation-pause-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid #efd69e;
+  border-radius: 10px;
+  background: #fffaf0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.conversation-pause-note svg { flex: 0 0 auto; margin-top: 2px; color: #9a6700; }
+.conversation-pause-note strong { color: var(--text); }
 
 .conversation-body {
   flex: 1;

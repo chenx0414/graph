@@ -93,8 +93,15 @@ test('proposal and graph summaries stay in the thread while details open in the 
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   await page.getByTestId('proposal-draft').waitFor();
+  const pauseBox = await page.getByTestId('conversation-pause').boundingBox();
+  const detailBox = await page.getByTestId('detail-toggle').boundingBox();
+  expect(pauseBox).not.toBeNull();
+  expect(detailBox).not.toBeNull();
+  expect(detailBox!.x).toBeGreaterThanOrEqual(pauseBox!.x + pauseBox!.width);
+  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   await page.getByTestId('draft-graph').click();
   await page.getByTestId('detail-drawer').waitFor();
+  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
   await page.getByTestId('draft-graph-detail').waitFor();
   const drawer = await page.getByTestId('detail-drawer').innerText();
   expect(drawer).toContain('检查通过');
@@ -104,6 +111,35 @@ test('proposal and graph summaries stay in the thread while details open in the 
   await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
   await page.getByTestId('detail-toggle').click();
   await page.getByTestId('detail-drawer').waitFor();
+});
+
+test('conversation pause and resume use one stateful action with visible feedback', async () => {
+  const root = await temp('pause-feedback');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论一下', requestId: 'pause-feedback' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+
+  await page.getByTestId('conversation-pause').click();
+  await page.getByTestId('conversation-resume').waitFor();
+  await page.getByTestId('conversation-paused-notice').waitFor();
+  expect(await page.getByTestId('conversation-pause').count()).toBe(0);
+  expect(await page.getByTestId('toasts').innerText()).toContain('主 Agent 对话已暂停');
+  expect(await page.getByTestId('conversation-paused-notice').innerText()).toContain('正在执行的功能任务仍按自身状态继续');
+
+  await page.getByTestId('conversation-resume').click();
+  await page.getByTestId('conversation-pause').waitFor();
+  await page.getByTestId('conversation-paused-notice').waitFor({ state: 'detached' });
+  expect(await page.getByTestId('toasts').innerText()).toContain('主 Agent 对话已继续');
 });
 
 test('the project picker adds a local project to the sidebar', async () => {
