@@ -749,6 +749,23 @@ small { color: var(--muted); }
 }
 .drawer-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .drawer-head h2 { margin: 0; font-size: 15px; flex: 1; }
+.drawer-empty {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 28px 22px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--muted);
+  text-align: center;
+}
+.drawer-empty svg { color: var(--faint); }
+.drawer-empty strong { color: var(--text); font-size: 14px; }
+.drawer-empty span { max-width: 260px; font-size: 12px; line-height: 1.5; }
 .drawer-section { border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 13px; margin-bottom: 12px; }
 .drawer-section h3 { margin-bottom: 8px; }
 .drawer-graph { height: 330px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-top: 10px; background: #fff; }

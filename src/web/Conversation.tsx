@@ -260,6 +260,11 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
     if (view && pausedOverride !== null && view.paused === pausedOverride) setPausedOverride(null);
   }, [view, pausedOverride]);
   useEffect(() => {
+    if (!view || !drawerOpen || drawer) return;
+    const next = view.proposal ? 'proposal' : view.tasks[0]?.id;
+    if (next) setDrawer(next);
+  }, [view, drawerOpen, drawer]);
+  useEffect(() => {
     if (view) mergeMessages(view.messages);
   }, [view, mergeMessages]);
   useEffect(() => {
@@ -378,7 +383,8 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
   }
   const tasks = view.tasks;
   const detailTask = tasks.find(task => task.id === drawer);
-  const detailAvailable = Boolean(proposal || tasks.length);
+  const drawerTitle = detailTask?.request ?? (drawer === 'proposal' && proposal ? `草稿 v${proposal.version}` : '详情');
+  const hasDrawerContent = drawer === 'proposal' ? Boolean(proposal) : Boolean(detailTask);
   const displayMessages = orderedMessages(cachedMessages);
   function openDrawer(next: string) {
     setDrawer(next);
@@ -391,7 +397,8 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
       : drawer && tasks.some(task => task.id === drawer)
         ? drawer
         : proposal ? 'proposal' : tasks[0]?.id;
-    if (next) openDrawer(next);
+    setDrawer(next ?? null);
+    setDrawerOpen(true);
   }
   return (
     <section className="conversation-page" data-testid="conversation">
@@ -421,20 +428,18 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           >
             {pauseAction === 'pause' ? '正在暂停…' : pauseAction === 'resume' ? '正在继续…' : paused ? '继续' : '暂停'}
           </Button>
-          {detailAvailable && (
-            <button
-              type="button"
-              className="icon-button conversation-detail-toggle"
-              data-testid="detail-toggle"
-              data-open={drawerOpen}
-              onClick={toggleDrawer}
-              title={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-              aria-label={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-              aria-expanded={drawerOpen}
-            >
-              <Icon name="panel-right" size={16} />
-            </button>
-          )}
+          <button
+            type="button"
+            className="icon-button conversation-detail-toggle"
+            data-testid="detail-toggle"
+            data-open={drawerOpen}
+            onClick={toggleDrawer}
+            title={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+            aria-label={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+            aria-expanded={drawerOpen}
+          >
+            <Icon name="panel-right" size={16} />
+          </button>
         </div>
       </header>
 
@@ -578,14 +583,21 @@ export function ConversationPanel({ id, settings, onChanged }: { id: string; set
           )}
         </div>
 
-        {drawerOpen && drawer && (
+        {drawerOpen && (
           <aside className="detail-drawer" data-testid="detail-drawer">
             <div className="drawer-head">
-              <h2>{detailTask?.request ?? `草稿 v${proposal?.version ?? ''}`}</h2>
+              <h2>{drawerTitle}</h2>
               <button type="button" className="icon-button" data-testid="detail-toggle-close" onClick={() => setDrawerOpen(false)} aria-label="收起右侧抽屉" title="收起右侧抽屉">
                 <Icon name="panel-right" size={16} />
               </button>
             </div>
+            {!hasDrawerContent && (
+              <div className="drawer-empty" data-testid="detail-empty">
+                <Icon name="panel-right" size={22} />
+                <strong>暂无详情</strong>
+                <span>出现草稿、任务图或执行进度后，详情会显示在这里。</span>
+              </div>
+            )}
             {drawer === 'proposal' && proposal && (
               <>
                 <section className="drawer-section" data-testid="strategy">

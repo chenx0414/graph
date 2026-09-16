@@ -142,6 +142,34 @@ test('conversation pause and resume use one stateful action with visible feedbac
   expect(await page.getByTestId('toasts').innerText()).toContain('主 Agent 对话已继续');
 });
 
+test('the right drawer toggle stays available and opens an empty state', async () => {
+  const root = await temp('empty-drawer');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '还没有执行信息', requestId: 'empty-drawer' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  const toggle = page.getByTestId('detail-toggle');
+  await toggle.waitFor();
+  expect(await toggle.getAttribute('data-open')).toBe('false');
+
+  await toggle.click();
+  await page.getByTestId('detail-drawer').waitFor();
+  expect(await page.getByTestId('detail-empty').innerText()).toContain('暂无详情');
+  expect(await toggle.getAttribute('data-open')).toBe('true');
+
+  await toggle.click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
+});
+
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');
   const initial = join(root, 'initial');
