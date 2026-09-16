@@ -111,7 +111,7 @@ test('conversations archive from the sidebar and restore from settings', async (
   await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('需要归档的对话');
 });
 
-test('proposal details open in a paged drawer, compress the chat, and switch draft versions', async () => {
+test('chat and graph tabs keep proposal details and node inspection independent', async () => {
   const root = await temp('drawer');
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
@@ -153,15 +153,16 @@ test('proposal details open in a paged drawer, compress the chat, and switch dra
   expect(detailBox).not.toBeNull();
   expect(detailBox!.x).toBeGreaterThanOrEqual(pauseBox!.x + pauseBox!.width);
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
+  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
+  expect(await page.getByTestId('conversation-tab-graph').getAttribute('data-active')).toBe('false');
   const beforeMain = await page.locator('.conversation-main').boundingBox();
   const beforeComposer = await page.locator('.conversation-composer-wrap').boundingBox();
   expect(beforeMain).not.toBeNull();
   expect(beforeComposer).not.toBeNull();
 
-  await page.getByTestId('draft-graph').click();
+  await page.getByTestId('draft-acceptance').click();
   await page.getByTestId('detail-drawer').waitFor();
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
-  await page.getByTestId('draft-graph-detail').waitFor();
   await page.waitForTimeout(260);
   await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
     .toBeLessThan(beforeMain!.width - 240);
@@ -188,11 +189,10 @@ test('proposal details open in a paged drawer, compress the chat, and switch dra
   expect(afterComposer!.y + afterComposer!.height).toBeLessThanOrEqual(720);
   expect(await page.locator('[data-testid="detail-toggle-close"]').count()).toBe(0);
 
-  await page.getByTestId('draft-tab-acceptance').click();
   await page.getByTestId('draft-page-acceptance').waitFor();
   expect(await page.getByTestId('draft-page-acceptance').innerText()).toContain('独立审查通过');
-  await page.getByTestId('draft-version-1').click();
-  await expect.poll(() => page.getByTestId('draft-version-1').getAttribute('data-active')).toBe('true');
+  await page.getByTestId('drawer-draft-version-1').click();
+  await expect.poll(() => page.getByTestId('drawer-draft-version-1').getAttribute('data-active')).toBe('true');
   await expect.poll(() => page.getByTestId('draft-page-acceptance').innerText()).toContain('检查通过');
 
   await page.getByTestId('draft-tab-nodes').click();
@@ -200,17 +200,37 @@ test('proposal details open in a paged drawer, compress the chat, and switch dra
   expect(nodes).toContain('work');
   expect(nodes).toContain('check');
 
-  await page.getByTestId('draft-tab-graph').click();
-  await page.getByTestId('draft-graph-detail').waitFor();
-
   await page.getByTestId('draft-tab-decisions').click();
   await page.getByTestId('draft-decisions-empty').waitFor();
 
   await page.getByTestId('detail-toggle').click();
   await expect.poll(() => page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
-  await page.getByTestId('detail-toggle').click();
-  await page.getByTestId('detail-drawer').waitFor();
+
+  await page.getByTestId('draft-graph').click();
+  await page.getByTestId('conversation-graph').waitFor();
+  expect(await page.getByTestId('conversation-tab-graph').getAttribute('data-active')).toBe('true');
+  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('false');
+  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
+  expect(await page.getByTestId('chat-input').count()).toBe(0);
+  await page.getByTestId('draft-graph-detail').waitFor();
+  await expect.poll(async () => {
+    const body = await page.locator('.conversation-body').boundingBox();
+    const graph = await page.locator('.conversation-graph-main').boundingBox();
+    return Boolean(body && graph && Math.abs(body.width - graph.width) <= 1);
+  }).toBe(true);
+
+  await page.getByTestId('draft-version-1').click();
+  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('先做一个最小版本');
+  await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
+  const nodeDetail = page.getByTestId('conversation-node-detail');
+  await nodeDetail.waitFor();
+  expect(await nodeDetail.innerText()).toContain('work');
+  expect(await nodeDetail.innerText()).toContain('coder@1');
+
+  await page.getByTestId('conversation-tab-chat').click();
+  await page.locator('.conversation-composer-wrap').waitFor();
+  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
 });
 
 test('conversation pause and resume use one stateful action with visible feedback', async () => {
@@ -260,6 +280,12 @@ test('the right drawer toggle stays available and opens an empty state', async (
   const toggle = page.getByTestId('detail-toggle');
   await toggle.waitFor();
   expect(await toggle.getAttribute('data-open')).toBe('false');
+
+  await page.getByTestId('conversation-tab-graph').click();
+  await page.getByTestId('conversation-graph-empty').waitFor();
+  expect(await page.getByTestId('conversation-tab-graph').getAttribute('data-active')).toBe('true');
+  await page.getByTestId('conversation-tab-chat').click();
+  await page.locator('.conversation-main').waitFor();
 
   await toggle.click();
   await page.getByTestId('detail-drawer').waitFor();

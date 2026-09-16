@@ -41,7 +41,7 @@ type ProposalDetail = {
   spec: {
     summary: string;
     acceptance: { id: string; description: string; checkNode: string }[];
-    nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[];
+    nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[]; container?: string; input?: unknown }[];
     loops?: { from: string; to: string }[];
   };
 };
@@ -52,7 +52,8 @@ type ProposalVersion = {
   summary: string;
   accepted: boolean;
 };
-type DrawerPage = 'acceptance' | 'nodes' | 'graph' | 'decisions' | 'task';
+type DrawerPage = 'acceptance' | 'nodes' | 'decisions' | 'task';
+type ConversationTab = 'chat' | 'graph';
 type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string };
 type ConversationView = {
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;
@@ -319,11 +320,41 @@ function orderedMessages(messages: ConversationMessage[]) {
   return ordered;
 }
 
+function DraftVersionToc({ history, selectedVersion, scope, onSelectVersion }: {
+  history: ProposalVersion[];
+  selectedVersion: number;
+  scope: 'board' | 'drawer';
+  onSelectVersion: (version: number) => void;
+}) {
+  if (history.length <= 1) return null;
+  return (
+    <div className="draft-toc" data-testid={scope === 'board' ? 'draft-toc' : 'drawer-draft-toc'} aria-label="草稿版本">
+      <span className="draft-toc-label">草稿</span>
+      <div className="draft-toc-scroll">
+        {history.map(item => (
+          <button
+            key={item.version}
+            type="button"
+            className="draft-toc-item"
+            data-testid={scope === 'board' ? `draft-version-${item.version}` : `drawer-draft-version-${item.version}`}
+            data-active={item.version === selectedVersion}
+            onClick={() => onSelectVersion(item.version)}
+            title={item.summary}
+            aria-pressed={item.version === selectedVersion}
+          >
+            v{item.version}
+            {item.stale && <span className="draft-toc-state">过期</span>}
+            {item.accepted && <span className="draft-toc-state">已确认</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProposalDrawer({
   proposal,
   history,
-  graph,
-  graphLoading,
   page,
   selectedVersion,
   onSelectVersion,
@@ -331,8 +362,6 @@ function ProposalDrawer({
 }: {
   proposal: ProposalDetail;
   history: ProposalVersion[];
-  graph: DraftGraph | null;
-  graphLoading: boolean;
   page: Exclude<DrawerPage, 'task'>;
   selectedVersion: number;
   onSelectVersion: (version: number) => void;
@@ -341,35 +370,12 @@ function ProposalDrawer({
   const pages: { id: Exclude<DrawerPage, 'task'>; label: string; count: number }[] = [
     { id: 'acceptance', label: '验收项', count: proposal.spec.acceptance.length },
     { id: 'nodes', label: '节点', count: proposal.spec.nodes.length },
-    { id: 'graph', label: 'Graph 看板', count: graph?.nodes.length ?? proposal.spec.nodes.length },
     { id: 'decisions', label: '决策与约束', count: proposal.decisions?.trim() ? 1 : 0 },
   ];
   const noDecisions = proposal.decisions === null || !proposal.decisions.trim();
   return (
     <>
-      {history.length > 1 && (
-        <div className="draft-toc" data-testid="draft-toc" aria-label="草稿版本">
-          <span className="draft-toc-label">草稿</span>
-          <div className="draft-toc-scroll">
-            {history.map(item => (
-              <button
-                key={item.version}
-                type="button"
-                className="draft-toc-item"
-                data-testid={`draft-version-${item.version}`}
-                data-active={item.version === selectedVersion}
-                onClick={() => onSelectVersion(item.version)}
-                title={item.summary}
-                aria-pressed={item.version === selectedVersion}
-              >
-                v{item.version}
-                {item.stale && <span className="draft-toc-state">过期</span>}
-                {item.accepted && <span className="draft-toc-state">已确认</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <DraftVersionToc history={history} selectedVersion={selectedVersion} scope="drawer" onSelectVersion={onSelectVersion} />
       <nav className="drawer-page-tabs" data-testid="draft-page-tabs" aria-label="草稿详情页面">
         {pages.map(item => (
           <button
@@ -419,29 +425,6 @@ function ProposalDrawer({
             </ul>
           </section>
         )}
-        {page === 'graph' && (
-          <section className="drawer-section drawer-section-graph" data-testid="draft-page-graph">
-            <div className="drawer-section-head">
-              <h3>Graph 看板</h3>
-              {graph && <span>{graph.nodes.length} 个节点</span>}
-            </div>
-            {graphLoading && <div className="drawer-loading"><Spinner label="正在加载任务图…" /></div>}
-            {!graphLoading && graph && graph.nodes.length > 0 && (
-              <div className="drawer-graph" data-testid="draft-graph-detail">
-                <GraphCanvas graph={{ nodes: graph.nodes, containers: graph.containers, layout: graph.layout }} collapsed={{}} onSelect={() => undefined} />
-              </div>
-            )}
-            {!graphLoading && (!graph || graph.nodes.length === 0) && (
-              <div className="drawer-empty compact" data-testid="draft-graph-empty">
-                <strong>暂无任务图</strong>
-                <span>这个草稿还没有可展示的节点。</span>
-              </div>
-            )}
-            {(proposal.spec.loops?.length ?? 0) > 0 && (
-              <p data-testid="draft-loops">返工回边：{proposal.spec.loops!.map(loop => `${loop.from} → ${loop.to}`).join('，')}</p>
-            )}
-          </section>
-        )}
         {page === 'decisions' && (
           <section className="drawer-section" data-testid="draft-page-decisions">
             <div className="drawer-section-head">
@@ -454,6 +437,97 @@ function ProposalDrawer({
         )}
       </div>
     </>
+  );
+}
+
+function ConversationGraphBoard({
+  proposal,
+  history,
+  graph,
+  graphLoading,
+  selectedVersion,
+  selectedNodeId,
+  onSelectVersion,
+  onSelectNode,
+}: {
+  proposal: ProposalDetail;
+  history: ProposalVersion[];
+  graph: DraftGraph | null;
+  graphLoading: boolean;
+  selectedVersion: number;
+  selectedNodeId: string | null;
+  onSelectVersion: (version: number) => void;
+  onSelectNode: (nodeId: string | null) => void;
+}) {
+  const selectedNode = proposal.spec.nodes.find(node => node.id === selectedNodeId) ?? null;
+  const selectedGraphNode = graph?.nodes.find(node => node.id === selectedNodeId) ?? null;
+  return (
+    <div className="conversation-graph-main" data-testid="conversation-graph">
+      <header className="conversation-graph-header">
+        <div className="conversation-graph-heading">
+          <div className="drawer-eyebrow">草稿任务图</div>
+          <h2 data-testid="conversation-graph-title">{proposal.spec.summary}</h2>
+          <div className="conversation-graph-meta">
+            <span>v{proposal.version}</span>
+            <span>{proposal.spec.nodes.length} 个节点</span>
+            <span>{proposal.spec.acceptance.length} 个验收项</span>
+            {proposal.stale && <Pill tone="warn">需求已变化</Pill>}
+          </div>
+        </div>
+        <DraftVersionToc history={history} selectedVersion={selectedVersion} scope="board" onSelectVersion={onSelectVersion} />
+      </header>
+      <div className="conversation-graph-stage">
+        {graphLoading && <div className="drawer-loading conversation-graph-empty"><Spinner label="正在加载任务图…" /></div>}
+        {!graphLoading && graph && graph.nodes.length > 0 && (
+          <div className="conversation-graph-canvas" data-testid="draft-graph-detail">
+            <GraphCanvas
+              graph={{ nodes: graph.nodes, containers: graph.containers, layout: graph.layout }}
+              collapsed={{}}
+              selected={selectedNodeId}
+              onSelect={id => onSelectNode(id === selectedNodeId ? null : id)}
+            />
+          </div>
+        )}
+        {!graphLoading && (!graph || graph.nodes.length === 0) && (
+          <div className="conversation-graph-empty" data-testid="draft-graph-empty">
+            <Icon name="graph" size={22} />
+            <strong>暂无任务图</strong>
+            <span>这个草稿还没有可展示的节点。</span>
+          </div>
+        )}
+        {selectedNode && (
+          <aside className="graph-node-inspector" data-testid="conversation-node-detail">
+            <div className="graph-node-inspector-head">
+              <div className="grow">
+                <div className="drawer-eyebrow">{selectedNode.kind === 'agent' ? 'Agent 节点' : '程序节点'}</div>
+                <h3>{selectedNode.id}</h3>
+              </div>
+              <button type="button" className="icon-button" onClick={() => onSelectNode(null)} title="关闭节点详情" aria-label="关闭节点详情">
+                <Icon name="close" size={15} />
+              </button>
+            </div>
+            <div className="row" style={{ marginBottom: 12 }}>
+              <StatusDot tone={NODE_TONE[selectedGraphNode?.status ?? ''] ?? 'neutral'} />
+              <span>{NODE_LABEL[selectedGraphNode?.status ?? ''] ?? selectedGraphNode?.status ?? '草稿'}</span>
+            </div>
+            <dl className="kv">
+              <dt>类型</dt><dd>{selectedNode.kind}</dd>
+              <dt>动作</dt><dd className="mono">{selectedNode.action ?? '—'}</dd>
+              <dt>定义</dt><dd className="mono">{selectedNode.definitionVersion ?? '—'}</dd>
+              <dt>模型</dt><dd className="mono">{selectedNode.model ?? '—'}</dd>
+              <dt>容器</dt><dd className="mono">{selectedNode.container ?? '—'}</dd>
+              <dt>依赖</dt><dd className="mono">{selectedNode.dependsOn?.join(', ') || '—'}</dd>
+            </dl>
+            {selectedNode.input !== undefined && (
+              <>
+                <h4 style={{ marginTop: 16 }}>输入</h4>
+                <pre>{JSON.stringify(selectedNode.input, null, 2)}</pre>
+              </>
+            )}
+          </aside>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -494,7 +568,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [forwardCursor, setForwardCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);
-  const [drawerPage, setDrawerPage] = useState<DrawerPage>('graph');
+  const [drawerPage, setDrawerPage] = useState<DrawerPage>('acceptance');
+  const [conversationTab, setConversationTab] = useState<ConversationTab>('chat');
+  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -564,11 +640,14 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     if (view?.proposal) setSelectedProposalVersion(view.proposal.version);
   }, [view?.proposal?.version]);
   useEffect(() => {
+    setSelectedGraphNodeId(null);
+  }, [selectedProposalVersion]);
+  useEffect(() => {
     if (!view || !drawerOpen || drawer) return;
     const next = view.proposal ? 'proposal' : view.tasks[0]?.id;
     if (next) {
       setDrawer(next);
-      setDrawerPage(next === 'proposal' ? 'graph' : 'task');
+      setDrawerPage(next === 'proposal' ? 'acceptance' : 'task');
     }
   }, [view, drawerOpen, drawer]);
   useEffect(() => {
@@ -733,15 +812,23 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const hasDrawerContent = drawer === 'proposal' ? Boolean(activeProposal) : Boolean(detailTask);
   const displayMessages = orderedMessages(cachedMessages.filter(message => !(message.role === 'user' && message.state === 'queued')));
   function openTaskDrawer(next: string) {
+    setConversationTab('chat');
     setDrawer(next);
     setDrawerPage('task');
     onDrawerOpenChange(true);
   }
   function openProposalDrawer(page: Exclude<DrawerPage, 'task'>, version = proposal?.version) {
+    setConversationTab('chat');
     setDrawer('proposal');
     setDrawerPage(page);
     if (version) setSelectedProposalVersion(version);
     onDrawerOpenChange(true);
+  }
+  function openGraphBoard(version = proposal?.version) {
+    setConversationTab('graph');
+    setSelectedGraphNodeId(null);
+    if (version) setSelectedProposalVersion(version);
+    onDrawerOpenChange(false);
   }
   return (
     <section className="conversation-page" data-testid="conversation">
@@ -796,6 +883,34 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         </div>
       </header>
 
+      <nav className="conversation-tabs" data-testid="conversation-tabs" role="tablist" aria-label="对话页面">
+        <button
+          type="button"
+          role="tab"
+          className="conversation-tab"
+          data-testid="conversation-tab-chat"
+          data-active={conversationTab === 'chat'}
+          aria-selected={conversationTab === 'chat'}
+          onClick={() => setConversationTab('chat')}
+        >
+          <Icon name="message" size={15} />
+          对话
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="conversation-tab"
+          data-testid="conversation-tab-graph"
+          data-active={conversationTab === 'graph'}
+          aria-selected={conversationTab === 'graph'}
+          onClick={() => openGraphBoard()}
+        >
+          <Icon name="graph" size={15} />
+          Graph 看板
+          {proposal && <span className="conversation-tab-count">{proposal.spec.nodes.length}</span>}
+        </button>
+      </nav>
+
       {paused && (
         <section className="conversation-alert" data-testid="conversation-paused-notice">
           <div className="conversation-pause-note">
@@ -816,8 +931,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         </section>
       )}
 
-      <div className="conversation-body" data-drawer={drawerOpen}>
-        <div className="conversation-main">
+      <div className="conversation-body" data-drawer={drawerOpen} data-view={conversationTab}>
+        {conversationTab === 'chat' ? (
+          <div className="conversation-main">
           <div className="conversation-thread" data-testid="message-list" ref={threadRef}>
           {hasOlder && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
           {displayMessages.map(message => <MessageRow key={message.id} message={message} />)}
@@ -857,7 +973,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                 </Pill>
               </div>
               <div className="thread-card-actions">
-                <button type="button" className="summary-graph-preview" data-testid="draft-graph" onClick={() => openProposalDrawer('graph')}>
+                <button type="button" className="summary-graph-preview" data-testid="draft-graph" onClick={() => openGraphBoard()}>
                   <Icon name="graph" size={14} />
                   任务图 · {proposal.spec.nodes.length} 个节点
                 </button>
@@ -991,6 +1107,26 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             </div>
           </div>
         </div>
+        ) : activeProposal ? (
+          <ConversationGraphBoard
+            proposal={activeProposal}
+            history={proposalHistory}
+            graph={draftGraph}
+            graphLoading={draftGraphLoading}
+            selectedVersion={selectedProposalVersion ?? activeProposal.version}
+            selectedNodeId={selectedGraphNodeId}
+            onSelectVersion={setSelectedProposalVersion}
+            onSelectNode={setSelectedGraphNodeId}
+          />
+        ) : (
+          <div className="conversation-graph-main" data-testid="conversation-graph">
+            <div className="conversation-graph-empty" data-testid="conversation-graph-empty">
+              <Icon name="graph" size={22} />
+              <strong>暂无 Graph 看板</strong>
+              <span>主 Agent 提出任务草稿后，可以在这里查看完整任务图。</span>
+            </div>
+          </div>
+        )}
 
         <aside className="detail-drawer" data-testid="detail-drawer" data-open={drawerOpen} aria-hidden={!drawerOpen} inert={!drawerOpen}>
           <div className="drawer-inner">
@@ -1003,15 +1139,13 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             {!hasDrawerContent && !drawerLoading && (
               <div className="drawer-empty" data-testid="detail-empty">
                 <strong>暂无详情</strong>
-                <span>出现草稿、任务图或执行进度后，详情会显示在这里。</span>
+                <span>出现草稿详情或执行进度后，详情会显示在这里。</span>
               </div>
             )}
             {drawer === 'proposal' && activeProposal && (
               <ProposalDrawer
                 proposal={activeProposal}
                 history={proposalHistory}
-                graph={draftGraph}
-                graphLoading={draftGraphLoading}
                 page={drawerPage === 'task' ? 'acceptance' : drawerPage}
                 selectedVersion={selectedProposalVersion ?? activeProposal.version}
                 onSelectVersion={setSelectedProposalVersion}
