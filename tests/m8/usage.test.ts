@@ -130,7 +130,13 @@ test('usage service normalizes the five supported subscription sources', async (
   expect(snapshot.plans.find(plan => plan.id === 'deepseek')?.balance).toMatchObject({ remaining: 88.5, currency: 'CNY' });
   expect(snapshot.plans.find(plan => plan.id === 'chatgpt')?.windows).toHaveLength(2);
   expect(snapshot.plans.find(plan => plan.id === 'grok')?.windows[0]?.usedPercent).toBe(37.5);
-  expect(snapshot.plans.find(plan => plan.id === 'opencode-go')?.models.map(model => model.id)).toEqual(['deepseek-v4-pro', 'grok-4.6']);
+  const openCodeModels = snapshot.plans.find(plan => plan.id === 'opencode-go')?.models ?? [];
+  expect(openCodeModels.map(model => model.id)).toEqual(expect.arrayContaining(['deepseek-v4-pro', 'grok-4.6']));
+  expect(openCodeModels.find(model => model.id === 'deepseek-v4-pro')).toMatchObject({
+    api: 'openai-completions',
+    headers: { 'x-opencode-session': 'graph-console' },
+  });
+  expect(openCodeModels.find(model => model.id === 'grok-4.6')).toMatchObject({ api: 'responses', supported: false });
   expect(snapshot.plans.find(plan => plan.id === 'command-goat')?.models[0]).toMatchObject({ id: 'deepseek/deepseek-v4-flash', contextWindow: 131_072 });
   expect(snapshot.plans.find(plan => plan.id === 'deepseek')?.models[0]).toMatchObject({ id: 'deepseek-chat', reasoning: false });
   expect(snapshot.plans.find(plan => plan.id === 'chatgpt')?.models[0]).toMatchObject({ id: 'gpt-5.6', supported: false });

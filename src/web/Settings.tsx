@@ -36,6 +36,7 @@ type SubscriptionModel = {
   outputCostPerMillion?: number;
   cacheReadCostPerMillion?: number;
   cacheCreationCostPerMillion?: number;
+  headers?: Record<string, string>;
 };
 type SubscriptionPlan = {
   id: string;
@@ -88,6 +89,9 @@ function subscriptionCost(model: SubscriptionModel): Cost | undefined {
 
 function modelFromSubscription(plan: SubscriptionPlan, model: SubscriptionModel, entries: RawModel[], currentIndex?: number): RawModel {
   const cost = subscriptionCost(model);
+  const headers = plan.id === 'opencode-go'
+    ? { 'x-opencode-session': 'graph-console', ...(model.headers ?? {}) }
+    : model.headers;
   return {
     id: uniqueModelId(plan.id, model.id, entries, currentIndex),
     provider: plan.id,
@@ -100,6 +104,7 @@ function modelFromSubscription(plan: SubscriptionPlan, model: SubscriptionModel,
     reasoning: model.reasoning,
     defaultThinkingLevel: model.reasoning ? 'medium' : 'off',
     credentialId: plan.credential?.id ?? plan.id,
+    ...(headers ? { headers } : {}),
     ...(cost ? { cost, pricing: { currency: 'USD', unit: 'per_million_tokens' as const, status: 'known' as const, sourceUrl: 'model-pricing.json' } } : {}),
   };
 }

@@ -91,6 +91,68 @@ test('config parsing validates and keeps per-model request headers', () => {
   expect(() => parseGraphConfig(document({ 'x-test': 42 }), '/tmp/graph.config.json')).toThrow(/non-empty string/);
 });
 
+test('OpenCode Go adds its routing header to connection tests and real dispatches', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m8-opencode-go-headers-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  const webDir = join(root, 'web');
+  await mkdir(project, { recursive: true });
+  await mkdir(webDir, { recursive: true });
+  await writeFile(join(webDir, 'index.html'), '<!doctype html><div id="root"></div>');
+
+  const provider = await openaiServer([{ text: 'pong' }, { text: 'task complete' }]);
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [{
+        id: 'opencode-go:deepseek-v4.1-flash', provider: 'opencode-go', modelId: 'deepseek-v4.1-flash',
+        grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl,
+        contextWindow: 1_000_000, maxTokens: 384_000, reasoning: true, credentialId: 'opencode-go',
+      }],
+    },
+    credentials: { 'opencode-go': { secretRef: 'GRAPH_OPENCODE_GO_KEY' } },
+    limits: {},
+  }, null, 2));
+  const daemon = await startGraphDaemon({
+    configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute',
+    env: { GRAPH_OPENCODE_GO_KEY: 'opencode-go-key' }, log: () => undefined,
+  });
+  cleanup.push(() => daemon.close());
+
+  const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
+  const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
+  const tested = await fetch(`${daemon.url}/api/config/test`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ modelId: 'opencode-go:deepseek-v4.1-flash' }),
+  });
+  expect(await tested.json()).toMatchObject({ ok: true, model: 'opencode-go:deepseek-v4.1-flash' });
+  expect(provider.headerList[0]?.['x-opencode-session']).toBeTruthy();
+
+  const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'p', request: 'header task', requestId: 'begin' });
+  await daemon.server.runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'headers',
+    acceptance: [{ id: 'works', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'opencode-go:deepseek-v4.1-flash' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['-e', 'process.exit(0)'] } },
+    ],
+  }, 'proposal-opencode-headers');
+  await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await daemon.server.runtime.host.runReady();
+    const node = (await daemon.server.runtime.user.task(taskId).view()).nodes.find(candidate => candidate.id === 'work');
+    if (node && ['succeeded', 'failed', 'blocked'].includes(node.status)) break;
+    await sleep(100);
+  }
+  expect(provider.headerList.length).toBeGreaterThan(1);
+  expect(provider.headerList.slice(1).every(headers => Boolean(headers['x-opencode-session']))).toBe(true);
+  expect((await daemon.server.runtime.user.task(taskId).view()).nodes.find(node => node.id === 'work')?.status).toBe('succeeded');
+}, 90_000);
+
 test('an unresolved credential only disables its own model, not dispatch for others', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m8-partial-credentials-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

@@ -161,8 +161,15 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string | (() =>
         // Resolve the credential at actual send time so a key rotation that
         // happened while this request waited applies to unsent calls.
         const key = typeof apiKey === 'function' ? apiKey() : apiKey;
+        const openCodeGo = model.provider === 'opencode-go' || model.baseUrl.includes('opencode.ai/zen/go');
+        const headers = {
+          ...(model.headers ?? {}),
+          ...(openCodeGo && options?.sessionId ? { 'x-opencode-session': options.sessionId } : {}),
+          ...(options?.headers ?? {}),
+        };
         const streamOptions = {
           ...options, apiKey: key, maxRetries: 0 as const, transport: 'sse' as const,
+          ...(Object.keys(headers).length ? { headers } : {}),
           // Reserve an upper bound for this model's accepted context and output.
           maxTokens: Math.min(options?.maxTokens ?? model.maxTokens, model.maxTokens),
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {

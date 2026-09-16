@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { OPENCODE_GO_MODELS } from '@earendil-works/pi-ai/providers/opencode-go.models';
 import type { GraphConfig } from './config.ts';
 
 export type UsageProviderId = 'opencode-go' | 'command-goat' | 'deepseek' | 'grok' | 'chatgpt';
@@ -46,6 +47,7 @@ export interface SubscriptionModel {
   outputCostPerMillion?: number;
   cacheReadCostPerMillion?: number;
   cacheCreationCostPerMillion?: number;
+  headers?: Record<string, string>;
 }
 
 export interface UsagePlan {
@@ -847,7 +849,7 @@ function subscriptionModel(
   api: SubscriptionModelApi,
   baseUrl: string,
   prices: ModelPrice[],
-  values: Partial<Pick<SubscriptionModel, 'contextWindow' | 'maxTokens' | 'reasoning'>> = {},
+  values: Partial<Pick<SubscriptionModel, 'contextWindow' | 'maxTokens' | 'reasoning' | 'headers'>> = {},
 ): SubscriptionModel {
   const price = priceFor(id, prices);
   return {
@@ -865,6 +867,7 @@ function subscriptionModel(
       cacheReadCostPerMillion: price.cacheReadCostPerMillion,
       cacheCreationCostPerMillion: price.cacheCreationCostPerMillion,
     } : {}),
+    ...(values.headers ? { headers: values.headers } : {}),
   };
 }
 
@@ -907,24 +910,44 @@ function openCodeConfiguredModelKeys(config: unknown, ids: string[]): string[] {
 async function discoverOpenCodeModels(credential: Credential, fetchImpl: FetchLike, prices: ModelPrice[], openCodeConfig: unknown): Promise<SubscriptionModel[]> {
   const baseUrl = credential.baseUrl ?? DEFAULT_BASE_URLS['opencode-go'];
   const configuredKeys = openCodeConfiguredModelKeys(openCodeConfig, ['opencode-go']);
+  const piModels = new Map<string, (typeof OPENCODE_GO_MODELS)[keyof typeof OPENCODE_GO_MODELS]>(
+    Object.values(OPENCODE_GO_MODELS).map(model => [model.id, model]),
+  );
   try {
     const response = await fetchWithTimeout(fetchImpl, 'https://models.dev/api.json', { headers: { accept: 'application/json' } });
     const body = await responseJson(response, 'models.dev');
     const models = record(record(body['opencode-go'])?.models);
     if (!models) return fallbackModels(configuredKeys, 'opencode-go', baseUrl, prices);
-    const result: SubscriptionModel[] = [];
-    for (const [id, raw] of Object.entries(models)) {
+    const ids = [...new Set([...Object.keys(models), ...piModels.keys()])];
+    const result: SubscriptionModel[] = ids.map(id => {
+      const raw = models[id];
       const item = record(raw);
       const limit = record(item?.limit);
-      result.push(subscriptionModel(id, text(item?.name) ?? id, 'opencode-go', 'openai-completions', baseUrl, prices, {
-        contextWindow: number(limit?.context) ?? 131_072,
-        maxTokens: number(limit?.output) ?? 8_192,
-        reasoning: boolean(item?.reasoning) ?? true,
-      }));
-    }
+      const pi = piModels.get(id);
+      const api: SubscriptionModelApi = pi?.api === 'anthropic-messages'
+        ? 'anthropic-messages'
+        : pi?.api === 'openai-responses'
+          ? 'responses'
+          : 'openai-completions';
+      return subscriptionModel(
+        id,
+        text(item?.name) ?? pi?.name ?? id,
+        'opencode-go',
+        api,
+        pi?.baseUrl ?? baseUrl,
+        prices,
+        {
+          contextWindow: pi?.contextWindow ?? number(limit?.context) ?? 131_072,
+          maxTokens: pi?.maxTokens ?? number(limit?.output) ?? 8_192,
+          reasoning: pi?.reasoning ?? boolean(item?.reasoning) ?? true,
+          headers: { 'x-opencode-session': 'graph-console' },
+        },
+      );
+    });
     return result;
   } catch {
-    return fallbackModels(configuredKeys, 'opencode-go', baseUrl, prices);
+    return fallbackModels(configuredKeys, 'opencode-go', baseUrl, prices)
+      .map(model => ({ ...model, headers: { 'x-opencode-session': 'graph-console' } }));
   }
 }
 

@@ -5,7 +5,7 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
-import type { ModelApi, ModelEntry } from '../catalog/models.ts';
+import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
@@ -32,6 +32,7 @@ export interface PiAdapterChannels {
 }
 
 function toPiModel(entry: ModelEntry): Model<ModelApi> {
+  const headers = modelRequestHeaders(entry);
   return {
     id: entry.modelId ?? entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
     reasoning: entry.reasoning !== false, input: ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
@@ -39,7 +40,7 @@ function toPiModel(entry: ModelEntry): Model<ModelApi> {
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     // Gateway routing headers (for example x-opencode-session) must travel
     // with every provider request.
-    ...(entry.headers ? { headers: entry.headers } : {}),
+    ...(headers ? { headers } : {}),
   };
 }
 

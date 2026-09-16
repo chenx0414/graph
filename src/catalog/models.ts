@@ -42,6 +42,17 @@ export interface ModelEntry {
   modelId?: string;
 }
 
+/** Provider-required HTTP headers that must travel with every model request.
+ * OpenCode Go rejects chat completions without a session identifier. */
+export function modelRequestHeaders(entry: Pick<ModelEntry, 'provider' | 'baseUrl' | 'headers'>): Record<string, string> | undefined {
+  const openCodeGo = entry.provider === 'opencode-go' || entry.baseUrl.includes('opencode.ai/zen/go');
+  if (!openCodeGo) return entry.headers;
+  return {
+    'x-opencode-session': 'graph-console',
+    ...(entry.headers ?? {}),
+  };
+}
+
 export interface CostSummary {
   unknown: boolean;
   amounts: Record<string, number>;

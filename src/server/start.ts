@@ -7,6 +7,7 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
 import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
+import { modelRequestHeaders } from '../catalog/models.ts';
 import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
 import { installPresets } from '../catalog/presets.ts';
@@ -64,6 +65,7 @@ export interface GraphDaemon {
 }
 
 function piModel(entry: ConfiguredModel): Model<ConfiguredModel['api']> {
+  const headers = modelRequestHeaders(entry);
   return {
     id: entry.id,
     name: entry.id,
@@ -75,7 +77,7 @@ function piModel(entry: ConfiguredModel): Model<ConfiguredModel['api']> {
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens,
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    ...(entry.headers ? { headers: entry.headers } : {}),
+    ...(headers ? { headers } : {}),
   };
 }
 
@@ -204,9 +206,16 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     for (const [provider, group] of providerGroups(live.entries())) {
       const binding = live.credentialFor(group.entries[0]!);
       if (!binding) continue;
+      const headers = modelRequestHeaders(group.entries[0]!);
       // Re-registering the same provider name replaces its endpoint/key, so a
       // saved rotation applies to the next session opened for this provider.
-      runtime.registerProvider(provider, { baseUrl: group.baseUrl, api: group.api, apiKey: binding.apiKey, models: group.entries.map(piModel) });
+      runtime.registerProvider(provider, {
+        baseUrl: group.baseUrl,
+        api: group.api,
+        apiKey: binding.apiKey,
+        models: group.entries.map(piModel),
+        ...(headers ? { headers } : {}),
+      });
     }
   };
   await syncProviders();
@@ -233,12 +242,13 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5_000);
     const anthropic = entry.api === 'anthropic-messages';
+    const headers = modelRequestHeaders(entry);
     try {
       const response = await fetch(`${entry.baseUrl.replace(/\/$/, '')}${anthropic ? '/messages' : '/chat/completions'}`, {
         method: 'POST',
         headers: anthropic
-          ? { 'content-type': 'application/json', 'x-api-key': binding.apiKey, 'anthropic-version': '2023-06-01', ...entry.headers }
-          : { 'content-type': 'application/json', authorization: `Bearer ${binding.apiKey}`, ...entry.headers },
+          ? { 'content-type': 'application/json', 'x-api-key': binding.apiKey, 'anthropic-version': '2023-06-01', ...headers }
+          : { 'content-type': 'application/json', authorization: `Bearer ${binding.apiKey}`, ...headers },
         body: JSON.stringify({ model: entry.modelId ?? entry.id, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
         signal: controller.signal,
       });
