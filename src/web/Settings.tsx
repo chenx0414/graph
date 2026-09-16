@@ -320,27 +320,40 @@ function SettingsAdvanced({ active }: { active: string }) {
   const credentials = Object.entries(draft.credentials ?? {});
   const credentialIds = credentials.map(([id]) => id);
   const invalid = (field: string) => error?.field === field ? 'true' : undefined;
+  const configurationActions = <>
+    {active === 'settings-models' && <Button data-testid="pricing-refresh" icon="refresh" disabled={refreshing || dirty} onClick={() => void refreshPrices()}>{refreshing ? '刷新中…' : '刷新价格快照'}</Button>}
+    <Button data-testid="settings-reload" icon="refresh" onClick={() => void load()}>重新加载</Button>
+    <Button variant="primary" data-testid="settings-save" icon="check" disabled={saving || !dirty} onClick={() => void save()}>{saving ? '保存中…' : '保存配置'}</Button>
+  </>;
+  const configurationMessages = <>
+    {error && <p data-testid="config-error" style={{ color: 'var(--danger)', margin: 0 }}>{error.message}{error.code ? `（${error.code}）` : ''}</p>}
+    {status && <p data-testid="config-status" className="muted" style={{ margin: 0 }}>{status}</p>}
+    {priceStatus && <p data-testid="pricing-status" className="muted" style={{ margin: 0 }}>{priceStatus}</p>}
+    {status.includes('等待生效') && <div data-testid="restart-required" className="hint-card">待生效：当前守护进程仍使用上一份有效绑定；修正配置后可再次保存。</div>}
+  </>;
 
   return (
     <div className="stagger" data-testid="settings-page" data-page={active}>
-      <section id="settings-overview" className="settings-section">
-      <Card title="设置" icon="settings" subtitle="保存并应用；价格快照仅在你点击刷新时更新"
-        actions={<>
-          <Button data-testid="pricing-refresh" icon="refresh" disabled={refreshing || dirty} onClick={() => void refreshPrices()}>{refreshing ? '刷新中…' : '刷新价格快照'}</Button>
-          <Button data-testid="settings-reload" icon="refresh" onClick={() => void load()}>重新加载</Button>
-          <Button variant="primary" data-testid="settings-save" icon="check" disabled={saving || !dirty} onClick={() => void save()}>{saving ? '保存中…' : '保存配置'}</Button>
-        </>}>
-        <div className="chip-row">
-          <Pill>已保存 revision <span data-testid="config-revision">{revision}</span></Pill>
-          {effectiveRevision !== null && <Pill tone="info">当前运行版本 <span data-testid="effective-revision">{effectiveRevision}</span>{effectiveRevision !== revision ? '（有未生效修改）' : ''}</Pill>}
-          {dirty && <Pill tone="warn">有未保存修改</Pill>}
+      {active === 'settings-overview' ? (
+        <section id="settings-overview" className="settings-section">
+          <Card title="设置" icon="settings" subtitle="保存并应用；价格快照仅在你点击刷新时更新" actions={configurationActions}>
+            <div className="chip-row">
+              <Pill>已保存 revision <span data-testid="config-revision">{revision}</span></Pill>
+              {effectiveRevision !== null && <Pill tone="info">当前运行版本 <span data-testid="effective-revision">{effectiveRevision}</span>{effectiveRevision !== revision ? '（有未生效修改）' : ''}</Pill>}
+              {dirty && <Pill tone="warn">有未保存修改</Pill>}
+            </div>
+            <div className="settings-config-messages">{configurationMessages}</div>
+          </Card>
+        </section>
+      ) : (
+        <div className="settings-action-strip" data-testid="settings-action-strip">
+          <div className="settings-action-message">
+            {dirty && <Pill tone="warn">有未保存修改</Pill>}
+            <div className="settings-config-messages">{configurationMessages}</div>
+          </div>
+          <div className="settings-action-buttons">{configurationActions}</div>
         </div>
-        {error && <p data-testid="config-error" style={{ color: 'var(--danger)', marginTop: 10 }}>{error.message}{error.code ? `（${error.code}）` : ''}</p>}
-        {status && <p data-testid="config-status" className="muted" style={{ marginTop: 10 }}>{status}</p>}
-        {priceStatus && <p data-testid="pricing-status" className="muted" style={{ marginTop: 10 }}>{priceStatus}</p>}
-        {status.includes('等待生效') && <div data-testid="restart-required" className="hint-card">待生效：当前守护进程仍使用上一份有效绑定；修正配置后可再次保存。</div>}
-      </Card>
-      </section>
+      )}
 
       {active === 'settings-project' && <section id="settings-project" className="settings-section">
       <Card title="项目" icon="box" actions={<Button size="sm" icon="plus" data-testid="project-add" onClick={() => mutate(next => { next.projects = [...(next.projects ?? []), { id: 'new-project', root: '.' }]; })}>添加项目</Button>}>

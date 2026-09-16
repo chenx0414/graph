@@ -125,6 +125,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('settings-save').click();
   await page.getByTestId('config-status').waitFor();
   expect(await page.getByTestId('config-status').innerText()).toContain('已保存 revision 1');
+  await openPage('常规');
   // Hot apply: the running revision advances without a restart prompt.
   expect(await page.getByTestId('effective-revision').innerText()).toContain('1');
   expect(await page.getByTestId('restart-required').count()).toBe(0);
@@ -173,6 +174,7 @@ test('the settings page edits and persists projects, models, credentials and lim
   await page.getByTestId('config-error').waitFor();
   expect(await page.getByTestId('config-error').innerText()).toContain('duplicate model');
   expect((await (await restartedApi.get('/api/config')).text())).toBe(before);
+  await openPage('常规');
   expect(await page.getByTestId('config-revision').innerText()).toBe('1');
 }, 120_000);
 

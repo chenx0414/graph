@@ -1355,6 +1355,29 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .settings-content > .settings-root { width: min(880px, 100%); margin: 0 auto; }
 .settings-section { scroll-margin-top: 18px; }
 .settings-root { width: 100%; }
+.settings-action-strip {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0 18px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+.settings-action-message {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+.settings-config-messages { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.settings-action-strip .settings-config-messages { margin-top: 0; }
+.settings-action-buttons { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+
 /* ---------- misc ---------- */
 
 .section-title { display: flex; align-items: center; gap: 8px; margin: 22px 0 6px; }
@@ -1428,6 +1451,9 @@ details.disclosure summary:hover { color: var(--accent); }
   .settings-main-header { padding: 18px 14px 12px; }
   [data-desktop="true"] .settings-main-header { padding-top: 18px; }
   .settings-content { padding: 0 14px 44px; }
+  .settings-action-strip { flex-direction: column; }
+  .settings-action-buttons { width: 100%; }
+  .settings-action-buttons .btn { flex: 1 1 120px; justify-content: center; }
   .settings-content .card-head { flex-wrap: wrap; }
   .settings-content .card-sub { flex: 1 0 100%; order: 3; }
   .settings-content .card-actions { width: 100%; margin-left: 0; order: 2; flex-wrap: wrap; }

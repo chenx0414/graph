@@ -661,6 +661,7 @@ test('settings opens as a second page with its own navigation and return control
   await nav.getByRole('button', { name: '模型' }).click();
   expect(await page.getByTestId('settings-page').getAttribute('data-page')).toBe('settings-models');
   expect(await nav.getByRole('button', { name: '模型' }).getAttribute('data-active')).toBe('true');
+  expect(await page.locator('#settings-overview').count()).toBe(0);
   await nav.getByRole('button', { name: '项目' }).click();
   expect(await page.getByTestId('settings-page').getAttribute('data-page')).toBe('settings-project');
   expect(await nav.getByRole('button', { name: '项目' }).getAttribute('data-active')).toBe('true');
