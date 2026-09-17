@@ -61,7 +61,7 @@ export interface Operation {
 export interface AttachmentInput { name: string; type: string; size: number; text: string }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
-  question?: { prompt: string; grant?: string };
+  question?: { prompt: string; grant?: string; data?: Json };
   route?: string;
   artifacts?: ArtifactInput[];
 }

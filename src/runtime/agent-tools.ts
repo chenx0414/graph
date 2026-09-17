@@ -3,6 +3,12 @@ import { isAbsolute, sep } from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { CapabilityKind, Catalog } from '../catalog/catalog.ts';
+import {
+  resourceDetail,
+  searchResourceCatalog,
+  type RecommendedResource,
+  type RecommendedResourceKind,
+} from '../catalog/resource-catalog.ts';
 import type { Json, NodeSpec, Proposal } from '../core/types.ts';
 import { listBounded, readBounded, writeBounded } from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
@@ -31,6 +37,11 @@ export function agentTools(input: {
   fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
   catalog?: Catalog;
+  systemContext?: {
+    resourceCatalog?: () => RecommendedResource[];
+    systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+    requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
+  };
   install?: (input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) => Promise<unknown>;
   onSubmit?: (output: Json) => void;
   onSuggestedPrompt?: (prompt: string) => void;
@@ -138,6 +149,71 @@ export function agentTools(input: {
         const body = fields(params);
         const published = input.catalog!.publishDefinition(String(body.id), JSON.parse(String(body.specJson)));
         return text(JSON.stringify(published));
+      },
+    });
+  }
+  if (input.role === 'master' && input.systemContext?.resourceCatalog) {
+    tools.push(
+      {
+        name: 'search_resources', label: 'Search system resources', description: 'Search the shared resource library (Skills, MCP servers, Pi extensions and Agent.md profiles) before planning. Results are catalog entries only: they are not installed capabilities and do not grant task permission. Use get_resource for the exact source, revision, requirements and risk.',
+        parameters: Type.Object({
+          query: Type.Optional(Type.String()),
+          kind: Type.Optional(Type.String()),
+          limit: Type.Optional(Type.Number()),
+          offset: Type.Optional(Type.Number()),
+        }),
+        execute: async (_id, params) => {
+          const body = fields(params);
+          const query = typeof body.query === 'string' ? body.query.trim() : '';
+          if (query.length > 500) throw new Error('Resource search query must be at most 500 characters');
+          const kind = typeof body.kind === 'string' && body.kind.trim() ? body.kind.trim() as RecommendedResourceKind : undefined;
+          if (kind && !['skill', 'skill-index', 'mcp', 'pi-extension', 'agent-md'].includes(kind)) throw new Error('Unsupported resource kind');
+          const result = searchResourceCatalog(input.systemContext!.resourceCatalog!(), {
+            ...(query ? { query } : {}),
+            ...(kind ? { kind } : {}),
+            ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+            ...(typeof body.offset === 'number' ? { offset: body.offset } : {}),
+          });
+          return text(JSON.stringify(result));
+        },
+      },
+      {
+        name: 'get_resource', label: 'Get resource details', description: 'Read one shared resource-library entry by id. This is sourcing information only: installation and task authorization happen separately.',
+        parameters: Type.Object({ id: Type.String() }),
+        execute: async (_id, params) => {
+          const id = String(fields(params).id).trim();
+          if (!id || id.length > 160) throw new Error('A bounded resource id is required');
+          const entry = input.systemContext!.resourceCatalog!().find(item => item.id === id);
+          if (!entry) throw new Error(`Unknown resource ${id}`);
+          return text(JSON.stringify(resourceDetail(entry)));
+        },
+      },
+    );
+  }
+  if (input.role === 'master' && input.systemContext?.systemSummary) {
+    tools.push({
+      name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read a redacted inventory of configured subscription plans, model connections, Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.',
+      parameters: Type.Object({}),
+      execute: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
+    });
+  }
+  if (input.role === 'master' && input.systemContext?.requestModelAccess) {
+    tools.push({
+      name: 'request_model_access', label: 'Request model access', description: 'Open one durable user question asking for a model or subscription to be configured. This never edits configuration and never grants permission automatically. Use it only when the current task needs a model that read_system_capabilities shows as unavailable.',
+      parameters: Type.Object({ modelId: Type.String(), reason: Type.String(), planId: Type.Optional(Type.String()) }),
+      execute: async (_id, params) => {
+        const body = fields(params);
+        const modelId = String(body.modelId).trim();
+        const reason = String(body.reason).trim();
+        if (!modelId || modelId.length > 160) throw new Error('A bounded modelId is required');
+        if (!reason || reason.length > 2_000) throw new Error('A concise reason of at most 2000 characters is required');
+        const planId = typeof body.planId === 'string' ? body.planId.trim() : '';
+        if (planId.length > 160) throw new Error('A bounded planId is required');
+        return text(JSON.stringify(await input.systemContext!.requestModelAccess!({
+          modelId,
+          reason,
+          ...(planId ? { planId } : {}),
+        })));
       },
     });
   }

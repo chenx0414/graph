@@ -155,3 +155,62 @@ export async function loadResourceCatalog(root: string) {
   const document = JSON.parse(await readFile(join(root, 'resources.json'), 'utf8')) as Json;
   return parseResourceCatalog(document);
 }
+
+export interface ResourceSearchResult {
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  items: RecommendedResource[];
+}
+
+/**
+ * Bounded, deterministic search for the master Agent. The full built-in
+ * catalog is intentionally never copied into a prompt: the master searches it
+ * on demand and then opens only the entries that matter.
+ */
+export function searchResourceCatalog(
+  entries: RecommendedResource[],
+  input: { query?: string; kind?: RecommendedResourceKind; limit?: number; offset?: number } = {},
+): ResourceSearchResult {
+  const query = input.query?.trim().toLowerCase() ?? '';
+  const terms = query.split(/\s+/).filter(Boolean);
+  const limit = Number.isSafeInteger(input.limit) && input.limit! > 0 ? Math.min(input.limit!, 50) : 20;
+  const offset = Number.isSafeInteger(input.offset) && input.offset! > 0 ? input.offset! : 0;
+  const matches = entries.filter(entry => {
+    if (input.kind && entry.kind !== input.kind) return false;
+    if (!terms.length) return true;
+    const haystack = [
+      entry.id,
+      entry.name,
+      entry.description,
+      entry.kind,
+      entry.source,
+      entry.sourceRepository,
+      entry.sourcePath,
+      ...(entry.tags ?? []),
+      ...(entry.requirements ?? []),
+    ].filter(Boolean).join('\n').toLowerCase();
+    return terms.every(term => haystack.includes(term));
+  });
+  return {
+    total: matches.length,
+    offset,
+    limit,
+    hasMore: offset + limit < matches.length,
+    items: matches.slice(offset, offset + limit),
+  };
+}
+
+export function resourceDetail(entry: RecommendedResource): RecommendedResource & {
+  authorization: { catalogEntryOnly: true; notInstalled: true; grantsNoPermission: true };
+} {
+  return {
+    ...entry,
+    authorization: {
+      catalogEntryOnly: true,
+      notInstalled: true,
+      grantsNoPermission: true,
+    },
+  };
+}

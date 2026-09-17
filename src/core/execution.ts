@@ -34,9 +34,10 @@ export class Execution {
   private readonly git?: GitIntegration;
   private readonly scratchRoot?: string;
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
+  private readonly systemContext?: { resources?: boolean; systemSummary?: boolean; requestModelAccess?: boolean };
   private readonly autoWake: boolean;
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -45,6 +46,7 @@ export class Execution {
     if (extras.git) this.git = extras.git;
     if (extras.scratchRoot) this.scratchRoot = extras.scratchRoot;
     if (extras.program) this.program = extras.program;
+    if (extras.systemContext) this.systemContext = extras.systemContext;
     this.autoWake = Boolean(extras.autoWake);
     this.generation = store.transaction(() => {
       store.db.prepare('UPDATE runtime SET generation=generation+1').run();
@@ -564,6 +566,9 @@ export class Execution {
           ...(spec.role === 'master' ? { catalog: {
             definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
             capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
+          }, systemContext: {
+            ...this.systemContext,
+            requestModelAccess: Boolean(conversation && spec.role === 'master' && this.systemContext?.requestModelAccess),
           } } : {}),
         });
       } else {
@@ -574,6 +579,12 @@ export class Execution {
           ...(review ? { review } : {}),
           ...(conversationStatus ? { conversation: conversationStatus } : {}),
           ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
+          ...(spec.role === 'master' && this.systemContext ? {
+            systemContext: {
+              ...this.systemContext,
+              requestModelAccess: Boolean(conversation && spec.role === 'master' && this.systemContext?.requestModelAccess),
+            },
+          } : {}),
         });
       }
       this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
@@ -791,7 +802,7 @@ export class Execution {
       // A remote capability that needs an operation grant blocks as a permission
       // question, so answering it persists the exact grant for the next attempt.
       if (result.question.grant) this.block(node, 'permission', { grant: result.question.grant }, operation.id);
-      else this.block(node, 'waiting', { prompt: result.question.prompt }, operation.id);
+      else this.block(node, 'waiting', result.question.data ?? { prompt: result.question.prompt }, operation.id);
     }
     const conversation = nodeSpec.role === 'master' && operation.kind === 'agent' ? conversationForTask(this.store, operation.taskId) : undefined;
     this.recordConversationOutput(operation, result);

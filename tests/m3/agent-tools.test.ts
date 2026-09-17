@@ -86,3 +86,41 @@ test('a master can record one bounded prompt suggestion', async () => {
   expect(suggestions).toEqual(['继续检查测试覆盖。']);
   await expect(execute('probe', { prompt: '' })).rejects.toThrow('between 1 and 500');
 });
+
+test('only the master receives read-only resource and system inventory tools', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-system-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const resources = [{
+    id: 'mcp-github',
+    kind: 'mcp' as const,
+    name: 'GitHub MCP',
+    description: 'GitHub operations',
+    source: 'https://github.com/github/github-mcp-server',
+    sourceKind: 'github' as const,
+  }];
+  const systemContext = {
+    resourceCatalog: () => resources,
+    systemSummary: () => ({ configuredModels: [{ id: 'local', grade: 'high' }], subscriptionPlans: [] }),
+  };
+  const masterTools = agentTools({
+    workspace: root,
+    role: 'master',
+    supervisor: { propose: async () => ({}), revise: async () => ({}) },
+    systemContext: {
+      ...systemContext,
+      requestModelAccess: async input => ({ requestType: 'model_access', ...input }),
+    },
+  });
+  expect(masterTools.map(tool => tool.name)).toEqual(expect.arrayContaining([
+    'search_resources', 'get_resource', 'read_system_capabilities', 'request_model_access',
+  ]));
+  const execute = (name: string) => masterTools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>;
+  const search = JSON.parse((await execute('search_resources')('probe', { query: 'github' })).content[0]!.text!) as { items: { id: string }[] };
+  expect(search.items).toEqual([expect.objectContaining({ id: 'mcp-github' })]);
+  const detail = JSON.parse((await execute('get_resource')('probe', { id: 'mcp-github' })).content[0]!.text!) as { authorization: { grantsNoPermission: boolean } };
+  expect(detail.authorization.grantsNoPermission).toBe(true);
+
+  const workerTools = agentTools({ workspace: root, systemContext });
+  expect(workerTools.map(tool => tool.name)).not.toContain('search_resources');
+  expect(workerTools.map(tool => tool.name)).not.toContain('read_system_capabilities');
+});

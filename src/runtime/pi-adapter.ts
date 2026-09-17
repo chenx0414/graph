@@ -30,6 +30,10 @@ export interface PiAdapterChannels {
   };
   catalog: Catalog;
   install: (input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) => Promise<unknown>;
+  systemContext?: {
+    resourceCatalog?: () => import('../catalog/resource-catalog.ts').RecommendedResource[];
+    systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+  };
 }
 
 function toPiModel(entry: ModelEntry): Model<ModelApi> {
@@ -204,6 +208,7 @@ export function createPiAdapter(options: {
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
+        let modelAccessQuestion: Json | undefined;
         const channels = options.channels;
         let capabilities: Awaited<ReturnType<typeof loadCapabilities>>;
         let commands: Awaited<ReturnType<typeof openWorkspaceCommandRunner>>;
@@ -234,6 +239,25 @@ export function createPiAdapter(options: {
             run: (command, args) => commands.run(command, args),
             ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
             ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog, install: channels.install } : {}),
+            ...(channels?.systemContext ? {
+              systemContext: {
+                ...(channels.systemContext.resourceCatalog ? { resourceCatalog: channels.systemContext.resourceCatalog } : {}),
+                ...(channels.systemContext.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
+                ...(conversation && spec.role === 'master' ? {
+                  requestModelAccess: async (request: { modelId: string; reason: string; planId?: string }) => {
+                    const data = {
+                      requestType: 'model_access',
+                      modelId: request.modelId,
+                      reason: request.reason,
+                      ...(request.planId ? { planId: request.planId } : {}),
+                      prompt: `任务需要模型 ${request.modelId}。原因：${request.reason}。请先在“设置 · 模型”中配置对应订阅或模型，然后在此确认。`,
+                    } as Json;
+                    modelAccessQuestion ??= data;
+                    return data as Record<string, unknown>;
+                  },
+                } : {}),
+              },
+            } : {}),
             onSubmit: output => { submitted = output; },
             ...(conversation && spec.role === 'master' ? { onSuggestedPrompt: prompt => { suggestedPrompt = prompt; } } : {}),
           }),
@@ -389,6 +413,8 @@ export function createPiAdapter(options: {
                     'propose_graph creates a draft version for the user to confirm; nothing is dispatched before confirmation. When the user changes direction, propose a new draft instead of arguing for the old one (only the latest draft on the current requirement can be confirmed).',
                     'Each proposal should include a short decisions list of the binding constraints the user confirmed (for example "do not touch login.ts"); update or drop entries when the user revises them. The list is frozen with the draft and shown on the confirmation card, so workers receive exactly what the user reviewed.',
                     'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
+                    'Before proposing a graph, inspect the project and query the shared resource library with search_resources/get_resource. These entries are sourcing information only: never claim they are installed, never invent resource capabilities from memory, and never treat a catalog entry as task authorization.',
+                    'Use read_system_capabilities to check configured subscriptions, models, Agent definitions and graph architectures before designing or assembling the graph. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
                     'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',
                     'After writing the normal reply, call suggest_prompt with one concise and specific message the user is most likely to send next. Omit the suggestion when there is no useful follow-up. The suggestion is only a composer hint and must never be sent automatically.',
                   ] : []),
@@ -428,6 +454,17 @@ export function createPiAdapter(options: {
               return {
                 outcome: 'waiting', output: { permission: { grant: permissionRequest.grant, capabilityId: permissionRequest.capabilityId, tool: permissionRequest.tool } },
                 question: { prompt: `Remote MCP tool ${permissionRequest.tool} requires the user grant ${permissionRequest.grant} in this task`, grant: permissionRequest.grant },
+                usage: gate.total(),
+              };
+            }
+            if (modelAccessQuestion) {
+              return {
+                outcome: 'waiting',
+                output: { question: modelAccessQuestion },
+                question: {
+                  prompt: String((modelAccessQuestion as { prompt?: string }).prompt ?? 'Model access is required'),
+                  data: modelAccessQuestion,
+                },
                 usage: gate.total(),
               };
             }

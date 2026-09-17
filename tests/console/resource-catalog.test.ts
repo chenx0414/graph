@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
-import { loadResourceCatalog, parseResourceCatalog } from '../../src/catalog/resource-catalog.ts';
+import { loadResourceCatalog, parseResourceCatalog, resourceDetail, searchResourceCatalog } from '../../src/catalog/resource-catalog.ts';
 
 const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
 
@@ -43,4 +43,25 @@ test('resource catalog rejects duplicate ids and unsupported kinds', () => {
   };
   expect(() => parseResourceCatalog({ version: 1, entries: [base, base] })).toThrow(/Duplicate resource id/);
   expect(() => parseResourceCatalog({ version: 1, entries: [{ ...base, kind: 'plugin' }] })).toThrow(/unsupported kind/);
+});
+
+test('resource search is bounded, filterable and keeps catalog entries separate from authorization', async () => {
+  const catalog = await loadResourceCatalog(presetsRoot);
+  const github = searchResourceCatalog(catalog.entries, { query: 'github', kind: 'mcp', limit: 5 });
+  expect(github.items.every(entry => entry.kind === 'mcp')).toBe(true);
+  expect(github.items.some(entry => entry.id === 'mcp-github')).toBe(true);
+  expect(github.limit).toBe(5);
+  expect(github.items.length).toBeLessThanOrEqual(5);
+
+  const first = searchResourceCatalog(catalog.entries, { query: 'skill', limit: 3, offset: 0 });
+  const second = searchResourceCatalog(catalog.entries, { query: 'skill', limit: 3, offset: 3 });
+  expect(first.items.map(entry => entry.id)).not.toEqual(second.items.map(entry => entry.id));
+  expect(first.hasMore).toBe(true);
+
+  const detail = resourceDetail(catalog.entries.find(entry => entry.id === 'mcp-github')!);
+  expect(detail.authorization).toEqual({
+    catalogEntryOnly: true,
+    notInstalled: true,
+    grantsNoPermission: true,
+  });
 });

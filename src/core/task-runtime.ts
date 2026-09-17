@@ -131,6 +131,12 @@ export async function openTaskRuntime(options: {
   };
   /** Host-selected grants and environment for confirmed program checks only. */
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
+  /** Read-only host inventory exposed to the master Agent. It must never
+   * contain secret values or write configuration on the Agent's behalf. */
+  systemContext?: {
+    resourceCatalog?: () => import('../catalog/resource-catalog.ts').RecommendedResource[];
+    systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+  };
   /** UI-hosted daemons wake dispatch as soon as a conversation message is queued. */
   autoWake?: boolean;
 }) {
@@ -258,6 +264,7 @@ export async function openTaskRuntime(options: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
         install: input => channels.install!(input),
+        ...(options.systemContext ? { systemContext: options.systemContext } : {}),
       },
     }) : undefined;
     if (options.live) {
@@ -273,6 +280,13 @@ export async function openTaskRuntime(options: {
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
       ...(options.program ? { program: options.program } : {}),
+      ...(options.systemContext ? {
+        systemContext: {
+          resources: Boolean(options.systemContext.resourceCatalog),
+          systemSummary: Boolean(options.systemContext.systemSummary),
+          requestModelAccess: true,
+        },
+      } : {}),
       autoWake: Boolean(options.autoWake),
     });
     // Tasks and conversations created while dispatch was disabled carry no

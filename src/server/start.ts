@@ -12,6 +12,7 @@ import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
 import { installPresets } from '../catalog/presets.ts';
 import { loadResourceCatalog } from '../catalog/resource-catalog.ts';
+import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
@@ -274,6 +275,58 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     log(`Resource catalog unavailable (${error instanceof Error ? error.message : String(error)}); recommended resources stay hidden.`);
     return { version: 1, entries: [] };
   });
+  let agentDefinitionSummary: () => Record<string, unknown>[] = () => [];
+  const systemSummary = async () => {
+    const usage = await usageService.get();
+    const configured = live.entries().map(entry => ({
+      id: entry.id,
+      provider: entry.provider,
+      modelId: entry.modelId ?? entry.id,
+      grade: entry.grade,
+      reasoning: entry.reasoning !== false,
+      ...(entry.defaultThinkingLevel ? { defaultThinkingLevel: entry.defaultThinkingLevel } : {}),
+      contextWindow: entry.contextWindow,
+      maxTokens: entry.maxTokens,
+      credentialConfigured: Boolean(live.credentialFor(entry)),
+      pricingStatus: entry.pricing?.status ?? (entry.cost ? 'known' : 'unknown'),
+    }));
+    return {
+      configuredModels: configured,
+      agentDefinitions: agentDefinitionSummary(),
+      architectures: GRAPH_ARCHITECTURES,
+      subscriptionPlans: usage.plans.map(plan => ({
+        id: plan.id,
+        name: plan.name,
+        configured: plan.configured,
+        status: plan.status,
+        plan: plan.plan,
+        models: plan.models.map(model => ({
+          id: model.id,
+          name: model.name,
+          reasoning: model.reasoning,
+          supported: model.supported,
+          contextWindow: model.contextWindow,
+          maxTokens: model.maxTokens,
+          ...(model.inputCostPerMillion !== undefined ? { inputCostPerMillion: model.inputCostPerMillion } : {}),
+          ...(model.outputCostPerMillion !== undefined ? { outputCostPerMillion: model.outputCostPerMillion } : {}),
+        })),
+        windows: plan.windows,
+        balance: plan.balance,
+        error: plan.error,
+        updatedAt: plan.updatedAt,
+      })),
+      summary: usage.summary,
+      resourceCatalog: {
+        entries: resourceCatalog.entries.length,
+        byKind: Object.fromEntries(
+          ['skill', 'skill-index', 'mcp', 'pi-extension', 'agent-md'].map(kind => [
+            kind,
+            resourceCatalog.entries.filter(entry => entry.kind === kind).length,
+          ]),
+        ),
+      },
+    };
+  };
   const server = await openGraphServer({
     stateDir,
     projects: config.projects,
@@ -308,6 +361,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     ...(configStore ? { configStore, configEnv: { ...options.env, ...importedSecrets }, configTest: testConnection } : {}),
     usage: usageService,
     resourceCatalog: resourceCatalog.entries,
+    systemContext: {
+      resourceCatalog: () => resourceCatalog.entries,
+      systemSummary,
+    },
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
       pushSecret: (ref, value) => pushSecret(ref, value),
@@ -319,6 +376,20 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       }),
     },
   });
+  agentDefinitionSummary = () => {
+    const catalog = server.runtime.catalog;
+    return catalog.definitions().map(({ id, version }) => {
+      const spec = catalog.definitionSpec(id, version);
+      return {
+        id,
+        version,
+        recommendedGrade: spec.recommendedGrade,
+        review: spec.review === true,
+        capabilities: spec.capabilities ?? [],
+        ...(spec.prompts ? { prompts: spec.prompts } : {}),
+      };
+    });
+  };
   const presetResult = await installPresets(
     server.runtime.catalog,
     presetsRoot,

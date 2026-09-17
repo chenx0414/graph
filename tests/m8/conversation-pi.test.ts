@@ -95,6 +95,47 @@ async function conversationProvider() {
   return { baseUrl, modelRuntime, requests };
 }
 
+async function systemContextProvider() {
+  const requests: { tools: string[]; messages: { role?: string; content?: unknown }[] }[] = [];
+  let step = 0;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] } : {};
+    const tools = (body.tools ?? []).map(tool => tool.function?.name ?? '');
+    requests.push({ tools, messages: body.messages ?? [] });
+    const usage = { prompt_tokens: 12, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 0 } };
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    const chunk = (delta: unknown, finish: string | null) => response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
+    const end = (finish: string) => {
+      chunk({}, finish);
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: finish }], usage })}\n\n`);
+      response.end('data: [DONE]\n\n');
+    };
+    const call = (id: string, name: string, args: Record<string, unknown>) => {
+      chunk({ role: 'assistant', tool_calls: [{ index: 0, id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, null);
+      end('tool_calls');
+    };
+    step += 1;
+    if (step === 1) return call('c1', 'read_system_capabilities', {});
+    if (step === 2) return call('c2', 'search_resources', { query: 'github', kind: 'mcp' });
+    if (step === 3) return call('c3', 'request_model_access', { modelId: 'missing-model', reason: '需要独立审查模型', planId: 'opencode-go' });
+    chunk({ role: 'assistant', content: '已打开模型授权问题。' }, null);
+    end('stop');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+  const model: Model<'openai-completions'> = {
+    id: 'local', name: 'Local', provider: 'local', api: 'openai-completions', baseUrl,
+    reasoning: false, input: ['text'], contextWindow: 32_000, maxTokens: 256,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+  const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false, refreshOnCreate: false });
+  modelRuntime.registerProvider('local', { baseUrl, api: 'openai-completions', apiKey: 'local-key', models: [model] });
+  return { modelRuntime, requests, baseUrl };
+}
+
 test('the real Pi master investigates, drafts, and keeps answering after confirmation', async () => {
   const root = await temp('flow');
   const project = join(root, 'project');
@@ -177,4 +218,63 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   expect(events.some(event => event.type === 'message.delta')).toBe(true);
   expect(events.some(event => event.type === 'message.tool' && (event.data as { phase?: string }).phase === 'start')).toBe(true);
   expect(view.messages.some(message => message.role === 'tool' && message.text.includes('list_dir'))).toBe(true);
+}, 120_000);
+
+test('the real Pi master can search the resource library and open a model-access question', async () => {
+  const root = await temp('system-context');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, 'README.md'), '# Project\n');
+  git(project, ['init', '-q', '-b', 'main']);
+  git(project, ['config', 'user.email', 'graph@example.invalid']);
+  git(project, ['config', 'user.name', 'Graph Test']);
+  git(project, ['add', '.']);
+  git(project, ['commit', '-q', '-m', 'init']);
+
+  const provider = await systemContextProvider();
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [{ id: 'local', provider: 'local', grade: 'high', api: 'openai-completions', baseUrl: provider.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'c' }],
+      apiKey: 'local-key',
+      modelRuntime: provider.modelRuntime,
+      credentialFor: () => ({ credentialId: 'c', apiKey: 'local-key' }),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+    systemContext: {
+      resourceCatalog: () => [{
+        id: 'mcp-github',
+        kind: 'mcp',
+        name: 'GitHub MCP',
+        description: 'GitHub operations',
+        source: 'https://github.com/github/github-mcp-server',
+        sourceKind: 'github',
+      }],
+      systemSummary: () => ({ configuredModels: [{ id: 'local', grade: 'high' }], subscriptionPlans: [] }),
+    },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({ projectId: 'p', text: '请先检查可用能力，再决定任务图。', requestId: 'system-context-create' });
+  await runtime.host.runReady();
+  const view = await runtime.conversations.view(created.conversationId);
+
+  expect(provider.requests[0]!.tools).toEqual(expect.arrayContaining([
+    'search_resources', 'get_resource', 'read_system_capabilities', 'request_model_access',
+  ]));
+  expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
+  expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('"mcp-github"');
+  expect(view.questions).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      kind: 'waiting',
+      status: 'open',
+      data: expect.objectContaining({
+        requestType: 'model_access',
+        modelId: 'missing-model',
+        planId: 'opencode-go',
+      }),
+    }),
+  ]));
 }, 120_000);
