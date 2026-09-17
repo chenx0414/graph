@@ -67,6 +67,7 @@ flowchart TB
 - [operation-lifecycle.ts](../src/core/operation-lifecycle.ts)：operation 的 intent、dispatch、reconcile、settle、阻塞、未知用量与返工状态机。
 - [program-adapters.ts](../src/core/program-adapters.ts)：`graph.verify`、`graph.command` 与人工检查程序节点。
 - [conversation.ts](../src/core/conversation.ts)：会话消息、队列投递、回复摘要与消息事件。
+- [conversation-projection.ts](../src/core/conversation-projection.ts)：会话历史分页覆盖、稳定 ID 归并、实时 delta/tool 合并、队列状态与消息排序。
 - [pi-instance.ts](../src/runtime/pi-instance.ts)：单个 Pi session 生命周期、能力包绑定和受控模型门。
 - [pi-adapter.ts](../src/runtime/pi-adapter.ts)：Agent 节点到独立 Pi 进程、工具门和 Graph 系统能力的适配。
 

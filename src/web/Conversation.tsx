@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api } from './api.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
+import {
+  applyConversationEvent,
+  conversationProjectionSnapshot,
+  createConversationProjection,
+  messageAttachments,
+  observeConversationHistory,
+  observeConversationView,
+  type ConversationMessage,
+} from '../core/conversation-projection.ts';
 import { formatTokens } from './insights.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
@@ -13,10 +22,6 @@ type Settings = { projects: { id: string; root: string }[]; models: { id: string
 export type ConversationSummary = {
   id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; updatedAt: number | null;
   openQuestions: number; taskCount: number; status: string;
-};
-type ConversationMessage = {
-  id: string; seq: number; role: string; kind: string; text: string; data: Record<string, unknown> | null;
-  state: string; operationId: string | null; turn: number; createdAt: number; updatedAt: number;
 };
 type ConversationNode = { id: string; kind: string; role: string | null; status: string; used: number | null; budget: number | null; unlimited?: boolean; model: string | null; definitionVersion: string | null; stallCount: number; outputVersion: number };
 type ConversationTask = {
@@ -79,24 +84,6 @@ type ConversationView = {
   tasks: ConversationTask[];
   cursor: number;
 };
-type LiveTool = { toolCallId: string; name: string; summary: string; done: boolean };
-
-function messageAttachments(message: ConversationMessage): ChatAttachment[] {
-  const value = message.data?.attachments;
-  if (!Array.isArray(value)) return [];
-  return value.flatMap(item => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
-    const attachment = item as Record<string, unknown>;
-    if (typeof attachment.name !== 'string' || typeof attachment.text !== 'string') return [];
-    return [{
-      name: attachment.name,
-      type: typeof attachment.type === 'string' ? attachment.type : 'text/plain',
-      size: typeof attachment.size === 'number' ? attachment.size : attachment.text.length,
-      text: attachment.text,
-    }];
-  });
-}
-
 function telemetryValue(value: number | null | undefined, render: (value: number) => string) {
   return value === null || value === undefined ? '—' : render(value);
 }
@@ -295,29 +282,6 @@ function MessageRow({ message }: { message: ConversationMessage }) {
     return <div className="message-row" data-role="tool" data-testid="message-tool"><div className="message-stack"><div className="message-content">工具 · {message.text}</div></div></div>;
   }
   return <div className="message-row" data-role="system" data-testid="message-system"><div className="message-stack"><div className="message-content">{message.text}</div></div></div>;
-}
-
-/** Tool activity belongs to the assistant turn, but the final answer should
- * close that turn. Move adjacent tool records ahead of the answer they support
- * without changing the order of independent turns. */
-function orderedMessages(messages: ConversationMessage[]) {
-  const ordered: ConversationMessage[] = [];
-  for (let index = 0; index < messages.length;) {
-    if (messages[index]!.role !== 'assistant') {
-      ordered.push(messages[index]!);
-      index += 1;
-      continue;
-    }
-    const answers: ConversationMessage[] = [];
-    const tools: ConversationMessage[] = [];
-    while (index < messages.length && (messages[index]!.role === 'assistant' || messages[index]!.role === 'tool')) {
-      if (messages[index]!.role === 'assistant') answers.push(messages[index]!);
-      else tools.push(messages[index]!);
-      index += 1;
-    }
-    ordered.push(...tools, ...answers);
-  }
-  return ordered;
 }
 
 function DraftVersionToc({ history, selectedVersion, scope, onSelectVersion }: {
@@ -577,11 +541,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
   const [branch, setBranch] = useState('main');
-  const [liveText, setLiveText] = useState<Record<string, string>>({});
-  const [liveTools, setLiveTools] = useState<LiveTool[]>([]);
-  const [cache, setCache] = useState<Record<string, ConversationMessage>>({});
-  const [historyExhausted, setHistoryExhausted] = useState(false);
-  const [forwardCursor, setForwardCursor] = useState<number | null>(null);
+  const [projection, setProjection] = useState(createConversationProjection);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);
   const [drawerPage, setDrawerPage] = useState<DrawerPage>('acceptance');
@@ -590,26 +550,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
-  // One stable, seq-ordered cache per mounted conversation. Every source
-  // (latest window, history pages, streamed message records) merges by stable
-  // ID and only newer records may replace older ones, so a late history
-  // response cannot roll a state change back.
-  const mergeMessages = useCallback((incoming: ConversationMessage[]) => {
-    if (!incoming.length) return;
-    setCache(current => {
-      let changed = false;
-      const next = { ...current };
-      for (const message of incoming) {
-        const previous = next[message.id];
-        if (previous && message.updatedAt < previous.updatedAt) continue;
-        if (!previous || previous.text !== message.text || previous.state !== message.state || previous.updatedAt !== message.updatedAt) {
-          next[message.id] = message;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, []);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
     // One event usually means several records changed; coalesce the refetches.
@@ -618,27 +558,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   }, [reload]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
   const connected = useEventStream(view ? `/api/conversations/${view.id}/events/stream` : null, event => {
-    const data = event.data as { operationId?: string; text?: string; message?: ConversationMessage; phase?: string; toolCallId?: string; toolName?: string; summary?: string } | undefined;
-    if (event.type === 'message.delta' && data?.text) {
-      setLiveText(current => ({ ...current, [data.operationId ?? 'stream']: (current[data.operationId ?? 'stream'] ?? '') + data.text }));
-    } else if (event.type === 'message.tool' && data?.toolCallId) {
-      setLiveTools(current => {
-        const next = current.filter(tool => tool.toolCallId !== data.toolCallId);
-        return [...next, { toolCallId: data.toolCallId!, name: data.toolName ?? 'tool', summary: data.summary ?? '', done: data.phase === 'end' }];
-      });
-    } else if (event.type === 'message.created' || event.type === 'message.updated') {
-      const message = data?.message;
-      // Incremental contract: state changes always merge, while replayed or
-      // historical created records must not bypass pagination (the latest
-      // window plus explicit history pages own backfill). Only records newer
-      // than everything cached extend the live window.
-      if (message?.id) {
-        const knownMax = Object.values(cache).reduce((max, candidate) => Math.max(max, candidate.seq), 0);
-        if (event.type === 'message.updated' || message.seq > knownMax) mergeMessages([message]);
-      }
-      if (message?.role === 'assistant' && message.operationId) setLiveText(current => { const next = { ...current }; delete next[message.operationId!]; return next; });
-      if (message?.role === 'tool' && typeof message.data?.toolCallId === 'string') setLiveTools(current => current.filter(tool => tool.toolCallId !== message.data!.toolCallId));
-    }
+    const data = event.data as Parameters<typeof applyConversationEvent>[1]['data'];
+    setProjection(current => applyConversationEvent(current, { type: event.type, ...(data ? { data } : {}) }));
     refresh();
   });
   useEffect(() => {
@@ -667,15 +588,17 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     }
   }, [view, drawerOpen, drawer]);
   useEffect(() => {
-    if (view) mergeMessages(view.messages);
-  }, [view, mergeMessages]);
+    if (view) setProjection(current => observeConversationView(current, view));
+  }, [view]);
+  const busy = view?.master?.status === 'preparing' || view?.master?.status === 'running';
+  const snapshot = conversationProjectionSnapshot(projection, { busy: Boolean(busy) });
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const thread = threadRef.current;
       if (thread) thread.scrollTop = thread.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
-  }, [view?.messages.length, liveText, view?.proposal?.version, view?.tasks.length]);
+  }, [snapshot.messages.length, snapshot.streaming.length, view?.proposal?.version, view?.tasks.length]);
   if (loading && !view) return <p>加载中…</p>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <p>加载中…</p>;
@@ -683,11 +606,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const acceptedVersions = new Set(view.accepted.map(item => item.proposalVersion));
   const proposal = view.proposal;
   const confirmable = Boolean(proposal && !proposal.stale && !acceptedVersions.has(proposal.version));
-  const busy = view.master?.status === 'preparing' || view.master?.status === 'running';
   const paused = pausedOverride ?? view.paused;
-  const durableAssistantOps = new Set(view.messages.filter(message => message.role === 'assistant' && message.operationId).map(message => message.operationId!));
-  const durableToolIds = new Set(view.messages.filter(message => message.role === 'tool' && typeof message.data?.toolCallId === 'string').map(message => String(message.data!.toolCallId)));
-  const liveEntries = Object.entries(liveText).filter(([operationId]) => !durableAssistantOps.has(operationId));
+  const queuedMessages = snapshot.queuedMessages;
+  const promptSuggestion = snapshot.promptSuggestion;
 
   async function act(action: () => Promise<unknown>, after?: () => void) {
     setActionError('');
@@ -773,42 +694,17 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   }
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
-  const cachedMessages = Object.values(cache).sort((left, right) => left.seq - right.seq);
-  const currentMessages = view.messages;
-  const queuedMessages = currentMessages.filter(message => message.role === 'user' && message.state === 'queued');
-  const latestAssistant = [...cachedMessages].reverse().find(message => message.role === 'assistant');
-  const promptSuggestion = !busy && !queuedMessages.length && typeof latestAssistant?.data?.suggestedPrompt === 'string'
-    ? latestAssistant.data.suggestedPrompt.trim().slice(0, 500)
-    : '';
-  const totalMessages = view.messageCount;
-  const hasOlder = !historyExhausted && totalMessages > cachedMessages.length;
   async function loadOlder() {
     if (loadingOlder) return;
-    if (totalMessages <= cachedMessages.length) { setHistoryExhausted(true); return; }
+    const request = snapshot.historyRequest;
+    if (!request) return;
     setLoadingOlder(true);
     setActionError('');
     try {
-      // `messages.seq` is a global sequence shared by every conversation, so a
-      // step in the numbers is not evidence of a missing record here. History
-      // is always fetched by the conversation's own filters: first older than
-      // the earliest known record, and only once that is exhausted does a
-      // forward cursor sweep any remaining middle/latest records.
-      const earliest = cachedMessages[0]?.seq;
-      if (earliest !== undefined && earliest > 1) {
-        const older = await api<ConversationView>(`/api/conversations/${id}?before=${earliest}&limit=200`);
-        if (older.messages.length) { mergeMessages(older.messages); return; }
-      }
-      // Start the sweep from the tail of the records known to precede the
-      // latest window, so a burst fills its hole instead of re-walking the
-      // whole conversation; the cursor then advances page by page.
-      const windowStart = currentMessages[0]?.seq;
-      const belowWindow = windowStart === undefined ? cachedMessages : cachedMessages.filter(message => message.seq < windowStart);
-      const base = belowWindow.length ? belowWindow[belowWindow.length - 1]!.seq : (earliest ?? 0);
-      const cursor = forwardCursor === null ? base : Math.max(forwardCursor, base);
-      const forward = await api<ConversationView>(`/api/conversations/${id}?after=${cursor}&limit=200`);
-      if (!forward.messages.length) { setHistoryExhausted(true); return; }
-      mergeMessages(forward.messages);
-      setForwardCursor(forward.messages[forward.messages.length - 1]!.seq);
+      const page = await api<ConversationView>(
+        `/api/conversations/${id}?${request.direction}=${request.cursor}&limit=200`,
+      );
+      setProjection(current => observeConversationHistory(current, { request, messages: page.messages }));
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -826,7 +722,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const drawerTitle = detailTask?.request
     ?? (activeProposal ? `草稿 v${activeProposal.version}` : activeProposalSummary ? `草稿 v${activeProposalSummary.version}` : '详情');
   const hasDrawerContent = drawer === 'proposal' ? Boolean(activeProposal) : Boolean(detailTask);
-  const displayMessages = orderedMessages(cachedMessages.filter(message => !(message.role === 'user' && message.state === 'queued')));
+  const displayMessages = snapshot.messages;
   const graphState = {
     taskCount: tasks.length,
     evidenceCount: tasks.reduce((count, task) => count + task.evidence.filter(item => item.valid).length, 0),
@@ -959,14 +855,14 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         {conversationTab === 'chat' ? (
           <div className="conversation-main">
           <div className="conversation-thread" data-testid="message-list" ref={threadRef}>
-          {hasOlder && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
+          {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
           {displayMessages.map(message => <MessageRow key={message.id} message={message} />)}
-          {liveTools.filter(tool => !durableToolIds.has(tool.toolCallId)).map(tool => (
+          {snapshot.liveTools.map(tool => (
             <div key={tool.toolCallId} className="message-row" data-role="tool" data-testid="tool-activity">
               <div className="message-stack"><div className="message-content">工具 · {tool.name} {tool.summary} {tool.done ? '（完成）' : '（进行中）'}</div></div>
             </div>
           ))}
-          {liveEntries.map(([operationId, chunk]) => (
+          {snapshot.streaming.map(([operationId, chunk]) => (
             <div key={operationId} className="message-row" data-role="assistant" data-testid="streaming">
               <div className="message-stack">
                 <div className="message-author">主 Agent · 正在输入…</div>
