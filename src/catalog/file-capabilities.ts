@@ -3,7 +3,7 @@ import { readdir, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { normalizeDomainPattern } from '../core/domains.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
-import type { CapabilityKind, CapabilityRecord } from './catalog.ts';
+import type { CapabilityKind, CapabilityRecord } from './capability-library.ts';
 
 export interface CapabilityManifest {
   id: string;

@@ -1,5 +1,6 @@
 import type { TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
+import type { CapabilityRecord } from '../catalog/capability-library.ts';
 
 export interface TalentSample {
   kind: 'task' | 'chat';
@@ -125,8 +126,13 @@ export function talentExperience(store: TaskStore, id: string, options: { versio
   return { scope: { version: scopeVersion ?? null, allVersions: scopeVersion === undefined }, samples, task: statsFor(task), chat: statsFor(chat), all: statsFor(samples) };
 }
 
-/** Definition detail with versions, bound capabilities and their install state. */
-export function talentDetail(store: TaskStore, id: string, options: { version?: number } = {}) {
+/** Definition detail with versions, bound capabilities and their current availability. */
+export function talentDetail(
+  store: TaskStore,
+  id: string,
+  options: { version?: number } = {},
+  capability?: (id: string, version: string) => CapabilityRecord | undefined,
+) {
   const versions = (store.db.prepare('SELECT version,spec FROM definitions WHERE id=? ORDER BY version').all(id) as { version: number; spec: string }[])
     .map(row => ({
       version: row.version,
@@ -142,8 +148,7 @@ export function talentDetail(store: TaskStore, id: string, options: { version?: 
   const chosen = options.version === undefined ? versions[versions.length - 1]! : versions.find(item => item.version === options.version);
   if (!chosen) throw new RuntimeError('not_found', `Definition ${id}@${options.version} is not published`);
   const capabilities = (chosen.spec.capabilities ?? []).map(bound => {
-    const record = store.db.prepare('SELECT kind,source,version,snapshot,status FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as
-      { kind: string; source: string; version: string; snapshot: string; status: string } | undefined;
+    const record = capability?.(bound.id, bound.version);
     return {
       id: bound.id, version: bound.version, kind: record?.kind ?? null, status: record?.status ?? 'missing',
       source: record?.source ?? null,
@@ -151,8 +156,7 @@ export function talentDetail(store: TaskStore, id: string, options: { version?: 
   });
   const prompts = Object.entries(chosen.spec.prompts ?? {}).map(([role, bound]) => {
     if (!bound) return null;
-    const record = store.db.prepare('SELECT kind,source,version,snapshot,status FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as
-      { kind: string; source: string; version: string; snapshot: string; status: string } | undefined;
+    const record = capability?.(bound.id, bound.version);
     return {
       id: bound.id,
       version: bound.version,

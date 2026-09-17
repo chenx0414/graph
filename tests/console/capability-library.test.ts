@@ -2,13 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { CapabilityLibrary } from '../../src/catalog/capability-library.ts';
 import { Catalog } from '../../src/catalog/catalog.ts';
-import { scanCapabilities } from '../../src/catalog/file-capabilities.ts';
-import {
-  compileAgentCombinationDefinition,
-  parseAgentCombinations,
-  validateAgentCombination,
-} from '../../src/catalog/agent-combinations.ts';
 import { TaskStore } from '../../src/core/store.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -25,15 +20,16 @@ async function capability(root: string, directory: string, manifest: Record<stri
 }
 
 test('filesystem capabilities are scanned recursively and invalid manifests stay visible', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-capabilities-'));
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-library-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   await capability(root, 'skills/research', { id: 'research', kind: 'skill', version: '1.0.0', name: 'Research' }, { 'SKILL.md': '# Research\n' });
   await capability(root, 'mcp/github', { id: 'github', kind: 'mcp', version: '2.0.0', name: 'GitHub', url: 'https://example.test/mcp' });
   await capability(root, 'prompts/reviewer', { id: 'reviewer', kind: 'prompt', role: 'agent', version: '1.0.0', name: 'Reviewer' }, { 'agent.md': 'Review carefully.\n' });
   await capability(root, 'broken', { id: 'broken', kind: 'skill', version: '1.0.0', name: 'Broken' });
 
-  const records = await scanCapabilities(root);
-  expect(records).toEqual(expect.arrayContaining([
+  const library = new CapabilityLibrary({ capabilityRoot: root });
+  await library.refresh();
+  expect(library.capabilities()).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: 'research', status: 'available', kind: 'skill' }),
     expect.objectContaining({ id: 'github', status: 'available', kind: 'mcp' }),
     expect.objectContaining({ id: 'reviewer', status: 'available', kind: 'prompt', role: 'agent' }),
@@ -64,8 +60,9 @@ test('MCP network declarations accept host patterns and environment references b
     id: 'skill', kind: 'skill', version: '1.0.0', name: 'Skill', networkDomains: ['api.example.test'],
   }, { 'SKILL.md': '# Skill\n' });
 
-  const records = await scanCapabilities(root);
-  expect(records).toEqual(expect.arrayContaining([
+  const library = new CapabilityLibrary({ capabilityRoot: root });
+  await library.refresh();
+  expect(library.capabilities()).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: 'valid', status: 'available' }),
     expect.objectContaining({ id: 'browser', status: 'available' }),
     expect.objectContaining({ id: 'url', status: 'invalid', error: expect.stringContaining('networkDomains') }),
@@ -74,30 +71,32 @@ test('MCP network declarations accept host patterns and environment references b
   ]));
 });
 
-test('recipes validate against scanned capabilities and compile to a versioned definition', async () => {
+test('recipes validate against the current capability projection and compile to a versioned definition', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-recipes-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const capabilitiesRoot = join(root, 'capabilities');
-  await capability(capabilitiesRoot, 'identity', { id: 'identity', kind: 'prompt', role: 'agent', version: '1.0.0', name: 'Identity' }, { 'agent.md': 'Identity.\n' });
-  await capability(capabilitiesRoot, 'research', { id: 'research', kind: 'skill', version: '1.0.0', name: 'Research' }, { 'SKILL.md': '# Research\n' });
-  const records = await scanCapabilities(capabilitiesRoot);
-  const document = parseAgentCombinations({
-    version: 1,
-    combinations: [{
-      id: 'review',
-      name: 'Review',
-      description: 'Review work.',
-      recommendedGrade: 'high',
-      review: true,
-      resources: [
-        { resourceId: 'identity', version: '1.0.0', role: 'identity' },
-        { resourceId: 'research', version: '1.0.0', role: 'skill' },
-      ],
-    }],
+  const capabilityRoot = join(root, 'capabilities');
+  const recipesPath = join(root, 'agent-combinations.json');
+  await capability(capabilityRoot, 'identity', { id: 'identity', kind: 'prompt', role: 'agent', version: '1.0.0', name: 'Identity' }, { 'agent.md': 'Identity.\n' });
+  await capability(capabilityRoot, 'research', { id: 'research', kind: 'skill', version: '1.0.0', name: 'Research' }, { 'SKILL.md': '# Research\n' });
+  const library = new CapabilityLibrary({ capabilityRoot, recipesPath });
+  await library.refresh();
+
+  const view = await library.saveAgentCombination({
+    id: 'review',
+    name: 'Review',
+    description: 'Review work.',
+    recommendedGrade: 'high',
+    review: true,
+    tags: ['review'],
+    resources: [
+      { resourceId: 'identity', version: '1.0.0', role: 'identity', required: true },
+      { resourceId: 'research', version: '1.0.0', role: 'skill', required: true },
+    ],
   });
-  const view = validateAgentCombination(document.combinations[0]!, records);
   expect(view).toMatchObject({ status: 'valid', issues: [] });
-  const compiled = compileAgentCombinationDefinition(document.combinations[0]!, records);
+  expect(library.agentCombinations()).toHaveLength(1);
+  expect(library.searchAgentCombinations({ query: 'review' }).items).toEqual([expect.objectContaining({ id: 'review' })]);
+  const compiled = library.compileAgentCombination('review');
   expect(compiled.definition).toMatchObject({
     recommendedGrade: 'high',
     review: true,
@@ -106,14 +105,14 @@ test('recipes validate against scanned capabilities and compile to a versioned d
   });
 });
 
-test('Catalog persists recipe CRUD and compiles the same definition only once', async () => {
+test('catalog composes the capability library and persists recipe compilation only once', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-catalog-recipes-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const capabilitiesRoot = join(root, 'capabilities');
-  await capability(capabilitiesRoot, 'skill', { id: 'skill', kind: 'skill', version: '1.0.0', name: 'Skill' }, { 'SKILL.md': '# Skill\n' });
+  const capabilityRoot = join(root, 'capabilities');
+  await capability(capabilityRoot, 'skill', { id: 'skill', kind: 'skill', version: '1.0.0', name: 'Skill' }, { 'SKILL.md': '# Skill\n' });
   const store = new TaskStore(join(root, 'tasks.sqlite'));
   cleanup.push(() => store.close());
-  const catalog = new Catalog(store, { capabilityRoot: capabilitiesRoot, recipesPath: join(root, 'agent-combinations.json') });
+  const catalog = new Catalog(store, { capabilityRoot, recipesPath: join(root, 'agent-combinations.json') });
   await catalog.refresh();
   await catalog.saveAgentCombination({
     id: 'worker',

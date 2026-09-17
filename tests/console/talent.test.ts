@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, test } from 'vitest';
+import { CapabilityLibrary } from '../../src/catalog/capability-library.ts';
 import { TaskStore, canonicalJson } from '../../src/core/store.ts';
 import { talentDetail, talentExperience } from '../../src/core/talent.ts';
 
@@ -190,14 +191,22 @@ test('an unfinished sample is excluded from means and reported as unfinished', a
 
 test('talent detail exposes versions, bound capability state and traceability', async () => {
   const db = await store();
+  const root = await mkdtemp(join(tmpdir(), 'graph-talent-capability-'));
+  const capabilityRoot = join(root, 'capabilities');
+  const skill = join(capabilityRoot, 'skill-x');
+  await mkdir(skill, { recursive: true });
+  await writeFile(join(skill, 'SKILL.md'), '# Skill X\n');
+  await writeFile(join(skill, 'capability.json'), JSON.stringify({ id: 'skill-x', kind: 'skill', version: '1.0.0', name: 'Skill X' }));
+  const library = new CapabilityLibrary({ capabilityRoot });
+  await library.refresh();
   db.transaction(() => {
     db.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',1,?)")
       .run(canonicalJson({ recommendedGrade: 'medium', capabilities: [{ id: 'skill-x', version: '1.0.0' }], snapshot: { preset: { id: 'agent-coder', version: '1.0.0', hash: 'abcd' }, description: '内置实现人才' } }));
-    db.db.prepare("INSERT INTO capabilities(id,kind,source,version,snapshot,status) VALUES('skill-x','skill','/presets/x','1.0.0','{}','installed')").run();
   });
-  const detail = talentDetail(db, 'coder');
+  const detail = talentDetail(db, 'coder', {}, (id, version) => library.capability(id, version));
   expect(detail).toMatchObject({ id: 'coder', version: 1, recommendedGrade: 'medium', description: '内置实现人才' });
   expect(detail.traceability).toMatchObject({ origin: 'preset', id: 'agent-coder' });
-  expect(detail.capabilities).toEqual([{ id: 'skill-x', version: '1.0.0', kind: 'skill', status: 'installed', source: '/presets/x' }]);
+  expect(detail.capabilities).toEqual([{ id: 'skill-x', version: '1.0.0', kind: 'skill', status: 'available', source: await realpath(skill) }]);
   expect(() => talentDetail(db, 'missing')).toThrowError(/Unknown Agent definition/);
+  await rm(root, { recursive: true, force: true });
 }, 30_000);

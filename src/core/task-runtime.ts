@@ -1030,7 +1030,10 @@ export async function openTaskRuntime(options: {
     /** Talent detail plus per-metric experience statistics from the ledger. */
     talent(id: string, options: { version?: number; allVersions?: boolean } = {}) {
       ensureOpen();
-      return { detail: talentDetail(store, id, options), experience: talentExperience(store, id, options) };
+      return {
+        detail: talentDetail(store, id, options, (capabilityId, version) => catalog.capability(capabilityId, version)),
+        experience: talentExperience(store, id, options),
+      };
     },
     /** Read-only node detail: real session entries, operations and usage. */
     nodeRun(taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {

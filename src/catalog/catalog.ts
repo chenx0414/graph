@@ -1,84 +1,39 @@
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
-import { parseDefinitionVersion, type ModelGrade } from './models.ts';
-import { scanCapabilities } from './file-capabilities.ts';
-import {
-  compileAgentCombinationDefinition,
-  parseAgentCombinations,
-  readAgentCombinations,
-  validateAgentCombination,
-  writeAgentCombinations,
-  type AgentCombination,
-  type AgentCombinationView,
-} from './agent-combinations.ts';
+import { parseDefinitionVersion } from './models.ts';
+import { CapabilityLibrary, type CapabilityBinding, type CapabilityRecord, type CapabilitySearchInput, type DefinitionSpec } from './capability-library.ts';
+import type { AgentCombination, AgentCombinationView } from './agent-combinations.ts';
 
-export type CapabilityKind = 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt';
-
-export interface CapabilityBinding {
-  id: string;
-  version: string;
-}
-
-export interface DefinitionSpec {
-  recommendedGrade: ModelGrade;
-  capabilities?: CapabilityBinding[];
-  /** Optional prompt capabilities kept separate from executable capabilities. */
-  prompts?: {
-    agent?: CapabilityBinding;
-    tool?: CapabilityBinding;
-  };
-  review?: boolean;
-  snapshot?: Json;
-}
-export interface CapabilityRecord {
-  id: string;
-  kind: CapabilityKind;
-  source: string;
-  version: string;
-  snapshot: Json;
-  status: 'available' | 'invalid' | 'installing' | 'installed' | 'failed';
-  name?: string;
-  description?: string;
-  role?: 'agent' | 'tool';
-  error?: string;
-}
+export type {
+  AgentCombinationSearchInput,
+  CapabilityBinding,
+  CapabilityKind,
+  CapabilityRecord,
+  CapabilitySearchInput,
+  CapabilitySearchResult,
+  DefinitionSpec,
+} from './capability-library.ts';
 
 /** Versioned Agent definitions and capabilities. Published rows are immutable. */
 export class Catalog {
   private readonly store: TaskStore;
-  private readonly capabilityRoot?: string;
-  private readonly recipesPath?: string;
-  private fileCapabilities: CapabilityRecord[] = [];
-  private recipes: AgentCombination[] = [];
-  private recipesError: string | undefined;
+  private readonly capabilityLibrary: CapabilityLibrary;
   constructor(store: TaskStore, options: { capabilityRoot?: string; recipesPath?: string } = {}) {
     this.store = store;
-    if (options.capabilityRoot) this.capabilityRoot = options.capabilityRoot;
-    if (options.recipesPath) this.recipesPath = options.recipesPath;
+    this.capabilityLibrary = new CapabilityLibrary(options);
   }
 
   async refreshCapabilities() {
-    this.fileCapabilities = this.capabilityRoot ? await scanCapabilities(this.capabilityRoot) : [];
-    return this.capabilities();
+    return this.capabilityLibrary.refreshCapabilities();
   }
 
   async refresh() {
-    await this.refreshCapabilities();
-    if (this.recipesPath) {
-      try {
-        this.recipes = (await readAgentCombinations(this.recipesPath)).combinations;
-        this.recipesError = undefined;
-      } catch (error) {
-        this.recipes = [];
-        this.recipesError = error instanceof Error ? error.message : String(error);
-      }
-    }
-    return { capabilities: this.capabilities(), agentCombinations: this.agentCombinations() };
+    return this.capabilityLibrary.refresh();
   }
 
-  capabilityRootPath() { return this.capabilityRoot; }
-  agentCombinationFilePath() { return this.recipesPath; }
-  agentCombinationError() { return this.recipesError; }
+  capabilityRootPath() { return this.capabilityLibrary.capabilityRootPath(); }
+  agentCombinationFilePath() { return this.capabilityLibrary.agentCombinationFilePath(); }
+  agentCombinationError() { return this.capabilityLibrary.agentCombinationError(); }
 
   private assertBinding(label: string, binding: CapabilityBinding | undefined) {
     if (!binding) return;
@@ -125,39 +80,28 @@ export class Catalog {
     this.store.db.prepare('INSERT OR REPLACE INTO presets VALUES(?,?,?,?,?)').run(id, version, hash, canonicalJson(detail), Date.now());
   }
 
-  recordInstall(record: CapabilityRecord) {
-    this.store.db.prepare('INSERT OR IGNORE INTO capabilities(id,kind,source,version,snapshot,status) VALUES(?,?,?,?,?,?)')
-      .run(record.id, record.kind, record.source, record.version, canonicalJson(record.snapshot), record.status);
+  agentCombinations(): AgentCombinationView[] {
+    return this.capabilityLibrary.agentCombinations();
   }
 
-  agentCombinations(): AgentCombinationView[] {
-    return this.recipes.map(recipe => validateAgentCombination(recipe, this.capabilities()));
+  agentCombination(id: string) {
+    return this.capabilityLibrary.agentCombination(id);
+  }
+
+  searchAgentCombinations(input: { query?: string; grade?: DefinitionSpec['recommendedGrade']; limit?: number } = {}) {
+    return this.capabilityLibrary.searchAgentCombinations(input);
   }
 
   async saveAgentCombination(combination: AgentCombination) {
-    if (!this.recipesPath) throw new RuntimeError('unsupported', 'This runtime has no agent-combination file');
-    const document = parseAgentCombinations({ version: 1, combinations: [...this.recipes.filter(item => item.id !== combination.id), combination] });
-    const next = document.combinations;
-    const view = validateAgentCombination(combination, this.capabilities());
-    if (view.status !== 'valid') throw new RuntimeError('invalid_agent_combination', view.issues.join('; '));
-    await writeAgentCombinations(this.recipesPath, { version: document.version, combinations: next });
-    this.recipes = next;
-    return validateAgentCombination(combination, this.capabilities());
+    return this.capabilityLibrary.saveAgentCombination(combination);
   }
 
   async deleteAgentCombination(id: string) {
-    if (!this.recipesPath) throw new RuntimeError('unsupported', 'This runtime has no agent-combination file');
-    const next = this.recipes.filter(item => item.id !== id);
-    if (next.length === this.recipes.length) throw new RuntimeError('not_found', `Unknown Agent combination ${id}`);
-    await writeAgentCombinations(this.recipesPath, { version: 1, combinations: next });
-    this.recipes = next;
-    return { id, deleted: true };
+    return this.capabilityLibrary.deleteAgentCombination(id);
   }
 
   compileAgentCombination(id: string) {
-    const combination = this.recipes.find(item => item.id === id);
-    if (!combination) throw new RuntimeError('not_found', `Unknown Agent combination ${id}`);
-    const compiled = compileAgentCombinationDefinition(combination, this.capabilities());
+    const compiled = this.capabilityLibrary.compileAgentCombination(id);
     const published = this.ensureDefinition(id, compiled.definition);
     return {
       combination: compiled.view,
@@ -168,16 +112,11 @@ export class Catalog {
   }
 
   capability(id: string, version?: string): CapabilityRecord | undefined {
-    if (this.capabilityRoot) {
-      return (version
-        ? this.fileCapabilities.find(item => item.id === id && item.version === version)
-        : [...this.fileCapabilities].reverse().find(item => item.id === id));
-    }
-    const row = (version
-      ? this.store.db.prepare('SELECT * FROM capabilities WHERE id=? AND version=? ORDER BY rowid DESC LIMIT 1').get(id, version)
-      : this.store.db.prepare('SELECT * FROM capabilities WHERE id=? ORDER BY rowid DESC LIMIT 1').get(id)) as { id: string; kind: CapabilityRecord['kind']; source: string; version: string; snapshot: string; status: CapabilityRecord['status'] } | undefined;
-    if (!row) return;
-    return { ...row, snapshot: JSON.parse(row.snapshot) as Json };
+    return this.capabilityLibrary.capability(id, version);
+  }
+
+  searchCapabilities(input: CapabilitySearchInput = {}) {
+    return this.capabilityLibrary.search(input);
   }
 
   listDefinitions() {
@@ -185,8 +124,6 @@ export class Catalog {
   }
 
   capabilities() {
-    if (this.capabilityRoot) return this.fileCapabilities.map(item => ({ ...item }));
-    const rows = this.store.db.prepare('SELECT id,kind,source,version,snapshot,status FROM capabilities ORDER BY rowid').all() as { id: string; kind: CapabilityRecord['kind']; source: string; version: string; snapshot: string; status: CapabilityRecord['status'] }[];
-    return rows.map(row => ({ ...row, snapshot: JSON.parse(row.snapshot) as Json }));
+    return this.capabilityLibrary.capabilities();
   }
 }

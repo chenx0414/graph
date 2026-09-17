@@ -392,7 +392,7 @@ export async function loadCapabilities(input: {
       if (seen.has(seenKey)) continue;
       seen.add(seenKey);
       const record = input.catalog.capability(bound.id, bound.version);
-      if (!record || !['available', 'installed'].includes(record.status)) {
+      if (!record || record.status !== 'available') {
         throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not available in the capability directory`);
       }
       const snapshot = snapshotPath(record);

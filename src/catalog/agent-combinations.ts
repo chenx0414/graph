@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { RuntimeError, type Json } from '../core/types.ts';
-import type { CapabilityRecord, DefinitionSpec } from './catalog.ts';
+import type { CapabilityRecord, DefinitionSpec } from './capability-library.ts';
 import type { ModelGrade } from './models.ts';
 
 export type AgentCombinationResourceRole = 'identity' | 'tool' | 'skill' | 'mcp' | 'pi-extension' | 'extension';

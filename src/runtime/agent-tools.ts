@@ -36,36 +36,6 @@ function capabilityView(record: CapabilityRecord) {
   };
 }
 
-function searchCapabilities(capabilities: CapabilityRecord[], input: {
-  query?: string;
-  kind?: string;
-  role?: string;
-  limit?: number;
-  offset?: number;
-}) {
-  const query = input.query?.trim().toLowerCase() ?? '';
-  const terms = query.split(/\s+/).filter(Boolean);
-  const kind = input.kind?.trim();
-  const role = input.role?.trim();
-  const limit = Number.isSafeInteger(input.limit) && input.limit! > 0 ? Math.min(input.limit!, 50) : 20;
-  const offset = Number.isSafeInteger(input.offset) && input.offset! > 0 ? input.offset! : 0;
-  const matches = capabilities.filter(record => {
-    if (kind && record.kind !== kind) return false;
-    if (role && record.role !== role) return false;
-    if (!terms.length) return true;
-    const haystack = [record.id, record.kind, record.version, record.name, record.description, record.source, record.role]
-      .filter(Boolean).join('\n').toLowerCase();
-    return terms.every(term => haystack.includes(term));
-  });
-  return {
-    total: matches.length,
-    offset,
-    limit,
-    hasMore: offset + limit < matches.length,
-    items: matches.slice(offset, offset + limit).map(capabilityView),
-  };
-}
-
 /** Workspace, result, supervisor, and granted retrieval tools for a production Pi instance. */
 export function agentTools(input: {
   workspace: string;
@@ -197,13 +167,14 @@ export function agentTools(input: {
         if (kind && !['skill', 'mcp', 'extension', 'pi-extension', 'prompt'].includes(kind)) throw new Error('Unsupported capability kind');
         const role = typeof body.role === 'string' && body.role.trim() ? body.role.trim() : undefined;
         if (role && role !== 'agent' && role !== 'tool') throw new Error('Prompt role must be agent or tool');
-        return text(JSON.stringify(searchCapabilities(input.catalog!.capabilities(), {
+        const result = input.catalog!.searchCapabilities({
           ...(query ? { query } : {}),
-          ...(kind ? { kind } : {}),
-          ...(role ? { role } : {}),
+          ...(kind ? { kind: kind as CapabilityRecord['kind'] } : {}),
+          ...(role ? { role: role as 'agent' | 'tool' } : {}),
           ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
           ...(typeof body.offset === 'number' ? { offset: body.offset } : {}),
-        })));
+        });
+        return text(JSON.stringify({ ...result, items: result.items.map(capabilityView) }));
       },
     });
     tools.push(
@@ -245,19 +216,11 @@ export function agentTools(input: {
           const grade = typeof body.grade === 'string' ? body.grade.trim() : '';
           if (grade && !['low', 'medium', 'high', 'highest'].includes(grade)) throw new Error('Unsupported model grade');
           const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 30;
-          const matches = input.catalog!.agentCombinations().filter(item => {
-            if (grade && item.recommendedGrade !== grade) return false;
-            if (!query) return true;
-            return [
-              item.id,
-              item.name,
-              item.description,
-              item.recommendedGrade,
-              ...item.tags,
-              ...item.resources.map(resource => resource.resourceId),
-            ].join('\n').toLowerCase().includes(query);
-          });
-          return text(JSON.stringify({ total: matches.length, items: matches.slice(0, limit) }));
+          return text(JSON.stringify(input.catalog!.searchAgentCombinations({
+            ...(query ? { query } : {}),
+            ...(grade ? { grade: grade as 'low' | 'medium' | 'high' | 'highest' } : {}),
+            limit,
+          })));
         },
       },
       {
@@ -266,7 +229,7 @@ export function agentTools(input: {
         execute: async (_id, params) => {
           const id = String(fields(params).id).trim();
           if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
-          const combination = input.catalog!.agentCombinations().find(candidate => candidate.id === id);
+          const combination = input.catalog!.agentCombination(id);
           if (!combination) throw new Error(`Unknown Agent combination ${id}`);
           return text(JSON.stringify(combination));
         },

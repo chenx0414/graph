@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -14,27 +14,32 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
   const root = await mkdtemp(join(tmpdir(), 'graph-capability-bundle-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'workspace');
-  const skill = join(root, 'skill');
-  const extension = join(root, 'pi-extension');
-  const agentPrompt = join(root, 'identity');
-  const toolPrompt = join(root, 'awareness');
+  const capabilityRoot = join(root, 'capabilities');
+  const skill = join(capabilityRoot, 'skill');
+  const extension = join(capabilityRoot, 'pi-extension');
+  const agentPrompt = join(capabilityRoot, 'identity');
+  const toolPrompt = join(capabilityRoot, 'awareness');
   await Promise.all([workspace, skill, extension, agentPrompt, toolPrompt].map(path => mkdir(path, { recursive: true })));
   await writeFile(join(skill, 'SKILL.md'), '# Skill\n\nRead the project before editing.\n');
+  await writeFile(join(skill, 'capability.json'), canonicalJson({ id: 'skill-read', kind: 'skill', version: '1.0.0', name: 'Read skill' }));
   await writeFile(join(extension, 'capability.json'), canonicalJson({
+    id: 'pi-probe',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Probe extension',
     entry: './index.ts',
     tools: [{ name: 'extension_probe', description: 'Probe the extension.' }],
   }));
   await writeFile(join(extension, 'index.ts'), 'export default function () {}\n');
   await writeFile(join(agentPrompt, 'agent.md'), 'You are the bundle test Agent.');
+  await writeFile(join(agentPrompt, 'capability.json'), canonicalJson({ id: 'prompt-identity', kind: 'prompt', role: 'agent', version: '1.0.0', name: 'Identity' }));
   await writeFile(join(toolPrompt, 'tool.md'), 'Use only the declared capability bundle.');
+  await writeFile(join(toolPrompt, 'capability.json'), canonicalJson({ id: 'prompt-awareness', kind: 'prompt', role: 'tool', version: '1.0.0', name: 'Awareness' }));
 
   const store = new TaskStore(join(root, 'tasks.sqlite'));
   cleanup.push(() => store.close());
-  const catalog = new Catalog(store);
-  catalog.recordInstall({ id: 'skill-read', kind: 'skill', source: skill, version: '1.0.0', snapshot: { path: skill }, status: 'installed' });
-  catalog.recordInstall({ id: 'pi-probe', kind: 'pi-extension', source: extension, version: '1.0.0', snapshot: { path: extension }, status: 'installed' });
-  catalog.recordInstall({ id: 'prompt-identity', kind: 'prompt', source: agentPrompt, version: '1.0.0', snapshot: { path: agentPrompt }, status: 'installed' });
-  catalog.recordInstall({ id: 'prompt-awareness', kind: 'prompt', source: toolPrompt, version: '1.0.0', snapshot: { path: toolPrompt }, status: 'installed' });
+  const catalog = new Catalog(store, { capabilityRoot });
+  await catalog.refresh();
   catalog.publishDefinition('bundle-agent', {
     recommendedGrade: 'medium',
     capabilities: [
@@ -57,8 +62,8 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
     gate,
   });
   try {
-    expect(loaded.skillPaths).toEqual([skill]);
-    expect(loaded.piExtensionPaths).toEqual([join(extension, 'index.ts')]);
+    expect(loaded.skillPaths).toEqual([await realpath(skill)]);
+    expect(loaded.piExtensionPaths).toEqual([join(await realpath(extension), 'index.ts')]);
     expect(loaded.piExtensionTools).toEqual(['extension_probe']);
     expect(loaded.prompts).toEqual({
       agent: 'You are the bundle test Agent.',

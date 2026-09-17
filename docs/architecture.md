@@ -59,6 +59,7 @@ flowchart TB
 ### 执行模块导航
 
 - [execution.ts](../src/core/execution.ts)：任务执行状态机、节点派发、暂停与恢复、主管回合和工具调用编排。
+- [capability-library.ts](../src/catalog/capability-library.ts)：文件系统能力扫描、版本解析、搜索、配方读写、验证与编译。
 - [context.ts](../src/core/context.ts)：Continue/Fresh/Fork 解析、handoff 冻结、上下文 lineage 与预算作用域。
 - [model-selection.ts](../src/core/model-selection.ts)：模型等级选择、审查模型排除与独立审查就绪判断。
 - [operation-settlement.ts](../src/core/operation-settlement.ts)：操作结果结算、返工循环、阻塞与等待问答。
