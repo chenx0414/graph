@@ -618,9 +618,10 @@ type ResourceDetailSelection =
 
 function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
   const kindLabel = item.kind === 'skill' ? 'Skill'
-    : item.kind === 'mcp' ? 'MCP'
-      : item.kind === 'pi-extension' ? 'Pi extension'
-        : 'Agent.md';
+    : item.kind === 'skill-index' ? 'Skill 索引'
+      : item.kind === 'mcp' ? 'MCP'
+        : item.kind === 'pi-extension' ? 'Pi extension'
+          : 'Agent.md';
   const riskLabel: Record<NonNullable<RecommendedResource['risk']>[number], string> = {
     credentials: '需要凭据',
     network: '访问网络',
@@ -652,7 +653,10 @@ function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
             <span>{host}</span>
           </a>
           <code className="faint">{item.source}</code>
+          {item.sourceRepository && <code className="faint">仓库：{item.sourceRepository}</code>}
           {item.sourcePath && <code className="faint">路径：{item.sourcePath}</code>}
+          {item.resolvedCommit && <code className="faint">commit：{item.resolvedCommit.slice(0, 12)}</code>}
+          {item.version && <code className="faint">Skill 版本：{item.version}</code>}
           {item.transport && <span className="muted">Transport：{item.transport}</span>}
         </div>
       </section>
@@ -686,17 +690,31 @@ function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
 
 function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
   const [selected, setSelected] = useState<ResourceDetailSelection | null>(null);
+  const [resourceQuery, setResourceQuery] = useState('');
+  const [resourceLimits, setResourceLimits] = useState<Record<string, number>>({});
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const capabilities = settings?.capabilities ?? [];
   const definitions = settings?.definitions ?? [];
   const recommended = settings?.recommended ?? [];
   const groups = [
-    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: capabilities.filter(item => item.kind === 'skill'), recommended: recommended.filter(item => item.kind === 'skill') },
+    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: capabilities.filter(item => item.kind === 'skill'), recommended: recommended.filter(item => item.kind === 'skill' || item.kind === 'skill-index') },
     { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: capabilities.filter(item => item.kind === 'mcp'), recommended: recommended.filter(item => item.kind === 'mcp') },
     { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, items: capabilities.filter(item => item.kind === 'pi-extension' || item.kind === 'extension'), recommended: recommended.filter(item => item.kind === 'pi-extension') },
     { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: capabilities.filter(item => item.kind === 'prompt'), recommended: recommended.filter(item => item.kind === 'agent-md') },
     { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: definitions, recommended: [] },
   ];
+  const query = resourceQuery.trim().toLowerCase();
+  const matches = (item: RecommendedResource) => !query || [
+    item.name,
+    item.description,
+    item.source,
+    item.sourceRepository,
+    item.sourcePath,
+    ...(item.tags ?? []),
+  ].some(value => value?.toLowerCase().includes(query));
+  const filteredRecommended = (group: typeof groups[number]) => group.recommended.filter(matches);
+  const visibleRecommended = (group: typeof groups[number]) => filteredRecommended(group).slice(0, resourceLimits[group.id] ?? 40);
+  const totalFiltered = groups.reduce((total, group) => total + filteredRecommended(group).length, 0);
   const architectures = [
     { name: '顺序执行', flow: 'A → B → C', description: '每一步使用前一步产物，适合依赖明确的实现与检查流程。' },
     { name: '条件路由', flow: 'A → B / C', description: '先判断输入或状态，再把任务交给一条匹配的分支。' },
@@ -720,8 +738,18 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
       <div className="resource-section-head">
         <div>
           <h1>资源库</h1>
-          <p>统一查看可复用的能力、Agent 定义与图架构参考。</p>
+          <p>已加入表示已安装并能被 Agent 定义绑定；可选只代表目录来源，尚未安装或授权。</p>
         </div>
+        <label className="resource-search">
+          <Icon name="search" size={15} />
+          <input
+            value={resourceQuery}
+            onChange={event => setResourceQuery(event.target.value)}
+            placeholder="搜索技能、来源或路径"
+            data-testid="resource-catalog-search"
+          />
+          <span className="faint">{totalFiltered}</span>
+        </label>
       </div>
       <div className="resource-grid">
         {groups.map(group => (
@@ -761,8 +789,9 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
                 {group.recommended.length > 0 && (
                   <div data-testid={`resource-recommended-${group.id}`}>
                     <div className="resource-subhead">可选</div>
-                    <div className="resource-candidate-list">
-                      {group.recommended.map(item => (
+                    {visibleRecommended(group).length ? (
+                      <div className="resource-candidate-list">
+                        {visibleRecommended(group).map(item => (
                         <button
                           key={item.id}
                           type="button"
@@ -777,8 +806,18 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
                           </span>
                           <Icon name="chevron" size={14} />
                         </button>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : <p className="muted">没有匹配的资源。</p>}
+                    {filteredRecommended(group).length > visibleRecommended(group).length && (
+                      <Button
+                        size="sm"
+                        data-testid={`resource-more-${group.id}`}
+                        onClick={() => setResourceLimits(current => ({ ...current, [group.id]: (current[group.id] ?? 40) + 40 }))}
+                      >
+                        显示更多（{visibleRecommended(group).length} / {filteredRecommended(group).length}）
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RuntimeError, type Json } from '../core/types.ts';
 
-export type RecommendedResourceKind = 'skill' | 'mcp' | 'pi-extension' | 'agent-md';
+export type RecommendedResourceKind = 'skill' | 'skill-index' | 'mcp' | 'pi-extension' | 'agent-md';
 export type ResourceCommercialUse = 'allowed' | 'restricted' | 'mixed' | 'unknown';
 export type ResourceCompatibility = 'verified' | 'unverified' | 'incompatible';
 export type ResourceTransport = 'stdio' | 'streamable-http' | 'sse' | 'none';
@@ -15,8 +15,11 @@ export interface RecommendedResource {
   description: string;
   source: string;
   sourceKind: 'github' | 'npm' | 'pi-package' | 'website' | 'local-reference';
+  sourceRepository?: string;
   license?: string;
   sourcePath?: string;
+  resolvedCommit?: string;
+  version?: string;
   archived?: boolean;
   commercialUse?: ResourceCommercialUse;
   compatibility?: ResourceCompatibility;
@@ -33,7 +36,7 @@ interface ResourceCatalogDocument {
   entries: RecommendedResource[];
 }
 
-const KINDS = new Set<RecommendedResourceKind>(['skill', 'mcp', 'pi-extension', 'agent-md']);
+const KINDS = new Set<RecommendedResourceKind>(['skill', 'skill-index', 'mcp', 'pi-extension', 'agent-md']);
 const SOURCE_KINDS = new Set<RecommendedResource['sourceKind']>(['github', 'npm', 'pi-package', 'website', 'local-reference']);
 const COMMERCIAL_USE = new Set<ResourceCommercialUse>(['allowed', 'restricted', 'mixed', 'unknown']);
 const COMPATIBILITY = new Set<ResourceCompatibility>(['verified', 'unverified', 'incompatible']);
@@ -93,6 +96,7 @@ export function parseResourceCatalog(value: unknown): ResourceCatalogDocument {
     const sourceKind = text(entry.sourceKind, `entries[${index}].sourceKind`) as RecommendedResource['sourceKind'];
     if (!SOURCE_KINDS.has(sourceKind)) throw new RuntimeError('invalid_resource_catalog', `Resource ${id} has unsupported sourceKind ${sourceKind}`);
     const source = text(entry.source, `entries[${index}].source`);
+    const sourceRepository = entry.sourceRepository === undefined ? undefined : text(entry.sourceRepository, `entries[${index}].sourceRepository`);
     if (sourceKind !== 'local-reference') {
       try {
         const url = new URL(source);
@@ -105,6 +109,11 @@ export function parseResourceCatalog(value: unknown): ResourceCatalogDocument {
     const requirements = textList(entry.requirements, `entries[${index}].requirements`);
     const license = entry.license === undefined ? undefined : text(entry.license, `entries[${index}].license`);
     const sourcePath = entry.sourcePath === undefined ? undefined : text(entry.sourcePath, `entries[${index}].sourcePath`);
+    const resolvedCommit = entry.resolvedCommit === undefined ? undefined : text(entry.resolvedCommit, `entries[${index}].resolvedCommit`);
+    if (resolvedCommit && !/^[0-9a-f]{40}$/.test(resolvedCommit)) {
+      throw new RuntimeError('invalid_resource_catalog', `entries[${index}].resolvedCommit must be a 40-character lowercase commit SHA`);
+    }
+    const version = entry.version === undefined ? undefined : text(entry.version, `entries[${index}].version`);
     if (entry.archived !== undefined && typeof entry.archived !== 'boolean') {
       throw new RuntimeError('invalid_resource_catalog', `entries[${index}].archived must be a boolean`);
     }
@@ -120,8 +129,11 @@ export function parseResourceCatalog(value: unknown): ResourceCatalogDocument {
       description: text(entry.description, `entries[${index}].description`),
       source,
       sourceKind,
+      ...(sourceRepository ? { sourceRepository } : {}),
       ...(license ? { license } : {}),
       ...(sourcePath ? { sourcePath } : {}),
+      ...(resolvedCommit ? { resolvedCommit } : {}),
+      ...(version ? { version } : {}),
       ...(entry.archived === true ? { archived: true } : {}),
       ...(commercialUse ? { commercialUse } : {}),
       ...(compatibility ? { compatibility } : {}),

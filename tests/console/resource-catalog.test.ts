@@ -25,8 +25,11 @@ test('the built-in resource catalog is valid and covers every resource family', 
     source: 'https://pi.dev/packages/pi-mcp-extension',
     compatibility: 'unverified',
   });
-  expect(catalog.entries.find(entry => entry.id === 'skill-superpowers')).toMatchObject({ archived: true });
-  expect(catalog.entries.find(entry => entry.id === 'skill-yichen')).toMatchObject({ commercialUse: 'restricted' });
+  const superpowers = catalog.entries.filter(entry => entry.sourceRepository === 'obra/superpowers-skills');
+  expect(superpowers.length).toBeGreaterThan(20);
+  expect(superpowers.every(entry => entry.archived === true && entry.resolvedCommit)).toBe(true);
+  expect(catalog.entries.find(entry => entry.sourceRepository === 'mcncarl/yichen-skills')).toMatchObject({ commercialUse: 'restricted' });
+  expect(catalog.entries.find(entry => entry.kind === 'skill-index')).toMatchObject({ sourceRepository: 'VoltAgent/awesome-agent-skills' });
 });
 
 test('resource catalog rejects duplicate ids and unsupported kinds', () => {
