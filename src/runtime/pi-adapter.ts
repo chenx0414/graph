@@ -424,6 +424,7 @@ export function createPiAdapter(options: {
                 nodeId: operation.nodeId,
                 operationId: operation.id,
                 bindingId: agentContext.bindingId,
+                sessionId: inspected.sessionId,
                 capabilityDigest: capabilities.digest,
                 ...(inspected.context?.sourceLeafId ? { sourceLeafId: inspected.context.sourceLeafId } : {}),
                 ...(inspected.context?.sourceContextDigest ? { sourceContextDigest: inspected.context.sourceContextDigest } : {}),

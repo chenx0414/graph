@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
-import { NODE_LABEL, when } from './labels.ts';
+import { describeQuestion, NODE_LABEL, when } from './labels.ts';
 import { costText, ErrorBox, useTaskStream } from './shared.tsx';
 import { Button, Empty, Pill, Spinner, Stat } from './ui.tsx';
 
@@ -54,6 +54,25 @@ function usageText(usage: Record<string, number> | null) {
   const total = Object.values(usage).reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0);
   return `${total.toLocaleString('en-US')} tokens`;
 }
+
+const CONTEXT_PURPOSE_LABEL: Record<string, string> = {
+  discuss: '讨论', explore: '探索', implement: '实现', review: '审查', verify: '验证', rework: '返工',
+};
+const CONTEXT_INDEPENDENCE_LABEL: Record<string, string> = {
+  none: '无额外独立性要求', fresh: '全新上下文', 'model-excluded': '排除实现模型',
+};
+const CONTEXT_REASON_LABEL: Record<string, string> = {
+  existing_session: '继续已有会话',
+  review_requires_fresh: '审查要求独立上下文',
+  independence_requires_fresh: '独立性要求全新上下文',
+  facts_do_not_require_transcript: '所需事实无需继承会话上下文',
+  default_fresh: '默认全新上下文',
+  explicit_transcript_facts: '显式要求继承会话上下文',
+  transcript_facts: '请求继承会话上下文',
+};
+const CONTEXT_FACT_LABEL: Record<string, string> = {
+  artifact: '产物', decision: '决策', file: '文件', transcript_range: '会话片段', tool_call: '工具调用',
+};
 
 /** Read-only node detail: real Pi entries, tools, operations and evidence.
  * Never starts an agent, injects a message or triggers a tool. */
@@ -194,20 +213,20 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
             <Pill tone={data.context.selectedMode === 'fork' ? 'warn' : 'accent'}>
               {data.context.selectedMode === 'continue' ? '继续原会话' : data.context.selectedMode === 'fork' ? 'Fork 快照' : 'Fresh 独立上下文'}
             </Pill>
-            {data.context.purpose && <Pill>{data.context.purpose}</Pill>}
-            {data.context.independence && <Pill>{data.context.independence}</Pill>}
+            {data.context.purpose && <Pill>{CONTEXT_PURPOSE_LABEL[data.context.purpose] ?? '未知用途'}</Pill>}
+            {data.context.independence && <Pill>{CONTEXT_INDEPENDENCE_LABEL[data.context.independence] ?? '未知独立性'}</Pill>}
           </div>
           <p className="muted">
-            {data.context.sourceNodeId ? `来源节点 ${data.context.sourceNodeId}` : '没有继承父 transcript'}
-            {data.context.reasonCode ? ` · ${data.context.reasonCode}` : ''}
+            {data.context.sourceNodeId ? `来源节点 ${data.context.sourceNodeId}` : '没有继承父会话上下文'}
+            {data.context.reasonCode ? ` · ${CONTEXT_REASON_LABEL[data.context.reasonCode] ?? '已解析上下文模式'}` : ''}
           </p>
           {data.context.requestedFacts?.length ? (
-            <p className="muted">请求事实：{data.context.requestedFacts.map(fact => fact.kind ?? 'unknown').join(', ')}</p>
+            <p className="muted">请求事实：{data.context.requestedFacts.map(fact => CONTEXT_FACT_LABEL[fact.kind ?? ''] ?? '未知事实').join('、')}</p>
           ) : null}
-          {data.context.sourceLeafId && <p className="muted mono">source leaf {data.context.sourceLeafId}</p>}
-          {data.context.sourceContextDigest && <p className="muted mono">source {data.context.sourceContextDigest.slice(0, 16)}</p>}
-          {data.context.childContextDigest && <p className="muted mono">child {data.context.childContextDigest.slice(0, 16)}</p>}
-          {data.context.handoffDigest && <p className="muted mono">handoff {data.context.handoffDigest.slice(0, 16)}</p>}
+          {data.context.sourceLeafId && <p className="muted mono">来源叶 {data.context.sourceLeafId}</p>}
+          {data.context.sourceContextDigest && <p className="muted mono">来源上下文摘要 {data.context.sourceContextDigest.slice(0, 16)}</p>}
+          {data.context.childContextDigest && <p className="muted mono">子上下文摘要 {data.context.childContextDigest.slice(0, 16)}</p>}
+          {data.context.handoffDigest && <p className="muted mono">交接摘要 {data.context.handoffDigest.slice(0, 16)}</p>}
           {data.context.budgetScope && (
             <p className="muted">
               共享预算 {data.context.budgetScope.used.toLocaleString('en-US')} /
@@ -307,7 +326,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
       <section>
         <h4 className="section-title">问题与验收</h4>
         {data.questions.filter(question => question.status === 'open').map(question => (
-          <p key={question.id}><Pill tone="warn">{question.kind}</Pill> 等待处理（在任务页答复）</p>
+          <p key={question.id}><Pill tone="warn">{describeQuestion(question.kind)}</Pill> 等待处理（在任务页答复）</p>
         ))}
         {data.evidence.length ? data.evidence.map(item => (
           <p key={item.acceptanceId} data-testid={`node-evidence-${item.acceptanceId}`}>{item.acceptanceId}:{item.valid ? '有效' : '无效或过期'}{item.commitSha ? ` · ${item.commitSha.slice(0, 10)}` : ''}</p>

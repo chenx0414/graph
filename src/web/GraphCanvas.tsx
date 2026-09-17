@@ -17,9 +17,9 @@ type NodeData = { id: string; label: string; tone: NodeTone; status: string };
 
 function nodeSuffix(node: GraphPayload['nodes'][number]) {
   if (node.action === 'graph.human_check' || /(^|[-_])human($|[-_])/i.test(node.id)) return 'human check';
-  if (node.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')) return 'fork agent';
-  if (node.context?.independence && node.context.independence !== 'none') return 'fresh agent';
-  if (node.context?.purpose === 'review' || node.context?.purpose === 'verify') return 'fresh agent';
+  if (node.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')) return '继承快照节点';
+  if (node.context?.independence && node.context.independence !== 'none') return '独立上下文节点';
+  if (node.context?.purpose === 'review' || node.context?.purpose === 'verify') return '独立上下文节点';
   if (node.kind === 'agent') return 'agent';
   if (node.action === 'graph.verify') return 'gate';
   if (node.action === 'graph.command') return 'tool';

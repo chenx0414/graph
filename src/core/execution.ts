@@ -217,7 +217,7 @@ export class Execution {
     } else if (question.kind === 'permission' && answer.type === 'grant') {
       if (answer.grant !== (JSON.parse(question.data) as { grant: string }).grant) throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
       this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);
-    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind) && answer.type === 'retry') && !(['reservation_exceeded', 'human_check', 'git_dirty'].includes(question.kind) && answer.type === 'acknowledge') && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
+    } else if (!(question.kind === 'waiting' && answer.type === 'respond') && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind) && answer.type === 'retry') && !(['reservation_exceeded', 'human_check', 'git_dirty'].includes(question.kind) && answer.type === 'acknowledge') && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
       throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
     }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
@@ -672,7 +672,16 @@ export class Execution {
       });
     } catch (error) {
       if (error instanceof RuntimeError && error.code.startsWith('context_')) {
-        this.store.transaction(() => this.block(node, 'adapter_error', { reason: error.message, code: error.code }));
+        this.store.transaction(() => {
+          const data = {
+            reason: error.message,
+            code: error.code,
+            requiredFacts: (spec.context?.requiredFacts ?? []) as unknown as Json,
+            policy: spec.context?.independence ?? 'none',
+          };
+          this.store.event(node.task_id, 'context.rejected', { nodeId: node.id, ...data });
+          this.block(node, 'context_rejected', data);
+        });
         return false;
       }
       throw error;
@@ -751,7 +760,16 @@ export class Execution {
             this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id, reason: refusal.message });
           }
           if (refusalCode === 'budget') this.block(node, 'budget', { reason: refusal.message, requested: reservation });
-          else if (refusalCode === 'context_rejected') this.block(node, 'adapter_error', { reason: refusal.message, code: refusalCode });
+          else if (refusalCode === 'context_rejected') {
+            const data = {
+              reason: refusal.message,
+              code: refusalCode,
+              requiredFacts: (spec.context?.requiredFacts ?? []) as unknown as Json,
+              policy: spec.context?.independence ?? 'none',
+            };
+            this.store.event(node.task_id, 'context.rejected', { nodeId: node.id, operationId: operation.id, ...data });
+            this.block(node, 'context_rejected', data, operation.id);
+          }
           else if (unknown || refusalCode === 'unknown_usage') {
             // The gate already recorded the unknown-usage question for this operation.
             const existing = this.store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id) as { id: string } | undefined;

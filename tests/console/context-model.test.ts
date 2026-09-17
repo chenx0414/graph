@@ -5,9 +5,17 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { validateProposal } from '../../src/core/proposal.ts';
-import { TaskStore } from '../../src/core/store.ts';
+import { canonicalJson, TaskStore } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { addInstanceUsage, assertWithinBudget, setInstanceBudget } from '../../src/core/context.ts';
+import {
+  addInstanceUsage,
+  assertWithinBudget,
+  contextView,
+  freezeContextHandoff,
+  recordContextSession,
+  resolveAgentContext,
+  setInstanceBudget,
+} from '../../src/core/context.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -158,4 +166,97 @@ test('a shared budget scope counts usage across source and fork instances', asyn
   addInstanceUsage(store, 'i-source', 60);
   expect(() => assertWithinBudget(store, 'i-fork', 41)).toThrow(/Shared context budget/);
   expect(() => assertWithinBudget(store, 'i-fork', 40)).not.toThrow();
+});
+
+test('fresh, continue and rejected context resolutions produce the correct events', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-context-events-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  store.transaction(() => {
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq) VALUES('t','p','events',1)").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,instance_id) VALUES('t','continued','{}','i-continued')").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,instance_id) VALUES('t','fresh','{}','i-fresh')").run();
+    store.db.prepare("INSERT INTO instances(id,task_id,node_id,budget,used,unlimited) VALUES('i-continued','t','continued',100,0,0)").run();
+    store.db.prepare("INSERT INTO instances(id,task_id,node_id,budget,used,unlimited) VALUES('i-fresh','t','fresh',100,0,0)").run();
+    store.db.prepare("INSERT INTO node_sessions(instance_id,session_id,session_file,updated_at) VALUES('i-continued','s-continued','/tmp/s-continued.jsonl',0)").run();
+  });
+
+  const continuedSpec = { id: 'continued', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'local' };
+  const continued = resolveAgentContext(store, { taskId: 't', nodeId: 'continued', spec: continuedSpec, review: false });
+  expect(continued.mode).toBe('continue');
+  store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES('op-continued','t','continued','i-continued',1,?,'intent',0,'a')").run(canonicalJson(continuedSpec));
+  freezeContextHandoff(store, continued, {
+    taskId: 't', operationId: 'op-continued', nodeId: 'continued', instanceId: 'i-continued', summary: '继续', package: { briefing: '继续' },
+  });
+  recordContextSession(store, {
+    taskId: 't', nodeId: 'continued', operationId: 'op-continued', bindingId: continued.bindingId,
+    sessionId: 's-continued', childContextDigest: 'd'.repeat(64),
+  });
+  expect(contextView(store, 't', 'continued')?.selectedMode).toBe('continue');
+
+  const freshSpec = { id: 'fresh', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'local' };
+  const fresh = resolveAgentContext(store, { taskId: 't', nodeId: 'fresh', spec: freshSpec, review: false });
+  expect(fresh.mode).toBe('fresh');
+  store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES('op-fresh','t','fresh','i-fresh',1,?,'intent',0,'b')").run(canonicalJson(freshSpec));
+  freezeContextHandoff(store, fresh, {
+    taskId: 't', operationId: 'op-fresh', nodeId: 'fresh', instanceId: 'i-fresh', summary: '全新', package: { briefing: '全新' },
+  });
+  recordContextSession(store, {
+    taskId: 't', nodeId: 'fresh', operationId: 'op-fresh', bindingId: fresh.bindingId,
+    sessionId: 's-fresh', childContextDigest: 'e'.repeat(64),
+  });
+
+  const branchEvents = store.db.prepare("SELECT type,json_extract(data,'$.nodeId') AS nodeId FROM events WHERE type IN ('context.branch_created','context.branch_resumed') ORDER BY cursor").all() as { type: string; nodeId: string }[];
+  expect(branchEvents).toEqual([{ type: 'context.branch_resumed', nodeId: 'continued' }]);
+});
+
+test('a runtime context rejection is visible as an event and does not send the rejected Agent', async () => {
+  const provider = await openaiServer([{ text: 'SOURCE_ONLY' }]);
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-context-rejected-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace }],
+    actions: {
+      check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) },
+    },
+    models: {
+      entries: [{
+        id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+  });
+  cleanup.push(() => runtime.close());
+  await installPresets(runtime.catalog, presetsRoot);
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'reject fork', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1,
+    summary: 'Reject a fork that changes the Agent definition without rebrand.',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'source', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      {
+        id: 'rejected', kind: 'agent', action: 'explore', definitionVersion: 'tester@1', model: 'local',
+        dependsOn: ['source'],
+        context: { purpose: 'explore', sourceNode: 'source', requiredFacts: [{ kind: 'transcript_range' }] },
+      },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['source', 'rejected'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  expect(provider.requests).toHaveLength(1);
+  expect(runtime.events(taskId).some(event => event.type === 'context.rejected')).toBe(true);
+  await expect(runtime.user.task(taskId).view()).resolves.toMatchObject({
+    questions: expect.arrayContaining([expect.objectContaining({ nodeId: 'rejected', kind: 'context_rejected' })]),
+  });
 });

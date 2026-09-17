@@ -1164,12 +1164,12 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
             <div><span className="muted">模型 </span>{selectedNode.selectedModel ?? '未知'} · 定义 {selectedNode.boundDefinition ?? '未知'}</div>
             <div><span className="muted">上下文 </span>{
               selectedNode.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')
-                ? `Fork · ${selectedNode.context.sourceNode ?? '缺少来源'}`
+                ? `继承会话快照 · ${selectedNode.context.sourceNode ?? '缺少来源'}`
                 : selectedNode.context?.independence && selectedNode.context.independence !== 'none'
-                  ? `Fresh · ${selectedNode.context.independence}`
+                  ? `独立上下文 · ${selectedNode.context.independence === 'model-excluded' ? '排除实现模型' : '全新上下文'}`
                   : selectedNode.context?.purpose === 'review' || selectedNode.context?.purpose === 'verify'
-                    ? 'Fresh · review'
-                    : 'Fresh / Continue（运行时解析）'
+                    ? '独立审查上下文'
+                    : '默认独立上下文；重跑时继续原会话'
             }</div>
             <div><span className="muted">用量 </span>{selectedNode.used == null ? '未知（无权威计量）' : formatTokens(selectedNode.used)}{selectedNode.unlimited ? ' · 额度不限' : selectedNode.budget == null ? '' : ` / 预算 ${formatTokens(selectedNode.budget)}`} · 预留 {selectedNode.reserved ?? 0}</div>
             <div><span className="muted">尝试次数 </span>{selectedNode.stallCount ?? 0} · 输出版本 {selectedNode.outputVersion ?? 0}</div>

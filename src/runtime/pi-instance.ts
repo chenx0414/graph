@@ -146,13 +146,17 @@ export async function openPiInstance(options: PiInstanceOptions) {
     const branchedFile = manager.createBranchedSession(sourceLeafId);
     if (!branchedFile) throw new Error('Failed to create a forked session file');
     const childContext = manager.buildSessionContext();
+    const childContextDigest = contextDigest(childContext);
+    if (sourceContextDigest !== childContextDigest) {
+      throw new Error('Forked session context digest mismatch');
+    }
     contextInfo = {
       mode: 'fork',
       ...(sourceSessionId ? { sourceSessionId } : {}),
       sourceSessionFile: sourceFile,
       sourceLeafId,
       sourceContextDigest,
-      childContextDigest: contextDigest(childContext),
+      childContextDigest,
     };
   } else {
     manager = SessionManager.create(workspace, sessionsDir);

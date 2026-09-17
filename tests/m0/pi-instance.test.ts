@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterEach, expect, test } from 'vitest';
+import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from '../../src/runtime/pi-instance.ts';
 import { modelA, modelB, respond, testModelRuntime } from '../fixtures/models.ts';
 
@@ -125,4 +126,48 @@ test('a v2 capability digest is required and must match exactly', async () => {
   delete manifest.capabilityDigest;
   await writeFile(manifestPath, JSON.stringify(manifest));
   await expect(openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) })).rejects.toThrow('has no digest');
+});
+
+test('a fork rejects a source/child context digest mismatch before any model request', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-fork-digest-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const runtime = await testModelRuntime();
+  const sourceOptions = {
+    binding: { instanceId: 'source', nodeId: 'source', definitionVersion: 'coder@1' },
+    workspace,
+    stateDir: join(root, 'source'),
+    model: modelA,
+    modelRuntime: runtime,
+    stream: respond,
+  };
+  const source = await openPiInstance(sourceOptions);
+  await source.prompt('source context');
+  const sourceFile = source.inspect().sessionFile;
+  await source.close();
+
+  let modelRequests = 0;
+  const original = SessionManager.prototype.buildSessionContext;
+  SessionManager.prototype.buildSessionContext = function patched() {
+    return {
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'tampered child context' }], timestamp: 1 }],
+      thinkingLevel: 'off',
+      model: null,
+    } as ReturnType<typeof original>;
+  };
+  try {
+    await expect(openPiInstance({
+      binding: { instanceId: 'fork', nodeId: 'fork', definitionVersion: 'coder@1' },
+      workspace,
+      stateDir: join(root, 'fork'),
+      model: modelA,
+      modelRuntime: runtime,
+      stream: (...args) => { modelRequests += 1; return respond(...args); },
+      forkFrom: { sessionFile: sourceFile },
+    })).rejects.toThrow('context digest mismatch');
+    expect(modelRequests).toBe(0);
+  } finally {
+    SessionManager.prototype.buildSessionContext = original;
+  }
 });

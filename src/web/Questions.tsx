@@ -60,9 +60,9 @@ export function QuestionReply({ taskId, question, onDone }: {
             return void submit({ type: 'usage', usage: { input: Number(inputTokens), output: Number(outputTokens), cacheRead: 0, cacheWrite: 0 }, proof });
           }
           if (question.kind === 'permission') return void submit({ type: 'grant', grant: question.data.grant });
-          if (['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind)) return void submit({ type: 'retry' });
+          if (['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind)) return void submit({ type: 'retry' });
           return void submit({ type: 'acknowledge' });
-        }}>{['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict'].includes(question.kind) ? '重试' : '答复'}</Button>}
+        }}>{['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind) ? '重试' : '答复'}</Button>}
       </div>
       {error && <p data-testid="answer-error" style={{ color: 'var(--danger)' }}>{error}</p>}
     </li>

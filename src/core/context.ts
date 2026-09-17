@@ -266,12 +266,16 @@ export function recordContextSession(store: TaskStore, input: {
   nodeId: string;
   operationId: string;
   bindingId: string;
+  sessionId?: string;
   capabilityDigest?: string;
   sourceLeafId?: string;
   sourceContextDigest?: string;
   childContextDigest?: string;
 }) {
-  const prior = store.db.prepare('SELECT source_context_digest FROM agent_context_bindings WHERE id=?').get(input.bindingId) as { source_context_digest: string | null } | undefined;
+  const prior = store.db.prepare('SELECT mode,source_context_digest FROM agent_context_bindings WHERE id=?')
+    .get(input.bindingId) as { mode: 'fresh' | 'fork'; source_context_digest: string | null } | undefined;
+  const resolution = store.db.prepare('SELECT selected_mode FROM context_resolutions WHERE operation_id=?')
+    .get(input.operationId) as { selected_mode: AgentContextMode } | undefined;
   store.db.prepare(`UPDATE agent_context_bindings SET
       source_leaf_id=COALESCE(?,source_leaf_id),
       source_context_digest=COALESCE(?,source_context_digest),
@@ -280,14 +284,22 @@ export function recordContextSession(store: TaskStore, input: {
     WHERE id=?`)
     .run(input.sourceLeafId ?? null, input.sourceContextDigest ?? null, input.childContextDigest ?? null,
       input.capabilityDigest ?? null, input.bindingId);
-  store.event(input.taskId, !prior?.source_context_digest && input.sourceContextDigest ? 'context.branch_created' : 'context.branch_resumed', {
-    nodeId: input.nodeId,
-    operationId: input.operationId,
-    bindingId: input.bindingId,
-    sourceLeafId: input.sourceLeafId ?? null,
-    sourceContextDigest: input.sourceContextDigest ?? null,
-    childContextDigest: input.childContextDigest ?? null,
-  });
+  const eventType = input.sourceContextDigest && prior?.mode === 'fork' && !prior.source_context_digest
+    ? 'context.branch_created'
+    : resolution?.selected_mode === 'continue' || (prior?.mode === 'fork' && prior.source_context_digest)
+      ? 'context.branch_resumed'
+      : null;
+  if (eventType) {
+    store.event(input.taskId, eventType, {
+      nodeId: input.nodeId,
+      operationId: input.operationId,
+      bindingId: input.bindingId,
+      sessionId: input.sessionId ?? null,
+      sourceLeafId: input.sourceLeafId ?? null,
+      sourceContextDigest: input.sourceContextDigest ?? null,
+      childContextDigest: input.childContextDigest ?? null,
+    });
+  }
 }
 
 export function contextView(store: TaskStore, taskId: string, nodeId: string) {
