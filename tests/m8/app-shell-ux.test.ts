@@ -559,53 +559,33 @@ test('the composer model control switches model and thinking as one persisted se
 
 test('the resource library groups reusable assets and includes graph architectures', async () => {
   const root = await temp('resources');
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const skill = join(capabilityRoot, 'research');
+  const mcp = join(capabilityRoot, 'jira');
+  const extension = join(capabilityRoot, 'pi-mcp-extension');
+  const prompt = join(capabilityRoot, 'architect');
+  await Promise.all([mkdir(skill, { recursive: true }), mkdir(mcp, { recursive: true }), mkdir(extension, { recursive: true }), mkdir(prompt, { recursive: true })]);
+  await writeFile(join(skill, 'SKILL.md'), '# Research\n');
+  await writeFile(join(skill, 'capability.json'), JSON.stringify({ id: 'research', kind: 'skill', version: '1.0.0', name: 'Preserving Productive Tensions', description: '保留多个有效方案，避免过早收敛。' }));
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify({ id: 'jira', kind: 'mcp', version: '1.0.0', name: 'Jira', description: 'Jira 工单管理。', command: 'node', args: ['./server.mjs'] }));
+  await writeFile(join(mcp, 'server.mjs'), 'export {};\n');
+  await writeFile(join(extension, 'capability.json'), JSON.stringify({ id: 'pi-mcp-extension', kind: 'pi-extension', version: '1.0.0', name: 'Pi MCP Extension', description: '帮助 Pi 加载并调用 MCP server。', entry: './index.mjs' }));
+  await writeFile(join(extension, 'index.mjs'), 'export default function () {}\n');
+  await writeFile(join(prompt, 'capability.json'), JSON.stringify({ id: 'architect', kind: 'prompt', role: 'agent', version: '1.0.0', name: '架构师', description: '系统设计与技术权衡。' }));
+  await writeFile(join(prompt, 'agent.md'), 'You are an architect.\n');
+  await writeFile(join(root, 'graph', 'agent-combinations.json'), JSON.stringify({
+    version: 1,
+    combinations: [{
+      id: 'code', name: '代码实现', description: '组合架构身份与研究 Skill。', recommendedGrade: 'medium', review: false, tags: ['编码'],
+      resources: [{ resourceId: 'architect', version: '1.0.0', role: 'identity', required: true }, { resourceId: 'research', version: '1.0.0', role: 'skill', required: true }],
+    }],
+  }));
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
     projects: [{ id: 'alpha', root }],
     webDir,
     startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-    resourceCatalog: [{
-      id: 'skill-obra-superpowers-skills-example',
-      kind: 'skill',
-      name: 'Preserving Productive Tensions',
-      description: '保留多个有效方案，避免过早收敛。',
-      source: 'https://github.com/obra/superpowers-skills/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/skills/architecture/preserving-productive-tensions/SKILL.md',
-      sourceKind: 'github',
-      sourceRepository: 'obra/superpowers-skills',
-      sourcePath: 'skills/architecture/preserving-productive-tensions',
-      resolvedCommit: 'a'.repeat(40),
-      archived: true,
-      compatibility: 'unverified',
-      risk: ['code-execution'],
-      tags: ['编码', '方法论'],
-      requirements: ['先核对许可证与版本'],
-    }, {
-      id: 'mcp-jira-example',
-      kind: 'mcp',
-      name: 'Jira',
-      description: 'Jira 工单管理。',
-      source: 'https://github.com/sooperset/mcp-atlassian',
-      sourceKind: 'github',
-      transport: 'stdio',
-      tags: ['工单'],
-    }, {
-      id: 'pi-mcp-extension-example',
-      kind: 'pi-extension',
-      name: 'Pi MCP Extension',
-      description: '帮助 Pi 加载并调用 MCP server。',
-      source: 'https://pi.dev/packages/pi-mcp-extension',
-      sourceKind: 'pi-package',
-      compatibility: 'unverified',
-      tags: ['MCP'],
-    }, {
-      id: 'agent-md-architect-example',
-      kind: 'agent-md',
-      name: '架构师',
-      description: '系统设计与技术权衡。',
-      source: 'https://github.com/affaan-m/ECC/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/agents/architect.md',
-      sourceKind: 'local-reference',
-      tags: ['架构'],
-    }],
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
   });
   cleanup.push(() => server.close());
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'resource-coder');
@@ -632,7 +612,7 @@ test('the resource library groups reusable assets and includes graph architectur
   expect(await page.getByTestId('resource-nav-skills').getAttribute('data-active')).toBe('true');
   expect(await page.getByTestId('resource-section-skills').innerText()).toContain('Preserving Productive Tensions');
   await page.getByTestId('resource-catalog-search').fill('not-a-real-resource');
-  expect(await page.getByTestId('resource-section-skills').innerText()).toContain('没有匹配的资源');
+  expect(await page.getByTestId('resource-section-skills').innerText()).toContain('没有匹配的能力');
   await page.getByTestId('resource-catalog-search').fill('');
   expect(await page.getByTestId('resource-section-skills').innerText()).toContain('Preserving Productive Tensions');
   await page.getByTestId('resource-open-skills').click();
@@ -655,22 +635,19 @@ test('the resource library groups reusable assets and includes graph architectur
 
   await page.getByTestId('resource-nav-skills').click();
   await page.getByTestId('resource-section-skills').waitFor();
-  await page.getByTestId('resource-entry-skill-obra-superpowers-skills-example').click();
-  await page.getByTestId('recommended-detail-skill-obra-superpowers-skills-example').waitFor();
-  const recommended = await page.getByTestId('recommended-detail-skill-obra-superpowers-skills-example').innerText();
-  expect(recommended).toContain('已加入');
-  expect(recommended).toContain('先核对许可证与版本');
-  expect(recommended).toContain('来源已归档');
-  expect(recommended).toContain('兼容性未验证');
-  expect(recommended).toContain('可能执行代码');
-  expect(recommended).toContain('收录不会自动授予运行权限');
-  expect(await page.locator('a[href^="https://github.com/obra/superpowers-skills/blob/"]').count()).toBe(1);
+  await page.getByTestId('resource-entry-research').click();
+  await page.getByTestId('capability-detail-research').waitFor();
+  const detail = await page.getByTestId('capability-detail-research').innerText();
+  expect(detail).toContain('可用');
+  expect(detail).toContain(skill);
+  expect(detail).toContain('能力本身不会授予任务权限');
   await page.getByTestId('resource-detail-close').click();
   await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
 
   await page.getByTestId('resource-nav-agents').click();
   await page.getByTestId('resource-section-agents').waitFor();
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 组合');
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('代码实现');
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('可编译');
   expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
 
   await page.getByTestId('resource-nav-architectures').click();

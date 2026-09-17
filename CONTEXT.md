@@ -45,8 +45,14 @@ _Avoid_：主管（主管是负责规划与返工的 Agent）
 一次实现或修复及其后的检查与审查，用于判断是否取得实质进展；新轮次不意味着新建节点或 Agent 实例。
 
 **Agent 库**：
-保存可复用 Agent 定义的人才库，各定义预先配置 Skills、MCP 等，模型可在调用时设定。
-_Avoid_：能力库（它保存可供 Agent 使用的 Skills、MCP 与扩展）
+保存可复用 Agent 定义的人才库；Agent 配方引用能力库中的精确能力版本，模型可在调用时设定。
+_Avoid_：能力库（它保存可供 Agent 使用的 Skills、MCP、扩展与 Prompt）
+
+**能力库**：
+用户根目录 `.graph/capabilities` 下由能力目录和 `capability.json` 组成的能力集合；导入即可用，不以数据库安装状态区分。
+
+**Agent 配方**：
+用户或主管创建、编辑的 Agent 组合，引用已有能力并编译为版本化 Agent 定义；配方允许创建，能力本身不允许由 Agent 自行生成。
 
 **Agent 定义**：
 Agent 库中可复用、带版本的能力配置，包含 Skills、MCP 等及推荐模型等级；具体模型不参与其身份定义。

@@ -22,17 +22,18 @@ const banner = [
 ].join('\n');
 
 const paths: AppPaths = {
-  root: '/repo', stateDir: '/repo/state', configPath: '/repo/graph.config.json',
+  root: '/repo', stateDir: '/repo/state', graphHome: '/repo/.graph', configPath: '/repo/graph.config.json',
   secretsPath: '/repo/secrets.json', serverEntry: '/repo/src/server/cli.ts', webDir: '/repo/dist/web',
 };
 
 describe('desktop app paths', () => {
   test('dev layout serves the repository web build and keeps state in userData', () => {
-    const resolved = resolveAppPaths({ appPath: '/repo', isPackaged: false, userData: '/home/me/Library/Application Support/Graph' });
+    const resolved = resolveAppPaths({ appPath: '/repo', isPackaged: false, userData: '/home/me/Library/Application Support/Graph', graphHome: '/home/me/.graph' });
     expect(resolved.root).toBe('/repo');
     expect(resolved.serverEntry).toBe('/repo/src/server/cli.ts');
     expect(resolved.webDir).toBe('/repo/dist/web');
     expect(resolved.stateDir).toBe('/home/me/Library/Application Support/Graph/state');
+    expect(resolved.graphHome).toBe('/home/me/.graph');
     expect(resolved.configPath).toBe('/home/me/Library/Application Support/Graph/graph.config.json');
   });
 
@@ -44,23 +45,23 @@ describe('desktop app paths', () => {
   });
 
   test('resource libraries resolve to allowlisted local storage roots', () => {
-    expect(resourceDirectory('/state', 'skills')).toBe('/state/capabilities');
-    expect(resourceDirectory('/state', 'mcp')).toBe('/state/capabilities');
-    expect(resourceDirectory('/state', 'pi-extensions')).toBe('/state/capabilities');
-    expect(resourceDirectory('/state', 'agent-md')).toBe('/state/capabilities');
+    expect(resourceDirectory('/home/me/.graph', 'skills')).toBe('/home/me/.graph/capabilities');
+    expect(resourceDirectory('/home/me/.graph', 'mcp')).toBe('/home/me/.graph/capabilities');
+    expect(resourceDirectory('/home/me/.graph', 'pi-extensions')).toBe('/home/me/.graph/capabilities');
+    expect(resourceDirectory('/home/me/.graph', 'agent-md')).toBe('/home/me/.graph/capabilities');
   });
 });
 
 describe('daemon launch contract', () => {
   test('passes an explicit state dir, web dir and a free port', () => {
     expect(daemonArgs({ paths, port: 0, mode: 'view', hasConfig: false })).toEqual([
-      '--state-dir', paths.stateDir, '--web-dir', paths.webDir, '--port', '0',
+      '--state-dir', paths.stateDir, '--graph-home', paths.graphHome, '--web-dir', paths.webDir, '--port', '0',
     ]);
   });
 
   test('adds the config and execute flag only when usable', () => {
     expect(daemonArgs({ paths, port: 4173, mode: 'execute', hasConfig: true })).toEqual([
-      '--state-dir', paths.stateDir, '--web-dir', paths.webDir, '--port', '4173',
+      '--state-dir', paths.stateDir, '--graph-home', paths.graphHome, '--web-dir', paths.webDir, '--port', '4173',
       '--config', paths.configPath, '--execute',
     ]);
   });

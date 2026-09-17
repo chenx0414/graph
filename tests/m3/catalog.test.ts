@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -44,17 +44,19 @@ test('the same definition can dispatch two instances on different models, and a 
   expect(view.nodes.find(node => node.id === 'left')?.instanceId).not.toBe(view.nodes.find(node => node.id === 'right')?.instanceId);
 });
 
-test('a restricted capability install records source and version without expanding task grants', async () => {
+test('a filesystem capability is available without an installation record or expanded task grants', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-cap-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const source = join(root, 'skill');
-  await mkdir(source);
+  const source = join(root, 'graph', 'capabilities', 'lookup');
+  await mkdir(source, { recursive: true });
   await writeFile(join(source, 'SKILL.md'), '# Lookup titles');
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root, grants: ['workspace:write'] }] });
+  await writeFile(join(source, 'capability.json'), JSON.stringify({ id: 'lookup', kind: 'skill', version: '1.0.0', name: 'Lookup' }));
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'project', root, grants: ['workspace:write'] }],
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
+  });
   cleanup.push(() => runtime.close());
-  const installed = await runtime.catalog.install({ id: 'lookup', kind: 'skill', source, version: '1.0.0', requestId: 'install' });
-  expect(installed.path).toContain('capabilities/lookup/1.0.0');
-  expect(runtime.catalog.capability('lookup')).toMatchObject({ id: 'lookup', version: '1.0.0', status: 'installed' });
+  expect(runtime.catalog.capability('lookup')).toMatchObject({ id: 'lookup', version: '1.0.0', status: 'available', source: await realpath(source) });
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Use skill', requestId: 'begin' });
   expect((await runtime.user.task(taskId).view()).questions).toEqual([]);
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'lookup', version: '1.0.0' }] }, 'with-skill');

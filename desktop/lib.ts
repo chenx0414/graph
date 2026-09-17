@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 export interface AppPaths {
   root: string;
   stateDir: string;
+  graphHome: string;
   configPath: string;
   secretsPath: string;
   serverEntry: string;
@@ -13,8 +14,8 @@ export interface AppPaths {
 export type ResourceLibraryKind = 'skills' | 'mcp' | 'pi-extensions' | 'agent-md';
 
 /** Allowlisted local storage roots for resource-library folder actions. */
-export function resourceDirectory(stateDir: string, _kind: ResourceLibraryKind): string {
-  return join(stateDir, 'capabilities');
+export function resourceDirectory(graphHome: string, _kind: ResourceLibraryKind): string {
+  return join(graphHome, 'capabilities');
 }
 
 /** Layout for dev (`electron .` in the repo) and packaged builds (app dir). */
@@ -22,11 +23,13 @@ export function resolveAppPaths(input: {
   appPath: string;
   isPackaged: boolean;
   userData: string;
+  graphHome?: string;
 }): AppPaths {
   const root = resolve(input.appPath);
   return {
     root,
     stateDir: join(input.userData, 'state'),
+    graphHome: resolve(input.graphHome ?? join(process.env.HOME ?? input.userData, '.graph')),
     configPath: join(input.userData, 'graph.config.json'),
     secretsPath: join(input.userData, 'secrets.json'),
     serverEntry: join(root, 'src/server/cli.ts'),
@@ -67,6 +70,7 @@ export function daemonArgs(input: {
 }): string[] {
   const args = [
     '--state-dir', input.paths.stateDir,
+    '--graph-home', input.paths.graphHome,
     '--web-dir', input.paths.webDir,
     '--port', String(input.port),
   ];

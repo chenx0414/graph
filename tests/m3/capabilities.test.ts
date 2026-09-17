@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -69,6 +69,37 @@ async function project() {
   return { root, workspace };
 }
 
+function catalogOptions(root: string) {
+  return {
+    catalog: {
+      capabilityRoot: join(root, 'graph', 'capabilities'),
+      recipesPath: join(root, 'graph', 'agent-combinations.json'),
+    },
+  };
+}
+
+async function installCapability(
+  runtime: Awaited<ReturnType<typeof openTaskRuntime>>,
+  root: string,
+  input: { id: string; kind: 'skill' | 'mcp' | 'extension' | 'pi-extension'; source: string; version: string; role?: 'agent' | 'tool' },
+) {
+  const destination = join(root, 'graph', 'capabilities', input.id);
+  await cp(input.source, destination, { recursive: true });
+  const manifestPath = join(destination, 'capability.json');
+  let existing: Record<string, unknown> = {};
+  try { existing = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>; } catch { /* source may not have a Graph manifest */ }
+  await writeFile(manifestPath, JSON.stringify({
+    ...existing,
+    id: input.id,
+    kind: input.kind,
+    version: input.version,
+    name: input.id,
+    ...(input.role ? { role: input.role } : {}),
+  }, null, 2));
+  await runtime.catalog.refreshCatalog();
+  return destination;
+}
+
 async function checkedTask(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, workspace: string) {
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Use the bound capability.', requestId: 'begin' });
   await runtime.supervisor(taskId).propose({
@@ -101,8 +132,8 @@ test('a definition-bound skill is loaded into the production worker prompt and r
     '---', 'name: title-lookup', 'description: Case-insensitive title matching rules.', '---',
     '# Title lookup', 'Always match titles case-insensitively.',
   ].join('\n'));
-  // The install snapshot lives under the canonical state directory; Pi prints the same path.
-  const skillFile = join(await realpath(root), 'state', 'capabilities', 'lookup', '1.0.0', 'SKILL.md');
+  // The capability copy lives under the user-owned Graph home; Pi prints the same path.
+  const skillFile = join(await realpath(root), 'graph', 'capabilities', 'lookup', 'SKILL.md');
   const provider = await openaiServer([
     { tools: [{ id: 'r1', name: 'read', arguments: JSON.stringify({ path: skillFile }) }] },
     { text: 'Read the bound skill.' },
@@ -110,12 +141,13 @@ test('a definition-bound skill is loaded into the production worker prompt and r
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    ...catalogOptions(root),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'lookup', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'lookup', kind: 'skill', source: skill, version: '1.0.0', requestId: 'install' });
+  await installCapability(runtime, root, { id: 'lookup', kind: 'skill', source: skill, version: '1.0.0' });
 
   await checkedTask(runtime, workspace);
   await runtime.host.drive();
@@ -142,12 +174,13 @@ test('a definition-bound MCP tool is callable, metered, and confined by the sand
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    ...catalogOptions(root),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'proof', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'proof', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+  await installCapability(runtime, root, { id: 'proof', kind: 'mcp', source: mcp, version: '1.0.0' });
 
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
@@ -181,12 +214,13 @@ test('a paused task cannot start a bound MCP capability process', async () => {
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    ...catalogOptions(root),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'proof', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'proof', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+  await installCapability(runtime, root, { id: 'proof', kind: 'mcp', source: mcp, version: '1.0.0' });
 
   task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
@@ -213,12 +247,13 @@ test('a bound MCP tool cannot rewrite Git metadata through relative paths', asyn
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    ...catalogOptions(root),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'proof', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'proof', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+  await installCapability(runtime, root, { id: 'proof', kind: 'mcp', source: mcp, version: '1.0.0' });
 
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
@@ -244,12 +279,13 @@ test('a definition-bound extension loads in the restricted worker and its tool i
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    ...catalogOptions(root),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'ext', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'ext', kind: 'extension', source: extension, version: '1.0.0', requestId: 'install' });
+  await installCapability(runtime, root, { id: 'ext', kind: 'extension', source: extension, version: '1.0.0' });
 
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
@@ -278,13 +314,14 @@ test('a definition-bound remote MCP tool is callable through the granted domain 
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace, grants: ['mcp:remote:echo'] }],
+    ...catalogOptions(root),
     network: { mcpDomains: ['127.0.0.1'] },
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'remote', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+  await installCapability(runtime, root, { id: 'remote', kind: 'mcp', source: mcp, version: '1.0.0' });
 
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();
@@ -308,12 +345,13 @@ test('a remote MCP host outside the granted domains stops the node with a concre
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
+    ...catalogOptions(root),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'remote', kind: 'mcp', source: mcp, version: '1.0.0', requestId: 'install' });
+  await installCapability(runtime, root, { id: 'remote', kind: 'mcp', source: mcp, version: '1.0.0' });
 
   const task = await checkedTask(runtime, workspace);
   await runtime.host.drive();

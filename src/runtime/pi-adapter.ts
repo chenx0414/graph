@@ -5,7 +5,6 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
-import type { CapabilityKind } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
@@ -29,10 +28,9 @@ export interface PiAdapterChannels {
     revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
   };
   catalog: Catalog;
-  install: (input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) => Promise<unknown>;
+  bootstrapPrompts?: Record<string, string>;
+  bootstrapToolPrompt?: string;
   systemContext?: {
-    resourceCatalog?: () => import('../catalog/resource-catalog.ts').RecommendedResource[];
-    agentCombinations?: () => import('../catalog/agent-combinations.ts').AgentCombination[];
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
   };
 }
@@ -221,6 +219,12 @@ export function createPiAdapter(options: {
             catalog: options.catalog,
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
             workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'), gate,
+            bootstrap: {
+              ...(instance.definition_version && options.channels?.bootstrapPrompts?.[instance.definition_version.split('@')[0]!]
+                ? { agent: options.channels.bootstrapPrompts[instance.definition_version.split('@')[0]!]! }
+                : {}),
+              ...(options.channels?.bootstrapToolPrompt ? { tool: options.channels.bootstrapToolPrompt } : {}),
+            },
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
             ...(discussion ? { readOnly: true } : {}),
             grants: operation.grants,
@@ -239,11 +243,9 @@ export function createPiAdapter(options: {
             ...(capabilities.readRoots.length ? { readRoots: capabilities.readRoots } : {}),
             run: (command, args) => commands.run(command, args),
             ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
-            ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog, install: channels.install } : {}),
+            ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog } : {}),
             ...(channels?.systemContext ? {
               systemContext: {
-                ...(channels.systemContext.resourceCatalog ? { resourceCatalog: channels.systemContext.resourceCatalog } : {}),
-                ...(channels.systemContext.agentCombinations ? { agentCombinations: channels.systemContext.agentCombinations } : {}),
                 ...(channels.systemContext.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
                 ...(conversation && spec.role === 'master' ? {
                   requestModelAccess: async (request: { modelId: string; reason: string; planId?: string }) => {
@@ -415,8 +417,8 @@ export function createPiAdapter(options: {
                     'propose_graph creates a draft version for the user to confirm; nothing is dispatched before confirmation. When the user changes direction, propose a new draft instead of arguing for the old one (only the latest draft on the current requirement can be confirmed).',
                     'Each proposal should include a short decisions list of the binding constraints the user confirmed (for example "do not touch login.ts"); update or drop entries when the user revises them. The list is frozen with the draft and shown on the confirmation card, so workers receive exactly what the user reviewed.',
                     'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
-                    'Before proposing a graph, inspect the project and query the shared resource library with search_resources/get_resource. These entries are sourcing information only: never claim they are installed, never invent resource capabilities from memory, and never treat a catalog entry as task authorization.',
-                    'Use list_agent_combinations/get_agent_combination to inspect subagent recipes assembled from resource-library IDs. These recipes do not create or install resources by themselves; resolve and verify each referenced resource before proposing the corresponding definition.',
+                    'Before proposing a graph, inspect the project and query the user capability directory with search_resources/get_resource. Every scanned capability is immediately available, but it grants no task permission; never invent capabilities from memory.',
+                    'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. You may save or edit recipes, but never create a new Skill, MCP, extension or identity yourself. Compile a recipe with compile_agent_combination and put the returned definitionVersion directly into propose_graph.',
                     'Use read_system_capabilities to check configured subscriptions, models, Agent definitions and graph architectures before designing or assembling the graph. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
                     'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',
                     'After writing the normal reply, call suggest_prompt with one concise and specific message the user is most likely to send next. Omit the suggestion when there is no useful follow-up. The suggestion is only a composer hint and must never be sent automatically.',

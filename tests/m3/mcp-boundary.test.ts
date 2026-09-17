@@ -99,11 +99,11 @@ async function permissionFixture(grants: string[], plans?: ResponsePlan[], hooks
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'project');
   await mkdir(workspace);
-  const capability = join(root, 'capability');
-  await mkdir(capability);
+  const capability = join(root, 'graph', 'capabilities', 'remote');
+  await mkdir(capability, { recursive: true });
   const server = await remoteTools(method => hooks.onRequest?.(method));
   cleanup.push(() => server.close());
-  await writeFile(join(capability, 'capability.json'), JSON.stringify({ kind: 'mcp', transport: 'http', url: server.url }));
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({ id: 'remote', kind: 'mcp', version: '1.0.0', name: 'Remote', transport: 'http', url: server.url }));
   const provider = await openaiServer(plans ?? [
     { tools: [{ id: 'x', name: 'mcp_remote_delete_records', arguments: '{}' }] },
     { text: 'Stopped after the denial.' },
@@ -111,13 +111,13 @@ async function permissionFixture(grants: string[], plans?: ResponsePlan[], hooks
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace, ...(grants.length ? { grants } : {}) }],
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
     network: { mcpDomains: ['127.0.0.1'] },
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'remote', kind: 'mcp', source: capability, version: '1.0.0', requestId: 'install' });
   const task = await checkedTask(runtime, workspace);
   return { runtime, task, server, provider };
 }

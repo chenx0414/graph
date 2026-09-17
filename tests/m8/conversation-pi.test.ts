@@ -119,7 +119,7 @@ async function systemContextProvider() {
     step += 1;
     if (step === 1) return call('c1', 'read_system_capabilities', {});
     if (step === 2) return call('c2', 'list_agent_combinations', { query: '审查' });
-    if (step === 3) return call('c3', 'search_resources', { query: 'reviewer', kind: 'agent-md' });
+    if (step === 3) return call('c3', 'search_resources', { query: 'reviewer', kind: 'prompt', role: 'agent' });
     if (step === 4) return call('c4', 'request_model_access', { modelId: 'missing-model', reason: '需要独立审查模型', planId: 'opencode-go' });
     chunk({ role: 'assistant', content: '已打开模型授权问题。' }, null);
     end('stop');
@@ -231,6 +231,18 @@ test('the real Pi master can search the resource library and open a model-access
   git(project, ['config', 'user.name', 'Graph Test']);
   git(project, ['add', '.']);
   git(project, ['commit', '-q', '-m', 'init']);
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const reviewer = join(capabilityRoot, 'reviewer');
+  await mkdir(reviewer, { recursive: true });
+  await writeFile(join(reviewer, 'agent.md'), 'Review code independently.\n');
+  await writeFile(join(reviewer, 'capability.json'), JSON.stringify({ id: 'reviewer', kind: 'prompt', role: 'agent', version: '1.0.0', name: '代码审查员', description: '审查代码修改' }));
+  await writeFile(join(root, 'graph', 'agent-combinations.json'), JSON.stringify({
+    version: 1,
+    combinations: [{
+      id: 'review', name: '代码审查', description: '组合代码审查身份。', recommendedGrade: 'high', review: true, tags: ['审查'],
+      resources: [{ resourceId: 'reviewer', version: '1.0.0', role: 'identity', required: true }],
+    }],
+  }));
 
   const provider = await systemContextProvider();
   const runtime = await openTaskRuntime({
@@ -243,24 +255,8 @@ test('the real Pi master can search the resource library and open a model-access
       credentialFor: () => ({ credentialId: 'c', apiKey: 'local-key' }),
     },
     master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
     systemContext: {
-      resourceCatalog: () => [{
-        id: 'agent-md-code-reviewer',
-        kind: 'agent-md',
-        name: '代码审查员',
-        description: '审查代码修改',
-        source: 'https://github.com/affaan-m/ECC/blob/main/agents/code-reviewer.md',
-        sourceKind: 'github',
-      }],
-      agentCombinations: () => [{
-        id: 'review',
-        name: '代码审查',
-        description: '组合代码审查资源',
-        recommendedGrade: 'high',
-        review: true,
-        tags: ['审查'],
-        resources: [{ resourceId: 'agent-md-code-reviewer', role: 'identity', required: true }],
-      }],
       systemSummary: () => ({ configuredModels: [{ id: 'local', grade: 'high' }], subscriptionPlans: [] }),
     },
   });
@@ -272,10 +268,11 @@ test('the real Pi master can search the resource library and open a model-access
   const view = await runtime.conversations.view(created.conversationId);
 
   expect(provider.requests[0]!.tools).toEqual(expect.arrayContaining([
-    'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination', 'read_system_capabilities', 'request_model_access',
+    'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
+    'save_agent_combination', 'compile_agent_combination', 'read_system_capabilities', 'request_model_access',
   ]));
   expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
-  expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('"agent-md-code-reviewer"');
+  expect(JSON.stringify(provider.requests[0]!.messages)).toContain('reviewer@1.0.0');
   expect(view.questions).toEqual(expect.arrayContaining([
     expect.objectContaining({
       kind: 'waiting',

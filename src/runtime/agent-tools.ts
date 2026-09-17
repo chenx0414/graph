@@ -2,14 +2,8 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, sep } from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { CapabilityKind, Catalog } from '../catalog/catalog.ts';
-import { resolveAgentCombination, type AgentCombination } from '../catalog/agent-combinations.ts';
-import {
-  resourceDetail,
-  searchResourceCatalog,
-  type RecommendedResource,
-  type RecommendedResourceKind,
-} from '../catalog/resource-catalog.ts';
+import type { CapabilityRecord, Catalog } from '../catalog/catalog.ts';
+import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { Json, NodeSpec, Proposal } from '../core/types.ts';
 import { listBounded, readBounded, writeBounded } from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
@@ -27,6 +21,51 @@ function fields(params: unknown) {
   return params as Record<string, unknown>;
 }
 
+function capabilityView(record: CapabilityRecord) {
+  return {
+    id: record.id,
+    kind: record.kind,
+    version: record.version,
+    name: record.name ?? record.id,
+    description: record.description ?? '',
+    source: record.source,
+    status: record.status,
+    ...(record.role ? { role: record.role } : {}),
+    ...(record.error ? { error: record.error } : {}),
+    grantsNoPermission: true as const,
+  };
+}
+
+function searchCapabilities(capabilities: CapabilityRecord[], input: {
+  query?: string;
+  kind?: string;
+  role?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const query = input.query?.trim().toLowerCase() ?? '';
+  const terms = query.split(/\s+/).filter(Boolean);
+  const kind = input.kind?.trim();
+  const role = input.role?.trim();
+  const limit = Number.isSafeInteger(input.limit) && input.limit! > 0 ? Math.min(input.limit!, 50) : 20;
+  const offset = Number.isSafeInteger(input.offset) && input.offset! > 0 ? input.offset! : 0;
+  const matches = capabilities.filter(record => {
+    if (kind && record.kind !== kind) return false;
+    if (role && record.role !== role) return false;
+    if (!terms.length) return true;
+    const haystack = [record.id, record.kind, record.version, record.name, record.description, record.source, record.role]
+      .filter(Boolean).join('\n').toLowerCase();
+    return terms.every(term => haystack.includes(term));
+  });
+  return {
+    total: matches.length,
+    offset,
+    limit,
+    hasMore: offset + limit < matches.length,
+    items: matches.slice(offset, offset + limit).map(capabilityView),
+  };
+}
+
 /** Workspace, result, supervisor, and granted retrieval tools for a production Pi instance. */
 export function agentTools(input: {
   workspace: string;
@@ -39,12 +78,9 @@ export function agentTools(input: {
   supervisor?: Supervisor;
   catalog?: Catalog;
   systemContext?: {
-    resourceCatalog?: () => RecommendedResource[];
-    agentCombinations?: () => AgentCombination[];
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
   };
-  install?: (input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) => Promise<unknown>;
   onSubmit?: (output: Json) => void;
   onSuggestedPrompt?: (prompt: string) => void;
 }): ToolDefinition[] {
@@ -145,49 +181,43 @@ export function agentTools(input: {
   }
   if (input.role === 'master' && input.catalog) {
     tools.push({
-      name: 'publish_definition', label: 'Publish definition', description: 'Publish a versioned Agent definition to the catalog.',
-      parameters: Type.Object({ id: Type.String(), specJson: Type.String() }),
+      name: 'search_resources', label: 'Search capability library', description: 'Search the user capability directory (Skills, MCP servers, Pi extensions, Graph extensions and prompt identities). These entries are available immediately from disk; a capability does not grant task permission.',
+      parameters: Type.Object({
+        query: Type.Optional(Type.String()),
+        kind: Type.Optional(Type.String()),
+        role: Type.Optional(Type.String()),
+        limit: Type.Optional(Type.Number()),
+        offset: Type.Optional(Type.Number()),
+      }),
       execute: async (_id, params) => {
         const body = fields(params);
-        const published = input.catalog!.publishDefinition(String(body.id), JSON.parse(String(body.specJson)));
-        return text(JSON.stringify(published));
+        const query = typeof body.query === 'string' ? body.query.trim() : '';
+        if (query.length > 500) throw new Error('Capability search query must be at most 500 characters');
+        const kind = typeof body.kind === 'string' && body.kind.trim() ? body.kind.trim() : undefined;
+        if (kind && !['skill', 'mcp', 'extension', 'pi-extension', 'prompt'].includes(kind)) throw new Error('Unsupported capability kind');
+        const role = typeof body.role === 'string' && body.role.trim() ? body.role.trim() : undefined;
+        if (role && role !== 'agent' && role !== 'tool') throw new Error('Prompt role must be agent or tool');
+        return text(JSON.stringify(searchCapabilities(input.catalog!.capabilities(), {
+          ...(query ? { query } : {}),
+          ...(kind ? { kind } : {}),
+          ...(role ? { role } : {}),
+          ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+          ...(typeof body.offset === 'number' ? { offset: body.offset } : {}),
+        })));
       },
     });
-  }
-  if (input.role === 'master' && input.systemContext?.resourceCatalog) {
     tools.push(
       {
-        name: 'search_resources', label: 'Search system resources', description: 'Search the shared resource library (Skills, MCP servers, Pi extensions and Agent.md profiles) before planning. Results are catalog entries only: they are not installed capabilities and do not grant task permission. Use get_resource for the exact source, revision, requirements and risk.',
-        parameters: Type.Object({
-          query: Type.Optional(Type.String()),
-          kind: Type.Optional(Type.String()),
-          limit: Type.Optional(Type.Number()),
-          offset: Type.Optional(Type.Number()),
-        }),
+        name: 'get_resource', label: 'Get capability details', description: 'Read one capability from the user capability directory by id or id@version. It is immediately loadable, but still grants no task permission.',
+        parameters: Type.Object({ id: Type.String(), version: Type.Optional(Type.String()) }),
         execute: async (_id, params) => {
           const body = fields(params);
-          const query = typeof body.query === 'string' ? body.query.trim() : '';
-          if (query.length > 500) throw new Error('Resource search query must be at most 500 characters');
-          const kind = typeof body.kind === 'string' && body.kind.trim() ? body.kind.trim() as RecommendedResourceKind : undefined;
-          if (kind && !['skill', 'skill-index', 'mcp', 'pi-extension', 'agent-md'].includes(kind)) throw new Error('Unsupported resource kind');
-          const result = searchResourceCatalog(input.systemContext!.resourceCatalog!(), {
-            ...(query ? { query } : {}),
-            ...(kind ? { kind } : {}),
-            ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
-            ...(typeof body.offset === 'number' ? { offset: body.offset } : {}),
-          });
-          return text(JSON.stringify(result));
-        },
-      },
-      {
-        name: 'get_resource', label: 'Get resource details', description: 'Read one shared resource-library entry by id. This is sourcing information only: installation and task authorization happen separately.',
-        parameters: Type.Object({ id: Type.String() }),
-        execute: async (_id, params) => {
-          const id = String(fields(params).id).trim();
+          const id = String(body.id).trim();
           if (!id || id.length > 160) throw new Error('A bounded resource id is required');
-          const entry = input.systemContext!.resourceCatalog!().find(item => item.id === id);
-          if (!entry) throw new Error(`Unknown resource ${id}`);
-          return text(JSON.stringify(resourceDetail(entry)));
+          const version = typeof body.version === 'string' && body.version.trim() ? body.version.trim() : undefined;
+          const entry = input.catalog!.capability(id, version);
+          if (!entry) throw new Error(`Unknown capability ${id}${version ? `@${version}` : ''}`);
+          return text(JSON.stringify(capabilityView(entry)));
         },
       },
     );
@@ -199,7 +229,7 @@ export function agentTools(input: {
       execute: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
     });
   }
-  if (input.role === 'master' && input.systemContext?.agentCombinations) {
+  if (input.role === 'master' && input.catalog) {
     tools.push(
       {
         name: 'list_agent_combinations', label: 'List Agent combinations', description: 'List subagent recipes composed from shared resource-library IDs. Results are recipes, not installed definitions or permissions; inspect the referenced resources before using one.',
@@ -215,7 +245,7 @@ export function agentTools(input: {
           const grade = typeof body.grade === 'string' ? body.grade.trim() : '';
           if (grade && !['low', 'medium', 'high', 'highest'].includes(grade)) throw new Error('Unsupported model grade');
           const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 30;
-          const matches = input.systemContext!.agentCombinations!().filter(item => {
+          const matches = input.catalog!.agentCombinations().filter(item => {
             if (grade && item.recommendedGrade !== grade) return false;
             if (!query) return true;
             return [
@@ -236,17 +266,36 @@ export function agentTools(input: {
         execute: async (_id, params) => {
           const id = String(fields(params).id).trim();
           if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
-          const combination = input.systemContext!.agentCombinations!().find(candidate => candidate.id === id);
+          const combination = input.catalog!.agentCombinations().find(candidate => candidate.id === id);
           if (!combination) throw new Error(`Unknown Agent combination ${id}`);
-          const resources = input.systemContext!.resourceCatalog?.() ?? [];
-          const resolved = resolveAgentCombination(combination, resources);
-          return text(JSON.stringify({
-            ...resolved,
-            resources: resolved.resources.map(member => ({
-              ...member,
-              resource: resourceDetail(member.resource),
-            })),
-          }));
+          return text(JSON.stringify(combination));
+        },
+      },
+      {
+        name: 'save_agent_combination', label: 'Save Agent combination', description: 'Create or edit an Agent recipe. A recipe may reference only capabilities that already exist in the user capability directory; it never creates capabilities or grants permission.',
+        parameters: Type.Object({ combinationJson: Type.String() }),
+        execute: async (_id, params) => {
+          const combination = JSON.parse(String(fields(params).combinationJson)) as AgentCombination;
+          const saved = await input.catalog!.saveAgentCombination(combination);
+          return text(JSON.stringify(saved));
+        },
+      },
+      {
+        name: 'delete_agent_combination', label: 'Delete Agent combination', description: 'Delete one user-editable Agent recipe. This never removes referenced capabilities.',
+        parameters: Type.Object({ id: Type.String() }),
+        execute: async (_id, params) => {
+          const id = String(fields(params).id).trim();
+          if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
+          return text(JSON.stringify(await input.catalog!.deleteAgentCombination(id)));
+        },
+      },
+      {
+        name: 'compile_agent_combination', label: 'Compile Agent combination', description: 'Validate and compile a recipe into a versioned Agent definition. Put the returned definitionVersion directly into propose_graph; no manual definition authoring is required.',
+        parameters: Type.Object({ id: Type.String() }),
+        execute: async (_id, params) => {
+          const id = String(fields(params).id).trim();
+          if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
+          return text(JSON.stringify(input.catalog!.compileAgentCombination(id)));
         },
       },
     );
@@ -268,19 +317,6 @@ export function agentTools(input: {
           reason,
           ...(planId ? { planId } : {}),
         })));
-      },
-    });
-  }
-  if (input.role === 'master' && input.install) {
-    tools.push({
-      name: 'install_capability', label: 'Install capability', description: 'Install a Skill, MCP server, Graph extension, Pi extension, or prompt bundle into the capability catalog.',
-      parameters: Type.Object({ id: Type.String(), kind: Type.String(), source: Type.String(), version: Type.String(), requestId: Type.String() }),
-      execute: async (_id, params) => {
-        const body = fields(params);
-        const kind = String(body.kind);
-        if (kind !== 'skill' && kind !== 'mcp' && kind !== 'extension' && kind !== 'pi-extension' && kind !== 'prompt') throw new Error('Unsupported capability kind');
-        const receipt = await input.install!({ id: String(body.id), kind, source: String(body.source), version: String(body.version), requestId: String(body.requestId) });
-        return text(JSON.stringify(receipt));
       },
     });
   }

@@ -1,0 +1,209 @@
+import { existsSync } from 'node:fs';
+import { readdir, readFile, realpath } from 'node:fs/promises';
+import { isAbsolute, join, resolve } from 'node:path';
+import { RuntimeError, type Json } from '../core/types.ts';
+import type { CapabilityKind, CapabilityRecord } from './catalog.ts';
+
+export interface CapabilityManifest {
+  id: string;
+  kind: CapabilityKind;
+  version: string;
+  name: string;
+  description?: string;
+  /** Prompt capabilities declare whether the file is agent.md or tool.md. */
+  role?: 'agent' | 'tool';
+  /** Local MCP command and arguments. */
+  command?: string;
+  args?: string[];
+  /** Remote MCP endpoint and optional credential headers. */
+  url?: string;
+  headers?: Record<string, string>;
+  headersEnv?: Record<string, string>;
+  /** Graph extension or Pi extension entry file. */
+  entry?: string;
+  tools?: { name: string; description?: string }[];
+  tags?: string[];
+  [key: string]: unknown;
+}
+
+const KINDS = new Set<CapabilityKind>(['skill', 'mcp', 'extension', 'pi-extension', 'prompt']);
+const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const MAX_SCAN_DEPTH = 4;
+const SKIP_DIRECTORIES = new Set(['node_modules', '.git', '.worker-home', '.worker-tmp']);
+
+function text(value: unknown, label: string) {
+  if (typeof value !== 'string' || !value.trim()) throw new RuntimeError('invalid_capability', `${label} must be a nonempty string`);
+  return value.trim();
+}
+
+export function parseCapabilityManifest(value: unknown, path: string): CapabilityManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RuntimeError('invalid_capability', `${path} must contain a capability object`);
+  }
+  const raw = value as Record<string, unknown>;
+  const id = text(raw.id, `${path}.id`);
+  if (!ID_PATTERN.test(id)) throw new RuntimeError('invalid_capability', `${path}.id must use lowercase letters, numbers and hyphens`);
+  const kind = text(raw.kind, `${path}.kind`) as CapabilityKind;
+  if (!KINDS.has(kind)) throw new RuntimeError('invalid_capability', `${path}.kind is unsupported`);
+  const version = text(raw.version, `${path}.version`);
+  const name = text(raw.name, `${path}.name`);
+  const description = raw.description === undefined ? undefined : text(raw.description, `${path}.description`);
+  const role = raw.role === undefined ? undefined : text(raw.role, `${path}.role`) as 'agent' | 'tool';
+  if (role && role !== 'agent' && role !== 'tool') throw new RuntimeError('invalid_capability', `${path}.role must be agent or tool`);
+  if (kind === 'prompt' && !role) throw new RuntimeError('invalid_capability', `${path}.role is required for prompt capabilities`);
+  const stringMap = (value: unknown, label: string) => {
+    if (value === undefined) return undefined;
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.values(value).some(item => typeof item !== 'string')) {
+      throw new RuntimeError('invalid_capability', `${label} must be a string map`);
+    }
+    return Object.fromEntries(Object.entries(value as Record<string, string>).map(([key, item]) => [key, item.trim()]));
+  };
+  const stringList = (value: unknown, label: string): string[] | undefined => {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim())) {
+      throw new RuntimeError('invalid_capability', `${label} must be an array of nonempty strings`);
+    }
+    return value.map(item => item.trim());
+  };
+  const command = raw.command === undefined ? undefined : text(raw.command, `${path}.command`);
+  const args = stringList(raw.args, `${path}.args`);
+  const url = raw.url === undefined ? undefined : text(raw.url, `${path}.url`);
+  const headers = stringMap(raw.headers, `${path}.headers`);
+  const headersEnv = stringMap(raw.headersEnv, `${path}.headersEnv`);
+  const entry = raw.entry === undefined ? undefined : text(raw.entry, `${path}.entry`);
+  const tags = stringList(raw.tags, `${path}.tags`);
+  let tools: CapabilityManifest['tools'];
+  if (raw.tools !== undefined) {
+    if (!Array.isArray(raw.tools)) throw new RuntimeError('invalid_capability', `${path}.tools must be an array`);
+    tools = raw.tools.map((value, index) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RuntimeError('invalid_capability', `${path}.tools[${index}] must be an object`);
+      const tool = value as Record<string, unknown>;
+      return {
+        name: text(tool.name, `${path}.tools[${index}].name`),
+        ...(tool.description === undefined ? {} : { description: text(tool.description, `${path}.tools[${index}].description`) }),
+      };
+    });
+  }
+  return {
+    ...raw,
+    id,
+    kind,
+    version,
+    name,
+    ...(description ? { description } : {}),
+    ...(role ? { role } : {}),
+    ...(command ? { command } : {}),
+    ...(args ? { args } : {}),
+    ...(url ? { url } : {}),
+    ...(headers ? { headers } : {}),
+    ...(headersEnv ? { headersEnv } : {}),
+    ...(entry ? { entry } : {}),
+    ...(tools ? { tools } : {}),
+    ...(tags ? { tags } : {}),
+  };
+}
+
+export async function readCapabilityManifest(directory: string): Promise<CapabilityManifest> {
+  const path = join(directory, 'capability.json');
+  let body: Json;
+  try {
+    body = JSON.parse(await readFile(path, 'utf8')) as Json;
+  } catch (error) {
+    throw new RuntimeError('invalid_capability', `Cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return parseCapabilityManifest(body, path);
+}
+
+async function validateFiles(directory: string, manifest: CapabilityManifest) {
+  if (manifest.kind === 'skill') {
+    const skill = join(directory, 'SKILL.md');
+    if (!existsSync(skill)) throw new RuntimeError('invalid_capability', `${directory} is a skill without SKILL.md`);
+    if (!(await readFile(skill, 'utf8')).trim()) throw new RuntimeError('invalid_capability', `${skill} is empty`);
+  }
+  if (manifest.kind === 'prompt') {
+    const prompt = join(directory, manifest.role === 'tool' ? 'tool.md' : 'agent.md');
+    if (!existsSync(prompt)) throw new RuntimeError('invalid_capability', `${directory} is a ${manifest.role} prompt without ${manifest.role === 'tool' ? 'tool.md' : 'agent.md'}`);
+    if (!(await readFile(prompt, 'utf8')).trim()) throw new RuntimeError('invalid_capability', `${prompt} is empty`);
+  }
+  if (manifest.kind === 'mcp' && !manifest.command && !manifest.url) {
+    throw new RuntimeError('invalid_capability', `${directory} is an MCP capability without command or url`);
+  }
+  if (manifest.kind === 'mcp' && manifest.command && !isAbsolute(manifest.command) && manifest.command !== 'node') {
+    throw new RuntimeError('invalid_capability', `${directory} MCP command must be absolute or "node"`);
+  }
+  if (manifest.kind === 'extension' || manifest.kind === 'pi-extension') {
+    const entry = manifest.entry ?? './index.mjs';
+    const path = isAbsolute(entry) ? entry : resolve(directory, entry);
+    if (path !== directory && !path.startsWith(`${directory}/`)) {
+      throw new RuntimeError('invalid_capability', `${directory} extension entry must stay inside its capability directory`);
+    }
+    if (!existsSync(path)) throw new RuntimeError('invalid_capability', `${directory} extension entry ${entry} does not exist`);
+  }
+}
+
+async function walkCapabilityDirectories(root: string, directory: string, depth: number, records: CapabilityRecord[]) {
+  if (depth > MAX_SCAN_DEPTH) return;
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (depth === 0 && (error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (entries.some(entry => entry.isFile() && entry.name === 'capability.json')) {
+    try {
+      const manifest = await readCapabilityManifest(directory);
+      await validateFiles(directory, manifest);
+      records.push({
+        id: manifest.id,
+        kind: manifest.kind,
+        source: directory,
+        version: manifest.version,
+        snapshot: { path: directory, manifest: manifest as unknown as Json },
+        status: 'available',
+        name: manifest.name,
+        ...(manifest.description ? { description: manifest.description } : {}),
+        ...(manifest.role ? { role: manifest.role } : {}),
+      });
+    } catch (error) {
+      records.push({
+        id: directory.slice(root.length + 1).replaceAll('/', '-') || directory,
+        kind: 'skill',
+        source: directory,
+        version: 'invalid',
+        snapshot: { path: directory, error: error instanceof Error ? error.message : String(error) },
+        status: 'invalid',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return;
+  }
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory() || entry.name.startsWith('.') || SKIP_DIRECTORIES.has(entry.name)) continue;
+    await walkCapabilityDirectories(root, join(directory, entry.name), depth + 1, records);
+  }
+}
+
+export async function scanCapabilities(root: string): Promise<CapabilityRecord[]> {
+  try { root = await realpath(root); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  const records: CapabilityRecord[] = [];
+  await walkCapabilityDirectories(root, root, 0, records);
+  const seen = new Map<string, CapabilityRecord>();
+  for (const record of records) {
+    if (record.status === 'invalid') continue;
+    const key = `${record.id}@${record.version}`;
+    const previous = seen.get(key);
+    if (previous) {
+      record.status = 'invalid';
+      record.error = `Duplicate capability ${key}; also found at ${previous.source}`;
+      record.snapshot = { path: record.source, error: record.error };
+      continue;
+    }
+    seen.set(key, record);
+  }
+  return records;
+}

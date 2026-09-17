@@ -1,17 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { loadResourceCatalog } from '../../src/catalog/resource-catalog.ts';
-import { loadAgentCombinations } from '../../src/catalog/agent-combinations.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
-const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
 // Each browser suite builds into its own directory; a shared dist/web would
@@ -59,7 +55,7 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   await page.getByTestId('catalog').waitFor();
   await page.getByTestId('resource-nav-agents').click();
   await page.getByTestId('resource-section-agents').waitFor();
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 组合');
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 配方');
   expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
   await page.goto(`${server.url}/#/tasks/${taskId}`);
   await page.getByTestId('status').waitFor();
@@ -80,18 +76,27 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   expect(await page.getByTestId('node-detail').innerText()).toContain('implement');
 }, 60_000);
 
-test('the Agent combination library renders recipes over resource-library entries', async () => {
+test('the Agent combination library renders and compiles recipes over filesystem capabilities', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m5-agent-combinations-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const resources = await loadResourceCatalog(presetsRoot);
-  const combinations = await loadAgentCombinations(presetsRoot, resources.entries);
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const skill = join(capabilityRoot, 'research');
+  await mkdir(skill, { recursive: true });
+  await writeFile(join(skill, 'SKILL.md'), '# Research\n');
+  await writeFile(join(skill, 'capability.json'), JSON.stringify({ id: 'research', kind: 'skill', version: '1.0.0', name: 'Research' }));
+  await writeFile(join(root, 'graph', 'agent-combinations.json'), JSON.stringify({
+    version: 1,
+    combinations: [{
+      id: 'review', name: '代码审查', description: '组合已有能力。', recommendedGrade: 'high', review: true, tags: ['审查'],
+      resources: [{ resourceId: 'research', version: '1.0.0', role: 'skill', required: true }],
+    }],
+  }));
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
     projects: [{ id: 'p', root }],
     autoDrive: false,
     webDir,
-    resourceCatalog: resources.entries,
-    agentCombinations: combinations.combinations,
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
   });
   cleanup.push(() => server.close());
 
@@ -102,14 +107,10 @@ test('the Agent combination library renders recipes over resource-library entrie
   const list = page.getByTestId('agent-combination-list');
   await list.waitFor();
   const text = await list.innerText();
-  expect(text).toContain('代码实现');
   expect(text).toContain('代码审查');
-  expect(text).toContain('安全检查');
-  expect(text).toContain('文献检索');
-  expect(text).toContain('论文润色');
-  expect(text).toContain('代码审查员');
-  expect(text).toContain('安全审查员');
-  expect(text).toContain('deep-research');
+  expect(text).toContain('research@1.0.0');
+  await page.getByRole('button', { name: '编译' }).click();
+  await expect.poll(async () => (await page.getByTestId('toasts').innerText()).includes('已编译为 review@1')).toBe(true);
 }, 60_000);
 
 test('the graph follows runtime events and a budget question accepts a token increment', async () => {

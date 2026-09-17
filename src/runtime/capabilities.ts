@@ -280,6 +280,8 @@ export async function loadCapabilities(input: {
   workspace: string;
   scratchDir: string;
   gate: SendGate;
+  /** Immutable Graph bootstrap prompts are not user capabilities. */
+  bootstrap?: { agent?: string; tool?: string };
   mcpDomains?: string[];
   grants?: string[];
   /** Discussion turns investigate without writing the business directory. */
@@ -291,8 +293,8 @@ export async function loadCapabilities(input: {
   const piExtensionTools: string[] = [];
   const readRoots: string[] = [];
   const tools: ToolDefinition[] = [];
-  let agentPrompt: string | null = null;
-  let toolPrompt: string | null = null;
+  let agentPrompt: string | null = input.bootstrap?.agent?.trim() || null;
+  let toolPrompt: string | null = input.bootstrap?.tool?.trim() || null;
   const releases: (() => Promise<void>)[] = [];
   // Actual load facts: later projections must never guess these from catalog
   // status alone.
@@ -307,10 +309,10 @@ export async function loadCapabilities(input: {
     prompts: { agent: agentPrompt, tool: toolPrompt },
     tools: tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as unknown as Json })),
   })).digest('hex');
-  if (!input.definitionVersion) return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: null, tool: null }, digest: digest(), close, report };
+  if (!input.definitionVersion) return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report };
   let definition;
   try { definition = input.catalog.definition(input.definitionVersion); }
-  catch { return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: null, tool: null }, digest: digest(), close, report }; } // Unpublished definitions keep briefing-only behavior.
+  catch { return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report }; } // Unpublished definitions keep briefing-only behavior.
   try {
     const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
       ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
@@ -323,15 +325,15 @@ export async function loadCapabilities(input: {
       if (seen.has(seenKey)) continue;
       seen.add(seenKey);
       const record = input.catalog.capability(bound.id, bound.version);
-      if (!record || record.status !== 'installed') {
-        throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not installed`);
+      if (!record || !['available', 'installed'].includes(record.status)) {
+        throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not available in the capability directory`);
       }
       const snapshot = snapshotPath(record);
       if (record.kind === 'prompt') {
         if (role === 'capability') throw new RuntimeError('capability_unsupported', `Prompt capability ${bound.id}@${bound.version} must be bound under prompts`);
         const text = await promptText(snapshot, role === 'agent' ? 'agent.md' : 'tool.md');
         if (role === 'agent') agentPrompt = text;
-        else toolPrompt = text;
+        else toolPrompt = [toolPrompt, text].filter(Boolean).join('\n\n');
         report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: false, reason: `${role === 'agent' ? '身份' : '能力感知'} Prompt 已注入` });
         continue;
       }

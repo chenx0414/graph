@@ -1,12 +1,14 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { RuntimeError } from '../core/types.ts';
+import { graphHome } from '../catalog/graph-home.ts';
 import { defaultConfigPath, defaultStateDir } from './config.ts';
 import { startGraphDaemon, type GraphDaemon } from './start.ts';
 
 export interface CliOptions {
   configPath: string | null;
   stateDir: string;
+  graphHome: string;
   webDir: string;
   port: number;
   mode: 'view' | 'execute';
@@ -21,6 +23,7 @@ Starts the Graph console on http://127.0.0.1 (loopback only).
 Options:
   --config <path>     Config file (default: ./graph.config.json when present)
   --state-dir <path>  State directory (default: $XDG_STATE_HOME/graph or ~/.local/state/graph)
+  --graph-home <path> User capability/recipe home (default: ~/.graph)
   --web-dir <path>    Built web console (default: ./dist/web)
   --port <number>     Loopback port, 0 picks a free port (default: 4173)
   --execute           Enable task dispatch; requires configured models and credentials
@@ -37,6 +40,7 @@ function usageError(message: string): never {
 export function parseArgs(argv: string[], env: Record<string, string | undefined>, cwd: string): CliOptions {
   let configFlag: string | undefined;
   let stateFlag: string | undefined;
+  let graphHomeFlag: string | undefined;
   let webFlag: string | undefined;
   let portFlag: string | undefined;
   let execute = false;
@@ -53,6 +57,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
     };
     if (arg === '--config') configFlag = value();
     else if (arg === '--state-dir') stateFlag = value();
+    else if (arg === '--graph-home') graphHomeFlag = value();
     else if (arg === '--web-dir') webFlag = value();
     else if (arg === '--port') portFlag = value();
     else if (arg === '--execute') execute = true;
@@ -74,6 +79,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
   return {
     configPath,
     stateDir: resolve(cwd, stateFlag ?? env.GRAPH_STATE_DIR ?? defaultStateDir(env)),
+    graphHome: resolve(cwd, graphHomeFlag ?? env.GRAPH_HOME ?? graphHome(env)),
     webDir: resolve(cwd, webFlag ?? env.GRAPH_WEB_DIR ?? 'dist/web'),
     port,
     mode: execute ? 'execute' : 'view',

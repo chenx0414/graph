@@ -28,10 +28,10 @@ test('a bound extension cannot write business files during discussion but a work
   const workspace = join(root, 'project');
   await mkdir(workspace, { recursive: true });
   await writeFile(join(workspace, 'check.js'), 'console.log("ok");\n');
-  const source = join(root, 'extension');
+  const source = join(root, 'graph', 'capabilities', 'ext');
   await mkdir(source, { recursive: true });
   await copyFile(new URL('../fixtures/extension-capability.mjs', import.meta.url), join(source, 'extension.mjs'));
-  await writeFile(join(source, 'capability.json'), JSON.stringify({ kind: 'extension', entry: './extension.mjs' }));
+  await writeFile(join(source, 'capability.json'), JSON.stringify({ id: 'ext', kind: 'extension', version: '1.0.0', name: 'Extension', entry: './extension.mjs' }));
 
   const provider = await openaiServer([
     { tools: [{ id: 'discussion-call', name: 'mcp_ext_write_proof', arguments: JSON.stringify({ outside: join(root, 'outside.txt') }) }] },
@@ -43,6 +43,7 @@ test('a bound extension cannot write business files during discussion but a work
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
     projects: [{ id: 'p', root: workspace }],
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
     models: {
       entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
       apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
@@ -52,7 +53,6 @@ test('a bound extension cannot write business files during discussion but a work
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [{ id: 'ext', version: '1.0.0' }] }, 'master');
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium', capabilities: [{ id: 'ext', version: '1.0.0' }] }, 'coder');
-  await runtime.catalog.install({ id: 'ext', kind: 'extension', source, version: '1.0.0', requestId: 'install' });
 
   // Discussion: the model calls the same capability tool, but the worker runs
   // with the business directory read-only.
@@ -104,9 +104,9 @@ test('a remote HTTP MCP tool is not offered during discussion even with a write 
   });
   await new Promise<void>(resolve => mcp.listen(0, '127.0.0.1', resolve));
   cleanup.push(async () => { mcp.closeAllConnections(); await new Promise<void>(resolve => mcp.close(() => resolve())); });
-  const source = join(root, 'remote');
+  const source = join(root, 'graph', 'capabilities', 'remote');
   await mkdir(source, { recursive: true });
-  await writeFile(join(source, 'capability.json'), JSON.stringify({ kind: 'mcp', transport: 'http', url: `http://127.0.0.1:${(mcp.address() as AddressInfo).port}/mcp` }));
+  await writeFile(join(source, 'capability.json'), JSON.stringify({ id: 'remote', kind: 'mcp', version: '1.0.0', name: 'Remote', transport: 'http', url: `http://127.0.0.1:${(mcp.address() as AddressInfo).port}/mcp` }));
   const provider = await openaiServer([
     { tools: [{ id: 'remote-call', name: 'mcp_remote_write_business', arguments: '{}' }] },
     { text: 'Discussion finished.' },
@@ -115,6 +115,7 @@ test('a remote HTTP MCP tool is not offered during discussion even with a write 
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
     projects: [{ id: 'p', root: workspace, grants: ['mcp:remote:write_business'] }],
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
     network: { mcpDomains: ['127.0.0.1'] },
     models: {
       entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
@@ -124,7 +125,6 @@ test('a remote HTTP MCP tool is not offered during discussion even with a write 
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'master');
-  await runtime.catalog.install({ id: 'remote', kind: 'mcp', source, version: '1.0.0', requestId: 'install' });
   const created = await runtime.conversations.create({ projectId: 'p', text: '只讨论，先看看项目。不要修改业务文件。', requestId: 'create' });
   await runtime.host.runReady();
   const view = await runtime.conversations.view(created.conversationId);

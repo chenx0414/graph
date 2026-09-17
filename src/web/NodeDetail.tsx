@@ -161,10 +161,15 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
         <Stat label="记录" value={entries.length} hint={`${data.entryCount} 条`} />
       </div>
 
+      {data.capabilityDigest && (
+        <section>
+          <h4 className="section-title">能力包</h4>
+          <p className="muted mono">{data.capabilityDigest.slice(0, 16)}</p>
+        </section>
+      )}
       {(data.capabilities ?? []).length > 0 && (
         <section>
           <h4 className="section-title">能力（按节点绑定的定义版本）</h4>
-          {data.capabilityDigest && <p className="muted mono">能力包 {data.capabilityDigest.slice(0, 16)}</p>}
           <ul className="list" data-testid="node-capabilities">
             {data.capabilities!.map(capability => (
               <li key={`${capability.id}@${capability.version}`} className="list-item">

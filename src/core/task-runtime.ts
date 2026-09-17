@@ -11,14 +11,12 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { talentDetail, talentExperience } from './talent.ts';
-import { Catalog, type CapabilityKind, type DefinitionSpec } from '../catalog/catalog.ts';
+import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
-import { CallBroker } from '../runtime/call-broker.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
-import { openRestrictedExecutor } from '../runtime/restricted-process.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { OperationRow } from './execution.ts';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
@@ -134,9 +132,14 @@ export async function openTaskRuntime(options: {
   /** Read-only host inventory exposed to the master Agent. It must never
    * contain secret values or write configuration on the Agent's behalf. */
   systemContext?: {
-    resourceCatalog?: () => import('../catalog/resource-catalog.ts').RecommendedResource[];
-    agentCombinations?: () => import('../catalog/agent-combinations.ts').AgentCombination[];
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+  };
+  /** User-owned capability and recipe files. The desktop daemon passes ~/.graph. */
+  catalog?: {
+    capabilityRoot?: string;
+    recipesPath?: string;
+    bootstrapPrompts?: Record<string, string>;
+    bootstrapToolPrompt?: string;
   };
   /** UI-hosted daemons wake dispatch as soon as a conversation message is queued. */
   autoWake?: boolean;
@@ -246,7 +249,11 @@ export async function openTaskRuntime(options: {
         store.db.prepare('INSERT OR IGNORE INTO projects VALUES(?,?,?)').run(project.id, root, grants);
       }
     });
-    catalog = new Catalog(store);
+    catalog = new Catalog(store, {
+      ...(options.catalog?.capabilityRoot ? { capabilityRoot: options.catalog.capabilityRoot } : {}),
+      ...(options.catalog?.recipesPath ? { recipesPath: options.catalog.recipesPath } : {}),
+    });
+    await catalog.refresh();
     git = new GitIntegration(store, stateDir);
     const slotScheduler: ModelScheduler = options.models?.modelScheduler ? options.models.modelScheduler : createModelScheduler();
     if (options.models) {
@@ -264,7 +271,8 @@ export async function openTaskRuntime(options: {
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
-        install: input => channels.install!(input),
+        ...(options.catalog?.bootstrapPrompts ? { bootstrapPrompts: options.catalog.bootstrapPrompts } : {}),
+        ...(options.catalog?.bootstrapToolPrompt ? { bootstrapToolPrompt: options.catalog.bootstrapToolPrompt } : {}),
         ...(options.systemContext ? { systemContext: options.systemContext } : {}),
       },
     }) : undefined;
@@ -283,8 +291,8 @@ export async function openTaskRuntime(options: {
       ...(options.program ? { program: options.program } : {}),
       ...(options.systemContext ? {
         systemContext: {
-          resources: Boolean(options.systemContext.resourceCatalog),
-          agentCombinations: Boolean(options.systemContext.agentCombinations),
+          resources: true,
+          agentCombinations: true,
           systemSummary: Boolean(options.systemContext.systemSummary),
           requestModelAccess: true,
         },
@@ -1236,62 +1244,37 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         return store.command('catalog', requestId, { type: 'publish', id, spec }, () => catalog.publishDefinition(id, spec));
       },
+      ensureDefinition(id: string, spec: DefinitionSpec) {
+        ensureOpen();
+        return catalog.ensureDefinition(id, spec);
+      },
       definitions() { ensureOpen(); return catalog.listDefinitions(); },
       capabilities() { ensureOpen(); return catalog.capabilities(); },
       capability(id: string, version?: string) { ensureOpen(); return catalog.capability(id, version); },
+      capabilityRootPath() { ensureOpen(); return catalog.capabilityRootPath(); },
+      agentCombinationFilePath() { ensureOpen(); return catalog.agentCombinationFilePath(); },
+      agentCombinationError() { ensureOpen(); return catalog.agentCombinationError(); },
+      agentCombinations() { ensureOpen(); return catalog.agentCombinations(); },
+      async saveAgentCombination(input: import('../catalog/agent-combinations.ts').AgentCombination) {
+        ensureOpen();
+        return catalog.saveAgentCombination(input);
+      },
+      async deleteAgentCombination(id: string) {
+        ensureOpen();
+        return catalog.deleteAgentCombination(id);
+      },
+      compileAgentCombination(id: string) {
+        ensureOpen();
+        return catalog.compileAgentCombination(id);
+      },
+      async refreshCatalog() {
+        ensureOpen();
+        await catalog.refresh();
+        return { capabilities: catalog.capabilities(), agentCombinations: catalog.agentCombinations() };
+      },
       preset(id: string) { ensureOpen(); return catalog.preset(id); },
       definitionSpec(id: string, version: number) { ensureOpen(); return catalog.definition(`${id}@${version}`); },
       recordPreset(id: string, version: string, hash: string, detail: Json) { ensureOpen(); return catalog.recordPreset(id, version, hash, detail); },
-      async install(input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) {
-        ensureOpen();
-        const payload = { type: 'install', id: input.id, kind: input.kind, source: input.source, version: input.version };
-        const encoded = canonicalJson(payload);
-        const previous = store.db.prepare('SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?').get('catalog', input.requestId) as { payload: string; receipt: string } | undefined;
-        if (previous) {
-          if (previous.payload !== encoded) throw new RuntimeError('idempotency_conflict', 'requestId was already used with different content');
-          return JSON.parse(previous.receipt) as { id: string; version: string; path: string };
-        }
-        const installationId = randomUUID();
-        const dest = join(stateDir, 'capabilities', input.id, input.version);
-        store.transaction(() => store.db.prepare('INSERT INTO installations VALUES(?,?,?,?,?)').run(installationId, input.id, 'intent', canonicalJson(input), null));
-        const broker = new CallBroker(join(stateDir, 'install-calls.sqlite'), 'installer');
-        try {
-          const parent = join(stateDir, 'capabilities', input.id);
-          await mkdir(parent, { recursive: true, mode: 0o700 });
-          const source = await realpath(input.source);
-          const grant = await realpath(parent);
-          store.db.prepare("UPDATE installations SET state='dispatched' WHERE id=?").run(installationId);
-          try { await realpath(dest); }
-          catch {
-            const executor = await openRestrictedExecutor();
-            try {
-              const result = await executor.run({
-                broker, cwd: source, scratchDir: grant, executable: '/bin/cp', args: ['-R', source, dest],
-                readPaths: [source], writePaths: [grant],
-              });
-              if (result.code !== 0) throw new RuntimeError('install_failed', result.stderr || 'Capability install failed');
-            } finally { await executor.close(); }
-          }
-          const snapshot = { path: dest, copied: true };
-          const receipt = { id: input.id, version: input.version, path: dest };
-          store.transaction(() => {
-            catalog.recordInstall({ id: input.id, kind: input.kind, source: input.source, version: input.version, snapshot, status: 'installed' });
-            store.db.prepare("UPDATE installations SET state='succeeded',result=? WHERE id=?").run(canonicalJson(snapshot), installationId);
-            store.db.prepare('INSERT INTO commands VALUES(?,?,?,?)').run('catalog', input.requestId, encoded, canonicalJson(receipt));
-          });
-          return receipt;
-        } catch (error) {
-          store.db.prepare("UPDATE installations SET state='unknown',result=? WHERE id=?").run(String(error), installationId);
-          throw error;
-        } finally { broker.close(); }
-      },
-      async reconcileInstall(id: string) {
-        ensureOpen();
-        const row = store.db.prepare('SELECT * FROM installations WHERE capability_id=? ORDER BY rowid DESC LIMIT 1').get(id) as { id: string; state: string; spec: string } | undefined;
-        if (!row || row.state === 'succeeded') return catalog.capability(id);
-        const spec = JSON.parse(row.spec) as { source: string; version: string; kind: CapabilityKind };
-        return this.install({ id, kind: spec.kind, source: spec.source, version: spec.version, requestId: `reconcile-${row.id}` });
-      },
     },
     close() {
       if (!closing) {
@@ -1302,6 +1285,5 @@ export async function openTaskRuntime(options: {
     },
   };
   channels.supervisor = runtime.supervisor;
-  channels.install = input => runtime.catalog.install(input);
   return runtime;
 }

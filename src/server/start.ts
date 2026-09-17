@@ -10,10 +10,9 @@ import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type Config
 import { modelRequestHeaders } from '../catalog/models.ts';
 import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
-import { installPresets } from '../catalog/presets.ts';
-import { loadResourceCatalog } from '../catalog/resource-catalog.ts';
-import { loadAgentCombinations, type AgentCombination } from '../catalog/agent-combinations.ts';
+import { loadPresetBootstrap, publishBootstrap } from '../catalog/presets.ts';
 import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
+import { graphHome as resolveGraphHome } from '../catalog/graph-home.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
@@ -24,6 +23,8 @@ export interface DaemonOptions {
   configPath: string | null;
   stateDir: string;
   webDir: string;
+  /** User-owned Graph home; capabilities and recipes live here. */
+  graphHome?: string;
   port: number;
   mode: 'view' | 'execute';
   env: Record<string, string | undefined>;
@@ -229,8 +230,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     server.startDrive();
     server.runtime.host.recoverMasters();
   };
-  // Replaced after the server exists: preset-driven definitions replace the
-  // minimal built-ins when the pack is available.
+  // Bootstrap prompts are immutable Graph runtime content, not user capabilities.
   let presetsAvailable = false;
   let publishDefinitions = () => {};
 
@@ -272,14 +272,12 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
 
   const runtimeReady = await ensureModelRuntime();
   const presetsRoot = options.presetsDir ?? fileURLToPath(new URL('../../presets', import.meta.url));
-  const resourceCatalog = await loadResourceCatalog(presetsRoot).catch(error => {
-    log(`Resource catalog unavailable (${error instanceof Error ? error.message : String(error)}); recommended resources stay hidden.`);
-    return { version: 1, entries: [] };
-  });
-  const agentCombinations = await loadAgentCombinations(presetsRoot, resourceCatalog.entries).catch(error => {
-    log(`Agent combinations unavailable (${error instanceof Error ? error.message : String(error)}); combinations stay hidden.`);
-    return { version: 1, combinations: [] as AgentCombination[] };
-  });
+  const userGraphHome = options.graphHome ?? resolveGraphHome(options.env);
+  const capabilityPath = join(userGraphHome, 'capabilities');
+  const recipesPath = join(userGraphHome, 'agent-combinations.json');
+  const bootstrap = await loadPresetBootstrap(presetsRoot, log);
+  let catalogCapabilities: import('../catalog/catalog.ts').CapabilityRecord[] = [];
+  let catalogCombinations: import('../catalog/agent-combinations.ts').AgentCombinationView[] = [];
   const systemSummary = async () => {
     const usage = await usageService.get();
     const configured = live.entries().map(entry => ({
@@ -296,7 +294,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }));
     return {
       configuredModels: configured,
-      agentCombinations: agentCombinations.combinations,
+      agentCombinations: catalogCombinations,
       architectures: GRAPH_ARCHITECTURES,
       subscriptionPlans: usage.plans.map(plan => ({
         id: plan.id,
@@ -320,12 +318,13 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
         updatedAt: plan.updatedAt,
       })),
       summary: usage.summary,
-      resourceCatalog: {
-        entries: resourceCatalog.entries.length,
+      capabilities: {
+        root: capabilityPath,
+        entries: catalogCapabilities.length,
         byKind: Object.fromEntries(
-          ['skill', 'skill-index', 'mcp', 'pi-extension', 'agent-md'].map(kind => [
+          ['skill', 'mcp', 'extension', 'pi-extension', 'prompt'].map(kind => [
             kind,
-            resourceCatalog.entries.filter(entry => entry.kind === kind).length,
+            catalogCapabilities.filter(entry => entry.kind === kind).length,
           ]),
         ),
       },
@@ -352,6 +351,12 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       projects: () => live.projects(),
     },
     master: { action: 'master', definitionVersion: 'master@1', model: () => live.masterModel() },
+    catalog: {
+      capabilityRoot: capabilityPath,
+      recipesPath,
+      ...(Object.keys(bootstrap.prompts).length ? { bootstrapPrompts: bootstrap.prompts } : {}),
+      ...(bootstrap.toolPrompt ? { bootstrapToolPrompt: bootstrap.toolPrompt } : {}),
+    },
     limits: { defaultBudgetTokens: live.defaultBudgetTokens() },
     config: { revision: () => live.revision() },
     autoDrive: options.mode === 'execute' || options.dynamic === true,
@@ -364,11 +369,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }),
     ...(configStore ? { configStore, configEnv: { ...options.env, ...importedSecrets }, configTest: testConnection } : {}),
     usage: usageService,
-    resourceCatalog: resourceCatalog.entries,
-    agentCombinations: agentCombinations.combinations,
     systemContext: {
-      resourceCatalog: () => resourceCatalog.entries,
-      agentCombinations: () => agentCombinations.combinations,
       systemSummary,
     },
     appServices: {
@@ -382,11 +383,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       }),
     },
   });
-  const presetResult = await installPresets(
-    server.runtime.catalog,
-    presetsRoot,
-    log,
-  );
+  const presetResult = publishBootstrap(server.runtime.catalog, bootstrap, log);
   presetsAvailable = presetResult.available;
   publishDefinitions = () => {
     if (presetsAvailable || definitionsPublished || !live.enabled()) return;
@@ -396,7 +393,13 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     server.runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   };
   publishDefinitions();
-  if (presetsAvailable) log(`Presets: ${presetResult.installed.length} installed, ${presetResult.skipped.length} unchanged${presetResult.failed.length ? `, ${presetResult.failed.length} failed` : ''}.`);
+  const refreshCatalogSnapshot = async () => {
+    const refreshed = await server.runtime.catalog.refreshCatalog();
+    catalogCapabilities = refreshed.capabilities;
+    catalogCombinations = refreshed.agentCombinations;
+  };
+  await refreshCatalogSnapshot();
+  if (presetsAvailable) log(`Bootstrap: ${presetResult.installed.length} definitions ready${presetResult.failed.length ? `, ${presetResult.failed.length} failed` : ''}; capabilities: ${capabilityPath}.`);
 
   // Configuration/secret changes must be serialized as a whole (read the
   // current revocation view, validate, persist, activate/rollback): two

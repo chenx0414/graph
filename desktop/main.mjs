@@ -217,7 +217,7 @@ if (!app.requestSingleInstanceLock()) {
       if (kind !== 'skills' && kind !== 'mcp' && kind !== 'pi-extensions' && kind !== 'agent-md') {
         return { opened: false, message: 'unknown resource library' };
       }
-      const path = resourceDirectory(currentPaths().stateDir, kind);
+      const path = resourceDirectory(currentPaths().graphHome, kind);
       mkdirSync(path, { recursive: true });
       const message = await shell.openPath(path);
       return message ? { opened: false, path, message } : { opened: true, path };

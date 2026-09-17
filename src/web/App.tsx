@@ -12,10 +12,12 @@ import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
 import { ErrorBox, costText, useAsync, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
 import { UsagePage } from './Usage.tsx';
+import { ResourceLibrary as CapabilityResourceLibrary } from './ResourceLibrary.tsx';
 import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
 import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
+import type { CapabilityRecord } from '../catalog/catalog.ts';
+import type { AgentCombination, AgentCombinationView } from '../catalog/agent-combinations.ts';
 import type { RecommendedResource } from '../catalog/resource-catalog.ts';
-import type { AgentCombination } from '../catalog/agent-combinations.ts';
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
@@ -42,13 +44,16 @@ type NodeView = {
   reserved?: number; instanceId?: string | null; selectedModel?: string; boundDefinition?: string;
   activationId?: string; outputVersion?: number; stallCount?: number;
 };
-type Settings_ = {
+export type Settings_ = {
   projects: { id: string; root: string }[];
   models: { id: string; grade: string; credentialId?: string; contextWindow?: number }[];
   definitions: { id: string; version: number }[];
-  capabilities: { id: string; version: string; kind?: 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt'; status?: string }[];
+  capabilities: CapabilityRecord[];
+  agentCombinations?: AgentCombinationView[];
   recommended?: RecommendedResource[];
-  agentCombinations?: AgentCombination[];
+  capabilityRoot?: string | null;
+  agentCombinationFile?: string | null;
+  agentCombinationError?: string | null;
 };
 type Limits = { active: Record<string, number>; queued: Record<string, number> };
 type OperationRow = { id: string; nodeId: string; state: string; reserved: number; workerActive: boolean; result: { output?: unknown } | null; durationMs?: number };
@@ -136,8 +141,10 @@ export function App() {
   useEffect(() => {
     const onHash = () => setPath(route());
     const onConversationsChanged = () => void reloadConversations();
+    const onSettingsChanged = () => void reloadSettings();
     window.addEventListener('hashchange', onHash);
     window.addEventListener('graph:conversations-changed', onConversationsChanged);
+    window.addEventListener('graph:settings-changed', onSettingsChanged);
     void reloadSettings();
     void api<Startup>('/api/startup').then(setStartup);
     void refreshTasks().catch(() => undefined);
@@ -148,6 +155,7 @@ export function App() {
     return () => {
       window.removeEventListener('hashchange', onHash);
       window.removeEventListener('graph:conversations-changed', onConversationsChanged);
+      window.removeEventListener('graph:settings-changed', onSettingsChanged);
       clearInterval(poll);
     };
   }, [refreshTasks, reloadConversations, reloadSettings]);
@@ -285,7 +293,7 @@ export function App() {
           <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`} key={path}>
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {pathname === '/inbox' && <Inbox tasks={tasks} />}
-            {catalogMatch && <ResourceLibrary settings={settings} section={catalogMatch[1]} />}
+            {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
             {pathname === '/usage' && <UsagePage />}
             {conversationMatch && (
               <ConversationPanel
@@ -622,7 +630,7 @@ function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
   );
 }
 
-function ResourceLibrary({ settings, section }: { settings: Settings_ | null; section?: string }) {
+function LegacyResourceLibrary({ settings, section }: { settings: Settings_ | null; section?: string }) {
   const [selected, setSelected] = useState<RecommendedResource | null>(null);
   const [resourceQuery, setResourceQuery] = useState('');
   const [resourceLimits, setResourceLimits] = useState<Record<string, number>>({});

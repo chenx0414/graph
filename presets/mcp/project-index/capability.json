@@ -1,5 +1,0 @@
-{
-  "kind": "mcp",
-  "command": "node",
-  "args": ["./server.mjs"]
-}

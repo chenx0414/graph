@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { agentTools } from '../../src/runtime/agent-tools.ts';
+import { Catalog } from '../../src/catalog/catalog.ts';
+import { TaskStore } from '../../src/core/store.ts';
 
-const cleanup: (() => Promise<void>)[] = [];
+const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
 async function workspace() {
@@ -90,48 +92,49 @@ test('a master can record one bounded prompt suggestion', async () => {
 test('only the master receives read-only resource and system inventory tools', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-tools-system-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const resources = [{
-    id: 'agent-md-code-reviewer',
-    kind: 'agent-md' as const,
-    name: '代码审查员',
-    description: '审查代码修改',
-    source: 'https://github.com/affaan-m/ECC/blob/main/agents/code-reviewer.md',
-    sourceKind: 'github' as const,
-  }];
-  const systemContext = {
-    resourceCatalog: () => resources,
-    agentCombinations: () => [{
-      id: 'review',
-      name: '代码审查',
-      description: '组合代码审查资源',
-      recommendedGrade: 'high' as const,
-      review: true,
-      tags: ['审查'],
-      resources: [{ resourceId: 'agent-md-code-reviewer', role: 'identity' as const, required: true }],
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const reviewer = join(capabilityRoot, 'reviewer');
+  await mkdir(reviewer, { recursive: true });
+  await writeFile(join(reviewer, 'agent.md'), 'Review code independently.\n');
+  await writeFile(join(reviewer, 'capability.json'), JSON.stringify({ id: 'reviewer', kind: 'prompt', role: 'agent', version: '1.0.0', name: '代码审查员', description: '审查代码修改' }));
+  await writeFile(join(root, 'graph', 'agent-combinations.json'), JSON.stringify({
+    version: 1,
+    combinations: [{
+      id: 'review', name: '代码审查', description: '组合代码审查资源', recommendedGrade: 'high', review: true, tags: ['审查'],
+      resources: [{ resourceId: 'reviewer', version: '1.0.0', role: 'identity', required: true }],
     }],
+  }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') });
+  await catalog.refresh();
+  const systemContext = {
     systemSummary: () => ({ configuredModels: [{ id: 'local', grade: 'high' }], subscriptionPlans: [] }),
   };
   const masterTools = agentTools({
     workspace: root,
     role: 'master',
     supervisor: { propose: async () => ({}), revise: async () => ({}) },
+    catalog,
     systemContext: {
       ...systemContext,
       requestModelAccess: async input => ({ requestType: 'model_access', ...input }),
     },
   });
   expect(masterTools.map(tool => tool.name)).toEqual(expect.arrayContaining([
-    'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination', 'read_system_capabilities', 'request_model_access',
+    'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
+    'save_agent_combination', 'delete_agent_combination', 'compile_agent_combination',
+    'read_system_capabilities', 'request_model_access',
   ]));
   const execute = (name: string) => masterTools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>;
   const search = JSON.parse((await execute('search_resources')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
-  expect(search.items).toEqual([expect.objectContaining({ id: 'agent-md-code-reviewer' })]);
-  const detail = JSON.parse((await execute('get_resource')('probe', { id: 'agent-md-code-reviewer' })).content[0]!.text!) as { authorization: { grantsNoPermission: boolean } };
-  expect(detail.authorization.grantsNoPermission).toBe(true);
+  expect(search.items).toEqual([expect.objectContaining({ id: 'reviewer' })]);
+  const detail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer' })).content[0]!.text!) as { grantsNoPermission: boolean };
+  expect(detail.grantsNoPermission).toBe(true);
   const combinations = JSON.parse((await execute('list_agent_combinations')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
   expect(combinations.items).toEqual([expect.objectContaining({ id: 'review' })]);
-  const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'review' })).content[0]!.text!) as { resources: { resource: { id: string; authorization: { grantsNoPermission: boolean } } }[] };
-  expect(combination.resources[0]!.resource).toMatchObject({ id: 'agent-md-code-reviewer', authorization: { grantsNoPermission: true } });
+  const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'review' })).content[0]!.text!) as { resolved: { resourceId: string; version: string }[] };
+  expect(combination.resolved[0]).toMatchObject({ resourceId: 'reviewer', version: '1.0.0' });
 
   const workerTools = agentTools({ workspace: root, systemContext });
   expect(workerTools.map(tool => tool.name)).not.toContain('search_resources');
