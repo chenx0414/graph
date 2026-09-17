@@ -10,6 +10,7 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openGraphServer } from '../../src/server/host.ts';
 import { git } from '../../src/git/git.ts';
+import { evidenceDir } from '../helpers/evidence.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -190,7 +191,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  const evidence = join(process.cwd(), 'docs', 'planning', 'acceptance-evidence', 'master-agent-entry');
+  const evidence = evidenceDir(root, 'master-agent-entry');
   await mkdir(evidence, { recursive: true });
 
   // 1. Vague goal without a project or a feature task.

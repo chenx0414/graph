@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
+import { evidenceDir } from '../helpers/evidence.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -39,6 +40,8 @@ test('history pages to the earliest record, survives new messages, and never cro
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  const evidence = evidenceDir(root, 'master-agent-entry');
+  await mkdir(evidence, { recursive: true });
   const userMessages = () => page.getByTestId('message-user');
   await page.goto(`${server.url}/#/conversations/${a.conversationId}`);
   await userMessages().filter({ hasText: 'A-message-500' }).waitFor();
@@ -63,7 +66,7 @@ test('history pages to the earliest record, survives new messages, and never cro
   await page.evaluate(id => { location.hash = `#/conversations/${id}`; }, b.conversationId);
   await userMessages().filter({ hasText: 'B-only-message' }).waitFor();
   expect(await userMessages().filter({ hasText: 'A-message-' }).count()).toBe(0);
-  await page.screenshot({ path: join(process.cwd(), 'docs', 'planning', 'acceptance-evidence', 'master-agent-entry', '09-conversation-switch.png'), fullPage: true });
+  await page.screenshot({ path: join(evidence, '09-conversation-switch.png'), fullPage: true });
 
   // Browser back restores A without leaking B, and an in-flight history load
   // cannot modify the conversation it was never part of.

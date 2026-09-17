@@ -15,3 +15,7 @@
 ### Implementation
 
 实施功能前读取 `docs/architecture.md` 和 `docs/implementation-plan.md`；产品范围与执行规则以 `docs/graph-mvp.md` 为准。
+
+### Checks
+
+提交或推送前运行 `node --run check`；证据与 pre-push 规则见 `docs/agents/checks.md`。

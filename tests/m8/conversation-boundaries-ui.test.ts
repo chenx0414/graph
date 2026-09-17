@@ -5,6 +5,7 @@ import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
+import { evidenceDir } from '../helpers/evidence.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -57,7 +58,8 @@ test('the conversation page surfaces master questions, live worker status, costs
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  const evidence = join(process.cwd(), 'docs', 'planning', 'acceptance-evidence', 'master-agent-entry');
+  const evidence = evidenceDir(root, 'master-agent-entry');
+  await mkdir(evidence, { recursive: true });
 
   const created = await server.runtime.conversations.create({ projectId: 'p', text: 'Discuss before working', requestId: 'create' });
   await server.runtime.host.runReady();

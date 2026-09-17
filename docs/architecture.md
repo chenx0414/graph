@@ -56,6 +56,18 @@ flowchart TB
 | Catalog | 安装/发布版本、解析可复用定义 | Skills/MCP/扩展来源、版本、完整配置快照、实例版本固定。 |
 | Git integration | 准备实例副本、汇集修改、验证后合入 | 分支与工作树、冲突、目标变化、精确提交证据和崩溃后核查。 |
 
+### 执行模块导航
+
+- [execution.ts](../src/core/execution.ts)：任务执行状态机、节点派发、暂停与恢复、主管回合和工具调用编排。
+- [context.ts](../src/core/context.ts)：Continue/Fresh/Fork 解析、handoff 冻结、上下文 lineage 与预算作用域。
+- [model-selection.ts](../src/core/model-selection.ts)：模型等级选择、审查模型排除与独立审查就绪判断。
+- [operation-settlement.ts](../src/core/operation-settlement.ts)：操作结果结算、返工循环、阻塞与等待问答。
+- [program-adapters.ts](../src/core/program-adapters.ts)：`graph.verify`、`graph.command` 与人工检查程序节点。
+- [conversation.ts](../src/core/conversation.ts)：会话消息、队列投递、回复摘要与消息事件。
+- [usage-ledger.ts](../src/core/usage-ledger.ts)：未知用量核对、调用记账与模型使用记录。
+- [pi-instance.ts](../src/runtime/pi-instance.ts)：单个 Pi session 生命周期、能力包绑定和受控模型门。
+- [pi-adapter.ts](../src/runtime/pi-adapter.ts)：Agent 节点到独立 Pi 进程、工具门和 Graph 系统能力的适配。
+
 纯图规则、预算算术、模板和数据库事务为 Task Runtime 的内部 implementation，不为每个计算拆一层 adapter。SQLite/Git 测试使用真实临时文件与仓库。Pi、供应商和远程 MCP 才使用可控替身与生产 adapter 两套实现。
 
 保持单一仓库与单一领域上下文，先按 `src/core/`、`src/runtime/`、`src/catalog/`、`src/git/`、`src/server/`、`src/web/` 组织内部代码；不因有前后端就引入多包工作区或多份 CONTEXT。
