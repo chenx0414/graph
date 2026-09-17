@@ -14,8 +14,8 @@ export interface AppPaths {
 export type ResourceLibraryKind = 'skills' | 'mcp' | 'pi-extensions' | 'agent-md';
 
 /** Allowlisted local storage roots for resource-library folder actions. */
-export function resourceDirectory(graphHome: string, _kind: ResourceLibraryKind): string {
-  return join(graphHome, 'capabilities');
+export function resourceDirectory(graphHome: string, kind: ResourceLibraryKind): string {
+  return join(graphHome, 'capabilities', kind);
 }
 
 /** Layout for dev (`electron .` in the repo) and packaged builds (app dir). */

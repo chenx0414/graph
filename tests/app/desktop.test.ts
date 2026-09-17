@@ -45,10 +45,10 @@ describe('desktop app paths', () => {
   });
 
   test('resource libraries resolve to allowlisted local storage roots', () => {
-    expect(resourceDirectory('/home/me/.graph', 'skills')).toBe('/home/me/.graph/capabilities');
-    expect(resourceDirectory('/home/me/.graph', 'mcp')).toBe('/home/me/.graph/capabilities');
-    expect(resourceDirectory('/home/me/.graph', 'pi-extensions')).toBe('/home/me/.graph/capabilities');
-    expect(resourceDirectory('/home/me/.graph', 'agent-md')).toBe('/home/me/.graph/capabilities');
+    expect(resourceDirectory('/home/me/.graph', 'skills')).toBe('/home/me/.graph/capabilities/skills');
+    expect(resourceDirectory('/home/me/.graph', 'mcp')).toBe('/home/me/.graph/capabilities/mcp');
+    expect(resourceDirectory('/home/me/.graph', 'pi-extensions')).toBe('/home/me/.graph/capabilities/pi-extensions');
+    expect(resourceDirectory('/home/me/.graph', 'agent-md')).toBe('/home/me/.graph/capabilities/agent-md');
   });
 });
 

@@ -15,13 +15,17 @@
 ```text
 ~/.graph/
   capabilities/
-    <capability directory>/
-      capability.json
-      ...files
+    skills/
+    mcp/
+    pi-extensions/
+    agent-md/
+      <capability directory>/
+        capability.json
+        ...files
   agent-combinations.json
 ```
 
-`capabilities` 下的目录可以嵌套；扫描器遇到 `capability.json` 即把该目录视为一个能力，不再继续向下扫描。每份清单至少包含 `id`、`kind`、`version`、`name`，并按 kind 声明入口文件或运行参数。Skill 必须有 `SKILL.md`；prompt 必须有 `agent.md` 或 `tool.md`；MCP 必须有 `command` 或 `url`；extension 与 Pi extension 必须有存在的入口文件。
+四类目录分别承载 Skill、MCP、Pi extension 与 Agent.md。`capabilities` 下的目录仍可继续嵌套；扫描器遇到 `capability.json` 即把该目录视为一个能力，不再继续向下扫描。每份清单至少包含 `id`、`kind`、`version`、`name`，并按 kind 声明入口文件或运行参数。Skill 必须有 `SKILL.md`；prompt 必须有 `agent.md` 或 `tool.md`；MCP 必须有 `command` 或 `url`；extension 与 Pi extension 必须有存在的入口文件。
 
 扫描结果只有“可用”与“清单无效”，没有安装状态。导入到正确路径后，下一次扫描或 APP 启动即可使用。无效清单仍会出现在资源库中，并显示具体错误，便于用户修复。
 
