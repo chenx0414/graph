@@ -7,7 +7,8 @@ import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { installPresets } from '../../src/catalog/presets.ts';
+import { loadResourceCatalog } from '../../src/catalog/resource-catalog.ts';
+import { loadAgentCombinations } from '../../src/catalog/agent-combinations.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
@@ -58,7 +59,8 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   await page.getByTestId('catalog').waitFor();
   await page.getByTestId('resource-nav-agents').click();
   await page.getByTestId('resource-section-agents').waitFor();
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('coder@1');
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 组合');
+  expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
   await page.goto(`${server.url}/#/tasks/${taskId}`);
   await page.getByTestId('status').waitFor();
   await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
@@ -78,17 +80,20 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   expect(await page.getByTestId('node-detail').innerText()).toContain('implement');
 }, 60_000);
 
-test('the Agent combination library exposes the built-in subagent combinations', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-m5-agents-'));
+test('the Agent combination library renders recipes over resource-library entries', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m5-agent-combinations-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const resources = await loadResourceCatalog(presetsRoot);
+  const combinations = await loadAgentCombinations(presetsRoot, resources.entries);
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
     projects: [{ id: 'p', root }],
     autoDrive: false,
     webDir,
+    resourceCatalog: resources.entries,
+    agentCombinations: combinations.combinations,
   });
   cleanup.push(() => server.close());
-  await installPresets(server.runtime.catalog, presetsRoot);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -100,13 +105,11 @@ test('the Agent combination library exposes the built-in subagent combinations',
   expect(text).toContain('代码实现');
   expect(text).toContain('代码审查');
   expect(text).toContain('安全检查');
-  expect(text).toContain('目标把关');
   expect(text).toContain('文献检索');
-  expect(text).toContain('论文写作');
   expect(text).toContain('论文润色');
-  expect(text).toContain('code@1');
-  expect(text).toContain('security@1');
-  expect(text).toContain('paper-polish@1');
+  expect(text).toContain('代码审查员');
+  expect(text).toContain('安全审查员');
+  expect(text).toContain('deep-research');
 }, 60_000);
 
 test('the graph follows runtime events and a budget question accepts a token increment', async () => {

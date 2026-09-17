@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { loadResourceCatalog, parseResourceCatalog, resourceDetail, searchResourceCatalog } from '../../src/catalog/resource-catalog.ts';
+import { loadAgentCombinations } from '../../src/catalog/agent-combinations.ts';
 
 const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
 
@@ -64,4 +65,20 @@ test('resource search is bounded, filterable and keeps catalog entries separate 
     notInstalled: true,
     grantsNoPermission: true,
   });
+});
+
+test('Agent combinations are recipes over existing resource-library entries', async () => {
+  const catalog = await loadResourceCatalog(presetsRoot);
+  const combinations = await loadAgentCombinations(presetsRoot, catalog.entries);
+  expect(combinations.combinations.map(item => item.id)).toEqual([
+    'code', 'test', 'review', 'e2e-test', 'security', 'gate', 'ship',
+    'literature-search', 'paper-writing', 'paper-polish',
+  ]);
+  const review = combinations.combinations.find(item => item.id === 'review')!;
+  expect(review).toMatchObject({ recommendedGrade: 'high', review: true });
+  expect(review.resources).toEqual(expect.arrayContaining([
+    expect.objectContaining({ resourceId: 'agent-md-code-reviewer', role: 'identity' }),
+  ]));
+  const known = new Set(catalog.entries.map(item => item.id));
+  expect(combinations.combinations.flatMap(item => item.resources).every(item => known.has(item.resourceId))).toBe(true);
 });

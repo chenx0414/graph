@@ -118,8 +118,8 @@ async function systemContextProvider() {
     };
     step += 1;
     if (step === 1) return call('c1', 'read_system_capabilities', {});
-    if (step === 2) return call('c2', 'list_agent_combinations', { query: 'review' });
-    if (step === 3) return call('c3', 'search_resources', { query: 'github', kind: 'mcp' });
+    if (step === 2) return call('c2', 'list_agent_combinations', { query: '审查' });
+    if (step === 3) return call('c3', 'search_resources', { query: 'reviewer', kind: 'agent-md' });
     if (step === 4) return call('c4', 'request_model_access', { modelId: 'missing-model', reason: '需要独立审查模型', planId: 'opencode-go' });
     chunk({ role: 'assistant', content: '已打开模型授权问题。' }, null);
     end('stop');
@@ -245,21 +245,21 @@ test('the real Pi master can search the resource library and open a model-access
     master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
     systemContext: {
       resourceCatalog: () => [{
-        id: 'mcp-github',
-        kind: 'mcp',
-        name: 'GitHub MCP',
-        description: 'GitHub operations',
-        source: 'https://github.com/github/github-mcp-server',
+        id: 'agent-md-code-reviewer',
+        kind: 'agent-md',
+        name: '代码审查员',
+        description: '审查代码修改',
+        source: 'https://github.com/affaan-m/ECC/blob/main/agents/code-reviewer.md',
         sourceKind: 'github',
       }],
-      agentDefinitions: () => [{
+      agentCombinations: () => [{
         id: 'review',
-        version: 1,
-        key: 'review@1',
+        name: '代码审查',
+        description: '组合代码审查资源',
         recommendedGrade: 'high',
         review: true,
-        description: '代码审查',
-        capabilities: [{ id: 'skill-independent-review', version: '1.0.0' }],
+        tags: ['审查'],
+        resources: [{ resourceId: 'agent-md-code-reviewer', role: 'identity', required: true }],
       }],
       systemSummary: () => ({ configuredModels: [{ id: 'local', grade: 'high' }], subscriptionPlans: [] }),
     },
@@ -275,8 +275,7 @@ test('the real Pi master can search the resource library and open a model-access
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination', 'read_system_capabilities', 'request_model_access',
   ]));
   expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
-  expect(JSON.stringify(provider.requests[0]!.messages)).toContain('list_agent_combinations');
-  expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('"mcp-github"');
+  expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('"agent-md-code-reviewer"');
   expect(view.questions).toEqual(expect.arrayContaining([
     expect.objectContaining({
       kind: 'waiting',

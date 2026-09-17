@@ -2,7 +2,8 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, sep } from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { AgentCombination, CapabilityKind, Catalog } from '../catalog/catalog.ts';
+import type { CapabilityKind, Catalog } from '../catalog/catalog.ts';
+import { resolveAgentCombination, type AgentCombination } from '../catalog/agent-combinations.ts';
 import {
   resourceDetail,
   searchResourceCatalog,
@@ -39,7 +40,7 @@ export function agentTools(input: {
   catalog?: Catalog;
   systemContext?: {
     resourceCatalog?: () => RecommendedResource[];
-    agentDefinitions?: () => AgentCombination[];
+    agentCombinations?: () => AgentCombination[];
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
   };
@@ -198,10 +199,10 @@ export function agentTools(input: {
       execute: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
     });
   }
-  if (input.role === 'master' && input.systemContext?.agentDefinitions) {
+  if (input.role === 'master' && input.systemContext?.agentCombinations) {
     tools.push(
       {
-        name: 'list_agent_combinations', label: 'List Agent combinations', description: 'List published Agent combinations that can be referenced directly as definitionVersion in a graph proposal. Each result includes the exact id@version and its bound capabilities/prompts.',
+        name: 'list_agent_combinations', label: 'List Agent combinations', description: 'List subagent recipes composed from shared resource-library IDs. Results are recipes, not installed definitions or permissions; inspect the referenced resources before using one.',
         parameters: Type.Object({
           query: Type.Optional(Type.String()),
           grade: Type.Optional(Type.String()),
@@ -214,32 +215,38 @@ export function agentTools(input: {
           const grade = typeof body.grade === 'string' ? body.grade.trim() : '';
           if (grade && !['low', 'medium', 'high', 'highest'].includes(grade)) throw new Error('Unsupported model grade');
           const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 30;
-          const matches = input.systemContext!.agentDefinitions!().filter(item => {
+          const matches = input.systemContext!.agentCombinations!().filter(item => {
             if (grade && item.recommendedGrade !== grade) return false;
             if (!query) return true;
-            const haystack = [
+            return [
               item.id,
-              item.key,
+              item.name,
               item.description,
               item.recommendedGrade,
-              ...item.capabilities.map(binding => `${binding.id}@${binding.version}`),
-              item.prompts?.agent ? `${item.prompts.agent.id}@${item.prompts.agent.version}` : undefined,
-              item.prompts?.tool ? `${item.prompts.tool.id}@${item.prompts.tool.version}` : undefined,
-            ].filter(Boolean).join('\n').toLowerCase();
-            return haystack.includes(query);
+              ...item.tags,
+              ...item.resources.map(resource => resource.resourceId),
+            ].join('\n').toLowerCase().includes(query);
           });
           return text(JSON.stringify({ total: matches.length, items: matches.slice(0, limit) }));
         },
       },
       {
-        name: 'get_agent_combination', label: 'Get Agent combination', description: 'Read one published Agent combination by id. Use the returned key as definitionVersion in propose_graph or revise_graph; this does not install or grant anything.',
+        name: 'get_agent_combination', label: 'Get Agent combination', description: 'Resolve one subagent recipe to its source resources. This does not install, compose or authorize anything; use the returned resources and their metadata to prepare the required capabilities.',
         parameters: Type.Object({ id: Type.String() }),
         execute: async (_id, params) => {
           const id = String(fields(params).id).trim();
           if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
-          const item = input.systemContext!.agentDefinitions!().find(candidate => candidate.id === id || candidate.key === id);
-          if (!item) throw new Error(`Unknown Agent combination ${id}`);
-          return text(JSON.stringify(item));
+          const combination = input.systemContext!.agentCombinations!().find(candidate => candidate.id === id);
+          if (!combination) throw new Error(`Unknown Agent combination ${id}`);
+          const resources = input.systemContext!.resourceCatalog?.() ?? [];
+          const resolved = resolveAgentCombination(combination, resources);
+          return text(JSON.stringify({
+            ...resolved,
+            resources: resolved.resources.map(member => ({
+              ...member,
+              resource: resourceDetail(member.resource),
+            })),
+          }));
         },
       },
     );

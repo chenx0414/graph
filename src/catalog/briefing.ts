@@ -29,7 +29,7 @@ export function briefing(operation: Operation, extra: { request: string; summary
       ? [
           'System context (read-only; query before planning instead of guessing):',
           extra.systemContext.resources ? '- search_resources / get_resource: the shared resource library of Skills, MCP servers, Pi extensions and Agent.md profiles.' : '',
-          extra.systemContext.agentCombinations ? '- list_agent_combinations / get_agent_combination: published Agent combinations. Use their exact key as definitionVersion in proposals.' : '',
+          extra.systemContext.agentCombinations ? '- list_agent_combinations / get_agent_combination: recipes composed from resource-library IDs. Resolve the referenced resources before using the recipe in a graph.' : '',
           extra.systemContext.systemSummary ? '- read_system_capabilities: configured subscription plans, configured models, Agent definitions, graph architectures and quota windows (secrets excluded).' : '',
           extra.systemContext.requestModelAccess ? '- request_model_access: ask the user to configure a needed model or subscription; it never changes configuration or grants permission itself.' : '',
         ].filter(Boolean).join('\n')

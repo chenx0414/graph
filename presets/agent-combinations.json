@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "combinations": [
+    {
+      "id": "code",
+      "name": "代码实现",
+      "description": "组合代码架构身份、实现流程、代码库设计与完成前验证资源。",
+      "recommendedGrade": "medium",
+      "review": false,
+      "tags": ["编码", "实现"],
+      "resources": [
+        { "resourceId": "agent-md-code-architect", "role": "identity" },
+        { "resourceId": "skill-mattpocock-skills-skills-engineering-implement-f5c1c2a5", "role": "skill" },
+        { "resourceId": "skill-mattpocock-skills-skills-engineering-codebase-design-6003c667", "role": "skill" },
+        { "resourceId": "skill-obra-superpowers-skills-skills-debugging-verification-before-completion-e92b535b", "role": "skill" }
+      ]
+    },
+    {
+      "id": "test",
+      "name": "测试编写",
+      "description": "组合 TDD 身份、TDD 工作流、测试反模式与异步等待资源。",
+      "recommendedGrade": "medium",
+      "review": false,
+      "tags": ["测试", "TDD"],
+      "resources": [
+        { "resourceId": "agent-md-tdd-guide", "role": "identity" },
+        { "resourceId": "skill-mattpocock-skills-skills-engineering-tdd-bbd49f78", "role": "skill" },
+        { "resourceId": "skill-obra-superpowers-skills-skills-testing-testing-anti-patterns-c5e85840", "role": "skill" },
+        { "resourceId": "skill-obra-superpowers-skills-skills-testing-condition-based-waiting-983ca90e", "role": "skill" }
+      ]
+    },
+    {
+      "id": "review",
+      "name": "代码审查",
+      "description": "组合代码审查身份、双轴代码审查与验证闭环资源。",
+      "recommendedGrade": "high",
+      "review": true,
+      "tags": ["审查", "质量"],
+      "resources": [
+        { "resourceId": "agent-md-code-reviewer", "role": "identity" },
+        { "resourceId": "skill-mattpocock-skills-skills-engineering-code-review-ac9a962e", "role": "skill" },
+        { "resourceId": "skill-affaan-m-ecc-skills-verification-loop-f829fe59", "role": "skill" }
+      ]
+    },
+    {
+      "id": "e2e-test",
+      "name": "端到端测试",
+      "description": "组合 E2E 身份、端到端测试方法与真实 Web QA 流程。",
+      "recommendedGrade": "high",
+      "review": false,
+      "tags": ["测试", "E2E"],
+      "resources": [
+        { "resourceId": "agent-md-e2e-runner", "role": "identity" },
+        { "resourceId": "skill-affaan-m-ecc-skills-e2e-testing-57a7766c", "role": "skill" },
+        { "resourceId": "skill-garrytan-gstack-qa-ea2f9a36", "role": "skill" }
+      ]
+    },
+    {
+      "id": "security",
+      "name": "安全检查",
+      "description": "组合安全审查身份、安全清单与安全审计工作流。",
+      "recommendedGrade": "highest",
+      "review": true,
+      "tags": ["安全", "审查"],
+      "resources": [
+        { "resourceId": "agent-md-security-reviewer", "role": "identity" },
+        { "resourceId": "skill-affaan-m-ecc-skills-security-review-94e40e78", "role": "skill" },
+        { "resourceId": "skill-garrytan-gstack-cso-2965fcc3", "role": "skill" }
+      ]
+    },
+    {
+      "id": "gate",
+      "name": "目标把关",
+      "description": "组合规划身份、验证闭环与生产就绪审计资源，用于 goal 通过或返工判断。",
+      "recommendedGrade": "highest",
+      "review": true,
+      "tags": ["验收", "把关"],
+      "resources": [
+        { "resourceId": "agent-md-planner", "role": "identity" },
+        { "resourceId": "skill-affaan-m-ecc-skills-verification-loop-f829fe59", "role": "skill" },
+        { "resourceId": "skill-affaan-m-ecc-skills-production-audit-1def8b2d", "role": "skill" }
+      ]
+    },
+    {
+      "id": "ship",
+      "name": "上线与运维",
+      "description": "组合发布、部署、金丝雀监控与发布文档资源。",
+      "recommendedGrade": "high",
+      "review": false,
+      "tags": ["发布", "运维"],
+      "resources": [
+        { "resourceId": "skill-garrytan-gstack-ship-8b8e0090", "role": "skill" },
+        { "resourceId": "skill-garrytan-gstack-land-and-deploy-f984a0cd", "role": "skill" },
+        { "resourceId": "skill-garrytan-gstack-canary-4a643777", "role": "skill" },
+        { "resourceId": "skill-garrytan-gstack-document-release-0bd0728c", "role": "skill" }
+      ]
+    },
+    {
+      "id": "literature-search",
+      "name": "文献检索",
+      "description": "组合深度研究、系统文献综述与可选的 Exa 搜索资源。",
+      "recommendedGrade": "high",
+      "review": false,
+      "tags": ["科研", "文献"],
+      "resources": [
+        { "resourceId": "skill-imbad0202-academic-research-skills-deep-research-bac8afd7", "role": "skill" },
+        { "resourceId": "skill-affaan-m-ecc-skills-scientific-thinking-literature-review-eaf76cc1", "role": "skill" },
+        { "resourceId": "mcp-exa-web-search", "role": "mcp", "required": false }
+      ]
+    },
+    {
+      "id": "paper-writing",
+      "name": "论文写作",
+      "description": "组合规划身份、学术论文写作与完整研究工作流资源。",
+      "recommendedGrade": "high",
+      "review": false,
+      "tags": ["科研", "写作"],
+      "resources": [
+        { "resourceId": "agent-md-planner", "role": "identity" },
+        { "resourceId": "skill-imbad0202-academic-research-skills-academic-paper-493f633f", "role": "skill" },
+        { "resourceId": "skill-imbad0202-academic-research-skills-academic-pipeline-502b9e25", "role": "skill" }
+      ]
+    },
+    {
+      "id": "paper-polish",
+      "name": "论文润色",
+      "description": "组合论文修订、多视角审稿与写作结构资源，不改变事实和引用。",
+      "recommendedGrade": "medium",
+      "review": false,
+      "tags": ["科研", "润色"],
+      "resources": [
+        { "resourceId": "skill-imbad0202-academic-research-skills-academic-paper-reviewer-f2565409", "role": "skill" },
+        { "resourceId": "skill-imbad0202-academic-research-skills-academic-paper-493f633f", "role": "skill" },
+        { "resourceId": "skill-mattpocock-skills-skills-in-progress-writing-shape-20396bfb", "role": "skill" }
+      ]
+    }
+  ]
+}

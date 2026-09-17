@@ -135,7 +135,7 @@ export async function openTaskRuntime(options: {
    * contain secret values or write configuration on the Agent's behalf. */
   systemContext?: {
     resourceCatalog?: () => import('../catalog/resource-catalog.ts').RecommendedResource[];
-    agentDefinitions?: () => import('../catalog/catalog.ts').AgentCombination[];
+    agentCombinations?: () => import('../catalog/agent-combinations.ts').AgentCombination[];
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
   };
   /** UI-hosted daemons wake dispatch as soon as a conversation message is queued. */
@@ -284,7 +284,7 @@ export async function openTaskRuntime(options: {
       ...(options.systemContext ? {
         systemContext: {
           resources: Boolean(options.systemContext.resourceCatalog),
-          agentCombinations: Boolean(options.systemContext.agentDefinitions),
+          agentCombinations: Boolean(options.systemContext.agentCombinations),
           systemSummary: Boolean(options.systemContext.systemSummary),
           requestModelAccess: true,
         },
@@ -1237,7 +1237,6 @@ export async function openTaskRuntime(options: {
         return store.command('catalog', requestId, { type: 'publish', id, spec }, () => catalog.publishDefinition(id, spec));
       },
       definitions() { ensureOpen(); return catalog.listDefinitions(); },
-      agentCombinations() { ensureOpen(); return catalog.agentCombinations(); },
       capabilities() { ensureOpen(); return catalog.capabilities(); },
       capability(id: string, version?: string) { ensureOpen(); return catalog.capability(id, version); },
       preset(id: string) { ensureOpen(); return catalog.preset(id); },

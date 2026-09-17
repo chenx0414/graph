@@ -91,23 +91,23 @@ test('only the master receives read-only resource and system inventory tools', a
   const root = await mkdtemp(join(tmpdir(), 'graph-tools-system-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const resources = [{
-    id: 'mcp-github',
-    kind: 'mcp' as const,
-    name: 'GitHub MCP',
-    description: 'GitHub operations',
-    source: 'https://github.com/github/github-mcp-server',
+    id: 'agent-md-code-reviewer',
+    kind: 'agent-md' as const,
+    name: '代码审查员',
+    description: '审查代码修改',
+    source: 'https://github.com/affaan-m/ECC/blob/main/agents/code-reviewer.md',
     sourceKind: 'github' as const,
   }];
   const systemContext = {
     resourceCatalog: () => resources,
-    agentDefinitions: () => [{
-      id: 'code',
-      version: 1,
-      key: 'code@1',
-      recommendedGrade: 'medium' as const,
-      review: false,
-      description: '写代码',
-      capabilities: [{ id: 'skill-implement-and-verify', version: '1.0.0' }],
+    agentCombinations: () => [{
+      id: 'review',
+      name: '代码审查',
+      description: '组合代码审查资源',
+      recommendedGrade: 'high' as const,
+      review: true,
+      tags: ['审查'],
+      resources: [{ resourceId: 'agent-md-code-reviewer', role: 'identity' as const, required: true }],
     }],
     systemSummary: () => ({ configuredModels: [{ id: 'local', grade: 'high' }], subscriptionPlans: [] }),
   };
@@ -124,14 +124,14 @@ test('only the master receives read-only resource and system inventory tools', a
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination', 'read_system_capabilities', 'request_model_access',
   ]));
   const execute = (name: string) => masterTools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>;
-  const search = JSON.parse((await execute('search_resources')('probe', { query: 'github' })).content[0]!.text!) as { items: { id: string }[] };
-  expect(search.items).toEqual([expect.objectContaining({ id: 'mcp-github' })]);
-  const detail = JSON.parse((await execute('get_resource')('probe', { id: 'mcp-github' })).content[0]!.text!) as { authorization: { grantsNoPermission: boolean } };
+  const search = JSON.parse((await execute('search_resources')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
+  expect(search.items).toEqual([expect.objectContaining({ id: 'agent-md-code-reviewer' })]);
+  const detail = JSON.parse((await execute('get_resource')('probe', { id: 'agent-md-code-reviewer' })).content[0]!.text!) as { authorization: { grantsNoPermission: boolean } };
   expect(detail.authorization.grantsNoPermission).toBe(true);
-  const combinations = JSON.parse((await execute('list_agent_combinations')('probe', { query: '写代码' })).content[0]!.text!) as { items: { key: string }[] };
-  expect(combinations.items).toEqual([expect.objectContaining({ key: 'code@1' })]);
-  const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'code' })).content[0]!.text!) as { key: string; capabilities: { id: string }[] };
-  expect(combination).toMatchObject({ key: 'code@1', capabilities: [{ id: 'skill-implement-and-verify', version: '1.0.0' }] });
+  const combinations = JSON.parse((await execute('list_agent_combinations')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
+  expect(combinations.items).toEqual([expect.objectContaining({ id: 'review' })]);
+  const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'review' })).content[0]!.text!) as { resources: { resource: { id: string; authorization: { grantsNoPermission: boolean } } }[] };
+  expect(combination.resources[0]!.resource).toMatchObject({ id: 'agent-md-code-reviewer', authorization: { grantsNoPermission: true } });
 
   const workerTools = agentTools({ workspace: root, systemContext });
   expect(workerTools.map(tool => tool.name)).not.toContain('search_resources');

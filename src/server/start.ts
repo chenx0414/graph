@@ -12,8 +12,8 @@ import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
 import { installPresets } from '../catalog/presets.ts';
 import { loadResourceCatalog } from '../catalog/resource-catalog.ts';
+import { loadAgentCombinations, type AgentCombination } from '../catalog/agent-combinations.ts';
 import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
-import type { AgentCombination } from '../catalog/catalog.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
@@ -276,7 +276,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     log(`Resource catalog unavailable (${error instanceof Error ? error.message : String(error)}); recommended resources stay hidden.`);
     return { version: 1, entries: [] };
   });
-  let agentDefinitionSummary: () => AgentCombination[] = () => [];
+  const agentCombinations = await loadAgentCombinations(presetsRoot, resourceCatalog.entries).catch(error => {
+    log(`Agent combinations unavailable (${error instanceof Error ? error.message : String(error)}); combinations stay hidden.`);
+    return { version: 1, combinations: [] as AgentCombination[] };
+  });
   const systemSummary = async () => {
     const usage = await usageService.get();
     const configured = live.entries().map(entry => ({
@@ -293,7 +296,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }));
     return {
       configuredModels: configured,
-      agentDefinitions: agentDefinitionSummary(),
+      agentCombinations: agentCombinations.combinations,
       architectures: GRAPH_ARCHITECTURES,
       subscriptionPlans: usage.plans.map(plan => ({
         id: plan.id,
@@ -362,9 +365,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     ...(configStore ? { configStore, configEnv: { ...options.env, ...importedSecrets }, configTest: testConnection } : {}),
     usage: usageService,
     resourceCatalog: resourceCatalog.entries,
+    agentCombinations: agentCombinations.combinations,
     systemContext: {
       resourceCatalog: () => resourceCatalog.entries,
-      agentDefinitions: () => agentDefinitionSummary(),
+      agentCombinations: () => agentCombinations.combinations,
       systemSummary,
     },
     appServices: {
@@ -378,7 +382,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       }),
     },
   });
-  agentDefinitionSummary = () => server.runtime.catalog.agentCombinations();
   const presetResult = await installPresets(
     server.runtime.catalog,
     presetsRoot,

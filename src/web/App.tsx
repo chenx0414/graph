@@ -15,6 +15,7 @@ import { UsagePage } from './Usage.tsx';
 import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
 import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
 import type { RecommendedResource } from '../catalog/resource-catalog.ts';
+import type { AgentCombination } from '../catalog/agent-combinations.ts';
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
@@ -45,13 +46,9 @@ type Settings_ = {
   projects: { id: string; root: string }[];
   models: { id: string; grade: string; credentialId?: string; contextWindow?: number }[];
   definitions: { id: string; version: number }[];
-  agents?: {
-    id: string; version: number; key: string; recommendedGrade: string; review: boolean; description?: string;
-    capabilities: { id: string; version: string }[];
-    prompts?: { agent?: { id: string; version: string }; tool?: { id: string; version: string } };
-  }[];
   capabilities: { id: string; version: string; kind?: 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt'; status?: string }[];
   recommended?: RecommendedResource[];
+  agentCombinations?: AgentCombination[];
 };
 type Limits = { active: Record<string, number>; queued: Record<string, number> };
 type OperationRow = { id: string; nodeId: string; state: string; reserved: number; workerActive: boolean; result: { output?: unknown } | null; durationMs?: number };
@@ -74,10 +71,6 @@ const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
 };
 
 const AGENT_COMBINATION_LABEL: Record<string, string> = {
-  master: '主 Agent',
-  coder: '实现 Agent（兼容）',
-  reviewer: '审查 Agent（兼容）',
-  tester: '测试 Agent（兼容）',
   code: '代码实现',
   test: '测试编写',
   review: '代码审查',
@@ -635,7 +628,8 @@ function ResourceLibrary({ settings, section }: { settings: Settings_ | null; se
   const [resourceLimits, setResourceLimits] = useState<Record<string, number>>({});
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const recommended = settings?.recommended ?? [];
-  const agentCombinations = settings?.agents ?? [];
+  const agentCombinations = settings?.agentCombinations ?? [];
+  const resourceById = new Map(recommended.map(item => [item.id, item]));
   const sections = [
     { id: 'skills', title: 'Skills 库', icon: 'spark' as const, description: '来自开源仓库的独立 Skills；搜索可按名称、来源或路径筛选。', items: recommended.filter(item => item.kind === 'skill' || item.kind === 'skill-index') },
     { id: 'mcp', title: 'MCP 库', icon: 'link' as const, description: '可接入的 MCP servers 与所需 transport、凭据和运行条件。', items: recommended.filter(item => item.kind === 'mcp') },
@@ -655,17 +649,15 @@ function ResourceLibrary({ settings, section }: { settings: Settings_ | null; se
     ...(item.tags ?? []),
   ].some(value => value?.toLowerCase().includes(query));
   const filtered = active.items.filter(matches);
-  const filteredAgents = agentCombinations.filter(item => {
-    if (!query) return true;
-    return [
-      item.id,
-      item.key,
-      item.description,
-      AGENT_COMBINATION_LABEL[item.id],
-      item.recommendedGrade,
-      ...item.capabilities.map(binding => binding.id),
-    ].some(value => value?.toLowerCase().includes(query));
-  });
+  const filteredAgents = agentCombinations.filter(item => !query || [
+    item.id,
+    item.name,
+    item.description,
+    AGENT_COMBINATION_LABEL[item.id],
+    item.recommendedGrade,
+    ...item.tags,
+    ...item.resources.map(resource => resource.resourceId),
+  ].some(value => value?.toLowerCase().includes(query)));
   const visibleAgents = filteredAgents.slice(0, resourceLimits.agents ?? 40);
   const visible = filtered.slice(0, resourceLimits[active.id] ?? 40);
   const countFor = (id: string) => id === 'architectures' ? GRAPH_ARCHITECTURES.length
@@ -718,7 +710,7 @@ function ResourceLibrary({ settings, section }: { settings: Settings_ | null; se
                       <input
                         value={resourceQuery}
                         onChange={event => setResourceQuery(event.target.value)}
-                        placeholder="搜索 Agent 组合或能力"
+                        placeholder="搜索 Agent 组合或资源"
                         data-testid="agent-combination-search"
                       />
                       <span className="faint">{filteredAgents.length}</span>
@@ -726,16 +718,19 @@ function ResourceLibrary({ settings, section }: { settings: Settings_ | null; se
                   </div>
                   <div className="agent-combination-list" data-testid="agent-combination-list">
                     {visibleAgents.map(item => (
-                      <article className="agent-combination-item" key={item.key} data-testid={`agent-combination-${item.id}`}>
+                      <article className="agent-combination-item" key={item.id} data-testid={`agent-combination-${item.id}`}>
                         <header>
-                          <strong>{AGENT_COMBINATION_LABEL[item.id] ?? item.id}</strong>
-                          <code>{item.key}</code>
+                          <strong>{AGENT_COMBINATION_LABEL[item.id] ?? item.name}</strong>
+                          <code>{item.id}</code>
                         </header>
-                        <p>{item.description ?? '已发布的 Agent 组合。'}</p>
+                        <p>{item.description}</p>
                         <div className="chip-row">
                           <Pill tone="neutral">{item.recommendedGrade}</Pill>
                           {item.review && <Pill tone="warn">独立审查</Pill>}
-                          {item.capabilities.map(binding => <Pill key={`${binding.id}:${binding.version}`} tone="info">{binding.id}@{binding.version}</Pill>)}
+                          {item.resources.map(member => {
+                            const resource = resourceById.get(member.resourceId);
+                            return <Pill key={`${member.role}:${member.resourceId}`} tone={member.required ? 'info' : 'neutral'}>{resource?.name ?? member.resourceId}</Pill>;
+                          })}
                         </div>
                       </article>
                     ))}
