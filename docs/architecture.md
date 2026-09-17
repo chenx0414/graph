@@ -61,7 +61,8 @@ flowchart TB
 - [execution.ts](../src/core/execution.ts)：任务执行状态机、节点派发、暂停与恢复、主管回合和工具调用编排。
 - [capability-library.ts](../src/catalog/capability-library.ts)：文件系统能力扫描、版本解析、搜索、配方读写、验证与编译。
 - [capability-bundle.ts](../src/runtime/capability-bundle.ts)：定义绑定的不可变能力包、静态 policy digest 与 operation overlay。
-- [context.ts](../src/core/context.ts)：Continue/Fresh/Fork 解析、handoff 冻结、上下文 lineage 与预算作用域。
+- [context.ts](../src/core/context.ts)：Continue/Fresh/Fork 解析、handoff 冻结与上下文 lineage。
+- [budget-ledger.ts](../src/core/budget-ledger.ts)：预算作用域与实例镜像、reservation、in-flight、usage commit、cap 改写与模型使用记录。
 - [model-selection.ts](../src/core/model-selection.ts)：模型等级选择、审查模型排除与独立审查就绪判断。
 - [operation-lifecycle.ts](../src/core/operation-lifecycle.ts)：operation 的 intent、dispatch、reconcile、settle、阻塞、未知用量与返工状态机。
 - [program-adapters.ts](../src/core/program-adapters.ts)：`graph.verify`、`graph.command` 与人工检查程序节点。

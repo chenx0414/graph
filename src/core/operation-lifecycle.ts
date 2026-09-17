@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
-import { addInstanceBudget, addInstanceUsage } from './context.ts';
+import {
+  addBudget,
+  commitUsage,
+  recordCurrentModelUse,
+  releaseOperationReservation,
+  reserveOperation,
+} from './budget-ledger.ts';
 import { conversationForTask, pendingMessages, recordConversationOutput, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
@@ -86,18 +92,6 @@ export interface OperationLifecycleHooks {
 
 function operationFrom(row: OperationDbRow) {
   return JSON.parse(row.spec) as Operation;
-}
-
-function addKnownUsage(store: TaskStore, instanceId: string | null, total: number) {
-  if (!instanceId) return;
-  if (total > 0) addInstanceUsage(store, instanceId, total);
-  const account = store.db.prepare('SELECT model,models_used FROM instances WHERE id=?')
-    .get(instanceId) as { model: string | null; models_used: string };
-  const usedModels = JSON.parse(account.models_used) as string[];
-  if (account.model && !usedModels.includes(account.model)) {
-    store.db.prepare('UPDATE instances SET models_used=? WHERE id=?')
-      .run(canonicalJson([...usedModels, account.model]), instanceId);
-  }
 }
 
 function tokenTotal(usage: TokenUsage) {
@@ -207,9 +201,10 @@ export class OperationLifecycle {
         operation.instanceId,
         operation.generation,
         canonicalJson(operation),
-        input.reservation,
+        0,
         operation.activationId,
       );
+      reserveOperation(this.store, operation.id, input.reservation);
       input.afterIntent?.(operation);
       this.store.db.prepare("UPDATE activations SET input_versions=?,state='preparing' WHERE id=?")
         .run(canonicalJson(operation.inputVersions), operation.activationId);
@@ -223,8 +218,9 @@ export class OperationLifecycle {
   private markNotSent(row: OperationDbRow, options: { resetNode: boolean; eventReason?: string }) {
     const now = Date.now();
     this.store.db.prepare(`UPDATE operations
-      SET state='not_sent',reserved=0,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
+      SET state='not_sent',worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
       WHERE id=?`).run(now, row.id);
+    releaseOperationReservation(this.store, row.id);
     if (options.resetNode) {
       this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
     }
@@ -346,10 +342,14 @@ export class OperationLifecycle {
       const total = known.reduce((sum, value) => sum + (value ? tokenTotal(value) : 0), 0);
       const state = invocations.length ? 'interrupted' : 'not_sent';
       this.store.db.prepare(`UPDATE operations
-        SET state=?,reserved=0,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
+        SET state=?,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
         WHERE id=?`).run(state, Date.now(), operation.id);
+      releaseOperationReservation(this.store, operation.id);
       if (state === 'interrupted') {
-        if (!unknown && total > 0) addKnownUsage(this.store, operation.instanceId, total);
+        if (!unknown && total > 0 && operation.instanceId) {
+          commitUsage(this.store, operation.instanceId, total);
+          recordCurrentModelUse(this.store, operation.instanceId);
+        }
         this.store.event(operation.taskId, 'operation.interrupted', {
           operationId: operation.id,
           reason: error.message,
@@ -444,7 +444,7 @@ export class OperationLifecycle {
         }
         const instance = this.store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?')
           .get(taskId, question.node_id) as { id: string };
-        addInstanceBudget(this.store, instance.id, answer.tokens);
+        addBudget(this.store, instance.id, answer.tokens);
       } else if (question.kind === 'unknown_usage' && (answer.type === 'usage' || answer.type === 'reconcile_usage')) {
         this.answerUnknownUsage(question.operation_id!, answer, models);
       } else if (question.kind === 'permission' && answer.type === 'grant') {
@@ -564,7 +564,10 @@ export class OperationLifecycle {
         };
       }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     const total = tokenTotal(known);
-    if (total > 0) addKnownUsage(this.store, row.instance_id, total);
+    if (total > 0 && row.instance_id) {
+      commitUsage(this.store, row.instance_id, total);
+      recordCurrentModelUse(this.store, row.instance_id);
+    }
     this.store.event(row.task_id, 'operation.usage_reconciled', {
       operationId: row.id,
       decision: answer.type === 'usage' ? 'recorded' : 'usage_unavailable',
@@ -723,9 +726,13 @@ export class OperationLifecycle {
       );
     }
     this.store.db.prepare(`UPDATE operations
-      SET state='succeeded',reserved=0,worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?)
+      SET state='succeeded',worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?)
       WHERE id=?`).run(canonicalJson(result), canonicalJson(usage), Date.now(), operation.id);
-    addKnownUsage(this.store, operation.instanceId, total);
+    releaseOperationReservation(this.store, operation.id);
+    if (operation.instanceId) {
+      commitUsage(this.store, operation.instanceId, total);
+      recordCurrentModelUse(this.store, operation.instanceId);
+    }
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'")
       .run(canonicalJson({ result }), operation.id);
     closeUserWaitForOperation(this.store, operation.id);

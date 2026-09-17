@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { budgetScopeView, ensureBudgetScope, shareBudgetScope } from './budget-ledger.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import {
   RuntimeError,
@@ -18,9 +19,6 @@ interface InstanceContextRow {
   node_id: string;
   model: string | null;
   definition_version: string | null;
-  budget: number;
-  used: number;
-  unlimited: number;
   budget_scope_id: string | null;
   session_id: string | null;
   session_file: string | null;
@@ -84,7 +82,7 @@ export function validateContextRequest(context: ContextRequest | undefined) {
 }
 
 function instanceContextRow(store: TaskStore, taskId: string, nodeId: string) {
-  return store.db.prepare(`SELECT i.id,i.node_id,i.model,i.definition_version,i.budget,i.used,i.unlimited,i.budget_scope_id,
+  return store.db.prepare(`SELECT i.id,i.node_id,i.model,i.definition_version,i.budget_scope_id,
       s.session_id,s.session_file
     FROM instances i LEFT JOIN node_sessions s ON s.instance_id=i.id
     WHERE i.task_id=? AND i.node_id=?`).get(taskId, nodeId) as InstanceContextRow | undefined;
@@ -94,20 +92,6 @@ function bindingRow(store: TaskStore, instanceId: string) {
   return store.db.prepare(`SELECT id,mode,source_instance_id,source_session_id,source_session_file,budget_scope_id,
       model_policy_digest,tool_policy_digest FROM agent_context_bindings WHERE instance_id=?`)
     .get(instanceId) as BindingRow | undefined;
-}
-
-function createBudgetScope(store: TaskStore, taskId: string, instance: InstanceContextRow) {
-  const id = randomUUID();
-  store.db.prepare(`INSERT INTO budget_scopes(id,task_id,root_task_id,owner_instance_id,limit_tokens,unlimited,used_tokens,created_at)
-    VALUES(?,?,?,?,?,?,?,?)`)
-    .run(id, taskId, taskId, instance.id, instance.unlimited ? null : instance.budget, instance.unlimited, instance.used, Date.now());
-  store.db.prepare('UPDATE instances SET budget_scope_id=? WHERE id=?').run(id, instance.id);
-  return id;
-}
-
-export function ensureBudgetScope(store: TaskStore, taskId: string, instance: InstanceContextRow) {
-  if (instance.budget_scope_id) return instance.budget_scope_id;
-  return createBudgetScope(store, taskId, instance);
 }
 
 function inferPurpose(spec: NodeSpec, review: boolean): ContextPurpose {
@@ -132,7 +116,7 @@ function sourceNodeSpec(store: TaskStore, taskId: string, sourceNodeId: string) 
 }
 
 function resolveFresh(store: TaskStore, taskId: string, instance: InstanceContextRow, request: ContextRequest, purpose: ContextPurpose, independence: ContextIndependence, review: boolean) {
-  const scopeId = ensureBudgetScope(store, taskId, instance);
+  const scopeId = ensureBudgetScope(store, taskId, instance.id);
   return {
     mode: 'fresh' as const,
     purpose,
@@ -184,7 +168,7 @@ export function resolveAgentContext(store: TaskStore, input: {
   // session may exist on the node after rework, but it must never become the
   // implementation lineage or the next round's only checkout of the source.
   if (instance.session_id && !input.review) {
-    const scopeId = existingBinding?.budget_scope_id ?? ensureBudgetScope(store, input.taskId, instance);
+    const scopeId = existingBinding?.budget_scope_id ?? ensureBudgetScope(store, input.taskId, instance.id);
     return {
       mode: 'continue',
       purpose,
@@ -231,8 +215,9 @@ export function resolveAgentContext(store: TaskStore, input: {
   if (!request.rebrand && (source.model !== instance.model || source.definition_version !== instance.definition_version)) {
     throw new RuntimeError('context_rejected', `Fork from ${sourceNodeId} changes model or Agent definition; set context.rebrand=true to allow it`);
   }
-  const sourceScopeId = ensureBudgetScope(store, input.taskId, source);
-  store.db.prepare('UPDATE instances SET budget_scope_id=?,parent_instance_id=? WHERE id=?').run(sourceScopeId, source.id, instance.id);
+  const sourceScopeId = ensureBudgetScope(store, input.taskId, source.id);
+  shareBudgetScope(store, instance.id, sourceScopeId);
+  store.db.prepare('UPDATE instances SET parent_instance_id=? WHERE id=?').run(source.id, instance.id);
   return {
     mode: 'fork',
     purpose,
@@ -388,14 +373,12 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
   const row = store.db.prepare(`SELECT b.mode,b.source_instance_id,b.source_session_id,b.source_session_file,b.source_leaf_id,
       b.source_context_digest,b.child_context_digest,b.capability_digest,b.model_policy_digest,b.tool_policy_digest,
       b.budget_scope_id,b.created_at,
-      s.limit_tokens,s.unlimited,s.used_tokens,
       r.selected_mode,r.requested_purpose,r.requested_facts,r.independence,r.reason_code,r.operation_id,
       r.constraints_digest,r.review_policy,
       h.digest AS handoff_digest,h.summary AS handoff_summary,
       si.node_id AS source_node_id
     FROM instances i
     LEFT JOIN agent_context_bindings b ON b.instance_id=i.id
-    LEFT JOIN budget_scopes s ON s.id=b.budget_scope_id
     LEFT JOIN context_resolutions r ON r.id=(SELECT id FROM context_resolutions WHERE binding_id=b.id ORDER BY created_at DESC,rowid DESC LIMIT 1)
     LEFT JOIN context_handoffs h ON h.id=(SELECT id FROM context_handoffs WHERE operation_id=r.operation_id ORDER BY rowid DESC LIMIT 1)
     LEFT JOIN instances si ON si.id=b.source_instance_id
@@ -412,9 +395,6 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
       tool_policy_digest: string | null;
       budget_scope_id: string | null;
       created_at: number | null;
-      limit_tokens: number | null;
-      unlimited: number | null;
-      used_tokens: number | null;
       selected_mode: AgentContextMode | null;
       requested_purpose: string | null;
       requested_facts: string | null;
@@ -449,116 +429,6 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
     reviewPolicy: row.review_policy ? JSON.parse(row.review_policy) as unknown : null,
     handoffDigest: row.handoff_digest,
     handoffSummary: row.handoff_summary,
-    budgetScope: row.budget_scope_id ? {
-      id: row.budget_scope_id,
-      used: row.used_tokens ?? 0,
-      limit: row.unlimited ? null : row.limit_tokens,
-      unlimited: Boolean(row.unlimited),
-    } : null,
+    budgetScope: row.budget_scope_id ? budgetScopeView(store, row.budget_scope_id) : null,
   };
-}
-
-export interface BudgetSnapshot {
-  instanceId: string;
-  budget: number;
-  used: number;
-  unlimited: boolean;
-  reserved: number;
-  scopeId: string | null;
-  scopeLimit: number | null;
-  scopeUsed: number;
-  scopeUnlimited: boolean;
-}
-
-function tokenTotal(usage: { input: number; output: number; cacheRead: number; cacheWrite: number }) {
-  return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
-}
-
-export function budgetSnapshot(store: TaskStore, instanceId: string): BudgetSnapshot {
-  const instance = store.db.prepare('SELECT id,budget,used,unlimited,budget_scope_id FROM instances WHERE id=?')
-    .get(instanceId) as { id: string; budget: number; used: number; unlimited: number; budget_scope_id: string | null } | undefined;
-  if (!instance) throw new RuntimeError('not_found', 'Unknown instance budget');
-  const { reserved } = store.db.prepare('SELECT COALESCE(SUM(reserved),0) AS reserved FROM operations WHERE instance_id=?').get(instanceId) as { reserved: number };
-  const scope = instance.budget_scope_id
-    ? store.db.prepare('SELECT limit_tokens,unlimited,used_tokens FROM budget_scopes WHERE id=?').get(instance.budget_scope_id) as { limit_tokens: number | null; unlimited: number; used_tokens: number } | undefined
-    : undefined;
-  return {
-    instanceId,
-    budget: instance.budget,
-    used: instance.used,
-    unlimited: Boolean(instance.unlimited),
-    reserved,
-    scopeId: instance.budget_scope_id,
-    scopeLimit: scope?.unlimited ? null : scope?.limit_tokens ?? null,
-    scopeUsed: scope?.used_tokens ?? 0,
-    scopeUnlimited: scope ? Boolean(scope.unlimited) : true,
-  };
-}
-
-export function scopeInFlightUsage(store: TaskStore, scopeId: string) {
-  const rows = store.db.prepare(`SELECT i.usage FROM invocations i
-    JOIN operations o ON o.id=i.operation_id
-    JOIN instances n ON n.id=i.instance_id
-    WHERE n.budget_scope_id=? AND o.state IN ('intent','dispatched','unknown') AND i.usage IS NOT NULL`).all(scopeId) as { usage: string }[];
-  return rows.reduce((sum, row) => sum + tokenTotal(JSON.parse(row.usage) as { input: number; output: number; cacheRead: number; cacheWrite: number }), 0);
-}
-
-export function scopeReserved(store: TaskStore, scopeId: string) {
-  return (store.db.prepare(`SELECT COALESCE(SUM(o.reserved),0) AS reserved FROM operations o
-    JOIN instances i ON i.id=o.instance_id WHERE i.budget_scope_id=?`).get(scopeId) as { reserved: number }).reserved;
-}
-
-export function assertWithinBudget(store: TaskStore, instanceId: string, reservation = 0) {
-  const snapshot = budgetSnapshot(store, instanceId);
-  if (snapshot.scopeId) {
-    if (snapshot.scopeUnlimited) return;
-    const total = snapshot.scopeUsed + scopeInFlightUsage(store, snapshot.scopeId) + scopeReserved(store, snapshot.scopeId) + reservation;
-    if (total > (snapshot.scopeLimit ?? 0) || (reservation === 0 && total >= (snapshot.scopeLimit ?? 0))) {
-      throw new RuntimeError('budget', 'Shared context budget exhausted');
-    }
-    return;
-  }
-  if (!snapshot.unlimited && (snapshot.used + snapshot.reserved + reservation > snapshot.budget
-    || (reservation === 0 && snapshot.used + snapshot.reserved >= snapshot.budget))) {
-    throw new RuntimeError('budget', 'Token budget exhausted');
-  }
-}
-
-export function addInstanceUsage(store: TaskStore, instanceId: string, total: number) {
-  if (!Number.isSafeInteger(total) || total < 0) throw new RuntimeError('invalid_input', 'Usage total must be a nonnegative integer');
-  store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, instanceId);
-  const scope = store.db.prepare('SELECT budget_scope_id FROM instances WHERE id=?').get(instanceId) as { budget_scope_id: string | null } | undefined;
-  if (scope?.budget_scope_id) store.db.prepare('UPDATE budget_scopes SET used_tokens=used_tokens+? WHERE id=?').run(total, scope.budget_scope_id);
-}
-
-export function setInstanceBudget(store: TaskStore, instanceId: string, tokens: number | null) {
-  if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
-  const row = store.db.prepare('SELECT budget_scope_id FROM instances WHERE id=?').get(instanceId) as { budget_scope_id: string | null } | undefined;
-  if (!row) throw new RuntimeError('not_found', 'Unknown instance budget');
-  if (row.budget_scope_id) {
-    const scope = store.db.prepare(`SELECT s.owner_instance_id,
-        (SELECT COUNT(*) FROM instances member WHERE member.budget_scope_id=s.id) AS members
-      FROM budget_scopes s WHERE s.id=?`).get(row.budget_scope_id) as { owner_instance_id: string | null; members: number } | undefined;
-    if (scope && scope.members > 1 && scope.owner_instance_id !== instanceId) {
-      throw new RuntimeError('shared_budget_owner_required', 'Only the shared budget owner can change the scope cap');
-    }
-  }
-  store.db.prepare('UPDATE instances SET budget=?,unlimited=? WHERE id=?').run(tokens ?? 0, tokens === null ? 1 : 0, instanceId);
-  if (row.budget_scope_id) {
-    store.db.prepare('UPDATE budget_scopes SET limit_tokens=?,unlimited=? WHERE id=?').run(tokens, tokens === null ? 1 : 0, row.budget_scope_id);
-  }
-}
-
-export function addInstanceBudget(store: TaskStore, instanceId: string, tokens: number) {
-  if (!Number.isSafeInteger(tokens) || tokens <= 0) throw new RuntimeError('invalid_input', 'A positive token increment is required');
-  const row = store.db.prepare('SELECT budget,unlimited,budget_scope_id FROM instances WHERE id=?')
-    .get(instanceId) as { budget: number; unlimited: number; budget_scope_id: string | null } | undefined;
-  if (!row) throw new RuntimeError('not_found', 'Unknown instance budget');
-  if (row.unlimited) throw new RuntimeError('invalid_answer', 'An unlimited instance has no budget question to add to');
-  if (!Number.isSafeInteger(row.budget + tokens)) throw new RuntimeError('invalid_answer', 'Budget exceeds the supported range');
-  store.db.prepare('UPDATE instances SET budget=budget+? WHERE id=?').run(tokens, instanceId);
-  if (row.budget_scope_id) {
-    const scope = store.db.prepare('SELECT limit_tokens,unlimited FROM budget_scopes WHERE id=?').get(row.budget_scope_id) as { limit_tokens: number | null; unlimited: number };
-    if (!scope.unlimited) store.db.prepare('UPDATE budget_scopes SET limit_tokens=COALESCE(limit_tokens,0)+? WHERE id=?').run(tokens, row.budget_scope_id);
-  }
 }

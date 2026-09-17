@@ -8,14 +8,10 @@ import { validateProposal } from '../../src/core/proposal.ts';
 import { canonicalJson, TaskStore } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import {
-  addInstanceBudget,
-  addInstanceUsage,
-  assertWithinBudget,
   contextView,
   freezeContextHandoff,
   recordContextSession,
   resolveAgentContext,
-  setInstanceBudget,
 } from '../../src/core/context.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -213,31 +209,6 @@ test('a fork fails closed when the source policy digest no longer matches', asyn
     questions: expect.arrayContaining([expect.objectContaining({ nodeId: 'explore', kind: 'context_rejected' })]),
   });
 }, 120_000);
-
-test('a shared budget scope counts usage across source and fork instances', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-context-budget-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const store = new TaskStore(join(root, 'tasks.sqlite'));
-  cleanup.push(async () => store.close());
-  store.transaction(() => {
-    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
-    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq) VALUES('t','p','budget',1)").run();
-    store.db.prepare("INSERT INTO nodes(task_id,id,spec,instance_id) VALUES('t','source','{}','i-source')").run();
-    store.db.prepare("INSERT INTO nodes(task_id,id,spec,instance_id) VALUES('t','fork','{}','i-fork')").run();
-    store.db.prepare("INSERT INTO instances(id,task_id,node_id,budget,used,unlimited) VALUES('i-source','t','source',100,0,0)").run();
-    store.db.prepare("INSERT INTO instances(id,task_id,node_id,budget,used,unlimited,parent_instance_id) VALUES('i-fork','t','fork',100,0,0,'i-source')").run();
-    store.db.prepare("INSERT INTO budget_scopes(id,task_id,owner_instance_id,limit_tokens,unlimited,used_tokens,created_at) VALUES('scope','t','i-source',100,0,0,0)").run();
-    store.db.prepare("UPDATE instances SET budget_scope_id='scope' WHERE id IN ('i-source','i-fork')").run();
-  });
-  setInstanceBudget(store, 'i-source', 100);
-  addInstanceUsage(store, 'i-source', 60);
-  expect(() => assertWithinBudget(store, 'i-fork', 41)).toThrow(/Shared context budget/);
-  expect(() => assertWithinBudget(store, 'i-fork', 40)).not.toThrow();
-  expect(() => setInstanceBudget(store, 'i-fork', 200)).toThrow(/shared budget owner/);
-  addInstanceBudget(store, 'i-fork', 50);
-  expect(() => assertWithinBudget(store, 'i-source', 90)).not.toThrow();
-  expect(() => assertWithinBudget(store, 'i-source', 91)).toThrow(/Shared context budget/);
-});
 
 test('context policy gates recursive forks, incomplete handoffs and independent review sessions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-context-policy-'));

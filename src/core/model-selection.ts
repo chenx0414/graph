@@ -1,5 +1,6 @@
 import type { Catalog } from '../catalog/catalog.ts';
 import { selectModel, type ModelEntry } from '../catalog/models.ts';
+import { modelsUsed } from './budget-ledger.ts';
 import { loadGraph } from './graph.ts';
 import type { TaskStore } from './store.ts';
 import type { NodeSpec } from './types.ts';
@@ -37,9 +38,9 @@ export function implementerModels(store: TaskStore, spec: NodeSpec, node: Execut
         FROM invocations i JOIN operations o ON o.id=i.operation_id
         WHERE o.task_id=? AND o.node_id=? AND i.model IS NOT NULL`).all(node.task_id, id) as { model: string }[];
       models.push(...calls.map(call => call.model));
-      const row = store.db.prepare('SELECT models_used FROM instances WHERE task_id=? AND node_id=?')
-        .get(node.task_id, id) as { models_used: string } | undefined;
-      if (row) models.push(...(JSON.parse(row.models_used) as string[]));
+      const row = store.db.prepare('SELECT instance_id FROM nodes WHERE task_id=? AND id=?')
+        .get(node.task_id, id) as { instance_id: string | null } | undefined;
+      if (row?.instance_id) models.push(...modelsUsed(store, row.instance_id));
       return;
     }
     for (const dependency of graph.plan.dependencies.get(id) ?? []) walk(dependency);

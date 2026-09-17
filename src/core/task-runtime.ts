@@ -5,7 +5,8 @@ import { join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
 import { appendMessage, conversationForTask, conversationRow, deliverMessages, listMessages, pendingMessages, type MessageRow } from './conversation.ts';
 import { Execution } from './execution.ts';
-import { contextView, setInstanceBudget } from './context.ts';
+import { contextView } from './context.ts';
+import { setBudget } from './budget-ledger.ts';
 import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
@@ -405,7 +406,7 @@ export async function openTaskRuntime(options: {
           const receipt = store.command('user', input.requestId, { type: 'set_budget', taskId, nodeId: input.nodeId, tokens: input.tokens }, () => {
             const instance = store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?').get(taskId, input.nodeId) as { id: string } | undefined;
             if (!instance) throw new RuntimeError('not_found', 'Unknown agent node');
-            setInstanceBudget(store, instance.id, input.tokens);
+            setBudget(store, instance.id, input.tokens);
             // An explicit policy change resolves the budget question that
             // blocked this node. Permission and unknown-usage questions stay.
             const resolved = store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'")

@@ -1,7 +1,8 @@
 import { isAbsolute } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
+import { assertWithinBudget, recordModelUse } from './budget-ledger.ts';
 import { conversationDigest, conversationForTask, deliverMessages, pendingMessages } from './conversation.ts';
-import { assertWithinBudget, digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
+import { digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
 import { loadGraph } from './graph.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
@@ -275,9 +276,7 @@ export class Execution {
       // needs the model this implementer was actually bound to. Later config
       // edits must never rewrite this record.
       const identity = selected.modelId ?? selected.id;
-      const account = this.store.db.prepare('SELECT models_used FROM instances WHERE id=?').get(node.instance_id) as { models_used: string };
-      const usedModels = JSON.parse(account.models_used) as string[];
-      if (!usedModels.includes(identity)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...usedModels, identity]), node.instance_id);
+      recordModelUse(this.store, node.instance_id, identity);
       if (spec.model && spec.model !== selected.id) this.store.event(node.task_id, 'model.switched', { nodeId: node.id, from: spec.model, to: selected.id, instanceId: node.instance_id });
     }
     const baseGrants = JSON.parse((this.store.db.prepare('SELECT grants FROM projects WHERE id=?').get(this.store.task(node.task_id).project_id) as { grants: string }).grants) as string[];

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
-import { assertWithinBudget } from '../core/context.ts';
+import { assertWithinBudget } from '../core/budget-ledger.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
 import { openUserWait } from '../core/time-ledger.ts';
