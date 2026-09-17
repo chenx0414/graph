@@ -128,7 +128,7 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 
 ## 能力安装与权限落实
 
-能力可以自主搜索和安装，不新增逐次人工审批。安装产物进入版本化能力库，Agent 定义引用准确版本，已运行实例继续原定义；主管不在正式后台进程直接加载第三方扩展。生产实例按定义版本加载绑定能力：Skill 只读进入系统提示，本地 stdio MCP 经真实客户端暴露工具，扩展由自带的受限 worker 按最小 `register(api)` 接口加载，远程 MCP 只放行运行时授予的域名；三类调用都经调用门。远程 MCP 的每次工具执行再校验任务预授予 `mcp:<capabilityId>:<toolName>`：域名放行、工具名、描述与 MCP 自报的只读提示都不构成操作授权，未授权时拒绝并把具体 grant 作为 permission 问题等待使用者。网络资料检索由受控读取 broker 提供，域名白名单、拒绝重定向、只收文本并限制大小。见 [ADR 0008](adr/0008-definition-bound-capability-loading.md)。
+能力可以自主搜索和安装，不新增逐次人工审批。安装产物进入版本化能力库，Agent 定义引用准确版本，已运行实例继续原定义；主管不在正式后台进程直接加载第三方扩展。生产实例按定义版本装配能力包：Skill、Pi extension、`agent.md` 与生成的 `tool.md` 注入 Agent 专属 Pi 子进程；模型、命令、MCP 与 Graph extension 的真实执行仍由宿主持有并通过调用门。本地 stdio MCP 经真实客户端暴露代理工具，Graph extension 由受限 worker 按最小 `register(api)` 接口加载，远程 MCP 只放行运行时授予的域名；各类调用都经调用门。远程 MCP 的每次工具执行再校验任务预授予 `mcp:<capabilityId>:<toolName>`：域名放行、工具名、描述与 MCP 自报的只读提示都不构成操作授权，未授权时拒绝并把具体 grant 作为 permission 问题等待使用者。网络资料检索由受控读取 broker 提供，域名白名单、拒绝重定向、只收文本并限制大小。见 [ADR 0008](adr/0008-definition-bound-capability-loading.md) 与 [ADR 0011](adr/0011-isolated-pi-process-capability-bundles.md)。
 
 正式数据库、任务授权和供应商凭据由后台持有；Pi worker、MCP 进程和安装脚本在实际受限的执行环境内运行。模型请求经 broker，信息检索经受控读取 broker，外部写操作经带范围授权的工具。域名白名单、独立 cwd 和普通子进程都不足以证明上述约束成立。受限执行边界在每次派发前扫描写授权内已存在的 `.git` 条目（含 worktree 链接文件），并以解析后的 literal/subpath 规则拒绝其写入，普通命令与 MCP 共用；只读 Git 子命令以具体的 Command Line Tools 二进制运行。
 

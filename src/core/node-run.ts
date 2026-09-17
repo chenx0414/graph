@@ -32,12 +32,27 @@ export function appendNodeEntry(store: TaskStore, input: NodeEntryInput) {
   return row.seq;
 }
 
-export interface CapabilityLoadFact { id: string; version: string; kind: string | null; loaded: boolean; executable: boolean; reason: string | null }
+export interface CapabilityLoadFact {
+  id: string;
+  version: string;
+  kind: string | null;
+  loaded: boolean;
+  executable: boolean;
+  reason: string | null;
+  name?: string;
+  description?: string;
+  path?: string;
+  tools?: string[];
+}
 
-export function recordCapabilityLoad(store: TaskStore, input: { taskId: string; nodeId: string; instanceId?: string | null; operationId?: string | null; readOnly: boolean; report: CapabilityLoadFact[] }) {
+export function recordCapabilityLoad(store: TaskStore, input: { taskId: string; nodeId: string; instanceId?: string | null; operationId?: string | null; readOnly: boolean; report: CapabilityLoadFact[]; digest?: string }) {
   store.db.prepare(`INSERT INTO node_capabilities(task_id,node_id,instance_id,operation_id,read_only,loaded,created_at)
     VALUES(?,?,?,?,?,?,?)`)
-    .run(input.taskId, input.nodeId, input.instanceId ?? null, input.operationId ?? null, input.readOnly ? 1 : 0, canonicalJson(input.report), Date.now());
+    .run(input.taskId, input.nodeId, input.instanceId ?? null, input.operationId ?? null, input.readOnly ? 1 : 0, canonicalJson({
+      version: 1,
+      digest: input.digest ?? null,
+      facts: input.report,
+    }), Date.now());
 }
 
 export function recordNodeSession(store: TaskStore, instanceId: string, sessionId: string, sessionFile: string | null) {
@@ -86,17 +101,31 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   // Capability view: definition binding plus the actual load fact recorded for
   // this node. No record means "not recorded", never a guessed true.
   const capabilities = (() => {
-    if (!spec.definitionVersion) return [];
+    if (!spec.definitionVersion) return { facts: [], digest: null };
     const match = /^(.*)@(\d+)$/.exec(spec.definitionVersion);
-    if (!match) return [];
+    if (!match) return { facts: [], digest: null };
     const definition = store.db.prepare('SELECT spec FROM definitions WHERE id=? AND version=?').get(match[1] ?? '', Number(match[2] ?? 0)) as { spec: string } | undefined;
-    if (!definition) return [];
-    const parsed = JSON.parse(definition.spec) as { capabilities?: { id: string; version: string }[] };
+    if (!definition) return { facts: [], digest: null };
+    const parsed = JSON.parse(definition.spec) as {
+      capabilities?: { id: string; version: string }[];
+      prompts?: { agent?: { id: string; version: string }; tool?: { id: string; version: string } };
+    };
     const factRow = store.db.prepare('SELECT loaded,read_only FROM node_capabilities WHERE task_id=? AND node_id=? ORDER BY seq DESC LIMIT 1').get(taskId, nodeId) as { loaded: string; read_only: number } | undefined;
     const taskPhase = store.task(taskId).phase;
     const facts = new Map<string, CapabilityLoadFact>();
-    if (factRow) for (const fact of JSON.parse(factRow.loaded) as CapabilityLoadFact[]) facts.set(`${fact.id}@${fact.version}`, fact);
-    return (parsed.capabilities ?? []).map(bound => {
+    let capabilityDigest: string | null = null;
+    if (factRow) {
+      const loaded = JSON.parse(factRow.loaded) as CapabilityLoadFact[] | { digest?: string | null; facts?: CapabilityLoadFact[] };
+      const loadedFacts = Array.isArray(loaded) ? loaded : loaded.facts ?? [];
+      capabilityDigest = Array.isArray(loaded) ? null : loaded.digest ?? null;
+      for (const fact of loadedFacts) facts.set(`${fact.id}@${fact.version}`, fact);
+    }
+    const bindings = [
+      ...(parsed.capabilities ?? []),
+      ...(parsed.prompts?.agent ? [parsed.prompts.agent] : []),
+      ...(parsed.prompts?.tool ? [parsed.prompts.tool] : []),
+    ];
+    return { facts: bindings.map(bound => {
       const catalogRecord = store.db.prepare('SELECT kind,source FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as { kind: string; source: string } | undefined;
       const fact = facts.get(`${bound.id}@${bound.version}`);
       // Authoritative current-state derivation for the one case the loading
@@ -128,7 +157,7 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
         state: fact.loaded ? (fact.executable ? '可执行' : '已加载') : '禁用',
         reason: fact.reason,
       };
-    });
+    }), digest: capabilityDigest };
   })();
   const instance = node.instance_id
     ? store.db.prepare('SELECT id,model,definition_version,used,budget,unlimited,models_used FROM instances WHERE id=?').get(node.instance_id) as
@@ -179,7 +208,8 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   };
   return {
     taskId, nodeId,
-    capabilities,
+    capabilities: capabilities.facts,
+    capabilityDigest: capabilities.digest,
     node: { id: node.id, kind: spec.kind, action: spec.action, role: spec.role ?? null, status: node.status, activationId: node.activation_id, outputVersion: node.output_version, stallCount: node.stall_count, ...(spec.definitionVersion ? { definitionVersion: spec.definitionVersion } : {}), ...(spec.input !== undefined ? { input: spec.input } : {}) },
     instance: instance ? {
       id: instance.id, model: instance.model, definitionVersion: instance.definition_version, used: instance.used,

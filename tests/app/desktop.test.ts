@@ -46,7 +46,8 @@ describe('desktop app paths', () => {
   test('resource libraries resolve to allowlisted local storage roots', () => {
     expect(resourceDirectory('/state', 'skills')).toBe('/state/capabilities');
     expect(resourceDirectory('/state', 'mcp')).toBe('/state/capabilities');
-    expect(resourceDirectory('/state', 'agent-md')).toBe('/state/agent-md');
+    expect(resourceDirectory('/state', 'pi-extensions')).toBe('/state/capabilities');
+    expect(resourceDirectory('/state', 'agent-md')).toBe('/state/capabilities');
   });
 });
 

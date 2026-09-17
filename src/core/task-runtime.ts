@@ -11,7 +11,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { talentDetail, talentExperience } from './talent.ts';
-import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
+import { Catalog, type CapabilityKind, type DefinitionSpec } from '../catalog/catalog.ts';
 import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { GitIntegration } from '../git/integration.ts';
@@ -1226,7 +1226,7 @@ export async function openTaskRuntime(options: {
       preset(id: string) { ensureOpen(); return catalog.preset(id); },
       definitionSpec(id: string, version: number) { ensureOpen(); return catalog.definition(`${id}@${version}`); },
       recordPreset(id: string, version: string, hash: string, detail: Json) { ensureOpen(); return catalog.recordPreset(id, version, hash, detail); },
-      async install(input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) {
+      async install(input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) {
         ensureOpen();
         const payload = { type: 'install', id: input.id, kind: input.kind, source: input.source, version: input.version };
         const encoded = canonicalJson(payload);
@@ -1273,7 +1273,7 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         const row = store.db.prepare('SELECT * FROM installations WHERE capability_id=? ORDER BY rowid DESC LIMIT 1').get(id) as { id: string; state: string; spec: string } | undefined;
         if (!row || row.state === 'succeeded') return catalog.capability(id);
-        const spec = JSON.parse(row.spec) as { source: string; version: string; kind: 'skill' | 'mcp' | 'extension' };
+        const spec = JSON.parse(row.spec) as { source: string; version: string; kind: CapabilityKind };
         return this.install({ id, kind: spec.kind, source: spec.source, version: spec.version, requestId: `reconcile-${row.id}` });
       },
     },

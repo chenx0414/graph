@@ -6,7 +6,7 @@ import type { Api, Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
-  type ModelRuntime, type ToolDefinition, type AgentSessionEvent,
+  type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension,
 } from '@earendil-works/pi-coding-agent';
 import type { SendGate } from './controlled-openai.ts';
 
@@ -23,6 +23,10 @@ export function externallyGated<T extends ToolDefinition>(tool: T): T {
   return Object.assign(tool, { [EXTERNALLY_GATED]: true });
 }
 
+export function isExternallyGated(tool: ToolDefinition) {
+  return Boolean((tool as { [EXTERNALLY_GATED]?: boolean })[EXTERNALLY_GATED]);
+}
+
 export interface PiInstanceOptions {
   binding: InstanceBinding;
   workspace: string;
@@ -33,6 +37,14 @@ export interface PiInstanceOptions {
   thinkingLevel?: ThinkingLevel;
   tools?: ToolDefinition[];
   skillPaths?: string[];
+  piExtensionPaths?: string[];
+  piExtensionTools?: string[];
+  extensionFactories?: InlineExtension[];
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  hideSkillDescriptions?: boolean;
+  activateExtensionTools?: boolean;
+  capabilityDigest?: string;
   broker?: SendGate;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
   /** A conversation master may bind a project after its first turn; the
@@ -42,12 +54,15 @@ export interface PiInstanceOptions {
 }
 
 interface Manifest {
-  version: 1;
+  version: 1 | 2;
   binding: InstanceBinding;
   workspace: string;
   sessionFile: string;
   sessionId: string;
+  capabilityDigest?: string;
 }
+
+const BUILTIN_TOOL_NAMES = new Set(['read', 'bash', 'edit', 'write', 'ls', 'find', 'grep', 'powershell']);
 
 async function writeAtomic(path: string, value: string) {
   const pending = `${path}.pending`;
@@ -66,7 +81,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  if (manifest && (manifest.version !== 1 ||
+  if (manifest && ((manifest.version !== 1 && manifest.version !== 2) ||
     (manifest.workspace !== workspace && !options.allowWorkspaceChange) ||
     manifest.binding.instanceId !== options.binding.instanceId ||
     manifest.binding.nodeId !== options.binding.nodeId ||
@@ -88,6 +103,9 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const sessionFile = manager.getSessionFile();
   if (!sessionFile) throw new Error('Expected a persistent Pi session');
   if (manifest && manager.getSessionId() !== manifest.sessionId) throw new Error('Persisted session identity changed');
+  if (manifest?.capabilityDigest && options.capabilityDigest && manifest.capabilityDigest !== options.capabilityDigest) {
+    throw new Error(`Persisted capability bundle does not match the Agent definition (${manifest.capabilityDigest} != ${options.capabilityDigest})`);
+  }
   if (!manifest) {
     // Bootstrap the public JSONL header, then reopen it through Pi's public API.
     // Pi now owns all subsequent appends, including the first user message.
@@ -101,12 +119,22 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
     ...(options.skillPaths?.length ? { additionalSkillPaths: options.skillPaths } : {}),
+    ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
+    ...(options.extensionFactories?.length ? { extensionFactories: options.extensionFactories } : {}),
+    ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+    ...(options.appendSystemPrompt ? { appendSystemPrompt: [options.appendSystemPrompt] } : {}),
+    ...(options.hideSkillDescriptions ? {
+      skillsOverride: base => ({
+        ...base,
+        skills: base.skills.map(skill => ({ ...skill, disableModelInvocation: true })),
+      }),
+    } : {}),
     noExtensions: true, noSkills: true, noPromptTemplates: true,
     noThemes: true, noContextFiles: true,
   });
   await loader.reload();
-  if (options.tools?.length && !options.broker) throw new Error('Tools require a call broker');
-  const customTools = options.tools?.map(tool => (tool as { [EXTERNALLY_GATED]?: boolean })[EXTERNALLY_GATED] ? tool : {
+  if (options.tools?.some(tool => !isExternallyGated(tool)) && !options.broker) throw new Error('Tools require a call broker');
+  const customTools = options.tools?.map(tool => isExternallyGated(tool) ? tool : {
     ...tool,
     execute: async (...args: Parameters<ToolDefinition['execute']>) => {
       const id = randomUUID();
@@ -118,13 +146,21 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const { session } = await createAgentSession({
     cwd: workspace, agentDir: stateDir, model: options.model,
     modelRuntime: options.modelRuntime, resourceLoader: loader,
-    sessionManager: manager, settingsManager: settings, noTools: 'all', thinkingLevel: options.thinkingLevel ?? 'off',
-    tools: customTools.map(tool => tool.name), customTools,
+    sessionManager: manager, settingsManager: settings, thinkingLevel: options.thinkingLevel ?? 'off',
+    customTools,
   });
+  const customNames = new Set(customTools.map(tool => tool.name));
+  const allowedExtensionTools = options.piExtensionTools ? new Set(options.piExtensionTools) : undefined;
+  const extensionNames = options.activateExtensionTools
+    ? loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])
+      .filter(name => !customNames.has(name) && !BUILTIN_TOOL_NAMES.has(name) && (!allowedExtensionTools || allowedExtensionTools.has(name)))
+    : [];
+  session.setActiveToolsByName([...customNames, ...extensionNames]);
   session.agent.streamFunction = options.stream;
   if (options.onEvent) session.subscribe(options.onEvent);
   await writeAtomic(manifestPath, JSON.stringify({
-    version: 1, binding: options.binding, workspace, sessionFile, sessionId: manager.getSessionId(),
+    version: 2, binding: options.binding, workspace, sessionFile, sessionId: manager.getSessionId(),
+    ...(options.capabilityDigest ? { capabilityDigest: options.capabilityDigest } : {}),
   } satisfies Manifest));
 
   return {
@@ -139,6 +175,12 @@ export async function openPiInstance(options: PiInstanceOptions) {
       return {
         binding: structuredClone(options.binding), sessionId: manager.getSessionId(),
         sessionFile, model: session.model?.id, messages: structuredClone(session.messages), leafId: manager.getLeafId(),
+        capabilityDigest: options.capabilityDigest ?? null,
+        activeTools: session.getActiveToolNames(),
+        registeredTools: session.getAllTools().map(tool => tool.name),
+        loadedExtensions: loader.getExtensions().extensions.map(extension => extension.path),
+        loadedExtensionTools: loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()]),
+        extensionErrors: loader.getExtensions().errors.map(error => ({ path: error.path, error: error.error })),
       };
     },
     async close() {

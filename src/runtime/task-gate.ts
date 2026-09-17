@@ -21,27 +21,28 @@ export type InvocationPurpose = 'completion' | 'compaction' | 'branch_summary';
 export const INVOCATION_PURPOSES: readonly InvocationPurpose[] = ['completion', 'compaction', 'branch_summary'];
 
 /** Task-store invocation gate: pause, unknown usage, and budget are checked before every provider send. */
-export function taskGate(store: TaskStore, operation: { id: string; taskId: string; instanceId: string; nodeId?: string }, model: ModelEntry): SendGate & { total(): TokenUsage | null; setPurpose(purpose: InvocationPurpose): void } {
+export function taskGate(store: TaskStore, operation: { id: string; taskId: string; instanceId: string; nodeId?: string }, model: ModelEntry): SendGate & { total(): TokenUsage | null; setPurpose(purpose: InvocationPurpose): void; check(reservation?: number): void } {
   let unknown = false;
   let purpose: InvocationPurpose = 'completion';
   const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const nodeId = operation.nodeId ?? (store.db.prepare('SELECT node_id FROM operations WHERE id=?').get(operation.id) as { node_id: string } | undefined)?.node_id;
   return {
+    check(reservation = 0) {
+      if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_input', 'A token reservation is required');
+      if (store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Instance paused');
+      if (nodeId && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
+        throw new RuntimeError('unknown_usage', 'Instance paused for unknown usage');
+      }
+      const account = store.db.prepare('SELECT budget,used,unlimited FROM instances WHERE id=?').get(operation.instanceId) as { budget: number; used: number; unlimited: number };
+      const inFlight = inFlightUsage(store, operation.instanceId);
+      if (!account.unlimited && (account.used + inFlight + reservation > account.budget || (reservation === 0 && account.used + inFlight >= account.budget))) {
+        throw new RuntimeError('budget', 'Token budget exhausted');
+      }
+    },
     dispatch<T>(id: string, reservation: number, send: () => T): T {
       if (!id) throw new RuntimeError('invalid_input', 'An invocation id is required');
-      if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_input', 'A token reservation is required');
+      this.check(reservation);
       store.transaction(() => {
-        if (store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Instance paused');
-        if (nodeId && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
-          throw new RuntimeError('unknown_usage', 'Instance paused for unknown usage');
-        }
-        const account = store.db.prepare('SELECT budget,used,unlimited FROM instances WHERE id=?').get(operation.instanceId) as { budget: number; used: number; unlimited: number };
-        const inFlight = inFlightUsage(store, operation.instanceId);
-        // Unlimited instances still record every invocation; only the
-        // cumulative cap comparison is skipped.
-        if (!account.unlimited && (account.used + inFlight + reservation > account.budget || (reservation === 0 && account.used + inFlight >= account.budget))) {
-          throw new RuntimeError('budget', 'Token budget exhausted');
-        }
         if (store.db.prepare('SELECT id FROM invocations WHERE id=?').get(id)) throw new RuntimeError('invalid_input', 'Invocation already dispatched');
         // Freeze the underlying upstream identity, not just the mutable
         // connection id: review independence reads this history later.

@@ -17,6 +17,7 @@ export interface NodeRun {
   operations: Operation[]; invocations: Invocation[]; questions: Question[]; evidence: Evidence[];
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
   capabilities?: { id: string; version: string; kind: string | null; state: string; reason: string | null }[];
+  capabilityDigest?: string | null;
   timing?: { totalMs: number | null; runMs: number | null; waitingMs: number; pauseMs?: number | null; userWaitMs?: number | null; inProgress?: boolean };
   container?: { id: string; parent: string | null; outputs: string[] } | null;
   children?: { id: string; status: string }[];
@@ -163,6 +164,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
       {(data.capabilities ?? []).length > 0 && (
         <section>
           <h4 className="section-title">能力（按节点绑定的定义版本）</h4>
+          {data.capabilityDigest && <p className="muted mono">bundle {data.capabilityDigest.slice(0, 16)}</p>}
           <ul className="list" data-testid="node-capabilities">
             {data.capabilities!.map(capability => (
               <li key={`${capability.id}@${capability.version}`} className="list-item">

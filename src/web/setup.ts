@@ -19,7 +19,7 @@ export interface SetupForm {
 export interface DesktopBridge {
   isDesktop: boolean;
   pickDirectory(): Promise<string | null>;
-  openResource(kind: 'skills' | 'mcp' | 'agent-md'): Promise<{ opened: boolean; path?: string; message?: string }>;
+  openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md'): Promise<{ opened: boolean; path?: string; message?: string }>;
   saveSecret(ref: string, value: string | null): Promise<{ stored: boolean; applied?: boolean; message?: string }>;
   secretStatus(refs: string[]): Promise<Record<string, boolean>>;
   relaunch(): Promise<{ url: string }>;

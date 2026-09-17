@@ -2,15 +2,27 @@ import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { parseDefinitionVersion, type ModelGrade } from './models.ts';
 
+export type CapabilityKind = 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt';
+
+export interface CapabilityBinding {
+  id: string;
+  version: string;
+}
+
 export interface DefinitionSpec {
   recommendedGrade: ModelGrade;
-  capabilities?: { id: string; version: string }[];
+  capabilities?: CapabilityBinding[];
+  /** Optional prompt capabilities kept separate from executable capabilities. */
+  prompts?: {
+    agent?: CapabilityBinding;
+    tool?: CapabilityBinding;
+  };
   review?: boolean;
   snapshot?: Json;
 }
 export interface CapabilityRecord {
   id: string;
-  kind: 'skill' | 'mcp' | 'extension';
+  kind: CapabilityKind;
   source: string;
   version: string;
   snapshot: Json;
@@ -22,9 +34,20 @@ export class Catalog {
   private readonly store: TaskStore;
   constructor(store: TaskStore) { this.store = store; }
 
+  private assertBinding(label: string, binding: CapabilityBinding | undefined) {
+    if (!binding) return;
+    if (!binding.id?.trim() || !binding.version?.trim()) throw new RuntimeError('invalid_input', `${label} requires capability id and version`);
+  }
+
   publishDefinition(id: string, spec: DefinitionSpec) {
     if (!id.trim()) throw new RuntimeError('invalid_input', 'A definition id is required');
     if (!['low', 'medium', 'high', 'highest'].includes(spec.recommendedGrade)) throw new RuntimeError('invalid_input', 'A recommended model grade is required');
+    for (const binding of spec.capabilities ?? []) this.assertBinding('Capability binding', binding);
+    this.assertBinding('Agent prompt binding', spec.prompts?.agent);
+    this.assertBinding('Tool prompt binding', spec.prompts?.tool);
+    if (spec.prompts && !spec.prompts.agent && spec.prompts.tool) {
+      throw new RuntimeError('invalid_input', 'A tool prompt binding requires an agent prompt binding');
+    }
     const { version } = this.store.db.prepare('SELECT COALESCE(MAX(version),0)+1 AS version FROM definitions WHERE id=?').get(id) as { version: number };
     this.store.db.prepare('INSERT INTO definitions VALUES(?,?,?)').run(id, version, canonicalJson(spec));
     return { id, version, key: `${id}@${version}` };

@@ -103,6 +103,11 @@ test('a worker loads the preset skill and runs the read-only project index MCP',
   const first = JSON.stringify(provider.requests[0]);
   // The bound Skill reaches the production prompt.
   expect(first).toContain('implement-and-verify');
+  // The bound agent.md and generated tool.md are both injected into the
+  // isolated Pi process, while the Skill description stays in the bundle.
+  expect(first).toContain('Coder Agent identity');
+  expect(first).toContain('Capability awareness');
+  expect(first).toContain('skill-implement-and-verify');
   // The MCP search result came back into the session with the workspace content.
   expect(JSON.stringify(provider.requests[1])).toContain('preset-marker');
   // The MCP call itself is metered as an invocation (zero-token local call).

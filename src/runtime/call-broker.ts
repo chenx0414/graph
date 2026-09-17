@@ -39,17 +39,21 @@ export class CallBroker {
   /** The gate check and actual send callback run in one JS turn without an await gap. */
   dispatch<T>(id: string, reservation: number, send: () => T): T {
     if (!id || !Number.isSafeInteger(reservation) || reservation < 0) throw new Error('Invalid call');
+    this.check(reservation);
     this.transaction(() => {
-      const account = this.account();
-      if (account.paused) throw new Error('Instance paused');
-      if (account.hold) throw new Error(account.hold);
       if (this.db.prepare('SELECT id FROM calls WHERE id=?').get(id)) throw new Error('Invocation already dispatched');
-      const { reserved } = this.inspect();
-      if (account.used + reserved + reservation > account.budget) throw new Error('Insufficient token budget');
       this.db.prepare("INSERT INTO calls VALUES(?,?,'inflight',NULL)").run(id, reservation);
     });
     try { return send(); }
     catch (error) { this.settle(id, null); throw error; }
+  }
+
+  check(reservation = 0) {
+    const account = this.account();
+    if (account.paused) throw new Error('Instance paused');
+    if (account.hold) throw new Error(account.hold);
+    const { reserved } = this.inspect();
+    if (account.used + reserved + reservation > account.budget) throw new Error('Insufficient token budget');
   }
 
   settle(id: string, usage: TokenUsage | null) {

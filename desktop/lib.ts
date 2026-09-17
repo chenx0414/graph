@@ -10,11 +10,11 @@ export interface AppPaths {
   webDir: string;
 }
 
-export type ResourceLibraryKind = 'skills' | 'mcp' | 'agent-md';
+export type ResourceLibraryKind = 'skills' | 'mcp' | 'pi-extensions' | 'agent-md';
 
 /** Allowlisted local storage roots for resource-library folder actions. */
-export function resourceDirectory(stateDir: string, kind: ResourceLibraryKind): string {
-  return kind === 'agent-md' ? join(stateDir, 'agent-md') : join(stateDir, 'capabilities');
+export function resourceDirectory(stateDir: string, _kind: ResourceLibraryKind): string {
+  return join(stateDir, 'capabilities');
 }
 
 /** Layout for dev (`electron .` in the repo) and packaged builds (app dir). */

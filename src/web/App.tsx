@@ -43,7 +43,7 @@ type Settings_ = {
   projects: { id: string; root: string }[];
   models: { id: string; grade: string; credentialId?: string; contextWindow?: number }[];
   definitions: { id: string; version: number }[];
-  capabilities: { id: string; version: string; kind?: 'skill' | 'mcp' | 'extension'; status?: string }[];
+  capabilities: { id: string; version: string; kind?: 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt'; status?: string }[];
 };
 type Limits = { active: Record<string, number>; queued: Record<string, number> };
 type OperationRow = { id: string; nodeId: string; state: string; reserved: number; workerActive: boolean; result: { output?: unknown } | null; durationMs?: number };
@@ -537,7 +537,17 @@ function TalentPanel({ id }: { id: string }) {
   const [sampleLimit, setSampleLimit] = useState(20);
   const query = allVersions ? '?scope=all' : version ? `?version=${version}` : '';
   const { data, error } = useAsync(() => api<{
-    detail: { id: string; version: number; versions: number[]; recommendedGrade: string; review: boolean; description: string | null; traceability: Record<string, unknown>; capabilities: { id: string; version: string; kind: string | null; status: string }[] };
+    detail: {
+      id: string;
+      version: number;
+      versions: number[];
+      recommendedGrade: string;
+      review: boolean;
+      description: string | null;
+      traceability: Record<string, unknown>;
+      capabilities: { id: string; version: string; kind: string | null; status: string }[];
+      prompts: { id: string; version: string; role: string; kind: string | null; status: string }[];
+    };
     experience: { scope: { version: number | null; allVersions: boolean }; task: { token: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; runMs: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; cost: { byCurrency: { currency: string; mean: number | null; samples: number; unknown: number }[]; mixedCurrency: boolean; unknown: boolean }; totalSamples: number }; chat: { token: { mean: number | null; samples: number }; totalSamples: number }; samples: { taskId: string; nodeId: string; kind: string; status: string; request: string | null; model: string | null; tokens: number | null; runMs: number | null; waitingMs: number; reworkRounds: number }[] };
   }>(`/api/catalog/definitions/${id}${query}`), [id, query]);
   if (error) return <ErrorBox message={error} />;
@@ -556,6 +566,12 @@ function TalentPanel({ id }: { id: string }) {
       <div>
         <h4>绑定能力</h4>
         <div className="chip-row">{data.detail.capabilities.map(item => <Pill key={`${item.id}@${item.version}`} tone={item.status === 'installed' ? 'success' : 'danger'}>{item.id}@{item.version} · {item.kind ?? '未知'} · {item.status}</Pill>)}</div>
+      </div>
+      <div>
+        <h4>Prompt 绑定</h4>
+        {data.detail.prompts.length
+          ? <div className="chip-row">{data.detail.prompts.map(item => <Pill key={`${item.role}-${item.id}@${item.version}`} tone={item.status === 'installed' ? 'success' : 'danger'}>{item.role} · {item.id}@{item.version} · {item.kind ?? '未知'}</Pill>)}</div>
+          : <p className="muted">未绑定独立 Prompt，使用 Graph 生成的默认身份与能力清单。</p>}
       </div>
       <div>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
@@ -602,7 +618,8 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
   const groups = [
     { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: capabilities.filter(item => item.kind === 'skill') },
     { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: capabilities.filter(item => item.kind === 'mcp') },
-    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: [] },
+    { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, items: capabilities.filter(item => item.kind === 'pi-extension' || item.kind === 'extension') },
+    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: capabilities.filter(item => item.kind === 'prompt') },
     { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: definitions },
   ];
   const architectures = [
@@ -615,7 +632,7 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
     { name: '对抗式验证', flow: 'W ⇄ R', description: '审查者主动寻找反例和证据，有效反例会阻塞通过。' },
     { name: '多视角与评委', flow: 'W → J1,J2 → J', description: '多个维度独立判断，再由评委按硬性规则汇总结果。' },
   ];
-  async function openResource(kind: 'skills' | 'mcp' | 'agent-md') {
+  async function openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md') {
     if (!bridge?.openResource) {
       toast('请在桌面 APP 中使用访达打开资源目录', 'info');
       return;
@@ -639,8 +656,8 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
             title={group.title}
             icon={group.icon}
             subtitle={`${group.items.length} 项`}
-            actions={['skills', 'mcp', 'agent-md'].includes(group.id) ? (
-              <button type="button" className="icon-button" data-testid={`resource-open-${group.id}`} onClick={() => void openResource(group.id as 'skills' | 'mcp' | 'agent-md')} title={`在访达中打开${group.title}目录`} aria-label={`在访达中打开${group.title}目录`}>
+            actions={['skills', 'mcp', 'pi-extensions', 'agent-md'].includes(group.id) ? (
+              <button type="button" className="icon-button" data-testid={`resource-open-${group.id}`} onClick={() => void openResource(group.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title={`在访达中打开${group.title}目录`} aria-label={`在访达中打开${group.title}目录`}>
                 <Icon name="folder" size={16} />
               </button>
             ) : undefined}

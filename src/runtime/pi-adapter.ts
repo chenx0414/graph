@@ -5,19 +5,20 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
+import type { CapabilityKind } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationForTask } from '../core/conversation.ts';
-import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
+import { capabilityPrompts, loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
-import { openPiInstance } from './pi-instance.ts';
+import { openPiProcess } from './pi-process.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
@@ -28,7 +29,7 @@ export interface PiAdapterChannels {
     revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
   };
   catalog: Catalog;
-  install: (input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) => Promise<unknown>;
+  install: (input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) => Promise<unknown>;
 }
 
 function toPiModel(entry: ModelEntry): Model<ModelApi> {
@@ -87,7 +88,7 @@ export function createPiAdapter(options: {
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   channels?: PiAdapterChannels;
 }): ActionAdapter {
-  const activeInstances = new Map<string, Awaited<ReturnType<typeof openPiInstance>>>();
+  const activeInstances = new Map<string, Awaited<ReturnType<typeof openPiProcess>>>();
   return {
     kind: 'agent',
     reserveTokens: PI_SESSION_RESERVE,
@@ -220,12 +221,6 @@ export function createPiAdapter(options: {
             onPermissionRequired: request => { permissionRequest ??= request; },
           });
           commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
-          // Record what was actually loaded for this operation so the node
-          // projection cannot later guess from catalog status.
-          recordCapabilityLoad(options.store, {
-            taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
-            operationId: operation.id, readOnly: Boolean(discussion), report: capabilities.report,
-          });
         } catch (error) {
           // A missing or unsupported bound capability stops this node with a concrete
           // reason instead of silently running without the definition's capabilities.
@@ -244,6 +239,22 @@ export function createPiAdapter(options: {
           }),
           ...capabilities.tools,
         ];
+        const prompts = capabilityPrompts({
+          definitionVersion,
+          action: spec.action,
+          ...(spec.role ? { role: spec.role } : {}),
+          agentPrompt: capabilities.prompts.agent,
+          toolPrompt: capabilities.prompts.tool,
+          report: capabilities.report,
+          tools,
+        });
+        // Record what was actually loaded for this operation so the node
+        // projection cannot later guess from catalog status.
+        recordCapabilityLoad(options.store, {
+          taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+          operationId: operation.id, readOnly: Boolean(discussion), report: capabilities.report,
+          digest: prompts.digest,
+        });
         // Live conversation text and tool activity are separate from the final
         // message: deltas are coalesced for reconnect, the durable assistant
         // record is written by the kernel when the operation settles.
@@ -341,12 +352,21 @@ export function createPiAdapter(options: {
           }
         };
         try {
-          const session = await openPiInstance({
+          const session = await openPiProcess({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry), modelRuntime: options.modelRuntime, stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
+            model: toPiModel(entry), stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
             thinkingLevel: (conversation?.thinking_level ?? 'off') as ThinkingLevel,
-            tools, ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}), broker: gate,
+            tools,
+            ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}),
+            ...(capabilities.piExtensionPaths.length ? { piExtensionPaths: capabilities.piExtensionPaths } : {}),
+            ...(capabilities.piExtensionTools.length ? { piExtensionTools: capabilities.piExtensionTools } : {}),
+            systemPrompt: prompts.systemPrompt,
+            appendSystemPrompt: prompts.appendSystemPrompt,
+            capabilityDigest: prompts.digest,
+            broker: gate,
+            ...(discussion ? { readOnly: true } : {}),
+            ...(conversation ? { allowWorkspaceChange: true } : {}),
             // Auto-compaction stays on for workers, reviewers and the master;
             // thresholds follow the model that will receive the summary.
             compaction: compactionSettings(entry),

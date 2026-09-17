@@ -1,10 +1,12 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { Catalog } from '../catalog/catalog.ts';
+import type { CapabilityBinding, Catalog } from '../catalog/catalog.ts';
+import { canonicalJson } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
 import { allowedDomain, normalizeDomains } from './domains.ts';
@@ -13,17 +15,40 @@ import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-pro
 import { graphNodeRuntime } from './workspace-command.ts';
 import type { SendGate } from './controlled-openai.ts';
 
-export interface CapabilityLoadFact { id: string; version: string; kind: string | null; loaded: boolean; executable: boolean; reason: string | null }
+export interface CapabilityLoadFact {
+  id: string;
+  version: string;
+  kind: string | null;
+  loaded: boolean;
+  executable: boolean;
+  reason: string | null;
+  name?: string;
+  description?: string;
+  path?: string;
+  tools?: string[];
+}
 
 export interface LoadedCapabilities {
   skillPaths: string[];
+  piExtensionPaths: string[];
+  piExtensionTools: string[];
   readRoots: string[];
   tools: ToolDefinition[];
+  prompts: { agent: string | null; tool: string | null };
+  digest: string;
   close(): Promise<void>;
   report: CapabilityLoadFact[];
 }
 
-interface McpManifest { command?: unknown; args?: unknown; entry?: unknown; url?: unknown; headers?: unknown; headersEnv?: unknown }
+interface McpManifest {
+  command?: unknown;
+  args?: unknown;
+  entry?: unknown;
+  url?: unknown;
+  headers?: unknown;
+  headersEnv?: unknown;
+  tools?: unknown;
+}
 
 /** A remote MCP operation the task has not pre-authorized; the user answers with this exact grant. */
 export interface CapabilityPermissionRequest {
@@ -53,9 +78,56 @@ function mcpToolName(capabilityId: string, tool: string) {
   return `mcp_${clean(capabilityId)}_${clean(tool)}`;
 }
 
+function safeToolName(name: string) {
+  const clean = name.replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]+/, '');
+  if (!clean) throw new RuntimeError('invalid_input', `Invalid tool name ${name}`);
+  return clean;
+}
+
+function declaredTools(manifest: McpManifest) {
+  if (manifest.tools === undefined) return [];
+  if (!Array.isArray(manifest.tools)) throw new RuntimeError('capability_unavailable', 'Pi extension manifest tools must be an array');
+  return manifest.tools.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RuntimeError('capability_unavailable', 'Pi extension tool declarations must be objects');
+    const tool = value as { name?: unknown; description?: unknown };
+    if (typeof tool.name !== 'string' || !tool.name.trim()) throw new RuntimeError('capability_unavailable', 'Pi extension tool declaration requires a name');
+    if (tool.description !== undefined && typeof tool.description !== 'string') throw new RuntimeError('capability_unavailable', `Pi extension tool ${tool.name} has an invalid description`);
+    return {
+      name: safeToolName(tool.name),
+      description: typeof tool.description === 'string' ? tool.description : `Pi extension tool ${tool.name}`,
+    };
+  });
+}
+
 async function manifestOf(snapshot: string) {
   try { return JSON.parse(await readFile(join(snapshot, 'capability.json'), 'utf8')) as McpManifest; }
   catch (error) { throw new RuntimeError('capability_unavailable', `Capability manifest is unreadable: ${String(error)}`); }
+}
+
+async function promptText(snapshot: string, name: 'agent.md' | 'tool.md') {
+  try {
+    const value = await readFile(join(snapshot, name), 'utf8');
+    if (!value.trim()) throw new Error('empty prompt');
+    return value;
+  } catch (error) {
+    throw new RuntimeError('capability_unavailable', `Prompt ${snapshot} requires a nonempty ${name}: ${String(error)}`);
+  }
+}
+
+function skillMetadata(text: string) {
+  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!match) return {};
+  const values: Record<string, string> = {};
+  for (const line of match[1]!.split(/\r?\n/)) {
+    const parsed = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!parsed) continue;
+    const raw = parsed[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
+    if (raw) values[parsed[1]!] = raw;
+  }
+  return {
+    ...(values.name ? { name: values.name } : {}),
+    ...(values.description ? { description: values.description } : {}),
+  };
 }
 
 function headerValues(headers: unknown, headersEnv: unknown) {
@@ -106,6 +178,22 @@ async function runGrants(workspace: string, scratchDir: string) {
   const canonicalWorkspace = await realpath(workspace);
   await mkdir(scratchDir, { recursive: true, mode: 0o700 });
   return { workspace: canonicalWorkspace, scratchDir: await realpath(scratchDir) };
+}
+
+function bindingKey(bound: CapabilityBinding, role: string) {
+  return `${bound.id}@${bound.version}:${role}`;
+}
+
+function stableFact(fact: CapabilityLoadFact) {
+  return {
+    id: fact.id,
+    version: fact.version,
+    kind: fact.kind,
+    name: fact.name ?? null,
+    description: fact.description ?? null,
+    path: fact.path ?? null,
+    tools: fact.tools ?? [],
+  };
 }
 
 async function localConnection(input: {
@@ -199,29 +287,85 @@ export async function loadCapabilities(input: {
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
 }): Promise<LoadedCapabilities> {
   const skillPaths: string[] = [];
+  const piExtensionPaths: string[] = [];
+  const piExtensionTools: string[] = [];
   const readRoots: string[] = [];
   const tools: ToolDefinition[] = [];
+  let agentPrompt: string | null = null;
+  let toolPrompt: string | null = null;
   const releases: (() => Promise<void>)[] = [];
   // Actual load facts: later projections must never guess these from catalog
   // status alone.
-  const report: { id: string; version: string; kind: string | null; loaded: boolean; executable: boolean; reason: string | null }[] = [];
+  const report: CapabilityLoadFact[] = [];
   const close = async () => { for (const release of releases.reverse()) await release(); releases.length = 0; };
-  if (!input.definitionVersion) return { skillPaths, readRoots, tools, close, report };
+  const digest = () => createHash('sha256').update(canonicalJson({
+    definitionVersion: input.definitionVersion ?? null,
+    report: report.map(stableFact) as unknown as Json,
+    skillPaths,
+    piExtensionPaths,
+    piExtensionTools,
+    prompts: { agent: agentPrompt, tool: toolPrompt },
+    tools: tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as unknown as Json })),
+  })).digest('hex');
+  if (!input.definitionVersion) return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: null, tool: null }, digest: digest(), close, report };
   let definition;
   try { definition = input.catalog.definition(input.definitionVersion); }
-  catch { return { skillPaths, readRoots, tools, close, report }; } // Unpublished definitions keep briefing-only behavior.
+  catch { return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: null, tool: null }, digest: digest(), close, report }; } // Unpublished definitions keep briefing-only behavior.
   try {
-    for (const bound of definition.capabilities ?? []) {
+    const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
+      ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
+      ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
+      ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
+    ];
+    const seen = new Set<string>();
+    for (const { bound, role } of bindings) {
+      const seenKey = bindingKey(bound, role);
+      if (seen.has(seenKey)) continue;
+      seen.add(seenKey);
       const record = input.catalog.capability(bound.id, bound.version);
       if (!record || record.status !== 'installed') {
         throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not installed`);
       }
       const snapshot = snapshotPath(record);
+      if (record.kind === 'prompt') {
+        if (role === 'capability') throw new RuntimeError('capability_unsupported', `Prompt capability ${bound.id}@${bound.version} must be bound under prompts`);
+        const text = await promptText(snapshot, role === 'agent' ? 'agent.md' : 'tool.md');
+        if (role === 'agent') agentPrompt = text;
+        else toolPrompt = text;
+        report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: false, reason: `${role === 'agent' ? '身份' : '能力感知'} Prompt 已注入` });
+        continue;
+      }
+      if (role !== 'capability') throw new RuntimeError('capability_unsupported', `${role} prompt binding ${bound.id}@${bound.version} is not a prompt capability`);
       if (record.kind === 'skill') {
-        if (!existsSync(join(snapshot, 'SKILL.md'))) throw new RuntimeError('capability_unavailable', `Skill ${bound.id}@${bound.version} has no SKILL.md`);
+        const skillFile = join(snapshot, 'SKILL.md');
+        if (!existsSync(skillFile)) throw new RuntimeError('capability_unavailable', `Skill ${bound.id}@${bound.version} has no SKILL.md`);
+        const metadata = skillMetadata(await readFile(skillFile, 'utf8'));
         skillPaths.push(snapshot);
         readRoots.push(snapshot);
-        report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: false, reason: '技能已加载为只读文档' });
+        report.push({
+          id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: false,
+          reason: '技能已加载为只读文档', path: skillFile, ...metadata,
+        });
+        continue;
+      }
+      if (record.kind === 'pi-extension') {
+        if (!existsSync(snapshot)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} has no snapshot`);
+        const manifest = await manifestOf(snapshot);
+        const entryValue = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry : './index.mjs';
+        const entry = isAbsolute(entryValue) ? entryValue : resolve(snapshot, entryValue);
+        if (entry !== snapshot && !entry.startsWith(`${snapshot}/`)) {
+          throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} must stay inside the snapshot`);
+        }
+        if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} does not exist`);
+        const declared = declaredTools(manifest);
+        piExtensionPaths.push(entry);
+        piExtensionTools.push(...declared.map(tool => tool.name));
+        report.push({
+          id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: true,
+          reason: `独立 Pi 进程内加载；声明工具 ${declared.length} 个`,
+          path: entry,
+          ...(declared.length ? { tools: declared.map(tool => tool.name) } : {}),
+        });
         continue;
       }
       if (record.kind !== 'mcp' && record.kind !== 'extension') {
@@ -271,11 +415,59 @@ export async function loadCapabilities(input: {
         executable = false;
         grantReason = '能力已连接但没有可调用工具';
       }
-      report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable, reason: grantReason ?? loadedReason });
+      report.push({
+        id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable,
+        reason: grantReason ?? loadedReason,
+        ...(discovered.length ? { tools: discovered.map(tool => mcpToolName(bound.id, tool.name)) } : {}),
+      });
     }
   } catch (error) {
     await close();
     throw error;
   }
-  return { skillPaths, readRoots, tools, close, report };
+  return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report };
+}
+
+/** Build the identity and capability-awareness prompts from the exact loaded bundle.
+ * The generated tool section is authoritative even when a tool.md capability is bound. */
+export function capabilityPrompts(input: {
+  definitionVersion: string;
+  action: string;
+  role?: string;
+  agentPrompt: string | null;
+  toolPrompt: string | null;
+  report: CapabilityLoadFact[];
+  tools: readonly ToolDefinition[];
+}) {
+  const systemPrompt = input.agentPrompt ?? [
+    `You are the ${input.action} Agent in Graph${input.role ? ` (${input.role})` : ''}.`,
+    'Work only within the confirmed task and the capabilities listed in tool.md.',
+    'Use tools for evidence. Do not claim a tool result that did not happen.',
+  ].join('\n');
+  const byKind = (kind: string) => input.report.filter(item => item.kind === kind);
+  const skillLines = byKind('skill').map(item => `- ${item.name ?? item.id} (${item.id}@${item.version})${item.path ? ` at ${item.path}` : ''}${item.description ? `: ${item.description}` : item.reason ? `: ${item.reason}` : ''}`);
+  const piExtensionLines = byKind('pi-extension').map(item => `- ${item.id}@${item.version}${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}${item.reason ? ` (${item.reason})` : ''}`);
+  const bridgeLines = [...byKind('mcp'), ...byKind('extension')].map(item => `- ${item.id}@${item.version}${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}`);
+  const toolLines = input.tools.map(tool => `- ${tool.name}: ${tool.description}`);
+  const toolAwareness = [
+    input.toolPrompt?.trim() ?? '',
+    '# Capability awareness',
+    `Definition: ${input.definitionVersion}`,
+    'The following inventory is generated from the exact capability bundle loaded for this Agent process.',
+    skillLines.length ? `\n## Skills\n${skillLines.join('\n')}` : '',
+    piExtensionLines.length ? `\n## Pi extensions\n${piExtensionLines.join('\n')}` : '',
+    bridgeLines.length ? `\n## Graph/MCP bridge capabilities\n${bridgeLines.join('\n')}` : '',
+    toolLines.length ? `\n## Callable tools\n${toolLines.join('\n')}` : '',
+    '\nUse only the callable tools listed above. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
+  ].filter(Boolean).join('\n');
+  const digest = createHash('sha256').update(canonicalJson({
+    definitionVersion: input.definitionVersion,
+    action: input.action,
+    role: input.role ?? null,
+    systemPrompt,
+    appendSystemPrompt: toolAwareness,
+    report: input.report.map(stableFact) as unknown as Json,
+    tools: input.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as unknown as Json })),
+  })).digest('hex');
+  return { systemPrompt, appendSystemPrompt: toolAwareness, digest };
 }

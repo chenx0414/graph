@@ -4,6 +4,7 @@ import { join, relative } from 'node:path';
 import { canonicalJson } from '../core/store.ts';
 import type { ModelGrade } from './models.ts';
 import type { Json } from '../core/types.ts';
+import type { CapabilityKind } from './catalog.ts';
 
 /** Narrow catalog surface used by preset installation; satisfied by the
  * runtime catalog handle so installation goes through the audited command path. */
@@ -14,12 +15,12 @@ export interface PresetCatalog {
   definitions(): { id: string; version: number }[];
   definitionSpec(id: string, version: number): unknown;
   publishDefinition(id: string, spec: unknown, requestId: string): unknown;
-  install(input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }): Promise<unknown>;
+  install(input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }): Promise<unknown>;
 }
 
 interface PresetEntry {
   id: string;
-  kind: 'skill' | 'mcp' | 'agent';
+  kind: 'skill' | 'mcp' | 'prompt' | 'agent';
   version: string;
   path?: string;
   definition?: string;
@@ -27,6 +28,10 @@ interface PresetEntry {
   review?: boolean;
   description?: string;
   capabilities?: { id: string; version: string }[];
+  prompts?: {
+    agent?: { id: string; version: string };
+    tool?: { id: string; version: string };
+  };
 }
 
 interface PresetManifest {
@@ -80,7 +85,7 @@ export async function installPresets(catalog: PresetCatalog, presetsRoot: string
   }
   for (const preset of manifest.presets) {
     try {
-      if (preset.kind === 'skill' || preset.kind === 'mcp') {
+      if (preset.kind === 'skill' || preset.kind === 'mcp' || preset.kind === 'prompt') {
         if (!preset.path) throw new Error('preset path is required');
         const source = join(presetsRoot, preset.path);
         const info = await stat(source).catch(() => undefined);
@@ -110,6 +115,7 @@ export async function installPresets(catalog: PresetCatalog, presetsRoot: string
         recommendedGrade: preset.recommendedGrade,
         ...(preset.review ? { review: true } : {}),
         ...(preset.capabilities?.length ? { capabilities: preset.capabilities } : {}),
+        ...(preset.prompts ? { prompts: preset.prompts } : {}),
         snapshot: {
           preset: { id: preset.id, version: preset.version, hash: hash.slice(0, 16), license: manifest.license ?? null, source: manifest.source ?? null },
           description: preset.description ?? null,
@@ -125,6 +131,11 @@ export async function installPresets(catalog: PresetCatalog, presetsRoot: string
       for (const bound of preset.capabilities ?? []) {
         const record = catalog.capability(bound.id, bound.version);
         if (!record || record.status !== 'installed') throw new Error(`bound capability ${bound.id}@${bound.version} is not installed`);
+      }
+      for (const bound of [preset.prompts?.agent, preset.prompts?.tool]) {
+        if (!bound) continue;
+        const record = catalog.capability(bound.id, bound.version);
+        if (!record || record.status !== 'installed') throw new Error(`bound prompt ${bound.id}@${bound.version} is not installed`);
       }
       catalog.publishDefinition(definitionId, desired, `preset-${preset.id}-${hash.slice(0, 16)}`);
       catalog.recordPreset(preset.id, preset.version, hash, { kind: 'agent', definition: definitionId, version: preset.version, description: preset.description ?? null });

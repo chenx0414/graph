@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, sep } from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { Catalog } from '../catalog/catalog.ts';
+import type { CapabilityKind, Catalog } from '../catalog/catalog.ts';
 import type { Json, NodeSpec, Proposal } from '../core/types.ts';
 import { listBounded, readBounded, writeBounded } from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
@@ -31,7 +31,7 @@ export function agentTools(input: {
   fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
   catalog?: Catalog;
-  install?: (input: { id: string; kind: 'skill' | 'mcp' | 'extension'; source: string; version: string; requestId: string }) => Promise<unknown>;
+  install?: (input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) => Promise<unknown>;
   onSubmit?: (output: Json) => void;
   onSuggestedPrompt?: (prompt: string) => void;
 }): ToolDefinition[] {
@@ -143,12 +143,12 @@ export function agentTools(input: {
   }
   if (input.role === 'master' && input.install) {
     tools.push({
-      name: 'install_capability', label: 'Install capability', description: 'Install a skill, MCP server, or extension into the capability catalog.',
+      name: 'install_capability', label: 'Install capability', description: 'Install a Skill, MCP server, Graph extension, Pi extension, or prompt bundle into the capability catalog.',
       parameters: Type.Object({ id: Type.String(), kind: Type.String(), source: Type.String(), version: Type.String(), requestId: Type.String() }),
       execute: async (_id, params) => {
         const body = fields(params);
         const kind = String(body.kind);
-        if (kind !== 'skill' && kind !== 'mcp' && kind !== 'extension') throw new Error('Unsupported capability kind');
+        if (kind !== 'skill' && kind !== 'mcp' && kind !== 'extension' && kind !== 'pi-extension' && kind !== 'prompt') throw new Error('Unsupported capability kind');
         const receipt = await input.install!({ id: String(body.id), kind, source: String(body.source), version: String(body.version), requestId: String(body.requestId) });
         return text(JSON.stringify(receipt));
       },

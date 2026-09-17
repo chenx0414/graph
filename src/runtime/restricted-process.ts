@@ -210,6 +210,18 @@ export interface RestrictedCommand {
   localNetwork?: boolean;
   /** Host-selected environment for the restricted process; worker input must never populate this. */
   env?: Record<string, string>;
+  /** Keep stdin open so the trusted host can steer a long-running worker. */
+  keepStdinOpen?: boolean;
+  /** Exposes only the process control surface the trusted host needs. */
+  onSpawn?: (process: RestrictedProcessControl) => void;
+  /** Preflight without creating a ledger invocation; used before spawning an Agent process. */
+  preflight?: () => void;
+}
+
+export interface RestrictedProcessControl {
+  pid: number | undefined;
+  write(message: unknown): boolean;
+  kill(signal?: NodeJS.Signals): boolean;
 }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
@@ -388,10 +400,22 @@ export async function openRestrictedExecutor() {
       };
       return new Promise((resolve, reject) => {
         const invocationId = randomUUID();
-        const child = command.broker.dispatch(invocationId, 0, () => {
+        const spawnProcess = () => {
           const spawned = spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
             cwd, detached: true, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}), ...guardEnv },
             stdio,
+          });
+          command.onSpawn?.({
+            pid: spawned.pid,
+            write(message) {
+              if (!spawned.stdin || spawned.stdin.destroyed) return false;
+              try { return spawned.stdin.write(`${JSON.stringify(message)}\n`); }
+              catch { return false; }
+            },
+            kill(signal = 'SIGTERM') {
+              try { return spawned.kill(signal); }
+              catch { return false; }
+            },
           });
           if (command.localNetwork) {
             // The host owns every listener: it binds the exact loopback port a
@@ -485,7 +509,9 @@ export async function openRestrictedExecutor() {
             });
           }
           return spawned;
-        });
+        };
+        command.preflight?.();
+        const child = command.preflight ? spawnProcess() : command.broker.dispatch(invocationId, 0, spawnProcess);
         let stdout = '', stderr = '';
         // The sandbox child is a process-group leader: timeouts and completion
         // must reap its whole tree so a hung check cannot leak grandchildren.
@@ -518,10 +544,14 @@ export async function openRestrictedExecutor() {
           if (timer) clearTimeout(timer);
           killTree();
           if (signal) stderr += `Process terminated by ${signal}\n`;
-          command.broker.settle(invocationId, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+          if (!command.preflight) command.broker.settle(invocationId, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
           void requests.then(() => resolve({ code, stdout, stderr }), reject);
         });
-        child.stdin!.end(command.input);
+        if (command.keepStdinOpen) {
+          if (command.input) child.stdin!.write(command.input);
+        } else {
+          child.stdin!.end(command.input);
+        }
       });
     },
     async close() { await SandboxManager.reset(); },

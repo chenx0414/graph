@@ -128,7 +128,16 @@ export function talentExperience(store: TaskStore, id: string, options: { versio
 /** Definition detail with versions, bound capabilities and their install state. */
 export function talentDetail(store: TaskStore, id: string, options: { version?: number } = {}) {
   const versions = (store.db.prepare('SELECT version,spec FROM definitions WHERE id=? ORDER BY version').all(id) as { version: number; spec: string }[])
-    .map(row => ({ version: row.version, spec: JSON.parse(row.spec) as { recommendedGrade: string; capabilities?: { id: string; version: string }[]; review?: boolean; snapshot?: Json } }));
+    .map(row => ({
+      version: row.version,
+      spec: JSON.parse(row.spec) as {
+        recommendedGrade: string;
+        capabilities?: { id: string; version: string }[];
+        prompts?: { agent?: { id: string; version: string }; tool?: { id: string; version: string } };
+        review?: boolean;
+        snapshot?: Json;
+      },
+    }));
   if (!versions.length) throw new RuntimeError('not_found', `Unknown Agent definition ${id}`);
   const chosen = options.version === undefined ? versions[versions.length - 1]! : versions.find(item => item.version === options.version);
   if (!chosen) throw new RuntimeError('not_found', `Definition ${id}@${options.version} is not published`);
@@ -140,6 +149,19 @@ export function talentDetail(store: TaskStore, id: string, options: { version?: 
       source: record?.source ?? null,
     };
   });
+  const prompts = Object.entries(chosen.spec.prompts ?? {}).map(([role, bound]) => {
+    if (!bound) return null;
+    const record = store.db.prepare('SELECT kind,source,version,snapshot,status FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as
+      { kind: string; source: string; version: string; snapshot: string; status: string } | undefined;
+    return {
+      id: bound.id,
+      version: bound.version,
+      role,
+      kind: record?.kind ?? null,
+      status: record?.status ?? 'missing',
+      source: record?.source ?? null,
+    };
+  }).filter((item): item is NonNullable<typeof item> => item !== null);
   const preset = chosen.spec.snapshot && typeof chosen.spec.snapshot === 'object' && !Array.isArray(chosen.spec.snapshot)
     ? (chosen.spec.snapshot as { preset?: { id?: string; version?: string; hash?: string; license?: string; source?: string }; description?: string })
     : undefined;
@@ -150,5 +172,6 @@ export function talentDetail(store: TaskStore, id: string, options: { version?: 
     description: preset?.description ?? null,
     traceability: preset?.preset ? { origin: 'preset', ...preset.preset } : { origin: 'user' },
     capabilities,
+    prompts,
   };
 }
