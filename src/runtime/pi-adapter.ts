@@ -20,7 +20,11 @@ import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
-import { openPiProcess } from './pi-process.ts';
+import {
+  createRestrictedProcessAgentSessionTransport,
+  type AgentSession,
+  type AgentSessionTransport,
+} from './agent-session.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
@@ -49,14 +53,6 @@ function toPiModel(entry: ModelEntry): Model<ModelApi> {
     // with every provider request.
     ...(headers ? { headers } : {}),
   };
-}
-
-function assistantText(messages: unknown[]) {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index] as { role?: string; content?: { type: string; text?: string }[] };
-    if (message.role === 'assistant') return message.content?.filter(part => part.type === 'text').map(part => part.text ?? '').join('') ?? '';
-  }
-  return '';
 }
 
 /** One-line summary of a tool call for the conversation activity stream. */
@@ -93,8 +89,10 @@ export function createPiAdapter(options: {
   modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   channels?: PiAdapterChannels;
+  transport?: AgentSessionTransport;
 }): ActionAdapter {
-  const activeInstances = new Map<string, Awaited<ReturnType<typeof openPiProcess>>>();
+  const transport = options.transport ?? createRestrictedProcessAgentSessionTransport();
+  const activeInstances = new Map<string, AgentSession>();
   return {
     kind: 'agent',
     reserveTokens: PI_SESSION_RESERVE,
@@ -417,7 +415,7 @@ export function createPiAdapter(options: {
           }
         };
         try {
-          const session = await openPiProcess({
+          const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry), stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
@@ -444,7 +442,6 @@ export function createPiAdapter(options: {
             // thresholds follow the model that will receive the summary.
             compaction: compactionSettings(entry),
             onEvent,
-            ...(conversation ? { allowWorkspaceChange: true } : {}),
           });
           activeInstances.set(operation.id, session);
           if (persistEntries) {
@@ -507,15 +504,13 @@ export function createPiAdapter(options: {
                 text: `${briefing}${hint}`.slice(0, 20_000),
               });
             }
-            await session.prompt(`${briefing}${hint}`);
+            const result = await session.prompt(`${briefing}${hint}`);
             flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
             // A provider or transport error ends the turn with an assistant
             // error message; that is a failure, never a successful operation.
-            const messages = session.inspect().messages as { role?: string; stopReason?: string; errorMessage?: string }[];
-            const lastAssistant = [...messages].reverse().find(message => message.role === 'assistant');
-            if (lastAssistant?.stopReason === 'error') {
-              return { outcome: 'failed', output: { error: lastAssistant.errorMessage ?? 'Model request failed' }, usage: gate.total() };
+            if (result.stopReason === 'error') {
+              return { outcome: 'failed', output: { error: result.errorMessage ?? 'Model request failed' }, usage: gate.total() };
             }
             if (permissionRequest) {
               return {
@@ -535,7 +530,7 @@ export function createPiAdapter(options: {
                 usage: gate.total(),
               };
             }
-            const text = assistantText(session.inspect().messages);
+            const text = result.finalAssistantText;
             const reply = text.trim() ? text : streamed.text;
             if (persistEntries && !sawAssistantMessageEnd && reply.trim()) {
               appendNodeEntry(options.store, {

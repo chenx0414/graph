@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type { Api, Model } from '@earendil-works/pi-ai';
 import type { AgentSessionEvent, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Json } from '../core/types.ts';
+import type {
+  AgentSessionBinding, AgentSessionInspect, AgentSessionRequest,
+} from './agent-session.ts';
 import { nodeReadPaths } from './capabilities.ts';
 import { graphNodeRuntime } from './workspace-command.ts';
 import { isExternallyGated } from './pi-instance.ts';
@@ -23,11 +24,8 @@ export interface PiWorkerTool {
   parameters: Json;
 }
 
-export interface PiWorkerConfig {
-  binding: { instanceId: string; nodeId: string; definitionVersion: string };
-  workspace: string;
-  stateDir: string;
-  model: Model<Api>;
+export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'onEvent' | 'tools' | 'readOnly'> & {
+  binding: AgentSessionBinding;
   thinkingLevel: ThinkingLevel;
   tools: PiWorkerTool[];
   skillPaths: string[];
@@ -36,40 +34,9 @@ export interface PiWorkerConfig {
   systemPrompt: string;
   appendSystemPrompt: string;
   allowedToolNames: string[];
-  bundleDigest: string;
-  legacyCapabilityDigest?: string;
-  toolPolicyDigest: string;
-  runtimePolicyDigest: string;
-  allowWorkspaceChange?: boolean;
-  forkFrom?: { sessionFile: string; leafId?: string };
-  compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
-}
+};
 
-export interface PiWorkerInspect {
-  binding: { instanceId: string; nodeId: string; definitionVersion: string };
-  sessionId: string;
-  sessionFile: string;
-  model: string | undefined;
-  messages: unknown[];
-  leafId: string | null;
-  bundleDigest: string | null;
-  toolPolicyDigest: string | null;
-  runtimePolicyDigest: string | null;
-  piVersion: string | null;
-  context?: {
-    mode: 'fresh' | 'fork';
-    sourceSessionId?: string;
-    sourceSessionFile?: string;
-    sourceLeafId?: string;
-    sourceContextDigest?: string;
-    childContextDigest: string;
-  };
-  processId: number;
-  activeTools?: string[];
-  registeredTools?: string[];
-  loadedExtensions?: string[];
-  loadedExtensionTools?: string[];
-}
+export type PiWorkerInspect = AgentSessionInspect & { processId: number };
 
 interface PiWorkerResult {
   ok: boolean;
@@ -77,31 +44,7 @@ interface PiWorkerResult {
   error?: string;
 }
 
-export interface PiProcessOptions {
-  binding: { instanceId: string; nodeId: string; definitionVersion: string };
-  workspace: string;
-  stateDir: string;
-  model: Model<Api>;
-  stream: StreamFn;
-  thinkingLevel?: ThinkingLevel;
-  tools?: ToolDefinition[];
-  skillPaths?: string[];
-  piExtensionPaths?: string[];
-  piExtensionTools?: string[];
-  systemPrompt?: string;
-  appendSystemPrompt?: string;
-  allowedToolNames?: string[];
-  bundleDigest: string;
-  legacyCapabilityDigest?: string;
-  toolPolicyDigest: string;
-  runtimePolicyDigest: string;
-  allowWorkspaceChange?: boolean;
-  forkFrom?: { sessionFile: string; leafId?: string };
-  broker: SendGate;
-  readOnly?: boolean;
-  compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
-  onEvent?: (event: AgentSessionEvent) => void;
-}
+export type PiProcessOptions = AgentSessionRequest;
 
 function serializedTools(tools: readonly ToolDefinition[]): PiWorkerTool[] {
   return tools.map(tool => ({
@@ -185,6 +128,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     toolPolicyDigest: options.toolPolicyDigest.trim(),
     runtimePolicyDigest: options.runtimePolicyDigest.trim(),
     ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
+    ...(options.freshSession ? { freshSession: true } : {}),
     ...(forkFrom ? { forkFrom } : {}),
     ...(options.compaction ? { compaction: options.compaction } : {}),
   };

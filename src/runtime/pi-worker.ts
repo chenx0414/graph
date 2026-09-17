@@ -9,7 +9,8 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { InlineExtension } from '@earendil-works/pi-coding-agent';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { externallyGated, openPiInstance } from './pi-instance.ts';
-import type { PiWorkerConfig, PiWorkerInspect } from './pi-process.ts';
+import type { PiWorkerConfig } from './pi-process.ts';
+import type { AgentSessionInspect } from './agent-session.ts';
 
 interface Reply { ok: boolean; value?: unknown; error?: string }
 
@@ -106,6 +107,7 @@ async function main() {
     toolPolicyDigest: config.toolPolicyDigest,
     runtimePolicyDigest: config.runtimePolicyDigest,
     ...(config.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
+    ...(config.freshSession ? { freshSession: true } : {}),
     ...(config.forkFrom ? { forkFrom: config.forkFrom } : {}),
     ...(config.compaction ? { compaction: config.compaction } : {}),
     onEvent: event => {
@@ -115,7 +117,7 @@ async function main() {
       }));
     },
   });
-  const inspect = () => ({ ...session.inspect(), processId: process.pid }) as PiWorkerInspect;
+  const inspect = () => ({ ...session.inspect(), processId: process.pid }) as AgentSessionInspect & { processId: number };
   await request({ operation: 'ready', inspect: inspect() });
 
   let promptRunning = false;

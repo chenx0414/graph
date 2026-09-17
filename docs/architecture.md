@@ -68,8 +68,10 @@ flowchart TB
 - [program-adapters.ts](../src/core/program-adapters.ts)：`graph.verify`、`graph.command` 与人工检查程序节点。
 - [conversation.ts](../src/core/conversation.ts)：会话消息、队列投递、回复摘要与消息事件。
 - [conversation-projection.ts](../src/core/conversation-projection.ts)：会话历史分页覆盖、稳定 ID 归并、实时 delta/tool 合并、队列状态与消息排序。
-- [pi-instance.ts](../src/runtime/pi-instance.ts)：单个 Pi session 生命周期、能力包绑定和受控模型门。
-- [pi-adapter.ts](../src/runtime/pi-adapter.ts)：Agent 节点到独立 Pi 进程、工具门和 Graph 系统能力的适配。
+- [agent-session.ts](../src/runtime/agent-session.ts)：Agent session transport contract、统一 inspect/turn 结果与 in-process/restricted-process adapter 选择。
+- [pi-instance.ts](../src/runtime/pi-instance.ts)：in-process Pi session 生命周期、能力包绑定和受控模型门。
+- [pi-process.ts](../src/runtime/pi-process.ts)：受操作系统限制的 Pi session adapter、宿主请求路由与 worker 协议。
+- [pi-adapter.ts](../src/runtime/pi-adapter.ts)：Agent operation 的能力包、凭据、gate、fork policy 与 Graph 事件语义到 session transport 的组合。
 
 纯图规则、预算算术、模板和数据库事务为 Task Runtime 的内部 implementation，不为每个计算拆一层 adapter。SQLite/Git 测试使用真实临时文件与仓库。Pi、供应商和远程 MCP 才使用可控替身与生产 adapter 两套实现。
 
