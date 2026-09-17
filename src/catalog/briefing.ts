@@ -1,7 +1,7 @@
 import type { NodeSpec, Operation } from '../core/types.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
-export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
+export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attempt'>, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
   const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact => `${artifact.path} (${artifact.digest})`)));
   const catalogDefinitions = extra.catalog?.definitions ?? [];
   const catalogCapabilities = extra.catalog?.capabilities ?? [];

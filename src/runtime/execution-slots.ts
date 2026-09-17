@@ -1,4 +1,5 @@
 import type { TaskStore } from '../core/store.ts';
+import { clearOperationCredentialWait } from '../core/operation-lifecycle.ts';
 
 /** Local execution capacity. Credential waits are not execution work: an
  * operation parked on a credential slot sets waiting_slot=1 and stops counting
@@ -29,7 +30,7 @@ export async function waitForAgentExecutionSlot(store: TaskStore, operationId: s
     if (signal?.aborted) throw aborted();
     const admitted = store.transaction(() => {
       if (occupiedSlots(store, 'agent') >= AGENT_EXECUTION_LIMIT) return false;
-      store.db.prepare('UPDATE operations SET waiting_slot=0 WHERE id=?').run(operationId);
+      clearOperationCredentialWait(store, operationId);
       return true;
     });
     if (admitted) return;

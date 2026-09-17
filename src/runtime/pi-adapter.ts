@@ -19,6 +19,7 @@ import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
+import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
 import { openPiProcess } from './pi-process.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
@@ -132,9 +133,9 @@ export function createPiAdapter(options: {
       const setWaitingSlot = (waiting: boolean) => {
         const now = Date.now();
         if (waiting) {
-          options.store.db.prepare('UPDATE operations SET waiting_slot=1,waiting_since=COALESCE(waiting_since,?) WHERE id=?').run(now, operation.id);
+          markOperationCredentialWait(options.store, operation.id, now);
         } else {
-          options.store.db.prepare('UPDATE operations SET waiting_slot=0,waiting_ms=waiting_ms + MAX(0,?-COALESCE(waiting_since,?)),waiting_since=NULL WHERE id=?').run(now, now, operation.id);
+          finishOperationCredentialWait(options.store, operation.id, now);
         }
       };
       const slot = binding && scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)

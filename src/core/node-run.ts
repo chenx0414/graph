@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
 import { contextView } from './context.ts';
+import { nodeOperationRuns } from './operation-lifecycle.ts';
 
 export interface NodeEntryInput {
   taskId: string;
@@ -179,20 +180,7 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   const session = node.instance_id
     ? store.db.prepare('SELECT session_id,session_file FROM node_sessions WHERE instance_id=?').get(node.instance_id) as { session_id: string; session_file: string | null } | undefined
     : undefined;
-  const operations = (store.db.prepare(`SELECT id,state,reserved,worker_active,waiting_slot,result,usage,dispatched_at,settled_at,waiting_ms,activation_id
-    FROM operations WHERE task_id=? AND node_id=? ORDER BY rowid`).all(taskId, nodeId) as {
-      id: string; state: string; reserved: number; worker_active: number; waiting_slot: number; result: string | null; usage: string | null;
-      dispatched_at: number | null; settled_at: number | null; waiting_ms: number; activation_id: string | null;
-    }[]).map(row => {
-    const waitingMs = row.waiting_ms ?? 0;
-    const runMs = row.dispatched_at !== null && row.settled_at !== null ? Math.max(0, row.settled_at - row.dispatched_at - (row.waiting_slot ? Date.now() - (row.dispatched_at ?? 0) : waitingMs)) : null;
-    return {
-      id: row.id, state: row.state, activationId: row.activation_id, workerActive: Boolean(row.worker_active),
-      waitingSlot: Boolean(row.waiting_slot), reserved: row.reserved, waitingMs,
-      runMs, dispatchedAt: row.dispatched_at, settledAt: row.settled_at,
-      result: row.result ? JSON.parse(row.result) as Json : null, usage: row.usage ? JSON.parse(row.usage) as Json : null,
-    };
-  });
+  const operations = nodeOperationRuns(store, taskId, nodeId);
   const invocations = (store.db.prepare(`SELECT i.id,i.model,i.usage,i.cost,i.purpose FROM invocations i JOIN operations o ON o.id=i.operation_id
     WHERE o.task_id=? AND o.node_id=? ORDER BY i.rowid`).all(taskId, nodeId) as { id: string; model: string; usage: string | null; cost: string | null; purpose: string }[])
     .map(row => ({ id: row.id, model: row.model, purpose: row.purpose, usage: row.usage ? JSON.parse(row.usage) as Json : null, cost: row.cost ? JSON.parse(row.cost) as Json : null }));

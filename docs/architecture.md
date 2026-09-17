@@ -63,10 +63,9 @@ flowchart TB
 - [capability-bundle.ts](../src/runtime/capability-bundle.ts)：定义绑定的不可变能力包、静态 policy digest 与 operation overlay。
 - [context.ts](../src/core/context.ts)：Continue/Fresh/Fork 解析、handoff 冻结、上下文 lineage 与预算作用域。
 - [model-selection.ts](../src/core/model-selection.ts)：模型等级选择、审查模型排除与独立审查就绪判断。
-- [operation-settlement.ts](../src/core/operation-settlement.ts)：操作结果结算、返工循环、阻塞与等待问答。
+- [operation-lifecycle.ts](../src/core/operation-lifecycle.ts)：operation 的 intent、dispatch、reconcile、settle、阻塞、未知用量与返工状态机。
 - [program-adapters.ts](../src/core/program-adapters.ts)：`graph.verify`、`graph.command` 与人工检查程序节点。
 - [conversation.ts](../src/core/conversation.ts)：会话消息、队列投递、回复摘要与消息事件。
-- [usage-ledger.ts](../src/core/usage-ledger.ts)：未知用量核对、调用记账与模型使用记录。
 - [pi-instance.ts](../src/runtime/pi-instance.ts)：单个 Pi session 生命周期、能力包绑定和受控模型门。
 - [pi-adapter.ts](../src/runtime/pi-adapter.ts)：Agent 节点到独立 Pi 进程、工具门和 Graph 系统能力的适配。
 
