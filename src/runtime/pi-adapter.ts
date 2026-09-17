@@ -32,6 +32,7 @@ export interface PiAdapterChannels {
   install: (input: { id: string; kind: CapabilityKind; source: string; version: string; requestId: string }) => Promise<unknown>;
   systemContext?: {
     resourceCatalog?: () => import('../catalog/resource-catalog.ts').RecommendedResource[];
+    agentDefinitions?: () => import('../catalog/catalog.ts').AgentCombination[];
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
   };
 }
@@ -242,6 +243,7 @@ export function createPiAdapter(options: {
             ...(channels?.systemContext ? {
               systemContext: {
                 ...(channels.systemContext.resourceCatalog ? { resourceCatalog: channels.systemContext.resourceCatalog } : {}),
+                ...(channels.systemContext.agentDefinitions ? { agentDefinitions: channels.systemContext.agentDefinitions } : {}),
                 ...(channels.systemContext.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
                 ...(conversation && spec.role === 'master' ? {
                   requestModelAccess: async (request: { modelId: string; reason: string; planId?: string }) => {
@@ -414,6 +416,7 @@ export function createPiAdapter(options: {
                     'Each proposal should include a short decisions list of the binding constraints the user confirmed (for example "do not touch login.ts"); update or drop entries when the user revises them. The list is frozen with the draft and shown on the confirmation card, so workers receive exactly what the user reviewed.',
                     'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
                     'Before proposing a graph, inspect the project and query the shared resource library with search_resources/get_resource. These entries are sourcing information only: never claim they are installed, never invent resource capabilities from memory, and never treat a catalog entry as task authorization.',
+                    'Use list_agent_combinations/get_agent_combination to choose published subagent combinations such as code, test, review, e2e-test, security, gate, ship, literature-search, paper-writing and paper-polish. Reference the returned key directly as definitionVersion; do not invent definition names.',
                     'Use read_system_capabilities to check configured subscriptions, models, Agent definitions and graph architectures before designing or assembling the graph. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
                     'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',
                     'After writing the normal reply, call suggest_prompt with one concise and specific message the user is most likely to send next. Omit the suggestion when there is no useful follow-up. The suggestion is only a composer hint and must never be sent automatically.',

@@ -34,10 +34,10 @@ export class Execution {
   private readonly git?: GitIntegration;
   private readonly scratchRoot?: string;
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
-  private readonly systemContext?: { resources?: boolean; systemSummary?: boolean; requestModelAccess?: boolean };
+  private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean };
   private readonly autoWake: boolean;
   private readonly generation: number;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;

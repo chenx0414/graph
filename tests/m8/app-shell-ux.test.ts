@@ -670,8 +670,7 @@ test('the resource library groups reusable assets and includes graph architectur
 
   await page.getByTestId('resource-nav-agents').click();
   await page.getByTestId('resource-section-agents').waitFor();
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 组合');
-  expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('coder@1');
 
   await page.getByTestId('resource-nav-architectures').click();
   await page.getByTestId('resource-section-architectures').waitFor();

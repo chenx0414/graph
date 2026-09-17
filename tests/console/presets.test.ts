@@ -54,8 +54,23 @@ test('presets install idempotently and upgrades publish new versions without tou
   expect(first.installed).toContain('agent-master');
   const definitions = runtime.catalog.definitions();
   const capabilities = runtime.catalog.capabilities();
-  expect(definitions.map(item => `${item.id}@${item.version}`)).toEqual(expect.arrayContaining(['master@1', 'coder@1', 'reviewer@1', 'tester@1']));
-  expect(capabilities.map(item => item.id)).toEqual(expect.arrayContaining(['skill-project-investigation', 'skill-implement-and-verify', 'skill-independent-review', 'skill-test-and-deliver', 'mcp-project-index']));
+  expect(definitions.map(item => `${item.id}@${item.version}`)).toEqual(expect.arrayContaining([
+    'master@1', 'coder@1', 'reviewer@1', 'tester@1',
+    'code@1', 'test@1', 'review@1', 'e2e-test@1', 'security@1', 'gate@1', 'ship@1',
+    'literature-search@1', 'paper-writing@1', 'paper-polish@1',
+  ]));
+  expect(capabilities.map(item => item.id)).toEqual(expect.arrayContaining([
+    'skill-project-investigation', 'skill-implement-and-verify', 'skill-independent-review', 'skill-test-and-deliver',
+    'mcp-project-index', 'prompt-e2e-test', 'prompt-security', 'prompt-gate', 'prompt-ship',
+    'prompt-literature-search', 'prompt-paper-writing', 'prompt-paper-polish',
+  ]));
+  const combinations = runtime.catalog.agentCombinations();
+  expect(combinations.map(item => item.key)).toEqual(expect.arrayContaining([
+    'code@1', 'test@1', 'review@1', 'e2e-test@1', 'security@1', 'gate@1', 'ship@1',
+    'literature-search@1', 'paper-writing@1', 'paper-polish@1',
+  ]));
+  expect(combinations.find(item => item.id === 'security')).toMatchObject({ review: true, recommendedGrade: 'highest' });
+  expect(combinations.find(item => item.id === 'paper-writing')?.prompts?.agent).toEqual({ id: 'prompt-paper-writing', version: '1.0.0' });
   const master = runtime.catalog.definitionSpec('master', 1) as { capabilities?: { id: string; version: string }[]; snapshot?: { preset?: { id: string; hash: string } } };
   expect(master.capabilities).toEqual([{ id: 'skill-project-investigation', version: '1.0.0' }]);
   expect(master.snapshot?.preset?.hash).toBeTruthy();

@@ -1,7 +1,7 @@
 import type { NodeSpec, Operation } from '../core/types.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
-export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions: string[]; capabilities: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
+export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions: string[]; capabilities: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
   const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact => `${artifact.path} (${artifact.digest})`)));
   const attachments = (operation.context.messages ?? []).flatMap(message =>
     (message.attachments ?? []).map(attachment => [
@@ -25,10 +25,11 @@ export function briefing(operation: Operation, extra: { request: string; summary
     extra.catalog && (extra.catalog.definitions.length || extra.catalog.capabilities.length)
       ? `Catalog:\n${[...extra.catalog.definitions.map(item => `- definition ${item}`), ...extra.catalog.capabilities.map(item => `- capability ${item}`)].join('\n')}`
       : '',
-    extra.systemContext && (extra.systemContext.resources || extra.systemContext.systemSummary || extra.systemContext.requestModelAccess)
+    extra.systemContext && (extra.systemContext.resources || extra.systemContext.agentCombinations || extra.systemContext.systemSummary || extra.systemContext.requestModelAccess)
       ? [
           'System context (read-only; query before planning instead of guessing):',
           extra.systemContext.resources ? '- search_resources / get_resource: the shared resource library of Skills, MCP servers, Pi extensions and Agent.md profiles.' : '',
+          extra.systemContext.agentCombinations ? '- list_agent_combinations / get_agent_combination: published Agent combinations. Use their exact key as definitionVersion in proposals.' : '',
           extra.systemContext.systemSummary ? '- read_system_capabilities: configured subscription plans, configured models, Agent definitions, graph architectures and quota windows (secrets excluded).' : '',
           extra.systemContext.requestModelAccess ? '- request_model_access: ask the user to configure a needed model or subscription; it never changes configuration or grants permission itself.' : '',
         ].filter(Boolean).join('\n')

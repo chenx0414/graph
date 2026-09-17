@@ -118,8 +118,9 @@ async function systemContextProvider() {
     };
     step += 1;
     if (step === 1) return call('c1', 'read_system_capabilities', {});
-    if (step === 2) return call('c2', 'search_resources', { query: 'github', kind: 'mcp' });
-    if (step === 3) return call('c3', 'request_model_access', { modelId: 'missing-model', reason: '需要独立审查模型', planId: 'opencode-go' });
+    if (step === 2) return call('c2', 'list_agent_combinations', { query: 'review' });
+    if (step === 3) return call('c3', 'search_resources', { query: 'github', kind: 'mcp' });
+    if (step === 4) return call('c4', 'request_model_access', { modelId: 'missing-model', reason: '需要独立审查模型', planId: 'opencode-go' });
     chunk({ role: 'assistant', content: '已打开模型授权问题。' }, null);
     end('stop');
   });
@@ -251,6 +252,15 @@ test('the real Pi master can search the resource library and open a model-access
         source: 'https://github.com/github/github-mcp-server',
         sourceKind: 'github',
       }],
+      agentDefinitions: () => [{
+        id: 'review',
+        version: 1,
+        key: 'review@1',
+        recommendedGrade: 'high',
+        review: true,
+        description: '代码审查',
+        capabilities: [{ id: 'skill-independent-review', version: '1.0.0' }],
+      }],
       systemSummary: () => ({ configuredModels: [{ id: 'local', grade: 'high' }], subscriptionPlans: [] }),
     },
   });
@@ -262,9 +272,10 @@ test('the real Pi master can search the resource library and open a model-access
   const view = await runtime.conversations.view(created.conversationId);
 
   expect(provider.requests[0]!.tools).toEqual(expect.arrayContaining([
-    'search_resources', 'get_resource', 'read_system_capabilities', 'request_model_access',
+    'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination', 'read_system_capabilities', 'request_model_access',
   ]));
   expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
+  expect(JSON.stringify(provider.requests[0]!.messages)).toContain('list_agent_combinations');
   expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('"mcp-github"');
   expect(view.questions).toEqual(expect.arrayContaining([
     expect.objectContaining({

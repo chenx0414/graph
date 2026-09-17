@@ -13,6 +13,13 @@
     { "id": "prompt-reviewer", "kind": "prompt", "version": "1.0.0", "path": "prompts/reviewer", "description": "独立审查 Agent 的身份与职责" },
     { "id": "prompt-tester", "kind": "prompt", "version": "1.0.0", "path": "prompts/tester", "description": "测试与交付 Agent 的身份与职责" },
     { "id": "prompt-tool-awareness", "kind": "prompt", "version": "1.0.0", "path": "prompts/tool-awareness", "description": "能力感知、Skill 使用与权限边界" },
+    { "id": "prompt-e2e-test", "kind": "prompt", "version": "1.0.0", "path": "prompts/e2e-test", "description": "端到端测试 Agent 的身份与职责" },
+    { "id": "prompt-security", "kind": "prompt", "version": "1.0.0", "path": "prompts/security", "description": "安全检查 Agent 的身份与职责" },
+    { "id": "prompt-gate", "kind": "prompt", "version": "1.0.0", "path": "prompts/gate", "description": "目标把关 Agent 的身份与职责" },
+    { "id": "prompt-ship", "kind": "prompt", "version": "1.0.0", "path": "prompts/ship", "description": "上线与运维 Agent 的身份与职责" },
+    { "id": "prompt-literature-search", "kind": "prompt", "version": "1.0.0", "path": "prompts/literature-search", "description": "文献检索 Agent 的身份与职责" },
+    { "id": "prompt-paper-writing", "kind": "prompt", "version": "1.0.0", "path": "prompts/paper-writing", "description": "论文写作 Agent 的身份与职责" },
+    { "id": "prompt-paper-polish", "kind": "prompt", "version": "1.0.0", "path": "prompts/paper-polish", "description": "论文润色 Agent 的身份与职责" },
     {
       "id": "agent-master", "kind": "agent", "version": "1.0.0", "definition": "master", "recommendedGrade": "high",
       "description": "主 Agent：与用户对话、调查、提出并维护策略草稿",
@@ -36,6 +43,64 @@
       "description": "测试与交付 Agent：执行确认检查并整理证据",
       "capabilities": [{ "id": "skill-test-and-deliver", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
       "prompts": { "agent": { "id": "prompt-tester", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-code", "kind": "agent", "version": "1.0.0", "definition": "code", "recommendedGrade": "medium",
+      "description": "代码实现：按确认范围写代码、补必要改动并交付可复核结果",
+      "capabilities": [{ "id": "skill-implement-and-verify", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-coder", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-test", "kind": "agent", "version": "1.0.0", "definition": "test", "recommendedGrade": "medium",
+      "description": "测试编写：补充单元、集成与回归测试并保存原始结果",
+      "capabilities": [{ "id": "skill-test-and-deliver", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-tester", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-review", "kind": "agent", "version": "1.0.0", "definition": "review", "recommendedGrade": "high", "review": true,
+      "description": "代码审查：独立检查需求、实现、回归和证据",
+      "capabilities": [{ "id": "skill-independent-review", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-reviewer", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-e2e-test", "kind": "agent", "version": "1.0.0", "definition": "e2e-test", "recommendedGrade": "high",
+      "description": "端到端测试：验证真实用户流程、集成边界与可复现证据",
+      "capabilities": [{ "id": "skill-test-and-deliver", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-e2e-test", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-security", "kind": "agent", "version": "1.0.0", "definition": "security", "recommendedGrade": "highest", "review": true,
+      "description": "安全检查：检查漏洞、信任边界、密钥暴露和权限扩张",
+      "capabilities": [{ "id": "skill-independent-review", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-security", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-gate", "kind": "agent", "version": "1.0.0", "definition": "gate", "recommendedGrade": "highest", "review": true,
+      "description": "目标把关：确认 goal 与验收证据一致，否则给出返工路径",
+      "capabilities": [{ "id": "skill-independent-review", "version": "1.0.0" }, { "id": "skill-project-investigation", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-gate", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-ship", "kind": "agent", "version": "1.0.0", "definition": "ship", "recommendedGrade": "high",
+      "description": "上线与运维：准备发布、兼容性、回滚、健康检查和发布后验证",
+      "capabilities": [{ "id": "skill-test-and-deliver", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-ship", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-literature-search", "kind": "agent", "version": "1.0.0", "definition": "literature-search", "recommendedGrade": "high",
+      "description": "文献检索：定义检索问题、收集一手来源并保留可核验引用",
+      "capabilities": [{ "id": "skill-project-investigation", "version": "1.0.0" }, { "id": "mcp-project-index", "version": "1.0.0" }],
+      "prompts": { "agent": { "id": "prompt-literature-search", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-paper-writing", "kind": "agent", "version": "1.0.0", "definition": "paper-writing", "recommendedGrade": "high",
+      "description": "论文写作：基于已有材料撰写连贯论文，不编造数据或引用",
+      "prompts": { "agent": { "id": "prompt-paper-writing", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
+    },
+    {
+      "id": "agent-paper-polish", "kind": "agent", "version": "1.0.0", "definition": "paper-polish", "recommendedGrade": "medium",
+      "description": "论文润色：改善清晰度、结构和学术语气，不改变事实与引用",
+      "prompts": { "agent": { "id": "prompt-paper-polish", "version": "1.0.0" }, "tool": { "id": "prompt-tool-awareness", "version": "1.0.0" } }
     }
   ]
 }

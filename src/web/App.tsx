@@ -45,6 +45,11 @@ type Settings_ = {
   projects: { id: string; root: string }[];
   models: { id: string; grade: string; credentialId?: string; contextWindow?: number }[];
   definitions: { id: string; version: number }[];
+  agents?: {
+    id: string; version: number; key: string; recommendedGrade: string; review: boolean; description?: string;
+    capabilities: { id: string; version: string }[];
+    prompts?: { agent?: { id: string; version: string }; tool?: { id: string; version: string } };
+  }[];
   capabilities: { id: string; version: string; kind?: 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt'; status?: string }[];
   recommended?: RecommendedResource[];
 };
@@ -66,6 +71,23 @@ const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
 const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   pending: 'neutral', ready: 'info', preparing: 'accent', running: 'accent',
   succeeded: 'success', failed: 'danger', blocked: 'warn', skipped: 'neutral',
+};
+
+const AGENT_COMBINATION_LABEL: Record<string, string> = {
+  master: '主 Agent',
+  coder: '实现 Agent（兼容）',
+  reviewer: '审查 Agent（兼容）',
+  tester: '测试 Agent（兼容）',
+  code: '代码实现',
+  test: '测试编写',
+  review: '代码审查',
+  'e2e-test': '端到端测试',
+  security: '安全检查',
+  gate: '目标把关',
+  ship: '上线与运维',
+  'literature-search': '文献检索',
+  'paper-writing': '论文写作',
+  'paper-polish': '论文润色',
 };
 
 function statusText(view: TaskView) {
@@ -613,6 +635,7 @@ function ResourceLibrary({ settings, section }: { settings: Settings_ | null; se
   const [resourceLimits, setResourceLimits] = useState<Record<string, number>>({});
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const recommended = settings?.recommended ?? [];
+  const agentCombinations = settings?.agents ?? [];
   const sections = [
     { id: 'skills', title: 'Skills 库', icon: 'spark' as const, description: '来自开源仓库的独立 Skills；搜索可按名称、来源或路径筛选。', items: recommended.filter(item => item.kind === 'skill' || item.kind === 'skill-index') },
     { id: 'mcp', title: 'MCP 库', icon: 'link' as const, description: '可接入的 MCP servers 与所需 transport、凭据和运行条件。', items: recommended.filter(item => item.kind === 'mcp') },
@@ -632,8 +655,22 @@ function ResourceLibrary({ settings, section }: { settings: Settings_ | null; se
     ...(item.tags ?? []),
   ].some(value => value?.toLowerCase().includes(query));
   const filtered = active.items.filter(matches);
+  const filteredAgents = agentCombinations.filter(item => {
+    if (!query) return true;
+    return [
+      item.id,
+      item.key,
+      item.description,
+      AGENT_COMBINATION_LABEL[item.id],
+      item.recommendedGrade,
+      ...item.capabilities.map(binding => binding.id),
+    ].some(value => value?.toLowerCase().includes(query));
+  });
+  const visibleAgents = filteredAgents.slice(0, resourceLimits.agents ?? 40);
   const visible = filtered.slice(0, resourceLimits[active.id] ?? 40);
-  const countFor = (id: string) => id === 'architectures' ? GRAPH_ARCHITECTURES.length : sections.find(item => item.id === id)?.items.length ?? 0;
+  const countFor = (id: string) => id === 'architectures' ? GRAPH_ARCHITECTURES.length
+    : id === 'agents' ? agentCombinations.length
+      : sections.find(item => item.id === id)?.items.length ?? 0;
   async function openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md') {
     if (!bridge?.openResource) {
       toast('请在桌面 APP 中使用访达打开资源目录', 'info');
@@ -672,7 +709,45 @@ function ResourceLibrary({ settings, section }: { settings: Settings_ | null; se
             ) : undefined}
           >
             {active.id === 'agents' ? (
-              <p className="muted">暂无 Agent 组合</p>
+              agentCombinations.length ? (
+                <>
+                  <div className="resource-section-toolbar">
+                    <p>{active.description}</p>
+                    <label className="resource-search">
+                      <Icon name="search" size={15} />
+                      <input
+                        value={resourceQuery}
+                        onChange={event => setResourceQuery(event.target.value)}
+                        placeholder="搜索 Agent 组合或能力"
+                        data-testid="agent-combination-search"
+                      />
+                      <span className="faint">{filteredAgents.length}</span>
+                    </label>
+                  </div>
+                  <div className="agent-combination-list" data-testid="agent-combination-list">
+                    {visibleAgents.map(item => (
+                      <article className="agent-combination-item" key={item.key} data-testid={`agent-combination-${item.id}`}>
+                        <header>
+                          <strong>{AGENT_COMBINATION_LABEL[item.id] ?? item.id}</strong>
+                          <code>{item.key}</code>
+                        </header>
+                        <p>{item.description ?? '已发布的 Agent 组合。'}</p>
+                        <div className="chip-row">
+                          <Pill tone="neutral">{item.recommendedGrade}</Pill>
+                          {item.review && <Pill tone="warn">独立审查</Pill>}
+                          {item.capabilities.map(binding => <Pill key={`${binding.id}:${binding.version}`} tone="info">{binding.id}@{binding.version}</Pill>)}
+                        </div>
+                      </article>
+                    ))}
+                    {!visibleAgents.length && <p className="muted">没有匹配的 Agent 组合。</p>}
+                    {visibleAgents.length < filteredAgents.length && (
+                      <button className="btn" type="button" onClick={() => setResourceLimits(current => ({ ...current, agents: (current.agents ?? 40) + 40 }))}>
+                        显示更多
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : <p className="muted">暂无 Agent 组合</p>
             ) : active.id === 'architectures' ? (
               <div className="architecture-list" data-testid="architecture-library">
                 {GRAPH_ARCHITECTURES.map(item => (

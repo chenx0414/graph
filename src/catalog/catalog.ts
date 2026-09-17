@@ -29,6 +29,24 @@ export interface CapabilityRecord {
   status: 'installing' | 'installed' | 'failed';
 }
 
+export interface AgentCombination {
+  id: string;
+  version: number;
+  key: string;
+  recommendedGrade: ModelGrade;
+  review: boolean;
+  description?: string;
+  capabilities: CapabilityBinding[];
+  prompts?: DefinitionSpec['prompts'];
+  snapshot?: Json;
+}
+
+function snapshotDescription(snapshot: Json | undefined) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return undefined;
+  const description = (snapshot as Record<string, unknown>).description;
+  return typeof description === 'string' && description.trim() ? description.trim() : undefined;
+}
+
 /** Versioned Agent definitions and capabilities. Published rows are immutable. */
 export class Catalog {
   private readonly store: TaskStore;
@@ -83,6 +101,24 @@ export class Catalog {
 
   listDefinitions() {
     return this.store.db.prepare('SELECT id,MAX(version) AS version FROM definitions GROUP BY id').all() as { id: string; version: number }[];
+  }
+
+  agentCombinations(): AgentCombination[] {
+    return this.listDefinitions().map(({ id, version }) => {
+      const spec = this.definition(`${id}@${version}`);
+      const description = snapshotDescription(spec.snapshot);
+      return {
+        id,
+        version,
+        key: `${id}@${version}`,
+        recommendedGrade: spec.recommendedGrade,
+        review: spec.review === true,
+        ...(description ? { description } : {}),
+        capabilities: spec.capabilities ?? [],
+        ...(spec.prompts ? { prompts: spec.prompts } : {}),
+        ...(spec.snapshot !== undefined ? { snapshot: spec.snapshot } : {}),
+      };
+    });
   }
 
   capabilities() {

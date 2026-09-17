@@ -1,13 +1,16 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { installPresets } from '../../src/catalog/presets.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
+const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
 // Each browser suite builds into its own directory; a shared dist/web would
@@ -55,8 +58,7 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   await page.getByTestId('catalog').waitFor();
   await page.getByTestId('resource-nav-agents').click();
   await page.getByTestId('resource-section-agents').waitFor();
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 组合');
-  expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('coder@1');
   await page.goto(`${server.url}/#/tasks/${taskId}`);
   await page.getByTestId('status').waitFor();
   await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
@@ -74,6 +76,37 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   expect(await page.locator('.node-card[data-node-id="check"]').innerText()).toContain('check tool');
   await implement.click();
   expect(await page.getByTestId('node-detail').innerText()).toContain('implement');
+}, 60_000);
+
+test('the Agent combination library exposes the built-in subagent combinations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m5-agents-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root }],
+    autoDrive: false,
+    webDir,
+  });
+  cleanup.push(() => server.close());
+  await installPresets(server.runtime.catalog, presetsRoot);
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/catalog/agents`);
+  const list = page.getByTestId('agent-combination-list');
+  await list.waitFor();
+  const text = await list.innerText();
+  expect(text).toContain('代码实现');
+  expect(text).toContain('代码审查');
+  expect(text).toContain('安全检查');
+  expect(text).toContain('目标把关');
+  expect(text).toContain('文献检索');
+  expect(text).toContain('论文写作');
+  expect(text).toContain('论文润色');
+  expect(text).toContain('code@1');
+  expect(text).toContain('security@1');
+  expect(text).toContain('paper-polish@1');
 }, 60_000);
 
 test('the graph follows runtime events and a budget question accepts a token increment', async () => {

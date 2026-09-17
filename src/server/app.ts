@@ -116,8 +116,9 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const projects = await runtime.user.projects();
     const models = runtime.models();
     const definitions = runtime.catalog.definitions();
+    const agents = runtime.catalog.agentCombinations();
     const capabilities = runtime.catalog.capabilities();
-    return { projects, models, definitions, capabilities, recommended: options.resourceCatalog ?? [] };
+    return { projects, models, definitions, agents, capabilities, recommended: options.resourceCatalog ?? [] };
   });
   app.get('/api/tasks', async () => runtime.user.list());
   app.get('/api/inbox', async request => {
@@ -328,7 +329,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const layout = await layoutGraph({ nodes: view.nodes, containers: view.containers, loops: view.loops });
     return { nodes: view.nodes, containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost };
   });
-  app.get('/api/catalog', async () => ({ definitions: runtime.catalog.definitions(), capabilities: runtime.catalog.capabilities(), recommended: options.resourceCatalog ?? [] }));
+  app.get('/api/catalog', async () => ({ definitions: runtime.catalog.definitions(), agents: runtime.catalog.agentCombinations(), capabilities: runtime.catalog.capabilities(), recommended: options.resourceCatalog ?? [] }));
   app.get('/api/catalog/definitions/:definitionId', async request => {
     const params = request.params as { definitionId: string };
     const query = request.query as { version?: string; scope?: string };

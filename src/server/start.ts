@@ -13,6 +13,7 @@ import { createLiveConfig, type LiveConfig } from './live-config.ts';
 import { installPresets } from '../catalog/presets.ts';
 import { loadResourceCatalog } from '../catalog/resource-catalog.ts';
 import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
+import type { AgentCombination } from '../catalog/catalog.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
@@ -275,7 +276,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     log(`Resource catalog unavailable (${error instanceof Error ? error.message : String(error)}); recommended resources stay hidden.`);
     return { version: 1, entries: [] };
   });
-  let agentDefinitionSummary: () => Record<string, unknown>[] = () => [];
+  let agentDefinitionSummary: () => AgentCombination[] = () => [];
   const systemSummary = async () => {
     const usage = await usageService.get();
     const configured = live.entries().map(entry => ({
@@ -363,6 +364,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     resourceCatalog: resourceCatalog.entries,
     systemContext: {
       resourceCatalog: () => resourceCatalog.entries,
+      agentDefinitions: () => agentDefinitionSummary(),
       systemSummary,
     },
     appServices: {
@@ -376,20 +378,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       }),
     },
   });
-  agentDefinitionSummary = () => {
-    const catalog = server.runtime.catalog;
-    return catalog.definitions().map(({ id, version }) => {
-      const spec = catalog.definitionSpec(id, version);
-      return {
-        id,
-        version,
-        recommendedGrade: spec.recommendedGrade,
-        review: spec.review === true,
-        capabilities: spec.capabilities ?? [],
-        ...(spec.prompts ? { prompts: spec.prompts } : {}),
-      };
-    });
-  };
+  agentDefinitionSummary = () => server.runtime.catalog.agentCombinations();
   const presetResult = await installPresets(
     server.runtime.catalog,
     presetsRoot,

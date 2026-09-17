@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, sep } from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { CapabilityKind, Catalog } from '../catalog/catalog.ts';
+import type { AgentCombination, CapabilityKind, Catalog } from '../catalog/catalog.ts';
 import {
   resourceDetail,
   searchResourceCatalog,
@@ -39,6 +39,7 @@ export function agentTools(input: {
   catalog?: Catalog;
   systemContext?: {
     resourceCatalog?: () => RecommendedResource[];
+    agentDefinitions?: () => AgentCombination[];
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
   };
@@ -196,6 +197,52 @@ export function agentTools(input: {
       parameters: Type.Object({}),
       execute: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
     });
+  }
+  if (input.role === 'master' && input.systemContext?.agentDefinitions) {
+    tools.push(
+      {
+        name: 'list_agent_combinations', label: 'List Agent combinations', description: 'List published Agent combinations that can be referenced directly as definitionVersion in a graph proposal. Each result includes the exact id@version and its bound capabilities/prompts.',
+        parameters: Type.Object({
+          query: Type.Optional(Type.String()),
+          grade: Type.Optional(Type.String()),
+          limit: Type.Optional(Type.Number()),
+        }),
+        execute: async (_id, params) => {
+          const body = fields(params);
+          const query = typeof body.query === 'string' ? body.query.trim().toLowerCase() : '';
+          if (query.length > 200) throw new Error('Agent combination query must be at most 200 characters');
+          const grade = typeof body.grade === 'string' ? body.grade.trim() : '';
+          if (grade && !['low', 'medium', 'high', 'highest'].includes(grade)) throw new Error('Unsupported model grade');
+          const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 30;
+          const matches = input.systemContext!.agentDefinitions!().filter(item => {
+            if (grade && item.recommendedGrade !== grade) return false;
+            if (!query) return true;
+            const haystack = [
+              item.id,
+              item.key,
+              item.description,
+              item.recommendedGrade,
+              ...item.capabilities.map(binding => `${binding.id}@${binding.version}`),
+              item.prompts?.agent ? `${item.prompts.agent.id}@${item.prompts.agent.version}` : undefined,
+              item.prompts?.tool ? `${item.prompts.tool.id}@${item.prompts.tool.version}` : undefined,
+            ].filter(Boolean).join('\n').toLowerCase();
+            return haystack.includes(query);
+          });
+          return text(JSON.stringify({ total: matches.length, items: matches.slice(0, limit) }));
+        },
+      },
+      {
+        name: 'get_agent_combination', label: 'Get Agent combination', description: 'Read one published Agent combination by id. Use the returned key as definitionVersion in propose_graph or revise_graph; this does not install or grant anything.',
+        parameters: Type.Object({ id: Type.String() }),
+        execute: async (_id, params) => {
+          const id = String(fields(params).id).trim();
+          if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
+          const item = input.systemContext!.agentDefinitions!().find(candidate => candidate.id === id || candidate.key === id);
+          if (!item) throw new Error(`Unknown Agent combination ${id}`);
+          return text(JSON.stringify(item));
+        },
+      },
+    );
   }
   if (input.role === 'master' && input.systemContext?.requestModelAccess) {
     tools.push({

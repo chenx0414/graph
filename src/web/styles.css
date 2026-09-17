@@ -1581,6 +1581,21 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .resource-candidate-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 1px; }
 .resource-candidate-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12.5px; font-weight: 600; }
 .resource-candidate-copy small { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.agent-combination-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.agent-combination-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.agent-combination-item header { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 10px; }
+.agent-combination-item header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.agent-combination-item header code { flex: 0 0 auto; color: var(--accent); font-size: 11.5px; }
+.agent-combination-item p { min-height: 32px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .architecture-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 26px; }
 .architecture-item {
   display: grid;
