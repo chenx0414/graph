@@ -143,6 +143,7 @@ export function App() {
   const [pathname, query = ''] = path.split('?');
   const queryParams = new URLSearchParams(query);
   const questionTotal = openQuestionTotal(tasks);
+  const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
   const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(pathname ?? '/');
   const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
@@ -150,7 +151,7 @@ export function App() {
   const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
   const title = pathname === '/' ? '新对话'
     : pathname === '/inbox' ? '问题收件箱'
-      : pathname === '/catalog' ? '资源库'
+      : catalogMatch ? '资源库'
         : pathname === '/usage' ? '用量'
         : pathname === '/setup' ? '设置'
           : pathname === '/settings' ? '设置'
@@ -268,7 +269,7 @@ export function App() {
           <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`} key={path}>
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {pathname === '/inbox' && <Inbox tasks={tasks} />}
-            {pathname === '/catalog' && <ResourceLibrary settings={settings} />}
+            {catalogMatch && <ResourceLibrary settings={settings} section={catalogMatch[1]} />}
             {pathname === '/usage' && <UsagePage />}
             {conversationMatch && (
               <ConversationPanel
@@ -605,19 +606,32 @@ function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
   );
 }
 
-function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
+const GRAPH_ARCHITECTURES = [
+  { name: '顺序执行', flow: 'A → B → C', description: '每一步使用前一步产物，适合依赖明确的实现与检查流程。' },
+  { name: '条件路由', flow: 'A → B / C', description: '先判断输入或状态，再把任务交给一条匹配的分支。' },
+  { name: '扇出与汇合', flow: 'A → B,C → D', description: '独立子任务并行执行，在汇合点统一等待必需结果。' },
+  { name: '流水线', flow: 'A → B → C…', description: '固定阶段持续传递产物，适合采集、转换、验证等连续工序。' },
+  { name: '主管与工人', flow: 'M ⇄ W1,W2', description: '主管拆分和协调，工人在各自上下文与工作副本中完成局部任务。' },
+  { name: '评估与优化', flow: 'A ⇄ E', description: '评估器给出可执行反馈，优化器修改后重新进入验证。' },
+  { name: '对抗式验证', flow: 'W ⇄ R', description: '审查者主动寻找反例和证据，有效反例会阻塞通过。' },
+  { name: '多视角与评委', flow: 'W → J1,J2 → J', description: '多个维度独立判断，再由评委按硬性规则汇总结果。' },
+] as const;
+
+function ResourceLibrary({ settings, section }: { settings: Settings_ | null; section?: string }) {
   const [selected, setSelected] = useState<RecommendedResource | null>(null);
   const [resourceQuery, setResourceQuery] = useState('');
   const [resourceLimits, setResourceLimits] = useState<Record<string, number>>({});
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const recommended = settings?.recommended ?? [];
-  const groups = [
-    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: recommended.filter(item => item.kind === 'skill' || item.kind === 'skill-index') },
-    { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: recommended.filter(item => item.kind === 'mcp') },
-    { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, items: recommended.filter(item => item.kind === 'pi-extension') },
-    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: recommended.filter(item => item.kind === 'agent-md') },
-    { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: [] as RecommendedResource[] },
+  const sections = [
+    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, description: '来自开源仓库的独立 Skills；搜索可按名称、来源或路径筛选。', items: recommended.filter(item => item.kind === 'skill' || item.kind === 'skill-index') },
+    { id: 'mcp', title: 'MCP 库', icon: 'link' as const, description: '可接入的 MCP servers 与所需 transport、凭据和运行条件。', items: recommended.filter(item => item.kind === 'mcp') },
+    { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, description: 'Pi package 扩展及其依赖、兼容性和代码执行边界。', items: recommended.filter(item => item.kind === 'pi-extension') },
+    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, description: '可作为 Agent 身份模板的 prompt 资源。', items: recommended.filter(item => item.kind === 'agent-md') },
+    { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, description: '绑定 Skills、MCP、Prompt 与模型等级的正式 Agent 组合。', items: [] as RecommendedResource[] },
+    { id: 'architectures', title: '架构库', icon: 'graph' as const, description: 'Graph 支持并可组合使用的经典任务图架构。', items: [] as RecommendedResource[] },
   ];
+  const active = sections.find(item => item.id === section) ?? sections[0]!;
   const query = resourceQuery.trim().toLowerCase();
   const matches = (item: RecommendedResource) => !query || [
     item.name,
@@ -627,19 +641,9 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
     item.sourcePath,
     ...(item.tags ?? []),
   ].some(value => value?.toLowerCase().includes(query));
-  const filteredRecommended = (group: typeof groups[number]) => group.items.filter(matches);
-  const visibleRecommended = (group: typeof groups[number]) => filteredRecommended(group).slice(0, resourceLimits[group.id] ?? 40);
-  const totalFiltered = groups.reduce((total, group) => total + filteredRecommended(group).length, 0);
-  const architectures = [
-    { name: '顺序执行', flow: 'A → B → C', description: '每一步使用前一步产物，适合依赖明确的实现与检查流程。' },
-    { name: '条件路由', flow: 'A → B / C', description: '先判断输入或状态，再把任务交给一条匹配的分支。' },
-    { name: '扇出与汇合', flow: 'A → B,C → D', description: '独立子任务并行执行，在汇合点统一等待必需结果。' },
-    { name: '流水线', flow: 'A → B → C…', description: '固定阶段持续传递产物，适合采集、转换、验证等连续工序。' },
-    { name: '主管与工人', flow: 'M ⇄ W1,W2', description: '主管拆分和协调，工人在各自上下文与工作副本中完成局部任务。' },
-    { name: '评估与优化', flow: 'A ⇄ E', description: '评估器给出可执行反馈，优化器修改后重新进入验证。' },
-    { name: '对抗式验证', flow: 'W ⇄ R', description: '审查者主动寻找反例和证据，有效反例会阻塞通过。' },
-    { name: '多视角与评委', flow: 'W → J1,J2 → J', description: '多个维度独立判断，再由评委按硬性规则汇总结果。' },
-  ];
+  const filtered = active.items.filter(matches);
+  const visible = filtered.slice(0, resourceLimits[active.id] ?? 40);
+  const countFor = (id: string) => id === 'architectures' ? GRAPH_ARCHITECTURES.length : sections.find(item => item.id === id)?.items.length ?? 0;
   async function openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md') {
     if (!bridge?.openResource) {
       toast('请在桌面 APP 中使用访达打开资源目录', 'info');
@@ -650,89 +654,98 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
   }
   return (
     <div className="stagger resource-library" data-testid="catalog">
-      <div className="resource-section-head">
-        <div>
-          <h1>资源库</h1>
-          <p>资源库条目默认已加入；绑定到 Agent 或授予任务权限仍需在后续流程中完成。</p>
-        </div>
-        <label className="resource-search">
-          <Icon name="search" size={15} />
-          <input
-            value={resourceQuery}
-            onChange={event => setResourceQuery(event.target.value)}
-            placeholder="搜索技能、来源或路径"
-            data-testid="resource-catalog-search"
-          />
-          <span className="faint">{totalFiltered}</span>
-        </label>
-      </div>
-      <div className="resource-grid">
-        {groups.map(group => (
+      <div className="resource-layout">
+        <nav className="resource-nav" aria-label="资源库导航">
+          {sections.map(item => (
+            <a
+              key={item.id}
+              href={`#/catalog/${item.id}`}
+              data-active={item.id === active.id}
+              data-testid={`resource-nav-${item.id}`}
+            >
+              <Icon name={item.icon} size={15} />
+              <span>{item.title}</span>
+              <span className="resource-nav-count">{countFor(item.id)}</span>
+            </a>
+          ))}
+        </nav>
+        <section className="resource-main">
           <Card
-            key={group.id}
-            testid={`resource-${group.id}`}
-            title={group.title}
-            icon={group.icon}
-            subtitle={`${group.items.length} 项`}
-            actions={['skills', 'mcp', 'pi-extensions', 'agent-md'].includes(group.id) ? (
-              <button type="button" className="icon-button" data-testid={`resource-open-${group.id}`} onClick={() => void openResource(group.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title={`在访达中打开${group.title}目录`} aria-label={`在访达中打开${group.title}目录`}>
+            testid={`resource-section-${active.id}`}
+            title={active.title}
+            icon={active.icon}
+            subtitle={`${countFor(active.id)} 项`}
+            actions={['skills', 'mcp', 'pi-extensions', 'agent-md'].includes(active.id) ? (
+              <button type="button" className="icon-button" data-testid={`resource-open-${active.id}`} onClick={() => void openResource(active.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title={`在访达中打开${active.title}目录`} aria-label={`在访达中打开${active.title}目录`}>
                 <Icon name="folder" size={16} />
               </button>
             ) : undefined}
           >
-            {group.id === 'agents' ? (
+            {active.id === 'agents' ? (
               <p className="muted">暂无 Agent 组合</p>
-            ) : group.items.length ? (
-              <div data-testid={`resource-items-${group.id}`}>
-                {visibleRecommended(group).length ? (
+            ) : active.id === 'architectures' ? (
+              <div className="architecture-list" data-testid="architecture-library">
+                {GRAPH_ARCHITECTURES.map(item => (
+                  <article className="architecture-item" key={item.name}>
+                    <div className="architecture-flow mono">{item.flow}</div>
+                    <div>
+                      <strong>{item.name}</strong>
+                      <p>{item.description}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : active.items.length ? (
+              <>
+                <div className="resource-section-toolbar">
+                  <p>{active.description}</p>
+                  <label className="resource-search">
+                    <Icon name="search" size={15} />
+                    <input
+                      value={resourceQuery}
+                      onChange={event => setResourceQuery(event.target.value)}
+                      placeholder="搜索技能、来源或路径"
+                      data-testid="resource-catalog-search"
+                    />
+                    <span className="faint">{filtered.length}</span>
+                  </label>
+                </div>
+                {visible.length ? (
                   <div className="resource-candidate-list">
-                    {visibleRecommended(group).map(item => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="resource-candidate-row"
-                          data-testid={`resource-entry-${item.id}`}
-                          onClick={() => setSelected(item)}
-                        >
-                          <Icon name={group.icon} size={15} />
-                          <span className="resource-candidate-copy">
-                            <span>{item.name}</span>
-                            <small>{item.description}</small>
-                          </span>
-                          <Icon name="chevron" size={14} />
-                        </button>
+                    {visible.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="resource-candidate-row"
+                        data-testid={`resource-entry-${item.id}`}
+                        onClick={() => setSelected(item)}
+                      >
+                        <Icon name={active.icon} size={15} />
+                        <span className="resource-candidate-copy">
+                          <span>{item.name}</span>
+                          <small>{item.description}</small>
+                        </span>
+                        <Icon name="chevron" size={14} />
+                      </button>
                     ))}
                   </div>
                 ) : <p className="muted">没有匹配的资源。</p>}
-                {filteredRecommended(group).length > visibleRecommended(group).length && (
+                {filtered.length > visible.length && (
                   <Button
                     size="sm"
-                    data-testid={`resource-more-${group.id}`}
-                    onClick={() => setResourceLimits(current => ({ ...current, [group.id]: (current[group.id] ?? 40) + 40 }))}
+                    data-testid={`resource-more-${active.id}`}
+                    onClick={() => setResourceLimits(current => ({ ...current, [active.id]: (current[active.id] ?? 40) + 40 }))}
                   >
-                    显示更多（{visibleRecommended(group).length} / {filteredRecommended(group).length}）
+                    显示更多（{visible.length} / {filtered.length}）
                   </Button>
                 )}
-              </div>
+              </>
             ) : (
-              <p className="muted">{group.id === 'agent-md' ? '暂无 Agent.md 资源' : `暂无 ${group.title.replace(' 库', '')} 资源`}</p>
+              <p className="muted">{active.id === 'agent-md' ? '暂无 Agent.md 资源' : `暂无 ${active.title.replace(' 库', '')} 资源`}</p>
             )}
           </Card>
-        ))}
+        </section>
       </div>
-      <Card title="架构库" icon="graph" subtitle="几种经典的 Graph 架构">
-        <div className="architecture-list" data-testid="architecture-library">
-          {architectures.map(item => (
-            <article className="architecture-item" key={item.name}>
-              <div className="architecture-flow mono">{item.flow}</div>
-              <div>
-                <strong>{item.name}</strong>
-                <p>{item.description}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </Card>
       {selected && createPortal(
         <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelected(null); }}>
           <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`资源详情 ${selected.name}`}>

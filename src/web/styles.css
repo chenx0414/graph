@@ -1462,6 +1462,47 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   font: inherit;
 }
 .resource-search input::placeholder { color: var(--faint); }
+.resource-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.resource-nav {
+  position: sticky;
+  top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  border-right: 1px solid var(--border);
+}
+.resource-nav a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 550;
+  text-decoration: none;
+}
+.resource-nav a:hover { background: var(--panel-soft); color: var(--text); }
+.resource-nav a[data-active="true"] { background: var(--accent-weak); color: var(--accent); }
+.resource-nav a > span:not(.resource-nav-count) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resource-nav-count { color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.resource-main { min-width: 0; }
+.resource-main .card { margin: 0; }
+.resource-section-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.resource-section-toolbar > p { margin: 0; color: var(--muted); }
 .resource-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -2041,6 +2082,10 @@ details.disclosure summary:hover { color: var(--accent); }
   .settings-content .card-actions .btn { flex: 1 1 120px; justify-content: center; }
   .resource-section-head { align-items: stretch; flex-direction: column; }
   .resource-search { width: 100%; }
+  .resource-layout { grid-template-columns: minmax(0, 1fr); }
+  .resource-nav { position: static; flex-direction: row; overflow-x: auto; border-right: 0; padding: 0 0 6px; }
+  .resource-nav a { flex: 0 0 auto; }
+  .resource-section-toolbar { align-items: stretch; flex-direction: column; }
   .architecture-list { grid-template-columns: minmax(0, 1fr); }
   .architecture-item { grid-template-columns: 108px minmax(0, 1fr); }
   .usage-page-head { align-items: stretch; flex-direction: column; }

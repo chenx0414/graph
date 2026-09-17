@@ -579,6 +579,32 @@ test('the resource library groups reusable assets and includes graph architectur
       risk: ['code-execution'],
       tags: ['编码', '方法论'],
       requirements: ['先核对许可证与版本'],
+    }, {
+      id: 'mcp-jira-example',
+      kind: 'mcp',
+      name: 'Jira',
+      description: 'Jira 工单管理。',
+      source: 'https://github.com/sooperset/mcp-atlassian',
+      sourceKind: 'github',
+      transport: 'stdio',
+      tags: ['工单'],
+    }, {
+      id: 'pi-mcp-extension-example',
+      kind: 'pi-extension',
+      name: 'Pi MCP Extension',
+      description: '帮助 Pi 加载并调用 MCP server。',
+      source: 'https://pi.dev/packages/pi-mcp-extension',
+      sourceKind: 'pi-package',
+      compatibility: 'unverified',
+      tags: ['MCP'],
+    }, {
+      id: 'agent-md-architect-example',
+      kind: 'agent-md',
+      name: '架构师',
+      description: '系统设计与技术权衡。',
+      source: 'https://github.com/affaan-m/ECC/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/agents/architect.md',
+      sourceKind: 'local-reference',
+      tags: ['架构'],
     }],
   });
   cleanup.push(() => server.close());
@@ -603,20 +629,32 @@ test('the resource library groups reusable assets and includes graph architectur
   });
   await page.goto(`${server.url}/#/catalog`);
   await page.getByTestId('catalog').waitFor();
-  expect(await page.getByTestId('resource-skills').innerText()).toContain('Skills 库');
-  expect(await page.getByTestId('resource-mcp').innerText()).toContain('MCP 库');
-  expect(await page.getByTestId('resource-agent-md').innerText()).toContain('Agent.md 库');
-  expect(await page.getByTestId('resource-agents').innerText()).toContain('Agent 组合库');
-  expect(await page.getByTestId('resource-agents').innerText()).not.toContain('coder@1');
-  expect(await page.getByTestId('resource-skills').innerText()).toContain('Preserving Productive Tensions');
+  expect(await page.getByTestId('resource-nav-skills').getAttribute('data-active')).toBe('true');
+  expect(await page.getByTestId('resource-section-skills').innerText()).toContain('Preserving Productive Tensions');
   await page.getByTestId('resource-catalog-search').fill('not-a-real-resource');
-  expect(await page.getByTestId('resource-skills').innerText()).toContain('没有匹配的资源');
+  expect(await page.getByTestId('resource-section-skills').innerText()).toContain('没有匹配的资源');
   await page.getByTestId('resource-catalog-search').fill('');
-  expect(await page.getByTestId('resource-skills').innerText()).toContain('Preserving Productive Tensions');
+  expect(await page.getByTestId('resource-section-skills').innerText()).toContain('Preserving Productive Tensions');
   await page.getByTestId('resource-open-skills').click();
+  expect(await page.evaluate(() => (window as Window & { __openedResourceKinds?: string[] }).__openedResourceKinds)).toEqual(['skills']);
+
+  await page.getByTestId('resource-nav-mcp').click();
+  await page.getByTestId('resource-section-mcp').waitFor();
+  expect(await page.getByTestId('resource-section-mcp').innerText()).toContain('Jira');
   await page.getByTestId('resource-open-mcp').click();
+
+  await page.getByTestId('resource-nav-agent-md').click();
+  await page.getByTestId('resource-section-agent-md').waitFor();
+  expect(await page.getByTestId('resource-section-agent-md').innerText()).toContain('架构师');
   await page.getByTestId('resource-open-agent-md').click();
   expect(await page.evaluate(() => (window as Window & { __openedResourceKinds?: string[] }).__openedResourceKinds)).toEqual(['skills', 'mcp', 'agent-md']);
+
+  await page.getByTestId('resource-nav-pi-extensions').click();
+  await page.getByTestId('resource-section-pi-extensions').waitFor();
+  expect(await page.getByTestId('resource-section-pi-extensions').innerText()).toContain('Pi MCP Extension');
+
+  await page.getByTestId('resource-nav-skills').click();
+  await page.getByTestId('resource-section-skills').waitFor();
   await page.getByTestId('resource-entry-skill-obra-superpowers-skills-example').click();
   await page.getByTestId('recommended-detail-skill-obra-superpowers-skills-example').waitFor();
   const recommended = await page.getByTestId('recommended-detail-skill-obra-superpowers-skills-example').innerText();
@@ -629,6 +667,14 @@ test('the resource library groups reusable assets and includes graph architectur
   expect(await page.locator('a[href^="https://github.com/obra/superpowers-skills/blob/"]').count()).toBe(1);
   await page.getByTestId('resource-detail-close').click();
   await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
+
+  await page.getByTestId('resource-nav-agents').click();
+  await page.getByTestId('resource-section-agents').waitFor();
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 组合');
+  expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
+
+  await page.getByTestId('resource-nav-architectures').click();
+  await page.getByTestId('resource-section-architectures').waitFor();
   const architectures = await page.getByTestId('architecture-library').innerText();
   expect(architectures).toContain('主管与工人');
   expect(architectures).toContain('评估与优化');
