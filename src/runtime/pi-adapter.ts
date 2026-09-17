@@ -360,7 +360,7 @@ export function createPiAdapter(options: {
             tools,
             ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}),
             ...(capabilities.piExtensionPaths.length ? { piExtensionPaths: capabilities.piExtensionPaths } : {}),
-            ...(capabilities.piExtensionTools.length ? { piExtensionTools: capabilities.piExtensionTools } : {}),
+            piExtensionTools: capabilities.piExtensionTools,
             systemPrompt: prompts.systemPrompt,
             appendSystemPrompt: prompts.appendSystemPrompt,
             capabilityDigest: prompts.digest,

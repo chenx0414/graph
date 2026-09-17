@@ -88,6 +88,17 @@ export async function openPiInstance(options: PiInstanceOptions) {
     manifest.binding.definitionVersion !== options.binding.definitionVersion)) {
     throw new Error('Instance binding does not match persisted identity');
   }
+  const persistedDigest = manifest?.capabilityDigest?.trim();
+  const currentDigest = options.capabilityDigest?.trim();
+  if ((manifest?.version ?? 0) >= 2) {
+    if (!persistedDigest) throw new Error('Persisted v2 capability bundle has no digest');
+    if (!currentDigest) throw new Error('A capability digest is required to restore this Agent session');
+    if (persistedDigest !== currentDigest) {
+      throw new Error(`Persisted capability bundle does not match the Agent definition (${persistedDigest} != ${currentDigest})`);
+    }
+  } else if (manifest && currentDigest) {
+    throw new Error('Legacy Agent session has no capability digest and cannot be rebound silently');
+  }
   const sessionsDir = join(stateDir, 'sessions');
   if (manifest) {
     const contents = await readFile(manifest.sessionFile, 'utf8'); // Missing is not new.
@@ -103,9 +114,6 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const sessionFile = manager.getSessionFile();
   if (!sessionFile) throw new Error('Expected a persistent Pi session');
   if (manifest && manager.getSessionId() !== manifest.sessionId) throw new Error('Persisted session identity changed');
-  if (manifest?.capabilityDigest && options.capabilityDigest && manifest.capabilityDigest !== options.capabilityDigest) {
-    throw new Error(`Persisted capability bundle does not match the Agent definition (${manifest.capabilityDigest} != ${options.capabilityDigest})`);
-  }
   if (!manifest) {
     // Bootstrap the public JSONL header, then reopen it through Pi's public API.
     // Pi now owns all subsequent appends, including the first user message.
@@ -150,17 +158,17 @@ export async function openPiInstance(options: PiInstanceOptions) {
     customTools,
   });
   const customNames = new Set(customTools.map(tool => tool.name));
-  const allowedExtensionTools = options.piExtensionTools ? new Set(options.piExtensionTools) : undefined;
+  const allowedExtensionTools = new Set(options.piExtensionTools ?? []);
   const extensionNames = options.activateExtensionTools
     ? loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])
-      .filter(name => !customNames.has(name) && !BUILTIN_TOOL_NAMES.has(name) && (!allowedExtensionTools || allowedExtensionTools.has(name)))
+      .filter(name => !customNames.has(name) && !BUILTIN_TOOL_NAMES.has(name) && allowedExtensionTools.has(name))
     : [];
   session.setActiveToolsByName([...customNames, ...extensionNames]);
   session.agent.streamFunction = options.stream;
   if (options.onEvent) session.subscribe(options.onEvent);
   await writeAtomic(manifestPath, JSON.stringify({
-    version: 2, binding: options.binding, workspace, sessionFile, sessionId: manager.getSessionId(),
-    ...(options.capabilityDigest ? { capabilityDigest: options.capabilityDigest } : {}),
+    version: currentDigest ? 2 : 1, binding: options.binding, workspace, sessionFile, sessionId: manager.getSessionId(),
+    ...(currentDigest ? { capabilityDigest: currentDigest } : {}),
   } satisfies Manifest));
 
   return {

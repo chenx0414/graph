@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -95,4 +95,34 @@ test('reopening an Agent instance restores its exact session and transcript', as
   } finally {
     await restored.close();
   }
+});
+
+test('a v2 capability digest is required and must match exactly', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-digest-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const base = {
+    binding: { instanceId: 'agent-digest', nodeId: 'node-digest', definitionVersion: 'coder@1' },
+    workspace,
+    stateDir: join(root, 'state'),
+    model: modelA,
+    modelRuntime: await testModelRuntime(),
+    stream: respond,
+  };
+  const first = await openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) });
+  await first.prompt('Persist with capability A');
+  await first.close();
+
+  await expect(openPiInstance(base)).rejects.toThrow('capability digest is required');
+  await expect(openPiInstance({ ...base, capabilityDigest: 'b'.repeat(64) })).rejects.toThrow('does not match');
+
+  const same = await openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) });
+  await same.close();
+
+  const manifestPath = join(root, 'state', 'instance.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+  delete manifest.capabilityDigest;
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await expect(openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) })).rejects.toThrow('has no digest');
 });

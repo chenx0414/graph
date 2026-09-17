@@ -75,6 +75,8 @@ test('node detail renders real entries, operations and a program command, and st
   expect(await page.getByTestId('entry-compaction').count()).toBe(1);
   expect(await page.getByTestId('node-run-work').innerText()).toContain('上下文摘要');
   expect(await page.getByTestId('node-run-work').innerText()).toContain('含 1 次摘要调用');
+  expect(await page.getByTestId('node-run-work').innerText()).toContain('能力包');
+  expect(await page.getByTestId('node-run-work').innerText()).not.toContain('bundle');
   // Read-only: no customer-action controls inside the detail panel.
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '发送' }).count()).toBe(0);
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '答复' }).count()).toBe(0);

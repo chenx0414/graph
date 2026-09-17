@@ -49,6 +49,10 @@ export interface PiWorkerInspect {
   leafId: string | null;
   capabilityDigest: string | null;
   processId: number;
+  activeTools?: string[];
+  registeredTools?: string[];
+  loadedExtensions?: string[];
+  loadedExtensionTools?: string[];
 }
 
 interface PiWorkerResult {
@@ -70,7 +74,7 @@ export interface PiProcessOptions {
   piExtensionTools?: string[];
   systemPrompt?: string;
   appendSystemPrompt?: string;
-  capabilityDigest?: string;
+  capabilityDigest: string;
   allowWorkspaceChange?: boolean;
   broker: SendGate;
   readOnly?: boolean;
@@ -114,6 +118,9 @@ function parseInspect(stdout: string): PiWorkerInspect {
  * The host keeps identity, credentials, gates and concrete tools; the child
  * receives only the exact capability bundle and proxy tool schemas. */
 export async function openPiProcess(options: PiProcessOptions) {
+  if (typeof options.capabilityDigest !== 'string' || !options.capabilityDigest.trim()) {
+    throw new Error('A nonempty capability digest is required for a production Agent process');
+  }
   const workspace = await realpath(resolve(options.workspace));
   const requestedStateDir = resolve(options.stateDir);
   const scratchDir = join(requestedStateDir, 'process-scratch');
@@ -138,7 +145,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     piExtensionTools: options.piExtensionTools ?? [],
     systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
     appendSystemPrompt: options.appendSystemPrompt ?? '',
-    capabilityDigest: options.capabilityDigest ?? '',
+    capabilityDigest: options.capabilityDigest.trim(),
     ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
     ...(options.compaction ? { compaction: options.compaction } : {}),
   };
@@ -151,6 +158,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     stream: options.stream,
     resources: {},
     tools: hostedTools,
+    allowedExtensionTools: options.piExtensionTools ?? [],
     onEvent: event => options.onEvent?.(event as AgentSessionEvent),
   });
   const runtime = graphNodeRuntime();

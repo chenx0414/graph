@@ -23,6 +23,14 @@ Agent 定义版本解析出的能力包包含 Skills、MCP、Pi extensions 与 p
 
 实例 manifest 记录最终 capability digest。恢复时必须按原定义版本重新解析同一能力包；session JSONL 本身不保存 Skills、MCP、Pi extensions、prompts 或权限绑定，digest 不一致时 fail closed。
 
+## 当前未完成
+
+- 尚未建立完整 `CapabilityBundleVersion` 对象，`toolPolicy` 与 `runtimePolicy` 仍由现有 catalog、loadCapabilities 和受限 executor 分散表达。
+- `createAgentSession` 尚未使用 `noTools: "all"` 加构造期 `tools` allowlist；当前在创建后设置 active tools。Pi extension 的声明名会在创建后过滤，但这不是 Pi 构造期的硬 allowlist。
+- Pi extension 工具仍使用 extension 注册的裸名，尚未统一为 `ext_<capabilityId>_<toolName>`。
+- `instance.json` 只记录 binding、workspace、session 和 capability digest，尚未记录 Pi version、model/thinking 与实际 tool names。
+- 尚未使用真实付费供应商与真实第三方 Pi extension 包做外部验收。
+
 ## 后果
 
 - Pi extension 的任意代码仍不能获得供应商凭据，且运行在宿主建立的 OS 文件/网络限制内。

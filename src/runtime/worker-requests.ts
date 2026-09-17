@@ -11,6 +11,7 @@ export function createWorkerRequests(options: {
   stream: StreamFn;
   resources: Record<string, { url: string; headers?: Record<string, string> }>;
   tools?: Record<string, ToolDefinition>;
+  allowedExtensionTools?: readonly string[];
   onEvent?: (event: unknown) => void;
 }) {
   return async (value: unknown): Promise<unknown> => {
@@ -50,6 +51,9 @@ export function createWorkerRequests(options: {
     }
     if (request.operation === 'tool_gate') {
       if (typeof request.name !== 'string' || !request.name) throw new Error('Invalid extension tool name');
+      if (!(options.allowedExtensionTools ?? []).includes(request.name)) {
+        return { allowed: false, reason: `Pi extension tool ${request.name} is not declared by the bound capability` };
+      }
       const id = randomUUID();
       try {
         options.broker.dispatch(id, 0, () => undefined);

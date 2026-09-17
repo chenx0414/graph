@@ -164,7 +164,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
       {(data.capabilities ?? []).length > 0 && (
         <section>
           <h4 className="section-title">能力（按节点绑定的定义版本）</h4>
-          {data.capabilityDigest && <p className="muted mono">bundle {data.capabilityDigest.slice(0, 16)}</p>}
+          {data.capabilityDigest && <p className="muted mono">能力包 {data.capabilityDigest.slice(0, 16)}</p>}
           <ul className="list" data-testid="node-capabilities">
             {data.capabilities!.map(capability => (
               <li key={`${capability.id}@${capability.version}`} className="list-item">
