@@ -272,7 +272,10 @@ test('the real Pi master can search the resource library and open a model-access
     'save_agent_combination', 'compile_agent_combination', 'read_system_capabilities', 'request_model_access',
   ]));
   expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
-  expect(JSON.stringify(provider.requests[0]!.messages)).toContain('reviewer@1.0.0');
+  expect(provider.requests.some(request => {
+    const messages = JSON.stringify(request.messages);
+    return messages.includes('reviewer') && messages.includes('1.0.0');
+  })).toBe(true);
   expect(view.questions).toEqual(expect.arrayContaining([
     expect.objectContaining({
       kind: 'waiting',

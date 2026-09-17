@@ -1,8 +1,10 @@
 import type { NodeSpec, Operation } from '../core/types.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
-export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions: string[]; capabilities: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
+export function briefing(operation: Operation, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
   const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact => `${artifact.path} (${artifact.digest})`)));
+  const catalogDefinitions = extra.catalog?.definitions ?? [];
+  const catalogCapabilities = extra.catalog?.capabilities ?? [];
   const attachments = (operation.context.messages ?? []).flatMap(message =>
     (message.attachments ?? []).map(attachment => [
       `- ${attachment.name} (${attachment.size} bytes, ${attachment.type || 'text/plain'})`,
@@ -22,8 +24,8 @@ export function briefing(operation: Operation, extra: { request: string; summary
     extra.summary ? `Summary: ${extra.summary}` : '',
     extra.acceptance.length ? `Acceptance:\n${extra.acceptance.map(item => `- ${item.id} (check ${item.checkNode}): ${item.description}`).join('\n')}` : '',
     extra.capabilities?.length ? `Bound capabilities:\n${extra.capabilities.map(item => `- ${item.id}@${item.version}`).join('\n')}` : '',
-    extra.catalog && (extra.catalog.definitions.length || extra.catalog.capabilities.length)
-      ? `Catalog:\n${[...extra.catalog.definitions.map(item => `- definition ${item}`), ...extra.catalog.capabilities.map(item => `- capability ${item}`)].join('\n')}`
+    catalogDefinitions.length || catalogCapabilities.length
+      ? `Catalog:\n${[...catalogDefinitions.map(item => `- definition ${item}`), ...catalogCapabilities.map(item => `- capability ${item}`)].join('\n')}`
       : '',
     extra.systemContext && (extra.systemContext.resources || extra.systemContext.agentCombinations || extra.systemContext.systemSummary || extra.systemContext.requestModelAccess)
       ? [

@@ -47,6 +47,7 @@ interface McpManifest {
   url?: unknown;
   headers?: unknown;
   headersEnv?: unknown;
+  env?: unknown;
   tools?: unknown;
 }
 
@@ -148,6 +149,26 @@ function headerValues(headers: unknown, headersEnv: unknown) {
   return values;
 }
 
+function environmentValues(env: unknown) {
+  if (env === undefined) return undefined;
+  if (!env || typeof env !== 'object' || Array.isArray(env) || Object.values(env).some(value => typeof value !== 'string')) {
+    throw new RuntimeError('capability_unavailable', 'MCP manifest env must be a string map');
+  }
+  const values: Record<string, string> = {};
+  for (const [name, rawValue] of Object.entries(env as Record<string, string>)) {
+    const reference = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(rawValue)?.[1]
+      ?? (/^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(rawValue)?.[1]);
+    if (reference) {
+      const value = process.env[reference];
+      if (value === undefined) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${reference}`);
+      values[name] = value;
+    } else {
+      values[name] = rawValue;
+    }
+  }
+  return values;
+}
+
 /** A granted remote MCP endpoint; the runtime allowlist is checked before any request. */
 function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: string[]): McpExchange {
   if (typeof manifest.url !== 'string' || !manifest.url.trim()) {
@@ -208,9 +229,11 @@ async function localConnection(input: {
   }
   const args = Array.isArray(input.manifest.args) && input.manifest.args.every(value => typeof value === 'string') ? input.manifest.args as string[] : [];
   const grants = await runGrants(input.workspace, input.scratchDir);
+  const env = environmentValues(input.manifest.env);
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
     command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
+    ...(env ? { env } : {}),
     readPaths: [input.snapshot, ...nodeReadPaths(nodeCommand, process.env.GRAPH_APP_NODE ? undefined : process.versions.electron as string | undefined)],
     // Discussion turns may read the business directory but only write scratch.
     writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],

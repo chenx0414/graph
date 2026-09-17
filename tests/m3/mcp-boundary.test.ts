@@ -5,12 +5,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { callMcpTool, httpExchange } from '../../src/runtime/mcp-client.ts';
+import { callMcpTool, httpExchange, resolveMcpArg } from '../../src/runtime/mcp-client.ts';
 import type { RestrictedGate } from '../../src/runtime/restricted-process.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
+
+test('MCP arguments resolve host environment references and relative snapshot paths', () => {
+  process.env.GRAPH_MCP_TEST_VALUE = 'project-ref';
+  try {
+    expect(resolveMcpArg('/capability', '--project-ref=${GRAPH_MCP_TEST_VALUE}')).toBe('--project-ref=project-ref');
+    expect(resolveMcpArg('/capability', './server.mjs')).toBe('/capability/server.mjs');
+    expect(() => resolveMcpArg('/capability', '${GRAPH_MCP_MISSING_VALUE}')).toThrow('GRAPH_MCP_MISSING_VALUE');
+  } finally {
+    delete process.env.GRAPH_MCP_TEST_VALUE;
+  }
+});
 
 /** Minimal Streamable HTTP MCP server with one read and one destructive tool. */
 async function remoteTools(onRequest?: (method: string) => Promise<void> | void) {

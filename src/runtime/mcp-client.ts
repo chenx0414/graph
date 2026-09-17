@@ -19,6 +19,7 @@ export interface StdioEndpoint {
   scratchDir: string;
   command: string;
   args: string[];
+  env?: Record<string, string>;
   readPaths: string[];
   writePaths: string[];
   timeoutMs?: number;
@@ -81,6 +82,7 @@ export function stdioExchange(endpoint: StdioEndpoint): McpExchange {
         const result = await endpoint.executor.run({
           broker: endpoint.gate, cwd: endpoint.cwd, scratchDir: endpoint.scratchDir,
           executable: endpoint.command, args: endpoint.args,
+          ...(endpoint.env ? { env: endpoint.env } : {}),
           readPaths: endpoint.readPaths, writePaths: endpoint.writePaths,
           timeoutMs: endpoint.timeoutMs ?? 30_000,
           input: `${requests.map(request => JSON.stringify(request)).join('\n')}\n`,
@@ -189,7 +191,14 @@ export async function callMcpTool(connection: McpExchange, name: string, args: J
   return { content, isError: result.isError === true };
 }
 
-/** Resolve a manifest argument that points inside the installed snapshot. */
+/** Resolve host environment references and relative paths in a manifest argument. */
 export function resolveMcpArg(snapshot: string, value: string) {
-  return value.startsWith('./') || value.startsWith('../') ? resolve(snapshot, value) : value;
+  const expanded = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => {
+    const resolved = process.env[name];
+    if (resolved === undefined) {
+      throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
+    }
+    return resolved;
+  });
+  return expanded.startsWith('./') || expanded.startsWith('../') ? resolve(snapshot, expanded) : expanded;
 }

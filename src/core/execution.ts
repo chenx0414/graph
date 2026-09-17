@@ -565,7 +565,6 @@ export class Execution {
           ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
           ...(spec.role === 'master' ? { catalog: {
             definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
-            capabilities: this.catalog.capabilities().map(item => `${item.id}@${item.version}`),
           }, systemContext: {
             ...this.systemContext,
             requestModelAccess: Boolean(conversation && spec.role === 'master' && this.systemContext?.requestModelAccess),
