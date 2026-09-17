@@ -35,7 +35,11 @@ export interface PiWorkerConfig {
   piExtensionTools: string[];
   systemPrompt: string;
   appendSystemPrompt: string;
-  capabilityDigest: string;
+  allowedToolNames: string[];
+  bundleDigest: string;
+  legacyCapabilityDigest?: string;
+  toolPolicyDigest: string;
+  runtimePolicyDigest: string;
   allowWorkspaceChange?: boolean;
   forkFrom?: { sessionFile: string; leafId?: string };
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
@@ -48,7 +52,10 @@ export interface PiWorkerInspect {
   model: string | undefined;
   messages: unknown[];
   leafId: string | null;
-  capabilityDigest: string | null;
+  bundleDigest: string | null;
+  toolPolicyDigest: string | null;
+  runtimePolicyDigest: string | null;
+  piVersion: string | null;
   context?: {
     mode: 'fresh' | 'fork';
     sourceSessionId?: string;
@@ -83,7 +90,11 @@ export interface PiProcessOptions {
   piExtensionTools?: string[];
   systemPrompt?: string;
   appendSystemPrompt?: string;
-  capabilityDigest: string;
+  allowedToolNames?: string[];
+  bundleDigest: string;
+  legacyCapabilityDigest?: string;
+  toolPolicyDigest: string;
+  runtimePolicyDigest: string;
   allowWorkspaceChange?: boolean;
   forkFrom?: { sessionFile: string; leafId?: string };
   broker: SendGate;
@@ -128,8 +139,14 @@ function parseInspect(stdout: string): PiWorkerInspect {
  * The host keeps identity, credentials, gates and concrete tools; the child
  * receives only the exact capability bundle and proxy tool schemas. */
 export async function openPiProcess(options: PiProcessOptions) {
-  if (typeof options.capabilityDigest !== 'string' || !options.capabilityDigest.trim()) {
+  if (typeof options.bundleDigest !== 'string' || !options.bundleDigest.trim()) {
     throw new Error('A nonempty capability digest is required for a production Agent process');
+  }
+  if (typeof options.toolPolicyDigest !== 'string' || !options.toolPolicyDigest.trim()) {
+    throw new Error('A nonempty tool policy digest is required for a production Agent process');
+  }
+  if (typeof options.runtimePolicyDigest !== 'string' || !options.runtimePolicyDigest.trim()) {
+    throw new Error('A nonempty runtime policy digest is required for a production Agent process');
   }
   const workspace = await realpath(resolve(options.workspace));
   const requestedStateDir = resolve(options.stateDir);
@@ -159,7 +176,14 @@ export async function openPiProcess(options: PiProcessOptions) {
     piExtensionTools: options.piExtensionTools ?? [],
     systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
     appendSystemPrompt: options.appendSystemPrompt ?? '',
-    capabilityDigest: options.capabilityDigest.trim(),
+    allowedToolNames: [...(options.allowedToolNames ?? [
+      ...tools.map(tool => tool.name),
+      ...(options.piExtensionTools ?? []),
+    ])].sort(),
+    bundleDigest: options.bundleDigest.trim(),
+    ...(options.legacyCapabilityDigest ? { legacyCapabilityDigest: options.legacyCapabilityDigest } : {}),
+    toolPolicyDigest: options.toolPolicyDigest.trim(),
+    runtimePolicyDigest: options.runtimePolicyDigest.trim(),
     ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
     ...(forkFrom ? { forkFrom } : {}),
     ...(options.compaction ? { compaction: options.compaction } : {}),

@@ -42,7 +42,9 @@ test('different subagents run in independent Pi processes with their own capabil
     broker: gate,
     systemPrompt: identity,
     appendSystemPrompt: awareness,
-    capabilityDigest: id === 'agent-a' ? 'a'.repeat(64) : 'b'.repeat(64),
+    bundleDigest: id === 'agent-a' ? 'a'.repeat(64) : 'b'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
     readOnly: true,
   });
   const first = await open('agent-a', gates[0]!, 'Identity A', 'Capability A');
@@ -103,7 +105,9 @@ test('a bound Pi extension registers its declared tool inside the isolated Agent
     piExtensionTools: ['extension_probe'],
     systemPrompt: 'Use the bound extension when asked.',
     appendSystemPrompt: 'extension_probe is declared by the bound Pi extension.',
-    capabilityDigest: 'c'.repeat(64),
+    bundleDigest: 'c'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
     broker: gate,
   });
   const inspect = await process.prompt('Run the extension probe');
@@ -114,7 +118,8 @@ test('a bound Pi extension registers its declared tool inside the isolated Agent
   expect(JSON.stringify(provider.requests[0])).not.toContain('secret_tool');
   expect(inspect.activeTools).not.toContain('secret_tool');
   expect(JSON.stringify(inspect.messages)).toContain('extension-probe-ok');
-  expect(inspect.capabilityDigest).toBe('c'.repeat(64));
+  expect(inspect.bundleDigest).toBe('c'.repeat(64));
+  expect(inspect.activeTools).toEqual(['extension_probe']);
   const host = createWorkerRequests({
     broker: gate,
     model: provider.model,
@@ -141,7 +146,9 @@ test('the process host never exposes the provider credential to the Agent proces
     stream: controlledOpenAIStream(gate, 'host-only-key'),
     tools: [],
     broker: gate,
-    capabilityDigest: 'd'.repeat(64),
+    bundleDigest: 'd'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
   });
   await process.prompt('Use the host credential');
   expect(provider.authorizations).toEqual(['Bearer host-only-key']);
@@ -165,19 +172,54 @@ test('the production process path requires and verifies the persisted capability
     tools: [],
     broker: gate,
   };
-  const first = await openPiProcess({ ...base, capabilityDigest: 'a'.repeat(64) });
+  const first = await openPiProcess({
+    ...base,
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  });
   await first.prompt('first');
   await first.close();
 
-  await expect(openPiProcess({ ...base, capabilityDigest: undefined as unknown as string })).rejects.toThrow('capability digest is required');
-  await expect(openPiProcess({ ...base, capabilityDigest: 'b'.repeat(64) })).rejects.toThrow('does not match');
-  const same = await openPiProcess({ ...base, capabilityDigest: 'a'.repeat(64) });
+  await expect(openPiProcess({
+    ...base,
+    bundleDigest: undefined as unknown as string,
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  })).rejects.toThrow('capability digest is required');
+  await expect(openPiProcess({
+    ...base,
+    bundleDigest: 'b'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  })).rejects.toThrow('does not match');
+  const same = await openPiProcess({
+    ...base,
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  });
   await same.prompt('same');
   await same.close();
 
   const manifestPath = join(root, 'state', 'instance.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
-  delete manifest.capabilityDigest;
+  expect(manifest).toMatchObject({
+    version: 3,
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+    model: modelA.id,
+    thinkingLevel: 'off',
+    activeTools: [],
+  });
+  expect(manifest.piVersion).toEqual(expect.any(String));
+  delete manifest.bundleDigest;
   await writeFile(manifestPath, JSON.stringify(manifest));
-  await expect(openPiProcess({ ...base, capabilityDigest: 'a'.repeat(64) })).rejects.toThrow('has no digest');
+  await expect(openPiProcess({
+    ...base,
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  })).rejects.toThrow('has no digest');
 }, 120_000);

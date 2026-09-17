@@ -43,6 +43,22 @@ export interface LoadedCapabilities {
   report: CapabilityLoadFact[];
 }
 
+export interface ResolvedCapabilityFact {
+  id: string;
+  version: string;
+  kind: string;
+  role?: 'agent' | 'tool';
+  source: string;
+  path: string;
+  digest: string;
+  declaredTools?: { name: string; description: string }[];
+  entry?: string;
+  command?: string;
+  url?: string;
+  networkDomains?: string[];
+  networkAccess?: 'unrestricted';
+}
+
 interface McpManifest {
   command?: unknown;
   args?: unknown;
@@ -118,6 +134,23 @@ async function promptText(snapshot: string, name: 'agent.md' | 'tool.md') {
   } catch (error) {
     throw new RuntimeError('capability_unavailable', `Prompt ${snapshot} requires a nonempty ${name}: ${String(error)}`);
   }
+}
+
+async function fileDigest(path: string) {
+  return createHash('sha256').update(await readFile(path)).digest('hex');
+}
+
+function textDigest(value: string) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function extensionEntry(manifest: McpManifest, snapshot: string) {
+  const value = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry : './index.mjs';
+  const path = isAbsolute(value) ? value : resolve(snapshot, value);
+  if (path !== snapshot && !path.startsWith(`${snapshot}/`)) {
+    throw new RuntimeError('capability_unavailable', `Capability entry ${value} must stay inside its snapshot`);
+  }
+  return path;
 }
 
 function skillMetadata(text: string) {
@@ -341,6 +374,121 @@ function capabilityTools(
  * the runtime's granted domains. Every tool call passes the same send gate as
  * model calls.
  */
+export async function resolveCapabilityFacts(
+  catalog: Catalog,
+  definitionVersion?: string,
+): Promise<ResolvedCapabilityFact[]> {
+  if (!definitionVersion) return [];
+  let definition: ReturnType<Catalog['definition']>;
+  try { definition = catalog.definition(definitionVersion); }
+  catch { return []; }
+  const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
+    ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
+    ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
+    ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
+  ];
+  const facts: ResolvedCapabilityFact[] = [];
+  const seen = new Set<string>();
+  for (const { bound, role } of bindings) {
+    const key = `${role}:${bound.id}@${bound.version}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const record = catalog.capability(bound.id, bound.version);
+    if (!record || record.status !== 'available') {
+      throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not available in the capability directory`);
+    }
+    const snapshot = snapshotPath(record);
+    if (record.kind === 'prompt') {
+      if (role === 'capability') throw new RuntimeError('capability_unsupported', `Prompt capability ${bound.id}@${bound.version} must be bound under prompts`);
+      const file = role === 'agent' ? 'agent.md' : 'tool.md';
+      const body = await promptText(snapshot, file);
+      facts.push({
+        id: bound.id,
+        version: bound.version,
+        kind: record.kind,
+        role: role === 'agent' ? 'agent' : 'tool',
+        source: record.source,
+        path: join(snapshot, file),
+        digest: textDigest(body),
+      });
+      continue;
+    }
+    if (role !== 'capability') {
+      throw new RuntimeError('capability_unsupported', `${role} prompt binding ${bound.id}@${bound.version} is not a prompt capability`);
+    }
+    const manifest = await manifestOf(snapshot);
+    if (record.kind === 'skill') {
+      const file = join(snapshot, 'SKILL.md');
+      if (!existsSync(file)) throw new RuntimeError('capability_unavailable', `Skill ${bound.id}@${bound.version} has no SKILL.md`);
+      const body = await readFile(file, 'utf8');
+      facts.push({
+        id: bound.id,
+        version: bound.version,
+        kind: record.kind,
+        source: record.source,
+        path: file,
+        digest: textDigest(body),
+      });
+      continue;
+    }
+    if (record.kind === 'pi-extension') {
+      const entry = extensionEntry(manifest, snapshot);
+      if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} entry does not exist`);
+      const declared = declaredTools(manifest);
+      facts.push({
+        id: bound.id,
+        version: bound.version,
+        kind: record.kind,
+        source: record.source,
+        path: snapshot,
+        digest: textDigest(canonicalJson({
+          manifest: manifest as unknown as Json,
+          entry: await fileDigest(entry),
+        })),
+        declaredTools: declared,
+        entry,
+      });
+      continue;
+    }
+    if (record.kind === 'extension') {
+      const entry = extensionEntry(manifest, snapshot);
+      if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Graph extension ${bound.id}@${bound.version} entry does not exist`);
+      facts.push({
+        id: bound.id,
+        version: bound.version,
+        kind: record.kind,
+        source: record.source,
+        path: snapshot,
+        digest: textDigest(canonicalJson({
+          manifest: manifest as unknown as Json,
+          entry: await fileDigest(entry),
+        })),
+        entry,
+      });
+      continue;
+    }
+    const networkAccess = manifest.networkAccess === 'unrestricted' ? 'unrestricted' : undefined;
+    const networkDomains = Array.isArray(manifest.networkDomains)
+      ? manifest.networkDomains.filter((domain): domain is string => typeof domain === 'string')
+      : undefined;
+    facts.push({
+      id: bound.id,
+      version: bound.version,
+      kind: record.kind,
+      source: record.source,
+      path: snapshot,
+      digest: textDigest(canonicalJson(manifest as unknown as Json)),
+      ...(typeof manifest.command === 'string' ? { command: manifest.command } : {}),
+      ...(typeof manifest.url === 'string' ? { url: manifest.url } : {}),
+      ...(networkDomains?.length ? { networkDomains } : {}),
+      ...(networkAccess ? { networkAccess } : {}),
+    });
+  }
+  return facts.sort((left, right) =>
+    `${left.kind}:${left.role ?? ''}:${left.id}@${left.version}`.localeCompare(`${right.kind}:${right.role ?? ''}:${right.id}@${right.version}`));
+}
+
+/** Internal resource loader. Production callers consume CapabilityBundleVersion. */
 export async function loadCapabilities(input: {
   catalog: Catalog;
   definitionVersion?: string;

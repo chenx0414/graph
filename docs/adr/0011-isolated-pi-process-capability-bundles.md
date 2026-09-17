@@ -21,14 +21,13 @@ Agent 定义版本解析出的能力包包含 Skills、MCP、Pi extensions 与 p
 
 不同 Agent 使用独立 `SessionManager`、`ResourceLoader`、Pi 进程和工作目录。Pi extension 只在该子进程内加载；模型和代理工具请求通过子进程的 fd 3 回到宿主 gate。Pi extension 注册的工具在宿主的 `tool_call` 拦截中先过一次 gate，命令、MCP 和 Graph extension 仍由宿主对应的受限 executor 执行。
 
-实例 manifest 记录最终 capability digest。恢复时必须按原定义版本重新解析同一能力包；session JSONL 本身不保存 Skills、MCP、Pi extensions、prompts 或权限绑定，digest 不一致时 fail closed。
+实例 manifest v3 记录 bundle digest、静态 tool/runtime policy digest、上次运行使用的模型与 thinking、实际 active/registered tools 和 Pi 版本。恢复时必须按原定义版本重新解析同一能力包；session JSONL 本身不保存 Skills、MCP、Pi extensions、prompts 或权限绑定，digest 不一致时 fail closed。v2 manifest 只有在 private legacy digest 与旧算法一致时才允许恢复，并在打开后原子升级为 v3。
+
+`CapabilityBundleVersion` 是不可变能力身份，包含精确组件、prompt 来源、声明工具与静态 network/read/write policy。任务 grants、讨论 `readOnly`、工作区与模型选择属于 operation overlay，不进入 bundle digest；实际工具集合由 bundle 与 adapter 组合后生成 effective tool policy digest。
 
 ## 当前未完成
 
-- 尚未建立完整 `CapabilityBundleVersion` 对象，`toolPolicy` 与 `runtimePolicy` 仍由现有 catalog、loadCapabilities 和受限 executor 分散表达。
-- `createAgentSession` 尚未使用 `noTools: "all"` 加构造期 `tools` allowlist；当前在创建后设置 active tools。Pi extension 的声明名会在创建后过滤，但这不是 Pi 构造期的硬 allowlist。
 - Pi extension 工具仍使用 extension 注册的裸名，尚未统一为 `ext_<capabilityId>_<toolName>`。
-- `instance.json` 只记录 binding、workspace、session 和 capability digest，尚未记录 Pi version、model/thinking 与实际 tool names。
 - 尚未使用真实付费供应商与真实第三方 Pi extension 包做外部验收。
 
 ## 后果

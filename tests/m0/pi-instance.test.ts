@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterEach, expect, test } from 'vitest';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
-import { openPiInstance } from '../../src/runtime/pi-instance.ts';
+import { externallyGated, openPiInstance } from '../../src/runtime/pi-instance.ts';
 import { modelA, modelB, respond, testModelRuntime } from '../fixtures/models.ts';
 
 const directories: string[] = [];
@@ -98,11 +98,16 @@ test('reopening an Agent instance restores its exact session and transcript', as
   }
 });
 
-test('a v2 capability digest is required and must match exactly', async () => {
+test('a v3 capability digest is required and v2 manifests migrate only with the legacy digest', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-instance-digest-'));
   directories.push(root);
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
+  const bundle = {
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: 'b'.repeat(64),
+    runtimePolicyDigest: 'c'.repeat(64),
+  };
   const base = {
     binding: { instanceId: 'agent-digest', nodeId: 'node-digest', definitionVersion: 'coder@1' },
     workspace,
@@ -111,21 +116,79 @@ test('a v2 capability digest is required and must match exactly', async () => {
     modelRuntime: await testModelRuntime(),
     stream: respond,
   };
-  const first = await openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) });
+  const first = await openPiInstance({ ...base, ...bundle });
   await first.prompt('Persist with capability A');
   await first.close();
 
-  await expect(openPiInstance(base)).rejects.toThrow('capability digest is required');
-  await expect(openPiInstance({ ...base, capabilityDigest: 'b'.repeat(64) })).rejects.toThrow('does not match');
+  await expect(openPiInstance(base)).rejects.toThrow('capability bundle digest is required');
+  await expect(openPiInstance({ ...base, ...bundle, bundleDigest: 'd'.repeat(64) })).rejects.toThrow('does not match');
 
-  const same = await openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) });
+  const same = await openPiInstance({ ...base, ...bundle });
   await same.close();
 
   const manifestPath = join(root, 'state', 'instance.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
-  delete manifest.capabilityDigest;
-  await writeFile(manifestPath, JSON.stringify(manifest));
-  await expect(openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) })).rejects.toThrow('has no digest');
+  const legacy = { ...manifest, version: 2, capabilityDigest: 'e'.repeat(64) } as Record<string, unknown>;
+  delete legacy.bundleDigest;
+  delete legacy.toolPolicyDigest;
+  delete legacy.runtimePolicyDigest;
+  delete legacy.model;
+  delete legacy.thinkingLevel;
+  delete legacy.activeTools;
+  delete legacy.registeredTools;
+  delete legacy.loadedExtensions;
+  delete legacy.loadedExtensionTools;
+  delete legacy.piVersion;
+  await writeFile(manifestPath, JSON.stringify(legacy));
+  await expect(openPiInstance({ ...base, ...bundle })).rejects.toThrow('legacy capability digest is required');
+  await expect(openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'f'.repeat(64) })).rejects.toThrow('legacy capability bundle');
+  const migrated = await openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'e'.repeat(64) });
+  await migrated.close();
+  expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({
+    version: 3,
+    bundleDigest: bundle.bundleDigest,
+    toolPolicyDigest: bundle.toolPolicyDigest,
+    runtimePolicyDigest: bundle.runtimePolicyDigest,
+    model: modelA.id,
+    thinkingLevel: 'off',
+  });
+
+  const v3 = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+  delete v3.bundleDigest;
+  await writeFile(manifestPath, JSON.stringify(v3));
+  await expect(openPiInstance({ ...base, ...bundle })).rejects.toThrow('has no digest');
+});
+
+test('the session constructor uses the exact tool allowlist instead of activating built-ins', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-tools-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const probe = externallyGated({
+    name: 'probe',
+    label: 'Probe',
+    description: 'Probe the exact allowlist.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => ({ content: [{ type: 'text' as const, text: 'ok' }], details: {} }),
+  });
+  const instance = await openPiInstance({
+    binding: { instanceId: 'agent-tools', nodeId: 'node-tools', definitionVersion: 'coder@1' },
+    workspace,
+    stateDir: join(root, 'state'),
+    model: modelA,
+    modelRuntime: await testModelRuntime(),
+    stream: respond,
+    tools: [probe],
+  });
+  try {
+    const inspect = instance.inspect();
+    expect(inspect.activeTools).toEqual(['probe']);
+    expect(inspect.registeredTools).toContain('probe');
+    expect(inspect.activeTools).not.toContain('read');
+    expect(inspect.activeTools).not.toContain('bash');
+  } finally {
+    await instance.close();
+  }
 });
 
 test('freshSession starts a new session for an existing instance identity', async () => {

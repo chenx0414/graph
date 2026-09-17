@@ -1,5 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
@@ -19,6 +21,17 @@ export interface InstanceBinding {
 }
 
 const EXTERNALLY_GATED = Symbol.for('graph.externally-gated');
+const require = createRequire(import.meta.url);
+
+const PI_PACKAGE_VERSION = (() => {
+  try {
+    const entry = require.resolve('@earendil-works/pi-coding-agent');
+    const manifest = JSON.parse(readFileSync(join(dirname(entry), '..', 'package.json'), 'utf8')) as { version?: string };
+    return manifest.version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 /** Mark a tool whose execute already passes the send gate at its own effect boundary. */
 export function externallyGated<T extends ToolDefinition>(tool: T): T {
@@ -46,7 +59,11 @@ export interface PiInstanceOptions {
   appendSystemPrompt?: string;
   hideSkillDescriptions?: boolean;
   activateExtensionTools?: boolean;
-  capabilityDigest?: string;
+  allowedToolNames?: string[];
+  bundleDigest?: string;
+  legacyCapabilityDigest?: string;
+  toolPolicyDigest?: string;
+  runtimePolicyDigest?: string;
   broker?: SendGate;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
   /** A conversation master may bind a project after its first turn; the
@@ -72,12 +89,23 @@ export interface SessionContextInfo {
 }
 
 interface Manifest {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   binding: InstanceBinding;
   workspace: string;
   sessionFile: string;
   sessionId: string;
+  /** v2 compatibility field. New writes use bundleDigest. */
   capabilityDigest?: string;
+  bundleDigest?: string;
+  toolPolicyDigest?: string;
+  runtimePolicyDigest?: string;
+  model?: string;
+  thinkingLevel?: string;
+  activeTools?: string[];
+  registeredTools?: string[];
+  loadedExtensions?: string[];
+  loadedExtensionTools?: string[];
+  piVersion?: string;
   context?: SessionContextInfo;
 }
 
@@ -104,7 +132,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  if (manifest && ((manifest.version !== 1 && manifest.version !== 2) ||
+  if (manifest && ((manifest.version !== 1 && manifest.version !== 2 && manifest.version !== 3) ||
     (manifest.workspace !== workspace && !options.allowWorkspaceChange) ||
     manifest.binding.instanceId !== options.binding.instanceId ||
     manifest.binding.nodeId !== options.binding.nodeId ||
@@ -112,12 +140,23 @@ export async function openPiInstance(options: PiInstanceOptions) {
     throw new Error('Instance binding does not match persisted identity');
   }
   const persistedDigest = manifest?.capabilityDigest?.trim();
-  const currentDigest = options.capabilityDigest?.trim();
-  if ((manifest?.version ?? 0) >= 2) {
+  const persistedBundleDigest = manifest?.bundleDigest?.trim();
+  const currentDigest = options.bundleDigest?.trim();
+  if (currentDigest && (!options.toolPolicyDigest?.trim() || !options.runtimePolicyDigest?.trim())) {
+    throw new Error('Capability bundle digests require tool and runtime policy digests');
+  }
+  if ((manifest?.version ?? 0) >= 3) {
+    if (!persistedBundleDigest) throw new Error('Persisted v3 capability bundle has no digest');
+    if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
+    if (persistedBundleDigest !== currentDigest) {
+      throw new Error(`Persisted capability bundle does not match the Agent definition (${persistedBundleDigest} != ${currentDigest})`);
+    }
+  } else if (manifest?.version === 2) {
     if (!persistedDigest) throw new Error('Persisted v2 capability bundle has no digest');
-    if (!currentDigest) throw new Error('A capability digest is required to restore this Agent session');
-    if (persistedDigest !== currentDigest) {
-      throw new Error(`Persisted capability bundle does not match the Agent definition (${persistedDigest} != ${currentDigest})`);
+    if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
+    if (!options.legacyCapabilityDigest) throw new Error('A legacy capability digest is required to restore this v2 Agent session');
+    if (persistedDigest !== options.legacyCapabilityDigest) {
+      throw new Error(`Persisted legacy capability bundle does not match the Agent definition (${persistedDigest} != ${options.legacyCapabilityDigest})`);
     }
   } else if (manifest && currentDigest) {
     throw new Error('Legacy Agent session has no capability digest and cannot be rebound silently');
@@ -207,11 +246,15 @@ export async function openPiInstance(options: PiInstanceOptions) {
       finally { options.broker!.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }); }
     },
   }) ?? [];
+  const allowedToolNames = new Set(options.allowedToolNames ?? [...customTools.map(tool => tool.name), ...options.piExtensionTools ?? []]);
+  const registeredToolNames = [...customTools.map(tool => tool.name), ...loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])];
   const { session } = await createAgentSession({
     cwd: workspace, agentDir: stateDir, model: options.model,
     modelRuntime: options.modelRuntime, resourceLoader: loader,
     sessionManager: manager, settingsManager: settings, thinkingLevel: options.thinkingLevel ?? 'off',
     customTools,
+    noTools: 'all',
+    tools: [...allowedToolNames],
   });
   const customNames = new Set(customTools.map(tool => tool.name));
   const allowedExtensionTools = new Set(options.piExtensionTools ?? []);
@@ -219,12 +262,26 @@ export async function openPiInstance(options: PiInstanceOptions) {
     ? loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])
       .filter(name => !customNames.has(name) && !BUILTIN_TOOL_NAMES.has(name) && allowedExtensionTools.has(name))
     : [];
-  session.setActiveToolsByName([...customNames, ...extensionNames]);
+  const activeToolNames = [...customNames, ...extensionNames];
   session.agent.streamFunction = options.stream;
   if (options.onEvent) session.subscribe(options.onEvent);
+  const loadedExtensions = loader.getExtensions().extensions.map(extension => extension.path);
+  const loadedExtensionTools = loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()]);
+  const piVersion = PI_PACKAGE_VERSION;
   await writeAtomic(manifestPath, JSON.stringify({
-    version: currentDigest ? 2 : 1, binding: options.binding, workspace, sessionFile, sessionId: manager.getSessionId(),
-    ...(currentDigest ? { capabilityDigest: currentDigest } : {}),
+    version: currentDigest ? 3 : 1, binding: options.binding, workspace, sessionFile, sessionId: manager.getSessionId(),
+    ...(currentDigest ? {
+      bundleDigest: currentDigest,
+      ...(options.toolPolicyDigest ? { toolPolicyDigest: options.toolPolicyDigest } : {}),
+      ...(options.runtimePolicyDigest ? { runtimePolicyDigest: options.runtimePolicyDigest } : {}),
+      model: options.model.id,
+      thinkingLevel: options.thinkingLevel ?? 'off',
+      activeTools: activeToolNames,
+      registeredTools: [...new Set(registeredToolNames)],
+      loadedExtensions,
+      loadedExtensionTools,
+      piVersion,
+    } : {}),
     context: contextInfo,
   } satisfies Manifest));
 
@@ -240,12 +297,15 @@ export async function openPiInstance(options: PiInstanceOptions) {
       return {
         binding: structuredClone(options.binding), sessionId: manager.getSessionId(),
         sessionFile, model: session.model?.id, messages: structuredClone(session.messages), leafId: manager.getLeafId(),
-        capabilityDigest: options.capabilityDigest ?? null,
+        bundleDigest: options.bundleDigest ?? null,
+        toolPolicyDigest: options.toolPolicyDigest ?? null,
+        runtimePolicyDigest: options.runtimePolicyDigest ?? null,
+        piVersion,
         context: structuredClone(contextInfo),
-        activeTools: session.getActiveToolNames(),
-        registeredTools: session.getAllTools().map(tool => tool.name),
-        loadedExtensions: loader.getExtensions().extensions.map(extension => extension.path),
-        loadedExtensionTools: loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()]),
+        activeTools: activeToolNames,
+        registeredTools: [...new Set(registeredToolNames)],
+        loadedExtensions,
+        loadedExtensionTools,
         extensionErrors: loader.getExtensions().errors.map(error => ({ path: error.path, error: error.error })),
       };
     },

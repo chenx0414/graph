@@ -1,0 +1,179 @@
+import { createHash } from 'node:crypto';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { Catalog } from '../catalog/catalog.ts';
+import { canonicalJson } from '../core/store.ts';
+import {
+  capabilityPrompts,
+  loadCapabilities,
+  resolveCapabilityFacts,
+  type CapabilityPermissionRequest,
+  type LoadedCapabilities,
+  type ResolvedCapabilityFact,
+} from './capabilities.ts';
+import type { SendGate } from './controlled-openai.ts';
+
+function digest(value: unknown) {
+  return createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
+export interface CapabilityBundleOptions {
+  catalog: Catalog;
+  definitionVersion?: string;
+  bootstrap?: { agent?: string; tool?: string };
+  mcpDomains?: string[];
+}
+
+export interface CapabilityOperationOptions {
+  workspace: string;
+  scratchDir: string;
+  gate: SendGate;
+  action: string;
+  role?: string;
+  readOnly?: boolean;
+  grants?: string[];
+  onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
+  hostTools(input: { readRoots: readonly string[] }): ToolDefinition[];
+}
+
+export interface CapabilityOperation {
+  readonly bundleDigest: string;
+  readonly toolPolicyDigest: string;
+  readonly runtimePolicyDigest: string;
+  readonly legacyPromptDigest: string;
+  readonly tools: readonly ToolDefinition[];
+  readonly allowedToolNames: readonly string[];
+  readonly prompts: { system: string; appendSystem: string };
+  readonly report: LoadedCapabilities['report'];
+  readonly skillPaths: readonly string[];
+  readonly piExtensionPaths: readonly string[];
+  readonly piExtensionTools: readonly string[];
+  close(): Promise<void>;
+}
+
+export class CapabilityBundleVersion {
+  readonly definitionVersion: string | null;
+  readonly digest: string;
+  readonly toolPolicyDigest: string;
+  readonly runtimePolicyDigest: string;
+  readonly facts: readonly ResolvedCapabilityFact[];
+  private readonly input: CapabilityBundleOptions;
+
+  private constructor(
+    input: CapabilityBundleOptions,
+    facts: ResolvedCapabilityFact[],
+  ) {
+    this.input = input;
+    this.definitionVersion = input.definitionVersion ?? null;
+    this.facts = Object.freeze(facts.map(fact => structuredClone(fact)));
+    const staticToolPolicy = {
+      piExtensionTools: this.facts.flatMap(fact =>
+        (fact.declaredTools ?? []).map(tool => ({
+          capabilityId: fact.id,
+          capabilityVersion: fact.version,
+          name: tool.name,
+          description: tool.description,
+        })))
+        .sort((left, right) =>
+          `${left.capabilityId}@${left.capabilityVersion}:${left.name}`.localeCompare(`${right.capabilityId}@${right.capabilityVersion}:${right.name}`)),
+    };
+    const runtimePolicy = {
+      capabilities: this.facts.map(fact => ({
+        id: fact.id,
+        version: fact.version,
+        kind: fact.kind,
+        role: fact.role ?? null,
+        digest: fact.digest,
+        declaredTools: fact.declaredTools ?? [],
+        networkDomains: fact.networkDomains ?? [],
+        networkAccess: fact.networkAccess ?? null,
+      })),
+    };
+    this.toolPolicyDigest = digest(staticToolPolicy);
+    this.runtimePolicyDigest = digest(runtimePolicy);
+    this.digest = digest({
+      definitionVersion: this.definitionVersion,
+      bootstrap: input.bootstrap ?? {},
+      toolPolicyDigest: this.toolPolicyDigest,
+      runtimePolicyDigest: this.runtimePolicyDigest,
+    });
+  }
+
+  static async open(options: CapabilityBundleOptions) {
+    const facts = await resolveCapabilityFacts(options.catalog, options.definitionVersion);
+    return new CapabilityBundleVersion(options, facts);
+  }
+
+  async openOperation(options: CapabilityOperationOptions): Promise<CapabilityOperation> {
+    let loaded: LoadedCapabilities | undefined;
+    try {
+      loaded = await loadCapabilities({
+        catalog: this.input.catalog,
+        ...(this.input.definitionVersion ? { definitionVersion: this.input.definitionVersion } : {}),
+        workspace: options.workspace,
+        scratchDir: options.scratchDir,
+        gate: options.gate,
+        ...(this.input.bootstrap ? { bootstrap: this.input.bootstrap } : {}),
+        ...(this.input.mcpDomains?.length ? { mcpDomains: this.input.mcpDomains } : {}),
+        ...(options.grants ? { grants: options.grants } : {}),
+        ...(options.readOnly ? { readOnly: true } : {}),
+        ...(options.onPermissionRequired ? { onPermissionRequired: options.onPermissionRequired } : {}),
+      });
+      const hostTools = options.hostTools({ readRoots: loaded.readRoots });
+      const tools = Object.freeze([...hostTools, ...loaded.tools]);
+      const prompts = capabilityPrompts({
+        definitionVersion: this.definitionVersion ?? 'unknown@1',
+        action: options.action,
+        ...(options.role ? { role: options.role } : {}),
+        agentPrompt: loaded.prompts.agent,
+        toolPrompt: loaded.prompts.tool,
+        report: loaded.report,
+        tools,
+      });
+      const effectiveToolPolicy = {
+        bundleDigest: this.digest,
+        readOnly: Boolean(options.readOnly),
+        grants: [...new Set(options.grants ?? [])].sort(),
+        tools: tools.map(tool => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters as unknown,
+        })),
+        piExtensionTools: [...loaded.piExtensionTools].sort(),
+      };
+      const toolPolicyDigest = digest(effectiveToolPolicy);
+      const runtimePolicyDigest = digest({
+        bundleRuntimePolicyDigest: this.runtimePolicyDigest,
+        readOnly: Boolean(options.readOnly),
+      });
+      const allowedToolNames = Object.freeze([...new Set([
+        ...tools.map(tool => tool.name),
+        ...loaded.piExtensionTools,
+      ])].sort());
+      const operation: CapabilityOperation = {
+        bundleDigest: this.digest,
+        toolPolicyDigest,
+        runtimePolicyDigest,
+        legacyPromptDigest: prompts.digest,
+        tools,
+        allowedToolNames,
+        prompts: {
+          system: prompts.systemPrompt,
+          appendSystem: prompts.appendSystemPrompt,
+        },
+        report: loaded.report,
+        skillPaths: Object.freeze([...loaded.skillPaths]),
+        piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
+        piExtensionTools: Object.freeze([...loaded.piExtensionTools]),
+        close: () => loaded!.close(),
+      };
+      return Object.freeze(operation);
+    } catch (error) {
+      await loaded?.close().catch(() => undefined);
+      throw error;
+    }
+  }
+}
+
+export function openCapabilityBundle(options: CapabilityBundleOptions) {
+  return CapabilityBundleVersion.open(options);
+}

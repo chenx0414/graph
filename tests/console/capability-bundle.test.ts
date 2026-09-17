@@ -5,10 +5,20 @@ import { afterEach, expect, test } from 'vitest';
 import { Catalog } from '../../src/catalog/catalog.ts';
 import { TaskStore, canonicalJson } from '../../src/core/store.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
-import { loadCapabilities } from '../../src/runtime/capabilities.ts';
+import { openCapabilityBundle } from '../../src/runtime/capability-bundle.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
+
+async function capability(root: string, directory: string, manifest: Record<string, unknown>, files: Record<string, string> = {}) {
+  const path = join(root, directory);
+  await mkdir(path, { recursive: true });
+  await writeFile(join(path, 'capability.json'), JSON.stringify(manifest));
+  for (const [name, body] of Object.entries(files)) {
+    await mkdir(join(path, name, '..'), { recursive: true });
+    await writeFile(join(path, name), body);
+  }
+}
 
 test('a definition version resolves Skills, Pi extensions and agent/tool prompts as one bundle', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-capability-bundle-'));
@@ -54,29 +64,89 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
 
   const gate = new CallBroker(join(root, 'calls.sqlite'), 'bundle-agent');
   cleanup.push(() => gate.close());
-  const loaded = await loadCapabilities({
+  const bundle = await openCapabilityBundle({
     catalog,
     definitionVersion: 'bundle-agent@1',
+    bootstrap: {
+      agent: 'You are the bundle test Agent.',
+      tool: 'Use only the declared capability bundle.',
+    },
+  });
+  const first = await bundle.openOperation({
     workspace,
     scratchDir: join(root, 'scratch'),
     gate,
+    action: 'work',
+    hostTools: () => [],
+  });
+  const second = await bundle.openOperation({
+    workspace,
+    scratchDir: join(root, 'scratch-2'),
+    gate,
+    action: 'work',
+    readOnly: true,
+    grants: ['mcp:example:read'],
+    hostTools: () => [],
   });
   try {
-    expect(loaded.skillPaths).toEqual([await realpath(skill)]);
-    expect(loaded.piExtensionPaths).toEqual([join(await realpath(extension), 'index.ts')]);
-    expect(loaded.piExtensionTools).toEqual(['extension_probe']);
-    expect(loaded.prompts).toEqual({
-      agent: 'You are the bundle test Agent.',
-      tool: 'Use only the declared capability bundle.',
-    });
-    expect(loaded.report).toEqual(expect.arrayContaining([
+    expect(first.skillPaths).toEqual([await realpath(skill)]);
+    expect(first.piExtensionPaths).toEqual([join(await realpath(extension), 'index.ts')]);
+    expect(first.piExtensionTools).toEqual(['extension_probe']);
+    expect(first.prompts.system).toBe('You are the bundle test Agent.');
+    expect(first.prompts.appendSystem).toContain('Use only the declared capability bundle.');
+    expect(first.report).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'skill-read', kind: 'skill', loaded: true }),
       expect.objectContaining({ id: 'pi-probe', kind: 'pi-extension', loaded: true, tools: ['extension_probe'] }),
       expect.objectContaining({ id: 'prompt-identity', kind: 'prompt', loaded: true }),
       expect.objectContaining({ id: 'prompt-awareness', kind: 'prompt', loaded: true }),
     ]));
-    expect(loaded.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.bundleDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.toolPolicyDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.runtimePolicyDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(second.bundleDigest).toBe(first.bundleDigest);
+    expect(second.toolPolicyDigest).not.toBe(first.toolPolicyDigest);
+    expect(second.runtimePolicyDigest).not.toBe(first.runtimePolicyDigest);
   } finally {
-    await loaded.close();
+    await first.close();
+    await second.close();
   }
+});
+
+test('bundle identity changes with injected content but not with operation grants or read-only overlay', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-identity-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'capabilities');
+  const skill = join(capabilityRoot, 'skill');
+  await capability(capabilityRoot, 'skill', { id: 'skill', kind: 'skill', version: '1.0.0', name: 'Skill' }, { 'SKILL.md': '# Skill\n\nVersion one.\n' });
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot });
+  await catalog.refresh();
+  catalog.publishDefinition('worker', { recommendedGrade: 'medium', capabilities: [{ id: 'skill', version: '1.0.0' }] });
+
+  const first = await openCapabilityBundle({ catalog, definitionVersion: 'worker@1' });
+  await writeFile(join(skill, 'SKILL.md'), '# Skill\n\nVersion two.\n');
+  await catalog.refresh();
+  const second = await openCapabilityBundle({ catalog, definitionVersion: 'worker@1' });
+  expect(second.digest).not.toBe(first.digest);
+});
+
+test('bundle identity is based on content rather than the capability root path', async () => {
+  const roots = await Promise.all([
+    mkdtemp(join(tmpdir(), 'graph-capability-root-a-')),
+    mkdtemp(join(tmpdir(), 'graph-capability-root-b-')),
+  ]);
+  cleanup.push(() => Promise.all(roots.map(root => rm(root, { recursive: true, force: true }))).then(() => undefined));
+  const bundles = [];
+  for (const root of roots) {
+    const capabilityRoot = join(root, 'capabilities');
+    await capability(capabilityRoot, 'skill', { id: 'skill', kind: 'skill', version: '1.0.0', name: 'Skill' }, { 'SKILL.md': '# Same content\n' });
+    const store = new TaskStore(join(root, 'tasks.sqlite'));
+    cleanup.push(() => store.close());
+    const catalog = new Catalog(store, { capabilityRoot });
+    await catalog.refresh();
+    catalog.publishDefinition('worker', { recommendedGrade: 'medium', capabilities: [{ id: 'skill', version: '1.0.0' }] });
+    bundles.push(await openCapabilityBundle({ catalog, definitionVersion: 'worker@1' }));
+  }
+  expect(bundles[1]!.digest).toBe(bundles[0]!.digest);
 });

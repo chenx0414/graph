@@ -46,12 +46,24 @@ export interface CapabilityLoadFact {
   tools?: string[];
 }
 
-export function recordCapabilityLoad(store: TaskStore, input: { taskId: string; nodeId: string; instanceId?: string | null; operationId?: string | null; readOnly: boolean; report: CapabilityLoadFact[]; digest?: string }) {
+export function recordCapabilityLoad(store: TaskStore, input: {
+  taskId: string;
+  nodeId: string;
+  instanceId?: string | null;
+  operationId?: string | null;
+  readOnly: boolean;
+  report: CapabilityLoadFact[];
+  digest?: string;
+  toolPolicyDigest?: string;
+  runtimePolicyDigest?: string;
+}) {
   store.db.prepare(`INSERT INTO node_capabilities(task_id,node_id,instance_id,operation_id,read_only,loaded,created_at)
     VALUES(?,?,?,?,?,?,?)`)
     .run(input.taskId, input.nodeId, input.instanceId ?? null, input.operationId ?? null, input.readOnly ? 1 : 0, canonicalJson({
-      version: 1,
+      version: 2,
       digest: input.digest ?? null,
+      toolPolicyDigest: input.toolPolicyDigest ?? null,
+      runtimePolicyDigest: input.runtimePolicyDigest ?? null,
       facts: input.report,
     }), Date.now());
 }

@@ -12,7 +12,8 @@ import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Propos
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationForTask } from '../core/conversation.ts';
-import { capabilityPrompts, loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
+import type { CapabilityPermissionRequest } from './capabilities.ts';
+import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
@@ -210,16 +211,15 @@ export function createPiAdapter(options: {
         let permissionRequest: CapabilityPermissionRequest | undefined;
         let modelAccessQuestion: Json | undefined;
         const channels = options.channels;
-        let capabilities: Awaited<ReturnType<typeof loadCapabilities>>;
-        let commands: Awaited<ReturnType<typeof openWorkspaceCommandRunner>>;
+        let capabilityOperation: CapabilityOperation;
+        let commands: Awaited<ReturnType<typeof openWorkspaceCommandRunner>> | undefined;
         const retrieval = options.network?.retrievalDomains?.length
           ? createRetrievalBroker({ domains: options.network.retrievalDomains, gate })
           : undefined;
         try {
-          capabilities = await loadCapabilities({
+          const bundle = await openCapabilityBundle({
             catalog: options.catalog,
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
-            workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'), gate,
             bootstrap: {
               ...(instance.definition_version && options.channels?.bootstrapPrompts?.[instance.definition_version.split('@')[0]!]
                 ? { agent: options.channels.bootstrapPrompts[instance.definition_version.split('@')[0]!]! }
@@ -227,56 +227,53 @@ export function createPiAdapter(options: {
               ...(options.channels?.bootstrapToolPrompt ? { tool: options.channels.bootstrapToolPrompt } : {}),
             },
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
+          });
+          commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
+          capabilityOperation = await bundle.openOperation({
+            workspace,
+            scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'),
+            gate,
+            action: spec.action,
+            ...(spec.role ? { role: spec.role } : {}),
             ...(discussion ? { readOnly: true } : {}),
             grants: operation.grants,
             onPermissionRequired: request => { permissionRequest ??= request; },
+            hostTools: ({ readRoots }) => agentTools({
+              workspace, ...(spec.role ? { role: spec.role } : {}),
+              ...(discussion ? { readOnly: true } : {}),
+              ...(readRoots.length ? { readRoots: [...readRoots] } : {}),
+              run: (command, args) => commands!.run(command, args),
+              ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
+              ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog } : {}),
+              ...(channels?.systemContext ? {
+                systemContext: {
+                  ...(channels.systemContext.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
+                  ...(conversation && spec.role === 'master' ? {
+                    requestModelAccess: async (request: { modelId: string; reason: string; planId?: string }) => {
+                      const data = {
+                        requestType: 'model_access',
+                        modelId: request.modelId,
+                        reason: request.reason,
+                        ...(request.planId ? { planId: request.planId } : {}),
+                        prompt: `任务需要模型 ${request.modelId}。原因：${request.reason}。请先在“设置 · 模型”中配置对应订阅或模型，然后在此确认。`,
+                      } as Json;
+                      modelAccessQuestion ??= data;
+                      return data as Record<string, unknown>;
+                    },
+                  } : {}),
+                },
+              } : {}),
+              onSubmit: output => { submitted = output; },
+              ...(conversation && spec.role === 'master' ? { onSuggestedPrompt: prompt => { suggestedPrompt = prompt; } } : {}),
+            }),
           });
-          commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
         } catch (error) {
           // A missing or unsupported bound capability stops this node with a concrete
           // reason instead of silently running without the definition's capabilities.
+          await commands?.close().catch(() => undefined);
           return { outcome: 'failed', output: { setupError: String(error) }, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
         }
-        const tools = [
-          ...agentTools({
-            workspace, ...(spec.role ? { role: spec.role } : {}),
-            ...(discussion ? { readOnly: true } : {}),
-            ...(capabilities.readRoots.length ? { readRoots: capabilities.readRoots } : {}),
-            run: (command, args) => commands.run(command, args),
-            ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
-            ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog } : {}),
-            ...(channels?.systemContext ? {
-              systemContext: {
-                ...(channels.systemContext.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
-                ...(conversation && spec.role === 'master' ? {
-                  requestModelAccess: async (request: { modelId: string; reason: string; planId?: string }) => {
-                    const data = {
-                      requestType: 'model_access',
-                      modelId: request.modelId,
-                      reason: request.reason,
-                      ...(request.planId ? { planId: request.planId } : {}),
-                      prompt: `任务需要模型 ${request.modelId}。原因：${request.reason}。请先在“设置 · 模型”中配置对应订阅或模型，然后在此确认。`,
-                    } as Json;
-                    modelAccessQuestion ??= data;
-                    return data as Record<string, unknown>;
-                  },
-                } : {}),
-              },
-            } : {}),
-            onSubmit: output => { submitted = output; },
-            ...(conversation && spec.role === 'master' ? { onSuggestedPrompt: prompt => { suggestedPrompt = prompt; } } : {}),
-          }),
-          ...capabilities.tools,
-        ];
-        const prompts = capabilityPrompts({
-          definitionVersion,
-          action: spec.action,
-          ...(spec.role ? { role: spec.role } : {}),
-          agentPrompt: capabilities.prompts.agent,
-          toolPrompt: capabilities.prompts.tool,
-          report: capabilities.report,
-          tools,
-        });
+        const tools = [...capabilityOperation.tools];
         const thinkingLevel = (conversation?.thinking_level ?? 'off') as ThinkingLevel;
         const modelPolicyDigest = digest({
           id: entry.id,
@@ -288,15 +285,7 @@ export function createPiAdapter(options: {
           maxTokens: entry.maxTokens,
           thinkingLevel,
         });
-        const toolPolicyDigest = digest({
-          readOnly: Boolean(discussion),
-          grants: [...operation.grants].sort(),
-          tools: tools.map(tool => ({
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters as unknown as Json,
-          })).sort((left, right) => left.name.localeCompare(right.name)),
-        });
+        const toolPolicyDigest = capabilityOperation.toolPolicyDigest;
         const agentContext = operation.context.agentContext;
         if (agentContext?.mode === 'fork') {
           if (!agentContext.sourceSessionFile) throw new RuntimeError('context_rejected', 'Fork context is missing its source session file');
@@ -310,7 +299,7 @@ export function createPiAdapter(options: {
             if (!sourceBinding?.capability_digest || !sourceBinding.model_policy_digest || !sourceBinding.tool_policy_digest) {
               throw new RuntimeError('context_rejected', 'Fork source has no complete policy digest; set context.rebrand=true to allow it');
             }
-            if (sourceBinding.capability_digest !== capabilities.digest) {
+            if (sourceBinding.capability_digest !== capabilityOperation.bundleDigest) {
               throw new RuntimeError('context_rejected', 'Fork context changes the capability bundle; set context.rebrand=true to allow it');
             }
             if (sourceBinding.model_policy_digest !== modelPolicyDigest) {
@@ -325,8 +314,10 @@ export function createPiAdapter(options: {
         // projection cannot later guess from catalog status.
         recordCapabilityLoad(options.store, {
           taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
-          operationId: operation.id, readOnly: Boolean(discussion), report: capabilities.report,
-          digest: prompts.digest,
+          operationId: operation.id, readOnly: Boolean(discussion), report: capabilityOperation.report,
+          digest: capabilityOperation.bundleDigest,
+          toolPolicyDigest: capabilityOperation.toolPolicyDigest,
+          runtimePolicyDigest: capabilityOperation.runtimePolicyDigest,
         });
         // Live conversation text and tool activity are separate from the final
         // message: deltas are coalesced for reconnect, the durable assistant
@@ -431,12 +422,16 @@ export function createPiAdapter(options: {
             model: toPiModel(entry), stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
             thinkingLevel,
             tools,
-            ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}),
-            ...(capabilities.piExtensionPaths.length ? { piExtensionPaths: capabilities.piExtensionPaths } : {}),
-            piExtensionTools: capabilities.piExtensionTools,
-            systemPrompt: prompts.systemPrompt,
-            appendSystemPrompt: prompts.appendSystemPrompt,
-            capabilityDigest: prompts.digest,
+            allowedToolNames: [...capabilityOperation.allowedToolNames],
+            ...(capabilityOperation.skillPaths.length ? { skillPaths: [...capabilityOperation.skillPaths] } : {}),
+            ...(capabilityOperation.piExtensionPaths.length ? { piExtensionPaths: [...capabilityOperation.piExtensionPaths] } : {}),
+            piExtensionTools: [...capabilityOperation.piExtensionTools],
+            systemPrompt: capabilityOperation.prompts.system,
+            appendSystemPrompt: capabilityOperation.prompts.appendSystem,
+            bundleDigest: capabilityOperation.bundleDigest,
+            legacyCapabilityDigest: capabilityOperation.legacyPromptDigest,
+            toolPolicyDigest: capabilityOperation.toolPolicyDigest,
+            runtimePolicyDigest: capabilityOperation.runtimePolicyDigest,
             ...(agentContext?.reviewPolicy ? { freshSession: true } : {}),
             ...(agentContext?.mode === 'fork' && agentContext.sourceSessionFile
               ? { forkFrom: { sessionFile: agentContext.sourceSessionFile, ...(agentContext.sourceLeafId ? { leafId: agentContext.sourceLeafId } : {}) } }
@@ -461,7 +456,7 @@ export function createPiAdapter(options: {
                 operationId: operation.id,
                 bindingId: agentContext.bindingId,
                 sessionId: inspected.sessionId,
-                capabilityDigest: capabilities.digest,
+                capabilityDigest: capabilityOperation.bundleDigest,
                 modelPolicyDigest,
                 toolPolicyDigest,
                 ...(inspected.context?.sourceLeafId ? { sourceLeafId: inspected.context.sourceLeafId } : {}),
@@ -557,7 +552,7 @@ export function createPiAdapter(options: {
             activeInstances.delete(operation.id);
             await session.close();
           }
-        } finally { await capabilities.close(); await commands.close(); }
+        } finally { await capabilityOperation.close(); await commands.close(); }
       };
     },
   };
