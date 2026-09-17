@@ -10,10 +10,11 @@ import { layoutGraph } from './layout.ts';
 import type { AppServices, StartupInfo } from './host.ts';
 import { sanitizeConfig, type ConfigStore } from './config-service.ts';
 import type { UsageService } from './usage.ts';
+import type { RecommendedResource } from '../catalog/resource-catalog.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 
-export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService }) {
+export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService; resourceCatalog?: RecommendedResource[] }) {
   const app = Fastify({ logger: false });
   const session = createSession();
   const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
@@ -116,7 +117,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const models = runtime.models();
     const definitions = runtime.catalog.definitions();
     const capabilities = runtime.catalog.capabilities();
-    return { projects, models, definitions, capabilities };
+    return { projects, models, definitions, capabilities, recommended: options.resourceCatalog ?? [] };
   });
   app.get('/api/tasks', async () => runtime.user.list());
   app.get('/api/inbox', async request => {
@@ -327,7 +328,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const layout = await layoutGraph({ nodes: view.nodes, containers: view.containers, loops: view.loops });
     return { nodes: view.nodes, containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost };
   });
-  app.get('/api/catalog', async () => ({ definitions: runtime.catalog.definitions(), capabilities: runtime.catalog.capabilities() }));
+  app.get('/api/catalog', async () => ({ definitions: runtime.catalog.definitions(), capabilities: runtime.catalog.capabilities(), recommended: options.resourceCatalog ?? [] }));
   app.get('/api/catalog/definitions/:definitionId', async request => {
     const params = request.params as { definitionId: string };
     const query = request.query as { version?: string; scope?: string };

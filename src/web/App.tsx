@@ -13,6 +13,7 @@ import { Settings } from './Settings.tsx';
 import { UsagePage } from './Usage.tsx';
 import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
 import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
+import type { RecommendedResource } from '../catalog/resource-catalog.ts';
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
@@ -44,6 +45,7 @@ type Settings_ = {
   models: { id: string; grade: string; credentialId?: string; contextWindow?: number }[];
   definitions: { id: string; version: number }[];
   capabilities: { id: string; version: string; kind?: 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt'; status?: string }[];
+  recommended?: RecommendedResource[];
 };
 type Limits = { active: Record<string, number>; queued: Record<string, number> };
 type OperationRow = { id: string; nodeId: string; state: string; reserved: number; workerActive: boolean; result: { output?: unknown } | null; durationMs?: number };
@@ -610,17 +612,90 @@ function TalentPanel({ id }: { id: string }) {
   );
 }
 
+type ResourceDetailSelection =
+  | { type: 'agent'; id: string }
+  | { type: 'recommended'; item: RecommendedResource };
+
+function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
+  const kindLabel = item.kind === 'skill' ? 'Skill'
+    : item.kind === 'mcp' ? 'MCP'
+      : item.kind === 'pi-extension' ? 'Pi extension'
+        : 'Agent.md';
+  const riskLabel: Record<NonNullable<RecommendedResource['risk']>[number], string> = {
+    credentials: '需要凭据',
+    network: '访问网络',
+    'external-write': '可能写外部系统',
+    'code-execution': '可能执行代码',
+    'local-runtime': '需要本地运行时',
+  };
+  const host = (() => {
+    try { return new URL(item.source).hostname; } catch { return item.source; }
+  })();
+  return (
+    <div className="stack resource-detail-sections" data-testid={`recommended-detail-${item.id}`}>
+      <div className="row" style={{ gap: 8 }}>
+        <Pill tone="accent">可选资源</Pill>
+        <Pill tone="neutral">{kindLabel}</Pill>
+        {item.license && <Pill tone="neutral">{item.license}</Pill>}
+        {item.archived && <Pill tone="warn">来源已归档</Pill>}
+        {item.commercialUse === 'restricted' && <Pill tone="danger">非商业许可</Pill>}
+        {item.commercialUse === 'mixed' && <Pill tone="warn">混合许可</Pill>}
+        {item.compatibility === 'unverified' && <Pill tone="warn">兼容性未验证</Pill>}
+        {item.compatibility === 'incompatible' && <Pill tone="danger">当前不兼容</Pill>}
+      </div>
+      <p>{item.description}</p>
+      <section>
+        <h4>来源</h4>
+        <div className="resource-source-row">
+          <a className="resource-source-link" href={item.source} target="_blank" rel="noreferrer">
+            <Icon name="link" size={14} />
+            <span>{host}</span>
+          </a>
+          <code className="faint">{item.source}</code>
+          {item.sourcePath && <code className="faint">路径：{item.sourcePath}</code>}
+          {item.transport && <span className="muted">Transport：{item.transport}</span>}
+        </div>
+      </section>
+      {item.tags?.length ? (
+        <section>
+          <h4>用途</h4>
+          <div className="chip-row">{item.tags.map(tag => <Pill key={tag} tone="neutral">{tag}</Pill>)}</div>
+        </section>
+      ) : null}
+      {item.requirements?.length ? (
+        <section>
+          <h4>启用前需要</h4>
+          <ul className="list">
+            {item.requirements.map(requirement => <li key={requirement}>{requirement}</li>)}
+          </ul>
+        </section>
+      ) : null}
+      {item.risk?.length ? (
+        <section>
+          <h4>边界</h4>
+          <div className="chip-row">{item.risk.map(risk => <Pill key={risk} tone="warn">{riskLabel[risk]}</Pill>)}</div>
+        </section>
+      ) : null}
+      <section>
+        <h4>加入方式</h4>
+        <p className="muted">{item.importHint ?? '该条目是来源索引，不代表已验证兼容或已安装。先核对许可证、固定版本与依赖，再通过资源库导入为对应类型的能力；加入资源库不会自动授予任务权限。'}</p>
+      </section>
+    </div>
+  );
+}
+
 function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ResourceDetailSelection | null>(null);
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const capabilities = settings?.capabilities ?? [];
   const definitions = settings?.definitions ?? [];
+  const recommended = settings?.recommended ?? [];
   const groups = [
-    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: capabilities.filter(item => item.kind === 'skill') },
-    { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: capabilities.filter(item => item.kind === 'mcp') },
-    { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, items: capabilities.filter(item => item.kind === 'pi-extension' || item.kind === 'extension') },
-    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: capabilities.filter(item => item.kind === 'prompt') },
-    { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: definitions },
+    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: capabilities.filter(item => item.kind === 'skill'), recommended: recommended.filter(item => item.kind === 'skill') },
+    { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: capabilities.filter(item => item.kind === 'mcp'), recommended: recommended.filter(item => item.kind === 'mcp') },
+    { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, items: capabilities.filter(item => item.kind === 'pi-extension' || item.kind === 'extension'), recommended: recommended.filter(item => item.kind === 'pi-extension') },
+    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: capabilities.filter(item => item.kind === 'prompt'), recommended: recommended.filter(item => item.kind === 'agent-md') },
+    { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: definitions, recommended: [] },
   ];
   const architectures = [
     { name: '顺序执行', flow: 'A → B → C', description: '每一步使用前一步产物，适合依赖明确的实现与检查流程。' },
@@ -655,7 +730,7 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
             testid={`resource-${group.id}`}
             title={group.title}
             icon={group.icon}
-            subtitle={`${group.items.length} 项`}
+            subtitle={`${new Set(group.items.map(item => item.id)).size} 已加入 · ${group.recommended.length} 可选`}
             actions={['skills', 'mcp', 'pi-extensions', 'agent-md'].includes(group.id) ? (
               <button type="button" className="icon-button" data-testid={`resource-open-${group.id}`} onClick={() => void openResource(group.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title={`在访达中打开${group.title}目录`} aria-label={`在访达中打开${group.title}目录`}>
                 <Icon name="folder" size={16} />
@@ -665,7 +740,7 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
             {group.id === 'agents' ? (
               <div className="resource-agent-list">
                 {definitions.map(item => (
-                  <button key={item.id} type="button" className="resource-agent-row" data-testid={`definition-${item.id}`} onClick={() => setSelected(item.id)}>
+                  <button key={item.id} type="button" className="resource-agent-row" data-testid={`definition-${item.id}`} onClick={() => setSelected({ type: 'agent', id: item.id })}>
                     <Icon name="catalog" size={16} />
                     <span className="grow">{item.id}@{item.version}</span>
                     <Icon name="chevron" size={14} />
@@ -673,9 +748,39 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
                 ))}
                 {!definitions.length && <span className="muted">暂无 Agent 组合</span>}
               </div>
-            ) : group.items.length ? (
-              <div className="resource-list">
-                {group.items.map(item => <div className="resource-item" key={`${item.id}@${item.version}`}><Icon name={group.icon} size={15} /><span className="grow">{item.id}</span><span className="faint">{item.version}</span></div>)}
+            ) : group.items.length || group.recommended.length ? (
+              <div className="resource-capability-groups">
+                {group.items.length > 0 && (
+                  <div>
+                    <div className="resource-subhead">已加入</div>
+                    <div className="resource-list">
+                      {group.items.map(item => <div className="resource-item" key={`${item.id}@${item.version}`}><Icon name={group.icon} size={15} /><span className="grow">{item.id}</span><span className="faint">{item.version}</span></div>)}
+                    </div>
+                  </div>
+                )}
+                {group.recommended.length > 0 && (
+                  <div data-testid={`resource-recommended-${group.id}`}>
+                    <div className="resource-subhead">可选</div>
+                    <div className="resource-candidate-list">
+                      {group.recommended.map(item => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="resource-candidate-row"
+                          data-testid={`resource-candidate-${item.id}`}
+                          onClick={() => setSelected({ type: 'recommended', item })}
+                        >
+                          <Icon name={group.icon} size={15} />
+                          <span className="resource-candidate-copy">
+                            <span>{item.name}</span>
+                            <small>{item.description}</small>
+                          </span>
+                          <Icon name="chevron" size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="muted">{group.id === 'agent-md' ? '暂无 Agent.md 资源' : `暂无 ${group.title.replace(' 库', '')} 资源`}</p>
@@ -698,18 +803,18 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
       </Card>
       {selected && createPortal(
         <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelected(null); }}>
-          <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`Agent 组合详情 ${selected}`}>
+          <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`资源详情 ${selected.type === 'agent' ? selected.id : selected.item.name}`}>
             <header className="resource-detail-head">
               <div>
-                <h2>{selected}</h2>
-                <p>Agent 组合详情</p>
+                <h2>{selected.type === 'agent' ? selected.id : selected.item.name}</h2>
+                <p>{selected.type === 'agent' ? 'Agent 组合详情' : '可选能力详情'}</p>
               </div>
               <button type="button" className="icon-button" data-testid="resource-detail-close" onClick={() => setSelected(null)} aria-label="关闭详情">
                 <Icon name="close" size={16} />
               </button>
             </header>
             <div className="resource-detail-body">
-              <TalentPanel id={selected} />
+              {selected.type === 'agent' ? <TalentPanel id={selected.id} /> : <RecommendedResourceDetail item={selected.item} />}
             </div>
           </aside>
         </div>,

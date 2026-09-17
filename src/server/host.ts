@@ -3,6 +3,7 @@ import { openTaskRuntime } from '../core/task-runtime.ts';
 import { RuntimeError } from '../core/types.ts';
 import type { ConfigStore } from './config-service.ts';
 import type { UsageService } from './usage.ts';
+import type { RecommendedResource } from '../catalog/resource-catalog.ts';
 
 export interface StartupInfo {
   mode: 'view' | 'execute';
@@ -25,9 +26,9 @@ export interface AppServices {
   refreshPrices?(expectedRevision: number): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number; results: { modelId: string; provider: string; status: string; sourceUrl?: string; reason?: string }[] }>;
 }
 
-export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService }) {
+export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService; resourceCatalog?: RecommendedResource[] }) {
   const runtime = await openTaskRuntime({ ...options, autoWake: Boolean(options.autoDrive) });
-  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}), ...(options.usage ? { usage: options.usage } : {}) });
+  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}), ...(options.usage ? { usage: options.usage } : {}), ...(options.resourceCatalog ? { resourceCatalog: options.resourceCatalog } : {}) });
   let address: string;
   try {
     address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });

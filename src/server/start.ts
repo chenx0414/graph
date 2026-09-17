@@ -11,6 +11,7 @@ import { modelRequestHeaders } from '../catalog/models.ts';
 import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
 import { installPresets } from '../catalog/presets.ts';
+import { loadResourceCatalog } from '../catalog/resource-catalog.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { openGraphServer } from './host.ts';
@@ -268,6 +269,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   await writeFile(join(stateDir, 'app-token'), `${appToken}\n`, { mode: 0o600 });
 
   const runtimeReady = await ensureModelRuntime();
+  const presetsRoot = options.presetsDir ?? fileURLToPath(new URL('../../presets', import.meta.url));
+  const resourceCatalog = await loadResourceCatalog(presetsRoot).catch(error => {
+    log(`Resource catalog unavailable (${error instanceof Error ? error.message : String(error)}); recommended resources stay hidden.`);
+    return { version: 1, entries: [] };
+  });
   const server = await openGraphServer({
     stateDir,
     projects: config.projects,
@@ -301,6 +307,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }),
     ...(configStore ? { configStore, configEnv: { ...options.env, ...importedSecrets }, configTest: testConnection } : {}),
     usage: usageService,
+    resourceCatalog: resourceCatalog.entries,
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
       pushSecret: (ref, value) => pushSecret(ref, value),
@@ -314,7 +321,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   });
   const presetResult = await installPresets(
     server.runtime.catalog,
-    options.presetsDir ?? fileURLToPath(new URL('../../presets', import.meta.url)),
+    presetsRoot,
     log,
   );
   presetsAvailable = presetResult.available;

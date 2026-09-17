@@ -564,6 +564,19 @@ test('the resource library groups reusable assets and includes graph architectur
     projects: [{ id: 'alpha', root }],
     webDir,
     startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+    resourceCatalog: [{
+      id: 'skill-superpowers',
+      kind: 'skill',
+      name: 'Superpowers Skills',
+      description: '面向编码 Agent 的软件开发方法论技能库。',
+      source: 'https://github.com/obra/superpowers-skills',
+      sourceKind: 'github',
+      archived: true,
+      compatibility: 'unverified',
+      risk: ['code-execution'],
+      tags: ['编码', '方法论'],
+      requirements: ['先核对许可证与版本'],
+    }],
   });
   cleanup.push(() => server.close());
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'resource-coder');
@@ -591,6 +604,7 @@ test('the resource library groups reusable assets and includes graph architectur
   expect(await page.getByTestId('resource-mcp').innerText()).toContain('MCP 库');
   expect(await page.getByTestId('resource-agent-md').innerText()).toContain('Agent.md 库');
   expect(await page.getByTestId('resource-agents').innerText()).toContain('Agent 组合库');
+  expect(await page.getByTestId('resource-skills').innerText()).toContain('Superpowers Skills');
   await page.getByTestId('resource-open-skills').click();
   await page.getByTestId('resource-open-mcp').click();
   await page.getByTestId('resource-open-agent-md').click();
@@ -599,6 +613,18 @@ test('the resource library groups reusable assets and includes graph architectur
   await page.getByTestId('resource-detail-drawer').waitFor();
   expect(await page.getByTestId('resource-detail-drawer').innerText()).toContain('coder');
   await page.getByTestId('talent-coder').waitFor();
+  await page.getByTestId('resource-detail-close').click();
+  await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
+  await page.getByTestId('resource-candidate-skill-superpowers').click();
+  await page.getByTestId('recommended-detail-skill-superpowers').waitFor();
+  const recommended = await page.getByTestId('recommended-detail-skill-superpowers').innerText();
+  expect(recommended).toContain('可选资源');
+  expect(recommended).toContain('先核对许可证与版本');
+  expect(recommended).toContain('来源已归档');
+  expect(recommended).toContain('兼容性未验证');
+  expect(recommended).toContain('可能执行代码');
+  expect(recommended).toContain('加入资源库不会自动授予任务权限');
+  expect(await page.locator('a[href="https://github.com/obra/superpowers-skills"]').count()).toBe(1);
   await page.getByTestId('resource-detail-close').click();
   await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
   const architectures = await page.getByTestId('architecture-library').innerText();
