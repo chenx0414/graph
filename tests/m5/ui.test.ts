@@ -53,7 +53,8 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   await page.getByTestId('conversation-list').waitFor();
   await page.goto(`${server.url}/#/catalog`);
   await page.getByTestId('catalog').waitFor();
-  expect(await page.getByTestId('catalog').innerText()).toContain('coder@1');
+  expect(await page.getByTestId('resource-agents').innerText()).toContain('暂无 Agent 组合');
+  expect(await page.getByTestId('catalog').innerText()).not.toContain('coder@1');
   await page.goto(`${server.url}/#/tasks/${taskId}`);
   await page.getByTestId('status').waitFor();
   await page.goto(`${server.url}/#/tasks/${taskId}/graph`);

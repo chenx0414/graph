@@ -533,89 +533,6 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
   );
 }
 
-function TalentPanel({ id }: { id: string }) {
-  const [version, setVersion] = useState<string>('');
-  const [allVersions, setAllVersions] = useState(false);
-  const [sampleLimit, setSampleLimit] = useState(20);
-  const query = allVersions ? '?scope=all' : version ? `?version=${version}` : '';
-  const { data, error } = useAsync(() => api<{
-    detail: {
-      id: string;
-      version: number;
-      versions: number[];
-      recommendedGrade: string;
-      review: boolean;
-      description: string | null;
-      traceability: Record<string, unknown>;
-      capabilities: { id: string; version: string; kind: string | null; status: string }[];
-      prompts: { id: string; version: string; role: string; kind: string | null; status: string }[];
-    };
-    experience: { scope: { version: number | null; allVersions: boolean }; task: { token: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; runMs: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number }; cost: { byCurrency: { currency: string; mean: number | null; samples: number; unknown: number }[]; mixedCurrency: boolean; unknown: boolean }; totalSamples: number }; chat: { token: { mean: number | null; samples: number }; totalSamples: number }; samples: { taskId: string; nodeId: string; kind: string; status: string; request: string | null; model: string | null; tokens: number | null; runMs: number | null; waitingMs: number; reworkRounds: number }[] };
-  }>(`/api/catalog/definitions/${id}${query}`), [id, query]);
-  if (error) return <ErrorBox message={error} />;
-  if (!data) return <Spinner />;
-  const stat = (label: string, value: { mean: number | null; samples: number; unknown: number }) => (
-    <li key={label}>{label}：{value.mean === null ? '暂无' : value.mean.toLocaleString('en-US', { maximumFractionDigits: 1 })}（样本 {value.samples}，未知 {value.unknown}）</li>
-  );
-  return (
-    <div data-testid={`talent-${id}`} className="stack" style={{ gap: 8 }}>
-      <div className="row">
-        <Pill tone="accent">{data.detail.id}@{data.detail.version}</Pill>
-        <Pill tone={data.detail.review ? 'warn' : 'info'}>{data.detail.review ? '独立审查' : `推荐 ${data.detail.recommendedGrade}`}</Pill>
-        <Pill tone="neutral">{String((data.detail.traceability as { origin?: string }).origin ?? 'user') === 'preset' ? '内置预设' : '用户版本'}</Pill>
-      </div>
-      {data.detail.description && <p className="muted">{data.detail.description}</p>}
-      <div>
-        <h4>绑定能力</h4>
-        <div className="chip-row">{data.detail.capabilities.map(item => <Pill key={`${item.id}@${item.version}`} tone={item.status === 'installed' ? 'success' : 'danger'}>{item.id}@{item.version} · {item.kind ?? '未知'} · {item.status}</Pill>)}</div>
-      </div>
-      <div>
-        <h4>Prompt 绑定</h4>
-        {data.detail.prompts.length
-          ? <div className="chip-row">{data.detail.prompts.map(item => <Pill key={`${item.role}-${item.id}@${item.version}`} tone={item.status === 'installed' ? 'success' : 'danger'}>{item.role} · {item.id}@{item.version} · {item.kind ?? '未知'}</Pill>)}</div>
-          : <p className="muted">未绑定独立 Prompt，使用 Graph 生成的默认身份与能力清单。</p>}
-      </div>
-      <div>
-        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-          <h4 style={{ margin: 0 }}>工作经历</h4>
-          <select className="input" style={{ width: 150 }} data-testid={`talent-version-${id}`} value={allVersions ? 'all' : version || String(data.detail.version)} disabled={allVersions}
-            onChange={event => { setVersion(event.target.value); setAllVersions(false); }}>
-            {data.detail.versions.map(item => <option key={item} value={String(item)}>版本 {item}</option>)}
-          </select>
-          <Button size="sm" variant={allVersions ? 'primary' : 'default'} data-testid={`talent-all-versions-${id}`} onClick={() => setAllVersions(current => !current)}>所有版本</Button>
-          <span className="muted" data-testid={`talent-scope-${id}`}>统计范围：{data.experience.scope.allVersions ? '所有版本合并' : `v${data.experience.scope.version}`}</span>
-        </div>
-        <ul className="list">
-          {stat('token 均值', data.experience.task.token)}
-          {stat('运行时间均值(ms)', data.experience.task.runMs)}
-          {data.experience.task.cost.byCurrency.map(entry => (
-            <li key={entry.currency}>{`费用均值：${entry.currency} ${entry.mean === null ? '暂无' : entry.mean.toFixed(6)}（样本 ${entry.samples}，未知 ${entry.unknown}）`}</li>
-          ))}
-          {!data.experience.task.cost.byCurrency.length && <li>费用均值：无记录{data.experience.task.cost.unknown ? '（存在未知价格调用）' : ''}</li>}
-          <li>费用币种：{data.experience.task.cost.mixedCurrency ? '多币种分列，不合并' : '单一币种'}</li>
-          <li>经历样本：任务 {data.experience.task.totalSamples} · 对话 {data.experience.chat.totalSamples}</li>
-        </ul>
-        {!data.experience.samples.length && <p className="muted">暂无经历。</p>}
-        <ul className="list" data-testid={`talent-samples-${id}`}>
-          {data.experience.samples.slice(0, sampleLimit).map(sample => (
-            <li className="list-item" key={`${sample.taskId}:${sample.nodeId}`}>
-              <a className="grow" href={`#/tasks/${sample.taskId}/nodes/${sample.nodeId}`}>{sample.request ?? (sample.kind === 'chat' ? '对话工作' : '实施经历')} · {sample.status}</a>
-              <span className="muted">{sample.model ?? '模型未知'}{sample.tokens === null ? ' · token 未知' : ` · ${sample.tokens.toLocaleString('en-US')} tokens`}{sample.runMs === null ? '' : ` · ${(sample.runMs / 1_000).toFixed(1)}s`}{sample.waitingMs ? ` · 凭据等待 ${(sample.waitingMs / 1_000).toFixed(1)}s` : ''}{sample.reworkRounds ? ` · 返工 ${sample.reworkRounds}` : ''}</span>
-            </li>
-          ))}
-        </ul>
-        {data.experience.samples.length > sampleLimit && (
-          <Button size="sm" data-testid={`talent-samples-more-${id}`} onClick={() => setSampleLimit(limit => limit + 50)}>载入更多经历（已显示 {Math.min(sampleLimit, data.experience.samples.length)} / {data.experience.samples.length}）</Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-type ResourceDetailSelection =
-  | { type: 'agent'; id: string }
-  | { type: 'recommended'; item: RecommendedResource };
-
 function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
   const kindLabel = item.kind === 'skill' ? 'Skill'
     : item.kind === 'skill-index' ? 'Skill 索引'
@@ -635,7 +552,7 @@ function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
   return (
     <div className="stack resource-detail-sections" data-testid={`recommended-detail-${item.id}`}>
       <div className="row" style={{ gap: 8 }}>
-        <Pill tone="accent">可选资源</Pill>
+        <Pill tone="success">已加入</Pill>
         <Pill tone="neutral">{kindLabel}</Pill>
         {item.license && <Pill tone="neutral">{item.license}</Pill>}
         {item.archived && <Pill tone="warn">来源已归档</Pill>}
@@ -681,27 +598,25 @@ function RecommendedResourceDetail({ item }: { item: RecommendedResource }) {
         </section>
       ) : null}
       <section>
-        <h4>加入方式</h4>
-        <p className="muted">{item.importHint ?? '该条目是来源索引，不代表已验证兼容或已安装。先核对许可证、固定版本与依赖，再通过资源库导入为对应类型的能力；加入资源库不会自动授予任务权限。'}</p>
+        <h4>使用边界</h4>
+        <p className="muted">{item.importHint ?? '该条目已收录到资源库。绑定到 Agent、安装依赖和授予任务权限仍需在后续流程中完成；收录不会自动授予运行权限。'}</p>
       </section>
     </div>
   );
 }
 
 function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
-  const [selected, setSelected] = useState<ResourceDetailSelection | null>(null);
+  const [selected, setSelected] = useState<RecommendedResource | null>(null);
   const [resourceQuery, setResourceQuery] = useState('');
   const [resourceLimits, setResourceLimits] = useState<Record<string, number>>({});
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
-  const capabilities = settings?.capabilities ?? [];
-  const definitions = settings?.definitions ?? [];
   const recommended = settings?.recommended ?? [];
   const groups = [
-    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: capabilities.filter(item => item.kind === 'skill'), recommended: recommended.filter(item => item.kind === 'skill' || item.kind === 'skill-index') },
-    { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: capabilities.filter(item => item.kind === 'mcp'), recommended: recommended.filter(item => item.kind === 'mcp') },
-    { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, items: capabilities.filter(item => item.kind === 'pi-extension' || item.kind === 'extension'), recommended: recommended.filter(item => item.kind === 'pi-extension') },
-    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: capabilities.filter(item => item.kind === 'prompt'), recommended: recommended.filter(item => item.kind === 'agent-md') },
-    { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: definitions, recommended: [] },
+    { id: 'skills', title: 'Skills 库', icon: 'spark' as const, items: recommended.filter(item => item.kind === 'skill' || item.kind === 'skill-index') },
+    { id: 'mcp', title: 'MCP 库', icon: 'link' as const, items: recommended.filter(item => item.kind === 'mcp') },
+    { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, items: recommended.filter(item => item.kind === 'pi-extension') },
+    { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, items: recommended.filter(item => item.kind === 'agent-md') },
+    { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, items: [] as RecommendedResource[] },
   ];
   const query = resourceQuery.trim().toLowerCase();
   const matches = (item: RecommendedResource) => !query || [
@@ -712,7 +627,7 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
     item.sourcePath,
     ...(item.tags ?? []),
   ].some(value => value?.toLowerCase().includes(query));
-  const filteredRecommended = (group: typeof groups[number]) => group.recommended.filter(matches);
+  const filteredRecommended = (group: typeof groups[number]) => group.items.filter(matches);
   const visibleRecommended = (group: typeof groups[number]) => filteredRecommended(group).slice(0, resourceLimits[group.id] ?? 40);
   const totalFiltered = groups.reduce((total, group) => total + filteredRecommended(group).length, 0);
   const architectures = [
@@ -738,7 +653,7 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
       <div className="resource-section-head">
         <div>
           <h1>资源库</h1>
-          <p>已加入表示已安装并能被 Agent 定义绑定；可选只代表目录来源，尚未安装或授权。</p>
+          <p>资源库条目默认已加入；绑定到 Agent 或授予任务权限仍需在后续流程中完成。</p>
         </div>
         <label className="resource-search">
           <Icon name="search" size={15} />
@@ -758,7 +673,7 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
             testid={`resource-${group.id}`}
             title={group.title}
             icon={group.icon}
-            subtitle={`${new Set(group.items.map(item => item.id)).size} 已加入 · ${group.recommended.length} 可选`}
+            subtitle={`${group.items.length} 项`}
             actions={['skills', 'mcp', 'pi-extensions', 'agent-md'].includes(group.id) ? (
               <button type="button" className="icon-button" data-testid={`resource-open-${group.id}`} onClick={() => void openResource(group.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title={`在访达中打开${group.title}目录`} aria-label={`在访达中打开${group.title}目录`}>
                 <Icon name="folder" size={16} />
@@ -766,38 +681,18 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
             ) : undefined}
           >
             {group.id === 'agents' ? (
-              <div className="resource-agent-list">
-                {definitions.map(item => (
-                  <button key={item.id} type="button" className="resource-agent-row" data-testid={`definition-${item.id}`} onClick={() => setSelected({ type: 'agent', id: item.id })}>
-                    <Icon name="catalog" size={16} />
-                    <span className="grow">{item.id}@{item.version}</span>
-                    <Icon name="chevron" size={14} />
-                  </button>
-                ))}
-                {!definitions.length && <span className="muted">暂无 Agent 组合</span>}
-              </div>
-            ) : group.items.length || group.recommended.length ? (
-              <div className="resource-capability-groups">
-                {group.items.length > 0 && (
-                  <div>
-                    <div className="resource-subhead">已加入</div>
-                    <div className="resource-list">
-                      {group.items.map(item => <div className="resource-item" key={`${item.id}@${item.version}`}><Icon name={group.icon} size={15} /><span className="grow">{item.id}</span><span className="faint">{item.version}</span></div>)}
-                    </div>
-                  </div>
-                )}
-                {group.recommended.length > 0 && (
-                  <div data-testid={`resource-recommended-${group.id}`}>
-                    <div className="resource-subhead">可选</div>
-                    {visibleRecommended(group).length ? (
-                      <div className="resource-candidate-list">
-                        {visibleRecommended(group).map(item => (
+              <p className="muted">暂无 Agent 组合</p>
+            ) : group.items.length ? (
+              <div data-testid={`resource-items-${group.id}`}>
+                {visibleRecommended(group).length ? (
+                  <div className="resource-candidate-list">
+                    {visibleRecommended(group).map(item => (
                         <button
                           key={item.id}
                           type="button"
                           className="resource-candidate-row"
-                          data-testid={`resource-candidate-${item.id}`}
-                          onClick={() => setSelected({ type: 'recommended', item })}
+                          data-testid={`resource-entry-${item.id}`}
+                          onClick={() => setSelected(item)}
                         >
                           <Icon name={group.icon} size={15} />
                           <span className="resource-candidate-copy">
@@ -806,19 +701,17 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
                           </span>
                           <Icon name="chevron" size={14} />
                         </button>
-                        ))}
-                      </div>
-                    ) : <p className="muted">没有匹配的资源。</p>}
-                    {filteredRecommended(group).length > visibleRecommended(group).length && (
-                      <Button
-                        size="sm"
-                        data-testid={`resource-more-${group.id}`}
-                        onClick={() => setResourceLimits(current => ({ ...current, [group.id]: (current[group.id] ?? 40) + 40 }))}
-                      >
-                        显示更多（{visibleRecommended(group).length} / {filteredRecommended(group).length}）
-                      </Button>
-                    )}
+                    ))}
                   </div>
+                ) : <p className="muted">没有匹配的资源。</p>}
+                {filteredRecommended(group).length > visibleRecommended(group).length && (
+                  <Button
+                    size="sm"
+                    data-testid={`resource-more-${group.id}`}
+                    onClick={() => setResourceLimits(current => ({ ...current, [group.id]: (current[group.id] ?? 40) + 40 }))}
+                  >
+                    显示更多（{visibleRecommended(group).length} / {filteredRecommended(group).length}）
+                  </Button>
                 )}
               </div>
             ) : (
@@ -842,18 +735,18 @@ function ResourceLibrary({ settings }: { settings: Settings_ | null }) {
       </Card>
       {selected && createPortal(
         <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelected(null); }}>
-          <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`资源详情 ${selected.type === 'agent' ? selected.id : selected.item.name}`}>
+          <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`资源详情 ${selected.name}`}>
             <header className="resource-detail-head">
               <div>
-                <h2>{selected.type === 'agent' ? selected.id : selected.item.name}</h2>
-                <p>{selected.type === 'agent' ? 'Agent 组合详情' : '可选能力详情'}</p>
+                <h2>{selected.name}</h2>
+                <p>资源详情</p>
               </div>
               <button type="button" className="icon-button" data-testid="resource-detail-close" onClick={() => setSelected(null)} aria-label="关闭详情">
                 <Icon name="close" size={16} />
               </button>
             </header>
             <div className="resource-detail-body">
-              {selected.type === 'agent' ? <TalentPanel id={selected.id} /> : <RecommendedResourceDetail item={selected.item} />}
+              <RecommendedResourceDetail item={selected} />
             </div>
           </aside>
         </div>,
