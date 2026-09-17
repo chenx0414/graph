@@ -24,6 +24,16 @@ interface ContextDetail {
   sourceContextDigest: string | null;
   childContextDigest: string | null;
   capabilityDigest: string | null;
+  modelPolicyDigest: string | null;
+  toolPolicyDigest: string | null;
+  constraintsDigest: string | null;
+  reviewPolicy: {
+    freshRequired?: boolean;
+    evidenceOnly?: boolean;
+    excludedModels?: string[];
+    allowedTools?: string[] | null;
+    reportSchema?: { kind?: string; version?: number };
+  } | null;
   handoffDigest: string | null;
   handoffSummary: string | null;
   budgetScope: { id: string; used: number; limit: number | null; unlimited: boolean } | null;
@@ -226,7 +236,21 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
           {data.context.sourceLeafId && <p className="muted mono">来源叶 {data.context.sourceLeafId}</p>}
           {data.context.sourceContextDigest && <p className="muted mono">来源上下文摘要 {data.context.sourceContextDigest.slice(0, 16)}</p>}
           {data.context.childContextDigest && <p className="muted mono">子上下文摘要 {data.context.childContextDigest.slice(0, 16)}</p>}
+          {data.context.capabilityDigest && <p className="muted mono">能力策略摘要 {data.context.capabilityDigest.slice(0, 16)}</p>}
+          {data.context.modelPolicyDigest && <p className="muted mono">模型策略摘要 {data.context.modelPolicyDigest.slice(0, 16)}</p>}
+          {data.context.toolPolicyDigest && <p className="muted mono">工具策略摘要 {data.context.toolPolicyDigest.slice(0, 16)}</p>}
+          {data.context.constraintsDigest && <p className="muted mono">约束摘要 {data.context.constraintsDigest.slice(0, 16)}</p>}
           {data.context.handoffDigest && <p className="muted mono">交接摘要 {data.context.handoffDigest.slice(0, 16)}</p>}
+          {data.context.reviewPolicy && (
+            <p className="muted">
+              独立审查策略：{data.context.reviewPolicy.freshRequired ? '全新上下文' : '允许继承'}
+              {' · '}
+              {data.context.reviewPolicy.evidenceOnly ? '仅冻结证据' : '允许实现上下文'}
+              {data.context.reviewPolicy.excludedModels?.length
+                ? ` · 排除模型 ${data.context.reviewPolicy.excludedModels.join('、')}`
+                : ''}
+            </p>
+          )}
           {data.context.budgetScope && (
             <p className="muted">
               共享预算 {data.context.budgetScope.used.toLocaleString('en-US')} /

@@ -57,6 +57,8 @@ export interface PiInstanceOptions {
     sessionFile: string;
     leafId?: string;
   };
+  /** Start a new session for this instance instead of reopening its manifest. */
+  freshSession?: boolean;
   onEvent?: (event: AgentSessionEvent) => void;
 }
 
@@ -121,7 +123,8 @@ export async function openPiInstance(options: PiInstanceOptions) {
     throw new Error('Legacy Agent session has no capability digest and cannot be rebound silently');
   }
   const sessionsDir = join(stateDir, 'sessions');
-  if (manifest) {
+  const forceFresh = options.freshSession === true;
+  if (manifest && !forceFresh) {
     const contents = await readFile(manifest.sessionFile, 'utf8'); // Missing is not new.
     const firstLine = contents.split('\n').find(line => line.trim().length > 0);
     const header = firstLine ? JSON.parse(firstLine) : undefined;
@@ -130,8 +133,8 @@ export async function openPiInstance(options: PiInstanceOptions) {
     }
   }
   let manager: SessionManager;
-  let contextInfo: SessionContextInfo | undefined = manifest?.context;
-  if (manifest) {
+  let contextInfo: SessionContextInfo | undefined = forceFresh ? undefined : manifest?.context;
+  if (manifest && !forceFresh) {
     manager = SessionManager.open(manifest.sessionFile, sessionsDir, workspace);
   } else if (options.forkFrom) {
     const sourceFile = resolve(options.forkFrom.sessionFile);
@@ -163,8 +166,8 @@ export async function openPiInstance(options: PiInstanceOptions) {
   }
   const sessionFile = manager.getSessionFile();
   if (!sessionFile) throw new Error('Expected a persistent Pi session');
-  if (manifest && manager.getSessionId() !== manifest.sessionId) throw new Error('Persisted session identity changed');
-  if (!manifest && !options.forkFrom) {
+  if (manifest && !forceFresh && manager.getSessionId() !== manifest.sessionId) throw new Error('Persisted session identity changed');
+  if (!options.forkFrom && (!manifest || forceFresh)) {
     // Bootstrap the public JSONL header, then reopen it through Pi's public API.
     // Pi now owns all subsequent appends, including the first user message.
     await writeAtomic(sessionFile, JSON.stringify(manager.getHeader()) + '\n');

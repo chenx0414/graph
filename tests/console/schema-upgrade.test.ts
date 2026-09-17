@@ -44,6 +44,9 @@ async function inspect(dbPath: string) {
       cost: store.db.prepare("SELECT cost FROM invocations WHERE id='legacy-inv'").get() as { cost: string },
       pauseColumns: (store.db.prepare('PRAGMA table_info(nodes)').all() as { name: string }[]).map(column => column.name).filter(column => column.startsWith('pause') || column.startsWith('user_wait')),
       conversationColumns: (store.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]).map(column => column.name),
+      bindingColumns: (store.db.prepare('PRAGMA table_info(agent_context_bindings)').all() as { name: string }[]).map(column => column.name),
+      resolutionColumns: (store.db.prepare('PRAGMA table_info(context_resolutions)').all() as { name: string }[]).map(column => column.name),
+      scopeColumns: (store.db.prepare('PRAGMA table_info(budget_scopes)').all() as { name: string }[]).map(column => column.name),
       preparation: store.db.prepare("SELECT state,repo_root,baseline_sha FROM project_preparation WHERE project_id='legacy'").get() as { state: string; repo_root: string; baseline_sha: string } | undefined,
       newNodes: store.db.prepare("SELECT COUNT(*) AS count FROM node_entries WHERE task_id<>'legacy-task'").get() as { count: number },
     };
@@ -92,11 +95,14 @@ for (const fixture of ['v13', 'v17'] as const) {
     await daemon.close();
 
     const upgraded = await inspect(dbPath);
-    expect(upgraded.version).toBe(22);
+    expect(upgraded.version).toBe(23);
     expect(upgraded.instance).toMatchObject({ budget: 20_000_000, used: 12_345, unlimited: 0, models_used: '["legacy-model"]' });
     expect(JSON.parse(upgraded.cost.cost)).toEqual({ amount: 0.001, currency: 'USD' });
     expect(upgraded.pauseColumns.sort()).toEqual(['pause_ms', 'pause_since', 'user_wait_ms', 'user_wait_since']);
     expect(upgraded.conversationColumns).toEqual(expect.arrayContaining(['archived_at', 'thinking_level']));
+    expect(upgraded.bindingColumns).toEqual(expect.arrayContaining(['model_policy_digest', 'tool_policy_digest']));
+    expect(upgraded.resolutionColumns).toEqual(expect.arrayContaining(['constraints_digest', 'review_policy']));
+    expect(upgraded.scopeColumns).toContain('root_task_id');
 
     // Phase B: the same file runs a scripted worker through Git preparation.
     const runtime = await openTaskRuntime({
@@ -127,3 +133,34 @@ for (const fixture of ['v13', 'v17'] as const) {
     expect(upgraded.instance.budget).toBe(20_000_000);
   }, 120_000);
 }
+
+test('v23 renumbers legacy handoffs before enforcing one version per task', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-upgrade-v22-handoffs-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const dbPath = join(root, 'tasks.sqlite');
+  const raw = new DatabaseSync(dbPath);
+  raw.exec(`
+    CREATE TABLE tasks(id TEXT PRIMARY KEY);
+    CREATE TABLE context_handoffs(id TEXT PRIMARY KEY, task_id TEXT, operation_id TEXT, version INTEGER,
+      purpose TEXT, summary TEXT, package TEXT, digest TEXT, created_at INTEGER);
+    CREATE TABLE budget_scopes(id TEXT PRIMARY KEY, task_id TEXT, owner_instance_id TEXT,
+      limit_tokens INTEGER, unlimited INTEGER, used_tokens INTEGER, created_at INTEGER);
+    CREATE TABLE agent_context_bindings(id TEXT PRIMARY KEY);
+    CREATE TABLE context_resolutions(id TEXT PRIMARY KEY);
+    INSERT INTO tasks(id) VALUES('task');
+    INSERT INTO context_handoffs VALUES
+      ('h1','task',NULL,1,'implement','first','{}','a',10),
+      ('h2','task',NULL,1,'review','second','{}','b',10),
+      ('h3','task',NULL,1,'verify','third','{}','c',11);
+    PRAGMA user_version=22;
+  `);
+  raw.close();
+  const store = new TaskStore(dbPath);
+  try {
+    expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(23);
+    expect(store.db.prepare('SELECT id,version FROM context_handoffs ORDER BY version').all())
+      .toEqual([{ id: 'h1', version: 1 }, { id: 'h2', version: 2 }, { id: 'h3', version: 3 }]);
+  } finally {
+    store.close();
+  }
+});

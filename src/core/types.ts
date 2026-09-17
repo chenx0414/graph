@@ -25,6 +25,30 @@ export interface ContextRequest {
   reason?: string;
 }
 export type AgentContextMode = 'continue' | 'fresh' | 'fork';
+export interface ReviewIndependencePolicy {
+  freshRequired: true;
+  evidenceOnly: true;
+  excludedModels: string[];
+  allowedTools: string[] | null;
+  reportSchema: { kind: string; version: number };
+}
+export interface ContextHandoffPackage {
+  mode: AgentContextMode;
+  purpose: ContextPurpose;
+  independence: ContextIndependence;
+  requestedFacts: ContextFactRef[];
+  reasonCode: string;
+  sourceNodeId: string | null;
+  sourceInstanceId: string | null;
+  sourceSessionId: string | null;
+  sourceLeafId: string | null;
+  summary: string;
+  decisions: string[];
+  acceptance: { id: string; description: string; checkNode: string }[];
+  artifactRefs: { path: string; digest: string }[];
+  outputSchema: { kind: string; version: number };
+  briefing: string;
+}
 export interface ResolvedAgentContext {
   mode: AgentContextMode;
   purpose: ContextPurpose;
@@ -35,7 +59,11 @@ export interface ResolvedAgentContext {
   resolutionId: string;
   handoffId: string;
   handoffDigest: string;
+  constraintsDigest: string;
   budgetScopeId: string;
+  modelPolicyDigest?: string;
+  toolPolicyDigest?: string;
+  reviewPolicy?: ReviewIndependencePolicy;
   sourceNodeId?: string;
   sourceInstanceId?: string;
   sourceSessionId?: string;

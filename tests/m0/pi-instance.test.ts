@@ -128,6 +128,30 @@ test('a v2 capability digest is required and must match exactly', async () => {
   await expect(openPiInstance({ ...base, capabilityDigest: 'a'.repeat(64) })).rejects.toThrow('has no digest');
 });
 
+test('freshSession starts a new session for an existing instance identity', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-fresh-session-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const runtime = await testModelRuntime();
+  const options = {
+    binding: { instanceId: 'review', nodeId: 'review', definitionVersion: 'reviewer@1' },
+    workspace,
+    stateDir: join(root, 'state'),
+    model: modelA,
+    modelRuntime: runtime,
+    stream: respond,
+  };
+  const first = await openPiInstance(options);
+  await first.prompt('first independent review');
+  const firstSession = first.inspect().sessionId;
+  await first.close();
+
+  const fresh = await openPiInstance({ ...options, freshSession: true });
+  expect(fresh.inspect().sessionId).not.toBe(firstSession);
+  await fresh.close();
+});
+
 test('a fork rejects a source/child context digest mismatch before any model request', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-fork-digest-'));
   directories.push(root);

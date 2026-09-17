@@ -7,7 +7,7 @@ import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
-import { recordContextSession } from '../core/context.ts';
+import { digest, recordContextSession } from '../core/context.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
@@ -277,13 +277,48 @@ export function createPiAdapter(options: {
           report: capabilities.report,
           tools,
         });
+        const thinkingLevel = (conversation?.thinking_level ?? 'off') as ThinkingLevel;
+        const modelPolicyDigest = digest({
+          id: entry.id,
+          modelId: entry.modelId ?? null,
+          provider: entry.provider,
+          api: entry.api,
+          baseUrl: entry.baseUrl,
+          contextWindow: entry.contextWindow,
+          maxTokens: entry.maxTokens,
+          thinkingLevel,
+        });
+        const toolPolicyDigest = digest({
+          readOnly: Boolean(discussion),
+          grants: [...operation.grants].sort(),
+          tools: tools.map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters as unknown as Json,
+          })).sort((left, right) => left.name.localeCompare(right.name)),
+        });
         const agentContext = operation.context.agentContext;
         if (agentContext?.mode === 'fork') {
           if (!agentContext.sourceSessionFile) throw new RuntimeError('context_rejected', 'Fork context is missing its source session file');
-          const sourceBinding = options.store.db.prepare('SELECT capability_digest FROM agent_context_bindings WHERE instance_id=?')
-            .get(agentContext.sourceInstanceId!) as { capability_digest: string | null } | undefined;
-          if (!agentContext.rebrand && sourceBinding?.capability_digest && sourceBinding.capability_digest !== capabilities.digest) {
-            throw new RuntimeError('context_rejected', 'Fork context changes the capability bundle; set context.rebrand=true to allow it');
+          const sourceBinding = options.store.db.prepare(`SELECT capability_digest,model_policy_digest,tool_policy_digest
+            FROM agent_context_bindings WHERE instance_id=?`).get(agentContext.sourceInstanceId!) as {
+              capability_digest: string | null;
+              model_policy_digest: string | null;
+              tool_policy_digest: string | null;
+            } | undefined;
+          if (!agentContext.rebrand) {
+            if (!sourceBinding?.capability_digest || !sourceBinding.model_policy_digest || !sourceBinding.tool_policy_digest) {
+              throw new RuntimeError('context_rejected', 'Fork source has no complete policy digest; set context.rebrand=true to allow it');
+            }
+            if (sourceBinding.capability_digest !== capabilities.digest) {
+              throw new RuntimeError('context_rejected', 'Fork context changes the capability bundle; set context.rebrand=true to allow it');
+            }
+            if (sourceBinding.model_policy_digest !== modelPolicyDigest) {
+              throw new RuntimeError('context_rejected', 'Fork context changes the model policy; set context.rebrand=true to allow it');
+            }
+            if (sourceBinding.tool_policy_digest !== toolPolicyDigest) {
+              throw new RuntimeError('context_rejected', 'Fork context changes the tool policy; set context.rebrand=true to allow it');
+            }
           }
         }
         // Record what was actually loaded for this operation so the node
@@ -394,7 +429,7 @@ export function createPiAdapter(options: {
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry), stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
-            thinkingLevel: (conversation?.thinking_level ?? 'off') as ThinkingLevel,
+            thinkingLevel,
             tools,
             ...(capabilities.skillPaths.length ? { skillPaths: capabilities.skillPaths } : {}),
             ...(capabilities.piExtensionPaths.length ? { piExtensionPaths: capabilities.piExtensionPaths } : {}),
@@ -402,6 +437,7 @@ export function createPiAdapter(options: {
             systemPrompt: prompts.systemPrompt,
             appendSystemPrompt: prompts.appendSystemPrompt,
             capabilityDigest: prompts.digest,
+            ...(agentContext?.reviewPolicy ? { freshSession: true } : {}),
             ...(agentContext?.mode === 'fork' && agentContext.sourceSessionFile
               ? { forkFrom: { sessionFile: agentContext.sourceSessionFile, ...(agentContext.sourceLeafId ? { leafId: agentContext.sourceLeafId } : {}) } }
               : {}),
@@ -426,6 +462,8 @@ export function createPiAdapter(options: {
                 bindingId: agentContext.bindingId,
                 sessionId: inspected.sessionId,
                 capabilityDigest: capabilities.digest,
+                modelPolicyDigest,
+                toolPolicyDigest,
                 ...(inspected.context?.sourceLeafId ? { sourceLeafId: inspected.context.sourceLeafId } : {}),
                 ...(inspected.context?.sourceContextDigest ? { sourceContextDigest: inspected.context.sourceContextDigest } : {}),
                 ...(inspected.context?.childContextDigest ? { childContextDigest: inspected.context.childContextDigest } : {}),

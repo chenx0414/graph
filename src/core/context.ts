@@ -3,12 +3,14 @@ import { canonicalJson, type TaskStore } from './store.ts';
 import {
   RuntimeError,
   type AgentContextMode,
+  type ContextHandoffPackage,
   type ContextFactRef,
   type ContextIndependence,
   type ContextPurpose,
   type ContextRequest,
   type NodeSpec,
   type ResolvedAgentContext,
+  type ReviewIndependencePolicy,
 } from './types.ts';
 
 interface InstanceContextRow {
@@ -31,6 +33,8 @@ interface BindingRow {
   source_session_id: string | null;
   source_session_file: string | null;
   budget_scope_id: string;
+  model_policy_digest: string | null;
+  tool_policy_digest: string | null;
 }
 
 export function digest(value: unknown) {
@@ -87,15 +91,16 @@ function instanceContextRow(store: TaskStore, taskId: string, nodeId: string) {
 }
 
 function bindingRow(store: TaskStore, instanceId: string) {
-  return store.db.prepare('SELECT id,mode,source_instance_id,source_session_id,source_session_file,budget_scope_id FROM agent_context_bindings WHERE instance_id=?')
+  return store.db.prepare(`SELECT id,mode,source_instance_id,source_session_id,source_session_file,budget_scope_id,
+      model_policy_digest,tool_policy_digest FROM agent_context_bindings WHERE instance_id=?`)
     .get(instanceId) as BindingRow | undefined;
 }
 
 function createBudgetScope(store: TaskStore, taskId: string, instance: InstanceContextRow) {
   const id = randomUUID();
-  store.db.prepare(`INSERT INTO budget_scopes(id,task_id,owner_instance_id,limit_tokens,unlimited,used_tokens,created_at)
-    VALUES(?,?,?,?,?,?,?)`)
-    .run(id, taskId, instance.id, instance.unlimited ? null : instance.budget, instance.unlimited, instance.used, Date.now());
+  store.db.prepare(`INSERT INTO budget_scopes(id,task_id,root_task_id,owner_instance_id,limit_tokens,unlimited,used_tokens,created_at)
+    VALUES(?,?,?,?,?,?,?,?)`)
+    .run(id, taskId, taskId, instance.id, instance.unlimited ? null : instance.budget, instance.unlimited, instance.used, Date.now());
   store.db.prepare('UPDATE instances SET budget_scope_id=? WHERE id=?').run(id, instance.id);
   return id;
 }
@@ -144,6 +149,7 @@ export function resolveAgentContext(store: TaskStore, input: {
   nodeId: string;
   spec: NodeSpec;
   review: boolean;
+  excludedModels?: string[];
 }): ResolvedAgentContext {
   validateContextRequest(input.spec.context);
   const instance = instanceContextRow(store, input.taskId, input.nodeId);
@@ -155,8 +161,29 @@ export function resolveAgentContext(store: TaskStore, input: {
   const existingBinding = bindingRow(store, instance.id);
   const resolutionId = randomUUID();
   const handoffId = randomUUID();
+  const reviewPolicy: ReviewIndependencePolicy | undefined = input.review
+    ? {
+        freshRequired: true,
+        evidenceOnly: true,
+        excludedModels: [...new Set(input.excludedModels ?? [])].sort(),
+        allowedTools: null,
+        reportSchema: { kind: 'independent_review', version: 1 },
+      }
+    : undefined;
+  const policyFields = reviewPolicy ? { reviewPolicy } : {};
 
-  if (instance.session_id) {
+  const requestedTranscript = request.requiredFacts?.some(transcriptFact) ?? false;
+  if (input.review && requestedTranscript) {
+    throw new RuntimeError('context_rejected', 'Independent review cannot inherit implementation transcript or tool calls');
+  }
+  if (independence !== 'none' && requestedTranscript) {
+    throw new RuntimeError('context_rejected', 'Fresh independent context cannot inherit transcript or tool calls');
+  }
+
+  // Independent review always starts from a fresh handoff. A prior review
+  // session may exist on the node after rework, but it must never become the
+  // implementation lineage or the next round's only checkout of the source.
+  if (instance.session_id && !input.review) {
     const scopeId = existingBinding?.budget_scope_id ?? ensureBudgetScope(store, input.taskId, instance);
     return {
       mode: 'continue',
@@ -168,16 +195,10 @@ export function resolveAgentContext(store: TaskStore, input: {
       resolutionId,
       handoffId,
       handoffDigest: '',
+      constraintsDigest: '',
       budgetScopeId: scopeId,
+      ...policyFields,
     };
-  }
-
-  const requestedTranscript = request.requiredFacts?.some(transcriptFact) ?? false;
-  if (input.review && requestedTranscript) {
-    throw new RuntimeError('context_rejected', 'Independent review cannot inherit implementation transcript or tool calls');
-  }
-  if (independence !== 'none' && requestedTranscript) {
-    throw new RuntimeError('context_rejected', 'Fresh independent context cannot inherit transcript or tool calls');
   }
 
   if (!requestedTranscript) {
@@ -192,7 +213,9 @@ export function resolveAgentContext(store: TaskStore, input: {
       resolutionId,
       handoffId,
       handoffDigest: '',
+      constraintsDigest: '',
       budgetScopeId: fresh.budgetScopeId,
+      ...policyFields,
     };
   }
 
@@ -200,6 +223,11 @@ export function resolveAgentContext(store: TaskStore, input: {
   const sourceSpec = sourceNodeSpec(store, input.taskId, sourceNodeId);
   const source = instanceContextRow(store, input.taskId, sourceNodeId);
   if (!source || !source.session_id || !source.session_file) throw new RuntimeError('context_rejected', `Context source ${sourceNodeId} has no persisted session`);
+  const sourceBinding = bindingRow(store, source.id);
+  const sourceParent = store.db.prepare('SELECT parent_instance_id FROM instances WHERE id=?').get(source.id) as { parent_instance_id: string | null } | undefined;
+  if (sourceParent?.parent_instance_id || sourceBinding?.mode === 'fork') {
+    throw new RuntimeError('context_rejected', `Context source ${sourceNodeId} was created by a fork; recursive fork is not supported`);
+  }
   if (!request.rebrand && (source.model !== instance.model || source.definition_version !== instance.definition_version)) {
     throw new RuntimeError('context_rejected', `Fork from ${sourceNodeId} changes model or Agent definition; set context.rebrand=true to allow it`);
   }
@@ -215,7 +243,9 @@ export function resolveAgentContext(store: TaskStore, input: {
     resolutionId,
     handoffId,
     handoffDigest: '',
+    constraintsDigest: '',
     budgetScopeId: sourceScopeId,
+    ...policyFields,
     ...(request.rebrand ? { rebrand: true } : {}),
     sourceNodeId,
     sourceInstanceId: source.id,
@@ -225,16 +255,48 @@ export function resolveAgentContext(store: TaskStore, input: {
   };
 }
 
+function validateHandoffPackage(context: ResolvedAgentContext, handoff: ContextHandoffPackage) {
+  if (handoff.mode !== context.mode || handoff.purpose !== context.purpose || handoff.independence !== context.independence) {
+    throw new RuntimeError('context_rejected', 'Context handoff does not match the resolved context mode');
+  }
+  if (!handoff.summary.trim() || !handoff.briefing.trim()) {
+    throw new RuntimeError('context_rejected', 'Context handoff requires a summary and briefing');
+  }
+  if (!Array.isArray(handoff.decisions) || handoff.decisions.some(item => typeof item !== 'string')) {
+    throw new RuntimeError('context_rejected', 'Context handoff requires a decisions array');
+  }
+  if (!Array.isArray(handoff.acceptance) || (context.purpose !== 'discuss' && handoff.acceptance.length === 0)) {
+    throw new RuntimeError('context_rejected', 'Context handoff requires the frozen acceptance contract');
+  }
+  if (!Array.isArray(handoff.artifactRefs) || handoff.artifactRefs.some(ref =>
+    !ref || typeof ref.path !== 'string' || !ref.path.trim() || !/^[a-f0-9]{64}$/.test(ref.digest))) {
+    throw new RuntimeError('context_rejected', 'Context handoff requires artifact references with exact digests');
+  }
+  if (!handoff.outputSchema || typeof handoff.outputSchema.kind !== 'string' || !handoff.outputSchema.kind.trim()
+    || !Number.isSafeInteger(handoff.outputSchema.version) || handoff.outputSchema.version < 1) {
+    throw new RuntimeError('context_rejected', 'Context handoff requires an output schema');
+  }
+}
+
+export function handoffConstraintsDigest(handoff: ContextHandoffPackage) {
+  return digest({
+    acceptance: handoff.acceptance,
+    decisions: handoff.decisions,
+    outputSchema: handoff.outputSchema,
+  });
+}
+
 export function freezeContextHandoff(store: TaskStore, context: ResolvedAgentContext, input: {
   taskId: string;
   operationId: string;
   nodeId: string;
   instanceId: string;
-  summary: string;
-  package: unknown;
+  package: ContextHandoffPackage;
   capabilityDigest?: string;
 }) {
+  validateHandoffPackage(context, input.package);
   const packageDigest = digest(input.package);
+  const constraintsDigest = handoffConstraintsDigest(input.package);
   const existingBinding = bindingRow(store, input.instanceId);
   const mode: 'fresh' | 'fork' = context.mode === 'fork' ? 'fork' : 'fresh';
   if (!existingBinding) {
@@ -245,20 +307,36 @@ export function freezeContextHandoff(store: TaskStore, context: ResolvedAgentCon
         context.sourceInstanceId ?? null, context.sourceSessionId ?? null, context.sourceSessionFile ?? null,
         context.sourceLeafId ?? null, context.budgetScopeId, Date.now());
   }
+  if (mode === 'fork' && !context.rebrand) {
+    if (!context.sourceInstanceId) throw new RuntimeError('context_rejected', 'Fork source instance is missing');
+    const sourceConstraints = store.db.prepare(`SELECT r.constraints_digest
+      FROM agent_context_bindings b
+      JOIN context_resolutions r ON r.binding_id=b.id
+      WHERE b.instance_id=? ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1`).get(context.sourceInstanceId) as { constraints_digest: string } | undefined;
+    if (!sourceConstraints?.constraints_digest) {
+      throw new RuntimeError('context_rejected', 'Fork source has no frozen constraints digest; set context.rebrand=true to allow it');
+    }
+    if (sourceConstraints.constraints_digest !== constraintsDigest) {
+      throw new RuntimeError('context_rejected', 'Fork source and target constraints differ; set context.rebrand=true to allow it');
+    }
+  }
+  const { version } = store.db.prepare('SELECT COALESCE(MAX(version),0)+1 AS version FROM context_handoffs WHERE task_id=?')
+    .get(input.taskId) as { version: number };
   store.db.prepare(`INSERT INTO context_handoffs(id,task_id,operation_id,version,purpose,summary,package,digest,created_at)
     VALUES(?,?,?,?,?,?,?,?,?)`)
-    .run(context.handoffId, input.taskId, input.operationId, 1, context.purpose, input.summary,
+    .run(context.handoffId, input.taskId, input.operationId, version, context.purpose, input.package.summary,
       canonicalJson(input.package as never), packageDigest, Date.now());
   store.db.prepare(`INSERT INTO context_resolutions(id,task_id,node_id,operation_id,requested_purpose,requested_facts,independence,
-      selected_mode,reason_code,source_instance_id,binding_id,handoff_id,created_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      selected_mode,reason_code,source_instance_id,binding_id,handoff_id,constraints_digest,review_policy,created_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(context.resolutionId, input.taskId, input.nodeId, input.operationId, context.purpose,
       canonicalJson(context.requestedFacts as never), context.independence,
-      context.mode, context.reasonCode, context.sourceInstanceId ?? null, context.bindingId, context.handoffId, Date.now());
+      context.mode, context.reasonCode, context.sourceInstanceId ?? null, context.bindingId, context.handoffId,
+      constraintsDigest, context.reviewPolicy ? canonicalJson(context.reviewPolicy as never) : null, Date.now());
   if (input.capabilityDigest) {
     store.db.prepare('UPDATE agent_context_bindings SET capability_digest=? WHERE id=?').run(input.capabilityDigest, context.bindingId);
   }
-  return { ...context, handoffDigest: packageDigest };
+  return { ...context, handoffDigest: packageDigest, constraintsDigest };
 }
 
 export function recordContextSession(store: TaskStore, input: {
@@ -268,6 +346,8 @@ export function recordContextSession(store: TaskStore, input: {
   bindingId: string;
   sessionId?: string;
   capabilityDigest?: string;
+  modelPolicyDigest?: string;
+  toolPolicyDigest?: string;
   sourceLeafId?: string;
   sourceContextDigest?: string;
   childContextDigest?: string;
@@ -280,10 +360,12 @@ export function recordContextSession(store: TaskStore, input: {
       source_leaf_id=COALESCE(?,source_leaf_id),
       source_context_digest=COALESCE(?,source_context_digest),
       child_context_digest=COALESCE(?,child_context_digest),
-      capability_digest=COALESCE(?,capability_digest)
+      capability_digest=COALESCE(?,capability_digest),
+      model_policy_digest=COALESCE(?,model_policy_digest),
+      tool_policy_digest=COALESCE(?,tool_policy_digest)
     WHERE id=?`)
     .run(input.sourceLeafId ?? null, input.sourceContextDigest ?? null, input.childContextDigest ?? null,
-      input.capabilityDigest ?? null, input.bindingId);
+      input.capabilityDigest ?? null, input.modelPolicyDigest ?? null, input.toolPolicyDigest ?? null, input.bindingId);
   const eventType = input.sourceContextDigest && prior?.mode === 'fork' && !prior.source_context_digest
     ? 'context.branch_created'
     : resolution?.selected_mode === 'continue' || (prior?.mode === 'fork' && prior.source_context_digest)
@@ -304,9 +386,11 @@ export function recordContextSession(store: TaskStore, input: {
 
 export function contextView(store: TaskStore, taskId: string, nodeId: string) {
   const row = store.db.prepare(`SELECT b.mode,b.source_instance_id,b.source_session_id,b.source_session_file,b.source_leaf_id,
-      b.source_context_digest,b.child_context_digest,b.capability_digest,b.budget_scope_id,b.created_at,
+      b.source_context_digest,b.child_context_digest,b.capability_digest,b.model_policy_digest,b.tool_policy_digest,
+      b.budget_scope_id,b.created_at,
       s.limit_tokens,s.unlimited,s.used_tokens,
       r.selected_mode,r.requested_purpose,r.requested_facts,r.independence,r.reason_code,r.operation_id,
+      r.constraints_digest,r.review_policy,
       h.digest AS handoff_digest,h.summary AS handoff_summary,
       si.node_id AS source_node_id
     FROM instances i
@@ -324,6 +408,8 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
       source_context_digest: string | null;
       child_context_digest: string | null;
       capability_digest: string | null;
+      model_policy_digest: string | null;
+      tool_policy_digest: string | null;
       budget_scope_id: string | null;
       created_at: number | null;
       limit_tokens: number | null;
@@ -335,6 +421,8 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
       independence: string | null;
       reason_code: string | null;
       operation_id: string | null;
+      constraints_digest: string | null;
+      review_policy: string | null;
       handoff_digest: string | null;
       handoff_summary: string | null;
       source_node_id: string | null;
@@ -355,6 +443,10 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
     sourceContextDigest: row.source_context_digest,
     childContextDigest: row.child_context_digest,
     capabilityDigest: row.capability_digest,
+    modelPolicyDigest: row.model_policy_digest,
+    toolPolicyDigest: row.tool_policy_digest,
+    constraintsDigest: row.constraints_digest,
+    reviewPolicy: row.review_policy ? JSON.parse(row.review_policy) as unknown : null,
     handoffDigest: row.handoff_digest,
     handoffSummary: row.handoff_summary,
     budgetScope: row.budget_scope_id ? {
@@ -418,15 +510,17 @@ export function scopeReserved(store: TaskStore, scopeId: string) {
 
 export function assertWithinBudget(store: TaskStore, instanceId: string, reservation = 0) {
   const snapshot = budgetSnapshot(store, instanceId);
-  if (!snapshot.unlimited && (snapshot.used + snapshot.reserved + reservation > snapshot.budget
-    || (reservation === 0 && snapshot.used + snapshot.reserved >= snapshot.budget))) {
-    throw new RuntimeError('budget', 'Token budget exhausted');
-  }
-  if (snapshot.scopeId && !snapshot.scopeUnlimited) {
+  if (snapshot.scopeId) {
+    if (snapshot.scopeUnlimited) return;
     const total = snapshot.scopeUsed + scopeInFlightUsage(store, snapshot.scopeId) + scopeReserved(store, snapshot.scopeId) + reservation;
     if (total > (snapshot.scopeLimit ?? 0) || (reservation === 0 && total >= (snapshot.scopeLimit ?? 0))) {
       throw new RuntimeError('budget', 'Shared context budget exhausted');
     }
+    return;
+  }
+  if (!snapshot.unlimited && (snapshot.used + snapshot.reserved + reservation > snapshot.budget
+    || (reservation === 0 && snapshot.used + snapshot.reserved >= snapshot.budget))) {
+    throw new RuntimeError('budget', 'Token budget exhausted');
   }
 }
 
@@ -441,6 +535,14 @@ export function setInstanceBudget(store: TaskStore, instanceId: string, tokens: 
   if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
   const row = store.db.prepare('SELECT budget_scope_id FROM instances WHERE id=?').get(instanceId) as { budget_scope_id: string | null } | undefined;
   if (!row) throw new RuntimeError('not_found', 'Unknown instance budget');
+  if (row.budget_scope_id) {
+    const scope = store.db.prepare(`SELECT s.owner_instance_id,
+        (SELECT COUNT(*) FROM instances member WHERE member.budget_scope_id=s.id) AS members
+      FROM budget_scopes s WHERE s.id=?`).get(row.budget_scope_id) as { owner_instance_id: string | null; members: number } | undefined;
+    if (scope && scope.members > 1 && scope.owner_instance_id !== instanceId) {
+      throw new RuntimeError('shared_budget_owner_required', 'Only the shared budget owner can change the scope cap');
+    }
+  }
   store.db.prepare('UPDATE instances SET budget=?,unlimited=? WHERE id=?').run(tokens ?? 0, tokens === null ? 1 : 0, instanceId);
   if (row.budget_scope_id) {
     store.db.prepare('UPDATE budget_scopes SET limit_tokens=?,unlimited=? WHERE id=?').run(tokens, tokens === null ? 1 : 0, row.budget_scope_id);

@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 22) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 23) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -294,6 +294,34 @@ export class TaskStore {
           FROM instances i JOIN node_sessions s ON s.instance_id=i.id
           WHERE i.budget_scope_id IS NOT NULL;
         PRAGMA user_version=22;
+      `);
+    });
+    if (version < 23) this.transaction(() => {
+      // Complete the context policy contract: policy digests are persisted on
+      // the binding, constraints are frozen with each resolution, review
+      // independence is first-class, and handoff versions are unique per task.
+      this.db.exec(`
+        ALTER TABLE budget_scopes ADD COLUMN root_task_id TEXT REFERENCES tasks(id);
+        UPDATE budget_scopes SET root_task_id=task_id WHERE root_task_id IS NULL;
+
+        ALTER TABLE agent_context_bindings ADD COLUMN model_policy_digest TEXT;
+        ALTER TABLE agent_context_bindings ADD COLUMN tool_policy_digest TEXT;
+
+        ALTER TABLE context_resolutions ADD COLUMN constraints_digest TEXT NOT NULL DEFAULT '';
+        ALTER TABLE context_resolutions ADD COLUMN review_policy TEXT;
+      `);
+      // v22 wrote version=1 for every handoff. Renumber each task's history
+      // before enforcing the intended UNIQUE(task_id,version) contract.
+      this.db.exec(`
+        UPDATE context_handoffs
+        SET version=(
+          SELECT COUNT(*) FROM context_handoffs prior
+          WHERE prior.task_id=context_handoffs.task_id
+            AND (prior.created_at<context_handoffs.created_at
+              OR (prior.created_at=context_handoffs.created_at AND prior.rowid<=context_handoffs.rowid))
+        );
+        CREATE UNIQUE INDEX context_handoffs_task_version ON context_handoffs(task_id,version);
+        PRAGMA user_version=23;
       `);
     });
   }

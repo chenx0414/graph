@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from './store.ts';
-import { RuntimeError, type Json } from './types.ts';
+import { RuntimeError, type Json, type NodeSpec, type Operation, type OperationResult } from './types.ts';
 
 /**
  * Conversation records live next to the execution ledger: every master turn is
@@ -96,6 +96,67 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
   const row = store.db.prepare('SELECT * FROM messages WHERE id=?').get(messageId) as unknown as MessageRow | undefined;
   if (!row) return;
   store.event(conversationRow(store, row.conversation_id).anchor_task_id, 'message.updated', { message: publicMessage(row) });
+}
+
+/** Persist the durable side of one master turn: its assistant reply and the
+ * summarized tool activity. Idempotent per operation. */
+export function recordConversationOutput(store: TaskStore, operation: Operation, result: OperationResult) {
+  if (operation.kind !== 'agent') return;
+  const nodeSpec = JSON.parse((store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
+    .get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+  if (nodeSpec.role !== 'master') return;
+  const conversation = conversationForTask(store, operation.taskId);
+  if (!conversation) return;
+  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='assistant' LIMIT 1").get(operation.id)) return;
+  const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
+    ? result.output as { [key: string]: Json }
+    : undefined;
+  if (result.outcome === 'completed') {
+    const reply = typeof output?.text === 'string' ? output.text.trim() : '';
+    const suggestedPrompt = typeof output?.suggestedPrompt === 'string' ? output.suggestedPrompt.trim().slice(0, 500) : '';
+    if (reply) {
+      appendMessage(store, {
+        conversationId: conversation.id,
+        role: 'assistant',
+        kind: 'chat',
+        text: reply,
+        state: 'done',
+        operationId: operation.id,
+        turn: operation.attempt,
+        ...(suggestedPrompt ? { data: { suggestedPrompt } } : {}),
+      });
+    }
+    const activity = Array.isArray(output?.toolActivity) ? output.toolActivity : [];
+    for (const item of activity) {
+      const entry = item as { name?: unknown; summary?: unknown; state?: unknown; toolCallId?: unknown };
+      if (typeof entry.summary !== 'string' || !entry.summary.trim()) continue;
+      appendMessage(store, {
+        conversationId: conversation.id,
+        role: 'tool',
+        kind: 'tool',
+        text: typeof entry.name === 'string' ? `${entry.name}: ${entry.summary}` : entry.summary,
+        data: {
+          tool: typeof entry.name === 'string' ? entry.name : 'tool',
+          ...(typeof entry.toolCallId === 'string' ? { toolCallId: entry.toolCallId } : {}),
+          ...(entry.state === 'error' ? { error: true } : {}),
+        },
+        state: 'done',
+        operationId: operation.id,
+        turn: operation.attempt,
+      });
+    }
+  } else if (result.outcome === 'failed') {
+    const reason = output && 'error' in output ? JSON.stringify(output.error) : JSON.stringify(result.output);
+    appendMessage(store, {
+      conversationId: conversation.id,
+      role: 'system',
+      kind: 'error',
+      text: `主 Agent 本轮未完成：${(reason ?? '').slice(0, 500)}`,
+      state: 'done',
+      operationId: operation.id,
+      turn: operation.attempt,
+    });
+  }
 }
 
 /** A pre-send refusal proves the model never saw the message, so it queues
