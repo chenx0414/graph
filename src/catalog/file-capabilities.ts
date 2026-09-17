@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
+import { normalizeDomainPattern } from '../core/domains.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import type { CapabilityKind, CapabilityRecord } from './catalog.ts';
 
@@ -19,6 +20,10 @@ export interface CapabilityManifest {
   url?: string;
   headers?: Record<string, string>;
   headersEnv?: Record<string, string>;
+  /** Host patterns this MCP process may reach; `${ENV}` may resolve to a base URL. */
+  networkDomains?: string[];
+  /** Explicit opt-in for browser-style MCPs that must reach arbitrary public hosts. */
+  networkAccess?: 'unrestricted';
   /** Graph extension or Pi extension entry file. */
   entry?: string;
   tools?: { name: string; description?: string }[];
@@ -65,11 +70,28 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
     }
     return value.map(item => item.trim());
   };
+  const networkDomains = (value: unknown, label: string): string[] | undefined => {
+    const domains = stringList(value, label);
+    if (!domains) return undefined;
+    return domains.map((domain) => {
+      const expanded = domain.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, 'placeholder.example');
+      if (expanded.includes('$')) throw new RuntimeError('invalid_capability', `${label} contains an invalid environment reference`);
+      try { normalizeDomainPattern(expanded); }
+      catch { throw new RuntimeError('invalid_capability', `${label} must contain host patterns or environment references`); }
+      return domain;
+    });
+  };
   const command = raw.command === undefined ? undefined : text(raw.command, `${path}.command`);
   const args = stringList(raw.args, `${path}.args`);
   const url = raw.url === undefined ? undefined : text(raw.url, `${path}.url`);
   const headers = stringMap(raw.headers, `${path}.headers`);
   const headersEnv = stringMap(raw.headersEnv, `${path}.headersEnv`);
+  const domains = networkDomains(raw.networkDomains, `${path}.networkDomains`);
+  const networkAccess = raw.networkAccess === undefined ? undefined : text(raw.networkAccess, `${path}.networkAccess`);
+  if (networkAccess && networkAccess !== 'unrestricted') throw new RuntimeError('invalid_capability', `${path}.networkAccess must be "unrestricted"`);
+  if (domains && kind !== 'mcp') throw new RuntimeError('invalid_capability', `${path}.networkDomains is only valid for MCP capabilities`);
+  if (networkAccess && kind !== 'mcp') throw new RuntimeError('invalid_capability', `${path}.networkAccess is only valid for MCP capabilities`);
+  if (domains && networkAccess) throw new RuntimeError('invalid_capability', `${path} cannot combine networkDomains with unrestricted network access`);
   const entry = raw.entry === undefined ? undefined : text(raw.entry, `${path}.entry`);
   const tags = stringList(raw.tags, `${path}.tags`);
   let tools: CapabilityManifest['tools'];
@@ -97,6 +119,8 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
     ...(url ? { url } : {}),
     ...(headers ? { headers } : {}),
     ...(headersEnv ? { headersEnv } : {}),
+    ...(domains ? { networkDomains: domains } : {}),
+    ...(networkAccess ? { networkAccess: networkAccess as 'unrestricted' } : {}),
     ...(entry ? { entry } : {}),
     ...(tools ? { tools } : {}),
     ...(tags ? { tags } : {}),

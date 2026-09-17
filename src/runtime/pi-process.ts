@@ -37,6 +37,7 @@ export interface PiWorkerConfig {
   appendSystemPrompt: string;
   capabilityDigest: string;
   allowWorkspaceChange?: boolean;
+  forkFrom?: { sessionFile: string; leafId?: string };
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
 }
 
@@ -48,6 +49,14 @@ export interface PiWorkerInspect {
   messages: unknown[];
   leafId: string | null;
   capabilityDigest: string | null;
+  context?: {
+    mode: 'fresh' | 'fork';
+    sourceSessionId?: string;
+    sourceSessionFile?: string;
+    sourceLeafId?: string;
+    sourceContextDigest?: string;
+    childContextDigest: string;
+  };
   processId: number;
   activeTools?: string[];
   registeredTools?: string[];
@@ -76,6 +85,7 @@ export interface PiProcessOptions {
   appendSystemPrompt?: string;
   capabilityDigest: string;
   allowWorkspaceChange?: boolean;
+  forkFrom?: { sessionFile: string; leafId?: string };
   broker: SendGate;
   readOnly?: boolean;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
@@ -132,6 +142,10 @@ export async function openPiProcess(options: PiProcessOptions) {
   const appRoot = await realpath(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
   const skillPaths = await Promise.all((options.skillPaths ?? []).map(path => realpath(path)));
   const piExtensionPaths = await Promise.all((options.piExtensionPaths ?? []).map(path => realpath(path)));
+  const forkSource = options.forkFrom ? await realpath(options.forkFrom.sessionFile) : undefined;
+  const forkFrom = forkSource
+    ? { sessionFile: forkSource, ...(options.forkFrom?.leafId ? { leafId: options.forkFrom.leafId } : {}) }
+    : undefined;
   const tools = options.tools ?? [];
   const config: PiWorkerConfig = {
     binding: options.binding,
@@ -147,6 +161,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     appendSystemPrompt: options.appendSystemPrompt ?? '',
     capabilityDigest: options.capabilityDigest.trim(),
     ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
+    ...(forkFrom ? { forkFrom } : {}),
     ...(options.compaction ? { compaction: options.compaction } : {}),
   };
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
@@ -187,6 +202,7 @@ export async function openPiProcess(options: PiProcessOptions) {
       stateDir,
       ...skillPaths,
       ...piExtensionPaths,
+      ...(forkSource ? [forkSource] : []),
       ...(await Promise.all(nodeReadPaths(runtime.execPath, runtime.electron).map(path => realpath(path)))),
     ],
     writePaths: [stateDir, ...(options.readOnly ? [] : [workspace])],

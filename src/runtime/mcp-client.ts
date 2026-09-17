@@ -13,6 +13,11 @@ export interface StdioEndpoint {
   executor: { run(command: {
     broker: RestrictedGate; cwd: string; scratchDir: string; executable: string; args: string[];
     input?: string; readPaths: string[]; writePaths: string[]; timeoutMs?: number;
+    networkDomains?: string[];
+    allowUnrestrictedNetwork?: boolean;
+    keepStdinOpen?: boolean;
+    onSpawn?: (process: { kill(signal?: NodeJS.Signals): boolean; end(): void }) => void;
+    onStdout?: (chunk: string) => void;
   }): Promise<{ code: number | null; stdout: string; stderr: string }> };
   gate: RestrictedGate;
   cwd: string;
@@ -23,6 +28,8 @@ export interface StdioEndpoint {
   readPaths: string[];
   writePaths: string[];
   timeoutMs?: number;
+  networkDomains?: string[];
+  allowUnrestrictedNetwork?: boolean;
 }
 
 export interface HttpEndpoint {
@@ -79,12 +86,34 @@ export function stdioExchange(endpoint: StdioEndpoint): McpExchange {
   return {
     exchange(requests, expect) {
       return usageSettled(endpoint.gate, async () => {
+        let pending = '';
+        let streamedReply: Reply | undefined;
+        let processControl: { kill(signal?: NodeJS.Signals): boolean; end(): void } | undefined;
         const result = await endpoint.executor.run({
           broker: endpoint.gate, cwd: endpoint.cwd, scratchDir: endpoint.scratchDir,
           executable: endpoint.command, args: endpoint.args,
           ...(endpoint.env ? { env: endpoint.env } : {}),
           readPaths: endpoint.readPaths, writePaths: endpoint.writePaths,
           timeoutMs: endpoint.timeoutMs ?? 30_000,
+          ...(endpoint.networkDomains?.length ? { networkDomains: endpoint.networkDomains } : {}),
+          ...(endpoint.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
+          keepStdinOpen: true,
+          onSpawn: process => { processControl = process; },
+          onStdout: (chunk) => {
+            pending += chunk;
+            let newline: number;
+            while ((newline = pending.indexOf('\n')) !== -1) {
+              const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
+              if (!line.trim()) continue;
+              try {
+                const message = JSON.parse(line) as Reply;
+                if (message.id === expect) {
+                  streamedReply = message;
+                  processControl?.end();
+                }
+              } catch { /* non-protocol output is ignored, never evaluated */ }
+            }
+          },
           input: `${requests.map(request => JSON.stringify(request)).join('\n')}\n`,
         });
         const replies = new Map<number, Reply>();
@@ -98,7 +127,7 @@ export function stdioExchange(endpoint: StdioEndpoint): McpExchange {
         if (result.code !== 0 && replies.size === 0) {
           throw new RuntimeError('capability_failed', result.stderr.trim() || `MCP server exited with code ${result.code}`);
         }
-        const reply = replies.get(expect);
+        const reply = streamedReply ?? replies.get(expect);
         if (!reply) throw new RuntimeError('capability_failed', `MCP server did not answer request ${expect}`);
         return reply;
       });

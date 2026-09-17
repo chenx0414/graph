@@ -38,6 +38,19 @@ _Avoid_：主管（主管是负责规划与返工的 Agent）
 **Agent 实例**：
 对应唯一 Agent 节点的具体 Agent，具有自己的会话、工作副本与累计额度；同一库定义可创建多个实例。
 
+**Agent 上下文模式**：
+Agent 实例取得初始上下文的程序决策，取值为 `fresh`、`fork` 或 `continue`。默认 `fresh`；`fork` 从已成功源 Agent 的冻结 leaf 复制新会话；已有实例继续执行时为 `continue`。
+_Avoid_：让模型直接选择模式、多个 Agent 共享同一个可变 session
+
+**Fork 子 Agent**：
+从一个已成功 Agent 会话的冻结 leaf 复制 root-to-leaf 上下文，创建新 session file、新 session ID 与新 Agent 实例的子 Agent。Fork 不是独立验证，也不扩大工具权限或预算。
+
+**Fresh 子 Agent**：
+从空 session 开始，只读取冻结 handoff、任务、验收、决策和产物引用的子 Agent。独立审查必须使用 Fresh，并额外执行 evidence-only 与模型排除规则。
+
+**上下文交接版本**：
+Fresh 或每次上下文解析时冻结的 purpose、任务 briefing、决策引用、产物引用和 digest；它使恢复与审计不依赖聊天摘要的最新文本。
+
 **Agent 节点**：
 任务图中与一个 Agent 实例一一对应的节点，允许经回边再次执行，返工时沿用原实例。
 
@@ -78,3 +91,6 @@ _Avoid_：运行配置（还包含实例实际选择的模型）
 
 **运行名额**：
 Agent 正在执行时占用的并发配额；等待依赖或结果时释放，恢复执行前重新获取，主管同样适用。
+
+**预算作用域**：
+共享同一累计额度约束的一组 Agent 实例。Fork 默认加入源实例的预算作用域，禁止用创建新实例重置已消耗额度。

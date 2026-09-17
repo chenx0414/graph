@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 21) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 22) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -253,6 +253,48 @@ export class TaskStore {
         ALTER TABLE conversations ADD COLUMN thinking_level TEXT NOT NULL DEFAULT 'off';
         CREATE INDEX conversations_archived ON conversations(archived_at);
         PRAGMA user_version=21;`);
+    });
+    if (version < 22) this.transaction(() => {
+      // Agent context lineage is first-class: continue, snapshot fork and
+      // fresh handoff all share one durable budget/audit model.
+      this.db.exec(`
+        CREATE TABLE budget_scopes(id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+          owner_instance_id TEXT REFERENCES instances(id), limit_tokens INTEGER, unlimited INTEGER NOT NULL,
+          used_tokens INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+        CREATE INDEX budget_scopes_task ON budget_scopes(task_id);
+      `);
+      const columns = new Set((this.db.prepare('PRAGMA table_info(instances)').all() as { name: string }[]).map(row => row.name));
+      if (!columns.has('budget_scope_id')) this.db.exec('ALTER TABLE instances ADD COLUMN budget_scope_id TEXT REFERENCES budget_scopes(id);');
+      if (!columns.has('parent_instance_id')) this.db.exec('ALTER TABLE instances ADD COLUMN parent_instance_id TEXT REFERENCES instances(id);');
+      this.db.exec(`
+        INSERT INTO budget_scopes(id,task_id,owner_instance_id,limit_tokens,unlimited,used_tokens,created_at)
+          SELECT lower(hex(randomblob(16))),task_id,id,CASE WHEN unlimited=1 THEN NULL ELSE budget END,unlimited,used,0 FROM instances;
+        UPDATE instances SET budget_scope_id=(SELECT id FROM budget_scopes s WHERE s.owner_instance_id=instances.id);
+        CREATE TABLE context_handoffs(id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+          operation_id TEXT REFERENCES operations(id), version INTEGER NOT NULL, purpose TEXT NOT NULL,
+          summary TEXT NOT NULL, package TEXT NOT NULL, digest TEXT NOT NULL, created_at INTEGER NOT NULL);
+        CREATE INDEX context_handoffs_task ON context_handoffs(task_id,created_at);
+        CREATE TABLE agent_context_bindings(id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+          node_id TEXT NOT NULL, instance_id TEXT NOT NULL UNIQUE REFERENCES instances(id),
+          mode TEXT NOT NULL CHECK(mode IN ('fresh','fork')), source_instance_id TEXT REFERENCES instances(id),
+          source_session_id TEXT, source_session_file TEXT, source_leaf_id TEXT, source_context_digest TEXT,
+          child_context_digest TEXT, handoff_id TEXT REFERENCES context_handoffs(id), capability_digest TEXT,
+          budget_scope_id TEXT NOT NULL REFERENCES budget_scopes(id), created_at INTEGER NOT NULL);
+        CREATE INDEX agent_context_bindings_task ON agent_context_bindings(task_id,node_id);
+        CREATE TABLE context_resolutions(id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+          node_id TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE REFERENCES operations(id),
+          requested_purpose TEXT NOT NULL, requested_facts TEXT NOT NULL DEFAULT '[]', independence TEXT NOT NULL,
+          selected_mode TEXT NOT NULL CHECK(selected_mode IN ('continue','fresh','fork')),
+          reason_code TEXT NOT NULL, source_instance_id TEXT REFERENCES instances(id),
+          binding_id TEXT NOT NULL REFERENCES agent_context_bindings(id), handoff_id TEXT NOT NULL REFERENCES context_handoffs(id),
+          created_at INTEGER NOT NULL);
+        CREATE INDEX context_resolutions_binding ON context_resolutions(binding_id,created_at);
+        INSERT INTO agent_context_bindings(id,task_id,node_id,instance_id,mode,budget_scope_id,created_at)
+          SELECT lower(hex(randomblob(16))),i.task_id,i.node_id,i.id,'fresh',i.budget_scope_id,0
+          FROM instances i JOIN node_sessions s ON s.instance_id=i.id
+          WHERE i.budget_scope_id IS NOT NULL;
+        PRAGMA user_version=22;
+      `);
     });
   }
   transaction<T>(action: () => T): T {

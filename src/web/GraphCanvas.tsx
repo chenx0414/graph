@@ -5,7 +5,10 @@ const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
 
 type GraphPayload = {
-  nodes: { id: string; kind: string; action?: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null }[];
+  nodes: {
+    id: string; kind: string; action?: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null;
+    context?: { purpose?: string; sourceNode?: string; requiredFacts?: { kind: string }[]; independence?: string };
+  }[];
   containers: { id: string; parent?: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
 };
@@ -14,6 +17,9 @@ type NodeData = { id: string; label: string; tone: NodeTone; status: string };
 
 function nodeSuffix(node: GraphPayload['nodes'][number]) {
   if (node.action === 'graph.human_check' || /(^|[-_])human($|[-_])/i.test(node.id)) return 'human check';
+  if (node.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')) return 'fork agent';
+  if (node.context?.independence && node.context.independence !== 'none') return 'fresh agent';
+  if (node.context?.purpose === 'review' || node.context?.purpose === 'verify') return 'fresh agent';
   if (node.kind === 'agent') return 'agent';
   if (node.action === 'graph.verify') return 'gate';
   if (node.action === 'graph.command') return 'tool';

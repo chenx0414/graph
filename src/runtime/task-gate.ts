@@ -1,18 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
+import { assertWithinBudget } from '../core/context.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
 import { openUserWait } from '../core/time-ledger.ts';
 import type { TokenUsage } from './call-broker.ts';
 import type { SendGate } from './controlled-openai.ts';
-
-function tokens(usage: TokenUsage) { return usage.input + usage.output + usage.cacheRead + usage.cacheWrite; }
-
-function inFlightUsage(store: TaskStore, instanceId: string) {
-  const rows = store.db.prepare(`SELECT i.usage FROM invocations i JOIN operations o ON o.id=i.operation_id
-    WHERE i.instance_id=? AND o.state IN ('intent','dispatched','unknown') AND i.usage IS NOT NULL`).all(instanceId) as { usage: string }[];
-  return rows.reduce((sum, row) => sum + tokens(JSON.parse(row.usage) as TokenUsage), 0);
-}
 
 /** What one provider send is for. Pi compaction and branch summaries are real
  * billed requests and must be attributable separately from normal turns. */
@@ -33,11 +26,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
       if (nodeId && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
         throw new RuntimeError('unknown_usage', 'Instance paused for unknown usage');
       }
-      const account = store.db.prepare('SELECT budget,used,unlimited FROM instances WHERE id=?').get(operation.instanceId) as { budget: number; used: number; unlimited: number };
-      const inFlight = inFlightUsage(store, operation.instanceId);
-      if (!account.unlimited && (account.used + inFlight + reservation > account.budget || (reservation === 0 && account.used + inFlight >= account.budget))) {
-        throw new RuntimeError('budget', 'Token budget exhausted');
-      }
+      assertWithinBudget(store, operation.instanceId, reservation);
     },
     dispatch<T>(id: string, reservation: number, send: () => T): T {
       if (!id) throw new RuntimeError('invalid_input', 'An invocation id is required');

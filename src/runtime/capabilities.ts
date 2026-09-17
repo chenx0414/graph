@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { CapabilityBinding, Catalog } from '../catalog/catalog.ts';
+import { normalizeDomainPattern } from '../core/domains.ts';
 import { canonicalJson } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
@@ -26,6 +27,8 @@ export interface CapabilityLoadFact {
   description?: string;
   path?: string;
   tools?: string[];
+  networkDomains?: string[];
+  networkAccess?: 'unrestricted';
 }
 
 export interface LoadedCapabilities {
@@ -49,6 +52,8 @@ interface McpManifest {
   headersEnv?: unknown;
   env?: unknown;
   tools?: unknown;
+  networkDomains?: unknown;
+  networkAccess?: unknown;
 }
 
 /** A remote MCP operation the task has not pre-authorized; the user answers with this exact grant. */
@@ -169,6 +174,39 @@ function environmentValues(env: unknown) {
   return values;
 }
 
+/** Resolve capability-declared host patterns; base URLs are reduced to their hostname. */
+function manifestNetworkDomains(manifest: McpManifest, granted: string[] = []) {
+  const declared = manifest.networkDomains;
+  if (declared === undefined) return normalizeDomains(granted);
+  if (!Array.isArray(declared) || declared.some(value => typeof value !== 'string' || !value.trim())) {
+    throw new RuntimeError('capability_unavailable', 'MCP networkDomains must be an array of nonempty strings');
+  }
+  const resolved: string[] = [];
+  for (const value of declared as string[]) {
+    const expanded = value.trim().replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, braced: string | undefined, plain: string | undefined) => {
+      const name = braced ?? plain!;
+      const replacement = process.env[name];
+      if (!replacement) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
+      return replacement;
+    });
+    if (expanded.includes('$')) throw new RuntimeError('capability_unavailable', `MCP networkDomains contains an invalid environment reference: ${value}`);
+    let host = expanded;
+    try {
+      const url = new URL(expanded);
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('unsupported protocol');
+      if (url.username || url.password) throw new Error('embedded credentials');
+      host = url.hostname;
+    } catch (error) {
+      if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(expanded)) {
+        throw new RuntimeError('capability_unavailable', `MCP network domain URL is invalid: ${value}`);
+      }
+    }
+    try { resolved.push(normalizeDomainPattern(host)); }
+    catch { throw new RuntimeError('capability_unavailable', `MCP networkDomains contains an invalid host: ${host}`); }
+  }
+  return normalizeDomains([...granted, ...resolved]);
+}
+
 /** A granted remote MCP endpoint; the runtime allowlist is checked before any request. */
 function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: string[]): McpExchange {
   if (typeof manifest.url !== 'string' || !manifest.url.trim()) {
@@ -179,7 +217,7 @@ function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: str
   catch { throw new RuntimeError('capability_unavailable', `Remote MCP url is invalid: ${manifest.url}`); }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new RuntimeError('capability_unavailable', `Remote MCP supports http and https, not ${url.protocol}`);
   if (url.username || url.password) throw new RuntimeError('capability_unavailable', 'Remote MCP urls cannot embed credentials');
-  const domains = normalizeDomains(mcpDomains);
+  const domains = manifestNetworkDomains(manifest, [...mcpDomains, url.hostname]);
   if (!allowedDomain(domains, url.hostname)) {
     throw new RuntimeError('capability_unavailable', `Remote MCP host ${url.hostname} is not in the granted MCP domains`);
   }
@@ -214,12 +252,16 @@ function stableFact(fact: CapabilityLoadFact) {
     description: fact.description ?? null,
     path: fact.path ?? null,
     tools: fact.tools ?? [],
+    networkDomains: fact.networkDomains ?? [],
+    networkAccess: fact.networkAccess ?? null,
   };
 }
 
 async function localConnection(input: {
   executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
   manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
+  networkDomains?: string[];
+  allowUnrestrictedNetwork?: boolean;
 }): Promise<McpExchange> {
   // Helper processes use the bundled node binary when the app is packaged.
   const nodeCommand = graphNodeRuntime().execPath;
@@ -237,6 +279,8 @@ async function localConnection(input: {
     readPaths: [input.snapshot, ...nodeReadPaths(nodeCommand, process.env.GRAPH_APP_NODE ? undefined : process.versions.electron as string | undefined)],
     // Discussion turns may read the business directory but only write scratch.
     writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],
+    ...(input.networkDomains?.length ? { networkDomains: input.networkDomains } : {}),
+    ...(input.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
   });
 }
 
@@ -271,14 +315,14 @@ function capabilityTools(
     description: tool.description ?? `MCP tool ${tool.name} from ${capability.id}@${capability.version}`,
     parameters: Type.Unsafe(tool.inputSchema ?? { type: 'object', properties: {} }),
     execute: async (_id, params) => {
-      // A granted domain only allows reaching the service. Every remote tool
+      // A granted domain only allows reaching the service. Every network tool
       // execution needs its own scoped task grant; tool names, descriptions and
       // MCP annotations are never treated as authorization.
       if (authorization) {
         const grant = mcpGrant(capability.id, tool.name);
         if (!authorization.grants.includes(grant)) {
           authorization.onPermissionRequired?.({ grant, capabilityId: capability.id, tool: tool.name, description: tool.description ?? '' });
-          throw new Error(`Permission required: remote MCP tool ${tool.name} needs the task grant ${grant}`);
+          throw new Error(`Permission required: MCP tool ${tool.name} needs the task grant ${grant}`);
         }
       }
       const result = await callMcpTool(connection, tool.name, params as Json);
@@ -400,17 +444,41 @@ export async function loadCapabilities(input: {
       let connection: McpExchange;
       let authorization: { grants: string[]; onPermissionRequired?: (request: CapabilityPermissionRequest) => void } | undefined;
       let loadedReason: string | null = null;
+      let networkDomains: string[] = [];
+      let networkAccess: 'unrestricted' | undefined;
       if (record.kind === 'extension') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
         connection = await extensionConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
         loadedReason = input.readOnly ? '只读讨论模式：本地扩展在 scratch 只读范围加载' : null;
       } else if (typeof manifest.command === 'string') {
+        if (manifest.networkAccess !== undefined && manifest.networkAccess !== 'unrestricted') {
+          throw new RuntimeError('capability_unavailable', 'MCP networkAccess must be "unrestricted"');
+        }
+        networkAccess = manifest.networkAccess === 'unrestricted' ? 'unrestricted' : undefined;
+        if (networkAccess && manifest.networkDomains !== undefined) {
+          throw new RuntimeError('capability_unavailable', 'MCP cannot combine networkDomains with unrestricted network access');
+        }
+        networkDomains = networkAccess ? [] : manifestNetworkDomains(manifest, input.mcpDomains ?? []);
+        if (networkDomains.length || networkAccess) {
+          authorization = {
+            grants: input.grants ?? [],
+            ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}),
+          };
+        }
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
-        connection = await localConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
+        connection = await localConnection({
+          executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir,
+          ...(input.readOnly ? { readOnly: true } : {}),
+          ...(networkDomains.length ? { networkDomains } : {}),
+          ...(networkAccess ? { allowUnrestrictedNetwork: true } : {}),
+        });
         loadedReason = input.readOnly ? '只读讨论模式：本地能力在只读范围加载' : null;
       } else {
+        if (manifest.networkAccess !== undefined) {
+          throw new RuntimeError('capability_unavailable', 'MCP networkAccess is only valid for local MCP commands');
+        }
         // HTTP is only a transport: a remote service can operate on business
         // resources and its self-reported annotations are not authorization.
         // Discussion therefore uses only host-recognized read paths (built-in
@@ -424,6 +492,7 @@ export async function loadCapabilities(input: {
         const grants = input.grants ?? [];
         authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };
         connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? []);
+        networkDomains = manifestNetworkDomains(manifest, [...(input.mcpDomains ?? []), new URL(manifest.url as string).hostname]);
       }
       const discovered = await listMcpTools(connection);
       tools.push(...capabilityTools(connection, discovered, bound, authorization));
@@ -444,6 +513,8 @@ export async function loadCapabilities(input: {
         id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable,
         reason: grantReason ?? loadedReason,
         ...(discovered.length ? { tools: discovered.map(tool => mcpToolName(bound.id, tool.name)) } : {}),
+        ...(networkDomains.length ? { networkDomains } : {}),
+        ...(networkAccess ? { networkAccess } : {}),
       });
     }
   } catch (error) {
@@ -472,7 +543,14 @@ export function capabilityPrompts(input: {
   const byKind = (kind: string) => input.report.filter(item => item.kind === kind);
   const skillLines = byKind('skill').map(item => `- ${item.name ?? item.id} (${item.id}@${item.version})${item.path ? ` at ${item.path}` : ''}${item.description ? `: ${item.description}` : item.reason ? `: ${item.reason}` : ''}`);
   const piExtensionLines = byKind('pi-extension').map(item => `- ${item.id}@${item.version}${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}${item.reason ? ` (${item.reason})` : ''}`);
-  const bridgeLines = [...byKind('mcp'), ...byKind('extension')].map(item => `- ${item.id}@${item.version}${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}`);
+  const bridgeLines = [...byKind('mcp'), ...byKind('extension')].map(item => {
+    const network = item.networkAccess === 'unrestricted'
+      ? 'network: unrestricted'
+      : item.networkDomains?.length
+        ? `network: ${item.networkDomains.join(', ')}`
+        : 'network: none';
+    return `- ${item.id}@${item.version} [${network}]${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}`;
+  });
   const toolLines = input.tools.map(tool => `- ${tool.name}: ${tool.description}`);
   const toolAwareness = [
     input.toolPrompt?.trim() ?? '',

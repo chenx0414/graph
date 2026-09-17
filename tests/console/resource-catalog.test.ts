@@ -41,6 +41,39 @@ test('filesystem capabilities are scanned recursively and invalid manifests stay
   ]));
 });
 
+test('MCP network declarations accept host patterns and environment references but reject URLs and wildcard-all', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-network-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await capability(root, 'valid', {
+    id: 'valid', kind: 'mcp', version: '1.0.0', name: 'Valid', command: 'node',
+    networkDomains: ['api.github.com', '*.example.test', '${EXA_BASE_URL}'],
+  });
+  await capability(root, 'browser', {
+    id: 'browser', kind: 'mcp', version: '1.0.0', name: 'Browser', command: 'node',
+    networkAccess: 'unrestricted',
+  });
+  await capability(root, 'url', {
+    id: 'url', kind: 'mcp', version: '1.0.0', name: 'URL', command: 'node',
+    networkDomains: ['https://api.example.test'],
+  });
+  await capability(root, 'all', {
+    id: 'all', kind: 'mcp', version: '1.0.0', name: 'All', command: 'node',
+    networkDomains: ['*'],
+  });
+  await capability(root, 'skill', {
+    id: 'skill', kind: 'skill', version: '1.0.0', name: 'Skill', networkDomains: ['api.example.test'],
+  }, { 'SKILL.md': '# Skill\n' });
+
+  const records = await scanCapabilities(root);
+  expect(records).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'valid', status: 'available' }),
+    expect.objectContaining({ id: 'browser', status: 'available' }),
+    expect.objectContaining({ id: 'url', status: 'invalid', error: expect.stringContaining('networkDomains') }),
+    expect.objectContaining({ id: 'all', status: 'invalid', error: expect.stringContaining('networkDomains') }),
+    expect.objectContaining({ id: 'skill', status: 'invalid', error: expect.stringContaining('only valid for MCP') }),
+  ]));
+});
+
 test('recipes validate against scanned capabilities and compile to a versioned definition', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-recipes-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

@@ -102,6 +102,7 @@ async function main() {
     activateExtensionTools: true,
     capabilityDigest: config.capabilityDigest,
     ...(config.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
+    ...(config.forkFrom ? { forkFrom: config.forkFrom } : {}),
     ...(config.compaction ? { compaction: config.compaction } : {}),
     onEvent: event => {
       pendingEvents.push(request({ operation: 'event', event }).catch(error => {

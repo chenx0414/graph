@@ -43,6 +43,7 @@ type NodeView = {
   id: string; kind: string; status: string; container?: string; used?: number | null; budget?: number | null; unlimited?: boolean;
   reserved?: number; instanceId?: string | null; selectedModel?: string; boundDefinition?: string;
   activationId?: string; outputVersion?: number; stallCount?: number;
+  context?: { purpose?: string; sourceNode?: string; requiredFacts?: { kind: string }[]; independence?: string };
 };
 export type Settings_ = {
   projects: { id: string; root: string }[];
@@ -1161,6 +1162,15 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
           <div className="stack" style={{ gap: 4 }}>
             <div><span className="muted">实例 </span><span className="mono">{selectedNode.instanceId ?? '未知'}</span></div>
             <div><span className="muted">模型 </span>{selectedNode.selectedModel ?? '未知'} · 定义 {selectedNode.boundDefinition ?? '未知'}</div>
+            <div><span className="muted">上下文 </span>{
+              selectedNode.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')
+                ? `Fork · ${selectedNode.context.sourceNode ?? '缺少来源'}`
+                : selectedNode.context?.independence && selectedNode.context.independence !== 'none'
+                  ? `Fresh · ${selectedNode.context.independence}`
+                  : selectedNode.context?.purpose === 'review' || selectedNode.context?.purpose === 'verify'
+                    ? 'Fresh · review'
+                    : 'Fresh / Continue（运行时解析）'
+            }</div>
             <div><span className="muted">用量 </span>{selectedNode.used == null ? '未知（无权威计量）' : formatTokens(selectedNode.used)}{selectedNode.unlimited ? ' · 额度不限' : selectedNode.budget == null ? '' : ` / 预算 ${formatTokens(selectedNode.budget)}`} · 预留 {selectedNode.reserved ?? 0}</div>
             <div><span className="muted">尝试次数 </span>{selectedNode.stallCount ?? 0} · 输出版本 {selectedNode.outputVersion ?? 0}</div>
             <div><span className="muted">验收证据 </span>{nodeEvidence.length ? nodeEvidence.map(item => `${item.acceptanceId}:${item.valid ? '有效' : '无效或过期'} ${item.summary}`).join(' / ') : '无'}</div>

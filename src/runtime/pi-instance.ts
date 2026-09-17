@@ -1,13 +1,15 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
+  buildSessionContext,
   type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension,
 } from '@earendil-works/pi-coding-agent';
+import { canonicalJson } from '../core/store.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface InstanceBinding {
@@ -50,7 +52,21 @@ export interface PiInstanceOptions {
   /** A conversation master may bind a project after its first turn; the
    * session keeps its identity while the workspace moves to the project. */
   allowWorkspaceChange?: boolean;
+  /** Create a new persistent session file from an immutable source leaf. */
+  forkFrom?: {
+    sessionFile: string;
+    leafId?: string;
+  };
   onEvent?: (event: AgentSessionEvent) => void;
+}
+
+export interface SessionContextInfo {
+  mode: 'fresh' | 'fork';
+  sourceSessionId?: string;
+  sourceSessionFile?: string;
+  sourceLeafId?: string;
+  sourceContextDigest?: string;
+  childContextDigest: string;
 }
 
 interface Manifest {
@@ -60,6 +76,7 @@ interface Manifest {
   sessionFile: string;
   sessionId: string;
   capabilityDigest?: string;
+  context?: SessionContextInfo;
 }
 
 const BUILTIN_TOOL_NAMES = new Set(['read', 'bash', 'edit', 'write', 'ls', 'find', 'grep', 'powershell']);
@@ -68,6 +85,10 @@ async function writeAtomic(path: string, value: string) {
   const pending = `${path}.pending`;
   await writeFile(pending, value, { mode: 0o600 });
   await rename(pending, path);
+}
+
+function contextDigest(context: ReturnType<typeof buildSessionContext>) {
+  return createHash('sha256').update(canonicalJson(context as never)).digest('hex');
 }
 
 export async function openPiInstance(options: PiInstanceOptions) {
@@ -108,17 +129,45 @@ export async function openPiInstance(options: PiInstanceOptions) {
       throw new Error('Persisted session identity is missing or inconsistent');
     }
   }
-  const manager = manifest
-    ? SessionManager.open(manifest.sessionFile, sessionsDir, workspace)
-    : SessionManager.create(workspace, sessionsDir);
+  let manager: SessionManager;
+  let contextInfo: SessionContextInfo | undefined = manifest?.context;
+  if (manifest) {
+    manager = SessionManager.open(manifest.sessionFile, sessionsDir, workspace);
+  } else if (options.forkFrom) {
+    const sourceFile = resolve(options.forkFrom.sessionFile);
+    manager = SessionManager.open(sourceFile, sessionsDir, workspace);
+    const sourceLeafId = options.forkFrom.leafId ?? manager.getLeafId();
+    if (!sourceLeafId) throw new Error('Cannot fork a session without an active leaf');
+    const entries = manager.getEntries();
+    const byId = new Map(entries.map(entry => [entry.id, entry]));
+    const sourceContext = buildSessionContext(entries, sourceLeafId, byId);
+    const sourceSessionId = manager.getHeader()?.id;
+    const sourceContextDigest = contextDigest(sourceContext);
+    const branchedFile = manager.createBranchedSession(sourceLeafId);
+    if (!branchedFile) throw new Error('Failed to create a forked session file');
+    const childContext = manager.buildSessionContext();
+    contextInfo = {
+      mode: 'fork',
+      ...(sourceSessionId ? { sourceSessionId } : {}),
+      sourceSessionFile: sourceFile,
+      sourceLeafId,
+      sourceContextDigest,
+      childContextDigest: contextDigest(childContext),
+    };
+  } else {
+    manager = SessionManager.create(workspace, sessionsDir);
+  }
   const sessionFile = manager.getSessionFile();
   if (!sessionFile) throw new Error('Expected a persistent Pi session');
   if (manifest && manager.getSessionId() !== manifest.sessionId) throw new Error('Persisted session identity changed');
-  if (!manifest) {
+  if (!manifest && !options.forkFrom) {
     // Bootstrap the public JSONL header, then reopen it through Pi's public API.
     // Pi now owns all subsequent appends, including the first user message.
     await writeAtomic(sessionFile, JSON.stringify(manager.getHeader()) + '\n');
     manager.setSessionFile(sessionFile);
+  }
+  if (!contextInfo) {
+    contextInfo = { mode: 'fresh', childContextDigest: contextDigest(manager.buildSessionContext()) };
   }
   const settings = SettingsManager.inMemory({
     compaction: options.compaction ?? { enabled: false }, retry: { enabled: false, provider: { maxRetries: 0 } },
@@ -169,6 +218,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   await writeAtomic(manifestPath, JSON.stringify({
     version: currentDigest ? 2 : 1, binding: options.binding, workspace, sessionFile, sessionId: manager.getSessionId(),
     ...(currentDigest ? { capabilityDigest: currentDigest } : {}),
+    context: contextInfo,
   } satisfies Manifest));
 
   return {
@@ -184,6 +234,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
         binding: structuredClone(options.binding), sessionId: manager.getSessionId(),
         sessionFile, model: session.model?.id, messages: structuredClone(session.messages), leafId: manager.getLeafId(),
         capabilityDigest: options.capabilityDigest ?? null,
+        context: structuredClone(contextInfo),
         activeTools: session.getActiveToolNames(),
         registeredTools: session.getAllTools().map(tool => tool.name),
         loadedExtensions: loader.getExtensions().extensions.map(extension => extension.path),

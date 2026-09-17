@@ -88,6 +88,124 @@ test('worker preparation writes only to its granted scratch directory, even with
   } finally { broker.close(); }
 });
 
+test('restricted workers reach only explicitly granted outbound domains', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-network-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  let hits = 0;
+  const server = createServer((_request, response) => { hits += 1; response.end('reachable'); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+  const url = `http://127.0.0.1:${port}/probe`;
+  await writeFile(join(workspace, 'network.mjs'), `
+    try {
+      const response = await fetch(${JSON.stringify(url)}, { signal: AbortSignal.timeout(1_000) });
+      console.log(JSON.stringify({ network: 'allowed', body: await response.text() }));
+    } catch {
+      console.log(JSON.stringify({ network: 'denied' }));
+    }
+  `);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const allowed = await executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['network.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace], networkDomains: ['127.0.0.1'],
+    });
+    expect(allowed.code, allowed.stderr).toBe(0);
+    expect(JSON.parse(allowed.stdout)).toEqual({ network: 'allowed', body: 'reachable' });
+    expect(hits).toBe(1);
+
+    const denied = await executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['network.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace], networkDomains: ['example.com'],
+    });
+    expect(denied.code, denied.stderr).toBe(0);
+    expect(JSON.parse(denied.stdout)).toEqual({ network: 'denied' });
+    expect(hits).toBe(1);
+  } finally {
+    broker.close();
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('explicit unrestricted network mode reaches the network but still cannot bind listeners', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-unrestricted-network-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const server = createServer((_request, response) => response.end('reachable'));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+  await writeFile(join(workspace, 'network.mjs'), `
+    import { createServer } from 'node:http';
+    const response = await fetch(${JSON.stringify(`http://127.0.0.1:${port}/probe`)});
+    let bind = 'allowed';
+    try {
+      const listener = createServer();
+      await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve); });
+      listener.close();
+    } catch { bind = 'denied'; }
+    console.log(JSON.stringify({ network: await response.text(), bind }));
+  `);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const result = await executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['network.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace], allowUnrestrictedNetwork: true,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ network: 'reachable', bind: 'denied' });
+  } finally {
+    broker.close();
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('unrestricted network does not leak proxy access into a concurrent no-network worker', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-network-isolation-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  let hits = 0;
+  const server = createServer((_request, response) => { hits += 1; response.end('reachable'); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/probe`;
+  await writeFile(join(workspace, 'unrestricted.mjs'), `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync('started.txt', 'yes');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    try {
+      const response = await fetch(${JSON.stringify(url)});
+      console.log(JSON.stringify({ network: await response.text() }));
+    } catch {
+      console.log(JSON.stringify({ network: 'denied' }));
+    }
+  `);
+  await writeFile(join(workspace, 'no-network.mjs'), `
+    try { await fetch(${JSON.stringify(url)}); console.log(JSON.stringify({ network: 'allowed' })); }
+    catch { console.log(JSON.stringify({ network: 'denied' })); }
+  `);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const unrestricted = executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['unrestricted.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace], allowUnrestrictedNetwork: true,
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try { await readFile(join(workspace, 'started.txt'), 'utf8'); break; }
+      catch { await new Promise(resolve => setTimeout(resolve, 10)); }
+    }
+    const isolated = await executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['no-network.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace],
+    });
+    expect(JSON.parse(isolated.stdout)).toEqual({ network: 'denied' });
+    expect(JSON.parse((await unrestricted).stdout)).toEqual({ network: 'reachable' });
+    expect(hits).toBe(1);
+  } finally {
+    broker.close();
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test('a check cannot overwrite a host listener with a duplicate request id', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-duplicate-listener-'))); dirs.push(root);
   const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');

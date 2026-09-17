@@ -47,6 +47,8 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 - 执行期间继续在同一对话里问进度、解释与偏差；主 Agent 忙时输入会进入输入框上方的右侧队列，当前回复结束后按顺序每次发送一条，形成一问一答，不会丢消息。
 - 主 Agent 完成回答时可留下灰色候选 prompt：`Tab` 填入输入框，`Enter` 直接发送；忙时输入 `Enter` 会入队，输入框为空且已有队列消息时再按 `Enter` 会把队列作为打断引导送入当前回复。
 - 暂停只作用于对话主 Agent；功能任务的暂停/继续仍在对应任务页。重启守护进程后，对话、未处理消息与执行状态都会恢复。
+- 工人默认使用 Fresh 上下文；只有主 Agent 明确要求精确 transcript/tool-call 状态时，Graph 才会从已成功源节点创建 Fork 新会话。返工和主 Agent 连续对话使用 Continue。Fork 不会共享可变 session，也不会重置预算。
+- 节点详情会显示实际上下文模式、来源节点、source/child digest、handoff 与共享预算作用域；独立审查始终使用 Fresh，且不能读取实现 Agent 的 transcript。
 
 确认后若要新增功能，主 Agent 会把它作为新的功能任务讨论与确认，原任务的验收范围不被静默修改。讨论阶段的主 Agent 只有读取类工具，不会修改项目文件或派发实现工作。
 

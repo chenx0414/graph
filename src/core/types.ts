@@ -3,6 +3,46 @@ import type { VerifierConfig } from './verification.ts';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 export interface ProjectConfig { id: string; root: string; grants?: string[] }
+export type ContextPurpose = 'discuss' | 'explore' | 'implement' | 'review' | 'verify' | 'rework';
+export type ContextIndependence = 'none' | 'fresh' | 'model-excluded';
+export type ContextFactKind = 'artifact' | 'decision' | 'file' | 'transcript_range' | 'tool_call';
+export interface ContextFactRef {
+  kind: ContextFactKind;
+  ref?: string;
+  from?: string;
+  to?: string;
+}
+export interface ContextRequest {
+  purpose?: ContextPurpose;
+  /** Another Agent node in the same graph whose transcript may be required. */
+  sourceNode?: string;
+  /** Optional immutable entry id; omitted means the source's current leaf. */
+  sourceLeafId?: string;
+  requiredFacts?: ContextFactRef[];
+  independence?: ContextIndependence;
+  /** Explicitly allow a fork to use a different model, definition or capability bundle. */
+  rebrand?: boolean;
+  reason?: string;
+}
+export type AgentContextMode = 'continue' | 'fresh' | 'fork';
+export interface ResolvedAgentContext {
+  mode: AgentContextMode;
+  purpose: ContextPurpose;
+  independence: ContextIndependence;
+  requestedFacts: ContextFactRef[];
+  reasonCode: string;
+  bindingId: string;
+  resolutionId: string;
+  handoffId: string;
+  handoffDigest: string;
+  budgetScopeId: string;
+  sourceNodeId?: string;
+  sourceInstanceId?: string;
+  sourceSessionId?: string;
+  sourceSessionFile?: string;
+  sourceLeafId?: string;
+  rebrand?: boolean;
+}
 export interface NodeSpec {
   id: string;
   kind: 'agent' | 'program';
@@ -18,6 +58,7 @@ export interface NodeSpec {
   optional?: boolean;
   verifier?: VerifierConfig;
   replaces?: string;
+  context?: ContextRequest;
 }
 export interface ContainerSpec { id: string; parent?: string; dependsOn?: string[]; when?: { node: string; case: string }; outputs: string[] }
 export interface LoopSpec { from: string; to: string }
@@ -51,6 +92,7 @@ export interface Operation {
     answers: { questionId: string; value: Json }[];
     messages?: { id?: string; text: string; requirementVersion: number; attachments?: AttachmentInput[] }[];
     briefing?: string;
+    agentContext?: ResolvedAgentContext;
   };
   grants: string[];
   activationId: string; graphVersion: number;

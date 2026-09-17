@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
+import { contextView } from './context.ts';
 
 export interface NodeEntryInput {
   taskId: string;
@@ -208,6 +209,7 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   };
   return {
     taskId, nodeId,
+    context: contextView(store, taskId, nodeId),
     capabilities: capabilities.facts,
     capabilityDigest: capabilities.digest,
     node: { id: node.id, kind: spec.kind, action: spec.action, role: spec.role ?? null, status: node.status, activationId: node.activation_id, outputVersion: node.output_version, stallCount: node.stall_count, ...(spec.definitionVersion ? { definitionVersion: spec.definitionVersion } : {}), ...(spec.input !== undefined ? { input: spec.input } : {}) },

@@ -7,6 +7,7 @@ import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
+import { recordContextSession } from '../core/context.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
@@ -276,6 +277,15 @@ export function createPiAdapter(options: {
           report: capabilities.report,
           tools,
         });
+        const agentContext = operation.context.agentContext;
+        if (agentContext?.mode === 'fork') {
+          if (!agentContext.sourceSessionFile) throw new RuntimeError('context_rejected', 'Fork context is missing its source session file');
+          const sourceBinding = options.store.db.prepare('SELECT capability_digest FROM agent_context_bindings WHERE instance_id=?')
+            .get(agentContext.sourceInstanceId!) as { capability_digest: string | null } | undefined;
+          if (!agentContext.rebrand && sourceBinding?.capability_digest && sourceBinding.capability_digest !== capabilities.digest) {
+            throw new RuntimeError('context_rejected', 'Fork context changes the capability bundle; set context.rebrand=true to allow it');
+          }
+        }
         // Record what was actually loaded for this operation so the node
         // projection cannot later guess from catalog status.
         recordCapabilityLoad(options.store, {
@@ -392,6 +402,9 @@ export function createPiAdapter(options: {
             systemPrompt: prompts.systemPrompt,
             appendSystemPrompt: prompts.appendSystemPrompt,
             capabilityDigest: prompts.digest,
+            ...(agentContext?.mode === 'fork' && agentContext.sourceSessionFile
+              ? { forkFrom: { sessionFile: agentContext.sourceSessionFile, ...(agentContext.sourceLeafId ? { leafId: agentContext.sourceLeafId } : {}) } }
+              : {}),
             broker: gate,
             ...(discussion ? { readOnly: true } : {}),
             ...(conversation ? { allowWorkspaceChange: true } : {}),
@@ -405,6 +418,18 @@ export function createPiAdapter(options: {
           if (persistEntries) {
             const inspected = session.inspect();
             recordNodeSession(options.store, operation.instanceId!, inspected.sessionId, inspected.sessionFile);
+            if (agentContext) {
+              recordContextSession(options.store, {
+                taskId: operation.taskId,
+                nodeId: operation.nodeId,
+                operationId: operation.id,
+                bindingId: agentContext.bindingId,
+                capabilityDigest: capabilities.digest,
+                ...(inspected.context?.sourceLeafId ? { sourceLeafId: inspected.context.sourceLeafId } : {}),
+                ...(inspected.context?.sourceContextDigest ? { sourceContextDigest: inspected.context.sourceContextDigest } : {}),
+                ...(inspected.context?.childContextDigest ? { childContextDigest: inspected.context.childContextDigest } : {}),
+              });
+            }
           }
           try {
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
@@ -420,6 +445,7 @@ export function createPiAdapter(options: {
                     'Before proposing a graph, inspect the project and query the user capability directory with search_resources/get_resource. Every scanned capability is immediately available, but it grants no task permission; never invent capabilities from memory.',
                     'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. You may save or edit recipes, but never create a new Skill, MCP, extension or identity yourself. Compile a recipe with compile_agent_combination and put the returned definitionVersion directly into propose_graph.',
                     'Use read_system_capabilities to check configured subscriptions, models, Agent definitions and graph architectures before designing or assembling the graph. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
+                    'For each worker, request the minimum sufficient context. Omit context for a normal fresh Agent. Use context.requiredFacts with transcript_range or tool_call only when the exact parent transcript or tool-call state is essential; Graph will then fork from context.sourceNode. Never specify a mode directly. Independent review and verification must use context.independence="model-excluded" and must not request transcript or tool-call facts.',
                     'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',
                     'After writing the normal reply, call suggest_prompt with one concise and specific message the user is most likely to send next. Omit the suggestion when there is no useful follow-up. The suggestion is only a composer hint and must never be sent automatically.',
                   ] : []),
@@ -430,8 +456,9 @@ export function createPiAdapter(options: {
                   ' "acceptance": [{"id":"a1","description":"...","checkNode":"<mandatory program node id>"}],',
                   ' "nodes": [',
                   '  {"id":"work","kind":"agent","action":"work","definitionVersion":"coder@1","model":"<one of the configured models>"},',
+                  '  {"id":"alternative","kind":"agent","action":"explore","definitionVersion":"coder@1","model":"<same model/definition as work>","dependsOn":["work"],"context":{"purpose":"explore","sourceNode":"work","requiredFacts":[{"kind":"transcript_range"}],"reason":"Continue from the exact debugging state"}},',
                   '  {"id":"check","kind":"program","action":"graph.command","dependsOn":["work"],"input":{"command":"node","args":["--test","test/example.test.js"]}},',
-                  '  {"id":"review","kind":"agent","action":"review","definitionVersion":"reviewer@1","model":"<a different configured model>"},',
+                  '  {"id":"review","kind":"agent","action":"review","definitionVersion":"reviewer@1","model":"<a different configured model>","dependsOn":["work"],"context":{"purpose":"review","independence":"model-excluded"}},',
                   '  {"id":"review-gate","kind":"program","action":"graph.verify","dependsOn":["review"],"verifier":{"kind":"independent","reportNodes":["review"]}},',
                   '  {"id":"login","kind":"program","action":"graph.human_check","dependsOn":["review-gate"]}],',
                   ' "loops": [{"from":"check","to":"work"}],',

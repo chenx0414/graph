@@ -198,6 +198,45 @@ test('a definition-bound MCP tool is callable, metered, and confined by the sand
   expect(view.questions).toEqual([]);
 });
 
+test('a local MCP reaches only the network domains declared by its capability manifest', async () => {
+  const { root, workspace } = await project();
+  let hits = 0;
+  const server = createServer((_request, response) => { hits += 1; response.end('network-ok'); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  cleanup.push(() => new Promise<void>((resolve, reject) => {
+    server.closeAllConnections();
+    server.close(error => error ? reject(error) : resolve());
+  }));
+  const port = (server.address() as AddressInfo).port;
+  const mcp = join(root, 'network-mcp');
+  await mkdir(mcp);
+  await copyFile(join(fixtureDir, 'mcp-network-capability-server.mjs'), join(mcp, 'server.mjs'));
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify({
+    kind: 'mcp', command: process.execPath, args: ['./server.mjs'], networkDomains: ['127.0.0.1'],
+  }));
+  const provider = await openaiServer([
+    { tools: [{ id: 'n1', name: 'mcp_network_probe_network', arguments: JSON.stringify({ url: `http://127.0.0.1:${port}/probe` }) }] },
+    { text: 'Network capability completed.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace, grants: ['mcp:network:probe_network'] }],
+    ...catalogOptions(root),
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: checkAction(workspace) },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'network', version: '1.0.0' }] }, 'coder');
+  await installCapability(runtime, root, { id: 'network', kind: 'mcp', source: mcp, version: '1.0.0' });
+
+  const task = await checkedTask(runtime, workspace);
+  await runtime.host.drive();
+
+  expect(hits).toBe(1);
+  expect(JSON.stringify(provider.requests[1])).toContain('network:200:network-ok');
+  expect((await task.view()).questions).toEqual([]);
+});
+
 test('a paused task cannot start a bound MCP capability process', async () => {
   const { root, workspace } = await project();
   const outside = join(root, 'outside.txt');
@@ -315,7 +354,6 @@ test('a definition-bound remote MCP tool is callable through the granted domain 
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace, grants: ['mcp:remote:echo'] }],
     ...catalogOptions(root),
-    network: { mcpDomains: ['127.0.0.1'] },
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: checkAction(workspace) },
   });
@@ -332,35 +370,6 @@ test('a definition-bound remote MCP tool is callable through the granted domain 
   expect(view.questions).toEqual([]);
   const measurements = view.invocations.filter(row => row.usage && row.usage.input === 0 && row.usage.output === 0);
   expect(measurements.length).toBeGreaterThanOrEqual(2); // one tools/list plus one tools/call
-});
-
-test('a remote MCP host outside the granted domains stops the node with a concrete reason', async () => {
-  const { root, workspace } = await project();
-  const mcp = join(root, 'remote');
-  await mkdir(mcp);
-  const server = await remoteMcp();
-  cleanup.push(() => server.close());
-  await writeFile(join(mcp, 'capability.json'), JSON.stringify({ kind: 'mcp', transport: 'http', url: server.url }));
-  const provider = await openaiServer([{ text: 'Should not be reached.' }]);
-  cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
-    ...catalogOptions(root),
-    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: checkAction(workspace) },
-  });
-  cleanup.push(() => runtime.close());
-  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'remote', version: '1.0.0' }] }, 'coder');
-  await installCapability(runtime, root, { id: 'remote', kind: 'mcp', source: mcp, version: '1.0.0' });
-
-  const task = await checkedTask(runtime, workspace);
-  await runtime.host.drive();
-  const view = await task.view();
-  const question = view.questions.find(item => item.kind === 'execution_failed');
-  expect(question).toBeTruthy();
-  expect(JSON.stringify(question!.data)).toContain('not in the granted MCP domains');
-  expect(provider.requests).toHaveLength(0);
-  expect(server.calls()).toBe(0);
 });
 
 test('a packaged Electron runtime grants its own bundle frameworks to sandboxed helpers', async () => {

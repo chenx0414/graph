@@ -5,6 +5,7 @@ import { realpath, symlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { appendMessage, conversationDigest, conversationForTask, deliverMessages, pendingMessages, releaseMessages } from './conversation.ts';
+import { addInstanceBudget, addInstanceUsage, assertWithinBudget, digest, freezeContextHandoff, resolveAgentContext } from './context.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { evaluateVerifier, isReworkDecision, type VerificationDecision } from './verification.ts';
 import { briefing } from '../catalog/briefing.ts';
@@ -168,7 +169,7 @@ export class Execution {
       }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     const total = known.input + known.output + known.cacheRead + known.cacheWrite;
     if (total > 0 && operation.instance_id) {
-      this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instance_id);
+      addInstanceUsage(this.store, operation.instance_id, total);
       const account = this.store.db.prepare('SELECT model,models_used FROM instances WHERE id=?').get(operation.instance_id) as { model: string | null; models_used: string };
       const usedModels = JSON.parse(account.models_used) as string[];
       if (account.model && !usedModels.includes(account.model)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...usedModels, account.model]), operation.instance_id);
@@ -184,10 +185,8 @@ export class Execution {
     if (!question || question.status !== 'open') throw new RuntimeError('invalid_question', 'No open question in this task');
     if (question.kind === 'budget' && answer.type === 'add_budget') {
       if (!Number.isSafeInteger(answer.tokens) || answer.tokens <= 0) throw new RuntimeError('invalid_answer', 'A positive token increment is required');
-      const instance = this.store.db.prepare('SELECT id,budget,unlimited FROM instances WHERE task_id=? AND node_id=?').get(taskId, question.node_id) as { id: string; budget: number; unlimited: number };
-      if (instance.unlimited) throw new RuntimeError('invalid_answer', 'An unlimited instance has no budget question to add to');
-      if (!Number.isSafeInteger(instance.budget + answer.tokens)) throw new RuntimeError('invalid_answer', 'Budget exceeds the supported range');
-      this.store.db.prepare('UPDATE instances SET budget=budget+? WHERE id=?').run(answer.tokens, instance.id);
+      const instance = this.store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?').get(taskId, question.node_id) as { id: string };
+      addInstanceBudget(this.store, instance.id, answer.tokens);
     } else if (question.kind === 'unknown_usage' && answer.type === 'usage') {
       const operation = this.store.db.prepare('SELECT * FROM operations WHERE id=?').get(question.operation_id!) as OperationRow;
       if (operation.state === 'interrupted') {
@@ -501,10 +500,11 @@ export class Execution {
     const reservation = spec.kind === 'agent' ? adapter.reserveTokens : 0;
     if (reservation === undefined || !Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_adapter', 'A bounded token reservation is required');
     if (node.instance_id) {
-      const account = this.store.db.prepare('SELECT budget,used,unlimited FROM instances WHERE id=?').get(node.instance_id) as { budget: number; used: number; unlimited: number };
-      const { reserved } = this.store.db.prepare('SELECT COALESCE(SUM(reserved),0) AS reserved FROM operations WHERE instance_id=?').get(node.instance_id) as { reserved: number };
-      if (!account.unlimited && (account.used >= account.budget || account.used + reserved + reservation > account.budget)) {
-        this.store.transaction(() => this.block(node, 'budget', { budget: account.budget, used: account.used, reserved, requested: reservation }));
+      try {
+        assertWithinBudget(this.store, node.instance_id, reservation);
+      } catch (error) {
+        if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
+        this.store.transaction(() => this.block(node, 'budget', { reason: error.message, requested: reservation }));
         return false;
       }
     }
@@ -514,7 +514,9 @@ export class Execution {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: String(error) }));
       return false;
     }
-    const operation = this.store.transaction(() => {
+    let operation: Operation;
+    try {
+      operation = this.store.transaction(() => {
       const task = this.store.task(node.task_id);
       const attempt = (this.store.db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=? AND node_id=?').get(node.task_id, node.id) as { count: number }).count + 1;
       const conversation = task.phase === 'chatting' ? conversationForTask(this.store, node.task_id) : undefined;
@@ -538,10 +540,19 @@ export class Execution {
           .map(message => ({ text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 }));
       const latest = this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(node.task_id, task.latest_proposal) as { spec: string } | undefined;
       const proposal = latest ? JSON.parse(latest.spec) as Proposal : undefined;
+      const reviewNode = spec.kind === 'agent' && this.isReviewer(spec);
+      const agentContext = spec.kind === 'agent'
+        ? resolveAgentContext(this.store, { taskId: node.task_id, nodeId: node.id, spec, review: reviewNode })
+        : undefined;
       const operation: Operation = { id: randomUUID(), taskId: node.task_id, nodeId: node.id, instanceId: node.instance_id,
         generation: this.generation, attempt, kind: spec.kind, action: spec.action, input: spec.input ?? null, dependencies,
         proposalVersion: task.accepted_proposal ?? 0, requirementVersion: task.requirement_version,
-        context: { previousOutput: node.output ? JSON.parse(node.output) as Json : null, answers, ...(messages.length ? { messages } : {}) }, grants,
+        context: {
+          previousOutput: node.output ? JSON.parse(node.output) as Json : null,
+          answers,
+          ...(messages.length ? { messages } : {}),
+          ...(agentContext ? { agentContext } : {}),
+        }, grants,
         activationId: node.activation_id, graphVersion: task.graph_version, dependencySources, inputVersions, ...(workspace ? { workspace } : {}) };
       const graphBriefing = task.accepted_proposal !== null && spec.kind === 'agent'
         ? [...loadGraph(this.store, node.task_id).plan.nodes.values()]
@@ -586,8 +597,64 @@ export class Execution {
           } : {}),
         });
       }
-      this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
-        .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
+      if (agentContext) {
+        const handoffPackage = {
+          mode: agentContext.mode,
+          purpose: agentContext.purpose,
+          independence: agentContext.independence,
+          requestedFacts: agentContext.requestedFacts,
+          reasonCode: agentContext.reasonCode,
+          sourceNodeId: agentContext.sourceNodeId ?? null,
+          sourceInstanceId: agentContext.sourceInstanceId ?? null,
+          sourceSessionId: agentContext.sourceSessionId ?? null,
+          sourceLeafId: agentContext.sourceLeafId ?? null,
+          briefing: operation.context.briefing,
+        };
+        const handoffDigest = digest(handoffPackage);
+        operation.context.agentContext = { ...agentContext, handoffDigest };
+        this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
+          .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
+        freezeContextHandoff(this.store, operation.context.agentContext, {
+          taskId: node.task_id,
+          operationId: operation.id,
+          nodeId: node.id,
+          instanceId: node.instance_id!,
+          summary: proposal?.summary ?? task.request,
+          package: handoffPackage,
+        });
+        this.store.event(node.task_id, 'context.requested', {
+          nodeId: node.id,
+          operationId: operation.id,
+          purpose: agentContext.purpose,
+          independence: agentContext.independence,
+          sourceNodeId: agentContext.sourceNodeId ?? null,
+        });
+        this.store.event(node.task_id, 'context.mode_selected', {
+          nodeId: node.id,
+          operationId: operation.id,
+          mode: agentContext.mode,
+          reasonCode: agentContext.reasonCode,
+          sourceInstanceId: agentContext.sourceInstanceId ?? null,
+        });
+        this.store.event(node.task_id, 'context.handoff_frozen', {
+          nodeId: node.id,
+          operationId: operation.id,
+          handoffId: agentContext.handoffId,
+          digest: handoffDigest,
+        });
+        if (reviewNode) {
+          this.store.event(node.task_id, 'review.independence_checked', {
+            nodeId: node.id,
+            operationId: operation.id,
+            handoffDigest,
+            transcriptIncluded: agentContext.mode === 'fork',
+            independence: agentContext.independence,
+          });
+        }
+      } else {
+        this.store.db.prepare("INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id) VALUES(?,?,?,?,?,?,'intent',?,?)")
+          .run(operation.id, node.task_id, node.id, node.instance_id, operation.generation, canonicalJson(operation), reservation, node.activation_id);
+      }
       if (conversation && chatMessages.length) {
         // Consuming the queue in the same transaction as the operation makes
         // the binding durable before any provider send can happen. The state
@@ -602,7 +669,14 @@ export class Execution {
       this.store.db.prepare("UPDATE nodes SET status='preparing' WHERE task_id=? AND id=?").run(node.task_id, node.id);
       this.store.event(node.task_id, 'operation.intent', operation);
       return operation;
-    });
+      });
+    } catch (error) {
+      if (error instanceof RuntimeError && error.code.startsWith('context_')) {
+        this.store.transaction(() => this.block(node, 'adapter_error', { reason: error.message, code: error.code }));
+        return false;
+      }
+      throw error;
+    }
     let dispatch: () => Promise<OperationResult>;
     try {
       dispatch = await adapter.prepare(operation);
@@ -654,7 +728,7 @@ export class Execution {
       // graph or hides the worker state.
       const refusal = error instanceof RuntimeError ? error : undefined;
       const refusalCode = refusal?.code;
-      if (refusal && refusalCode && ['paused', 'budget', 'unknown_usage'].includes(refusalCode)) {
+      if (refusal && refusalCode && ['paused', 'budget', 'unknown_usage', 'context_rejected'].includes(refusalCode)) {
         const handled = this.store.transaction(() => {
           const current = this.store.db.prepare('SELECT state FROM operations WHERE id=?').get(operation.id) as { state: string };
           if (!['dispatched', 'unknown'].includes(current.state)) return false;
@@ -666,7 +740,7 @@ export class Execution {
           this.store.db.prepare('UPDATE operations SET state=?,reserved=0,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?) WHERE id=?').run(state, Date.now(), operation.id);
           if (state === 'interrupted') {
             if (!unknown && total > 0 && operation.instanceId) {
-              this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instanceId);
+              addInstanceUsage(this.store, operation.instanceId, total);
               const account = this.store.db.prepare('SELECT model,models_used FROM instances WHERE id=?').get(operation.instanceId) as { model: string | null; models_used: string };
               const usedModels = JSON.parse(account.models_used) as string[];
               if (account.model && !usedModels.includes(account.model)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...usedModels, account.model]), operation.instanceId);
@@ -677,6 +751,7 @@ export class Execution {
             this.store.event(node.task_id, 'operation.not_sent', { operationId: operation.id, reason: refusal.message });
           }
           if (refusalCode === 'budget') this.block(node, 'budget', { reason: refusal.message, requested: reservation });
+          else if (refusalCode === 'context_rejected') this.block(node, 'adapter_error', { reason: refusal.message, code: refusalCode });
           else if (unknown || refusalCode === 'unknown_usage') {
             // The gate already recorded the unknown-usage question for this operation.
             const existing = this.store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id) as { id: string } | undefined;
@@ -788,7 +863,7 @@ export class Execution {
     this.store.db.prepare("UPDATE operations SET state='succeeded',reserved=0,worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?) WHERE id=?")
       .run(canonicalJson(result), canonicalJson(usage), Date.now(), operation.id);
     if (operation.instanceId) {
-      this.store.db.prepare('UPDATE instances SET used=used+? WHERE id=?').run(total, operation.instanceId);
+      addInstanceUsage(this.store, operation.instanceId, total);
       const account = this.store.db.prepare('SELECT model,models_used FROM instances WHERE id=?').get(operation.instanceId) as { model: string | null; models_used: string };
       const used = JSON.parse(account.models_used) as string[];
       if (account.model && !used.includes(account.model)) this.store.db.prepare('UPDATE instances SET models_used=? WHERE id=?').run(canonicalJson([...used, account.model]), operation.instanceId);

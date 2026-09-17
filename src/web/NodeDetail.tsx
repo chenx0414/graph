@@ -9,6 +9,25 @@ interface Operation { id: string; state: string; runMs: number | null; waitingMs
 interface Invocation { id: string; model: string; purpose?: string; usage: Record<string, number> | null; cost: { unknown?: boolean; amount?: number; currency?: string } | null }
 interface Question { id: string; kind: string; status: string }
 interface Evidence { acceptanceId: string; valid: boolean; commitSha: string | null }
+interface ContextDetail {
+  initialMode: 'fresh' | 'fork';
+  selectedMode: 'continue' | 'fresh' | 'fork';
+  purpose: string | null;
+  requestedFacts?: { kind?: string; ref?: string }[];
+  independence: string | null;
+  reasonCode: string | null;
+  sourceNodeId: string | null;
+  sourceInstanceId: string | null;
+  sourceSessionId: string | null;
+  sourceSessionFile: string | null;
+  sourceLeafId: string | null;
+  sourceContextDigest: string | null;
+  childContextDigest: string | null;
+  capabilityDigest: string | null;
+  handoffDigest: string | null;
+  handoffSummary: string | null;
+  budgetScope: { id: string; used: number; limit: number | null; unlimited: boolean } | null;
+}
 export interface NodeRun {
   taskId: string; nodeId: string;
   node: { id: string; kind: string; action: string; role: string | null; status: string; definitionVersion?: string; input?: unknown };
@@ -18,6 +37,7 @@ export interface NodeRun {
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
   capabilities?: { id: string; version: string; kind: string | null; state: string; reason: string | null }[];
   capabilityDigest?: string | null;
+  context?: ContextDetail | null;
   timing?: { totalMs: number | null; runMs: number | null; waitingMs: number; pauseMs?: number | null; userWaitMs?: number | null; inProgress?: boolean };
   container?: { id: string; parent: string | null; outputs: string[] } | null;
   children?: { id: string; status: string }[];
@@ -165,6 +185,35 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
         <section>
           <h4 className="section-title">能力包</h4>
           <p className="muted mono">{data.capabilityDigest.slice(0, 16)}</p>
+        </section>
+      )}
+      {data.context && (
+        <section data-testid="node-context">
+          <h4 className="section-title">上下文来源</h4>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <Pill tone={data.context.selectedMode === 'fork' ? 'warn' : 'accent'}>
+              {data.context.selectedMode === 'continue' ? '继续原会话' : data.context.selectedMode === 'fork' ? 'Fork 快照' : 'Fresh 独立上下文'}
+            </Pill>
+            {data.context.purpose && <Pill>{data.context.purpose}</Pill>}
+            {data.context.independence && <Pill>{data.context.independence}</Pill>}
+          </div>
+          <p className="muted">
+            {data.context.sourceNodeId ? `来源节点 ${data.context.sourceNodeId}` : '没有继承父 transcript'}
+            {data.context.reasonCode ? ` · ${data.context.reasonCode}` : ''}
+          </p>
+          {data.context.requestedFacts?.length ? (
+            <p className="muted">请求事实：{data.context.requestedFacts.map(fact => fact.kind ?? 'unknown').join(', ')}</p>
+          ) : null}
+          {data.context.sourceLeafId && <p className="muted mono">source leaf {data.context.sourceLeafId}</p>}
+          {data.context.sourceContextDigest && <p className="muted mono">source {data.context.sourceContextDigest.slice(0, 16)}</p>}
+          {data.context.childContextDigest && <p className="muted mono">child {data.context.childContextDigest.slice(0, 16)}</p>}
+          {data.context.handoffDigest && <p className="muted mono">handoff {data.context.handoffDigest.slice(0, 16)}</p>}
+          {data.context.budgetScope && (
+            <p className="muted">
+              共享预算 {data.context.budgetScope.used.toLocaleString('en-US')} /
+              {data.context.budgetScope.unlimited ? ' 不限' : ` ${(data.context.budgetScope.limit ?? 0).toLocaleString('en-US')}`}
+            </p>
+          )}
         </section>
       )}
       {(data.capabilities ?? []).length > 0 && (
