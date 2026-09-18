@@ -110,6 +110,41 @@ test('view-only start serves the real page, reports startup state, and has zero 
   expect(view.status).toBe('discussing');
 });
 
+test('the daemon seeds and compiles the Main Agent recipe for the resource library', async () => {
+  const dir = await temp('main-recipe');
+  const web = await fakeWeb(join(dir, 'web'));
+  const graphHome = join(dir, 'graph-home');
+  const path = await configFile(dir, { projects: [] });
+  const daemon = await startGraphDaemon({
+    configPath: path,
+    stateDir: join(dir, 'state'),
+    graphHome,
+    webDir: web,
+    port: 0,
+    mode: 'view',
+    env: {},
+    log: () => undefined,
+  });
+  cleanup.push(() => daemon.close());
+  const combinations = daemon.server.runtime.catalog.agentCombinations();
+  expect(combinations).toEqual([
+    expect.objectContaining({
+      id: 'main',
+      mode: 'main',
+      status: 'valid',
+      resources: [],
+    }),
+  ]);
+  expect(daemon.server.runtime.catalog.definitions()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'main', version: 1 }),
+  ]));
+  const api = await session(daemon.url);
+  const settings = await (await api.get('/api/settings')).json() as { agentCombinations: { id: string; mode?: string }[] };
+  expect(settings.agentCombinations).toEqual([
+    expect.objectContaining({ id: 'main', mode: 'main' }),
+  ]);
+});
+
 test('restart keeps the same explicit state directory and its tasks', async () => {
   const dir = await temp('restart');
   const web = await fakeWeb(join(dir, 'web'));

@@ -93,7 +93,11 @@ export class Catalog {
   }
 
   async saveAgentCombination(combination: AgentCombination) {
-    return this.capabilityLibrary.saveAgentCombination(combination);
+    const saved = await this.capabilityLibrary.saveAgentCombination(combination);
+    // Main Agent changes are a deployable recipe, not a draft-only document:
+    // compile immediately so newly created master nodes use the latest version.
+    if (saved.mode === 'main') this.compileAgentCombination(saved.id);
+    return saved;
   }
 
   async deleteAgentCombination(id: string) {

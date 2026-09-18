@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, realpath } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { CapabilityBinding, Catalog } from '../catalog/catalog.ts';
+import type { CapabilityBinding, CapabilityRecord, Catalog } from '../catalog/catalog.ts';
 import { normalizeDomainPattern } from '../core/domains.ts';
 import { canonicalJson } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
@@ -169,7 +170,9 @@ function skillMetadata(text: string) {
   };
 }
 
-function headerValues(headers: unknown, headersEnv: unknown) {
+export type CapabilitySecrets = Record<string, string>;
+
+function headerValues(headers: unknown, headersEnv: unknown, secrets: CapabilitySecrets = {}) {
   const values: Record<string, string> = {};
   const merge = (source: unknown, resolveValue: (value: string) => string, label: string) => {
     if (source === undefined) return;
@@ -180,14 +183,14 @@ function headerValues(headers: unknown, headersEnv: unknown) {
   };
   merge(headers, value => value, 'MCP manifest headers');
   merge(headersEnv, name => {
-    const value = process.env[name];
+    const value = secrets[name] ?? process.env[name];
     if (!value) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
     return value;
   }, 'MCP manifest headersEnv');
   return values;
 }
 
-function environmentValues(env: unknown) {
+function environmentValues(env: unknown, secrets: CapabilitySecrets = {}) {
   if (env === undefined) return undefined;
   if (!env || typeof env !== 'object' || Array.isArray(env) || Object.values(env).some(value => typeof value !== 'string')) {
     throw new RuntimeError('capability_unavailable', 'MCP manifest env must be a string map');
@@ -197,7 +200,7 @@ function environmentValues(env: unknown) {
     const reference = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(rawValue)?.[1]
       ?? (/^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(rawValue)?.[1]);
     if (reference) {
-      const value = process.env[reference];
+      const value = secrets[reference] ?? process.env[reference];
       if (value === undefined) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${reference}`);
       values[name] = value;
     } else {
@@ -208,7 +211,7 @@ function environmentValues(env: unknown) {
 }
 
 /** Resolve capability-declared host patterns; base URLs are reduced to their hostname. */
-function manifestNetworkDomains(manifest: McpManifest, granted: string[] = []) {
+function manifestNetworkDomains(manifest: McpManifest, granted: string[] = [], secrets: CapabilitySecrets = {}) {
   const declared = manifest.networkDomains;
   if (declared === undefined) return normalizeDomains(granted);
   if (!Array.isArray(declared) || declared.some(value => typeof value !== 'string' || !value.trim())) {
@@ -218,7 +221,7 @@ function manifestNetworkDomains(manifest: McpManifest, granted: string[] = []) {
   for (const value of declared as string[]) {
     const expanded = value.trim().replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, braced: string | undefined, plain: string | undefined) => {
       const name = braced ?? plain!;
-      const replacement = process.env[name];
+      const replacement = secrets[name] ?? process.env[name];
       if (!replacement) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
       return replacement;
     });
@@ -241,7 +244,7 @@ function manifestNetworkDomains(manifest: McpManifest, granted: string[] = []) {
 }
 
 /** A granted remote MCP endpoint; the runtime allowlist is checked before any request. */
-function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: string[]): McpExchange {
+function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: string[], secrets: CapabilitySecrets = {}): McpExchange {
   if (typeof manifest.url !== 'string' || !manifest.url.trim()) {
     throw new RuntimeError('capability_unavailable', 'An MCP capability requires capability.json with an absolute command or a remote url');
   }
@@ -250,11 +253,58 @@ function remoteConnection(manifest: McpManifest, gate: SendGate, mcpDomains: str
   catch { throw new RuntimeError('capability_unavailable', `Remote MCP url is invalid: ${manifest.url}`); }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new RuntimeError('capability_unavailable', `Remote MCP supports http and https, not ${url.protocol}`);
   if (url.username || url.password) throw new RuntimeError('capability_unavailable', 'Remote MCP urls cannot embed credentials');
-  const domains = manifestNetworkDomains(manifest, [...mcpDomains, url.hostname]);
+  const domains = manifestNetworkDomains(manifest, [...mcpDomains, url.hostname], secrets);
   if (!allowedDomain(domains, url.hostname)) {
     throw new RuntimeError('capability_unavailable', `Remote MCP host ${url.hostname} is not in the granted MCP domains`);
   }
-  return httpExchange({ gate, url: url.href, headers: headerValues(manifest.headers, manifest.headersEnv), timeoutMs: 30_000 });
+  return httpExchange({ gate, url: url.href, headers: headerValues(manifest.headers, manifest.headersEnv, secrets), timeoutMs: 30_000 });
+}
+
+export interface CapabilityCheckResult {
+  ok: boolean;
+  tools: string[];
+  message: string;
+}
+
+/** Verify one credential-bound MCP without mutating task or capability state. */
+export async function verifyMcpCapability(record: CapabilityRecord, secrets: CapabilitySecrets = {}): Promise<CapabilityCheckResult> {
+  if (record.kind !== 'mcp') return { ok: false, tools: [], message: 'Only MCP capabilities can be verified here' };
+  const snapshot = snapshotPath(record);
+  const manifest = await manifestOf(snapshot);
+  const gate: SendGate = { dispatch: (_id, _reservation, send) => send(), settle: () => undefined };
+  let release: (() => Promise<void>) | undefined;
+  let workspace: string | undefined;
+  try {
+    let connection: McpExchange;
+    if (typeof manifest.command === 'string') {
+      workspace = await mkdtemp(join(tmpdir(), 'graph-capability-check-'));
+      const scratch = join(workspace, 'scratch');
+      await mkdir(scratch, { recursive: true, mode: 0o700 });
+      const acquired = await acquireRestrictedExecutor();
+      release = acquired.release;
+      const domains = manifestNetworkDomains(manifest, [], secrets);
+      connection = await localConnection({
+        executor: acquired.executor,
+        gate,
+        manifest,
+        snapshot,
+        workspace,
+        scratchDir: scratch,
+        secrets,
+        ...(domains.length ? { networkDomains: domains } : {}),
+        ...(manifest.networkAccess === 'unrestricted' ? { allowUnrestrictedNetwork: true } : {}),
+      });
+    } else {
+      connection = remoteConnection(manifest, gate, [], secrets);
+    }
+    const tools = await listMcpTools(connection);
+    return { ok: true, tools: tools.map(tool => tool.name), message: `连接成功，发现 ${tools.length} 个工具` };
+  } catch (error) {
+    return { ok: false, tools: [], message: error instanceof Error ? error.message : String(error) };
+  } finally {
+    await release?.().catch(() => undefined);
+    if (workspace) await rm(workspace, { recursive: true, force: true });
+  }
 }
 
 /** Read paths a sandboxed helper needs to start the Node runtime itself.
@@ -295,6 +345,7 @@ async function localConnection(input: {
   manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
   networkDomains?: string[];
   allowUnrestrictedNetwork?: boolean;
+  secrets?: CapabilitySecrets;
 }): Promise<McpExchange> {
   // Helper processes use the bundled node binary when the app is packaged.
   const nodeCommand = graphNodeRuntime().execPath;
@@ -304,10 +355,10 @@ async function localConnection(input: {
   }
   const args = Array.isArray(input.manifest.args) && input.manifest.args.every(value => typeof value === 'string') ? input.manifest.args as string[] : [];
   const grants = await runGrants(input.workspace, input.scratchDir);
-  const env = environmentValues(input.manifest.env);
+  const env = environmentValues(input.manifest.env, input.secrets);
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
-    command, args: args.map(arg => resolveMcpArg(input.snapshot, arg)),
+    command, args: args.map(arg => resolveMcpArg(input.snapshot, arg, input.secrets)),
     ...(env ? { env } : {}),
     readPaths: [input.snapshot, ...nodeReadPaths(nodeCommand, process.env.GRAPH_APP_NODE ? undefined : process.versions.electron as string | undefined)],
     // Discussion turns may read the business directory but only write scratch.
@@ -501,6 +552,8 @@ export async function loadCapabilities(input: {
   grants?: string[];
   /** Discussion turns investigate without writing the business directory. */
   readOnly?: boolean;
+  /** APP/keychain values merged over the daemon environment for MCP config. */
+  secrets?: CapabilitySecrets;
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
 }): Promise<LoadedCapabilities> {
   const skillPaths: string[] = [];
@@ -607,7 +660,7 @@ export async function loadCapabilities(input: {
         if (networkAccess && manifest.networkDomains !== undefined) {
           throw new RuntimeError('capability_unavailable', 'MCP cannot combine networkDomains with unrestricted network access');
         }
-        networkDomains = networkAccess ? [] : manifestNetworkDomains(manifest, input.mcpDomains ?? []);
+        networkDomains = networkAccess ? [] : manifestNetworkDomains(manifest, input.mcpDomains ?? [], input.secrets);
         if (networkDomains.length || networkAccess) {
           authorization = {
             grants: input.grants ?? [],
@@ -621,6 +674,7 @@ export async function loadCapabilities(input: {
           ...(input.readOnly ? { readOnly: true } : {}),
           ...(networkDomains.length ? { networkDomains } : {}),
           ...(networkAccess ? { allowUnrestrictedNetwork: true } : {}),
+          ...(input.secrets ? { secrets: input.secrets } : {}),
         });
         loadedReason = input.readOnly ? '只读讨论模式：本地能力在只读范围加载' : null;
       } else {
@@ -639,8 +693,8 @@ export async function loadCapabilities(input: {
         }
         const grants = input.grants ?? [];
         authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };
-        connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? []);
-        networkDomains = manifestNetworkDomains(manifest, [...(input.mcpDomains ?? []), new URL(manifest.url as string).hostname]);
+        connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? [], input.secrets);
+        networkDomains = manifestNetworkDomains(manifest, [...(input.mcpDomains ?? []), new URL(manifest.url as string).hostname], input.secrets);
       }
       const discovered = await listMcpTools(connection);
       tools.push(...capabilityTools(connection, discovered, bound, authorization));

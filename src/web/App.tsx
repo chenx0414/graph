@@ -58,6 +58,11 @@ export type Settings_ = {
   definitions: { id: string; version: number }[];
   capabilities: CapabilityRecord[];
   agentCombinations?: AgentCombinationView[];
+  capabilityConfig?: {
+    id: string; version: string; name: string; kind: string; source: string;
+    fields: { env: string; label: string; secret: boolean; reason: string }[];
+    configured: string[]; missing: string[]; ready: boolean; error?: string;
+  }[];
   capabilityRoot?: string | null;
   agentCombinationFile?: string | null;
   agentCombinationError?: string | null;

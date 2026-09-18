@@ -7,7 +7,7 @@ import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
   abortMerge, commitAll, commitBaseline, detectRepo, directoryFingerprint, ensureWorktree, fastForwardCheckout, git,
   hasHead, initRepo, isClean, mergeRef, pathInside, repoFingerprint, resetHard, revParse, scopedDirty, updateRef, worktreeList,
-  checkedOutBranch, projectPathEntries,
+  checkedOutBranch, projectPathEntries, type GitIdentity,
 } from './git.ts';
 
 interface PreparationFields {
@@ -258,6 +258,29 @@ export class GitIntegration {
     return subdir ? join(path, subdir) : path;
   }
 
+  private agentIdentity(instanceId: string | null, nodeId: string): GitIdentity {
+    const row = instanceId
+      ? this.store.db.prepare(`SELECT i.definition_version,d.spec FROM instances i
+          LEFT JOIN definitions d ON d.id=substr(i.definition_version,1,instr(i.definition_version,'@')-1)
+            AND d.version=CAST(substr(i.definition_version,instr(i.definition_version,'@')+1) AS INTEGER)
+          WHERE i.id=?`).get(instanceId) as { definition_version: string | null; spec: string | null } | undefined
+      : undefined;
+    const definitionVersion = row?.definition_version ?? nodeId;
+    const definitionId = definitionVersion.split('@')[0] || nodeId;
+    let name = definitionId;
+    if (row?.spec) {
+      try {
+        const spec = JSON.parse(row.spec) as { snapshot?: { agentCombination?: { name?: unknown }; name?: unknown } };
+        const candidate = spec.snapshot?.agentCombination?.name ?? spec.snapshot?.name;
+        if (typeof candidate === 'string' && candidate.trim()) name = candidate.trim();
+      } catch {
+        // A malformed historical definition falls back to its stable id.
+      }
+    }
+    const slug = definitionId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent';
+    return { name, email: `${slug}@agents.graph.local` };
+  }
+
   integrate(operation: Operation) {
     if (!operation.instanceId || operation.kind !== 'agent') return;
     const task = this.store.task(operation.taskId);
@@ -265,7 +288,8 @@ export class GitIntegration {
     const tree = this.store.db.prepare('SELECT path,branch FROM worktrees WHERE instance_id=?').get(operation.instanceId) as { path: string; branch: string } | undefined;
     const integration = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${operation.taskId}`) as { path: string } | undefined;
     if (!tree || !integration) return;
-    const sha = commitAll(tree.path, `graph:${operation.nodeId}:${operation.id}`);
+    const identity = this.agentIdentity(operation.instanceId, operation.nodeId);
+    const sha = commitAll(tree.path, `graph:${operation.nodeId}:${operation.id}`, identity);
     if (sha) this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(sha, operation.taskId, operation.nodeId, operation.id, 'instance');
     const merged = mergeRef(integration.path, tree.branch);
     if (!merged.ok) return merged;

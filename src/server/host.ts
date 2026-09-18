@@ -3,6 +3,8 @@ import { openTaskRuntime } from '../core/task-runtime.ts';
 import { RuntimeError } from '../core/types.ts';
 import type { ConfigStore } from './config-service.ts';
 import type { UsageService } from './usage.ts';
+import type { CapabilityCheckResult } from '../runtime/capabilities.ts';
+import type { CapabilityRecord } from '../catalog/catalog.ts';
 
 export interface StartupInfo {
   mode: 'view' | 'execute';
@@ -23,6 +25,10 @@ export interface AppServices {
   /** Explicit price snapshot refresh (C01): re-verify archived entries against
    * their official pages and persist/activate through the same live path. */
   refreshPrices?(expectedRevision: number): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number; results: { modelId: string; provider: string; status: string; sourceUrl?: string; reason?: string }[] }>;
+  capabilityConfig?: {
+    secretValues(): Record<string, string>;
+    verify(record: CapabilityRecord, values?: Record<string, string>): Promise<CapabilityCheckResult>;
+  };
 }
 
 export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService; systemContext?: Parameters<typeof openTaskRuntime>[0]['systemContext'] }) {

@@ -17,13 +17,18 @@ const flags = [
   '-c', 'advice.detachedHead=false',
 ];
 
-function runGit(cwd: string, args: string[], input?: string) {
+export interface GitIdentity {
+  name: string;
+  email: string;
+}
+
+function runGit(cwd: string, args: string[], input?: string, identity?: GitIdentity) {
   const result = spawnSync('git', [...flags, ...args], {
     cwd, encoding: 'utf8', timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'], ...(input !== undefined ? { input } : {}),
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: 'Graph', GIT_AUTHOR_EMAIL: 'graph@local',
-      GIT_COMMITTER_NAME: 'Graph', GIT_COMMITTER_EMAIL: 'graph@local',
+      GIT_AUTHOR_NAME: identity?.name ?? 'Graph', GIT_AUTHOR_EMAIL: identity?.email ?? 'graph@local',
+      GIT_COMMITTER_NAME: identity?.name ?? 'Graph', GIT_COMMITTER_EMAIL: identity?.email ?? 'graph@local',
       GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat', PAGER: 'cat', GIT_EDITOR: 'true', EDITOR: 'true',
       GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
     },
@@ -32,8 +37,8 @@ function runGit(cwd: string, args: string[], input?: string) {
   return { code: result.status ?? 1, stdout: result.stdout ?? '', stderr: (result.stderr ?? '').trim() };
 }
 
-export function git(cwd: string, args: string[], input?: string) {
-  const result = runGit(cwd, args, input);
+export function git(cwd: string, args: string[], input?: string, identity?: GitIdentity) {
+  const result = runGit(cwd, args, input, identity);
   return { ...result, stdout: result.stdout.trim() };
 }
 
@@ -414,10 +419,10 @@ export function ensureWorktree(repo: string, path: string, branch: string, start
   if (added.code !== 0) throw new Error(added.stderr || `Failed to add worktree ${resolved}`);
 }
 
-export function commitAll(cwd: string, message: string) {
-  git(cwd, ['add', '-A']);
+export function commitAll(cwd: string, message: string, identity?: GitIdentity) {
+  git(cwd, ['add', '-A'], undefined, identity);
   if (isClean(cwd)) return revParse(cwd, 'HEAD');
-  const committed = git(cwd, ['commit', '--no-verify', '-m', message]);
+  const committed = git(cwd, ['commit', '--no-verify', '-m', message], undefined, identity);
   if (committed.code !== 0) throw new Error(committed.stderr || 'Commit failed');
   return revParse(cwd, 'HEAD');
 }

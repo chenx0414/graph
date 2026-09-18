@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { createApp } from '../../src/server/app.ts';
+import type { AppServices } from '../../src/server/host.ts';
 import type { ActionAdapter } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -12,7 +13,7 @@ const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
 const origin = 'http://127.0.0.1:1';
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 
-async function start(actions: Record<string, ActionAdapter>, extra: { models?: boolean } = {}) {
+async function start(actions: Record<string, ActionAdapter>, extra: { models?: boolean; appServices?: AppServices } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-m5-http-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const runtime = await openTaskRuntime({
@@ -20,7 +21,7 @@ async function start(actions: Record<string, ActionAdapter>, extra: { models?: b
     ...(extra.models ? { models: { entries: [{ id: 'local', provider: 'fixture', grade: 'medium' as const, api: 'openai-completions' as const, baseUrl: 'http://127.0.0.1/v1', contextWindow: 1000, maxTokens: 100 }], apiKey: 'test', modelRuntime: {} as never } } : {}),
   });
   cleanup.push(() => runtime.close());
-  const app = await createApp(runtime, { origin });
+  const app = await createApp(runtime, { origin, ...(extra.appServices ? { appServices: extra.appServices } : {}) });
   cleanup.push(() => app.close());
   const home = await app.inject({ method: 'GET', url: '/', headers: { origin } });
   const cookie = String(home.headers['set-cookie'] ?? '');
@@ -31,6 +32,62 @@ async function start(actions: Record<string, ActionAdapter>, extra: { models?: b
     post: (url: string, payload: unknown) => app.inject({ method: 'POST', url, headers, payload: JSON.stringify(payload) }),
   };
 }
+
+test('the capability config API exposes required fields and delegates verification to the app bridge', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m5-capability-config-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const capability = join(capabilityRoot, 'configured');
+  await mkdir(capability, { recursive: true });
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({
+    id: 'configured',
+    kind: 'mcp',
+    version: '1.0.0',
+    name: 'Configured MCP',
+    url: 'https://example.test/mcp',
+    headersEnv: { authorization: 'CONFIGURED_TOKEN' },
+  }));
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'project', root }],
+    catalog: { capabilityRoot },
+  });
+  cleanup.push(() => runtime.close());
+  const calls: { id: string; version: string; values: Record<string, string> }[] = [];
+  const appServices: AppServices = {
+    appToken: 'test-token',
+    applyConfig: async () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
+    pushSecret: async () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
+    snapshot: () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
+    capabilityConfig: {
+      secretValues: () => ({}),
+      verify: async (record, values = {}) => {
+        calls.push({ id: record.id, version: record.version, values });
+        return { ok: true, tools: ['configured_search'], message: '连接成功，发现 1 个工具' };
+      },
+    },
+  };
+  const app = await createApp(runtime, { origin, appServices });
+  cleanup.push(() => app.close());
+  const home = await app.inject({ method: 'GET', url: '/' });
+  const cookie = String(home.headers['set-cookie'] ?? '');
+  const headers = { origin, cookie, 'content-type': 'application/json' };
+  const settings = JSON.parse((await app.inject({ method: 'GET', url: '/api/settings', headers })).body) as {
+    capabilityConfig: { id: string; missing: string[] }[];
+  };
+  expect(settings.capabilityConfig).toEqual([
+    expect.objectContaining({ id: 'configured', missing: ['CONFIGURED_TOKEN'] }),
+  ]);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/capabilities/configured/1.0.0/test',
+    headers,
+    payload: JSON.stringify({ values: { CONFIGURED_TOKEN: 'secret-value' } }),
+  });
+  expect(response.statusCode).toBe(200);
+  expect(JSON.parse(response.body)).toMatchObject({ ok: true, tools: ['configured_search'] });
+  expect(calls).toEqual([{ id: 'configured', version: '1.0.0', values: { CONFIGURED_TOKEN: 'secret-value' } }]);
+});
 
 test('HTTP session can begin a task, talk to the master channel, confirm requirements, and list the queue', async () => {
   const { runtime, get, post } = await start({

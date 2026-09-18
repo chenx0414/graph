@@ -6,6 +6,7 @@ import type { CapabilityRecord, DefinitionSpec } from './capability-library.ts';
 import type { ModelGrade } from './models.ts';
 
 export type AgentCombinationResourceRole = 'identity' | 'tool' | 'skill' | 'mcp' | 'pi-extension' | 'extension';
+export type AgentCombinationMode = 'main' | 'subagent';
 
 export interface AgentCombinationResource {
   resourceId: string;
@@ -18,6 +19,8 @@ export interface AgentCombination {
   id: string;
   name: string;
   description: string;
+  /** Main Agent recipes are compiled into the definition used by the master role. */
+  mode?: AgentCombinationMode;
   recommendedGrade: ModelGrade;
   review: boolean;
   tags: string[];
@@ -45,6 +48,7 @@ export interface AgentCombinationDocument {
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const GRADES = new Set<ModelGrade>(['low', 'medium', 'high', 'highest']);
 const ROLES = new Set<AgentCombinationResourceRole>(['identity', 'tool', 'skill', 'mcp', 'pi-extension', 'extension']);
+const MODES = new Set<AgentCombinationMode>(['main', 'subagent']);
 
 function text(value: unknown, label: string) {
   if (typeof value !== 'string' || !value.trim()) throw new RuntimeError('invalid_agent_combination', `${label} must be a nonempty string`);
@@ -78,11 +82,14 @@ export function parseAgentCombinations(value: unknown): AgentCombinationDocument
     if (!ID_PATTERN.test(id)) throw new RuntimeError('invalid_agent_combination', `Agent combination id ${id} is invalid`);
     if (ids.has(id)) throw new RuntimeError('invalid_agent_combination', `Duplicate Agent combination id ${id}`);
     ids.add(id);
+    const mode = entry.mode === undefined ? undefined : text(entry.mode, `combinations[${index}].mode`) as AgentCombinationMode;
+    if (mode && !MODES.has(mode)) throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} has unsupported mode ${mode}`);
+    if (mode === 'main' && id !== 'main') throw new RuntimeError('invalid_agent_combination', 'The Main Agent recipe must use id "main"');
     const recommendedGrade = text(entry.recommendedGrade, `combinations[${index}].recommendedGrade`) as ModelGrade;
     if (!GRADES.has(recommendedGrade)) throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} has unsupported grade ${recommendedGrade}`);
     if (entry.review !== undefined && typeof entry.review !== 'boolean') throw new RuntimeError('invalid_agent_combination', `combinations[${index}].review must be a boolean`);
-    if (!Array.isArray(entry.resources) || !entry.resources.length) {
-      throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} must reference at least one resource`);
+    if (!Array.isArray(entry.resources) || (!entry.resources.length && mode !== 'main')) {
+      throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} must reference at least one resource unless it is the Main Agent recipe`);
     }
     const seen = new Set<string>();
     const resources = entry.resources.map((rawResource, resourceIndex) => {
@@ -111,6 +118,7 @@ export function parseAgentCombinations(value: unknown): AgentCombinationDocument
       id,
       name: text(entry.name, `combinations[${index}].name`),
       description: text(entry.description, `combinations[${index}].description`),
+      ...(mode ? { mode } : {}),
       recommendedGrade,
       review: entry.review === true,
       tags: textList(entry.tags, `combinations[${index}].tags`),
@@ -163,6 +171,9 @@ export function validateAgentCombination(
   combination: AgentCombination,
   capabilities: CapabilityRecord[],
 ): AgentCombinationView {
+  if (combination.mode === 'main' && combination.id !== 'main') {
+    return { ...combination, status: 'invalid', issues: ['The Main Agent recipe must use id "main"'], resolved: [] };
+  }
   const issues: string[] = [];
   const resolved: AgentCombinationView['resolved'] = [];
   let identityCount = 0;
@@ -212,6 +223,7 @@ export function compileAgentCombinationDefinition(
         name: combination.name,
         description: combination.description,
         tags: combination.tags,
+        ...(combination.mode ? { mode: combination.mode } : {}),
       },
     } as Json,
   };

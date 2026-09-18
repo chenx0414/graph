@@ -10,12 +10,34 @@ import './setup.ts';
 interface ResourceSettings {
   capabilities: CapabilityRecord[];
   agentCombinations?: AgentCombinationView[];
+  capabilityConfig?: CapabilityConfigItem[];
   capabilityRoot?: string | null;
   agentCombinationFile?: string | null;
   agentCombinationError?: string | null;
 }
 
+type CapabilityConfigField = {
+  env: string;
+  label: string;
+  secret: boolean;
+  reason: string;
+};
+
+type CapabilityConfigItem = {
+  id: string;
+  version: string;
+  name: string;
+  kind: string;
+  source: string;
+  fields: CapabilityConfigField[];
+  configured: string[];
+  missing: string[];
+  ready: boolean;
+  error?: string;
+};
+
 const AGENT_COMBINATION_LABEL: Record<string, string> = {
+  main: 'Main Agent',
   code: '代码实现',
   test: '测试编写',
   review: '代码审查',
@@ -27,6 +49,16 @@ const AGENT_COMBINATION_LABEL: Record<string, string> = {
   'paper-writing': '论文写作',
   'paper-polish': '论文润色',
 };
+
+const MAIN_AGENT_SYSTEM_CAPABILITIES = [
+  '任务规划',
+  'Graph 设计',
+  '组装并调用 Subagents',
+  '按订阅选择模型',
+  '监控 Graph 全程',
+  '处理执行问题',
+  '面向用户汇报',
+];
 
 function capabilityKindLabel(item: CapabilityRecord) {
   if (item.kind === 'prompt') return item.role === 'tool' ? 'Tool.md' : 'Agent.md';
@@ -67,6 +99,93 @@ function CapabilityDetail({ item }: { item: CapabilityRecord }) {
   );
 }
 
+function CapabilityConfigPanel({ items }: { items: CapabilityConfigItem[] }) {
+  const bridge = typeof window !== 'undefined' ? window.graph : undefined;
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, { ok: boolean; message: string; tools?: string[] }>>({});
+  if (!items.length) return <Empty icon="settings" title="暂无需要配置的能力" hint="需要凭据或环境变量的 MCP 会显示在这里。" />;
+  const saveAndTest = async (item: CapabilityConfigItem) => {
+    const key = `${item.id}@${item.version}`;
+    setBusy(key);
+    try {
+      const supplied = Object.fromEntries(item.fields.flatMap(field => {
+        const value = values[`${key}:${field.env}`]?.trim();
+        return value ? [[field.env, value]] : [];
+      }));
+      if (bridge) {
+        for (const [ref, value] of Object.entries(supplied)) {
+          const saved = await bridge.saveSecret(ref, value);
+          if (!saved.stored && !saved.applied) throw new Error(saved.message ?? `无法保存 ${ref}`);
+        }
+        window.dispatchEvent(new Event('graph:settings-changed'));
+      }
+      const result = await api<{ ok: boolean; message: string; tools?: string[] }>(
+        `/api/capabilities/${encodeURIComponent(item.id)}/${encodeURIComponent(item.version)}/test`,
+        { method: 'POST', body: JSON.stringify({ values: supplied }) },
+      );
+      setResults(current => ({ ...current, [key]: result }));
+      if (result.ok) toast(`${item.name} 可用${result.tools?.length ? `，发现 ${result.tools.length} 个工具` : ''}`, 'success');
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setResults(current => ({ ...current, [key]: { ok: false, message } }));
+      toast(message, 'danger');
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="capability-config-list" data-testid="capability-config-list">
+      {items.map(item => {
+        const key = `${item.id}@${item.version}`;
+        const result = results[key];
+        return (
+          <article className="capability-config-item" key={key} data-testid={`capability-config-${item.id}`}>
+            <header>
+              <div><strong>{item.name}</strong><code>{item.id}@{item.version}</code></div>
+              <Pill tone={item.ready ? 'success' : item.missing.length ? 'warn' : 'danger'}>
+                {item.error ? '清单不可读' : item.ready ? '已配置' : `缺少 ${item.missing.length} 项`}
+              </Pill>
+            </header>
+            {item.error && <div className="form-error">{item.error}</div>}
+            <div className="capability-config-fields">
+              {item.fields.map(field => {
+                const configured = item.configured.includes(field.env);
+                return (
+                  <label className="capability-config-field" key={field.env}>
+                    <span><strong>{field.label}</strong><code>{field.env}</code></span>
+                    <input
+                      className="input"
+                      type={field.secret ? 'password' : 'text'}
+                      autoComplete="off"
+                      placeholder={configured ? '已保存，留空则保持不变' : field.env}
+                      value={values[`${key}:${field.env}`] ?? ''}
+                      data-testid={`capability-config-${item.id}-${field.env}`}
+                      onChange={event => setValues(current => ({ ...current, [`${key}:${field.env}`]: event.target.value }))}
+                    />
+                    <small>{field.reason}{configured ? ' · 已配置' : ''}</small>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="capability-config-actions">
+              <span className="muted">{bridge ? '保存到本机钥匙串，并立即验证连接。' : '浏览器模式：请先设置对应环境变量。'}</span>
+              <Button size="sm" icon="check" disabled={busy === key} onClick={() => void saveAndTest(item)}>
+                {busy === key ? '验证中…' : '保存并验证'}
+              </Button>
+            </div>
+            {result && (
+              <div className={result.ok ? 'capability-config-result is-ok' : 'capability-config-result is-error'} data-testid={`capability-config-result-${item.id}`}>
+                {result.message}
+              </div>
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function AgentCombinationEditor(input: {
   capabilities: CapabilityRecord[];
   initial?: AgentCombinationView;
@@ -83,6 +202,8 @@ function AgentCombinationEditor(input: {
   const [grade, setGrade] = useState(input.initial?.recommendedGrade ?? 'medium');
   const [review, setReview] = useState(input.initial?.review ?? false);
   const [tags, setTags] = useState((input.initial?.tags ?? []).join(', '));
+  const mode = input.initial?.mode;
+  const main = mode === 'main';
   const selected = (role: AgentCombination['resources'][number]['role']) => new Set(
     (input.initial?.resources ?? [])
       .filter(member => member.role === role)
@@ -129,7 +250,7 @@ function AgentCombinationEditor(input: {
         method: 'POST',
         body: JSON.stringify({
           combination: {
-            id, name, description, recommendedGrade: grade, review,
+            id, name, description, ...(mode ? { mode } : {}), recommendedGrade: grade, review: main ? false : review,
             tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
             resources,
           },
@@ -164,13 +285,18 @@ function AgentCombinationEditor(input: {
         </header>
         <div className="resource-detail-body recipe-form">
           <div className="form-grid">
-            <label><span>ID</span><input value={id} onChange={event => setId(event.target.value)} placeholder="code" /></label>
+            <label><span>ID</span><input data-testid="agent-recipe-id" value={id} disabled={main} onChange={event => setId(event.target.value)} placeholder="code" /></label>
             <label><span>名称</span><input value={name} onChange={event => setName(event.target.value)} placeholder="代码实现" /></label>
           </div>
           <label><span>说明</span><textarea value={description} onChange={event => setDescription(event.target.value)} rows={3} /></label>
+          {main && (
+            <div className="recipe-main-note" data-testid="main-agent-recipe-note">
+              Main Agent 的系统能力由 `master` 角色固定启用，不能从配方移除。下方配置的是它额外可用的 Skills、MCP、Pi extensions 和 Agent.md。
+            </div>
+          )}
           <div className="form-grid">
             <label><span>模型等级</span><select value={grade} onChange={event => setGrade(event.target.value as typeof grade)}><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="highest">最高</option></select></label>
-            <label className="recipe-check"><input type="checkbox" checked={review} onChange={event => setReview(event.target.checked)} /><span>作为独立审查 Agent</span></label>
+            <label className="recipe-check"><input type="checkbox" disabled={main} checked={main ? false : review} onChange={event => setReview(event.target.checked)} /><span>作为独立审查 Agent</span></label>
           </div>
           <label><span>标签</span><input value={tags} onChange={event => setTags(event.target.value)} placeholder="编码, 实现" /></label>
           <section className="recipe-section">
@@ -208,6 +334,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
     { id: 'mcp', title: 'MCP 库', icon: 'link' as const, description: '扫描自能力目录的 MCP servers。', items: capabilities.filter(item => item.kind === 'mcp') },
     { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, description: '扫描到的 Pi extensions 与 Graph extensions。', items: capabilities.filter(item => item.kind === 'pi-extension' || item.kind === 'extension') },
     { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, description: '可作为 Agent 身份模板的 prompt 能力。', items: capabilities.filter(item => item.kind === 'prompt' && item.role === 'agent') },
+    { id: 'config', title: '配置', icon: 'settings' as const, description: '需要凭据、环境变量或服务地址才能加载的能力。', items: [] as CapabilityRecord[] },
     { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, description: '引用已有能力的配方；编译后直接成为可派发定义。', items: [] as CapabilityRecord[] },
     { id: 'architectures', title: '架构库', icon: 'graph' as const, description: 'Graph 支持并可组合使用的经典任务图架构。', items: [] as CapabilityRecord[] },
   ];
@@ -220,7 +347,8 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
   ].some(value => value?.toLowerCase().includes(query)));
   const visibleAgents = filteredAgents.slice(0, resourceLimits.agents ?? 40);
   const visible = filtered.slice(0, resourceLimits[active.id] ?? 40);
-  const countFor = (id: string) => id === 'architectures' ? GRAPH_ARCHITECTURES.length
+  const countFor = (id: string) => id === 'config' ? settings?.capabilityConfig?.length ?? 0
+    : id === 'architectures' ? GRAPH_ARCHITECTURES.length
     : id === 'agents' ? agentCombinations.length
       : sections.find(item => item.id === id)?.items.length ?? 0;
   const refresh = () => {
@@ -278,7 +406,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
               <div className="row" style={{ gap: 4 }}>
                 {active.id === 'agents' && <button type="button" className="icon-button" onClick={() => setEditing(null)} title="新建 Agent 配方" aria-label="新建 Agent 配方"><Icon name="plus" size={16} /></button>}
                 <button type="button" className="icon-button" onClick={refresh} title="重新扫描能力目录" aria-label="重新扫描能力目录"><Icon name="refresh" size={16} /></button>
-                {active.id !== 'agents' && active.id !== 'architectures' && <button type="button" className="icon-button" data-testid={`resource-open-${active.id}`} onClick={() => void openResource(active.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title="在访达中打开能力目录" aria-label="在访达中打开能力目录"><Icon name="folder" size={16} /></button>}
+                {active.id !== 'agents' && active.id !== 'architectures' && active.id !== 'config' && <button type="button" className="icon-button" data-testid={`resource-open-${active.id}`} onClick={() => void openResource(active.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title="在访达中打开能力目录" aria-label="在访达中打开能力目录"><Icon name="folder" size={16} /></button>}
               </div>
             )}
           >
@@ -294,9 +422,18 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                         <p>{item.description}</p>
                         <div className="chip-row">
                           <Pill tone={item.status === 'valid' ? 'success' : 'danger'}>{item.status === 'valid' ? '可编译' : '引用有误'}</Pill>
+                          {item.mode === 'main' && <Pill tone="accent">Main Agent</Pill>}
                           <Pill tone="neutral">{item.recommendedGrade}</Pill>
                           {item.review && <Pill tone="warn">独立审查</Pill>}
                         </div>
+                        {item.mode === 'main' && (
+                          <section className="recipe-capability-group" data-testid="main-agent-system-capabilities">
+                            <h4>系统能力</h4>
+                            <div className="chip-row">
+                              {MAIN_AGENT_SYSTEM_CAPABILITIES.map(capability => <span className="capability-chip" key={capability}>{capability}</span>)}
+                            </div>
+                          </section>
+                        )}
                         <div className="recipe-capability-groups">
                           {capabilityGroups(item).map(group => (
                             <section className="recipe-capability-group" key={group.id} data-testid={`agent-capabilities-${item.id}-${group.id}`}>
@@ -321,13 +458,15 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                         <div className="recipe-card-actions">
                           <Button size="sm" disabled={item.status !== 'valid'} onClick={() => void compile(item.id)}>编译</Button>
                           <Button size="sm" variant="ghost" onClick={() => setEditing(item)}>编辑</Button>
-                          <Button size="sm" variant="danger" onClick={() => void remove(item.id)}>删除</Button>
+                          <Button size="sm" variant="danger" disabled={item.mode === 'main'} onClick={() => void remove(item.id)}>删除</Button>
                         </div>
                       </article>
                     ))}
                   </div>
                 </>
               ) : <Empty icon="catalog" title="暂无 Agent 配方" hint="点击右上角 + 创建配方。" />
+            ) : active.id === 'config' ? (
+              <CapabilityConfigPanel items={settings?.capabilityConfig ?? []} />
             ) : active.id === 'architectures' ? (
               <div className="architecture-list" data-testid="architecture-library">{GRAPH_ARCHITECTURES.map(item => <article className="architecture-item" key={item.name}><div className="architecture-flow mono">{item.flow}</div><div><strong>{item.name}</strong><p>{item.description}</p></div></article>)}</div>
             ) : active.items.length ? (

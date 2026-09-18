@@ -15,6 +15,7 @@ import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
 import { graphHome as resolveGraphHome } from '../catalog/graph-home.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
+import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import { openGraphServer } from './host.ts';
 import { createUsageService } from './usage.ts';
 
@@ -330,6 +331,23 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       },
     };
   };
+  const capabilitySecretValues = () => {
+    const revoked = new Set(live.revoked());
+    const values: Record<string, string> = {};
+    for (const [ref, value] of Object.entries(options.env)) {
+      if (!revoked.has(ref) && typeof value === 'string' && value.trim()) values[ref] = value;
+    }
+    for (const [ref, value] of Object.entries(live.secrets())) {
+      if (!revoked.has(ref) && value.trim()) values[ref] = value;
+    }
+    return values;
+  };
+  let graphServer: Awaited<ReturnType<typeof openGraphServer>> | undefined;
+  const currentMasterDefinitionVersion = () => {
+    if (!bootstrap.prompts.main) return 'master@1';
+    const main = graphServer?.runtime.catalog.definitions().find(item => item.id === 'main');
+    return main ? `main@${main.version}` : 'master@1';
+  };
   const server = await openGraphServer({
     stateDir,
     projects: config.projects,
@@ -350,7 +368,8 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       defaultBudgetTokens: () => live.defaultBudgetTokens(),
       projects: () => live.projects(),
     },
-    master: { action: 'master', definitionVersion: 'master@1', model: () => live.masterModel() },
+    capabilitySecrets: capabilitySecretValues,
+    master: { action: 'master', definitionVersion: currentMasterDefinitionVersion, model: () => live.masterModel() },
     catalog: {
       capabilityRoot: capabilityPath,
       recipesPath,
@@ -376,6 +395,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
       pushSecret: (ref, value) => pushSecret(ref, value),
       refreshPrices: (expectedRevision: number) => refreshPrices(expectedRevision),
+      capabilityConfig: {
+        secretValues: capabilitySecretValues,
+        verify: (record, values = {}) => verifyMcpCapability(record, values),
+      },
       appToken,
       snapshot: () => ({
         revision: live.revision(), effectiveRevision: live.revision(), applied: true,
@@ -383,6 +406,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       }),
     },
   });
+  graphServer = server;
   const presetResult = publishBootstrap(server.runtime.catalog, bootstrap, log);
   presetsAvailable = presetResult.available;
   publishDefinitions = () => {
@@ -398,6 +422,35 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     catalogCapabilities = refreshed.capabilities;
     catalogCombinations = refreshed.agentCombinations;
   };
+  const ensureMainRecipe = async () => {
+    if (!bootstrap.prompts.main) return;
+    if (server.runtime.catalog.agentCombinationError()) {
+      log(`Main Agent recipe unavailable (${server.runtime.catalog.agentCombinationError()}); using bootstrap master@1.`);
+      return;
+    }
+    const existing = server.runtime.catalog.agentCombinations().find(item => item.id === 'main');
+    try {
+      if (!existing) {
+        await server.runtime.catalog.saveAgentCombination({
+          id: 'main',
+          name: 'Main Agent',
+          description: '持续面对用户、规划任务、设计并监控 Graph，并在确认范围内组装和调用 subagents。',
+          mode: 'main',
+          recommendedGrade: 'high',
+          review: false,
+          tags: ['main', 'system'],
+          resources: [],
+        });
+      } else if (existing.mode !== 'main') {
+        await server.runtime.catalog.saveAgentCombination({ ...existing, mode: 'main' });
+      } else {
+        server.runtime.catalog.compileAgentCombination('main');
+      }
+    } catch (error) {
+      log(`Main Agent recipe unavailable (${error instanceof Error ? error.message : String(error)}); using bootstrap master@1.`);
+    }
+  };
+  await ensureMainRecipe();
   await refreshCatalogSnapshot();
   if (presetsAvailable) log(`Bootstrap: ${presetResult.installed.length} definitions ready${presetResult.failed.length ? `, ${presetResult.failed.length} failed` : ''}; capabilities: ${capabilityPath}.`);
 

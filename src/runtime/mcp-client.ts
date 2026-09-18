@@ -221,9 +221,9 @@ export async function callMcpTool(connection: McpExchange, name: string, args: J
 }
 
 /** Resolve host environment references and relative paths in a manifest argument. */
-export function resolveMcpArg(snapshot: string, value: string) {
+export function resolveMcpArg(snapshot: string, value: string, env: Record<string, string> = {}) {
   const expanded = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => {
-    const resolved = process.env[name];
+    const resolved = env[name] ?? process.env[name];
     if (resolved === undefined) {
       throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
     }

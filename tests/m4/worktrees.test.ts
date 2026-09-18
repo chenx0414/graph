@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec } from '../../src/core/types.ts';
+import type { ActionAdapter, Json, NodeSpec } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { withIndependentReview } from '../fixtures/review-gate.ts';
 
@@ -27,11 +27,19 @@ async function repo() {
   return root;
 }
 
-async function run(root: string, actions: Record<string, ActionAdapter>, nodes: NodeSpec[]) {
+async function run(
+  root: string,
+  actions: Record<string, ActionAdapter>,
+  nodes: NodeSpec[],
+  options: { coderSnapshot?: Json } = {},
+) {
   const reviewed = withIndependentReview(actions, nodes);
   const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: reviewed.actions });
   cleanup.push(() => runtime.close());
-  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('coder', {
+    recommendedGrade: 'high',
+    ...(options.coderSnapshot ? { snapshot: options.coderSnapshot } : {}),
+  }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Integrate', requestId: 'begin' });
   const proposed = await runtime.supervisor(taskId).propose({
@@ -42,6 +50,32 @@ async function run(root: string, actions: Record<string, ActionAdapter>, nodes: 
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   return { runtime, task, taskId };
 }
+
+test('an Agent worktree commit uses the recipe display name as author and committer', async () => {
+  const root = await repo();
+  const { runtime, task } = await run(root, {
+    work: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
+      await writeFile(join(operation.workspace!, 'agent.txt'), 'named commit\n');
+      return { outcome: 'completed', output: { file: 'agent.txt' }, usage };
+    } },
+    check: { kind: 'program', prepare: async () => async () => ({
+      outcome: 'completed',
+      output: null,
+      evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'README.md'), digest: createHash('sha256').update('project\n').digest('hex') } }],
+    }) },
+  }, [
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+  ], {
+    coderSnapshot: { agentCombination: { name: '代码实现' } },
+  });
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.phase).toBe('completed');
+  const worktree = view.worktrees.find(tree => tree.nodeId === 'work')!.path;
+  expect(git(worktree, ['log', '-1', '--format=%an <%ae>|%cn <%ce>']))
+    .toBe('代码实现 <coder@agents.graph.local>|代码实现 <coder@agents.graph.local>');
+});
 
 test('parallel instances write in separate work copies and both land on the integration and target branches', async () => {
   const root = await repo();

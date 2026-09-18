@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
+import { capabilityConfigViews } from '../../src/catalog/capability-config.ts';
+import { verifyMcpCapability } from '../../src/runtime/capabilities.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -196,6 +198,67 @@ test('a definition-bound MCP tool is callable, metered, and confined by the sand
   expect(view.cost).toMatchObject({ amount: expect.any(Number) });
   expect((view.cost as { amount: number }).amount).toBeGreaterThan(0);
   expect(view.questions).toEqual([]);
+});
+
+test('credential-bound MCP configuration is visible, explicit values load it, and missing values fail closed', async () => {
+  const { root, workspace } = await project();
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const mcp = join(capabilityRoot, 'configured');
+  await mkdir(mcp, { recursive: true });
+  await copyFile(join(fixtureDir, 'mcp-config-capability-server.mjs'), join(mcp, 'server.mjs'));
+  const manifest = {
+    id: 'configured',
+    kind: 'mcp',
+    version: '1.0.0',
+    name: 'Configured MCP',
+    command: process.execPath,
+    args: ['./server.mjs'],
+    env: { MCP_CONFIG_TEST_TOKEN: '${MCP_CONFIG_TEST_TOKEN}' },
+  };
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify(manifest, null, 2));
+  const provider = await openaiServer([
+    { tools: [{ id: 'configured-call', name: 'mcp_configured_configured_search', arguments: JSON.stringify({ query: 'graph' }) }] },
+    { text: 'Configured MCP completed.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace }],
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+    actions: { check: checkAction(workspace) },
+    capabilitySecrets: () => ({ MCP_CONFIG_TEST_TOKEN: 'test-value' }),
+  });
+  cleanup.push(() => runtime.close());
+  const record = runtime.catalog.capability('configured', '1.0.0');
+  expect(record).toBeDefined();
+
+  const missing = await capabilityConfigViews([record!], {});
+  expect(missing).toEqual([
+    expect.objectContaining({
+      id: 'configured',
+      ready: false,
+      missing: ['MCP_CONFIG_TEST_TOKEN'],
+      fields: [expect.objectContaining({ env: 'MCP_CONFIG_TEST_TOKEN', secret: true, reason: '环境变量 MCP_CONFIG_TEST_TOKEN' })],
+    }),
+  ]);
+  const configured = await capabilityConfigViews([record!], { MCP_CONFIG_TEST_TOKEN: 'test-value' });
+  expect(configured[0]).toMatchObject({ ready: true, configured: ['MCP_CONFIG_TEST_TOKEN'], missing: [] });
+
+  const denied = await verifyMcpCapability(record!, {});
+  expect(denied.ok).toBe(false);
+  expect(denied.message).toContain('MCP_CONFIG_TEST_TOKEN');
+  const verified = await verifyMcpCapability(record!, { MCP_CONFIG_TEST_TOKEN: 'test-value' });
+  expect(verified).toMatchObject({ ok: true, tools: ['configured_search'] });
+
+  runtime.catalog.publishDefinition('coder', {
+    recommendedGrade: 'high',
+    capabilities: [{ id: 'configured', version: '1.0.0' }],
+  }, 'configured-agent');
+  const task = await checkedTask(runtime, workspace);
+  await runtime.host.drive();
+  expect(JSON.stringify(provider.requests[1])).toContain('configured:graph:10');
+  expect((await task.view()).questions).toEqual([]);
 });
 
 test('a local MCP reaches only the network domains declared by its capability manifest', async () => {

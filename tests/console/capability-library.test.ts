@@ -105,6 +105,34 @@ test('recipes validate against the current capability projection and compile to 
   });
 });
 
+test('the Main Agent recipe may start empty, compiles as main, and cannot be deleted', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-main-recipe-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const library = new CapabilityLibrary({
+    capabilityRoot: join(root, 'capabilities'),
+    recipesPath: join(root, 'agent-combinations.json'),
+  });
+  await library.refresh();
+  const saved = await library.saveAgentCombination({
+    id: 'main',
+    name: 'Main Agent',
+    description: 'Continue-facing orchestration agent.',
+    mode: 'main',
+    recommendedGrade: 'high',
+    review: false,
+    tags: ['main'],
+    resources: [],
+  });
+  expect(saved).toMatchObject({ id: 'main', mode: 'main', status: 'valid', resources: [] });
+  const compiled = library.compileAgentCombination('main');
+  expect(compiled.definition).toMatchObject({
+    recommendedGrade: 'high',
+    snapshot: { agentCombination: { id: 'main', mode: 'main' } },
+  });
+  expect(compiled.definition.capabilities).toBeUndefined();
+  await expect(library.deleteAgentCombination('main')).rejects.toThrow(/cannot be deleted/);
+});
+
 test('catalog composes the capability library and persists recipe compilation only once', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-catalog-recipes-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

@@ -664,6 +664,121 @@ test('the resource library groups reusable assets and includes graph architectur
   expect(architectures).toContain('对抗式验证');
 });
 
+test('the resource config page saves capability credentials and verifies the selected MCP', async () => {
+  const root = await temp('resource-config');
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const mcp = join(capabilityRoot, 'exa-web-search');
+  await mkdir(mcp, { recursive: true });
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify({
+    id: 'exa-web-search',
+    kind: 'mcp',
+    version: '3.4.1',
+    name: 'Exa Web Search',
+    description: 'Web search through Exa.',
+    url: 'https://mcp.exa.ai/mcp',
+    headersEnv: { authorization: 'EXA_API_KEY' },
+  }, null, 2));
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+  });
+  cleanup.push(() => server.close());
+  const verified: { values?: Record<string, string> }[] = [];
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.addInitScript(() => {
+    window.graph = {
+      isDesktop: true,
+      pickDirectory: async () => null,
+      openResource: async () => ({ opened: true }),
+      saveSecret: async (ref, value) => {
+        (window as Window & { __savedCapabilitySecrets?: { ref: string; value: string }[] }).__savedCapabilitySecrets!.push({ ref, value: value ?? '' });
+        return { stored: true, applied: true };
+      },
+      secretStatus: async () => ({}),
+      relaunch: async () => ({ url: location.origin }),
+    };
+    (window as Window & { __savedCapabilitySecrets?: { ref: string; value: string }[] }).__savedCapabilitySecrets = [];
+  });
+  await page.route('**/api/capabilities/exa-web-search/3.4.1/test', async route => {
+    verified.push(JSON.parse(route.request().postData() ?? '{}') as { values?: Record<string, string> });
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, tools: ['search'], message: '连接成功，发现 1 个工具' }),
+    });
+  });
+  await page.goto(`${server.url}/#/catalog/config`);
+  await page.getByTestId('resource-nav-config').click();
+  await page.getByTestId('resource-section-config').waitFor();
+  expect(await page.getByTestId('resource-section-config').innerText()).toContain('Exa Web Search');
+  expect(await page.getByTestId('capability-config-exa-web-search').innerText()).toContain('EXA_API_KEY');
+  expect(await page.getByTestId('resource-open-config').count()).toBe(0);
+  await page.getByTestId('capability-config-exa-web-search-EXA_API_KEY').fill('exa-secret');
+  await page.getByRole('button', { name: '保存并验证' }).click();
+  await expect.poll(() => verified.length).toBe(1);
+  expect(verified[0]?.values).toEqual({ EXA_API_KEY: 'exa-secret' });
+  expect(await page.evaluate(() => (window as Window & { __savedCapabilitySecrets?: { ref: string; value: string }[] }).__savedCapabilitySecrets)).toEqual([
+    { ref: 'EXA_API_KEY', value: 'exa-secret' },
+  ]);
+  expect(await page.getByTestId('capability-config-result-exa-web-search').innerText()).toContain('连接成功');
+});
+
+test('the Main Agent recipe is visible with fixed system capabilities and an editable capability recipe', async () => {
+  const root = await temp('main-agent-recipe');
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const skill = join(capabilityRoot, 'main-research');
+  await mkdir(skill, { recursive: true });
+  await writeFile(join(skill, 'SKILL.md'), '# Main research\n');
+  await writeFile(join(skill, 'capability.json'), JSON.stringify({
+    id: 'main-research',
+    kind: 'skill',
+    version: '1.0.0',
+    name: 'Main Agent Research',
+  }));
+  const recipesPath = join(root, 'graph', 'agent-combinations.json');
+  await writeFile(recipesPath, JSON.stringify({
+    version: 1,
+    combinations: [{
+      id: 'main',
+      name: 'Main Agent',
+      description: '主 Agent 配方。',
+      mode: 'main',
+      recommendedGrade: 'high',
+      review: false,
+      tags: ['main'],
+      resources: [],
+    }],
+  }));
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+    catalog: { capabilityRoot, recipesPath },
+  });
+  cleanup.push(() => server.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/catalog/agents`);
+  await page.getByTestId('agent-combination-main').waitFor();
+  expect(await page.getByTestId('main-agent-system-capabilities').innerText()).toContain('任务规划');
+  expect(await page.getByTestId('main-agent-system-capabilities').innerText()).toContain('监控 Graph 全程');
+  await page.getByTestId('agent-combination-main').getByRole('button', { name: '编辑' }).click();
+  await page.getByTestId('main-agent-recipe-note').waitFor();
+  expect(await page.getByTestId('agent-recipe-id').isDisabled()).toBe(true);
+  expect(await page.getByTestId('main-agent-recipe-note').innerText()).toContain('不能从配方移除');
+  await page.getByRole('button', { name: '取消' }).click();
+  expect(await page.getByTestId('agent-combination-main').getByRole('button', { name: '删除' }).isDisabled()).toBe(true);
+});
+
 test('the inbox keeps resolved questions in history', async () => {
   const root = await temp('inbox-history');
   const server = await openGraphServer({

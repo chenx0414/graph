@@ -1749,6 +1749,34 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .recipe-capability-groups { display: grid; gap: 8px; }
 .recipe-capability-group { display: grid; gap: 5px; }
 .recipe-capability-group h4 { margin: 0; color: var(--faint); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; }
+.recipe-main-note {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel-soft));
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.capability-config-list { display: grid; gap: 10px; }
+.capability-config-item {
+  display: grid; gap: 10px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel-soft);
+}
+.capability-config-item > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.capability-config-item > header > div { display: grid; gap: 2px; min-width: 0; }
+.capability-config-item > header strong { font-size: 13px; }
+.capability-config-item > header code { color: var(--faint); font-size: 11px; }
+.capability-config-fields { display: grid; gap: 8px; }
+.capability-config-field { display: grid; grid-template-columns: minmax(150px, 0.45fr) minmax(220px, 1fr); gap: 4px 12px; align-items: center; }
+.capability-config-field > span { display: grid; gap: 2px; min-width: 0; }
+.capability-config-field strong { font-size: 12px; }
+.capability-config-field code { color: var(--faint); font-size: 10.5px; overflow-wrap: anywhere; }
+.capability-config-field small { grid-column: 2; color: var(--muted); font-size: 10.5px; }
+.capability-config-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.capability-config-result { padding: 7px 9px; border-radius: 7px; font-size: 11.5px; }
+.capability-config-result.is-ok { background: color-mix(in srgb, var(--success) 9%, var(--panel)); color: var(--success); }
+.capability-config-result.is-error { background: color-mix(in srgb, var(--danger) 8%, var(--panel)); color: var(--danger); }
 .capability-chip {
   border: 1px solid var(--border);
   border-radius: 999px;

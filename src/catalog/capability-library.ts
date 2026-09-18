@@ -174,6 +174,9 @@ export class CapabilityLibrary {
 
   async saveAgentCombination(combination: AgentCombination) {
     if (!this.recipesPath) throw new RuntimeError('unsupported', 'This runtime has no agent-combination file');
+    if (combination.mode === 'main' && combination.id !== 'main') {
+      throw new RuntimeError('invalid_agent_combination', 'The Main Agent recipe must use id "main"');
+    }
     const document = parseAgentCombinations({ version: 1, combinations: [...this.recipes.filter(item => item.id !== combination.id), combination] });
     const next = document.combinations;
     const view = validateAgentCombination(combination, this.capabilitiesCache);
@@ -185,6 +188,9 @@ export class CapabilityLibrary {
 
   async deleteAgentCombination(id: string) {
     if (!this.recipesPath) throw new RuntimeError('unsupported', 'This runtime has no agent-combination file');
+    if (this.recipes.find(item => item.id === id)?.mode === 'main') {
+      throw new RuntimeError('invalid_agent_combination', 'The Main Agent recipe cannot be deleted');
+    }
     const next = this.recipes.filter(item => item.id !== id);
     if (next.length === this.recipes.length) throw new RuntimeError('not_found', `Unknown Agent combination ${id}`);
     await writeAgentCombinations(this.recipesPath, { version: 1, combinations: next });

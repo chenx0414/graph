@@ -3,6 +3,7 @@
   "bootstrap": {
     "prompts": {
       "master": "prompts/master/agent.md",
+      "main": "prompts/master/agent.md",
       "coder": "prompts/coder/agent.md",
       "reviewer": "prompts/reviewer/agent.md",
       "tester": "prompts/tester/agent.md"

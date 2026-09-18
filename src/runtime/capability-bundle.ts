@@ -21,6 +21,7 @@ export interface CapabilityBundleOptions {
   definitionVersion?: string;
   bootstrap?: { agent?: string; tool?: string };
   mcpDomains?: string[];
+  secrets?: () => Record<string, string>;
 }
 
 export interface CapabilityOperationOptions {
@@ -114,6 +115,7 @@ export class CapabilityBundleVersion {
         gate: options.gate,
         ...(this.input.bootstrap ? { bootstrap: this.input.bootstrap } : {}),
         ...(this.input.mcpDomains?.length ? { mcpDomains: this.input.mcpDomains } : {}),
+        ...(this.input.secrets ? { secrets: this.input.secrets() } : {}),
         ...(options.grants ? { grants: options.grants } : {}),
         ...(options.readOnly ? { readOnly: true } : {}),
         ...(options.onPermissionRequired ? { onPermissionRequired: options.onPermissionRequired } : {}),

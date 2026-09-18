@@ -89,6 +89,7 @@ export function createPiAdapter(options: {
   scheduler?: ModelScheduler;
   modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
+  capabilitySecrets?: () => Record<string, string>;
   channels?: PiAdapterChannels;
   transport?: AgentSessionTransport;
 }): ActionAdapter {
@@ -227,6 +228,7 @@ export function createPiAdapter(options: {
               ...(options.channels?.bootstrapToolPrompt ? { tool: options.channels.bootstrapToolPrompt } : {}),
             },
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
+            ...(options.capabilitySecrets ? { secrets: options.capabilitySecrets } : {}),
           });
           commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
           capabilityOperation = await bundle.openOperation({

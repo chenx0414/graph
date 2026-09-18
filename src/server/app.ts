@@ -12,6 +12,8 @@ import { sanitizeConfig, type ConfigStore } from './config-service.ts';
 import type { UsageService } from './usage.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { DefinitionSpec } from '../catalog/catalog.ts';
+import { capabilityConfigViews } from '../catalog/capability-config.ts';
+import { verifyMcpCapability } from '../runtime/capabilities.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 
@@ -64,6 +66,9 @@ function graphAgentDetail(runtime: Runtime, definitionVersion: string | null | u
 export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService }) {
   const app = Fastify({ logger: false });
   const session = createSession();
+  const capabilitySecretValues = () => options.appServices?.capabilityConfig?.secretValues() ?? Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim())),
+  );
   const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
 
   app.setErrorHandler((error, _request, reply) => {
@@ -164,13 +169,28 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const models = runtime.models();
     const definitions = runtime.catalog.definitions();
     const capabilities = runtime.catalog.capabilities();
+    const capabilityConfig = await capabilityConfigViews(capabilities, capabilitySecretValues());
     return {
-      projects, models, definitions, capabilities,
+      projects, models, definitions, capabilities, capabilityConfig,
       agentCombinations: runtime.catalog.agentCombinations(),
       capabilityRoot: runtime.catalog.capabilityRootPath() ?? null,
       agentCombinationFile: runtime.catalog.agentCombinationFilePath() ?? null,
       agentCombinationError: runtime.catalog.agentCombinationError() ?? null,
     };
+  });
+  app.get('/api/capabilities/config', async () => ({
+    items: await capabilityConfigViews(runtime.catalog.capabilities(), capabilitySecretValues()),
+  }));
+  app.post('/api/capabilities/:id/:version/test', async request => {
+    const params = request.params as { id: string; version: string };
+    const record = runtime.catalog.capability(params.id, params.version);
+    if (!record) throw new RuntimeError('not_found', `Unknown capability ${params.id}@${params.version}`);
+    const body = request.body as { values?: unknown } | undefined;
+    const supplied = body?.values && typeof body.values === 'object' && !Array.isArray(body.values)
+      ? Object.fromEntries(Object.entries(body.values).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+      : {};
+    const verify = options.appServices?.capabilityConfig?.verify ?? verifyMcpCapability;
+    return verify(record, { ...capabilitySecretValues(), ...supplied });
   });
   app.get('/api/tasks', async () => runtime.user.list());
   app.get('/api/inbox', async request => {

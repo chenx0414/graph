@@ -8,6 +8,7 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git } from '../../src/git/git.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -288,3 +289,69 @@ test('the real Pi master can search the resource library and open a model-access
     }),
   ]));
 }, 120_000);
+
+test('the Main Agent recipe compiles its capabilities into the conversation master bundle', async () => {
+  const root = await temp('main-recipe');
+  const project = join(root, 'project');
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const skill = join(capabilityRoot, 'main-research');
+  await mkdir(project, { recursive: true });
+  await mkdir(skill, { recursive: true });
+  await writeFile(join(skill, 'SKILL.md'), '# Main research\n\nInvestigate before proposing a graph.\n');
+  await writeFile(join(skill, 'capability.json'), JSON.stringify({
+    id: 'main-research',
+    kind: 'skill',
+    version: '1.0.0',
+    name: 'Main Agent Research',
+  }, null, 2));
+  const recipesPath = join(root, 'graph', 'agent-combinations.json');
+  await writeFile(recipesPath, JSON.stringify({
+    version: 1,
+    combinations: [{
+      id: 'main',
+      name: 'Main Agent',
+      description: 'Main Agent with an extra research capability.',
+      mode: 'main',
+      recommendedGrade: 'high',
+      review: false,
+      tags: ['main'],
+      resources: [{ resourceId: 'main-research', version: '1.0.0', role: 'skill', required: true }],
+    }],
+  }, null, 2));
+  const provider = await openaiServer([{ text: 'Main Agent recipe loaded.' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: () => 'main@1', model: 'local' },
+    catalog: {
+      capabilityRoot,
+      recipesPath,
+      bootstrapPrompts: { main: '# Main Agent identity\n\nPlan and orchestrate.' },
+      bootstrapToolPrompt: '# Capability awareness',
+    },
+  });
+  cleanup.push(() => runtime.close());
+  expect(runtime.catalog.compileAgentCombination('main').definitionVersion).toBe('main@1');
+  const created = await runtime.conversations.create({ text: '请先调研再规划。', requestId: 'main-recipe-create' });
+  await runtime.host.runReady();
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.master?.definitionVersion).toBe('main@1');
+  const request = JSON.stringify(provider.requests[0]);
+  expect(request).toContain('Main Agent identity');
+  expect(request).toContain('main-research');
+  expect(request).toContain('SKILL.md');
+});

@@ -82,6 +82,10 @@ _Avoid_：能力库（它保存可供 Agent 使用的 Skills、MCP、扩展与 P
 **Agent 配方**：
 用户或主管创建、编辑的 Agent 组合，引用已有能力并编译为版本化 Agent 定义；配方允许创建，能力本身不允许由 Agent 自行生成。
 
+**Main Agent 配方**：
+`mode=main` 的 Agent 配方，编译为 `main@N` 并成为新建 Main Agent 实例的定义；规划、建图、调用 subagents、模型选择、监控、问题处理和用户汇报等角色能力固定启用，配方可继续组合资源库中的 Skills、MCP、Pi extensions 与 Prompt。
+_Avoid_：把 Main Agent 的身份或角色能力绕开配方硬编码成不可见的运行分支
+
 **Agent 定义**：
 Agent 库中可复用、带版本的能力配置，包含 Skills、MCP 等及推荐模型等级；具体模型不参与其身份定义。
 _Avoid_：运行配置（还包含实例实际选择的模型）

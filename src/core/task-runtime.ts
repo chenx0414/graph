@@ -112,8 +112,10 @@ export async function openTaskRuntime(options: {
   };
   /** Config version recorded with new tasks so history points at its binding. */
   config?: { revision(): number };
-  master?: { action: string; definitionVersion: string; model: string | (() => string | undefined) };
+  master?: { action: string; definitionVersion: string | (() => string | undefined); model: string | (() => string | undefined) };
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
+  /** Hot-reloadable APP/keychain values used only for declared MCP config refs. */
+  capabilitySecrets?: () => Record<string, string>;
   /** Default per-instance budget for new instances. null/absent means no
    * cumulative token cap; a positive integer keeps the finite-budget gate. */
   limits?: { defaultBudgetTokens?: number | null };
@@ -161,8 +163,10 @@ export async function openTaskRuntime(options: {
   const createMasterNode = (taskId: string) => {
     const master = options.master!;
     const model = masterModel();
+    const definitionVersion = masterDefinitionVersion();
     if (!model) throw new RuntimeError('models_missing', 'No configured model for a master agent');
-    const spec: NodeSpec = { id: 'master', kind: 'agent', action: master.action, definitionVersion: master.definitionVersion, model, role: 'master' };
+    if (!definitionVersion) throw new RuntimeError('definition_missing', 'No configured definition for a master agent');
+    const spec: NodeSpec = { id: 'master', kind: 'agent', action: master.action, definitionVersion, model, role: 'master' };
     const instanceId = randomUUID();
     store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, spec.id, canonicalJson(spec), instanceId);
     insertInstance(instanceId, taskId, spec.id, spec.definitionVersion, spec.model);
@@ -190,6 +194,12 @@ export async function openTaskRuntime(options: {
     const model = typeof master.model === 'function' ? master.model() : master.model;
     return model?.trim() ? model : undefined;
   };
+  const masterDefinitionVersion = () => {
+    const master = options.master;
+    if (!master) return undefined;
+    const version = typeof master.definitionVersion === 'function' ? master.definitionVersion() : master.definitionVersion;
+    return version?.trim() ? version : undefined;
+  };
   const defaultBudgetTokens = options.limits?.defaultBudgetTokens ?? null;
   // The node row must exist first: instances(task_id,node_id) references nodes.
   const insertInstance = (id: string, taskId: string, nodeId: string, definitionVersion?: string | null, model?: string | null) => {
@@ -199,7 +209,7 @@ export async function openTaskRuntime(options: {
     return id;
   };
   const recoverMasterNodes = () => {
-    if (!options.master || !masterModel()) return 0;
+    if (!options.master || !masterModel() || !masterDefinitionVersion()) return 0;
     return store.transaction(() => {
       const pending = (store.db.prepare("SELECT id, project_id, phase FROM tasks WHERE phase IN ('discussing','chatting') ORDER BY created_seq").all() as { id: string; project_id: string; phase: string }[])
         // A task whose project was removed from the configuration keeps its
@@ -270,6 +280,7 @@ export async function openTaskRuntime(options: {
       ...(options.live ? { bindingFor: (entry: ModelEntry) => options.live!.credentialFor(entry) } : {}),
       scheduler: modelScheduler,
       ...(options.network ? { network: options.network } : {}),
+      ...(options.capabilitySecrets ? { capabilitySecrets: options.capabilitySecrets } : {}),
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
@@ -369,8 +380,8 @@ export async function openTaskRuntime(options: {
         const taskId = randomUUID();
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         store.db.prepare('INSERT INTO tasks(id,project_id,request,created_seq) VALUES(?,?,?,?)').run(taskId, input.projectId, input.request, sequence);
-        if (options.master && masterModel()) {
-          const spec: NodeSpec = { id: 'master', kind: 'agent', action: options.master.action, definitionVersion: options.master.definitionVersion, model: masterModel()!, role: 'master' };
+        if (options.master && masterModel() && masterDefinitionVersion()) {
+          const spec: NodeSpec = { id: 'master', kind: 'agent', action: options.master.action, definitionVersion: masterDefinitionVersion()!, model: masterModel()!, role: 'master' };
           const instanceId = randomUUID();
           store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, spec.id, canonicalJson(spec), instanceId);
           insertInstance(instanceId, taskId, spec.id, spec.definitionVersion, spec.model);
