@@ -58,6 +58,11 @@ export interface NodeRun {
   operations: Operation[]; invocations: Invocation[]; questions: Question[]; evidence: Evidence[];
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
   capabilities?: { id: string; version: string; kind: string | null; state: string; reason: string | null }[];
+  capabilityUsage?: {
+    id: string; version: string; kind: string | null; name: string; tools: string[];
+    calls: number; successes: number; failures: number; pending: number;
+    successRate: number | null; lastCalledAt: number | null;
+  }[];
   capabilityDigest?: string | null;
   context?: ContextDetail | null;
   timing?: { totalMs: number | null; runMs: number | null; waitingMs: number; pauseMs?: number | null; userWaitMs?: number | null; inProgress?: boolean };
@@ -312,6 +317,34 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
                 <span className="grow">{capability.id}@{capability.version}{capability.kind ? ` · ${capability.kind}` : ''}</span>
                 <Pill tone={capability.state === '可执行' ? 'success' : capability.state === '禁用' ? 'danger' : 'neutral'}>{`已绑定/${capability.state}`}</Pill>
                 {capability.reason && <span className="muted">{capability.reason}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {(data.capabilityUsage ?? []).length > 0 && (
+        <section data-testid="capability-usage">
+          <h4 className="section-title">能力调用统计</h4>
+          <ul className="list">
+            {data.capabilityUsage!.map(item => (
+              <li key={`${item.id}@${item.version}`} className="list-item" style={{ alignItems: 'flex-start' }}>
+                <div className="grow">
+                  <div className="row" style={{ gap: 6 }}>
+                    <strong>{item.name}</strong>
+                    <span className="muted mono">{item.id}@{item.version}</span>
+                  </div>
+                  <div className="muted">
+                    {item.calls === 0
+                      ? '暂无调用'
+                      : `调用 ${item.calls} · 成功 ${item.successes} · 失败 ${item.failures}${item.pending ? ` · 进行中 ${item.pending}` : ''}`}
+                    {item.successRate !== null ? ` · 成功率 ${(item.successRate * 100).toFixed(item.successRate >= 0.1 ? 0 : 1)}%` : ''}
+                    {item.lastCalledAt ? ` · 最近 ${when(item.lastCalledAt)}` : ''}
+                  </div>
+                  {!item.tools.length && <div className="faint">该能力没有可调用工具，或本次运行未加载工具。</div>}
+                </div>
+                <Pill tone={item.calls === 0 ? 'neutral' : item.failures === 0 ? 'success' : 'warn'}>
+                  {item.calls === 0 ? '未调用' : item.failures === 0 ? '全部成功' : `${item.failures} 次失败`}
+                </Pill>
               </li>
             ))}
           </ul>

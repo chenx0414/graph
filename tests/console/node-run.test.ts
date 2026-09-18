@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import { appendNodeEntry, listNodeEntries, nodeRun } from '../../src/core/node-run.ts';
+import { appendNodeEntry, listNodeEntries, nodeRun, recordCapabilityLoad } from '../../src/core/node-run.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -245,6 +245,46 @@ test('a terminal node is not in progress because of a historical not_sent attemp
   const view = nodeRun(store, 't', 'work');
   expect(view.operations).toHaveLength(2);
   expect(view.timing).toMatchObject({ inProgress: false, totalMs: 1_000, runMs: 1_000 });
+});
+
+test('node detail aggregates capability tool calls into success statistics', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-usage-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  store.transaction(() => {
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('t','p','capability usage',1,'running')").run();
+    store.db.prepare("INSERT INTO definitions(id,version,spec) VALUES('coder',1,?)").run(JSON.stringify({
+      recommendedGrade: 'high',
+      capabilities: [{ id: 'demo-mcp', version: '1.0.0' }],
+    }));
+    store.db.prepare("INSERT INTO capabilities(id,kind,source,version,snapshot,status) VALUES('demo-mcp','mcp',?,?,?,'available')")
+      .run(join(root, 'demo-mcp'), '1.0.0', JSON.stringify({ name: 'Demo MCP' }));
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,status,activation_id,output_version,stall_count) VALUES('t','work',?,'succeeded','act',1,0)")
+      .run(JSON.stringify({ id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1' }));
+  });
+  recordCapabilityLoad(store, {
+    taskId: 't',
+    nodeId: 'work',
+    operationId: 'op',
+    readOnly: false,
+    report: [{
+      id: 'demo-mcp', version: '1.0.0', kind: 'mcp', loaded: true, executable: true, reason: null,
+      name: 'Demo MCP', tools: ['mcp:demo:search', 'mcp:demo:write'],
+    }],
+  });
+  appendNodeEntry(store, { taskId: 't', nodeId: 'work', role: 'tool', kind: 'call', text: 'search', data: { toolCallId: 'c1', toolName: 'mcp:demo:search' } });
+  appendNodeEntry(store, { taskId: 't', nodeId: 'work', role: 'tool', kind: 'result', text: 'ok', data: { toolCallId: 'c1', toolName: 'mcp:demo:search', isError: false } });
+  appendNodeEntry(store, { taskId: 't', nodeId: 'work', role: 'tool', kind: 'call', text: 'write', data: { toolCallId: 'c2', toolName: 'mcp:demo:write' } });
+  appendNodeEntry(store, { taskId: 't', nodeId: 'work', role: 'tool', kind: 'result', text: 'failed', data: { toolCallId: 'c2', toolName: 'mcp:demo:write', isError: true } });
+  appendNodeEntry(store, { taskId: 't', nodeId: 'work', role: 'tool', kind: 'call', text: 'search again', data: { toolCallId: 'c3', toolName: 'mcp:demo:search' } });
+
+  expect(nodeRun(store, 't', 'work').capabilityUsage).toEqual([
+    expect.objectContaining({
+      id: 'demo-mcp', version: '1.0.0', name: 'Demo MCP', calls: 3, successes: 1, failures: 1, pending: 1, successRate: 0.5,
+    }),
+  ]);
 });
 
 test('pause and user-wait accumulate only at state boundaries with recorded facts (C02)', async () => {

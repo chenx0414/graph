@@ -1,11 +1,32 @@
 import ElkConstructor from 'elkjs';
+import { graphNodeSize } from '../core/graph-presentation.ts';
 import type { ContainerSpec, LoopSpec, NodeSpec } from '../core/types.ts';
 
-type ElkEngine = { layout(graph: object): Promise<{ id?: string; x?: number; y?: number; width?: number; height?: number; children?: object[] }> };
+type Point = { x: number; y: number };
+type ElkSection = {
+  startPoint?: Point;
+  endPoint?: Point;
+  bendPoints?: Point[];
+};
+type ElkEdge = {
+  id?: string;
+  sources?: string[];
+  targets?: string[];
+  container?: string;
+  sections?: ElkSection[];
+};
+type ElkNode = {
+  id?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  children?: ElkNode[];
+  edges?: ElkEdge[];
+};
+type ElkEngine = { layout(graph: object): Promise<ElkNode> };
 const elk: ElkEngine = new (ElkConstructor as unknown as { new(): ElkEngine })();
 const GRID = 16;
-const width = 192;
-const height = 48;
 const snap = (value: number) => Math.round(value / GRID) * GRID;
 
 export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: ContainerSpec[]; loops?: LoopSpec[] }) {
@@ -18,7 +39,7 @@ export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: Conta
     byParent.set(container.parent, list);
   }
   const nodeChildren = (parent?: string) => input.nodes.filter(node => node.container === parent).map(node => ({
-    id: node.id, width, height, labels: [{ text: node.id }],
+    id: node.id, ...graphNodeSize(node), labels: [{ text: node.id }],
   }));
   const build = (id: string): { id: string; children: unknown[]; layoutOptions: Record<string, string> } => ({
     id,
@@ -40,12 +61,18 @@ export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: Conta
       'elk.algorithm': 'layered',
       'elk.direction': 'DOWN',
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '48',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.nodeNode': '56',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '72',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '28',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '20',
+      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.layered.mergeEdges': 'false',
       'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
     },
     children: [
       ...(byParent.get(undefined) ?? []).map(build),
-      ...input.nodes.filter(node => !nested.has(node.id)).map(node => ({ id: node.id, width, height })),
+      ...input.nodes.filter(node => !nested.has(node.id)).map(node => ({ id: node.id, ...graphNodeSize(node) })),
     ],
     // Back-edges describe runtime rework, not dependency order. Including them
     // in the layered layout can invert the main path and collapse both edges
@@ -54,13 +81,56 @@ export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: Conta
   };
   const laid = await elk.layout(graph as never);
   const positions: Record<string, { x: number; y: number; width: number; height: number }> = {};
-  const walk = (node: { id?: string; x?: number; y?: number; width?: number; height?: number; children?: unknown[] }, ox = 0, oy = 0) => {
+  const origins: Record<string, Point> = {};
+  const walk = (node: ElkNode, ox = 0, oy = 0) => {
     if (!node.id) return;
     const x = snap(ox + (node.x ?? 0));
     const y = snap(oy + (node.y ?? 0));
-    positions[node.id] = { x, y, width: node.width ?? width, height: node.height ?? height };
-    for (const child of node.children ?? []) walk(child as typeof node, x, y);
+    origins[node.id] = { x, y };
+    positions[node.id] = { x, y, width: node.width ?? 144, height: node.height ?? 56 };
+    for (const child of node.children ?? []) walk(child, x, y);
   };
   walk(laid);
-  return { positions, edges: edges.map(edge => ({ id: edge.id, source: edge.sources[0]!, target: edge.targets[0]! })) };
+  const attachToBoundary = (point: Point, id: string | undefined) => {
+    const rect = id ? positions[id] : undefined;
+    if (!rect) return point;
+    const x = Math.min(rect.x + rect.width, Math.max(rect.x, point.x));
+    const y = Math.min(rect.y + rect.height, Math.max(rect.y, point.y));
+    const candidates = [
+      { x, y: rect.y },
+      { x, y: rect.y + rect.height },
+      { x: rect.x, y },
+      { x: rect.x + rect.width, y },
+    ];
+    return candidates.reduce((best, candidate) => {
+      const distance = (candidate.x - point.x) ** 2 + (candidate.y - point.y) ** 2;
+      const bestDistance = (best.x - point.x) ** 2 + (best.y - point.y) ** 2;
+      return distance < bestDistance ? candidate : best;
+    });
+  };
+  const routed = new Map<string, Point[]>();
+  for (const edge of laid.edges ?? []) {
+    if (!edge.id) continue;
+    const section = edge.sections?.[0];
+    if (!section?.startPoint || !section.endPoint) continue;
+    const origin = origins[edge.container ?? 'root'] ?? { x: 0, y: 0 };
+    const shift = (point: Point) => ({ x: Math.round(origin.x + point.x), y: Math.round(origin.y + point.y) });
+    const points = [
+      shift(section.startPoint),
+      ...(section.bendPoints ?? []).map(shift),
+      shift(section.endPoint),
+    ];
+    points[0] = attachToBoundary(points[0]!, edge.sources?.[0]);
+    points[points.length - 1] = attachToBoundary(points[points.length - 1]!, edge.targets?.[0]);
+    routed.set(edge.id, points);
+  }
+  return {
+    positions,
+    edges: edges.map(edge => ({
+      id: edge.id,
+      source: edge.sources[0]!,
+      target: edge.targets[0]!,
+      ...(routed.get(edge.id) ? { points: routed.get(edge.id)! } : {}),
+    })),
+  };
 }

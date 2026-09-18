@@ -32,8 +32,46 @@ type ConversationTask = {
   cost: { unknown?: boolean; amount?: number };
   evidence: { acceptanceId: string; valid: boolean }[];
 };
+export type GraphAgentDetail = {
+  id: string;
+  version: number;
+  name: string;
+  description: string | null;
+  recommendedGrade: string;
+  review: boolean;
+  capabilities: {
+    id: string;
+    version: string;
+    role: string;
+    kind: string | null;
+    name: string;
+    status: string;
+    source: string | null;
+  }[];
+  experience: {
+    task: {
+      token: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number };
+      runMs: { mean: number | null; samples: number; unknown: number; unfinished: number; failed: number };
+      totalSamples: number;
+    };
+    samples: {
+      taskId: string; nodeId: string; request: string | null; status: string;
+      tokens: number | null; runMs: number | null; reworkRounds: number; failed: boolean;
+    }[];
+  };
+};
 type DraftGraph = {
-  nodes: { id: string; kind: string; status: string; container?: string }[];
+  nodes: {
+    id: string; kind: string; status: string; container?: string;
+    action?: string; definitionVersion?: string; model?: string; dependsOn?: string[];
+    context?: {
+      purpose?: string; sourceNode?: string; independence?: string; reason?: string;
+      requiredFacts?: { kind?: string }[];
+      predecessors?: { source?: string; mode?: string }[];
+    } | null;
+    contextMode?: 'fresh' | 'fork' | null;
+    agent?: GraphAgentDetail | null;
+  }[];
   containers: { id: string; parent?: string }[];
   loops: { from: string; to: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
@@ -404,6 +442,19 @@ function ProposalDrawer({
   );
 }
 
+function graphDuration(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '未记录';
+  return value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
+}
+
+function graphCapabilityLabel(kind: string | null) {
+  if (kind === 'skill') return 'Skills';
+  if (kind === 'mcp') return 'MCP';
+  if (kind === 'pi-extension' || kind === 'extension') return 'Pi extensions';
+  if (kind === 'prompt') return 'Agent.md';
+  return '能力';
+}
+
 function ConversationGraphBoard({
   proposal,
   history,
@@ -425,8 +476,7 @@ function ConversationGraphBoard({
   onSelectVersion: (version: number) => void;
   onSelectNode: (nodeId: string | null) => void;
 }) {
-  const selectedNode = proposal.spec.nodes.find(node => node.id === selectedNodeId) ?? null;
-  const selectedGraphNode = graph?.nodes.find(node => node.id === selectedNodeId) ?? null;
+  const selectedNode = graph?.nodes.find(node => node.id === selectedNodeId) ?? null;
   return (
     <div className="conversation-graph-main" data-testid="conversation-graph">
       <header className="conversation-graph-header">
@@ -487,21 +537,97 @@ function ConversationGraphBoard({
               </button>
             </div>
             <div className="row" style={{ marginBottom: 12 }}>
-              <StatusDot tone={NODE_TONE[selectedGraphNode?.status ?? ''] ?? 'neutral'} />
-              <span>{NODE_LABEL[selectedGraphNode?.status ?? ''] ?? selectedGraphNode?.status ?? '草稿'}</span>
+              <StatusDot tone={NODE_TONE[selectedNode?.status ?? ''] ?? 'neutral'} />
+              <span>{NODE_LABEL[selectedNode?.status ?? ''] ?? selectedNode?.status ?? '草稿'}</span>
             </div>
-            <dl className="kv">
-              <dt>类型</dt><dd>{selectedNode.kind}</dd>
-              <dt>动作</dt><dd className="mono">{selectedNode.action ?? '—'}</dd>
-              <dt>定义</dt><dd className="mono">{selectedNode.definitionVersion ?? '—'}</dd>
-              <dt>模型</dt><dd className="mono">{selectedNode.model ?? '—'}</dd>
-              <dt>容器</dt><dd className="mono">{selectedNode.container ?? '—'}</dd>
-              <dt>依赖</dt><dd className="mono">{selectedNode.dependsOn?.join(', ') || '—'}</dd>
-            </dl>
-            {selectedNode.input !== undefined && (
+            {selectedNode.kind === 'agent' && selectedNode.agent ? (
               <>
-                <h4 style={{ marginTop: 16 }}>输入</h4>
-                <pre>{JSON.stringify(selectedNode.input, null, 2)}</pre>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  <Pill tone={selectedNode.contextMode === 'fork' ? 'warn' : 'accent'}>{selectedNode.contextMode === 'fork' ? 'Fork' : 'Fresh'}</Pill>
+                  <Pill tone="neutral">{selectedNode.agent.recommendedGrade}</Pill>
+                  {selectedNode.agent.review && <Pill tone="warn">独立审查</Pill>}
+                </div>
+                <dl className="kv">
+                  <dt>Subagent</dt><dd>{selectedNode.agent.name} <span className="muted mono">{selectedNode.agent.id}@{selectedNode.agent.version}</span></dd>
+                  <dt>动作</dt><dd className="mono">{selectedNode.action ?? '—'}</dd>
+                  <dt>模型</dt><dd className="mono">{selectedNode.model ?? '—'}</dd>
+                  <dt>容器</dt><dd className="mono">{selectedNode.container ?? '—'}</dd>
+                  <dt>依赖</dt><dd className="mono">{selectedNode.dependsOn?.join(', ') || '—'}</dd>
+                </dl>
+                <section className="graph-agent-detail-section" data-testid="graph-agent-capabilities">
+                  <h4>能力</h4>
+                  {['prompt', 'skill', 'mcp', 'pi-extension'].map(kind => {
+                    const resources = selectedNode.agent!.capabilities.filter(item =>
+                      kind === 'pi-extension' ? item.kind === 'pi-extension' || item.kind === 'extension' : item.kind === kind);
+                    if (!resources.length) return null;
+                    return (
+                      <div className="graph-agent-capability-group" key={kind}>
+                        <span className="faint">{graphCapabilityLabel(kind)}</span>
+                        <div className="chip-row">
+                          {resources.map(resource => <Pill key={`${resource.id}@${resource.version}`} tone="neutral">{resource.name}</Pill>)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!selectedNode.agent.capabilities.length && <p className="muted">未绑定能力。</p>}
+                </section>
+                <section className="graph-agent-detail-section" data-testid="graph-agent-experience">
+                  <h4>工作经历</h4>
+                  <p className="muted">
+                    平均消耗 {selectedNode.agent.experience.task.token.mean === null
+                      ? '未知'
+                      : `${formatTokens(selectedNode.agent.experience.task.token.mean)} tokens`}
+                    {' · '}
+                    平均耗时 {graphDuration(selectedNode.agent.experience.task.runMs.mean)}
+                    {' · '}
+                    {selectedNode.agent.experience.task.totalSamples} 次任务样本
+                  </p>
+                  {selectedNode.agent.experience.samples.length > 0 && (
+                    <ul className="list compact-list">
+                      {selectedNode.agent.experience.samples.map(sample => (
+                        <li className="list-item" key={`${sample.taskId}:${sample.nodeId}`}>
+                          <span className="grow truncate">{sample.request ?? sample.nodeId}</span>
+                          <span className="muted">{sample.status} · {sample.tokens === null ? 'token 未知' : `${formatTokens(sample.tokens)} tokens`} · {graphDuration(sample.runMs)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section className="graph-agent-detail-section" data-testid="graph-agent-instructions">
+                  <h4>灌输的指令</h4>
+                  <p className="muted">
+                    用途 {selectedNode.context?.purpose ?? '未指定'}
+                    {selectedNode.context?.independence ? ` · 独立性 ${selectedNode.context.independence}` : ''}
+                    {selectedNode.context?.sourceNode ? ` · 来源 ${selectedNode.context.sourceNode}` : ''}
+                  </p>
+                  {selectedNode.context?.requiredFacts?.length
+                    ? <p className="muted">继承事实：{selectedNode.context.requiredFacts.map(fact => fact.kind ?? '未知').join('、')}</p>
+                    : <p className="muted">默认 Fresh 指令；不复制前驱 transcript。</p>}
+                  {selectedNode.agent.capabilities.filter(item => item.role === 'agent' || item.role === 'tool').length > 0 && (
+                    <p className="muted">Prompt：{selectedNode.agent.capabilities.filter(item => item.role === 'agent' || item.role === 'tool').map(item => item.name).join('、')}</p>
+                  )}
+                </section>
+                <section className="graph-agent-detail-section" data-testid="graph-agent-handoff">
+                  <h4>传递的 handoff</h4>
+                  {selectedNode.context?.predecessors?.length
+                    ? selectedNode.context.predecessors.map(policy => (
+                      <p className="muted" key={`${policy.source}:${policy.mode}`}>
+                        {policy.source ?? '—'} · {policy.mode === 'result_handoff' ? '结果交接' : '仅证据交接'}
+                      </p>
+                    ))
+                    : <p className="muted">没有声明前驱交接边。</p>}
+                </section>
+              </>
+            ) : (
+              <>
+                <dl className="kv">
+                  <dt>类型</dt><dd>{selectedNode.kind}</dd>
+                  <dt>动作</dt><dd className="mono">{selectedNode.action ?? '—'}</dd>
+                  <dt>定义</dt><dd className="mono">{selectedNode.definitionVersion ?? '—'}</dd>
+                  <dt>模型</dt><dd className="mono">{selectedNode.model ?? '—'}</dd>
+                  <dt>容器</dt><dd className="mono">{selectedNode.container ?? '—'}</dd>
+                  <dt>依赖</dt><dd className="mono">{selectedNode.dependsOn?.join(', ') || '—'}</dd>
+                </dl>
               </>
             )}
           </aside>

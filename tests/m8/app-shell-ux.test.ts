@@ -120,6 +120,7 @@ test('chat and graph tabs keep proposal details and node inspection independent'
     startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
   });
   cleanup.push(() => server.close());
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'app-shell-agent-detail');
   const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论一下', requestId: 'conversation' });
   const view = await server.runtime.conversations.view(created.conversationId);
   const firstProposal = {
@@ -217,6 +218,7 @@ test('chat and graph tabs keep proposal details and node inspection independent'
   await page.getByTestId('draft-graph-detail').waitFor();
   expect(await page.getByTestId('graph-state-summary').innerText()).toContain('任务状态');
   expect(await page.locator('.node-card[data-node-id="human"]').innerText()).toContain('human check');
+  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-node-type')).toBe('human');
   await expect.poll(async () => {
     const body = await page.locator('.conversation-body').boundingBox();
     const graph = await page.locator('.conversation-graph-main').boundingBox();
@@ -230,6 +232,10 @@ test('chat and graph tabs keep proposal details and node inspection independent'
   await nodeDetail.waitFor();
   expect(await nodeDetail.innerText()).toContain('work');
   expect(await nodeDetail.innerText()).toContain('coder@1');
+  expect(await nodeDetail.innerText()).toContain('Fresh');
+  expect(await nodeDetail.innerText()).toContain('工作经历');
+  expect(await nodeDetail.innerText()).toContain('灌输的指令');
+  expect(await nodeDetail.innerText()).toMatch(/传递的 handoff/i);
 
   await page.getByTestId('conversation-tab-chat').click();
   await page.locator('.conversation-composer-wrap').waitFor();

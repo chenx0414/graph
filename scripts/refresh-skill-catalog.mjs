@@ -144,7 +144,7 @@ function slug(value) {
 function stableId(repo, path) {
   const stem = slug(`${repo}-${path.replace(/\/?SKILL\.md$/, '')}`);
   const digest = createHash('sha1').update(`${repo}:${path}`).digest('hex').slice(0, 8);
-  return `skill-${stem}-${digest}`;
+  return `${stem}-${digest}`;
 }
 
 function frontmatter(text) {

@@ -4,7 +4,7 @@ import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
-import { ConversationPanel, type ConversationSummary } from './Conversation.tsx';
+import { ConversationPanel, type ConversationSummary, type GraphAgentDetail } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useTaskStream } from './shared.tsx';
@@ -40,7 +40,17 @@ type NodeView = {
   id: string; kind: string; status: string; container?: string; used?: number | null; budget?: number | null; unlimited?: boolean;
   reserved?: number; instanceId?: string | null; selectedModel?: string; boundDefinition?: string;
   activationId?: string; outputVersion?: number; stallCount?: number;
-  context?: { purpose?: string; sourceNode?: string; requiredFacts?: { kind: string }[]; independence?: string };
+  context?: {
+    purpose?: string; sourceNode?: string; requiredFacts?: { kind: string }[]; independence?: string;
+    predecessors?: { source?: string; mode?: string }[];
+    predecessorHandoffs?: {
+      sourceNodeId?: string;
+      mode?: string;
+      resultHandoff?: { workSummary?: string } | null;
+    }[];
+    handoffSummary?: string | null;
+  };
+  agent?: GraphAgentDetail | null;
 };
 export type Settings_ = {
   projects: { id: string; root: string }[];
@@ -822,6 +832,9 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
   const nodeEvidence = view?.evidence?.filter(item => item.nodeId === selected) ?? [];
   const nodeOperations = (ops ?? []).filter(item => item.nodeId === selected);
   const nodeWaiting = selectedNode ? waitingForSlot(selectedNode, settings, limits, startup?.limitAliases) : false;
+  const graphDuration = (value: number | null | undefined) => value === null || value === undefined || !Number.isFinite(value)
+    ? '未记录'
+    : value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
   return (
     <div className="stagger" data-testid="graph" data-editable="false">
       <Card>
@@ -875,6 +888,37 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
                     ? '独立审查上下文'
                     : '默认独立上下文；重跑时继续原会话'
             }</div>
+            {selectedNode.agent && (
+              <>
+                <div><span className="muted">Subagent </span>{selectedNode.agent.name} <span className="mono muted">{selectedNode.agent.id}@{selectedNode.agent.version}</span></div>
+                <div><span className="muted">上下文模式 </span>{selectedNode.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call') ? 'Fork' : 'Fresh'}</div>
+                <div><span className="muted">能力 </span>{selectedNode.agent.capabilities.length ? selectedNode.agent.capabilities.map(item => item.name).join('、') : '未绑定'}</div>
+                <div>
+                  <span className="muted">工作经历 </span>
+                  平均 {selectedNode.agent.experience.task.token.mean === null ? 'token 未知' : `${formatTokens(selectedNode.agent.experience.task.token.mean)} tokens`}
+                  {' · '}
+                  {graphDuration(selectedNode.agent.experience.task.runMs.mean)}
+                  {' · '}
+                  {selectedNode.agent.experience.task.totalSamples} 次样本
+                </div>
+                <div>
+                  <span className="muted">灌输的指令 </span>
+                  {selectedNode.context?.purpose ? `用途 ${selectedNode.context.purpose}` : '默认任务说明'}
+                  {selectedNode.context?.independence ? ` · 独立性 ${selectedNode.context.independence}` : ''}
+                  {selectedNode.agent.capabilities.some(item => item.role === 'agent' || item.role === 'tool')
+                    ? ` · Prompt ${selectedNode.agent.capabilities.filter(item => item.role === 'agent' || item.role === 'tool').map(item => item.name).join('、')}`
+                    : ''}
+                </div>
+                <div>
+                  <span className="muted">Handoff </span>
+                  {selectedNode.context?.predecessorHandoffs?.length
+                    ? selectedNode.context.predecessorHandoffs.map(item => `${item.sourceNodeId ?? '—'}:${item.resultHandoff?.workSummary ?? (item.mode === 'result_handoff' ? '结果交接' : '仅证据交接')}`).join('、')
+                    : selectedNode.context?.predecessors?.length
+                      ? selectedNode.context.predecessors.map(policy => `${policy.source}:${policy.mode === 'result_handoff' ? '结果交接' : '仅证据交接'}`).join('、')
+                      : '无'}
+                </div>
+              </>
+            )}
             <div><span className="muted">用量 </span>{selectedNode.used == null ? '未知（无权威计量）' : formatTokens(selectedNode.used)}{selectedNode.unlimited ? ' · 额度不限' : selectedNode.budget == null ? '' : ` / 预算 ${formatTokens(selectedNode.budget)}`} · 预留 {selectedNode.reserved ?? 0}</div>
             <div><span className="muted">尝试次数 </span>{selectedNode.stallCount ?? 0} · 输出版本 {selectedNode.outputVersion ?? 0}</div>
             <div><span className="muted">验收证据 </span>{nodeEvidence.length ? nodeEvidence.map(item => `${item.acceptanceId}:${item.valid ? '有效' : '无效或过期'} ${item.summary}`).join(' / ') : '无'}</div>

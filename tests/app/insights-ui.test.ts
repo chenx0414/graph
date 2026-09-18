@@ -105,8 +105,9 @@ test('the task page shows a run timeline, usage summary and a toned graph with a
   expect(await page.locator('.react-flow__node').count()).toBeGreaterThanOrEqual(2);
   await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
   const border = await page.locator('.node-card[data-node-id="work"]').first()
-    .evaluate(element => getComputedStyle(element).borderColor);
-  expect(border).toBe('rgb(22, 163, 74)');
+    .evaluate(element => ({ top: getComputedStyle(element).borderTopColor, left: getComputedStyle(element).borderLeftColor }));
+  expect(border.top).toBe('rgb(22, 163, 74)');
+  expect(border.left).toBe('rgb(37, 99, 235)');
   // The status dot mirrors the border tone.
   const dot = await page.locator('.node-card[data-node-id="work"]').first()
     .locator('.node-dot').evaluate(element => getComputedStyle(element).backgroundColor);

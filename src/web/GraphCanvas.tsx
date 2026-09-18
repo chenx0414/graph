@@ -1,4 +1,5 @@
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, type EdgeProps, type NodeProps } from '@xyflow/react';
+import { graphNodeLabel, graphNodeVisualKind, type GraphNodeVisualKind } from '../core/graph-presentation.ts';
 import { NODE_TONE_COLOR, nodeTone, type NodeTone } from './insights.ts';
 
 const GRID = 16;
@@ -10,35 +11,35 @@ type GraphPayload = {
     context?: {
       purpose?: string;
       sourceNode?: string;
-      requiredFacts?: { kind: string }[];
+      requiredFacts?: { kind?: string }[];
       independence?: string;
       predecessors?: { source?: string; mode?: string }[];
-    };
+    } | null;
   }[];
   containers: { id: string; parent?: string }[];
-  layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
+  layout: {
+    positions: Record<string, { x: number; y: number; width: number; height: number }>;
+    edges: { id: string; source: string; target: string; points?: { x: number; y: number }[] }[];
+  };
 };
 
-type NodeData = { id: string; label: string; tone: NodeTone; status: string };
+type NodeData = {
+  id: string;
+  label: string;
+  nodeType: GraphNodeVisualKind;
+  tone: NodeTone;
+  status: string;
+};
 
-function nodeSuffix(node: GraphPayload['nodes'][number]) {
-  if (node.action === 'graph.human_check' || /(^|[-_])human($|[-_])/i.test(node.id)) return 'human check';
-  if (node.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')) return '继承快照节点';
-  if (node.context?.independence && node.context.independence !== 'none') return '独立上下文节点';
-  if (node.context?.purpose === 'review' || node.context?.purpose === 'verify') return '独立上下文节点';
-  if (node.kind === 'agent') return 'agent';
-  if (node.action === 'graph.verify') return 'gate';
-  if (node.action === 'graph.command') return 'tool';
-  if (node.action === 'route') return 'route';
-  if (node.action === 'join') return 'join';
-  return node.kind === 'program' ? 'tool' : node.kind;
-}
-
-function nodeLabel(node: GraphPayload['nodes'][number]) {
-  const suffix = nodeSuffix(node);
-  const prefix = node.id.toLowerCase();
-  return suffix.toLowerCase() === prefix || suffix.toLowerCase().startsWith(`${prefix} `) ? suffix : `${node.id} ${suffix}`;
-}
+const NODE_TYPE_LABEL: Record<GraphNodeVisualKind, string> = {
+  agent: 'A',
+  tool: 'T',
+  human: 'H',
+  gate: 'G',
+  route: 'R',
+  join: 'J',
+  program: 'P',
+};
 
 const handleStyle = { opacity: 0, width: 1, height: 1, border: 0, background: 'transparent' };
 
@@ -47,14 +48,17 @@ const handleStyle = { opacity: 0, width: 1, height: 1, border: 0, background: 't
 function GraphNode({ data, selected }: NodeProps) {
   const info = data as unknown as NodeData;
   return (
-    <div className="node-card" data-node-id={info.id} data-status={info.status} data-tone={info.tone} data-selected={selected ? 'true' : 'false'}>
+    <div className="node-card" data-node-id={info.id} data-node-type={info.nodeType} data-status={info.status} data-tone={info.tone} data-selected={selected ? 'true' : 'false'}>
       <Handle id="target-top" type="target" position={Position.Top} style={handleStyle} />
+      <Handle id="target-left" type="target" position={Position.Left} style={handleStyle} />
       <Handle id="target-right" type="target" position={Position.Right} style={handleStyle} />
       <div className="node-head">
         <span className="node-dot" style={{ background: NODE_TONE_COLOR[info.tone] }} />
-        {info.label}
+        <span className="node-kind" title={info.nodeType}>{NODE_TYPE_LABEL[info.nodeType]}</span>
+        <span className="node-label">{info.label}</span>
       </div>
       <Handle id="source-bottom" type="source" position={Position.Bottom} style={handleStyle} />
+      <Handle id="source-left" type="source" position={Position.Left} style={handleStyle} />
       <Handle id="source-right" type="source" position={Position.Right} style={handleStyle} />
     </div>
   );
@@ -62,20 +66,26 @@ function GraphNode({ data, selected }: NodeProps) {
 
 const nodeTypes = { graphNode: GraphNode };
 
-function GridEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth }: EdgeProps) {
-  const path = sourceX === targetX
+function GridEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth, data }: EdgeProps) {
+  const points = (data as { points?: { x: number; y: number }[] } | undefined)?.points;
+  const lane = (data as { lane?: number } | undefined)?.lane ?? 0;
+  const path = points?.length
+    ? `M ${points[0]!.x} ${points[0]!.y} ${points.slice(1).map(point => `L ${point.x} ${point.y}`).join(' ')}`
+    : sourceX === targetX
     ? `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`
-    : `M ${sourceX} ${sourceY} L ${sourceX} ${align((sourceY + targetY) / 2)} L ${targetX} ${align((sourceY + targetY) / 2)} L ${targetX} ${targetY}`;
+    : `M ${sourceX} ${sourceY} L ${sourceX} ${align((sourceY + targetY) / 2) + lane} L ${targetX} ${align((sourceY + targetY) / 2) + lane} L ${targetX} ${targetY}`;
   return <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />;
 }
 
-function GridLoopEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth }: EdgeProps) {
-  const lane = 40 + (id.split('').reduce((sum, value) => sum + value.charCodeAt(0), 0) % 3) * GRID;
-  const right = Math.max(sourceX, targetX) + lane;
+function GridLoopEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth, data }: EdgeProps) {
+  const explicitLeft = (data as { leftX?: number } | undefined)?.leftX;
+  const lane = (data as { lane?: number } | undefined)?.lane
+    ?? 40 + (id.split('').reduce((sum, value) => sum + value.charCodeAt(0), 0) % 3) * GRID;
+  const left = explicitLeft ?? Math.min(sourceX, targetX) - lane;
   const path = [
     `M ${sourceX} ${sourceY}`,
-    `L ${right} ${sourceY}`,
-    `L ${right} ${targetY}`,
+    `L ${left} ${sourceY}`,
+    `L ${left} ${targetY}`,
     `L ${targetX} ${targetY}`,
   ].join(' ');
   return <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />;
@@ -112,6 +122,11 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
   };
   for (const [id, closed] of Object.entries(collapsed)) if (closed) walk(id);
   const hidden = new Set(graph.nodes.filter(node => node.container && hiddenContainers.has(node.container)).map(node => node.id));
+  const nodePositions = graph.nodes
+    .map(node => graph.layout.positions[node.id])
+    .filter((position): position is NonNullable<typeof position> => Boolean(position));
+  const minNodeLeft = Math.min(0, ...nodePositions.map(position => position.x));
+  let loopLane = 0;
   const nodes = [
     ...graph.containers.map(container => {
       const position = graph.layout.positions[container.id] ?? { x: 0, y: 0, width: 240, height: 120 };
@@ -125,13 +140,14 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
     ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => {
       const position = graph.layout.positions[node.id] ?? { x: 0, y: 0, width: 192, height: 48 };
       const tone = nodeTone(node.status);
+      const nodeType = graphNodeVisualKind(node);
       return {
         id: node.id, type: 'graphNode', position: relativePosition(node.id, position),
-        data: { id: node.id, label: nodeLabel(node), tone, status: node.status } satisfies NodeData,
+        data: { id: node.id, label: graphNodeLabel(node), nodeType, tone, status: node.status } satisfies NodeData,
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
-        style: { width: position.width, height: position.height, minWidth: 150, minHeight: 44 },
+        style: { width: position.width, height: position.height },
         ...(node.container ? { parentId: node.container } : {}),
       };
     }),
@@ -139,14 +155,31 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
   const edges = graph.layout.edges.filter(edge => !hidden.has(edge.source) && !hidden.has(edge.target))
     .map(edge => {
       const loop = edge.id.startsWith('loop:');
+      const sourceIsNode = graph.nodes.some(node => node.id === edge.source);
+      const targetIsNode = graph.nodes.some(node => node.id === edge.target);
       const policy = edgePolicy.get(`${edge.source}:${edge.target}`);
       const resultHandoff = policy === 'result_handoff';
       return {
         id: edge.id, source: edge.source, target: edge.target, type: loop ? 'gridLoop' : 'grid',
-        sourceHandle: loop ? 'source-right' : 'source-bottom',
-        targetHandle: loop ? 'target-right' : 'target-top',
+        ...(loop
+          ? {
+              ...(sourceIsNode ? { sourceHandle: 'source-left' } : {}),
+              ...(targetIsNode ? { targetHandle: 'target-left' } : {}),
+            }
+          : {
+              ...(sourceIsNode ? { sourceHandle: 'source-bottom' } : {}),
+              ...(targetIsNode ? { targetHandle: 'target-top' } : {}),
+            }),
         className: loop ? 'grid-edge grid-loop-edge' : 'grid-edge',
-        ...(policy ? { label: resultHandoff ? '结果交接' : '仅证据交接', labelStyle: { fill: resultHandoff ? '#b45309' : '#475569', fontSize: 11 } } : {}),
+        ...(loop ? { data: { leftX: minNodeLeft - 64 - loopLane++ * 24 } } : {}),
+        ...(!loop && edge.points?.length ? { data: { points: edge.points } } : {}),
+        ...(policy ? {
+          label: resultHandoff ? '结果交接' : '仅证据交接',
+          labelStyle: { fill: resultHandoff ? '#b45309' : '#475569', fontSize: 11 },
+          labelBgStyle: { fill: '#ffffff', fillOpacity: 0.92 },
+          labelBgPadding: [4, 2] as [number, number],
+          labelBgBorderRadius: 4,
+        } : {}),
         ...(loop
           ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } }
           : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),

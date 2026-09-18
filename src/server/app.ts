@@ -11,8 +11,55 @@ import type { AppServices, StartupInfo } from './host.ts';
 import { sanitizeConfig, type ConfigStore } from './config-service.ts';
 import type { UsageService } from './usage.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
+import type { DefinitionSpec } from '../catalog/catalog.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
+
+function graphAgentDetail(runtime: Runtime, definitionVersion: string | null | undefined) {
+  if (!definitionVersion) return null;
+  const match = /^(.*)@(\d+)$/.exec(definitionVersion);
+  if (!match) return null;
+  const id = match[1]!;
+  const version = Number(match[2]);
+  try {
+    const definition = runtime.catalog.definitionSpec(id, version) as DefinitionSpec;
+    const talent = runtime.talent(id, { version });
+    const snapshot = definition.snapshot && typeof definition.snapshot === 'object' && !Array.isArray(definition.snapshot)
+      ? definition.snapshot as { agentCombination?: { name?: string; description?: string } }
+      : undefined;
+    const capabilityView = (bound: { id: string; version: string }, role: string) => {
+      const record = runtime.catalog.capability(bound.id, bound.version);
+      return {
+        id: bound.id,
+        version: bound.version,
+        role,
+        kind: record?.kind ?? null,
+        name: record?.name ?? bound.id,
+        status: record?.status ?? 'missing',
+        source: record?.source ?? null,
+      };
+    };
+    return {
+      id,
+      version,
+      name: snapshot?.agentCombination?.name ?? id,
+      description: snapshot?.agentCombination?.description ?? talent.detail.description,
+      recommendedGrade: talent.detail.recommendedGrade,
+      review: talent.detail.review,
+      capabilities: [
+        ...(definition.capabilities ?? []).map(bound => capabilityView(bound, 'capability')),
+        ...(definition.prompts?.agent ? [capabilityView(definition.prompts.agent, 'agent')] : []),
+        ...(definition.prompts?.tool ? [capabilityView(definition.prompts.tool, 'tool')] : []),
+      ],
+      experience: {
+        task: talent.experience.task,
+        samples: talent.experience.samples.slice(-5).reverse(),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService }) {
   const app = Fastify({ logger: false });
@@ -175,7 +222,23 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     if (!spec) return { nodes: [], containers: [], loops: [], layout: { positions: {}, edges: [] } };
     const layout = await layoutGraph({ nodes: spec.nodes, containers: spec.containers ?? [], loops: spec.loops ?? [] });
     return {
-      nodes: spec.nodes.map(node => ({ id: node.id, kind: node.kind, status: 'draft', container: node.container })),
+      nodes: spec.nodes.map(node => {
+        const fork = Boolean(node.context?.sourceNode)
+          || Boolean(node.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call'));
+        return {
+          id: node.id,
+          kind: node.kind,
+          status: 'draft',
+          container: node.container,
+          action: node.action,
+          definitionVersion: node.definitionVersion,
+          model: node.model,
+          dependsOn: node.dependsOn ?? [],
+          context: node.context ?? null,
+          contextMode: node.kind === 'agent' ? (fork ? 'fork' : 'fresh') : null,
+          agent: node.kind === 'agent' ? graphAgentDetail(runtime, node.definitionVersion) : null,
+        };
+      }),
       containers: spec.containers ?? [], loops: spec.loops ?? [], layout,
     };
   });
@@ -332,7 +395,13 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const params = request.params as { taskId: string };
     const view = await runtime.user.task(params.taskId).view();
     const layout = await layoutGraph({ nodes: view.nodes, containers: view.containers, loops: view.loops });
-    return { nodes: view.nodes, containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost };
+    return {
+      nodes: view.nodes.map(node => ({
+        ...node,
+        agent: graphAgentDetail(runtime, node.boundDefinition),
+      })),
+      containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost,
+    };
   });
   app.get('/api/catalog', async () => ({
     definitions: runtime.catalog.definitions(),

@@ -1057,7 +1057,7 @@ export async function openTaskRuntime(options: {
         return {
           taskId, nodeId,
           node: { id: nodeId, kind: 'container', action: 'container', role: null, status: children.every(child => child.status === 'succeeded') ? 'succeeded' : 'running', activationId: '', outputVersion: 0, stallCount: 0 },
-          instance: null, session: null, context: null, capabilities: [],
+          instance: null, session: null, context: null, capabilities: [], capabilityUsage: [],
           operations: [], invocations: [], questions: [], evidence: [],
           entries: [], entryCount: 0, hasOlder: false, hasNewer: false,
           childContainers: [...childIds], children,

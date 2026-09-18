@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { graphNodeSize } from '../../src/core/graph-presentation.ts';
 import { createApp } from '../../src/server/app.ts';
 import { layoutGraph } from '../../src/server/layout.ts';
 import * as templates from '../../src/core/templates.ts';
@@ -15,6 +16,52 @@ afterEach(async () => { for (const action of cleanup.reverse()) await action(); 
 const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
 const origin = 'http://127.0.0.1:1';
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+const overlaps = (
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+) => left.x < right.x + right.width
+  && left.x + left.width > right.x
+  && left.y < right.y + right.height
+  && left.y + left.height > right.y;
+
+function segmentHitsRect(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  rect: { x: number; y: number; width: number; height: number },
+) {
+  const left = Math.min(start.x, end.x);
+  const right = Math.max(start.x, end.x);
+  const top = Math.min(start.y, end.y);
+  const bottom = Math.max(start.y, end.y);
+  return left < rect.x + rect.width
+    && right > rect.x
+    && top < rect.y + rect.height
+    && bottom > rect.y;
+}
+
+function segmentsCross(
+  left: [{ x: number; y: number }, { x: number; y: number }],
+  right: [{ x: number; y: number }, { x: number; y: number }],
+) {
+  const leftVertical = left[0].x === left[1].x;
+  const rightVertical = right[0].x === right[1].x;
+  if (leftVertical !== rightVertical) return false;
+  if (leftVertical) {
+    return left[0].x === right[0].x
+      && Math.max(Math.min(left[0].y, left[1].y), Math.min(right[0].y, right[1].y))
+        < Math.min(Math.max(left[0].y, left[1].y), Math.max(right[0].y, right[1].y));
+  }
+  return left[0].y === right[0].y
+    && Math.max(Math.min(left[0].x, left[1].x), Math.min(right[0].x, right[1].x))
+      < Math.min(Math.max(left[0].x, left[1].x), Math.max(right[0].x, right[1].x));
+}
+
+function onNodeBoundary(point: { x: number; y: number }, node: { x: number; y: number; width: number; height: number }) {
+  const onHorizontal = point.y === node.y || point.y === node.y + node.height;
+  const onVertical = point.x === node.x || point.x === node.x + node.width;
+  return (onHorizontal && point.x >= node.x && point.x <= node.x + node.width)
+    || (onVertical && point.y >= node.y && point.y <= node.y + node.height);
+}
 
 async function graphOf(create: (root: string) => { actions: Record<string, ActionAdapter>; graph: Pick<Proposal, 'nodes' | 'containers' | 'loops'>; acceptance?: Proposal['acceptance'] }) {
   const root = await mkdtemp(join(tmpdir(), 'graph-m5-graph-'));
@@ -88,10 +135,56 @@ test('every template including back-edges receives layout positions', async () =
       if (!position) continue;
       expect(Math.abs(position.x % 16), `${node.id} x`).toBe(0);
       expect(Math.abs(position.y % 16), `${node.id} y`).toBe(0);
-      expect(position.width, `${node.id} width`).toBe(192);
-      expect(position.height, `${node.id} height`).toBe(48);
+      expect(position).toMatchObject(graphNodeSize(node));
     }
     for (const loop of graph.loops ?? []) expect(layout.edges.some(edge => edge.source === loop.from && edge.target === loop.to)).toBe(true);
+  }
+});
+
+test('orthogonal dependency routes avoid node overlap and edge crossings', async () => {
+  const optimize: Extract<VerifierConfig, { kind: 'multiview' }> = { kind: 'multiview', subjectNode: 'implement', reportNodes: ['review'], dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }] };
+  const ranking = [{ id: 'quality', weight: 1, min: 0, max: 10 }];
+  const select: Extract<VerifierConfig, { kind: 'jury' }> = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['compiles'], ranking, tieOrder: ['quality'], candidates: [{ id: 'a', node: 'candidate-a' }, { id: 'b', node: 'candidate-b' }] };
+  const graphs = [
+    templates.fanout(),
+    templates.router(),
+    templates.supervisorWorkers(3),
+    templates.evaluateOptimize(optimize),
+    templates.jury({ select, final: { ...select, reportNodes: ['final-review'], candidates: [{ id: 'absorbed', node: 'absorb' }], revalidate: { selectionNode: 'select', subjectNode: 'absorb' } } }),
+  ];
+  for (const graph of graphs) {
+    const layout = await layoutGraph(graph);
+    const nodes = graph.nodes.map(node => ({ id: node.id, ...layout.positions[node.id]! }));
+    for (let left = 0; left < nodes.length; left += 1) {
+      for (let right = left + 1; right < nodes.length; right += 1) {
+        expect(overlaps(nodes[left]!, nodes[right]!), `${nodes[left]!.id} overlaps ${nodes[right]!.id}`).toBe(false);
+      }
+    }
+    const segments: { edge: string; points: [{ x: number; y: number }, { x: number; y: number }] }[] = [];
+    for (const edge of layout.edges.filter(edge => !edge.id.startsWith('loop:'))) {
+      expect(edge.points?.length, `${edge.id} route`).toBeGreaterThanOrEqual(2);
+      const source = nodes.find(node => node.id === edge.source);
+      const target = nodes.find(node => node.id === edge.target);
+      if (source) expect(onNodeBoundary(edge.points![0]!, source), `${edge.id} starts on ${source.id}`).toBe(true);
+      if (target) expect(onNodeBoundary(edge.points!.at(-1)!, target), `${edge.id} ends on ${target.id}`).toBe(true);
+      for (let index = 0; index < (edge.points?.length ?? 0) - 1; index += 1) {
+        const segment = [edge.points![index]!, edge.points![index + 1]!] as [{ x: number; y: number }, { x: number; y: number }];
+        segments.push({ edge: edge.id, points: segment });
+        for (const node of nodes) {
+          if (node.id === edge.source || node.id === edge.target) continue;
+          expect(segmentHitsRect(segment[0], segment[1], node), `${edge.id} crosses ${node.id}`).toBe(false);
+        }
+      }
+    }
+    for (let left = 0; left < segments.length; left += 1) {
+      for (let right = left + 1; right < segments.length; right += 1) {
+        if (segments[left]!.edge === segments[right]!.edge) continue;
+        expect(
+          segmentsCross(segments[left]!.points, segments[right]!.points),
+          `${segments[left]!.edge} crosses ${segments[right]!.edge}`,
+        ).toBe(false);
+      }
+    }
   }
 });
 

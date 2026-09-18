@@ -47,6 +47,75 @@ export interface CapabilityLoadFact {
   tools?: string[];
 }
 
+export interface CapabilityUsageFact {
+  id: string;
+  version: string;
+  kind: string | null;
+  name: string;
+  tools: string[];
+  calls: number;
+  successes: number;
+  failures: number;
+  pending: number;
+  successRate: number | null;
+  lastCalledAt: number | null;
+}
+
+function capabilityUsage(
+  store: TaskStore,
+  taskId: string,
+  nodeId: string,
+  facts: { id: string; version: string; kind: string | null; name?: string; tools?: string[] }[],
+): CapabilityUsageFact[] {
+  const rows = store.db.prepare(`SELECT kind,data,created_at FROM node_entries
+    WHERE task_id=? AND node_id=? AND role='tool' AND kind IN ('call','result') ORDER BY seq`).all(taskId, nodeId) as {
+      kind: 'call' | 'result';
+      data: string | null;
+      created_at: number;
+    }[];
+  const calls = new Map<string, { toolName: string; calledAt: number; error?: boolean }>();
+  for (const row of rows) {
+    if (!row.data) continue;
+    const data = JSON.parse(row.data) as { toolCallId?: unknown; toolName?: unknown; isError?: unknown };
+    if (typeof data.toolCallId !== 'string' || !data.toolCallId) continue;
+    if (row.kind === 'call') {
+      if (typeof data.toolName === 'string' && data.toolName) calls.set(data.toolCallId, { toolName: data.toolName, calledAt: row.created_at });
+    } else {
+      const call = calls.get(data.toolCallId);
+      if (call) call.error = data.isError === true;
+    }
+  }
+  const toolOwners = new Map<string, string>();
+  for (const fact of facts) {
+    for (const tool of fact.tools ?? []) toolOwners.set(tool, `${fact.id}@${fact.version}`);
+  }
+  const stats = new Map<string, { calls: number; successes: number; failures: number; pending: number; lastCalledAt: number | null }>();
+  for (const call of calls.values()) {
+    const owner = toolOwners.get(call.toolName);
+    if (!owner) continue;
+    const current = stats.get(owner) ?? { calls: 0, successes: 0, failures: 0, pending: 0, lastCalledAt: null };
+    current.calls += 1;
+    if (call.error === undefined) current.pending += 1;
+    else if (call.error) current.failures += 1;
+    else current.successes += 1;
+    current.lastCalledAt = Math.max(current.lastCalledAt ?? 0, call.calledAt);
+    stats.set(owner, current);
+  }
+  return facts.map(fact => {
+    const current = stats.get(`${fact.id}@${fact.version}`) ?? { calls: 0, successes: 0, failures: 0, pending: 0, lastCalledAt: null };
+    const settled = current.successes + current.failures;
+    return {
+      id: fact.id,
+      version: fact.version,
+      kind: fact.kind,
+      name: fact.name ?? fact.id,
+      tools: fact.tools ?? [],
+      ...current,
+      successRate: settled ? current.successes / settled : null,
+    };
+  });
+}
+
 export function recordCapabilityLoad(store: TaskStore, input: {
   taskId: string;
   nodeId: string;
@@ -140,7 +209,18 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
       ...(parsed.prompts?.tool ? [parsed.prompts.tool] : []),
     ];
     return { facts: bindings.map(bound => {
-      const catalogRecord = store.db.prepare('SELECT kind,source FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as { kind: string; source: string } | undefined;
+      const catalogRecord = store.db.prepare('SELECT kind,source,snapshot FROM capabilities WHERE id=? AND version=?').get(bound.id, bound.version) as {
+        kind: string;
+        source: string;
+        snapshot: string;
+      } | undefined;
+      const catalogName = (() => {
+        if (!catalogRecord) return bound.id;
+        try {
+          const snapshot = JSON.parse(catalogRecord.snapshot) as { name?: unknown };
+          return typeof snapshot.name === 'string' && snapshot.name.trim() ? snapshot.name : bound.id;
+        } catch { return bound.id; }
+      })();
       const fact = facts.get(`${bound.id}@${bound.version}`);
       // Authoritative current-state derivation for the one case the loading
       // code skips by contract: a remote MCP is never loaded in read-only
@@ -153,20 +233,20 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
       })();
       if (!fact && !factRow && remote && spec.role === 'master' && (taskPhase === 'chatting' || taskPhase === 'discussing')) {
         return {
-          id: bound.id, version: bound.version, kind: 'mcp', bound: true as const,
+          id: bound.id, version: bound.version, kind: 'mcp', name: catalogName, tools: [], bound: true as const,
           loaded: false, executable: false, state: '禁用', reason: '只读讨论模式不加载远程能力',
         };
       }
       if (!fact) {
         return {
-          id: bound.id, version: bound.version, kind: catalogRecord?.kind ?? null,
+          id: bound.id, version: bound.version, kind: catalogRecord?.kind ?? null, name: catalogName, tools: [],
           bound: true as const, loaded: null, executable: null,
           state: factRow ? '未加载' : '未记录',
           reason: factRow ? '本次运行未加载该能力' : '该节点没有能力加载记录（历史或尚未运行）',
         };
       }
       return {
-        id: fact.id, version: fact.version, kind: fact.kind, bound: true as const,
+        id: fact.id, version: fact.version, kind: fact.kind, name: fact.name ?? catalogName, tools: fact.tools ?? [], bound: true as const,
         loaded: fact.loaded, executable: fact.executable,
         state: fact.loaded ? (fact.executable ? '可执行' : '已加载') : '禁用',
         reason: fact.reason,
@@ -189,6 +269,7 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   const evidence = (store.db.prepare('SELECT acceptance_id,valid,commit_sha FROM evidence WHERE task_id=? AND node_id=? ORDER BY rowid').all(taskId, nodeId) as { acceptance_id: string; valid: number; commit_sha: string | null }[])
     .map(row => ({ acceptanceId: row.acceptance_id, valid: Boolean(row.valid), commitSha: row.commit_sha }));
   const page = listNodeEntries(store, taskId, nodeId, query);
+  const capabilityUsageFacts = capabilityUsage(store, taskId, nodeId, capabilities.facts);
   // Time segments come from authoritative state timestamps, never from the
   // message span. "Still running" is a property of the current lifecycle:
   // a terminal node is never in progress because of a historical attempt.
@@ -211,6 +292,7 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
     taskId, nodeId,
     context: contextView(store, taskId, nodeId),
     capabilities: capabilities.facts,
+    capabilityUsage: capabilityUsageFacts,
     capabilityDigest: capabilities.digest,
     node: { id: node.id, kind: spec.kind, action: spec.action, role: spec.role ?? null, status: node.status, activationId: node.activation_id, outputVersion: node.output_version, stallCount: node.stall_count, ...(spec.definitionVersion ? { definitionVersion: spec.definitionVersion } : {}), ...(spec.input !== undefined ? { input: spec.input } : {}) },
     instance: instance ? {

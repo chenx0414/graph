@@ -35,6 +35,16 @@ function capabilityKindLabel(item: CapabilityRecord) {
   return item.kind === 'mcp' ? 'MCP' : 'Skill';
 }
 
+function capabilityGroups(item: AgentCombinationView) {
+  const groups = [
+    { id: 'agent-md', label: 'Agent.md', resources: item.resolved.filter(resource => resource.role === 'identity' || resource.role === 'tool') },
+    { id: 'skills', label: 'Skills', resources: item.resolved.filter(resource => resource.role === 'skill') },
+    { id: 'mcp', label: 'MCP', resources: item.resolved.filter(resource => resource.role === 'mcp') },
+    { id: 'pi-extensions', label: 'Pi extensions', resources: item.resolved.filter(resource => resource.role === 'pi-extension' || resource.role === 'extension') },
+  ];
+  return groups.filter(group => group.resources.length);
+}
+
 function CapabilityDetail({ item }: { item: CapabilityRecord }) {
   return (
     <div className="stack resource-detail-sections" data-testid={`capability-detail-${item.id}`}>
@@ -219,6 +229,14 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
       toast('已重新扫描能力目录', 'success');
     }).catch(cause => toast(cause instanceof Error ? cause.message : String(cause), 'danger'));
   };
+  const openResolvedCapability = (resourceId: string, version: string) => {
+    const record = capabilities.find(item => item.id === resourceId && item.version === version);
+    if (!record) {
+      toast(`找不到能力 ${resourceId}@${version}`, 'danger');
+      return;
+    }
+    setSelected(record);
+  };
   const remove = async (id: string) => {
     try {
       await api(`/api/catalog/combinations/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -278,7 +296,26 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                           <Pill tone={item.status === 'valid' ? 'success' : 'danger'}>{item.status === 'valid' ? '可编译' : '引用有误'}</Pill>
                           <Pill tone="neutral">{item.recommendedGrade}</Pill>
                           {item.review && <Pill tone="warn">独立审查</Pill>}
-                          {item.resources.map(member => <Pill key={`${member.role}:${member.resourceId}:${member.version ?? ''}`} tone={member.required ? 'info' : 'neutral'}>{member.resourceId}{member.version ? `@${member.version}` : ''}</Pill>)}
+                        </div>
+                        <div className="recipe-capability-groups">
+                          {capabilityGroups(item).map(group => (
+                            <section className="recipe-capability-group" key={group.id} data-testid={`agent-capabilities-${item.id}-${group.id}`}>
+                              <h4>{group.label}</h4>
+                              <div className="chip-row">
+                                {group.resources.map(resource => (
+                                  <button
+                                    key={`${resource.role}:${resource.resourceId}:${resource.version}`}
+                                    type="button"
+                                    className="capability-chip"
+                                    data-testid={`agent-capability-${item.id}-${resource.resourceId}`}
+                                    onClick={() => openResolvedCapability(resource.resourceId, resource.version)}
+                                  >
+                                    {resource.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </section>
+                          ))}
                         </div>
                         {item.issues.map(issue => <div className="form-error" key={issue}>{issue}</div>)}
                         <div className="recipe-card-actions">

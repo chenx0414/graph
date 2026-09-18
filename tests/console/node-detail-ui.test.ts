@@ -9,7 +9,7 @@ import { openGraphServer } from '../../src/server/host.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import { appendNodeEntry } from '../../src/core/node-run.ts';
+import { appendNodeEntry, recordCapabilityLoad } from '../../src/core/node-run.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -56,6 +56,24 @@ test('node detail renders real entries, operations and a program command, and st
   const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
   cleanup.push(async () => projection.close());
   appendNodeEntry(projection, { taskId, nodeId: 'work', role: 'system', kind: 'compaction', text: '## Goal\n窗口写满后的摘要', data: { reason: 'threshold', tokensBefore: 1_200 } });
+  projection.transaction(() => {
+    projection.db.prepare("UPDATE definitions SET spec=? WHERE id='coder' AND version=1").run(JSON.stringify({
+      recommendedGrade: 'high',
+      capabilities: [{ id: 'demo-mcp', version: '1.0.0' }],
+    }));
+    projection.db.prepare("INSERT OR REPLACE INTO capabilities(id,kind,source,version,snapshot,status) VALUES('demo-mcp','mcp',?,?,?,'available')")
+      .run(join(workspace, 'demo-mcp'), '1.0.0', JSON.stringify({ name: 'Demo MCP' }));
+  });
+  recordCapabilityLoad(projection, {
+    taskId, nodeId: 'work', readOnly: false,
+    digest: 'b'.repeat(64),
+    report: [{
+      id: 'demo-mcp', version: '1.0.0', kind: 'mcp', loaded: true, executable: true, reason: null,
+      name: 'Demo MCP', tools: ['mcp:demo:search'],
+    }],
+  });
+  appendNodeEntry(projection, { taskId, nodeId: 'work', role: 'tool', kind: 'call', text: 'search', data: { toolCallId: 'cap-1', toolName: 'mcp:demo:search' } });
+  appendNodeEntry(projection, { taskId, nodeId: 'work', role: 'tool', kind: 'result', text: 'ok', data: { toolCallId: 'cap-1', toolName: 'mcp:demo:search', isError: false } });
   projection.db.prepare("UPDATE invocations SET purpose='compaction' WHERE id=(SELECT i.id FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=? AND o.node_id='work' LIMIT 1)").run(taskId);
 
   const browser = await chromium.launch({ headless: true });
@@ -79,6 +97,9 @@ test('node detail renders real entries, operations and a program command, and st
   expect(await page.getByTestId('node-context').innerText()).toContain('Fresh 独立上下文');
   expect(await page.getByTestId('node-context').innerText()).not.toMatch(/source leaf|handoff |fork agent|Fresh ·/);
   expect(await page.getByTestId('node-run-work').innerText()).not.toContain('bundle');
+  expect(await page.getByTestId('capability-usage').innerText()).toContain('Demo MCP');
+  expect(await page.getByTestId('capability-usage').innerText()).toContain('调用 1');
+  expect(await page.getByTestId('capability-usage').innerText()).toContain('全部成功');
   // Read-only: no customer-action controls inside the detail panel.
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '发送' }).count()).toBe(0);
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '答复' }).count()).toBe(0);
