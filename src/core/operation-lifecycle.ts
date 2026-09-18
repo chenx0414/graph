@@ -7,6 +7,7 @@ import {
   recordCurrentModelUse,
   releaseOperationReservation,
   reserveOperation,
+  masterUnknownUsageIsNonBlocking,
 } from './budget-ledger.ts';
 import { conversationForTask, pendingMessages, recordConversationOutput, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
@@ -654,7 +655,9 @@ export class OperationLifecycle {
     const usage = operation.kind === 'agent'
       ? result.usage
       : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    if (!usage) {
+    const unknownUsageAllowed = usage === null
+      && masterUnknownUsageIsNonBlocking(this.store, operation.instanceId, operation.taskId, operation.nodeId);
+    if (!usage && !unknownUsageAllowed) {
       recordConversationOutput(this.store, operation, result);
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?")
         .run(canonicalJson(result), operation.id);
@@ -671,9 +674,16 @@ export class OperationLifecycle {
       }
       return;
     }
-    const values = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
+    if (!usage) {
+      this.store.event(operation.taskId, 'operation.usage_unknown', {
+        operationId: operation.id,
+        nodeId: operation.nodeId,
+        policy: 'non_blocking_unlimited',
+      });
+    }
+    const values = usage ? [usage.input, usage.output, usage.cacheRead, usage.cacheWrite] : [];
     const total = values.reduce((sum, value) => sum + value, 0);
-    if (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total)) {
+    if (usage && (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total))) {
       throw new RuntimeError('invalid_usage', 'Invalid disjoint token counts');
     }
     const proposalRow = this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?')
@@ -758,9 +768,9 @@ export class OperationLifecycle {
     }
     this.store.db.prepare(`UPDATE operations
       SET state='succeeded',worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?)
-      WHERE id=?`).run(canonicalJson(result), canonicalJson(usage), Date.now(), operation.id);
+      WHERE id=?`).run(canonicalJson(result), usage ? canonicalJson(usage) : null, Date.now(), operation.id);
     releaseOperationReservation(this.store, operation.id);
-    if (operation.instanceId) {
+    if (operation.instanceId && usage) {
       commitUsage(this.store, operation.instanceId, total);
       recordCurrentModelUse(this.store, operation.instanceId);
     }

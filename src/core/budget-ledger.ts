@@ -117,6 +117,27 @@ export function budgetSnapshot(store: TaskStore, instanceId: string): BudgetSnap
   };
 }
 
+/** Only an unlimited main Agent may continue when the provider omits usage.
+ * Workers and finite-budget instances keep fail-closed accounting because
+ * their graph contract still depends on authoritative usage. */
+export function masterUnknownUsageIsNonBlocking(
+  store: TaskStore,
+  instanceId: string | null | undefined,
+  taskId: string,
+  nodeId: string | null | undefined,
+) {
+  if (!instanceId || !nodeId) return false;
+  const row = store.db.prepare(`SELECT i.unlimited,n.spec
+    FROM instances i JOIN nodes n ON n.task_id=? AND n.id=?
+    WHERE i.id=?`).get(taskId, nodeId, instanceId) as { unlimited: number; spec: string } | undefined;
+  if (!row?.unlimited) return false;
+  try {
+    return (JSON.parse(row.spec) as { role?: string }).role === 'master';
+  } catch {
+    return false;
+  }
+}
+
 function scopeInFlightUsage(store: TaskStore, scopeId: string) {
   const rows = store.db.prepare(`SELECT i.usage FROM invocations i
     JOIN operations o ON o.id=i.operation_id

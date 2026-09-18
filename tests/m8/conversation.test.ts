@@ -397,24 +397,17 @@ test('chat request ids are idempotent and bound to their content', async () => {
   await expect(runtime.conversations.chat(created.conversationId, { text: '不同内容', requestId: 'same' })).rejects.toMatchObject({ code: 'idempotency_conflict' });
 });
 
-test('unknown master usage opens the accepted reconciliation path without duplicating the reply', async () => {
+test('unknown master usage on an unlimited conversation completes without a blocking question', async () => {
   const root = await temp('unknown');
   const runtime = await withRuntime(root, () => ({ outcome: 'completed', output: { text: '答复已产生但用量未知' }, usage: null }));
   const created = await runtime.conversations.create({ text: '会未知用量吗', requestId: 'create' });
   await runtime.host.runReady();
   const view = await runtime.conversations.view(created.conversationId);
-  // The reply stays visible even though the invocation is unmeasured.
   expect(view.messages.find(message => message.role === 'assistant')?.text).toBe('答复已产生但用量未知');
   const anchorTask = await runtime.user.task(view.anchorTaskId).view();
-  const question = anchorTask.questions.find(item => item.kind === 'unknown_usage');
-  expect(question).toBeTruthy();
-  await runtime.user.task(view.anchorTaskId).answer(question!.id, { type: 'usage', usage, proof: '供应商账单' }, 'reconcile');
-  const reconciled = await runtime.conversations.view(created.conversationId);
-  expect(reconciled.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
-  const anchorAfter = await runtime.user.task(view.anchorTaskId).view();
-  expect(anchorAfter.questions.some(item => item.kind === 'unknown_usage' && item.status === 'open')).toBe(false);
-  const master = anchorAfter.nodes.find(node => node.role === 'master');
-  expect(master?.used).toBe(15);
+  expect(anchorTask.questions.some(item => item.kind === 'unknown_usage')).toBe(false);
+  expect(anchorTask.nodes.find(node => node.role === 'master')).toMatchObject({ status: 'succeeded', used: 0, unlimited: true });
+  expect(view.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
 });
 
 test('a scope change after confirmation becomes a new queued task, not an edit of the running one', async () => {
@@ -485,30 +478,25 @@ test('a conversation created without models gets its master once dispatch is ava
   expect(after.messages.find(message => message.role === 'assistant')?.text).toBe('恢复后的主管答复');
 });
 
-test('reconciling unknown usage continues the message queued during the blocked turn', async () => {
-  for (const type of ['usage', 'reconcile_usage'] as const) {
-    const root = await temp(`reconcile-${type}`);
-    let calls = 0;
-    const runtime = await withRuntime(root, () => {
-      calls += 1;
-      if (calls === 1) return { outcome: 'completed', output: { text: '第一次回答' }, usage: null };
-      return { outcome: 'completed', output: { text: '第二次回答' }, usage };
-    });
-    const created = await runtime.conversations.create({ text: '第一条', requestId: 'create' });
-    await runtime.host.runReady();
-    const blocked = await runtime.conversations.view(created.conversationId);
-    expect(blocked.master?.status).toBe('blocked');
-    const question = blocked.questions.find(item => item.kind === 'unknown_usage' && item.status === 'open');
-    expect(question).toBeTruthy();
-    await runtime.conversations.chat(created.conversationId, { text: '第二条', requestId: 'queue' });
-    await runtime.user.task(blocked.anchorTaskId).answer(question!.id,
-      type === 'usage' ? { type: 'usage', usage, proof: '账单' } : { type: 'reconcile_usage', proof: '供应商不提供' }, 'answer');
-    await runtime.host.runReady();
-    const after = await runtime.conversations.view(created.conversationId);
-    expect(after.messages.filter(message => message.role === 'assistant').map(message => message.text)).toEqual(['第一次回答', '第二次回答']);
-    expect(after.messages.find(message => message.text === '第二条')?.state).toBe('delivered');
-    expect(calls).toBe(2);
-  }
+test('unknown master usage does not block a queued conversation turn', async () => {
+  const root = await temp('unknown-queued');
+  let calls = 0;
+  const runtime = await withRuntime(root, () => {
+    calls += 1;
+    if (calls === 1) return { outcome: 'completed', output: { text: '第一次回答' }, usage: null };
+    return { outcome: 'completed', output: { text: '第二次回答' }, usage };
+  });
+  const created = await runtime.conversations.create({ text: '第一条', requestId: 'create' });
+  await runtime.host.runReady();
+  const first = await runtime.conversations.view(created.conversationId);
+  expect(first.master?.status).toBe('succeeded');
+  expect(first.questions.some(item => item.kind === 'unknown_usage')).toBe(false);
+  await runtime.conversations.chat(created.conversationId, { text: '第二条', requestId: 'queue' });
+  await runtime.host.runReady();
+  const after = await runtime.conversations.view(created.conversationId);
+  expect(after.messages.filter(message => message.role === 'assistant').map(message => message.text)).toEqual(['第一次回答', '第二次回答']);
+  expect(after.messages.find(message => message.text === '第二条')?.state).toBe('delivered');
+  expect(calls).toBe(2);
 });
 
 test('rebinding a conversation invalidates drafts investigated for the previous project', async () => {

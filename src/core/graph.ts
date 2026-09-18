@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { RuntimeError, type ContainerSpec, type DependencySource, type Json, type LoopSpec, type NodeSpec, type OperationResult, type Proposal } from './types.ts';
 import type { TaskStore } from './store.ts';
+import { masterUnknownUsageIsNonBlocking } from './budget-ledger.ts';
 
 const invalid = (reason: string): never => { throw new RuntimeError('invalid_proposal', reason); };
 
@@ -157,10 +158,13 @@ export function createActivation(store: TaskStore, taskId: string, nodeId: strin
   return id;
 }
 
-const lockedQuestion = "kind IN ('budget','unknown_usage','reservation_exceeded','permission')";
-
 export function hasLockedQuestion(store: TaskStore, taskId: string, nodeId: string) {
-  return Boolean(store.db.prepare(`SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND ${lockedQuestion}`).get(taskId, nodeId));
+  const node = store.db.prepare('SELECT instance_id FROM nodes WHERE task_id=? AND id=?')
+    .get(taskId, nodeId) as { instance_id: string | null } | undefined;
+  const kinds = masterUnknownUsageIsNonBlocking(store, node?.instance_id, taskId, nodeId)
+    ? "kind IN ('budget','reservation_exceeded','permission')"
+    : "kind IN ('budget','unknown_usage','reservation_exceeded','permission')";
+  return Boolean(store.db.prepare(`SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND ${kinds}`).get(taskId, nodeId));
 }
 
 /** Invalidate an idle node for recheck. Locked budget/usage/permission questions stay blocking. */
@@ -194,7 +198,7 @@ export function reactivate(store: TaskStore, taskId: string, targetIds: string |
   for (const id of affected) {
     const node = store.db.prepare('SELECT activation_id FROM nodes WHERE task_id=? AND id=?').get(taskId, id) as { activation_id: string };
     store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND node_id=? AND valid=1').run(taskId, id);
-    if (store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND kind IN ('budget','unknown_usage','reservation_exceeded','permission')").get(taskId, id)) continue;
+    if (hasLockedQuestion(store, taskId, id)) continue;
     store.db.prepare('UPDATE activations SET state=? WHERE id=?').run(targets.includes(id) ? 'superseded' : 'invalidated', node.activation_id);
     createActivation(store, taskId, id, task.graph_version, rounds.get(id) ?? 1);
     store.db.prepare("UPDATE nodes SET status='pending',output=NULL,route=NULL,output_operation=NULL WHERE task_id=? AND id=?").run(taskId, id);

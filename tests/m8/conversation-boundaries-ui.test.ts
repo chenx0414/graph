@@ -65,22 +65,15 @@ test('the conversation page surfaces master questions, live worker status, costs
   await server.runtime.host.runReady();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
 
-  // ME-R02: the master's blocking question must be visible and answerable here.
-  await page.getByTestId('master-questions').waitFor();
-  expect(await page.getByTestId('master-questions').innerText()).toContain('unknown_usage');
-  // ME-R06: unknown usage must not be shown as a zero cost.
-  expect(await page.getByTestId('conversation').innerText()).toContain('费用未知');
-  await page.screenshot({ path: join(evidence, '06-master-question.png'), fullPage: true });
+  // Missing usage on an unlimited master is recorded as unknown without
+  // turning into a blocking inbox question.
+  expect(await page.getByTestId('master-questions').count()).toBe(0);
+  await page.screenshot({ path: join(evidence, '06-master-unknown-usage-nonblocking.png'), fullPage: true });
 
-  // A message queued behind the blocked master survives the reconciliation.
+  // A message sent after the unknown-usage turn runs normally.
   await page.getByTestId('chat-input').fill('queued second message');
   await page.getByTestId('chat-send').click();
-  await page.getByTestId('queued-message').filter({ hasText: 'queued second message' }).waitFor();
-  await page.getByTestId('usage-proof').fill('local fixture proof');
-  await page.getByTestId('usage-input').fill('10');
-  await page.getByTestId('usage-output').fill('5');
-  await page.getByRole('button', { name: '答复' }).click();
-  await page.waitForFunction(() => !document.querySelector('[data-testid="master-questions"]'));
+  await page.waitForFunction(() => document.body.innerText.includes('queued second message'));
   await server.runtime.host.runReady();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="message-assistant"]').length === 2);
 

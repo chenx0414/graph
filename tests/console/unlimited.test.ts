@@ -79,7 +79,7 @@ test('a configured finite default still blocks, and an explicit policy change re
 test('the v14 migration keeps existing finite instances finite and untouched', async () => {
   const { root, options, runtime } = await setup({
     work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } }) },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) },
+    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }] }) },
   });
   await runtime.close();
   // Rewind the database to the v13 shape with a finite instance carrying usage.
@@ -96,7 +96,7 @@ test('the v14 migration keeps existing finite instances finite and untouched', a
   expect(row).toEqual({ budget: 20_000_000, used: 17, unlimited: 0 });
 }, 60_000);
 
-test('unlimited instances still stop for unknown usage', async () => {
+test('unlimited worker instances still stop for unknown usage', async () => {
   const { runtime, task } = await setup({
     work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage: null }) },
     check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) },
@@ -105,7 +105,7 @@ test('unlimited instances still stop for unknown usage', async () => {
   const view = await task.view();
   expect(view.questions).toMatchObject([{ kind: 'unknown_usage', nodeId: 'work' }]);
   expect(view.nodes.find(node => node.id === 'work')).toMatchObject({ unlimited: true, budget: null, status: 'blocked' });
-  // The unknown-usage gate still stops further sends even without a cap.
+  // The unknown-usage gate still stops further sends for non-master workers.
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
 }, 60_000);
 

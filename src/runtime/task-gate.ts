@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
-import { assertWithinBudget } from '../core/budget-ledger.ts';
+import { assertWithinBudget, masterUnknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
 import { openUserWait } from '../core/time-ledger.ts';
@@ -23,7 +23,9 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
     check(reservation = 0) {
       if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_input', 'A token reservation is required');
       if (store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Instance paused');
-      if (nodeId && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
+      if (nodeId
+        && !masterUnknownUsageIsNonBlocking(store, operation.instanceId, operation.taskId, nodeId)
+        && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
         throw new RuntimeError('unknown_usage', 'Instance paused for unknown usage');
       }
       assertWithinBudget(store, operation.instanceId, reservation);
@@ -52,7 +54,9 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
         store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?').run(usage ? canonicalJson(usage) : null, canonicalJson(cost), id);
         if (!usage) {
           unknown = true;
-          if (nodeId && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
+          if (nodeId
+            && !masterUnknownUsageIsNonBlocking(store, operation.instanceId, operation.taskId, nodeId)
+            && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
             const questionId = randomUUID();
             const data = { reason: 'Agent returned no authoritative usage' };
             store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
