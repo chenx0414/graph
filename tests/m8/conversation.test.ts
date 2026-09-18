@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
@@ -166,6 +167,33 @@ test('a new conversation can choose its model and thinking before the first turn
   expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm2', thinkingLevel: 'high' });
   await expect(runtime.conversations.create({ text: '坏模型', model: 'missing', requestId: 'create-bad' }))
     .rejects.toMatchObject({ code: 'model_unavailable' });
+});
+
+test('settings offer only currently configured models, not removed history', async () => {
+  const root = await temp('stale-models');
+  const options = {
+    stateDir: join(root, 'state'),
+    actions: { master: scripted(() => ({ outcome: 'completed' as const, output: { text: 'ok' }, usage })) },
+    models: {
+      entries: [{
+        id: 'live', provider: 'synthetic', grade: 'high' as const, api: 'openai-completions' as const,
+        baseUrl: 'http://127.0.0.1:1', contextWindow: 32_000, maxTokens: 256, reasoning: true,
+      }],
+      modelRuntime: {} as never,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'live' },
+  };
+  const first = await openTaskRuntime(options);
+  expect(first.models().map(model => model.id)).toEqual(['live']);
+  await first.close();
+  // Simulate a model that used to be configured and was later removed: its
+  // durable row remains for old task records but must not be offered again.
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
+  db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run('removed', JSON.stringify({ provider: 'synthetic', grade: 'low' }));
+  db.close();
+  const reopened = await openTaskRuntime(options);
+  cleanup.push(() => reopened.close());
+  expect(reopened.models().map(model => model.id)).toEqual(['live']);
 });
 
 test('messages sent while the master is running are answered one queued turn at a time', async () => {

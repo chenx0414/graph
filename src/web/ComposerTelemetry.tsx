@@ -155,7 +155,6 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
                   onClick={() => void applySelection(option, currentLevel)}
                 >
                   <span className="grow truncate">{option.id}</span>
-                  <span className="faint">{option.reasoning === false ? '标准' : '可思考'}</span>
                   {option.id === telemetry?.model && <Icon name="check" size={13} />}
                 </button>
               ))}

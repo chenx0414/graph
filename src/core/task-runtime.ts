@@ -1390,8 +1390,10 @@ export async function openTaskRuntime(options: {
     },
     models() {
       ensureOpen();
-      return (store.db.prepare('SELECT id,spec FROM models ORDER BY id').all() as { id: string; spec: string }[])
-        .map(row => ({ id: row.id, ...JSON.parse(row.spec) as { provider: string; grade: string } }));
+      // Settings must reflect the models configured right now. The `models`
+      // table is append-only history for old task records, so reading it here
+      // would keep offering models the user already removed.
+      return liveEntries();
     },
     /** The model a new conversation would use before any per-chat override. */
     defaultModel() {

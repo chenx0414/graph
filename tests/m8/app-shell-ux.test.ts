@@ -1122,7 +1122,11 @@ test('the new-chat composer switches model and thinking before the conversation 
   expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
   expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('低');
   await control.click();
-  await page.getByTestId('model-option-fast').click();
+  const fastOption = page.getByTestId('model-option-fast');
+  await fastOption.waitFor();
+  expect(await fastOption.innerText()).not.toContain('可思考');
+  expect(await fastOption.innerText()).not.toContain('标准');
+  await fastOption.click();
   expect(await page.getByTestId('telemetry-model').innerText()).toContain('fast');
   await page.keyboard.press('Escape');
   await page.getByTestId('model-menu').waitFor({ state: 'detached' });
