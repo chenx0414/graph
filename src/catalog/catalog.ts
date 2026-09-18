@@ -127,6 +127,14 @@ export class Catalog {
     return this.store.db.prepare('SELECT id,MAX(version) AS version FROM definitions GROUP BY id').all() as { id: string; version: number }[];
   }
 
+  /** Latest published definitions whose recipes still exist and compile. */
+  availableAgentDefinitions() {
+    const activeIds = new Set(this.agentCombinations()
+      .filter(item => item.status === 'valid')
+      .map(item => item.id));
+    return this.listDefinitions().filter(item => activeIds.has(item.id));
+  }
+
   capabilities() {
     return this.capabilityLibrary.capabilities();
   }

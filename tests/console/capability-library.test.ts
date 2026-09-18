@@ -156,6 +156,9 @@ test('catalog composes the capability library and persists recipe compilation on
   expect(first.definitionVersion).toBe('worker@1');
   expect(second.version).toBe(first.version);
   expect(catalog.agentCombinations()).toHaveLength(1);
+  catalog.publishDefinition('retired', { recommendedGrade: 'medium' });
+  expect(catalog.availableAgentDefinitions()).toEqual([{ id: 'worker', version: first.version }]);
   await catalog.deleteAgentCombination('worker');
   expect(catalog.agentCombinations()).toEqual([]);
+  expect(catalog.availableAgentDefinitions()).toEqual([]);
 });

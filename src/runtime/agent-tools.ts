@@ -222,7 +222,7 @@ export function agentTools(input: {
   }
   if (input.role === 'master' && input.systemContext?.systemSummary) {
     tools.push({
-      name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read a redacted inventory of configured subscription plans, model connections, Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.',
+      name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read a redacted inventory of configured subscription plans, model connections, current Agent recipes, compiled Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.',
       parameters: Type.Object({}),
       execute: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
     });

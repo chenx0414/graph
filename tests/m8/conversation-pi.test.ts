@@ -263,6 +263,8 @@ test('the real Pi master can search the resource library and open a model-access
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  runtime.catalog.publishDefinition('retired', { recommendedGrade: 'medium' }, 'retired');
+  runtime.catalog.compileAgentCombination('review');
 
   const created = await runtime.conversations.create({ projectId: 'p', text: '请先检查可用能力，再决定任务图。', requestId: 'system-context-create' });
   await runtime.host.runReady();
@@ -277,6 +279,9 @@ test('the real Pi master can search the resource library and open a model-access
     const messages = JSON.stringify(request.messages);
     return messages.includes('reviewer') && messages.includes('1.0.0');
   })).toBe(true);
+  const briefingContext = JSON.stringify(provider.requests.flatMap(request => request.messages));
+  expect(briefingContext).toContain('review@1');
+  expect(briefingContext).not.toContain('retired@1');
   expect(view.questions).toEqual(expect.arrayContaining([
     expect.objectContaining({
       kind: 'waiting',

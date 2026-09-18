@@ -448,7 +448,7 @@ export class Execution {
               ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
               ...(spec.role === 'master' ? {
                 catalog: {
-                  definitions: this.catalog.listDefinitions().map(item => `${item.id}@${item.version}`),
+                  definitions: this.catalog.availableAgentDefinitions().map(item => `${item.id}@${item.version}`),
                 },
                 systemContext: {
                   ...this.systemContext,

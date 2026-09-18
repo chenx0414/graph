@@ -295,7 +295,8 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }));
     return {
       configuredModels: configured,
-      agentCombinations: catalogCombinations,
+      agentCombinations: graphServer?.runtime.catalog.agentCombinations() ?? catalogCombinations,
+      agentDefinitions: graphServer?.runtime.catalog.availableAgentDefinitions() ?? [],
       architectures: GRAPH_ARCHITECTURES,
       subscriptionPlans: usage.plans.map(plan => ({
         id: plan.id,

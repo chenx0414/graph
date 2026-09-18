@@ -1410,6 +1410,7 @@ export async function openTaskRuntime(options: {
         return catalog.ensureDefinition(id, spec);
       },
       definitions() { ensureOpen(); return catalog.listDefinitions(); },
+      availableAgentDefinitions() { ensureOpen(); return catalog.availableAgentDefinitions(); },
       capabilities() { ensureOpen(); return catalog.capabilities(); },
       capability(id: string, version?: string) { ensureOpen(); return catalog.capability(id, version); },
       capabilityRootPath() { ensureOpen(); return catalog.capabilityRootPath(); },
