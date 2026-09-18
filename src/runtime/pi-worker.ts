@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { Socket } from 'node:net';
 import {
@@ -13,6 +14,10 @@ import type { PiWorkerConfig } from './pi-process.ts';
 import type { AgentSessionInspect } from './agent-session.ts';
 
 interface Reply { ok: boolean; value?: unknown; error?: string }
+
+async function writeFully(stream: NodeJS.WriteStream, text: string) {
+  if (!stream.write(text)) await once(stream, 'drain');
+}
 
 async function main() {
   const configPath = process.argv[2];
@@ -126,7 +131,7 @@ async function main() {
     promptRunning = true;
     await session.prompt(text);
     await Promise.all(pendingEvents);
-    process.stdout.write(`${JSON.stringify({ ok: true, inspect: inspect() })}\n`);
+    await writeFully(process.stdout, `${JSON.stringify({ ok: true, inspect: inspect() })}\n`);
     await session.close();
     process.exit(0);
   };
@@ -135,8 +140,9 @@ async function main() {
     if (!line.trim()) continue;
     const command = JSON.parse(line) as { operation?: string; text?: string };
     if (command.operation === 'prompt' && typeof command.text === 'string') {
-      void runPrompt(command.text).catch(error => {
-        process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      void runPrompt(command.text).catch(async error => {
+        const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        await writeFully(process.stderr, `${message}\n`).catch(() => undefined);
         process.exit(1);
       });
     } else if (command.operation === 'steer' && typeof command.text === 'string') {
@@ -151,7 +157,10 @@ async function main() {
 }
 
 main().catch(error => {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-  process.stdout.write(`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) })}\n`);
-  process.exit(1);
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  const result = JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  void Promise.allSettled([
+    writeFully(process.stderr, `${message}\n`),
+    writeFully(process.stdout, `${result}\n`),
+  ]).finally(() => process.exit(1));
 });

@@ -155,6 +155,34 @@ test('the process host never exposes the provider credential to the Agent proces
   await process.close();
 }, 120_000);
 
+test('a model response larger than 64 KiB crosses the worker channel intact', async () => {
+  const { root, project } = await workspace('pi-large-response');
+  const text = `large-response:${'x'.repeat(80_000)}`;
+  const provider = await openaiServer([{ text }]);
+  cleanup.push(() => provider.close());
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-large-response');
+  cleanup.push(() => gate.close());
+  const process = await openPiProcess({
+    binding: { instanceId: 'agent-large-response', nodeId: 'work', definitionVersion: 'coder@1' },
+    workspace: project,
+    stateDir: join(root, 'state'),
+    model: provider.model,
+    stream: controlledOpenAIStream(gate, 'scripted-local-key'),
+    tools: [],
+    broker: gate,
+    bundleDigest: 'e'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  });
+  const inspect = await process.prompt('Return a large response');
+  expect(inspect.messages.at(-1)).toMatchObject({
+    role: 'assistant',
+    stopReason: 'stop',
+    content: [{ type: 'text', text }],
+  });
+  await process.close();
+}, 120_000);
+
 test('the production process path requires and verifies the persisted capability digest', async () => {
   const { root, project } = await workspace('pi-process-digest');
   const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-digest');
