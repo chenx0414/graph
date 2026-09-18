@@ -644,12 +644,20 @@ export async function openTaskRuntime(options: {
   // Conversation entry: chat messages are durable and queue behind the master
   // turn, while every formal change (bind, confirm) is a validated command.
   const conversations = {
-    async create(input: { projectId?: string; title?: string; text?: string; attachments?: AttachmentInput[]; requestId: string }) {
+    async create(input: { projectId?: string; title?: string; text?: string; attachments?: AttachmentInput[]; model?: string; thinkingLevel?: string; requestId: string }) {
       ensureOpen();
       const conversationId = randomUUID();
       if (!input.projectId) await mkdir(join(stateDir, 'conversations', conversationId), { recursive: true, mode: 0o700 });
       const attachments = cleanAttachments(input.attachments);
-      return store.command('conversations', input.requestId, { type: 'create', projectId: input.projectId ?? null, title: input.title ?? null, text: input.text ?? null, attachments }, () => {
+      return store.command('conversations', input.requestId, {
+        type: 'create',
+        projectId: input.projectId ?? null,
+        title: input.title ?? null,
+        text: input.text ?? null,
+        attachments,
+        model: input.model ?? null,
+        thinkingLevel: input.thinkingLevel ?? null,
+      }, () => {
         if (!input.text?.trim() && !attachments.length) throw new RuntimeError('invalid_input', 'A nonempty first message or attachment is required');
         const projectId = input.projectId ?? null;
         let workspaceProjectId: string;
@@ -671,10 +679,20 @@ export async function openTaskRuntime(options: {
         store.db.prepare('INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES(?,?,?,?,?,?,?)').run(conversationId, projectId, workspaceProjectId, taskId, title, sequence, Date.now());
         if (options.master && masterModel()) {
           createMasterNode(taskId);
-          const masterEntry = liveEntries().find(model => model.id === masterModel());
-          if (masterEntry?.defaultThinkingLevel) {
-            store.db.prepare('UPDATE conversations SET thinking_level=? WHERE id=?').run(masterEntry.defaultThinkingLevel, conversationId);
+          const requestedModel = input.model?.trim();
+          const selected = requestedModel ? liveEntries().find(model => model.id === requestedModel) : undefined;
+          if (requestedModel && !selected) throw new RuntimeError('model_unavailable', 'The selected model is not configured');
+          if (selected) {
+            const master = store.db.prepare("SELECT spec,instance_id FROM nodes WHERE task_id=? AND id='master'").get(taskId) as { spec: string; instance_id: string };
+            const spec = JSON.parse(master.spec) as NodeSpec;
+            spec.model = selected.id;
+            store.db.prepare("UPDATE nodes SET spec=? WHERE task_id=? AND id='master'").run(canonicalJson(spec), taskId);
+            store.db.prepare('UPDATE instances SET model=? WHERE id=?').run(selected.id, master.instance_id);
           }
+          const effective = selected ?? liveEntries().find(model => model.id === masterModel());
+          const requestedLevel = input.thinkingLevel ? asThinkingLevel(input.thinkingLevel) : undefined;
+          const level = effective?.reasoning === false ? 'off' : requestedLevel ?? effective?.defaultThinkingLevel;
+          if (level) store.db.prepare('UPDATE conversations SET thinking_level=? WHERE id=?').run(level, conversationId);
         }
         let cursor = store.event(taskId, 'conversation.created', { conversationId, projectId, title });
         let messageId: string | null = null;
@@ -1374,6 +1392,11 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       return (store.db.prepare('SELECT id,spec FROM models ORDER BY id').all() as { id: string; spec: string }[])
         .map(row => ({ id: row.id, ...JSON.parse(row.spec) as { provider: string; grade: string } }));
+    },
+    /** The model a new conversation would use before any per-chat override. */
+    defaultModel() {
+      ensureOpen();
+      return masterModel() ?? null;
     },
     catalog: {
       publishDefinition(id: string, spec: DefinitionSpec, requestId: string) {

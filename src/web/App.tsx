@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
+import { ComposerTelemetry, type ComposerTelemetryView } from './ComposerTelemetry.tsx';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
@@ -54,7 +55,8 @@ type NodeView = {
 };
 export type Settings_ = {
   projects: { id: string; root: string }[];
-  models: { id: string; grade: string; credentialId?: string; contextWindow?: number }[];
+  defaultModel?: string | null;
+  models: { id: string; grade: string; credentialId?: string; contextWindow?: number; reasoning?: boolean; defaultThinkingLevel?: string }[];
   definitions: { id: string; version: number }[];
   capabilities: CapabilityRecord[];
   agentCombinations?: AgentCombinationView[];
@@ -492,8 +494,29 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
   const [projectId, setProjectId] = useState(initialProjectId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [modelId, setModelId] = useState('');
+  const [thinkingLevel, setThinkingLevel] = useState('off');
 
   useEffect(() => { setProjectId(initialProjectId); }, [initialProjectId]);
+  // A new conversation inherits the daemon's default master model/thinking
+  // unless the user picks something else before the first message.
+  useEffect(() => {
+    if (!settings || modelId) return;
+    const selected = settings.models.find(model => model.id === settings.defaultModel) ?? settings.models[0];
+    setModelId(selected?.id ?? '');
+    setThinkingLevel(selected?.reasoning === false ? 'off' : selected?.defaultThinkingLevel ?? 'off');
+  }, [settings, modelId]);
+  const selectedModel = settings?.models.find(model => model.id === modelId);
+  const telemetry: ComposerTelemetryView = {
+    model: modelId || null,
+    thinkingLevel,
+    cacheHitRate: null,
+    cachedInput: 0,
+    cacheInput: 0,
+    contextTokens: null,
+    contextLimit: selectedModel?.contextWindow ?? null,
+    contextPercent: null,
+  };
   async function start() {
     if (busy) return;
     if (!text.trim() && !attachments.length) { setError('先说说你想解决什么，或添加一个附件。'); return; }
@@ -506,6 +529,8 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
           ...(projectId ? { projectId } : {}),
           ...(text.trim() ? { text: text.trim() } : {}),
           ...(attachments.length ? { attachments } : {}),
+          ...(modelId ? { model: modelId } : {}),
+          ...(thinkingLevel ? { thinkingLevel } : {}),
           requestId: `conv-${crypto.randomUUID()}`,
         }),
       });
@@ -552,6 +577,17 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
           </select>
         )}
       />
+      <div className="composer-footer new-chat-composer-footer">
+        <span className="composer-note">Enter 发送，Shift + Enter 换行</span>
+        <ComposerTelemetry
+          telemetry={telemetry}
+          models={settings?.models ?? []}
+          onSelect={(model, level) => {
+            setModelId(model.id);
+            setThinkingLevel(level);
+          }}
+        />
+      </div>
       {error && <ErrorBox message={error} />}
     </section>
   );

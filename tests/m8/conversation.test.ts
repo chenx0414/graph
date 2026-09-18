@@ -140,6 +140,34 @@ test('new conversations inherit the master model default thinking level', async 
   });
 });
 
+test('a new conversation can choose its model and thinking before the first turn', async () => {
+  const root = await temp('create-selection');
+  const entries = [
+    {
+      id: 'm1', provider: 'synthetic', grade: 'medium' as const, api: 'openai-completions' as const,
+      baseUrl: 'http://127.0.0.1:1', contextWindow: 32_000, maxTokens: 256, reasoning: false,
+    },
+    {
+      id: 'm2', provider: 'synthetic', grade: 'high' as const, api: 'openai-completions' as const,
+      baseUrl: 'http://127.0.0.1:1', contextWindow: 64_000, maxTokens: 256, reasoning: true, defaultThinkingLevel: 'low' as const,
+    },
+  ];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })) },
+    models: { entries, modelRuntime: {} as never },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm1' },
+  });
+  cleanup.push(() => runtime.close());
+  expect(runtime.defaultModel()).toBe('m1');
+  const created = await runtime.conversations.create({
+    text: '预选模型', model: 'm2', thinkingLevel: 'high', requestId: 'create-selection',
+  });
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm2', thinkingLevel: 'high' });
+  await expect(runtime.conversations.create({ text: '坏模型', model: 'missing', requestId: 'create-bad' }))
+    .rejects.toMatchObject({ code: 'model_unavailable' });
+});
+
 test('messages sent while the master is running are answered one queued turn at a time', async () => {
   const root = await temp('queue');
   let release!: () => void;

@@ -1082,6 +1082,58 @@ test('the new-chat composer supports project mentions and attachments before sub
   ]);
 });
 
+test('the new-chat composer switches model and thinking before the conversation starts', async () => {
+  const root = await temp('new-chat-model');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 2, enabledModelCount: 2 },
+  });
+  cleanup.push(() => server.close());
+  const creates: { text?: string; model?: string; thinkingLevel?: string }[] = [];
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/api/settings', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      projects: [],
+      defaultModel: 'local',
+      models: [
+        { id: 'local', grade: 'high', credentialId: 'local', contextWindow: 32_000, reasoning: true, defaultThinkingLevel: 'low' },
+        { id: 'fast', grade: 'medium', credentialId: 'local', contextWindow: 16_000, reasoning: false },
+      ],
+      definitions: [],
+      capabilities: [],
+    }),
+  }));
+  await page.route('**/api/conversations', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    creates.push(JSON.parse(route.request().postData() ?? '{}') as { text?: string; model?: string; thinkingLevel?: string });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversationId: 'created' }) });
+  });
+
+  await page.goto(`${server.url}/#/`);
+  await page.getByTestId('new-conversation-input').waitFor();
+  const control = page.getByTestId('model-control');
+  await control.waitFor();
+  // The pre-creation composer shows the daemon default and its thinking level.
+  expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
+  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('低');
+  await control.click();
+  await page.getByTestId('model-option-fast').click();
+  expect(await page.getByTestId('telemetry-model').innerText()).toContain('fast');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('model-menu').waitFor({ state: 'detached' });
+  await page.getByTestId('new-conversation-input').fill('用选中的模型开始');
+  await page.getByTestId('new-conversation-start').click();
+
+  await expect.poll(() => creates.length).toBe(1);
+  // A non-reasoning model clamps thinking to off before the conversation exists.
+  expect(creates[0]).toMatchObject({ text: '用选中的模型开始', model: 'fast', thinkingLevel: 'off' });
+}, 60_000);
+
 test('settings opens as a second page with its own navigation and return control', async () => {
   const root = await temp('settings-shell');
   const server = await openGraphServer({

@@ -167,11 +167,12 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   app.get('/api/settings', async () => {
     const projects = await runtime.user.projects();
     const models = runtime.models();
+    const defaultModel = runtime.defaultModel();
     const definitions = runtime.catalog.definitions();
     const capabilities = runtime.catalog.capabilities();
     const capabilityConfig = await capabilityConfigViews(capabilities, capabilitySecretValues());
     return {
-      projects, models, definitions, capabilities, capabilityConfig,
+      projects, models, defaultModel, definitions, capabilities, capabilityConfig,
       agentCombinations: runtime.catalog.agentCombinations(),
       capabilityRoot: runtime.catalog.capabilityRootPath() ?? null,
       agentCombinationFile: runtime.catalog.agentCombinationFilePath() ?? null,
