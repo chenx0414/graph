@@ -133,24 +133,23 @@ async function permissionFixture(grants: string[], plans?: ResponsePlan[], hooks
   return { runtime, task, server, provider };
 }
 
-test('a remote MCP write tool without a task grant is refused with a permission question', async () => {
+test('a definition-bound remote MCP write tool runs in the default bypass mode', async () => {
   const { runtime, task, server, provider } = await permissionFixture([]);
   await runtime.host.drive();
   const view = await task.view();
-  expect(server.calls()).toBe(0);
-  expect(server.methods).not.toContain('tools/call');
-  expect(view.questions).toEqual([expect.objectContaining({ kind: 'permission', data: { grant: 'mcp:remote:delete_records' } })]);
-  expect(JSON.stringify(provider.requests[1])).toContain('Permission required');
-  expect(JSON.stringify(provider.requests[1])).toContain('mcp:remote:delete_records');
-  expect(view.nodes.find(node => node.id === 'work')!.status).not.toBe('succeeded');
+  expect(server.calls()).toBe(1);
+  expect(server.methods).toContain('tools/call');
+  expect(view.questions).toEqual([]);
+  expect(view.phase).toBe('completed');
+  expect(JSON.stringify(provider.requests[1])).toContain('external records deleted');
 });
 
-test('a grant for another tool or service does not authorize the call', async () => {
+test('binding a capability authorizes its tools regardless of narrow manual grants', async () => {
   const { runtime, task, server } = await permissionFixture(['mcp:remote:echo', 'mcp:other:delete_records']);
   await runtime.host.drive();
   const view = await task.view();
-  expect(server.calls()).toBe(0);
-  expect(view.questions).toEqual([expect.objectContaining({ kind: 'permission', data: { grant: 'mcp:remote:delete_records' } })]);
+  expect(server.calls()).toBe(1);
+  expect(view.questions).toEqual([]);
 });
 
 test('a matching task grant authorizes the remote tool and is metered', async () => {
@@ -174,25 +173,4 @@ test('a task pause during the tool-call handshake stops the tools/call request',
   expect(server.methods.filter(method => method === 'tools/call')).toEqual([]);
   expect(server.methods.filter(method => method === 'initialize')).toHaveLength(2);
   expect((await task.view()).paused).toBe(true);
-});
-
-test('answering the permission question with the grant lets the next attempt run', async () => {
-  const { runtime, task, server, provider } = await permissionFixture([], [
-    { tools: [{ id: 'x', name: 'mcp_remote_delete_records', arguments: '{}' }] },
-    { text: 'Stopped after the denial.' },
-    { tools: [{ id: 'y', name: 'mcp_remote_delete_records', arguments: '{}' }] },
-    { text: 'Deleted after the grant.' },
-  ]);
-  await runtime.host.drive();
-  const blocked = await task.view();
-  const question = blocked.questions.find(item => item.kind === 'permission')!;
-  expect(server.calls()).toBe(0);
-  await task.answer(question.id, { type: 'grant', grant: 'mcp:remote:delete_records' }, 'grant');
-  await runtime.host.drive();
-  const done = await task.view();
-  expect(server.calls()).toBe(1);
-  expect(done.questions.filter(item => item.status === 'open')).toEqual([]);
-  expect(done.questions).toEqual([expect.objectContaining({ kind: 'permission', status: 'resolved' })]);
-  expect(done.evidence).toHaveLength(1);
-  expect(provider.requests.length).toBeGreaterThanOrEqual(4);
 });

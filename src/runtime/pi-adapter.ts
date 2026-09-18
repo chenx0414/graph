@@ -609,6 +609,7 @@ export function createPiAdapter(options: {
             tools,
             allowedToolNames: [...capabilityOperation.allowedToolNames],
             ...(capabilityOperation.skillPaths.length ? { skillPaths: [...capabilityOperation.skillPaths] } : {}),
+            ...(capabilityOperation.readRoots.length ? { readRoots: [...capabilityOperation.readRoots] } : {}),
             ...(capabilityOperation.piExtensionPaths.length ? { piExtensionPaths: [...capabilityOperation.piExtensionPaths] } : {}),
             piExtensionTools: [...capabilityOperation.piExtensionTools],
             systemPrompt: capabilityOperation.prompts.system,
@@ -630,8 +631,15 @@ export function createPiAdapter(options: {
             onEvent,
           });
           activeInstances.set(operation.id, session);
+          const inspected = session.inspect();
+          const extensionErrors = inspected.extensionErrors ?? [];
+          if (extensionErrors.length) {
+            const detail = extensionErrors
+              .map(item => `${item.path}: ${item.error instanceof Error ? item.error.message : String(item.error)}`)
+              .join('; ');
+            throw new RuntimeError('capability_unavailable', `A bound Pi extension failed to load: ${detail}`);
+          }
           if (persistEntries) {
-            const inspected = session.inspect();
             recordNodeSession(options.store, operation.instanceId!, inspected.sessionId, inspected.sessionFile);
             if (agentContext) {
               recordContextSession(options.store, {
@@ -671,7 +679,7 @@ export function createPiAdapter(options: {
                     'propose_graph creates a draft version for the user to confirm; nothing is dispatched before confirmation. When the user changes direction, propose a new draft instead of arguing for the old one (only the latest draft on the current requirement can be confirmed).',
                     'Each proposal should include a short decisions list of the binding constraints the user confirmed (for example "do not touch login.ts"); update or drop entries when the user revises them. The list is frozen with the draft and shown on the confirmation card, so workers receive exactly what the user reviewed.',
                     'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
-                    'Before proposing a graph, inspect the project and query the user capability directory with search_resources/get_resource. Every scanned capability is immediately available, but it grants no task permission; never invent capabilities from memory.',
+                    'Before proposing a graph, inspect the project and query the user capability directory with search_resources/get_resource. Search is discovery only; once a capability is bound into the Agent definition, its tools are available under the default capability-bypass runtime policy. Never invent capabilities from memory.',
                     'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. Recipe names use a human-readable identity plus role, such as Bob_coder or Alice_reviewer; preserve that name when presenting the Agent and pair it with the stable id@version. You may save or edit recipes and compile them directly.',
                     'You can inspect and improve Graph itself without a bound project. Use inspect_graph_system/read_system_capabilities for live self-awareness. To add or update a capability, first inspect the public source and prepare an exact capability bundle, then call propose_system_change. This creates a user question and does not change anything. Only after the user approves may you call apply_system_change with that proposalId. Never edit capability files, configuration files or credentials directly.',
                     'If the system pulse shows invalid capabilities, failed nodes, open internal problems or pending system changes, inspect them before making unrelated planning claims. When a concrete defect is actionable, explain the evidence and propose a bounded system change instead of silently changing the system.',

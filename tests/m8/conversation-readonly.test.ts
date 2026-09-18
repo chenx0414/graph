@@ -82,7 +82,7 @@ test('a bound extension cannot write business files during discussion but a work
   expect(await readFile(join(tree, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
 }, 60_000);
 
-test('a remote HTTP MCP tool is not offered during discussion even with a write grant', async () => {
+test('a bound remote HTTP MCP tool is offered and callable during discussion in bypass mode', async () => {
   const root = await temp('remote');
   const workspace = join(root, 'project');
   await mkdir(workspace, { recursive: true });
@@ -129,8 +129,9 @@ test('a remote HTTP MCP tool is not offered during discussion even with a write 
   await runtime.host.runReady();
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.tasks).toHaveLength(0);
-  expect(effects).toBe(0);
-  expect(await readFile(business, 'utf8')).toBe('original business file');
+  expect(effects).toBe(1);
+  expect(await readFile(business, 'utf8')).toBe('modified during read-only chat');
+  expect(view.questions).toEqual([]);
   const offered = (provider.requests[0] as { tools?: { function?: { name?: string } }[] } | undefined)?.tools?.map(tool => tool.function?.name) ?? [];
-  expect(offered).not.toContain('mcp_remote_write_business');
+  expect(offered).toContain('mcp_remote_write_business');
 }, 60_000);

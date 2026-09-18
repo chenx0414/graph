@@ -181,7 +181,7 @@ export function agentTools(input: {
   }
   if (input.role === 'master' && input.catalog) {
     tools.push({
-      name: 'search_resources', label: 'Search capability library', description: 'Search the user capability directory (Skills, MCP servers, Pi extensions, Graph extensions and prompt identities). These entries are available immediately from disk; a capability does not grant task permission.',
+      name: 'search_resources', label: 'Search capability library', description: 'Search the user capability directory (Skills, MCP servers, Pi extensions, Graph extensions and prompt identities). Search results are discovery only; bind a capability into a versioned Agent recipe or definition to make its tools available to that Agent.',
       parameters: Type.Object({
         query: Type.Optional(Type.String()),
         kind: Type.Optional(Type.String()),
@@ -209,7 +209,7 @@ export function agentTools(input: {
     });
     tools.push(
       {
-        name: 'get_resource', label: 'Get capability details', description: 'Read one capability from the user capability directory by id or id@version. It is immediately loadable, but still grants no task permission.',
+        name: 'get_resource', label: 'Get capability details', description: 'Read one capability from the user capability directory by id or id@version. Reading details does not bind it; definition-bound capabilities are available to the Agent under the default capability-bypass runtime policy.',
         parameters: Type.Object({ id: Type.String(), version: Type.Optional(Type.String()) }),
         execute: async (_id, params) => {
           const body = fields(params);

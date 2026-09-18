@@ -33,17 +33,20 @@
 }
 ```
 
-`networkAccess` 与 `networkDomains` 互斥。该模式只解除 outbound 目标限制，进程仍不能 bind 监听端口或使用 Unix socket；它也不能绕过暂停、预算、工具调用门和任务 grant。
+`networkAccess` 与 `networkDomains` 互斥。该模式只解除 outbound 目标限制，进程仍不能 bind 监听端口或使用 Unix socket；它也不能绕过暂停、预算、沙箱和计量门。
 
-### 3. 域名放行不等于工具授权
+### 3. 域名放行与工具授权
 
-只要 MCP 具有网络能力，所有工具调用都继续要求任务预授予：
+初始版本要求只要 MCP 具有网络能力，所有工具调用都要求任务预授予：
 
 ```text
 mcp:<capabilityId>:<toolName>
 ```
 
-因此导入能力、连接 MCP 或放行域名都不会自动授权外部修改操作。
+2026-09-19 起，该逐工具确认由 [ADR 0021](0021-capability-binding-default-authorization.md)
+取代。导入或连接能力本身仍不等于授权；把能力绑定到版本化 Agent 定义后，该 Agent 可以直接
+调用已发现工具。域名、沙箱、预算、暂停与计量仍独立生效。见
+[ADR 0021](0021-capability-binding-default-authorization.md)。
 
 ### 4. 网络声明进入能力 digest
 

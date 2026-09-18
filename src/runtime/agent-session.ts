@@ -56,6 +56,7 @@ export interface AgentSessionRequest {
   thinkingLevel?: ThinkingLevel;
   tools?: ToolDefinition[];
   skillPaths?: string[];
+  readRoots?: string[];
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
   systemPrompt?: string;

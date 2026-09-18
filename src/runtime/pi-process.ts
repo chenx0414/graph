@@ -102,6 +102,8 @@ export async function openPiProcess(options: PiProcessOptions) {
   const appRoot = await realpath(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
   const skillPaths = await Promise.all((options.skillPaths ?? []).map(path => realpath(path)));
   const piExtensionPaths = await Promise.all((options.piExtensionPaths ?? []).map(path => realpath(path)));
+  const capabilityReadRoots = await Promise.all((options.readRoots ?? []).map(path => realpath(path)));
+  const extensionReadRoots = await Promise.all(piExtensionPaths.map(path => realpath(dirname(path))));
   const forkSource = options.forkFrom ? await realpath(options.forkFrom.sessionFile) : undefined;
   const forkFrom = forkSource
     ? { sessionFile: forkSource, ...(options.forkFrom?.leafId ? { leafId: options.forkFrom.leafId } : {}) }
@@ -170,6 +172,8 @@ export async function openPiProcess(options: PiProcessOptions) {
       stateDir,
       ...skillPaths,
       ...piExtensionPaths,
+      ...capabilityReadRoots,
+      ...extensionReadRoots,
       ...(forkSource ? [forkSource] : []),
       ...(await Promise.all(nodeReadPaths(runtime.execPath, runtime.electron).map(path => realpath(path)))),
     ],

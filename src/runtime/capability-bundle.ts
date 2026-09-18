@@ -46,6 +46,7 @@ export interface CapabilityOperation {
   readonly prompts: { system: string; appendSystem: string };
   readonly report: LoadedCapabilities['report'];
   readonly skillPaths: readonly string[];
+  readonly readRoots: readonly string[];
   readonly piExtensionPaths: readonly string[];
   readonly piExtensionTools: readonly string[];
   close(): Promise<void>;
@@ -164,6 +165,7 @@ export class CapabilityBundleVersion {
         },
         report: loaded.report,
         skillPaths: Object.freeze([...loaded.skillPaths]),
+        readRoots: Object.freeze([...loaded.readRoots]),
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
         piExtensionTools: Object.freeze([...loaded.piExtensionTools]),
         close: () => loaded!.close(),

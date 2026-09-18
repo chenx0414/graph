@@ -132,6 +132,51 @@ test('a bound Pi extension registers its declared tool inside the isolated Agent
   await process.close();
 }, 120_000);
 
+test('a bound Pi extension can load sibling modules from its capability directory', async () => {
+  const { root, project } = await workspace('pi-extension-imports');
+  const extensionRoot = join(root, 'extension');
+  await mkdir(join(extensionRoot, 'lib'), { recursive: true });
+  await writeFile(join(extensionRoot, 'index.mjs'), `
+    import { value } from './lib/probe.mjs';
+    export default function (pi) {
+      pi.registerTool({
+        name: 'extension_import_probe',
+        label: 'Extension import probe',
+        description: 'Return a value imported from the extension package.',
+        parameters: { type: 'object', properties: {} },
+        async execute() {
+          return { content: [{ type: 'text', text: value }], details: {} };
+        },
+      });
+    }
+  `);
+  await writeFile(join(extensionRoot, 'lib', 'probe.mjs'), `export const value = 'extension-import-ok';\n`);
+  const provider = await openaiServer([{ text: 'The imported extension loaded.' }]);
+  cleanup.push(() => provider.close());
+  const gate: SendGate = new CallBroker(join(root, 'import-calls.sqlite'), 'agent-extension-imports');
+  cleanup.push(() => (gate as CallBroker).close());
+  const process = await openPiProcess({
+    binding: { instanceId: 'agent-extension-imports', nodeId: 'work', definitionVersion: 'coder@1' },
+    workspace: project,
+    stateDir: join(root, 'import-state'),
+    model: provider.model,
+    stream: controlledOpenAIStream(gate, 'scripted-local-key'),
+    tools: [],
+    piExtensionPaths: [join(extensionRoot, 'index.mjs')],
+    piExtensionTools: ['extension_import_probe'],
+    systemPrompt: 'Use the bound extension when asked.',
+    appendSystemPrompt: 'extension_import_probe is declared by the bound Pi extension.',
+    bundleDigest: 'f'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+    broker: gate,
+  });
+  const inspect = await process.prompt('Load the extension');
+  expect(inspect.extensionErrors).toEqual([]);
+  expect(inspect.activeTools).toContain('extension_import_probe');
+  await process.close();
+}, 120_000);
+
 test('the process host never exposes the provider credential to the Agent process', async () => {
   const { root, project } = await workspace('pi-credential');
   const provider = await openaiServer([{ text: 'Host-owned credential' }]);

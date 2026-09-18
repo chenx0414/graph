@@ -399,9 +399,8 @@ function capabilityTools(
     description: tool.description ?? `MCP tool ${tool.name} from ${capability.id}@${capability.version}`,
     parameters: Type.Unsafe(tool.inputSchema ?? { type: 'object', properties: {} }),
     execute: async (_id, params) => {
-      // A granted domain only allows reaching the service. Every network tool
-      // execution needs its own scoped task grant; tool names, descriptions and
-      // MCP annotations are never treated as authorization.
+      // The bound capability loader pre-authorizes every discovered tool.
+      // Explicit task grants remain an audit-compatible additional source.
       if (authorization) {
         const grant = mcpGrant(capability.id, tool.name);
         if (!authorization.grants.includes(grant)) {
@@ -630,6 +629,7 @@ export async function loadCapabilities(input: {
         const declared = declaredTools(manifest);
         piExtensionPaths.push(entry);
         piExtensionTools.push(...declared.map(tool => tool.name));
+        readRoots.push(snapshot);
         report.push({
           id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: true,
           reason: `独立 Pi 进程内加载；声明工具 ${declared.length} 个`,
@@ -681,25 +681,28 @@ export async function loadCapabilities(input: {
         if (manifest.networkAccess !== undefined) {
           throw new RuntimeError('capability_unavailable', 'MCP networkAccess is only valid for local MCP commands');
         }
-        // HTTP is only a transport: a remote service can operate on business
-        // resources and its self-reported annotations are not authorization.
-        // Discussion therefore uses only host-recognized read paths (built-in
-        // reads, capability snapshots, local capability reads with a read-only
-        // business directory, and controlled retrieval); remote tools load at
-        // execution time and remain grant-gated per call.
-        if (input.readOnly) {
-          report.push({ id: bound.id, version: bound.version, kind: record.kind, loaded: false, executable: false, reason: '只读讨论模式不加载远程能力' });
-          continue;
-        }
         const grants = input.grants ?? [];
         authorization = { grants, ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}) };
         connection = remoteConnection(manifest, input.gate, input.mcpDomains ?? [], input.secrets);
         networkDomains = manifestNetworkDomains(manifest, [...(input.mcpDomains ?? []), new URL(manifest.url as string).hostname], input.secrets);
       }
       const discovered = await listMcpTools(connection);
+      if (authorization) {
+        // Binding a capability to the Agent definition is the default
+        // authorization boundary. Keep explicit task grants as additional
+        // evidence, but do not require a second per-tool approval for tools
+        // that are already present in the bound, versioned capability.
+        authorization = {
+          grants: [...new Set([
+            ...authorization.grants,
+            ...discovered.map(tool => mcpGrant(bound.id, tool.name)),
+          ])].sort(),
+          ...(authorization.onPermissionRequired ? { onPermissionRequired: authorization.onPermissionRequired } : {}),
+        };
+      }
       tools.push(...capabilityTools(connection, discovered, bound, authorization));
-      // "Loaded" is discovery; "executable" needs the actual task grants.
-      // Reporting true without them would contradict the permission gate.
+      // "Loaded" is discovery; "executable" reflects the effective grants
+      // assembled for this operation.
       let executable = true;
       let grantReason: string | null = null;
       if (authorization && discovered.length) {
