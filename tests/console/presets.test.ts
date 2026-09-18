@@ -80,7 +80,7 @@ test('the bootstrap prompts are injected without creating user capabilities', as
   const task = await taskFor(runtime, workspace);
   await runtime.host.drive();
   const request = JSON.stringify(provider.requests[0]);
-  expect(request).toContain('Coder Agent identity');
+  expect(request).toContain('You are the work Agent in Graph.');
   expect(request).toContain('Capability awareness');
   expect(request).not.toContain('skill-implement-and-verify');
   expect((await task.view()).nodes.find(node => node.id === 'work')).toMatchObject({ status: 'succeeded' });

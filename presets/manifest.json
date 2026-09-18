@@ -3,10 +3,7 @@
   "bootstrap": {
     "prompts": {
       "master": "bootstrap/master/agent.md",
-      "main": "bootstrap/master/agent.md",
-      "coder": "bootstrap/coder/agent.md",
-      "reviewer": "bootstrap/reviewer/agent.md",
-      "tester": "bootstrap/tester/agent.md"
+      "main": "bootstrap/master/agent.md"
     },
     "toolPrompt": "bootstrap/tool-awareness/tool.md",
     "definitions": [

@@ -51,7 +51,7 @@ MCP 的网络范围属于能力清单：普通服务用 `networkDomains` 声明�
 
 ### 4. `presets` 只保留 bootstrap
 
-`presets/` 不再保存第三方 Skills、MCP、推荐目录或用户配方。它只保存 Graph 自身不可删除的 bootstrap：`bootstrap/` 下的 master/tool-awareness 及核心 Agent 身份 Prompt、核心定义描述。bootstrap Prompt 直接注入运行时，不进入用户能力库，也不以“可安装能力”的身份出现。
+`presets/` 不再保存第三方 Skills、MCP、推荐目录、核心 Agent 身份或用户配方。它只保存 Graph 自身不可删除的 bootstrap：`bootstrap/` 下的 master 身份与 tool-awareness，以及核心定义描述。其他 Agent 身份由用户能力库和 Agent 配方提供；没有身份绑定时使用通用系统提示。bootstrap Prompt 直接注入运行时，不进入用户能力库，也不以“可安装能力”的身份出现。
 
 ## 后果
 
