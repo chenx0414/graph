@@ -13,6 +13,7 @@ export const QUESTION_LABEL: Record<string, string> = {
   context_rejected: '上下文请求被拒',
   execution_failed: '执行失败', git_conflict: 'Git 冲突', rework: '需要返工', stalled: '任务停滞',
   permission: '等待权限确认', budget: '预算不足', git_dirty: '工作区不干净', recovery: '结果不明待核查',
+  system_change: '系统优化待批准',
 };
 
 export function when(timestamp: number | null) {

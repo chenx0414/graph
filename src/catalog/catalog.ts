@@ -1,7 +1,7 @@
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { parseDefinitionVersion } from './models.ts';
-import { CapabilityLibrary, type CapabilityBinding, type CapabilityRecord, type CapabilitySearchInput, type DefinitionSpec } from './capability-library.ts';
+import { CapabilityLibrary, type CapabilityBinding, type CapabilityBundleInput, type CapabilityRecord, type CapabilitySearchInput, type DefinitionSpec } from './capability-library.ts';
 import type { AgentCombination, AgentCombinationView } from './agent-combinations.ts';
 
 export type {
@@ -117,6 +117,10 @@ export class Catalog {
 
   capability(id: string, version?: string): CapabilityRecord | undefined {
     return this.capabilityLibrary.capability(id, version);
+  }
+
+  async upsertCapabilityBundle(input: CapabilityBundleInput) {
+    return this.capabilityLibrary.upsertCapabilityBundle(input);
   }
 
   searchCapabilities(input: CapabilitySearchInput = {}) {

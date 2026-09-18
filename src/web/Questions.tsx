@@ -11,6 +11,11 @@ function questionPrompt(kind: string, data: Record<string, unknown>) {
   }
   if (kind === 'budget' || kind === 'reservation_exceeded') return '该 Agent 已达到当前额度边界，需要你决定是否追加预算。';
   if (kind === 'human_check') return text('prompt') ?? '需要你完成一项人工验收。';
+  if (kind === 'system_change') {
+    const title = text('title');
+    const problem = text('problem');
+    return title && problem ? `${title}：${problem}` : title ?? '主 Agent 发现了一项需要你批准的系统优化。';
+  }
   return text('prompt') ?? text('reason') ?? text('message') ?? '这项操作需要你确认。';
 }
 
@@ -63,7 +68,10 @@ export function QuestionReply({ taskId, question, onDone }: {
           </>}
           <input className="input" style={{ width: 240 }} data-testid="usage-proof" value={proof} onChange={event => setProof(event.target.value)} placeholder={usageMode === 'usage' ? '用量证据' : '无法核对的说明'} />
         </>}
-        {question.kind === 'rework' || question.kind === 'stalled' ? <>
+        {question.kind === 'system_change' ? <>
+          <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'respond', value: { decision: 'approved' } })}>批准并执行</Button>
+          <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'respond', value: { decision: 'rejected' } })}>拒绝</Button>
+        </> : question.kind === 'rework' || question.kind === 'stalled' ? <>
           <Button size="sm" icon="refresh" onClick={() => void submit({ type: 'retry' })}>重试</Button>
           <Button size="sm" onClick={() => void submit({ type: 'respond', value })}>答复</Button>
         </> : <Button size="sm" variant="primary" onClick={() => {

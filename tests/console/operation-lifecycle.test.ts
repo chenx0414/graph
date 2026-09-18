@@ -69,6 +69,24 @@ test('intent recovery is conservative and attempt identity stays behind the life
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get()).toEqual({ status: 'pending' });
 });
 
+test('system-change questions accept only an explicit user decision', async () => {
+  const { store, lifecycle } = await fixture();
+  store.db.prepare("INSERT INTO questions(id,task_id,node_id,kind,data,owner,status) VALUES('s','t','work','system_change',?, 'user','open')")
+    .run(canonicalJson({ proposalId: 'p1', title: '安装 MCP', problem: '缺少能力' }));
+  store.transaction(() => lifecycle.answer('t', 's', {
+    type: 'respond',
+    value: { decision: 'approved' },
+  }));
+  expect(store.db.prepare("SELECT status,answer FROM questions WHERE id='s'").get()).toMatchObject({
+    status: 'resolved',
+    answer: expect.stringContaining('approved'),
+  });
+
+  store.db.prepare("INSERT INTO questions(id,task_id,node_id,kind,data,owner,status) VALUES('bad','t','work','system_change','{}','user','open')").run();
+  expect(() => lifecycle.answer('t', 'bad', { type: 'respond', value: { decision: 'maybe' } }))
+    .toThrow(/approved or rejected/);
+});
+
 test('dispatch, unknown usage, and a human answer compose in one lifecycle transaction', async () => {
   const { store, lifecycle } = await fixture();
   const operation = lifecycle.admit({

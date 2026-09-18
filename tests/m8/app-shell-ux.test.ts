@@ -311,7 +311,7 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   const chat = page.getByTestId('graph-agent-chat');
   await chat.waitFor();
   expect(await chat.innerText()).toContain('AGENT 节点对话');
-  expect(await chat.innerText()).toContain('任务说明');
+  await expect.poll(() => chat.innerText()).toContain('任务说明');
   expect(await chat.innerText()).toContain('实现 README 功能');
   expect(await chat.innerText()).toContain('读取 1 项');
   expect(await chat.innerText()).toContain('coder · 回复');

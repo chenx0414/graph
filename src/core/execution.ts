@@ -371,7 +371,7 @@ export class Execution {
             id,
             sources.map(source => ({ activationId: source.activationId, outputVersion: source.outputVersion })),
           ]));
-          const answers = (this.store.db.prepare("SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind='waiting' AND status='resolved' ORDER BY rowid")
+          const answers = (this.store.db.prepare("SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind IN ('waiting','system_change') AND status='resolved' ORDER BY rowid")
             .all(node.task_id, node.id) as { id: string; answer: string }[])
             .map(row => ({ questionId: row.id, value: (JSON.parse(row.answer) as { value: Json }).value }));
           const messages = task.phase === 'chatting'

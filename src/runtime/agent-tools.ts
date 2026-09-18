@@ -57,6 +57,9 @@ export function agentTools(input: {
   catalog?: Catalog;
   systemContext?: {
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+    systemDiagnostics?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+    proposeSystemChange?: (input: { title: string; problem: string; change: Json; impact?: string; risk?: string }) => Promise<Record<string, unknown>>;
+    applySystemChange?: (proposalId: string) => Promise<Record<string, unknown>>;
     requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
   };
   onSubmit?: (output: Json) => void;
@@ -225,6 +228,58 @@ export function agentTools(input: {
       name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read a redacted inventory of configured subscription plans, model connections, current Agent recipes, compiled Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.',
       parameters: Type.Object({}),
       execute: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
+    });
+  }
+  if (input.role === 'master' && input.systemContext?.systemDiagnostics) {
+    tools.push({
+      name: 'inspect_graph_system', label: 'Inspect Graph system', description: 'Inspect Graph itself: installed models and capability counts, invalid or blocked capabilities, open internal problems, failed nodes, unknown-usage records and pending user-approved system changes. Treat this as system telemetry, not project content.',
+      parameters: Type.Object({}),
+      execute: async () => text(JSON.stringify(await input.systemContext!.systemDiagnostics!())),
+    });
+  }
+  if (input.role === 'master' && input.systemContext?.proposeSystemChange) {
+    tools.push({
+      name: 'propose_system_change', label: 'Propose system change', description: 'Propose a Graph system optimization for explicit user approval. This does not change configuration. Include the exact machine-readable change. Supported change.kind is currently "capability" with change.capability = { manifest, files?, overwrite? }. Use it when the user asks to install/update a capability or when diagnostics reveal a system defect.',
+      parameters: Type.Object({
+        title: Type.String(),
+        problem: Type.String(),
+        changeJson: Type.String(),
+        impact: Type.Optional(Type.String()),
+        risk: Type.Optional(Type.String()),
+      }),
+      execute: async (_id, params) => {
+        const body = fields(params);
+        const title = String(body.title).trim();
+        const problem = String(body.problem).trim();
+        const impact = typeof body.impact === 'string' ? body.impact.trim() : undefined;
+        const risk = typeof body.risk === 'string' ? body.risk.trim() : undefined;
+        if (!title || title.length > 200) throw new Error('A system-change title of at most 200 characters is required');
+        if (!problem || problem.length > 4_000) throw new Error('A concrete problem statement of at most 4000 characters is required');
+        if (impact && impact.length > 2_000) throw new Error('System-change impact must be at most 2000 characters');
+        if (risk && risk.length > 2_000) throw new Error('System-change risk must be at most 2000 characters');
+        const serialized = String(body.changeJson);
+        if (!serialized.trim() || serialized.length > 250_000) throw new Error('changeJson must be a bounded JSON document');
+        const change = JSON.parse(serialized) as Json;
+        if (!change || typeof change !== 'object' || Array.isArray(change)) throw new Error('changeJson must describe one object');
+        return text(JSON.stringify(await input.systemContext!.proposeSystemChange!({
+          title,
+          problem,
+          change,
+          ...(impact ? { impact } : {}),
+          ...(risk ? { risk } : {}),
+        })));
+      },
+    });
+  }
+  if (input.role === 'master' && input.systemContext?.applySystemChange) {
+    tools.push({
+      name: 'apply_system_change', label: 'Apply approved system change', description: 'Apply one previously proposed system change only after the user approved its system_change question. Approval and proposal data are checked by the host; this tool cannot bypass the user decision.',
+      parameters: Type.Object({ proposalId: Type.String() }),
+      execute: async (_id, params) => {
+        const proposalId = String(fields(params).proposalId).trim();
+        if (!proposalId || proposalId.length > 200) throw new Error('A bounded proposalId is required');
+        return text(JSON.stringify(await input.systemContext!.applySystemChange!(proposalId)));
+      },
     });
   }
   if (input.role === 'master' && input.catalog) {

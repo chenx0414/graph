@@ -281,6 +281,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   let catalogCombinations: import('../catalog/agent-combinations.ts').AgentCombinationView[] = [];
   const systemSummary = async () => {
     const usage = await usageService.get();
+    const liveCapabilities = graphServer?.runtime.catalog.capabilities() ?? catalogCapabilities;
     const configured = live.entries().map(entry => ({
       id: entry.id,
       provider: entry.provider,
@@ -322,11 +323,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       summary: usage.summary,
       capabilities: {
         root: capabilityPath,
-        entries: catalogCapabilities.length,
+        entries: liveCapabilities.length,
         byKind: Object.fromEntries(
           ['skill', 'mcp', 'extension', 'pi-extension', 'prompt'].map(kind => [
             kind,
-            catalogCapabilities.filter(entry => entry.kind === kind).length,
+            liveCapabilities.filter(entry => entry.kind === kind).length,
           ]),
         ),
       },

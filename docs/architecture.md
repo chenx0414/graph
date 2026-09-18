@@ -151,6 +151,8 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 
 Main Agent 同样通过版本化 Agent 配方装载能力：`mode=main` 的 `main` 配方编译为 `main@N`，新建主 Agent 实例使用最新已编译定义，已有实例保留原版本。规划、建图、调用 subagents、模型选择、监控、问题处理和汇报由 `master` 角色工具强制启用，配方负责组合额外的 Skills、MCP、Pi extensions 与 Prompt。见 [ADR 0016](adr/0016-main-agent-capability-recipe.md)。
 
+Main Agent 每轮获得裁剪后的系统自模型，并可通过只读 `inspect_graph_system` 查询失败节点、开放问题、未知用量、无效能力和待批准变更。系统修改采用两阶段边界：`propose_system_change` 只创建用户审批问题；用户批准后，同一实例才能调用 `apply_system_change`，由宿主写入版本化能力目录并重新扫描验证。未绑定项目不阻止自省或提出能力变更。见 [ADR 0020](adr/0020-main-agent-system-introspection-and-approved-changes.md)。
+
 Agent 上下文来源采用程序解析的 `continue` / `fresh` / `fork` 三种模式。默认 Fresh：新实例只接收冻结 handoff、任务、验收、决策和产物引用。Fresh 的每条 incoming 依赖另有逐边前驱交接策略：普通实现与返工默认结果交接，独立审查与验证只读冻结证据；容器依赖展开到 leaf，缺失或失效的 `ResultHandoff` 失败关闭。已有实例返工或恢复使用 Continue。只有模型请求精确 transcript/tool-call 事实且源节点已成功时，才从源 session 的冻结 leaf 调用 Pi `createBranchedSession`，生成新 session file 与新 session ID；禁止多个 Agent 并发写同一 session。Fork 默认要求源与目标具有相同模型、定义、能力包和工具策略，不同配置必须显式 rebrand；独立审查始终 Fresh 且不得继承实现 transcript。Fork/Fresh 都创建新的 Agent 实例，Fork 加入源的预算作用域，写入型任务仍使用独立工作副本。具体决策见 [ADR 0014](adr/0014-agent-context-continuity.md) 与 [ADR 0015](adr/0015-predecessor-result-handoff-policy.md)。
 
 正式数据库、任务授权和供应商凭据由后台持有；Pi worker、MCP 进程和安装脚本在实际受限的执行环境内运行。模型请求经 broker，信息检索经受控读取 broker，外部写操作经带范围授权的工具。域名白名单、独立 cwd 和普通子进程都不足以证明上述约束成立。受限执行边界在每次派发前扫描写授权内已存在的 `.git` 条目（含 worktree 链接文件），并以解析后的 literal/subpath 规则拒绝其写入，普通命令与 MCP 共用；只读 Git 子命令以具体的 Command Line Tools 二进制运行。

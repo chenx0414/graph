@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +36,72 @@ test('filesystem capabilities are scanned recursively and invalid manifests stay
     expect.objectContaining({ id: 'reviewer', status: 'available', kind: 'prompt', role: 'agent' }),
     expect.objectContaining({ id: 'broken', status: 'invalid', error: expect.stringContaining('SKILL.md') }),
   ]));
+});
+
+test('the writable capability bundle path installs MCP manifests and rejects unsafe files', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-bundle-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const library = new CapabilityLibrary({ capabilityRoot: root });
+  await library.refresh();
+
+  const installed = await library.upsertCapabilityBundle({
+    manifest: {
+      id: 'semantic-scholar',
+      kind: 'mcp',
+      version: '1.0.0',
+      name: 'Semantic Scholar',
+      command: 'uvx',
+      args: ['semantic-scholar-mcp'],
+      networkDomains: ['api.semanticscholar.org'],
+    },
+  });
+  expect(installed.capability).toMatchObject({
+    id: 'semantic-scholar',
+    kind: 'mcp',
+    version: '1.0.0',
+    status: 'available',
+  });
+  expect(library.capability('semantic-scholar')).toMatchObject({ status: 'available' });
+
+  await expect(library.upsertCapabilityBundle({
+    manifest: {
+      id: 'unsafe',
+      kind: 'skill',
+      version: '1.0.0',
+      name: 'Unsafe',
+    },
+    files: { '../escape.md': 'no' },
+  })).rejects.toThrow(/relative|traverse/);
+  await expect(library.upsertCapabilityBundle({
+    manifest: {
+      id: 'manifest-override',
+      kind: 'mcp',
+      version: '1.0.0',
+      name: 'Manifest override',
+      command: 'node',
+      args: ['server.mjs'],
+    },
+    files: { './capability.json': '{}' },
+  })).rejects.toThrow(/generated from the manifest/);
+  await expect(library.upsertCapabilityBundle({
+    manifest: {
+      id: 'literal-secret',
+      kind: 'mcp',
+      version: '1.0.0',
+      name: 'Literal secret',
+      url: 'https://example.test/mcp',
+      headers: { Authorization: 'Bearer plaintext' },
+    },
+  })).rejects.toThrow(/credential headers/);
+  await expect(library.upsertCapabilityBundle({
+    manifest: {
+      id: 'invalid-mcp',
+      kind: 'mcp',
+      version: '1.0.0',
+      name: 'Invalid MCP',
+    },
+  })).rejects.toThrow(/command or url/);
+  expect(existsSync(join(root, 'mcp', 'invalid-mcp-1.0.0'))).toBe(false);
 });
 
 test('MCP network declarations accept host patterns and environment references but reject URLs and wildcard-all', async () => {

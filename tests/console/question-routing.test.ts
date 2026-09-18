@@ -29,6 +29,7 @@ test('only decisions the user alone owns are classified as direct user questions
   expect(questionOwner('permission', {})).toBe('user');
   expect(questionOwner('budget', {})).toBe('user');
   expect(questionOwner('human_check', {})).toBe('user');
+  expect(questionOwner('system_change', {})).toBe('user');
   expect(questionOwner('waiting', { requestType: 'model_access' })).toBe('user');
   expect(questionOwner('recovery', { reason: 'SyntaxError' })).toBe('main');
   expect(questionOwner('adapter_error', { reason: 'boom' })).toBe('main');

@@ -280,9 +280,11 @@ test('the real Pi master can search the resource library and open a model-access
 
   expect(provider.requests[0]!.tools).toEqual(expect.arrayContaining([
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
-    'save_agent_combination', 'compile_agent_combination', 'read_system_capabilities', 'request_model_access',
+    'save_agent_combination', 'compile_agent_combination', 'read_system_capabilities', 'inspect_graph_system',
+    'propose_system_change', 'apply_system_change', 'request_model_access',
   ]));
   expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
+  expect(JSON.stringify(provider.requests[0]!.messages)).toContain('Graph system self-model');
   expect(provider.requests.some(request => {
     const messages = JSON.stringify(request.messages);
     return messages.includes('reviewer') && messages.includes('1.0.0');

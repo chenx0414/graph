@@ -509,6 +509,14 @@ export class OperationLifecycle {
           throw new RuntimeError('invalid_answer', 'Grant must match the requested capability');
         }
         this.store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(taskId, answer.grant);
+      } else if (question.kind === 'system_change' && answer.type === 'respond') {
+        const value = answer.value;
+        const decision = value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as { decision?: unknown }).decision
+          : undefined;
+        if (decision !== 'approved' && decision !== 'rejected') {
+          throw new RuntimeError('invalid_answer', 'A system change must be approved or rejected');
+        }
       } else if (!(question.kind === 'waiting' && answer.type === 'respond')
         && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind) && answer.type === 'retry')
         && !(['reservation_exceeded', 'human_check', 'git_dirty'].includes(question.kind) && answer.type === 'acknowledge')
@@ -531,7 +539,7 @@ export class OperationLifecycle {
         const queued = conversation ? pendingMessages(this.store, conversation.id, 1).length : 0;
         if (!['rework', 'stalled'].includes(question.kind)) {
           this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?')
-            .run(completed && !queued ? 'succeeded' : 'pending', taskId, question.node_id);
+            .run(question.kind === 'system_change' || !completed || queued ? 'pending' : 'succeeded', taskId, question.node_id);
         }
       }
       if (['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond')) {

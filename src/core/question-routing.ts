@@ -11,6 +11,7 @@ const DIRECT_USER_KINDS = new Set([
   'budget',
   'reservation_exceeded',
   'human_check',
+  'system_change',
 ]);
 
 function record(value: Json): Record<string, Json> | null {
