@@ -59,9 +59,11 @@ function liveTool(tool: LiveTool): TranscriptTool {
 
 function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptTool) {
   if (!previous) return incoming;
+  const genericResult = /^(工具执行完成|工具执行失败)$/.test(incoming.summary);
   return {
     ...previous,
     ...incoming,
+    summary: genericResult && previous.summary ? previous.summary : incoming.summary,
     done: previous.done || incoming.done,
     error: previous.error || incoming.error,
   };

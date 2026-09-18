@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
+import { appendNodeEntry } from '../../src/core/node-run.ts';
+import { TaskStore } from '../../src/core/store.ts';
 import { openGraphServer } from '../../src/server/host.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
 
@@ -240,6 +242,85 @@ test('chat and graph tabs keep proposal details and node inspection independent'
   await page.getByTestId('conversation-tab-chat').click();
   await page.locator('.conversation-composer-wrap').waitFor();
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
+});
+
+test('a graph agent node opens the same chat transcript used by the main agent', async () => {
+  const root = await temp('agent-node-chat');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root: project }],
+    webDir,
+    autoDrive: false,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'agent-node-chat-definition');
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '启动节点', requestId: 'agent-node-chat-create' });
+  const view = await server.runtime.conversations.view(created.conversationId);
+  await server.runtime.supervisor(view.anchorTaskId).propose({
+    requirementVersion: 1,
+    summary: '节点聊天',
+    acceptance: [{ id: 'ok', description: '完成', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'graph.human_check', dependsOn: ['work'] },
+    ],
+  }, 'agent-node-chat-proposal');
+  await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'agent-node-chat-prepare', initialize: true, createBaseline: true });
+  const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
+    proposalVersion: 1,
+    targetBranch: 'main',
+    requestId: 'agent-node-chat-confirm',
+  });
+  const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  cleanup.push(async () => projection.close());
+  appendNodeEntry(projection, { taskId: confirmed.taskId, nodeId: 'work', role: 'user', kind: 'briefing', text: '实现 README 功能' });
+  appendNodeEntry(projection, {
+    taskId: confirmed.taskId,
+    nodeId: 'work',
+    role: 'tool',
+    kind: 'call',
+    text: 'README.md',
+    data: { toolCallId: 'read-readme', toolName: 'read' },
+  });
+  appendNodeEntry(projection, {
+    taskId: confirmed.taskId,
+    nodeId: 'work',
+    role: 'tool',
+    kind: 'result',
+    text: '工具执行完成',
+    data: { toolCallId: 'read-readme', toolName: 'read', isError: false },
+  });
+  appendNodeEntry(projection, {
+    taskId: confirmed.taskId,
+    nodeId: 'work',
+    role: 'assistant',
+    kind: 'message',
+    text: '实现完成。',
+  });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('draft-graph').click();
+  await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
+  await page.getByTestId('open-agent-chat').click();
+  const chat = page.getByTestId('graph-agent-chat');
+  await chat.waitFor();
+  expect(await chat.innerText()).toContain('AGENT 节点对话');
+  expect(await chat.innerText()).toContain('任务说明');
+  expect(await chat.innerText()).toContain('实现 README 功能');
+  expect(await chat.innerText()).toContain('读取 1 项');
+  expect(await chat.innerText()).toContain('coder · 回复');
+  expect(await chat.innerText()).toContain('实现完成。');
+  expect(await chat.getByRole('button', { name: '发送' }).count()).toBe(0);
+  await chat.getByRole('button', { name: '展开工具活动' }).click();
+  expect(await chat.innerText()).toContain('README.md');
+  await chat.getByRole('button', { name: '关闭节点对话' }).click();
+  await chat.waitFor({ state: 'detached' });
 });
 
 test('conversation pause and resume use one stateful action with visible feedback', async () => {

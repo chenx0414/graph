@@ -4,7 +4,7 @@ import { describeQuestion, NODE_LABEL, when } from './labels.ts';
 import { costText, ErrorBox, useTaskStream } from './shared.tsx';
 import { Button, Empty, Pill, Spinner, Stat } from './ui.tsx';
 
-interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
+export interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
 interface UsageCounts { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; usageSource?: string }
 interface Operation { id: string; state: string; runMs: number | null; waitingMs: number; waitingSlot: boolean; result: { output?: unknown } | null; usage: UsageCounts | null }
 interface Invocation { id: string; model: string; purpose?: string; usage: UsageCounts | null; usageSource?: string; cost: { unknown?: boolean; amount?: number; currency?: string } | null }
