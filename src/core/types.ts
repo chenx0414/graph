@@ -29,7 +29,7 @@ export interface ContextRequest {
   /** Optional immutable entry id; omitted means the source's current leaf. */
   sourceLeafId?: string;
   requiredFacts?: ContextFactRef[];
-  /** Incoming edge policy for Fresh context assembly. Omitted entries default to evidence_only. */
+  /** Incoming edge policy for Fresh context assembly. Omitted edges use result_handoff except for independent review/verification, which use evidence_only. */
   predecessors?: PredecessorHandoffPolicy[];
   independence?: ContextIndependence;
   /** Explicitly allow a fork to use a different model, definition or capability bundle. */

@@ -96,6 +96,35 @@ test('predecessor handoff policies are frozen at graph definition and enforce re
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
   })).toThrow(/must contain only Agent nodes/);
+
+  expect(() => validateProposal({
+    requirementVersion: 1,
+    summary: 'verification result can hand off to rework',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      {
+        id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'review',
+        context: { purpose: 'review', independence: 'model-excluded' },
+      },
+      {
+        id: 'rework', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local',
+        dependsOn: ['review'],
+        context: { purpose: 'rework', predecessors: [{ source: 'review', mode: 'result_handoff' }] },
+      },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['rework'] },
+    ],
+  })).not.toThrow();
+
+  expect(() => validateProposal({
+    requirementVersion: 1,
+    summary: 'ambiguous incoming edges require a policy',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'absorb', kind: 'agent', action: 'absorb', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'] },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['absorb'] },
+    ],
+  })).toThrow(/requires an explicit handoff policy/);
 });
 
 test('a fork creates a new session from the source leaf and shares its budget scope', async () => {
@@ -244,7 +273,6 @@ test('a result_handoff edge injects the predecessor work summary into the next F
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       {
         id: 'next', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
-        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
       },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
     ],
@@ -264,6 +292,7 @@ test('a result_handoff edge injects the predecessor work summary into the next F
       resultHandoff: expect.objectContaining({ workSummary: resultHandoff.workSummary }),
     }),
   ]);
+  expect(runtime.events(taskId).some(event => event.type === 'context.handoff_policy_selected')).toBe(true);
   expect(JSON.stringify(provider.requests[2])).toContain('WORK_SUMMARY_SENTINEL');
 
   const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
@@ -285,7 +314,7 @@ test('an evidence_only edge hides a predecessor result handoff from the Fresh Ag
   const workSpec = { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'local' };
   const nextSpec = {
     id: 'review', kind: 'agent' as const, action: 'review', definitionVersion: 'reviewer@1', model: 'review', dependsOn: ['work'],
-    context: { purpose: 'review' as const, independence: 'model-excluded' as const, predecessors: [{ source: 'work', mode: 'evidence_only' as const }] },
+    context: { purpose: 'review' as const, independence: 'model-excluded' as const },
   };
   const result = {
     outcome: 'completed' as const,
@@ -399,7 +428,12 @@ test('a required result_handoff fails closed before the downstream Fresh Agent i
   await runtime.host.drive();
 
   expect(provider.requests).toHaveLength(1);
-  expect(runtime.events(taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(false);
+  const events = runtime.events(taskId);
+  expect(events.some(event => event.type === 'context.result_handoff_frozen')).toBe(false);
+  expect(events.some(event => event.type === 'context.result_handoff_missing'
+    && (event.data as { nodeId?: string }).nodeId === 'next')).toBe(true);
+  expect(events.some(event => event.type === 'context.rejected'
+    && (event.data as { nodeId?: string }).nodeId === 'next')).toBe(true);
   await expect(runtime.user.task(taskId).view()).resolves.toMatchObject({
     questions: expect.arrayContaining([
       expect.objectContaining({
@@ -408,6 +442,11 @@ test('a required result_handoff fails closed before the downstream Fresh Agent i
         data: expect.objectContaining({
           output: expect.objectContaining({ error: expect.objectContaining({ code: 'result_handoff_invalid' }) }),
         }),
+      }),
+      expect.objectContaining({
+        nodeId: 'next',
+        kind: 'context_rejected',
+        data: expect.objectContaining({ sourceNodeId: 'work', policy: 'result_handoff' }),
       }),
     ]),
   });

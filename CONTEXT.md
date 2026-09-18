@@ -51,6 +51,18 @@ _Avoid_：让模型直接选择模式、多个 Agent 共享同一个可变 sessi
 **Fresh 子 Agent**：
 从空 session 开始，只读取冻结 handoff、任务、验收、决策和产物引用的子 Agent。独立审查必须使用 Fresh，并额外执行 evidence-only 与模型排除规则。
 
+**前驱交接策略**：
+Fresh 节点对每条 incoming 依赖选择的输入投影方式，取值为 `result_handoff` 或 `evidence_only`；普通实现流水线默认结果交接，独立审查与验证默认仅证据交接。
+_Avoid_：把未声明策略静默当成仅证据交接，或让接收 Agent 在运行时自行选择。
+
+**结果交接**：
+前驱 Agent 在 operation 结算时生成并冻结的结构化工作结果，包含目标、工作摘要、变更、决策、验证、限制和后续动作；下游 Fresh 节点仅在对应边采用 `result_handoff` 时读取它。
+_Avoid_：前驱 transcript、工具历史或隐藏推理
+
+**仅证据交接**：
+Fresh 节点只接收验收、证据和 artifact 引用，不读取前驱结果交接摘要、自由文本、transcript 或工具历史的输入投影。
+_Avoid_：无上下文；它仍然包含经过允许列表过滤的冻结事实和证据
+
 **上下文交接版本**：
 Fresh 或每次上下文解析时冻结的 purpose、任务 briefing、决策引用、产物引用和 digest；它使恢复与审计不依赖聊天摘要的最新文本。
 

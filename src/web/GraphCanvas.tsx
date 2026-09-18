@@ -146,7 +146,7 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
         sourceHandle: loop ? 'source-right' : 'source-bottom',
         targetHandle: loop ? 'target-right' : 'target-top',
         className: loop ? 'grid-edge grid-loop-edge' : 'grid-edge',
-        ...(policy ? { label: resultHandoff ? '结果交接' : '仅证据', labelStyle: { fill: resultHandoff ? '#b45309' : '#475569', fontSize: 11 } } : {}),
+        ...(policy ? { label: resultHandoff ? '结果交接' : '仅证据交接', labelStyle: { fill: resultHandoff ? '#b45309' : '#475569', fontSize: 11 } } : {}),
         ...(loop
           ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } }
           : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),

@@ -16,7 +16,14 @@ export function mediaBookmarksProposal(requirementVersion: number): Proposal {
       { id: 'master', kind: 'agent', action: 'master', role: 'master', definitionVersion: 'master@1', model: 'scripted' },
       { id: 'web-api', kind: 'agent', action: 'web-api', role: 'worker', definitionVersion: 'coder@1', model: 'scripted', dependsOn: ['master'] },
       { id: 'web-ui', kind: 'agent', action: 'web-ui', role: 'worker', definitionVersion: 'coder@1', model: 'scripted', dependsOn: ['master'] },
-      { id: 'web-test', kind: 'agent', action: 'web-test', role: 'worker', definitionVersion: 'coder@1', model: 'scripted', dependsOn: ['web-api', 'web-ui'] },
+      {
+        id: 'web-test', kind: 'agent', action: 'web-test', role: 'worker', definitionVersion: 'coder@1', model: 'scripted',
+        dependsOn: ['web-api', 'web-ui'],
+        context: { predecessors: [
+          { source: 'web-api', mode: 'evidence_only' },
+          { source: 'web-ui', mode: 'evidence_only' },
+        ] },
+      },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['web-test'] },
       { id: 'review', kind: 'agent', action: 'review', role: 'worker', definitionVersion: 'reviewer@1', model: 'scripted', dependsOn: ['check'] },
       { id: 'review-gate', kind: 'program', action: 'graph.verify', dependsOn: ['review'], verifier: { kind: 'independent', reportNodes: ['review'] } },

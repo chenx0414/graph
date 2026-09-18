@@ -21,6 +21,35 @@ const DEFAULT_RESULT_SCHEMA = { kind: 'result_handoff', version: 1 } as const;
 const DEFAULT_MAX_SUMMARY_CHARS = 2_000;
 const MAX_SUMMARY_CHARS = 4_000;
 
+function hasTranscriptFacts(spec: NodeSpec) {
+  return spec.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call') ?? false;
+}
+
+function independentReviewReceiver(spec: NodeSpec) {
+  return spec.context?.purpose === 'review' || spec.context?.purpose === 'verify'
+    || (spec.context?.independence !== undefined && spec.context.independence !== 'none')
+    || /review|verify|jury|critic/i.test(spec.action)
+    || spec.definitionVersion?.startsWith('reviewer@') === true;
+}
+
+function freshPredecessorPoliciesApply(spec: NodeSpec) {
+  return spec.kind === 'agent'
+    && !spec.context?.sourceNode
+    && !hasTranscriptFacts(spec)
+    && (spec.dependsOn?.length ?? 0) > 0;
+}
+
+function implementationReceiver(spec: NodeSpec) {
+  return spec.context?.purpose === 'implement' || spec.context?.purpose === 'rework'
+    || /work|implement|rework/i.test(spec.action);
+}
+
+export function defaultPredecessorHandoffMode(spec: NodeSpec, source?: NodeSpec): PredecessorHandoffMode | undefined {
+  if (independentReviewReceiver(spec)) return 'evidence_only';
+  if (!source || source.kind !== 'agent' || source.role === 'master') return 'evidence_only';
+  return implementationReceiver(spec) ? 'result_handoff' : undefined;
+}
+
 function operationResultDigest(result: OperationResult) {
   return digest({
     outcome: result.outcome,
@@ -124,10 +153,12 @@ export function resultHandoffFromSubmission(value: Json | undefined) {
 export function validatePredecessorPolicies(proposal: Proposal, plan: GraphPlan, nodes: Map<string, NodeSpec>) {
   const invalid = (reason: string): never => { throw new RuntimeError('invalid_proposal', reason); };
   for (const node of proposal.nodes) {
-    const policies = node.context?.predecessors ?? [];
+    const { policies, orphaned, missing } = predecessorPoliciesForNode(node, nodes);
+    if (orphaned.length) invalid(`Unknown predecessor handoff source ${orphaned[0]!.source}`);
+    if (missing.length) invalid(`Fresh predecessor edge ${missing[0]} requires an explicit handoff policy`);
     if (!policies.length) continue;
     if (node.kind !== 'agent') invalid('Only Agent nodes may declare predecessor handoff policies');
-    if (node.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')) {
+    if (hasTranscriptFacts(node)) {
       invalid('Fork facts cannot be combined with Fresh predecessor handoff policies');
     }
     const sources = new Set<string>();
@@ -140,29 +171,33 @@ export function validatePredecessorPolicies(proposal: Proposal, plan: GraphPlan,
           const source = nodes.get(leaf);
           if (!source) throw new RuntimeError('invalid_proposal', `Result handoff source ${policy.source} must contain only Agent nodes`);
           if (source.kind !== 'agent') invalid(`Result handoff source ${policy.source} must contain only Agent nodes`);
-          if (source.context?.purpose === 'review' || source.context?.purpose === 'verify'
-            || source.context?.independence && source.context.independence !== 'none') {
-            invalid(`Result handoff source ${policy.source} cannot be an independent review or verification node`);
-          }
         }
       }
-      if ((node.context?.purpose === 'review' || node.context?.purpose === 'verify'
-        || node.context?.independence && node.context.independence !== 'none')
-        && policy.mode !== 'evidence_only') {
+      if (independentReviewReceiver(node) && policy.mode !== 'evidence_only') {
         invalid('Independent review and verification require evidence_only predecessor handoff');
       }
     }
   }
 }
 
-export function predecessorPoliciesForNode(spec: NodeSpec) {
+export function predecessorPoliciesForNode(spec: NodeSpec, sourceNodes?: Map<string, NodeSpec>) {
   const explicit = new Map((spec.context?.predecessors ?? []).map(policy => [policy.source, policy]));
+  if (!freshPredecessorPoliciesApply(spec)) {
+    return { policies: [], orphaned: [...explicit.values()], missing: [] };
+  }
   const policies: PredecessorHandoffPolicy[] = [];
+  const missing: string[] = [];
   for (const source of spec.dependsOn ?? []) {
-    policies.push(explicit.get(source) ?? { source, mode: 'evidence_only' });
+    const policy = explicit.get(source);
+    if (policy) policies.push(policy);
+    else {
+      const mode = defaultPredecessorHandoffMode(spec, sourceNodes?.get(source));
+      if (mode) policies.push({ source, mode });
+      else missing.push(source);
+    }
     explicit.delete(source);
   }
-  return { policies, orphaned: [...explicit.values()] };
+  return { policies, orphaned: [...explicit.values()], missing };
 }
 
 export function predecessorPolicyDigest(policies: PredecessorHandoffPolicy[]) {
@@ -172,7 +207,7 @@ export function predecessorPolicyDigest(policies: PredecessorHandoffPolicy[]) {
 function resultSourcesByNode(proposal: Proposal, plan: GraphPlan) {
   const sources = new Set<string>();
   for (const node of proposal.nodes) {
-    for (const policy of node.context?.predecessors ?? []) {
+    for (const policy of predecessorPoliciesForNode(node, plan.nodes).policies) {
       if (policy.mode !== 'result_handoff') continue;
       for (const leaf of plan.leaves(policy.source)) sources.add(leaf);
     }
@@ -183,7 +218,7 @@ function resultSourcesByNode(proposal: Proposal, plan: GraphPlan) {
 function resultPoliciesForSource(proposal: Proposal, nodeId: string, plan: GraphPlan) {
   const policies: PredecessorHandoffPolicy[] = [];
   for (const node of proposal.nodes) {
-    for (const policy of node.context?.predecessors ?? []) {
+    for (const policy of predecessorPoliciesForNode(node, plan.nodes).policies) {
       if (policy.mode !== 'result_handoff') continue;
       if (plan.leaves(policy.source).includes(nodeId)) policies.push(policy);
     }
@@ -200,6 +235,14 @@ export function resultSummaryLimit(proposal: Proposal, nodeId: string) {
   return policies.length
     ? Math.min(...policies.map(policy => policy.maxSummaryChars ?? DEFAULT_MAX_SUMMARY_CHARS))
     : DEFAULT_MAX_SUMMARY_CHARS;
+}
+
+export function resultHandoffDependents(proposal: Proposal, sourceNodeId: string) {
+  const plan = new GraphPlan(proposal);
+  return proposal.nodes
+    .filter(node => predecessorPoliciesForNode(node, plan.nodes).policies.some(policy =>
+      policy.mode === 'result_handoff' && plan.leaves(policy.source).includes(sourceNodeId)))
+    .map(node => node.id);
 }
 
 export function outputSchemaForNode(proposal: Proposal, nodeId: string) {
@@ -279,8 +322,9 @@ function readResultHandoff(store: TaskStore, source: {
 }
 
 export function buildPredecessorHandoffs(store: TaskStore, graph: GraphState, spec: NodeSpec) {
-  const { policies, orphaned } = predecessorPoliciesForNode(spec);
+  const { policies, orphaned, missing } = predecessorPoliciesForNode(spec, graph.plan.nodes);
   if (orphaned.length) throw new RuntimeError('invalid_adapter', `Unknown predecessor handoff source ${orphaned[0]!.source}`);
+  if (missing.length) throw new RuntimeError('invalid_adapter', `Missing predecessor handoff policy for ${missing[0]}`);
   const sourceMap = graph.sources(spec.id);
   const projections: PredecessorHandoffProjection[] = [];
   for (const policy of policies) {
@@ -330,6 +374,22 @@ function failedHandoffResult(result: OperationResult, reason: string): Operation
   };
 }
 
+export function resultHandoffFailure(result: OperationResult) {
+  if (result.outcome !== 'failed' || !result.output || typeof result.output !== 'object' || Array.isArray(result.output)) return undefined;
+  const error = (result.output as Record<string, unknown>).error;
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return undefined;
+  const details = error as Record<string, unknown>;
+  if (details.code !== 'result_handoff_invalid') return undefined;
+  return { reason: typeof details.reason === 'string' ? details.reason : 'Result handoff validation failed' };
+}
+
+function submittedDraft(result: OperationResult) {
+  const direct = normalizeDraft(result.resultHandoff);
+  if (direct) return direct;
+  if (!result.output || typeof result.output !== 'object' || Array.isArray(result.output)) return undefined;
+  return normalizeDraft((result.output as Record<string, unknown>).resultHandoff);
+}
+
 export function settleResultHandoff(
   store: TaskStore,
   operation: Operation,
@@ -337,7 +397,7 @@ export function settleResultHandoff(
   result: OperationResult,
 ) {
   if (!requiresResultHandoff(proposal, operation.nodeId) || result.outcome !== 'completed') return result;
-  const draft = normalizeDraft(result.resultHandoff);
+  const draft = submittedDraft(result);
   if (!draft) return failedHandoffResult(result, 'A downstream edge requires a valid result_handoff@1 submission');
   const summaryLimit = resultSummaryLimit(proposal, operation.nodeId);
   if (draft.workSummary.length > summaryLimit) {

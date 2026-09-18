@@ -73,7 +73,13 @@ export function jury(config: { select: Extract<VerifierConfig, { kind: 'jury' }>
       agent(ids.b, 'candidate'),
       agent(ids.jury, 'jury', { dependsOn: [ids.a, ids.b] }),
       program(ids.select, 'graph.verify', { dependsOn: [ids.a, ids.b, ids.jury], verifier: config.select }),
-      agent(ids.absorb, 'absorb', { dependsOn: [ids.select, ids.a, ids.b] }),
+      agent(ids.absorb, 'absorb', {
+        dependsOn: [ids.select, ids.a, ids.b],
+        context: { predecessors: [
+          { source: ids.a, mode: 'evidence_only' },
+          { source: ids.b, mode: 'evidence_only' },
+        ] },
+      }),
       agent(ids.review, 'final-review', { dependsOn: [ids.absorb] }),
       program(ids.final, 'graph.verify', { dependsOn: [ids.select, ids.absorb, ids.review], verifier: config.final }),
     ],

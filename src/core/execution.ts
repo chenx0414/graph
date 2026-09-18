@@ -7,7 +7,7 @@ import { loadGraph } from './graph.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
-import { buildPredecessorHandoffs, outputSchemaForNode, renderPredecessorHandoffs } from './predecessor-handoff.ts';
+import { buildPredecessorHandoffs, outputSchemaForNode, renderPredecessorHandoffs, requiresResultHandoff } from './predecessor-handoff.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
@@ -434,12 +434,18 @@ export class Execution {
           const predecessor = spec.kind === 'agent' && agentContext?.mode === 'fresh' && graph
             ? buildPredecessorHandoffs(this.store, graph, spec)
             : { policies: [], projections: [] };
+          const resultHandoffRequired = proposal ? requiresResultHandoff(proposal, node.id) : false;
           const outputSchema = reviewNode
             ? { kind: 'independent_review', version: 1 } as const
             : proposal ? outputSchemaForNode(proposal, node.id) : { kind: 'agent_result', version: 1 } as const;
-          const schemaInstruction = outputSchema.kind === 'result_handoff'
+          const schemaInstruction = resultHandoffRequired
             ? [
-                'A downstream Fresh Agent requires a result_handoff@1. Call submit_result with outputJson exactly shaped as:',
+                reviewNode
+                  ? 'This independent review also feeds a downstream Fresh Agent through a result_handoff edge.'
+                  : 'A downstream Fresh Agent requires a result_handoff@1.',
+                reviewNode
+                  ? 'Submit the normal independent_review JSON with an additional top-level "resultHandoff" object shaped as:'
+                  : 'Call submit_result with outputJson exactly shaped as:',
                 '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<absolute path when present>","digest":"<sha256 when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
                 'Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
               ].join('\n')
@@ -505,11 +511,19 @@ export class Execution {
               reasonCode: agentContext.reasonCode,
               sourceInstanceId: agentContext.sourceInstanceId ?? null,
             });
-            this.store.event(admitted.taskId, 'context.predecessor_policy_selected', {
+            this.store.event(admitted.taskId, 'context.handoff_policy_selected', {
               nodeId: admitted.nodeId,
               operationId: admitted.id,
+              applicable: agentContext.mode === 'fresh',
               policies: handoffPackage.predecessorPolicies as unknown as Json,
             });
+            if (agentContext.mode === 'fresh' && handoffPackage.predecessorPolicies.some(policy => policy.mode === 'evidence_only')) {
+              this.store.event(admitted.taskId, 'context.evidence_only_frozen', {
+                nodeId: admitted.nodeId,
+                operationId: admitted.id,
+                policies: handoffPackage.predecessorPolicies as unknown as Json,
+              });
+            }
             this.store.event(admitted.taskId, 'context.handoff_frozen', {
               nodeId: admitted.nodeId,
               operationId: admitted.id,

@@ -283,9 +283,11 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
                       {handoff.sourceOperationId ? `运行 ${handoff.sourceOperationId}` : '运行 —'}
                       {handoff.sourceActivationId ? ` · 激活 ${handoff.sourceActivationId.slice(0, 12)}` : ''}
                       {handoff.resultHandoffSchema?.kind
-                        ? ` · ${handoff.resultHandoffSchema.kind}@${handoff.resultHandoffSchema.version ?? '?'}`
+                        ? ` · ${handoff.resultHandoffSchema.kind === 'result_handoff'
+                          ? `结果交接 v${handoff.resultHandoffSchema.version ?? '?'}`
+                          : `${handoff.resultHandoffSchema.kind}@${handoff.resultHandoffSchema.version ?? '?'}`}`
                         : ''}
-                      {handoff.resultHandoffBytes !== undefined ? ` · ${handoff.resultHandoffBytes.toLocaleString('en-US')} bytes` : ''}
+                      {handoff.resultHandoffBytes !== undefined ? ` · ${handoff.resultHandoffBytes.toLocaleString('en-US')} 字节` : ''}
                       {handoff.resultHandoffDigest ? ` · ${handoff.resultHandoffDigest.slice(0, 16)}` : ''}
                     </p>
                   )}

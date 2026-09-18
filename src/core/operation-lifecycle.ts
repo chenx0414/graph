@@ -10,7 +10,7 @@ import {
 } from './budget-ledger.ts';
 import { conversationForTask, pendingMessages, recordConversationOutput, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
-import { settleResultHandoff } from './predecessor-handoff.ts';
+import { resultHandoffDependents, resultHandoffFailure, settleResultHandoff } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation, openUserWait } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
@@ -695,6 +695,35 @@ export class OperationLifecycle {
       throw new RuntimeError('invalid_result', 'Router must return a declared case');
     }
     result = settleResultHandoff(this.store, operation, proposal, result);
+    const handoffFailure = resultHandoffFailure(result);
+    if (handoffFailure) {
+      for (const target of resultHandoffDependents(proposal, operation.nodeId)) {
+        const data = {
+          reason: handoffFailure.reason,
+          code: 'context_rejected',
+          sourceNodeId: operation.nodeId,
+          sourceOperationId: operation.id,
+          policy: 'result_handoff',
+        };
+        const existing = this.store.db.prepare(
+          "SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='context_rejected' AND status='open'",
+        ).get(operation.taskId, target);
+        this.store.event(operation.taskId, 'context.result_handoff_missing', {
+          nodeId: target,
+          sourceNodeId: operation.nodeId,
+          sourceOperationId: operation.id,
+          reason: handoffFailure.reason,
+        });
+        this.store.event(operation.taskId, 'context.handoff_rejected', {
+          nodeId: target,
+          sourceNodeId: operation.nodeId,
+          sourceOperationId: operation.id,
+          reason: handoffFailure.reason,
+        });
+        this.store.event(operation.taskId, 'context.rejected', { nodeId: target, ...data });
+        if (!existing) this.block(operation.taskId, target, 'context_rejected', data);
+      }
+    }
     const rework = result.outcome === 'completed' && isReworkDecision(result.output);
     if (result.outcome === 'completed' && !rework && proposal.acceptance.some(item =>
       item.checkNode === operation.nodeId && !result.evidence?.some(evidence => evidence.acceptanceId === item.id))) {

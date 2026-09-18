@@ -372,7 +372,14 @@ test('revalidation cannot accept a pre-absorption candidate artifact as the curr
         { id: 'candidate-b', kind: 'agent', action: 'candidate', ...coder },
         { id: 'jury', kind: 'agent', action: 'jury', ...coder, dependsOn: ['candidate-a', 'candidate-b'] },
         { id: 'select', kind: 'program', action: 'graph.verify', dependsOn: ['candidate-a', 'candidate-b', 'jury'], verifier: select },
-        { id: 'absorb', kind: 'agent', action: 'absorb', ...coder, dependsOn: ['select', 'candidate-a', 'candidate-b'] },
+        {
+          id: 'absorb', kind: 'agent', action: 'absorb', ...coder,
+          dependsOn: ['select', 'candidate-a', 'candidate-b'],
+          context: { predecessors: [
+            { source: 'candidate-a', mode: 'evidence_only' },
+            { source: 'candidate-b', mode: 'evidence_only' },
+          ] },
+        },
         { id: 'final-review', kind: 'agent', action: 'final-review', ...coder, dependsOn: ['absorb'] },
         { id: 'final', kind: 'program', action: 'graph.verify', dependsOn: ['select', 'absorb', 'final-review'], verifier: final },
       ],
@@ -384,4 +391,3 @@ test('revalidation cannot accept a pre-absorption candidate artifact as the curr
   expect(view.evidence.filter(item => item.valid)).toEqual([]);
   expect(view.operations.find(operation => operation.nodeId === 'final')?.result?.output).toMatchObject({ outcome: 'rework' });
 });
-
