@@ -12,7 +12,7 @@ import { resultHandoffFromSubmission } from '../core/predecessor-handoff.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
-import { conversationForTask } from '../core/conversation.ts';
+import { conversationForTask, publishConversationDelta } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityPermissionRequest } from './capabilities.ts';
 import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
@@ -363,7 +363,16 @@ export function createPiAdapter(options: {
           const text = streamed.buffer;
           streamed.buffer = '';
           streamed.lastFlush = now;
-          options.store.event(operation.taskId, 'message.delta', { operationId: operation.id, text });
+          publishConversationDelta(options.store, {
+            taskId: operation.taskId,
+            conversationId: conversation.id,
+            operationId: operation.id,
+            entryId: operation.id,
+            partId: 'text',
+            delta: text,
+            text: streamed.text,
+            length: streamed.text.length,
+          });
         };
         const toolSummaries = new Map<string, string>();
         const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
@@ -570,6 +579,7 @@ export function createPiAdapter(options: {
             }
             const text = result.finalAssistantText;
             const reply = text.trim() ? text : streamed.text;
+            flushDeltas(true);
             if (persistEntries && !sawAssistantMessageEnd && reply.trim()) {
               appendNodeEntry(options.store, {
                 taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,

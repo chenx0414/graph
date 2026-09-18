@@ -580,7 +580,6 @@ test('live tool activity groups and streamed markdown follow the transcript tail
 
   await page.goto(`${server.url}/#/conversations/streaming`);
   await page.getByTestId('streaming').waitFor();
-  await page.getByTestId('streaming-fade').waitFor();
   expect(await page.getByTestId('streaming').innerText()).toContain('思考与过程 · 生成中');
   const tools = page.getByTestId('tool-activity-group');
   await tools.waitFor();
@@ -600,6 +599,7 @@ test('live tool activity groups and streamed markdown follow the transcript tail
     element.dispatchEvent(new Event('scroll', { bubbles: true }));
   });
   await page.getByTestId('jump-to-latest').waitFor();
+  expect(await page.getByTestId('message-list').getAttribute('data-pinned')).toBe('false');
   await page.getByTestId('jump-to-latest').click();
   await expect.poll(() => page.getByTestId('message-list').getAttribute('data-pinned')).toBe('true');
 });

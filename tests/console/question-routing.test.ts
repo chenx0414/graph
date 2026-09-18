@@ -105,7 +105,7 @@ test('upgrading reclassifies legacy internal questions so they leave the user in
   store.close();
   store = new TaskStore(path);
   cleanup.push(async () => store.close());
-  expect(store.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 26 });
+  expect(store.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 27 });
   expect(store.db.prepare('SELECT id,kind,owner FROM questions ORDER BY id').all()).toEqual([
     { id: 'perm', kind: 'permission', owner: 'user' },
     { id: 'rec', kind: 'recovery', owner: 'main' },

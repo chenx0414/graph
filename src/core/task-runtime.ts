@@ -3,7 +3,16 @@ import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
-import { appendMessage, conversationForTask, conversationRow, deliverMessages, listMessages, pendingMessages, type MessageRow } from './conversation.ts';
+import {
+  appendMessage,
+  conversationForTask,
+  conversationRow,
+  conversationStreams,
+  deliverMessages,
+  listMessages,
+  pendingMessages,
+  type MessageRow,
+} from './conversation.ts';
 import { Execution } from './execution.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
@@ -856,6 +865,7 @@ export async function openTaskRuntime(options: {
         workspaceProjectId: conversation.workspace_project_id, anchorTaskId: conversation.anchor_task_id,
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
         messages: listMessages(store, conversationId, query), messageCount,
+        streams: conversationStreams(store, conversationId),
         questions: anchorQuestions,
         proposal,
         proposalHistory,

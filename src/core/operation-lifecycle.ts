@@ -9,7 +9,14 @@ import {
   reserveOperation,
   unknownUsageIsNonBlocking,
 } from './budget-ledger.ts';
-import { conversationForTask, pendingMessages, recordConversationInterruption, recordConversationOutput, releaseMessages } from './conversation.ts';
+import {
+  clearConversationStream,
+  conversationForTask,
+  pendingMessages,
+  recordConversationInterruption,
+  recordConversationOutput,
+  releaseMessages,
+} from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { resultHandoffDependents, resultHandoffFailure, settleResultHandoff } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
@@ -255,6 +262,7 @@ export class OperationLifecycle {
 
   private markNotSent(row: OperationDbRow, options: { resetNode: boolean; eventReason?: string }) {
     const now = Date.now();
+    clearConversationStream(this.store, row.id);
     this.store.db.prepare(`UPDATE operations
       SET state='not_sent',worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
       WHERE id=?`).run(now, row.id);
@@ -384,6 +392,7 @@ export class OperationLifecycle {
       });
       const total = known.reduce((sum, value) => sum + (value ? tokenTotal(value) : 0), 0);
       const state = invocations.length ? 'interrupted' : 'not_sent';
+      clearConversationStream(this.store, operation.id);
       this.store.db.prepare(`UPDATE operations
         SET state=?,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
         WHERE id=?`).run(state, Date.now(), operation.id);
@@ -679,6 +688,7 @@ export class OperationLifecycle {
     if (currentNode.activation_id !== operation.activationId) {
       throw new RuntimeError('stale_activation', 'Operation belongs to a replaced activation');
     }
+    clearConversationStream(this.store, operation.id);
     if (row.result) {
       const previous = JSON.parse(row.result) as OperationResult;
       if (canonicalJson({ ...previous, usage: undefined }) !== canonicalJson({ ...result, usage: undefined })) {

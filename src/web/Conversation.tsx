@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { ComposerTelemetry } from './ComposerTelemetry.tsx';
@@ -15,6 +15,7 @@ import { formatTokens } from './insights.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { Markdown } from './Markdown.tsx';
+import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
 import { Button, Icon, Pill, Spinner, StatusDot, toast } from './ui.tsx';
@@ -26,6 +27,7 @@ import {
   type TranscriptRow,
 } from './transcript-model.ts';
 import { useTranscriptFollow } from './use-transcript-follow.ts';
+import { useStreamVeils } from './use-stream-veils.ts';
 
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean }[] };
 export type ConversationSummary = {
@@ -111,6 +113,9 @@ type ConversationView = {
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;
   createdAt: number; requirementVersion: number; paused: boolean;
   messages: ConversationMessage[]; messageCount: number;
+  streams: {
+    operationId: string; entryId: string; partId: string; text: string; length: number; updatedAt: number;
+  }[];
   questions: AnchorQuestion[];
   proposal: ProposalDetail | null;
   proposalHistory: ProposalVersion[];
@@ -235,40 +240,67 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
   );
 }
 
-function stableMarkdownCut(text: string) {
-  let offset = 0;
-  let cut = 0;
-  let inFence = false;
-  for (const line of text.split('\n')) {
-    const next = offset + line.length + 1;
-    if (/^\s*```/.test(line)) {
-      inFence = !inFence;
-    } else if (!inFence && !line.trim()) {
-      cut = next;
-    }
-    offset = next;
-  }
-  return cut;
+function sameVeils(left: MarkdownVeil[], right: MarkdownVeil[]) {
+  return left.length === right.length && left.every((veil, index) => {
+    const other = right[index]!;
+    return veil.start === other.start && veil.end === other.end && veil.opacity === other.opacity;
+  });
 }
 
-function StreamingMarkdown({ text }: { text: string }) {
-  const cut = stableMarkdownCut(text);
-  const settled = text.slice(0, cut);
-  const tail = text.slice(cut);
+const AssistantMarkdownBlock = memo(function AssistantMarkdownBlock(input: {
+  source: string;
+  veils: MarkdownVeil[];
+}) {
+  return <Markdown text={input.source} veils={input.veils} />;
+}, (previous, next) => previous.source === next.source && sameVeils(previous.veils, next.veils));
+
+function AssistantResponse({ row }: { row: Extract<TranscriptRow, { kind: 'assistant' }> }) {
+  const veils = useStreamVeils(row.text, row.id, row.streaming);
+  const blocks = splitMarkdownBlocks(row.text);
   return (
-    <div className="streaming-markdown">
-      {settled && <Markdown text={settled} />}
-      {tail && (
-        <div className="streaming-tail" data-testid="streaming-fade" key={`${cut}:${tail.length}`}>
-          <Markdown text={tail} />
+    <div
+      className={`message-row ${row.streaming ? 'process-row' : 'answer-row'}`}
+      data-role="assistant"
+      data-answer={!row.streaming}
+      data-process={row.streaming}
+      data-testid={row.streaming ? 'streaming' : 'message-assistant'}
+    >
+      <div className="message-stack">
+        <div className={`message-author ${row.streaming ? 'process-author' : ''}`}>
+          {row.streaming && <Icon name="spark" size={12} />}
+          {row.streaming ? '思考与过程 · 生成中' : '主 Agent · 最终回答'}
         </div>
-      )}
+        <div className={`message-content ${row.streaming ? 'streaming-card' : 'answer-card'}`}>
+          <div className="streaming-markdown">
+            {blocks.map((block, index) => {
+              const tail = row.streaming && index === blocks.length - 1;
+              const source = tail ? mendStreamingMarkdown(block.source) : block.source;
+              const localVeils = veils.flatMap(veil => {
+                const start = Math.max(block.start, veil.start);
+                const end = Math.min(block.end, veil.end);
+                return start < end
+                  ? [{ start: start - block.start, end: end - block.start, opacity: veil.opacity }]
+                  : [];
+              });
+              return (
+                <AssistantMarkdownBlock
+                  key={`${row.id}.${block.index}`}
+                  source={source}
+                  veils={localVeils}
+                />
+              );
+            })}
+          </div>
+          {row.streaming && <span className="streaming-caret" aria-hidden="true" />}
+        </div>
+      </div>
     </div>
   );
 }
 
 function TranscriptRowView({ row }: { row: TranscriptRow }) {
   if (row.kind === 'message') return <MessageRow message={row.message} />;
+  if (row.kind === 'assistant') return <AssistantResponse row={row} />;
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'thinking') {
     return (
@@ -280,17 +312,7 @@ function TranscriptRowView({ row }: { row: TranscriptRow }) {
       </div>
     );
   }
-  return (
-    <div className="message-row process-row" data-role="assistant" data-process="true" data-testid="streaming">
-      <div className="message-stack">
-        <div className="message-author process-author"><Icon name="spark" size={12} />思考与过程 · 生成中</div>
-        <div className="message-content streaming-card">
-          <StreamingMarkdown text={row.text} />
-          <span className="streaming-caret" aria-hidden="true" />
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 function DraftVersionToc({ history, selectedVersion, scope, onSelectVersion }: {
@@ -646,7 +668,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
-  const transcriptFollow = useTranscriptFollow(conversationTab === 'chat' ? view?.id ?? null : null);
+  const busy = view?.master?.status === 'preparing' || view?.master?.status === 'running';
+  const transcriptFollow = useTranscriptFollow(conversationTab === 'chat' ? view?.id ?? null : null, Boolean(busy));
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
     // One event usually means several records changed; coalesce the refetches.
@@ -687,8 +710,10 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   useEffect(() => {
     if (view) setProjection(current => observeConversationView(current, view));
   }, [view]);
-  const busy = view?.master?.status === 'preparing' || view?.master?.status === 'running';
   const snapshot = conversationProjectionSnapshot(projection, { busy: Boolean(busy) });
+  useEffect(() => {
+    if (snapshot.streamNeedsResync) reload();
+  }, [reload, snapshot.streamNeedsResync]);
   if (loading && !view) return <p>加载中…</p>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <p>加载中…</p>;
@@ -958,6 +983,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             data-pinned={transcriptFollow.pinned}
             ref={transcriptFollow.threadRef}
             onScroll={transcriptFollow.onScroll}
+            onWheel={transcriptFollow.onWheel}
+            onTouchStart={transcriptFollow.onTouchStart}
           >
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
@@ -1063,6 +1090,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               </div>
             </section>
           )}
+          <div className="conversation-runway" style={{ height: transcriptFollow.runway }} aria-hidden="true" />
           </div>
           </div>
           {transcriptFollow.showJump && (

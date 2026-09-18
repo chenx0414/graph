@@ -992,9 +992,7 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 }
 .streaming-card .markdown-body { color: var(--muted); }
 .streaming-markdown { min-width: 0; }
-.streaming-tail {
-  animation: stream-fade 190ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
-}
+.stream-veil { display: inline; }
 .streaming-caret {
   display: inline-block;
   width: 6px;
@@ -1005,6 +1003,7 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   opacity: 0.72;
   animation: stream-caret 820ms steps(2, end) infinite;
 }
+.conversation-runway { flex: 0 0 auto; min-height: 0; pointer-events: none; }
 .thread-action-card {
   margin: 14px 0 20px;
   border: 1px solid var(--border);

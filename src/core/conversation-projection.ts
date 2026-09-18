@@ -21,10 +21,20 @@ export interface LiveTool {
   error: boolean;
 }
 
+export interface LiveText {
+  operationId: string;
+  entryId: string;
+  partId: string;
+  text: string;
+  length: number;
+  updatedAt: number;
+}
+
 export interface ConversationProjectionState {
   records: Record<string, ConversationMessage>;
-  liveText: Record<string, string>;
+  liveText: Record<string, LiveText>;
   liveTools: Record<string, LiveTool>;
+  streamNeedsResync: boolean;
   messageCount: number;
   windowStartSeq: number | null;
   windowEndSeq: number | null;
@@ -38,6 +48,10 @@ export interface ConversationProjectionEvent {
   data?: {
     operationId?: string;
     text?: string;
+    entryId?: string;
+    partId?: string;
+    len?: number;
+    reset?: boolean;
     message?: ConversationMessage;
     phase?: string;
     toolCallId?: string;
@@ -65,9 +79,10 @@ const TERMINAL_OPERATION_EVENTS = new Set([
 export interface ConversationProjectionSnapshot {
   messages: ConversationMessage[];
   queuedMessages: ConversationMessage[];
-  streaming: [string, string][];
+  streaming: LiveText[];
   liveTools: LiveTool[];
   promptSuggestion: string;
+  streamNeedsResync: boolean;
   historyRequest: ConversationHistoryRequest | null;
 }
 
@@ -126,6 +141,7 @@ export function createConversationProjection(): ConversationProjectionState {
     records: {},
     liveText: {},
     liveTools: {},
+    streamNeedsResync: false,
     messageCount: 0,
     windowStartSeq: null,
     windowEndSeq: null,
@@ -138,13 +154,26 @@ export function createConversationProjection(): ConversationProjectionState {
 /** Observe a durable view window without treating it as an exhaustive history. */
 export function observeConversationView(
   state: ConversationProjectionState,
-  view: { messages: ConversationMessage[]; messageCount: number },
+  view: {
+    messages: ConversationMessage[];
+    messageCount: number;
+    streams?: { operationId: string; entryId: string; partId: string; text: string; length: number; updatedAt: number }[];
+  },
 ) {
   const records = mergeRecords(state.records, view.messages);
   const sequences = view.messages.map(message => message.seq);
+  const liveText = { ...state.liveText };
+  for (const stream of view.streams ?? []) {
+    const previous = liveText[stream.operationId];
+    if (state.streamNeedsResync || !previous || stream.text.startsWith(previous.text) || stream.length > previous.length) {
+      liveText[stream.operationId] = stream;
+    }
+  }
   return {
     ...state,
     records,
+    liveText,
+    streamNeedsResync: false,
     messageCount: view.messageCount,
     windowStartSeq: sequences.length ? Math.min(...sequences) : state.windowStartSeq,
     windowEndSeq: sequences.length ? Math.max(...sequences) : state.windowEndSeq,
@@ -158,12 +187,24 @@ export function applyConversationEvent(
   const data = event.data;
   if (event.type === 'message.delta' && data?.text) {
     const operationId = data.operationId ?? 'stream';
+    const previous = state.liveText[operationId];
+    const entryId = data.entryId ?? previous?.entryId ?? operationId;
+    const partId = data.partId ?? previous?.partId ?? 'text';
+    const length = data.len ?? (previous?.length ?? 0) + data.text.length;
+    const reset = data.reset === true || !previous;
+    const appendable = Boolean(previous && previous.length + data.text.length === length);
+    if (!reset && !appendable && data.len !== undefined) {
+      return { ...state, streamNeedsResync: true };
+    }
     return {
       ...state,
       liveText: {
         ...state.liveText,
-        [operationId]: (state.liveText[operationId] ?? '') + data.text,
+        [operationId]: reset
+          ? { operationId, entryId, partId, text: data.text, length, updatedAt: Date.now() }
+          : { ...previous!, text: previous!.text + data.text, length, updatedAt: Date.now() },
       },
+      streamNeedsResync: false,
     };
   }
   if (event.type === 'message.tool' && data?.toolCallId) {
@@ -188,7 +229,7 @@ export function applyConversationEvent(
     const liveTools = Object.fromEntries(
       Object.entries(state.liveTools).filter(([, tool]) => tool.operationId !== data.operationId),
     );
-    return { ...state, liveText, liveTools };
+    return { ...state, liveText, liveTools, streamNeedsResync: false };
   }
   const message = data?.message;
   if (!message || (event.type !== 'message.created' && event.type !== 'message.updated')) return state;
@@ -202,7 +243,7 @@ export function applyConversationEvent(
   if (message.role === 'tool' && typeof message.data?.toolCallId === 'string') {
     delete liveTools[message.data.toolCallId];
   }
-  return { ...state, records, liveText, liveTools };
+  return { ...state, records, liveText, liveTools, streamNeedsResync: false };
 }
 
 export function conversationHistoryRequest(state: ConversationProjectionState): ConversationHistoryRequest | null {
@@ -259,9 +300,10 @@ export function conversationProjectionSnapshot(
   return {
     messages: orderMessages(all.filter(message => !(message.role === 'user' && message.state === 'queued'))),
     queuedMessages,
-    streaming: Object.entries(state.liveText).filter(([operationId]) => !durableAssistantOps.has(operationId)),
+    streaming: Object.values(state.liveText).filter(item => !durableAssistantOps.has(item.operationId)),
     liveTools: Object.values(state.liveTools).filter(tool => !durableToolIds.has(tool.toolCallId)),
     promptSuggestion: !options.busy && !queuedMessages.length ? suggestedPrompt : '',
+    streamNeedsResync: state.streamNeedsResync,
     historyRequest: conversationHistoryRequest(state),
   };
 }

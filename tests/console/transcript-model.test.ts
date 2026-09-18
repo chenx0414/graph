@@ -42,7 +42,7 @@ test('consecutive durable tools become one collapsed group before the answer', (
     busy: false,
   });
 
-  expect(rows.map(row => row.kind)).toEqual(['message', 'tools', 'message']);
+  expect(rows.map(row => row.kind)).toEqual(['message', 'tools', 'assistant']);
   const tools = rows[1];
   expect(tools?.kind).toBe('tools');
   if (tools?.kind !== 'tools') throw new Error('expected tool group');
@@ -62,16 +62,23 @@ test('live activity stays open and is followed by streamed markdown text', () =>
   const rows = buildTranscriptRows({
     messages: [],
     liveTools: [live],
-    streaming: [['op-live', '## 进度\n\n正在整理结果']],
+    streaming: [{
+      operationId: 'op-live',
+      entryId: 'op-live',
+      partId: 'text',
+      text: '## 进度\n\n正在整理结果',
+      length: 14,
+      updatedAt: 1,
+    }],
     busy: true,
   });
 
-  expect(rows.map(row => row.kind)).toEqual(['tools', 'streaming']);
+  expect(rows.map(row => row.kind)).toEqual(['tools', 'assistant']);
   expect(rows[0]?.kind).toBe('tools');
   if (rows[0]?.kind !== 'tools') throw new Error('expected tool group');
   expect(rows[0].active).toBe(true);
   expect(activeToolStatus(rows[0].tools)).toContain('读取 src/web/Conversation.tsx');
-  expect(rows[1]).toMatchObject({ kind: 'streaming', text: '## 进度\n\n正在整理结果' });
+  expect(rows[1]).toMatchObject({ kind: 'assistant', streaming: true, text: '## 进度\n\n正在整理结果' });
 });
 
 test('duplicate tool start and end records keep one stable row and preserve failure state', () => {
@@ -102,4 +109,29 @@ test('duplicate tool start and end records keep one stable row and preserve fail
   if (rows[0]?.kind !== 'tools') throw new Error('expected tool group');
   expect(rows[0].tools).toHaveLength(1);
   expect(rows[0].tools[0]).toMatchObject({ id: 'same-tool', error: true, done: true });
+});
+
+test('live and durable assistant rows keep the same identity and operation-based block key', () => {
+  const live = buildTranscriptRows({
+    messages: [],
+    liveTools: [],
+    streaming: [{
+      operationId: 'op-1',
+      entryId: 'op-1',
+      partId: 'text',
+      text: '第一段\n\n第二段',
+      length: 9,
+      updatedAt: 1,
+    }],
+    busy: true,
+  });
+  const durable = buildTranscriptRows({
+    messages: [message({ id: 'answer-1', seq: 2, role: 'assistant', text: '第一段\n\n第二段', operationId: 'op-1' })],
+    liveTools: [],
+    streaming: [],
+    busy: false,
+  });
+
+  expect(live[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', streaming: true });
+  expect(durable[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', streaming: false });
 });

@@ -218,8 +218,16 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   // messages stay the authoritative record.
   const events = runtime.conversations.events(created.conversationId);
   expect(events.some(event => event.type === 'message.delta')).toBe(true);
+  const delta = events.find(event => event.type === 'message.delta');
+  expect(delta?.data).toMatchObject({
+    entryId: expect.any(String),
+    partId: 'text',
+    len: expect.any(Number),
+    reset: true,
+  });
   expect(events.some(event => event.type === 'message.tool' && (event.data as { phase?: string }).phase === 'start')).toBe(true);
   expect(view.messages.some(message => message.role === 'tool' && message.text.includes('list_dir'))).toBe(true);
+  expect(view.streams).toEqual([]);
 }, 120_000);
 
 test('the real Pi master can search the resource library and open a model-access question', async () => {

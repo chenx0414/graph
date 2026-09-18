@@ -18,6 +18,10 @@ export interface MessageRow {
   seq: number; id: string; conversation_id: string; role: string; kind: string; text: string;
   data: string | null; state: string; operation_id: string | null; turn: number; created_at: number; updated_at: number;
 }
+export interface ConversationStreamRow {
+  operation_id: string; conversation_id: string; entry_id: string; part_id: string;
+  text: string; length: number; updated_at: number;
+}
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 export type MessageState = 'pending' | 'queued' | 'delivered' | 'done' | 'failed';
 
@@ -40,6 +44,76 @@ export function publicMessage(row: MessageRow) {
   };
 }
 
+/** Persist one appendable live response, publishing only the new suffix in the
+ * common case. A reset carries the full active text so a reconnect can repair
+ * any missing prefix without guessing. */
+export function publishConversationDelta(store: TaskStore, input: {
+  taskId: string;
+  conversationId: string;
+  operationId: string;
+  entryId: string;
+  partId: string;
+  delta: string;
+  text: string;
+  length: number;
+}) {
+  const previous = store.db.prepare('SELECT * FROM conversation_streams WHERE operation_id=?')
+    .get(input.operationId) as ConversationStreamRow | undefined;
+  const appendable = Boolean(
+    previous
+    && input.text.startsWith(previous.text)
+    && previous.length + input.delta.length === input.length,
+  );
+  const reset = !appendable;
+  const text = reset ? input.text : input.delta;
+  store.transaction(() => {
+    store.db.prepare(`INSERT INTO conversation_streams(
+      operation_id,conversation_id,entry_id,part_id,text,length,updated_at
+    ) VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(operation_id) DO UPDATE SET
+      conversation_id=excluded.conversation_id,
+      entry_id=excluded.entry_id,
+      part_id=excluded.part_id,
+      text=excluded.text,
+      length=excluded.length,
+      updated_at=excluded.updated_at`).run(
+      input.operationId,
+      input.conversationId,
+      input.entryId,
+      input.partId,
+      input.text,
+      input.length,
+      Date.now(),
+    );
+    store.event(input.taskId, 'message.delta', {
+      operationId: input.operationId,
+      entryId: input.entryId,
+      partId: input.partId,
+      text,
+      len: input.length,
+      reset,
+    });
+  });
+}
+
+export function clearConversationStream(store: TaskStore, operationId: string) {
+  store.db.prepare('DELETE FROM conversation_streams WHERE operation_id=?').run(operationId);
+}
+
+export function conversationStreams(store: TaskStore, conversationId: string) {
+  return (store.db.prepare(`SELECT s.* FROM conversation_streams s
+    JOIN operations o ON o.id=s.operation_id
+    WHERE s.conversation_id=? AND o.state IN ('intent','dispatched','unknown')
+    ORDER BY s.updated_at`).all(conversationId) as unknown as ConversationStreamRow[]).map(row => ({
+    operationId: row.operation_id,
+    entryId: row.entry_id,
+    partId: row.part_id,
+    text: row.text,
+    length: row.length,
+    updatedAt: row.updated_at,
+  }));
+}
+
 /** Append one durable message and publish it on the conversation stream. */
 export function appendMessage(store: TaskStore, input: {
   conversationId: string; role: MessageRole; kind: string; text: string; data?: Json;
@@ -47,6 +121,7 @@ export function appendMessage(store: TaskStore, input: {
   messageId?: string;
 }) {
   const now = Date.now();
+  if (input.operationId && input.role !== 'user') clearConversationStream(store, input.operationId);
   let row: MessageRow;
   if (input.messageId) {
     store.db.prepare('UPDATE messages SET text=?,data=?,state=?,operation_id=?,turn=?,updated_at=MAX(?,updated_at+1) WHERE id=? AND conversation_id=?')

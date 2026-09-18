@@ -1,5 +1,6 @@
 import type {
   ConversationMessage,
+  LiveText,
   LiveTool,
 } from '../core/conversation-projection.ts';
 
@@ -14,14 +15,14 @@ export type TranscriptTool = {
 
 export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
+  | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
-  | { kind: 'streaming'; id: string; operationId: string; text: string }
   | { kind: 'thinking'; id: 'thinking' };
 
 export type TranscriptModelInput = {
   messages: ConversationMessage[];
   liveTools: LiveTool[];
-  streaming: [string, string][];
+  streaming: LiveText[];
   busy: boolean;
 };
 
@@ -95,6 +96,16 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   for (const message of input.messages) {
     if (message.role !== 'tool') {
       flushTools();
+      if (message.role === 'assistant') {
+        rows.push({
+          kind: 'assistant',
+          id: `assistant:${message.operationId ?? message.id}`,
+          operationId: message.operationId ?? message.id,
+          text: message.text,
+          streaming: false,
+        });
+        continue;
+      }
       rows.push({ kind: 'message', id: message.id, message });
       continue;
     }
@@ -114,8 +125,14 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   if (input.liveTools.length) {
     pushToolGroup(rows, input.liveTools.map(liveTool));
   }
-  for (const [operationId, text] of input.streaming) {
-    rows.push({ kind: 'streaming', id: `streaming:${operationId}`, operationId, text });
+  for (const stream of input.streaming) {
+    rows.push({
+      kind: 'assistant',
+      id: `assistant:${stream.entryId}`,
+      operationId: stream.operationId,
+      text: stream.text,
+      streaming: true,
+    });
   }
   if (input.busy && !input.liveTools.length && !input.streaming.length) {
     rows.push({ kind: 'thinking', id: 'thinking' });

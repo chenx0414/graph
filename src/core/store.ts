@@ -33,7 +33,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 26) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 27) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -380,6 +380,24 @@ export class TaskStore {
         `);
       }
       this.db.exec('PRAGMA user_version=26;');
+    });
+    if (version < 27) this.transaction(() => {
+      // Streaming text is a recoverable projection, not an in-memory-only
+      // tail. Reconnects can restore the exact active response while live
+      // deltas continue to carry stable identity and length checks.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS conversation_streams(
+          operation_id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id),
+          entry_id TEXT NOT NULL,
+          part_id TEXT NOT NULL,
+          text TEXT NOT NULL,
+          length INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS conversation_streams_scope ON conversation_streams(conversation_id, updated_at);
+        PRAGMA user_version=27;
+      `);
     });
   }
   transaction<T>(action: () => T): T {

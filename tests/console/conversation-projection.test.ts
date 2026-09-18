@@ -108,7 +108,7 @@ test('live deltas and tools disappear when durable records arrive, while queued 
     data: { toolCallId: 'tool-1', toolName: 'read', summary: 'README.md', phase: 'start' },
   });
   expect(conversationProjectionSnapshot(state, { busy: true })).toMatchObject({
-    streaming: [['op', 'partial']],
+    streaming: [{ operationId: 'op', text: 'partial' }],
     liveTools: [{ toolCallId: 'tool-1', name: 'read', done: false }],
   });
 
@@ -167,7 +167,7 @@ test('terminal operation events discard abandoned live output without touching t
   });
 
   expect(conversationProjectionSnapshot(state, { busy: true })).toMatchObject({
-    streaming: [['active', '新输出']],
+    streaming: [{ operationId: 'active', text: '新输出' }],
     liveTools: [{ operationId: 'active', toolCallId: 'tool-active' }],
   });
 });
@@ -212,5 +212,64 @@ test('interrupted retries do not push the durable final answer above stale strea
     messages: [{ id: 'final', text: 'final answer' }],
     streaming: [],
     liveTools: [],
+  });
+});
+
+test('length-checked append deltas extend in place and recover from a snapshot after desync', () => {
+  let state = createConversationProjection();
+  state = applyConversationEvent(state, {
+    type: 'message.delta',
+    data: {
+      operationId: 'op',
+      entryId: 'op',
+      partId: 'text',
+      text: '完整开头',
+      len: 4,
+      reset: true,
+    },
+  });
+  state = applyConversationEvent(state, {
+    type: 'message.delta',
+    data: {
+      operationId: 'op',
+      entryId: 'op',
+      partId: 'text',
+      text: '继续',
+      len: 6,
+      reset: false,
+    },
+  });
+  expect(conversationProjectionSnapshot(state, { busy: true }).streaming).toMatchObject([
+    { operationId: 'op', entryId: 'op', partId: 'text', text: '完整开头继续', length: 6 },
+  ]);
+
+  state = applyConversationEvent(state, {
+    type: 'message.delta',
+    data: {
+      operationId: 'op',
+      entryId: 'op',
+      partId: 'text',
+      text: '错位',
+      len: 9,
+      reset: false,
+    },
+  });
+  expect(conversationProjectionSnapshot(state, { busy: true }).streamNeedsResync).toBe(true);
+
+  state = observeConversationView(state, {
+    messageCount: 0,
+    messages: [],
+    streams: [{
+      operationId: 'op',
+      entryId: 'op',
+      partId: 'text',
+      text: '权威快照',
+      length: 4,
+      updatedAt: 20,
+    }],
+  });
+  expect(conversationProjectionSnapshot(state, { busy: true })).toMatchObject({
+    streamNeedsResync: false,
+    streaming: [{ operationId: 'op', text: '权威快照', length: 4 }],
   });
 });
