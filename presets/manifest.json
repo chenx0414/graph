@@ -2,13 +2,13 @@
   "version": 2,
   "bootstrap": {
     "prompts": {
-      "master": "prompts/master/agent.md",
-      "main": "prompts/master/agent.md",
-      "coder": "prompts/coder/agent.md",
-      "reviewer": "prompts/reviewer/agent.md",
-      "tester": "prompts/tester/agent.md"
+      "master": "bootstrap/master/agent.md",
+      "main": "bootstrap/master/agent.md",
+      "coder": "bootstrap/coder/agent.md",
+      "reviewer": "bootstrap/reviewer/agent.md",
+      "tester": "bootstrap/tester/agent.md"
     },
-    "toolPrompt": "prompts/tool-awareness/tool.md",
+    "toolPrompt": "bootstrap/tool-awareness/tool.md",
     "definitions": [
       { "id": "master", "recommendedGrade": "high" },
       { "id": "coder", "recommendedGrade": "medium" },
