@@ -2,6 +2,7 @@ import { RuntimeError, type Proposal } from './types.ts';
 import { GraphPlan } from './graph.ts';
 import { validateVerifierConfig } from './verification.ts';
 import { validateContextRequest } from './context.ts';
+import { validatePredecessorPolicies } from './predecessor-handoff.ts';
 
 /** Validate static structure before any node or instance is created. */
 export function validateProposal(proposal: Proposal) {
@@ -26,6 +27,7 @@ export function validateProposal(proposal: Proposal) {
     if (node.routes && (node.kind !== 'program' || !node.routes.length || new Set(node.routes).size !== node.routes.length || node.routes.some(route => !text(route)))) invalid('Routers require unique named cases');
   }
   const plan = new GraphPlan(proposal);
+  validatePredecessorPolicies(proposal, plan, nodes);
   for (const node of proposal.nodes) {
     const sourceNode = node.context?.sourceNode;
     if (!sourceNode) continue;

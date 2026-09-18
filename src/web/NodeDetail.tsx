@@ -34,6 +34,18 @@ interface ContextDetail {
     allowedTools?: string[] | null;
     reportSchema?: { kind?: string; version?: number };
   } | null;
+  predecessorPolicies?: { source?: string; mode?: string }[];
+  predecessorHandoffs?: {
+    sourceNodeId?: string;
+    mode?: string;
+    sourceOperationId?: string;
+    sourceActivationId?: string;
+    outputVersion?: number;
+    resultHandoff?: { workSummary?: string } | null;
+    resultHandoffDigest?: string;
+    resultHandoffSchema?: { kind?: string; version?: number };
+    resultHandoffBytes?: number;
+  }[];
   handoffDigest: string | null;
   handoffSummary: string | null;
   budgetScope: { id: string; used: number; limit: number | null; unlimited: boolean } | null;
@@ -250,6 +262,36 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
                 ? ` · 排除模型 ${data.context.reviewPolicy.excludedModels.join('、')}`
                 : ''}
             </p>
+          )}
+          {(data.context.predecessorPolicies?.length ?? 0) > 0 && (
+            <div>
+              <p className="muted">前驱交接策略</p>
+              {data.context.predecessorPolicies!.map(policy => (
+                <p key={`${policy.source}:${policy.mode}`} className="muted">
+                  {policy.source} · {policy.mode === 'result_handoff' ? '结果交接' : '仅证据交接'}
+                </p>
+              ))}
+              {data.context.predecessorHandoffs?.map(handoff => (
+                <div key={`${handoff.sourceNodeId}:${handoff.sourceOperationId}`}>
+                  <p className="muted">
+                    {handoff.sourceNodeId} · {handoff.mode === 'result_handoff' ? '已注入结果摘要' : '仅注入证据'}
+                    {handoff.outputVersion ? ` · 输出 v${handoff.outputVersion}` : ''}
+                    {handoff.resultHandoff?.workSummary ? ` · ${handoff.resultHandoff.workSummary}` : ''}
+                  </p>
+                  {(handoff.sourceOperationId || handoff.sourceActivationId || handoff.resultHandoffDigest) && (
+                    <p className="muted mono">
+                      {handoff.sourceOperationId ? `运行 ${handoff.sourceOperationId}` : '运行 —'}
+                      {handoff.sourceActivationId ? ` · 激活 ${handoff.sourceActivationId.slice(0, 12)}` : ''}
+                      {handoff.resultHandoffSchema?.kind
+                        ? ` · ${handoff.resultHandoffSchema.kind}@${handoff.resultHandoffSchema.version ?? '?'}`
+                        : ''}
+                      {handoff.resultHandoffBytes !== undefined ? ` · ${handoff.resultHandoffBytes.toLocaleString('en-US')} bytes` : ''}
+                      {handoff.resultHandoffDigest ? ` · ${handoff.resultHandoffDigest.slice(0, 16)}` : ''}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
           {data.context.budgetScope && (
             <p className="muted">

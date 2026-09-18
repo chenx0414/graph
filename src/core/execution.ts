@@ -7,6 +7,7 @@ import { loadGraph } from './graph.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
+import { buildPredecessorHandoffs, outputSchemaForNode, renderPredecessorHandoffs } from './predecessor-handoff.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
@@ -430,6 +431,24 @@ export class Execution {
               } : {}),
             });
           }
+          const predecessor = spec.kind === 'agent' && agentContext?.mode === 'fresh' && graph
+            ? buildPredecessorHandoffs(this.store, graph, spec)
+            : { policies: [], projections: [] };
+          const outputSchema = reviewNode
+            ? { kind: 'independent_review', version: 1 } as const
+            : proposal ? outputSchemaForNode(proposal, node.id) : { kind: 'agent_result', version: 1 } as const;
+          const schemaInstruction = outputSchema.kind === 'result_handoff'
+            ? [
+                'A downstream Fresh Agent requires a result_handoff@1. Call submit_result with outputJson exactly shaped as:',
+                '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<absolute path when present>","digest":"<sha256 when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
+                'Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
+              ].join('\n')
+            : '';
+          intent.context.briefing = [
+            intent.context.briefing,
+            renderPredecessorHandoffs(predecessor.projections),
+            schemaInstruction,
+          ].filter(Boolean).join('\n\n');
           if (agentContext) {
             if (reviewNode && (agentContext.mode !== 'fresh' || !agentContext.reviewPolicy
               || !agentContext.reviewPolicy.freshRequired || !agentContext.reviewPolicy.evidenceOnly)) {
@@ -451,7 +470,9 @@ export class Execution {
               decisions: proposal?.decisions ?? (task.decision_digest ? [task.decision_digest] : []),
               acceptance: proposal?.acceptance ?? [],
               artifactRefs,
-              outputSchema: reviewNode ? { kind: 'independent_review', version: 1 } : { kind: 'agent_result', version: 1 },
+              predecessorPolicies: predecessor.policies,
+              predecessorHandoffs: predecessor.projections,
+              outputSchema,
               briefing: intent.context.briefing ?? '',
             };
             const handoffDigest = digest(handoffPackage);
@@ -483,6 +504,11 @@ export class Execution {
               mode: agentContext.mode,
               reasonCode: agentContext.reasonCode,
               sourceInstanceId: agentContext.sourceInstanceId ?? null,
+            });
+            this.store.event(admitted.taskId, 'context.predecessor_policy_selected', {
+              nodeId: admitted.nodeId,
+              operationId: admitted.id,
+              policies: handoffPackage.predecessorPolicies as unknown as Json,
             });
             this.store.event(admitted.taskId, 'context.handoff_frozen', {
               nodeId: admitted.nodeId,

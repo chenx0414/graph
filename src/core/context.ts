@@ -50,6 +50,7 @@ function transcriptFact(fact: ContextFactRef) {
 const FACT_KINDS = new Set(['artifact', 'decision', 'file', 'transcript_range', 'tool_call']);
 const PURPOSES = new Set(['discuss', 'explore', 'implement', 'review', 'verify', 'rework']);
 const INDEPENDENCE = new Set(['none', 'fresh', 'model-excluded']);
+const PREDECESSOR_MODES = new Set(['evidence_only', 'result_handoff']);
 
 /** Validate the supervisor-authored request; mode is deliberately absent. */
 export function validateContextRequest(context: ContextRequest | undefined) {
@@ -78,6 +79,40 @@ export function validateContextRequest(context: ContextRequest | undefined) {
   }
   if (context.requiredFacts?.some(transcriptFact) && !context.sourceNode) {
     throw new RuntimeError('invalid_proposal', 'Transcript inheritance requires context.sourceNode');
+  }
+  if (context.predecessors !== undefined) {
+    if (!Array.isArray(context.predecessors) || context.predecessors.length > 50) {
+      throw new RuntimeError('invalid_proposal', 'context.predecessors must be a bounded list');
+    }
+    const sources = new Set<string>();
+    for (const policy of context.predecessors) {
+      if (!policy || typeof policy !== 'object' || Array.isArray(policy) || !boundedText(policy.source, 160)) {
+        throw new RuntimeError('invalid_proposal', 'Predecessor handoff policy requires a bounded source');
+      }
+      if (sources.has(policy.source)) throw new RuntimeError('invalid_proposal', `Duplicate predecessor handoff policy for ${policy.source}`);
+      sources.add(policy.source);
+      if (!PREDECESSOR_MODES.has(policy.mode)) throw new RuntimeError('invalid_proposal', 'Unknown predecessor handoff mode');
+      if (policy.resultSchema !== undefined) {
+        if (!policy.resultSchema || typeof policy.resultSchema !== 'object' || Array.isArray(policy.resultSchema)
+          || !boundedText(policy.resultSchema.kind, 160)
+          || !Number.isSafeInteger(policy.resultSchema.version) || policy.resultSchema.version < 1) {
+          throw new RuntimeError('invalid_proposal', 'Predecessor result schema must have a bounded kind and positive version');
+        }
+        if (policy.resultSchema.kind !== 'result_handoff' || policy.resultSchema.version !== 1) {
+          throw new RuntimeError('invalid_proposal', 'Only result_handoff@1 is supported for predecessor result handoffs');
+        }
+      }
+      if (policy.maxSummaryChars !== undefined
+        && (!Number.isSafeInteger(policy.maxSummaryChars) || policy.maxSummaryChars < 1 || policy.maxSummaryChars > 4_000)) {
+        throw new RuntimeError('invalid_proposal', 'Predecessor summary limit must be between 1 and 4000 characters');
+      }
+    }
+    if (context.requiredFacts?.some(transcriptFact)) {
+      throw new RuntimeError('invalid_proposal', 'Fork facts cannot be combined with predecessor handoff policies');
+    }
+    if (context.predecessors.length && context.sourceNode) {
+      throw new RuntimeError('invalid_proposal', 'Predecessor handoff policies apply only to Fresh context');
+    }
   }
 }
 
@@ -257,6 +292,9 @@ function validateHandoffPackage(context: ResolvedAgentContext, handoff: ContextH
     !ref || typeof ref.path !== 'string' || !ref.path.trim() || !/^[a-f0-9]{64}$/.test(ref.digest))) {
     throw new RuntimeError('context_rejected', 'Context handoff requires artifact references with exact digests');
   }
+  if (!Array.isArray(handoff.predecessorPolicies) || !Array.isArray(handoff.predecessorHandoffs)) {
+    throw new RuntimeError('context_rejected', 'Context handoff requires predecessor policies and projections');
+  }
   if (!handoff.outputSchema || typeof handoff.outputSchema.kind !== 'string' || !handoff.outputSchema.kind.trim()
     || !Number.isSafeInteger(handoff.outputSchema.version) || handoff.outputSchema.version < 1) {
     throw new RuntimeError('context_rejected', 'Context handoff requires an output schema');
@@ -267,6 +305,7 @@ export function handoffConstraintsDigest(handoff: ContextHandoffPackage) {
   return digest({
     acceptance: handoff.acceptance,
     decisions: handoff.decisions,
+    predecessorPolicies: handoff.predecessorPolicies,
     outputSchema: handoff.outputSchema,
   });
 }
@@ -312,12 +351,13 @@ export function freezeContextHandoff(store: TaskStore, context: ResolvedAgentCon
     .run(context.handoffId, input.taskId, input.operationId, version, context.purpose, input.package.summary,
       canonicalJson(input.package as never), packageDigest, Date.now());
   store.db.prepare(`INSERT INTO context_resolutions(id,task_id,node_id,operation_id,requested_purpose,requested_facts,independence,
-      selected_mode,reason_code,source_instance_id,binding_id,handoff_id,constraints_digest,review_policy,created_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      selected_mode,reason_code,source_instance_id,binding_id,handoff_id,constraints_digest,review_policy,predecessor_policy,created_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(context.resolutionId, input.taskId, input.nodeId, input.operationId, context.purpose,
       canonicalJson(context.requestedFacts as never), context.independence,
       context.mode, context.reasonCode, context.sourceInstanceId ?? null, context.bindingId, context.handoffId,
-      constraintsDigest, context.reviewPolicy ? canonicalJson(context.reviewPolicy as never) : null, Date.now());
+      constraintsDigest, context.reviewPolicy ? canonicalJson(context.reviewPolicy as never) : null,
+      canonicalJson(input.package.predecessorPolicies as never), Date.now());
   if (input.capabilityDigest) {
     store.db.prepare('UPDATE agent_context_bindings SET capability_digest=? WHERE id=?').run(input.capabilityDigest, context.bindingId);
   }
@@ -374,8 +414,8 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
       b.source_context_digest,b.child_context_digest,b.capability_digest,b.model_policy_digest,b.tool_policy_digest,
       b.budget_scope_id,b.created_at,
       r.selected_mode,r.requested_purpose,r.requested_facts,r.independence,r.reason_code,r.operation_id,
-      r.constraints_digest,r.review_policy,
-      h.digest AS handoff_digest,h.summary AS handoff_summary,
+      r.constraints_digest,r.review_policy,r.predecessor_policy,
+      h.digest AS handoff_digest,h.summary AS handoff_summary,h.package AS handoff_package,
       si.node_id AS source_node_id
     FROM instances i
     LEFT JOIN agent_context_bindings b ON b.instance_id=i.id
@@ -403,8 +443,10 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
       operation_id: string | null;
       constraints_digest: string | null;
       review_policy: string | null;
+      predecessor_policy: string | null;
       handoff_digest: string | null;
       handoff_summary: string | null;
+      handoff_package: string | null;
       source_node_id: string | null;
     } | undefined;
   if (!row?.mode) return null;
@@ -427,6 +469,10 @@ export function contextView(store: TaskStore, taskId: string, nodeId: string) {
     toolPolicyDigest: row.tool_policy_digest,
     constraintsDigest: row.constraints_digest,
     reviewPolicy: row.review_policy ? JSON.parse(row.review_policy) as unknown : null,
+    predecessorPolicies: row.predecessor_policy ? JSON.parse(row.predecessor_policy) as unknown : [],
+    predecessorHandoffs: row.handoff_package
+      ? (JSON.parse(row.handoff_package) as { predecessorHandoffs?: unknown }).predecessorHandoffs ?? []
+      : [],
     handoffDigest: row.handoff_digest,
     handoffSummary: row.handoff_summary,
     budgetScope: row.budget_scope_id ? budgetScopeView(store, row.budget_scope_id) : null,

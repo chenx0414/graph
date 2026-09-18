@@ -7,7 +7,13 @@ const align = (value: number) => Math.round(value / GRID) * GRID;
 type GraphPayload = {
   nodes: {
     id: string; kind: string; action?: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null;
-    context?: { purpose?: string; sourceNode?: string; requiredFacts?: { kind: string }[]; independence?: string };
+    context?: {
+      purpose?: string;
+      sourceNode?: string;
+      requiredFacts?: { kind: string }[];
+      independence?: string;
+      predecessors?: { source?: string; mode?: string }[];
+    };
   }[];
   containers: { id: string; parent?: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
@@ -85,6 +91,12 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
 }) {
   const containerById = new Map(graph.containers.map(container => [container.id, container]));
   const nodeContainer = new Map(graph.nodes.map(node => [node.id, node.container]));
+  const edgePolicy = new Map<string, string>();
+  for (const node of graph.nodes) {
+    for (const policy of node.context?.predecessors ?? []) {
+      if (policy.source && policy.mode) edgePolicy.set(`${policy.source}:${node.id}`, policy.mode);
+    }
+  }
   const relativePosition = (id: string, fallback: { x: number; y: number; width: number; height: number }) => {
     const position = graph.layout.positions[id] ?? fallback;
     const parentId = containerById.get(id)?.parent ?? nodeContainer.get(id);
@@ -127,14 +139,17 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
   const edges = graph.layout.edges.filter(edge => !hidden.has(edge.source) && !hidden.has(edge.target))
     .map(edge => {
       const loop = edge.id.startsWith('loop:');
+      const policy = edgePolicy.get(`${edge.source}:${edge.target}`);
+      const resultHandoff = policy === 'result_handoff';
       return {
         id: edge.id, source: edge.source, target: edge.target, type: loop ? 'gridLoop' : 'grid',
         sourceHandle: loop ? 'source-right' : 'source-bottom',
         targetHandle: loop ? 'target-right' : 'target-top',
         className: loop ? 'grid-edge grid-loop-edge' : 'grid-edge',
+        ...(policy ? { label: resultHandoff ? '结果交接' : '仅证据', labelStyle: { fill: resultHandoff ? '#b45309' : '#475569', fontSize: 11 } } : {}),
         ...(loop
           ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } }
-          : { style: { stroke: '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c8aa5' } }),
+          : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),
       };
     });
   return (

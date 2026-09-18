@@ -32,7 +32,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 23) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 24) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -322,6 +322,31 @@ export class TaskStore {
         );
         CREATE UNIQUE INDEX context_handoffs_task_version ON context_handoffs(task_id,version);
         PRAGMA user_version=23;
+      `);
+    });
+    if (version < 24) this.transaction(() => {
+      // A predecessor may publish one structured work-result handoff per
+      // operation. Downstream Fresh nodes choose per incoming dependency
+      // whether that handoff is projected or only frozen evidence is visible.
+      this.db.exec(`
+        ALTER TABLE context_resolutions ADD COLUMN predecessor_policy TEXT NOT NULL DEFAULT '[]';
+        CREATE TABLE result_handoffs(
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          node_id TEXT NOT NULL,
+          instance_id TEXT NOT NULL REFERENCES instances(id),
+          operation_id TEXT NOT NULL UNIQUE REFERENCES operations(id),
+          activation_id TEXT NOT NULL,
+          output_version INTEGER NOT NULL,
+          schema_kind TEXT NOT NULL,
+          schema_version INTEGER NOT NULL,
+          body TEXT NOT NULL,
+          digest TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX result_handoffs_source
+          ON result_handoffs(task_id,node_id,activation_id,output_version);
+        PRAGMA user_version=24;
       `);
     });
   }

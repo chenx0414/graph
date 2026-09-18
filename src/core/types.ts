@@ -12,6 +12,16 @@ export interface ContextFactRef {
   from?: string;
   to?: string;
 }
+export type PredecessorHandoffMode = 'evidence_only' | 'result_handoff';
+export interface PredecessorHandoffPolicy {
+  /** A direct dependency entry on the receiving Agent node. */
+  source: string;
+  mode: PredecessorHandoffMode;
+  /** Required result schema for result_handoff; defaults to result_handoff@1. */
+  resultSchema?: { kind: string; version: number };
+  /** Upper bound applied to the model-visible predecessor summary. */
+  maxSummaryChars?: number;
+}
 export interface ContextRequest {
   purpose?: ContextPurpose;
   /** Another Agent node in the same graph whose transcript may be required. */
@@ -19,12 +29,63 @@ export interface ContextRequest {
   /** Optional immutable entry id; omitted means the source's current leaf. */
   sourceLeafId?: string;
   requiredFacts?: ContextFactRef[];
+  /** Incoming edge policy for Fresh context assembly. Omitted entries default to evidence_only. */
+  predecessors?: PredecessorHandoffPolicy[];
   independence?: ContextIndependence;
   /** Explicitly allow a fork to use a different model, definition or capability bundle. */
   rebrand?: boolean;
   reason?: string;
 }
 export type AgentContextMode = 'continue' | 'fresh' | 'fork';
+export interface ResultHandoffDraft {
+  schemaVersion: 1;
+  objective: string;
+  outcome: 'completed' | 'partial' | 'blocked';
+  workSummary: string;
+  changes: {
+    kind: 'file' | 'artifact' | 'external';
+    path?: string;
+    digest?: string;
+    summary: string;
+  }[];
+  decisions: {
+    decision: string;
+    rationale: string;
+    evidenceRefs: string[];
+  }[];
+  verification: {
+    summary: string;
+    result: 'pass' | 'fail' | 'unknown';
+    evidenceRefs: string[];
+  }[];
+  knownLimits: string[];
+  openQuestions: string[];
+  nextActions: string[];
+}
+export interface ResultHandoff extends ResultHandoffDraft {
+  source: {
+    nodeId: string;
+    instanceId: string;
+    operationId: string;
+    activationId: string;
+    outputVersion: number;
+    operationResultDigest: string;
+  };
+}
+export interface PredecessorHandoffProjection {
+  sourceNodeId: string;
+  sourceInstanceId: string | null;
+  sourceOperationId: string;
+  sourceActivationId: string;
+  outputVersion: number;
+  mode: PredecessorHandoffMode;
+  artifactRefs: { path: string; digest: string }[];
+  evidenceRefs: { acceptanceId: string; summary: string; path: string; digest: string }[];
+  resultHandoff?: ResultHandoff;
+  resultHandoffDigest?: string;
+  resultHandoffSchema?: { kind: string; version: number };
+  resultHandoffBytes?: number;
+}
 export interface ReviewIndependencePolicy {
   freshRequired: true;
   evidenceOnly: true;
@@ -46,6 +107,8 @@ export interface ContextHandoffPackage {
   decisions: string[];
   acceptance: { id: string; description: string; checkNode: string }[];
   artifactRefs: { path: string; digest: string }[];
+  predecessorPolicies: PredecessorHandoffPolicy[];
+  predecessorHandoffs: PredecessorHandoffProjection[];
   outputSchema: { kind: string; version: number };
   briefing: string;
 }
@@ -110,7 +173,14 @@ import type { TokenUsage } from '../runtime/call-broker.ts';
 export interface EvidenceInput { acceptanceId: string; summary: string; artifact: { path: string; digest: string } }
 export interface ArtifactInput { id: string; path: string; digest: string }
 export interface ArtifactVersion extends ArtifactInput { nodeId: string; operationId: string; activationId: string }
-export interface DependencySource { nodeId: string; operationId: string; activationId: string; outputVersion: number; artifacts: ArtifactVersion[] }
+export interface DependencySource {
+  nodeId: string;
+  instanceId: string | null;
+  operationId: string;
+  activationId: string;
+  outputVersion: number;
+  artifacts: ArtifactVersion[];
+}
 export interface Operation {
   id: string; taskId: string; nodeId: string; instanceId: string | null; generation: number;
   attempt: number; kind: NodeSpec['kind']; action: string; input: Json; dependencies: Record<string, Json>;
@@ -131,6 +201,8 @@ export interface Operation {
 export interface AttachmentInput { name: string; type: string; size: number; text: string }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
+  /** Structured work-result handoff submitted by an Agent when a downstream edge requires it. */
+  resultHandoff?: ResultHandoffDraft;
   question?: { prompt: string; grant?: string; data?: Json };
   route?: string;
   artifacts?: ArtifactInput[];

@@ -10,6 +10,7 @@ import {
 } from './budget-ledger.ts';
 import { conversationForTask, pendingMessages, recordConversationOutput, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
+import { settleResultHandoff } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation, openUserWait } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
@@ -693,6 +694,7 @@ export class OperationLifecycle {
       || (result.route !== undefined && !nodeSpec.routes?.includes(result.route))) {
       throw new RuntimeError('invalid_result', 'Router must return a declared case');
     }
+    result = settleResultHandoff(this.store, operation, proposal, result);
     const rework = result.outcome === 'completed' && isReworkDecision(result.output);
     if (result.outcome === 'completed' && !rework && proposal.acceptance.some(item =>
       item.checkNode === operation.nodeId && !result.evidence?.some(evidence => evidence.acceptanceId === item.id))) {

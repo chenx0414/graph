@@ -141,9 +141,10 @@ export function loadGraph(store: TaskStore, taskId: string) {
   const proposal = JSON.parse((store.db.prepare('SELECT spec FROM graph_revisions WHERE task_id=? AND version=?').get(taskId, task.graph_version) as { spec: string }).spec) as Proposal;
   const states = store.db.prepare('SELECT id,status,output,route,activation_id,output_version,output_operation FROM nodes WHERE task_id=?').all(taskId) as GraphNodeState[];
   const sources = states.filter(state => state.output_operation).map(state => {
-    const operation = store.db.prepare('SELECT activation_id,result FROM operations WHERE id=?').get(state.output_operation!) as { activation_id: string; result: string };
+    const operation = store.db.prepare('SELECT activation_id,instance_id,result FROM operations WHERE id=?')
+      .get(state.output_operation!) as { activation_id: string; instance_id: string | null; result: string };
     const result = JSON.parse(operation.result) as OperationResult;
-    return { nodeId: state.id, operationId: state.output_operation!, activationId: operation.activation_id, outputVersion: state.output_version,
+    return { nodeId: state.id, instanceId: operation.instance_id, operationId: state.output_operation!, activationId: operation.activation_id, outputVersion: state.output_version,
       artifacts: (result.artifacts ?? []).map(artifact => ({ ...artifact, nodeId: state.id, operationId: state.output_operation!, activationId: operation.activation_id })) };
   });
   return new GraphState(new GraphPlan(proposal), states, sources);

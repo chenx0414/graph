@@ -8,6 +8,7 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
+import { resultHandoffFromSubmission } from '../core/predecessor-handoff.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
@@ -478,6 +479,7 @@ export function createPiAdapter(options: {
                     'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. You may save or edit recipes, but never create a new Skill, MCP, extension or identity yourself. Compile a recipe with compile_agent_combination and put the returned definitionVersion directly into propose_graph.',
                     'Use read_system_capabilities to check configured subscriptions, models, Agent definitions and graph architectures before designing or assembling the graph. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
                     'For each worker, request the minimum sufficient context. Omit context for a normal fresh Agent. Use context.requiredFacts with transcript_range or tool_call only when the exact parent transcript or tool-call state is essential; Graph will then fork from context.sourceNode. Never specify a mode directly. Independent review and verification must use context.independence="model-excluded" and must not request transcript or tool-call facts.',
+                    'For Fresh downstream Agents, choose each direct dependency edge in context.predecessors: evidence_only (the default) exposes acceptance/evidence/artifact refs without predecessor work summary, while result_handoff requires the predecessor to submit a structured result_handoff@1. Use result_handoff for normal implementation handoffs that need to understand prior work; independent review and verification must use evidence_only.',
                     'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',
                     'After writing the normal reply, call suggest_prompt with one concise and specific message the user is most likely to send next. Omit the suggestion when there is no useful follow-up. The suggestion is only a composer hint and must never be sent automatically.',
                   ] : []),
@@ -488,9 +490,10 @@ export function createPiAdapter(options: {
                   ' "acceptance": [{"id":"a1","description":"...","checkNode":"<mandatory program node id>"}],',
                   ' "nodes": [',
                   '  {"id":"work","kind":"agent","action":"work","definitionVersion":"coder@1","model":"<one of the configured models>"},',
+                  '  {"id":"next","kind":"agent","action":"work","definitionVersion":"coder@1","model":"<same model>","dependsOn":["work"],"context":{"purpose":"implement","predecessors":[{"source":"work","mode":"result_handoff"}]}},',
                   '  {"id":"alternative","kind":"agent","action":"explore","definitionVersion":"coder@1","model":"<same model/definition as work>","dependsOn":["work"],"context":{"purpose":"explore","sourceNode":"work","requiredFacts":[{"kind":"transcript_range"}],"reason":"Continue from the exact debugging state"}},',
                   '  {"id":"check","kind":"program","action":"graph.command","dependsOn":["work"],"input":{"command":"node","args":["--test","test/example.test.js"]}},',
-                  '  {"id":"review","kind":"agent","action":"review","definitionVersion":"reviewer@1","model":"<a different configured model>","dependsOn":["work"],"context":{"purpose":"review","independence":"model-excluded"}},',
+                  '  {"id":"review","kind":"agent","action":"review","definitionVersion":"reviewer@1","model":"<a different configured model>","dependsOn":["work"],"context":{"purpose":"review","independence":"model-excluded","predecessors":[{"source":"work","mode":"evidence_only"}]}},',
                   '  {"id":"review-gate","kind":"program","action":"graph.verify","dependsOn":["review"],"verifier":{"kind":"independent","reportNodes":["review"]}},',
                   '  {"id":"login","kind":"program","action":"graph.human_check","dependsOn":["review-gate"]}],',
                   ' "loops": [{"from":"check","to":"work"}],',
@@ -543,7 +546,8 @@ export function createPiAdapter(options: {
             const output: Json = conversation
               ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
               : (submitted ?? { text });
-            return { outcome: 'completed', output, usage: gate.total() };
+            const resultHandoff = resultHandoffFromSubmission(submitted);
+            return { outcome: 'completed', output, ...(resultHandoff ? { resultHandoff } : {}), usage: gate.total() };
           } finally {
             activeInstances.delete(operation.id);
             await session.close();
