@@ -1,9 +1,8 @@
-import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { assertWithinBudget, unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
-import { openUserWait } from '../core/time-ledger.ts';
+import { insertQuestion } from '../core/question-routing.ts';
 import {
   mergeUsageSource,
   normalizeTokenUsage,
@@ -33,7 +32,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
       if (store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Instance paused');
       if (nodeId
         && !unknownUsageIsNonBlocking(store, operation.instanceId)
-        && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
+        && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open' AND owner='user'").get(operation.taskId, nodeId)) {
         throw new RuntimeError('unknown_usage', 'Instance paused for unknown usage');
       }
       assertWithinBudget(store, operation.instanceId, reservation);
@@ -71,18 +70,19 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
           if (nodeId
             && !unknownUsageIsNonBlocking(store, operation.instanceId)
             && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
-            const questionId = randomUUID();
             const data = {
               reason: source === 'estimated'
                 ? 'Agent returned only estimated usage for a finite budget'
                 : 'Agent returned no accountable usage',
               usageSource: source,
             };
-            store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
-              .run(questionId, operation.taskId, nodeId, operation.id, 'unknown_usage', canonicalJson(data));
-            openUserWait(store, operation.taskId, nodeId);
-            // The stream must see the question even though no node status changed.
-            store.event(operation.taskId, 'question.opened', { nodeId, kind: 'unknown_usage', data, operationId: operation.id });
+            insertQuestion(store, {
+              taskId: operation.taskId,
+              nodeId,
+              operationId: operation.id,
+              kind: 'unknown_usage',
+              data,
+            });
           }
         } else if (normalized) {
           total.input += normalized.input;

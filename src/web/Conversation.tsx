@@ -105,7 +105,7 @@ type ProposalVersion = {
 };
 type DrawerPage = 'acceptance' | 'nodes' | 'decisions' | 'task';
 type ConversationTab = 'chat' | 'graph';
-type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string };
+type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; owner?: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string };
 type ConversationView = {
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;
   createdAt: number; requirementVersion: number; paused: boolean;
@@ -934,7 +934,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     if (!busy && promptSuggestion) return send(promptSuggestion);
   }
 
-  const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open');
+  const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
   async function loadOlder() {
     if (loadingOlder) return;
     const request = snapshot.historyRequest;

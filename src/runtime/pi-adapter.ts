@@ -35,6 +35,14 @@ export interface PiAdapterChannels {
   supervisor: (taskId: string) => {
     propose(proposal: Proposal, requestId: string): Promise<unknown>;
     revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+    listProblems(): Promise<unknown>;
+    resolveProblem(input: {
+      questionId: string;
+      action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage';
+      response?: string;
+      proof?: string;
+      requestId: string;
+    }): Promise<unknown>;
   };
   catalog: Catalog;
   bootstrapPrompts?: Record<string, string>;
@@ -488,6 +496,7 @@ export function createPiAdapter(options: {
                     'Before proposing a graph, inspect the project and query the user capability directory with search_resources/get_resource. Every scanned capability is immediately available, but it grants no task permission; never invent capabilities from memory.',
                     'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. You may save or edit recipes, but never create a new Skill, MCP, extension or identity yourself. Compile a recipe with compile_agent_combination and put the returned definitionVersion directly into propose_graph.',
                     'Use read_system_capabilities to check configured subscriptions, models, Agent definitions and graph architectures before designing or assembling the graph. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
+                    'Execution failures, recovery uncertainty, adapter/context errors, unknown usage and stalled or rework problems are yours to diagnose first. Use list_problems, then resolve_problem or revise_graph as appropriate. Never dump raw stack traces, JSON parsing errors, or internal state to the user. Only permission, quota, human acceptance, or a concrete decision that truly requires the user should appear as a user-facing question; ordinary user input may be requested in a normal chat reply.',
                     'For each worker, request the minimum sufficient context. Omit context for a normal fresh Agent. Use context.requiredFacts with transcript_range or tool_call only when the exact parent transcript or tool-call state is essential; Graph will then fork from context.sourceNode. Never specify a mode directly. Independent review and verification must use context.independence="model-excluded" and must not request transcript or tool-call facts.',
                     'For Fresh downstream Agents, choose each direct dependency edge in context.predecessors: result_handoff is the default for normal implementation handoffs and requires the predecessor to submit a structured result_handoff@1; evidence_only exposes acceptance/evidence/artifact refs without the predecessor work summary. Independent review and verification must use evidence_only, including when their predecessor is a review or verification node.',
                     'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',

@@ -28,11 +28,12 @@ export interface TaskRow {
 export class TaskStore {
   readonly db: DatabaseSync;
   private readonly changes = new EventEmitter();
+  private readonly eventListeners = new Set<(type: string) => void>();
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 24) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 25) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -349,6 +350,16 @@ export class TaskStore {
         PRAGMA user_version=24;
       `);
     });
+    if (version < 25) this.transaction(() => {
+      // User-facing questions contain only decisions/permissions the user can
+      // actually resolve. Runtime failures are owned by the main Agent first.
+      const columns = new Set((this.db.prepare('PRAGMA table_info(questions)').all() as { name: string }[]).map(row => row.name));
+      if (columns.size) {
+        if (!columns.has('owner')) this.db.exec("ALTER TABLE questions ADD COLUMN owner TEXT NOT NULL DEFAULT 'user';");
+        this.db.exec('CREATE INDEX IF NOT EXISTS questions_owner_status ON questions(owner,status);');
+      }
+      this.db.exec('PRAGMA user_version=25;');
+    });
   }
   transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -356,6 +367,10 @@ export class TaskStore {
     try { result = action(); this.db.exec('COMMIT'); }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
     this.changes.emit('change'); return result;
+  }
+  onEvent(listener: (type: string) => void) {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
   }
   command<T>(scope: string, requestId: string, payload: unknown, apply: () => T): T {
     if (!requestId || requestId.length > 200) throw new RuntimeError('invalid_input', 'A bounded requestId is required');
@@ -377,6 +392,7 @@ export class TaskStore {
     // Some writers record events outside a transaction; wake stream watchers
     // here so live delivery cannot depend on an unrelated commit.
     this.changes.emit('change');
+    for (const listener of this.eventListeners) listener(type);
     return cursor;
   }
   task(id: string): TaskRow {

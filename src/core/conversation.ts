@@ -191,6 +191,15 @@ function projectLine(store: TaskStore, projectId: string | null) {
   return `Project: ${projectId}${row ? ` (root ${row.root})` : ''}`;
 }
 
+function questionSummary(kind: string, data: Json) {
+  const body = data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  for (const key of ['prompt', 'reason', 'message', 'grant', 'requested'] as const) {
+    const value = body?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 500);
+  }
+  return `执行问题：${kind}`;
+}
+
 function nodeSummary(store: TaskStore, taskId: string) {
   const rows = store.db.prepare('SELECT id,spec,status FROM nodes WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; spec: string; status: string }[];
   return rows.map(row => `${row.id}:${row.status}`).join(', ');
@@ -215,13 +224,32 @@ export function conversationDigest(store: TaskStore, conversationId: string) {
     lines.push(`Draft: v${proposal.version} on requirement v${proposal.requirement_version}${stale} — ${spec.summary ?? '(no summary)'}`);
   } else lines.push('Draft: none yet');
   if (master) lines.push(`Master: ${master.status}, model ${master.model ?? 'unknown'}, used ${master.used ?? 0}/${master.budget ?? 0} tokens`);
+  const mainProblems = store.db.prepare(`SELECT q.id,q.task_id,q.node_id,q.kind,q.data
+    FROM questions q JOIN tasks t ON t.id=q.task_id
+    WHERE q.owner='main' AND q.status='open' AND (t.id=? OR t.conversation_id=?)
+    ORDER BY q.rowid`).all(anchor.id, conversationId) as { id: string; task_id: string; node_id: string; kind: string; data: string }[];
+  if (mainProblems.length) {
+    lines.push('Problems awaiting main Agent:');
+    for (const problem of mainProblems) {
+      const data = JSON.parse(problem.data) as Json;
+      lines.push(`- ${problem.id} · ${problem.kind}@${problem.node_id} on task ${problem.task_id.slice(0, 8)}: ${questionSummary(problem.kind, data)}`);
+    }
+  }
   const tasks = store.db.prepare("SELECT id,phase,paused,request,integration_sha,accepted_proposal FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; phase: string; paused: number; request: string; integration_sha: string | null; accepted_proposal: number | null }[];
   if (!tasks.length) lines.push('Feature tasks: none (nothing has been dispatched)');
   for (const task of tasks) {
-    const questions = store.db.prepare("SELECT kind,node_id FROM questions WHERE task_id=? AND status='open' ORDER BY rowid").all(task.id) as { kind: string; node_id: string }[];
+    const questions = store.db.prepare("SELECT id,kind,node_id,owner,data FROM questions WHERE task_id=? AND status='open' ORDER BY rowid").all(task.id) as { id: string; kind: string; node_id: string; owner: string; data: string }[];
     const usage = store.db.prepare('SELECT COALESCE(SUM(i.used),0) AS used, COALESCE(SUM(i.budget),0) AS budget FROM instances i JOIN nodes n ON n.instance_id=i.id WHERE n.task_id=?').get(task.id) as { used: number; budget: number };
     lines.push(`Feature task ${task.id.slice(0, 8)} (${task.phase}${task.paused ? ', paused' : ''}): request "${task.request.slice(0, 120)}"; commit ${task.integration_sha?.slice(0, 10) ?? 'none'}; tokens ${usage.used}/${usage.budget}; nodes: ${nodeSummary(store, task.id) || 'none'}`);
-    if (questions.length) lines.push(`  open questions: ${questions.map(question => `${question.kind}@${question.node_id}`).join(', ')}`);
+    const userQuestions = questions.filter(question => question.owner === 'user');
+    const internalQuestions = questions.filter(question => question.owner === 'main');
+    if (userQuestions.length) lines.push(`  questions awaiting user: ${userQuestions.map(question => `${question.kind}@${question.node_id}`).join(', ')}`);
+    if (internalQuestions.length) {
+      lines.push('  problems awaiting main Agent:');
+      for (const question of internalQuestions) {
+        lines.push(`  - ${question.id} · ${question.kind}@${question.node_id}: ${questionSummary(question.kind, JSON.parse(question.data) as Json)}`);
+      }
+    }
     const evidence = store.db.prepare('SELECT acceptance_id,valid FROM evidence WHERE task_id=? ORDER BY rowid').all(task.id) as { acceptance_id: string; valid: number }[];
     if (evidence.length) lines.push(`  evidence: ${evidence.map(item => `${item.acceptance_id}:${item.valid ? 'valid' : 'invalid'}`).join(', ')}`);
   }

@@ -11,6 +11,14 @@ import { externallyGated } from './pi-instance.ts';
 type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
   revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+  listProblems?(): Promise<unknown>;
+  resolveProblem?(input: {
+    questionId: string;
+    action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage';
+    response?: string;
+    proof?: string;
+    requestId: string;
+  }): Promise<unknown>;
 };
 
 function text(value: string) {
@@ -118,7 +126,7 @@ export function agentTools(input: {
       {
         name: 'suggest_prompt', label: 'Suggest next prompt', description: 'Record one concise next user prompt to show as an optional composer suggestion. This never sends anything automatically and must not replace the normal reply.',
         parameters: Type.Object({ prompt: Type.String() }),
-        execute: async (_id, params) => {
+        execute: async (_id: string, params: unknown) => {
           const prompt = String(fields(params).prompt).trim();
           if (!prompt || prompt.length > 500) throw new Error('A prompt suggestion must be between 1 and 500 characters');
           input.onSuggestedPrompt?.(prompt);
@@ -128,7 +136,7 @@ export function agentTools(input: {
       {
         name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson must use the schema shown in the briefing. Keep the optional decisions list current: it is frozen with this draft version and passed to workers after confirmation.',
         parameters: Type.Object({ proposalJson: Type.String(), requestId: Type.String() }),
-        execute: async (_id, params) => {
+        execute: async (_id: string, params: unknown) => {
           const body = fields(params);
           const proposal = JSON.parse(String(body.proposalJson)) as Proposal;
           const receipt = await input.supervisor!.propose(proposal, String(body.requestId));
@@ -147,6 +155,36 @@ export function agentTools(input: {
           return text(JSON.stringify(receipt));
         },
       },
+      ...(input.supervisor.listProblems && input.supervisor.resolveProblem ? [{
+        name: 'list_problems', label: 'List execution problems', description: 'List internal execution problems currently owned by the main Agent. These are not user questions; inspect them before retrying, revising the graph, or asking the user for a real decision.',
+        parameters: Type.Object({}),
+        execute: async () => text(JSON.stringify(await input.supervisor!.listProblems!())),
+      }, {
+        name: 'resolve_problem', label: 'Resolve execution problem', description: 'Resolve one main-Agent-owned execution problem after diagnosis. Use retry for transient execution/context failures, acknowledge only when the obstacle is externally cleared, respond when the worker asked a question, and reconcile_usage only when the provider cannot supply authoritative usage and the rationale is recorded.',
+        parameters: Type.Object({
+          questionId: Type.String(),
+          action: Type.String(),
+          response: Type.Optional(Type.String()),
+          proof: Type.Optional(Type.String()),
+          requestId: Type.String(),
+        }),
+        execute: async (_id: string, params: unknown) => {
+          const body = fields(params);
+          const action = String(body.action).trim();
+          if (!['retry', 'acknowledge', 'respond', 'reconcile_usage'].includes(action)) {
+            throw new Error('Unsupported problem action');
+          }
+          const response = typeof body.response === 'string' ? body.response.trim() : undefined;
+          const proof = typeof body.proof === 'string' ? body.proof.trim() : undefined;
+          return text(JSON.stringify(await input.supervisor!.resolveProblem!({
+            questionId: String(body.questionId).trim(),
+            action: action as 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage',
+            ...(response ? { response } : {}),
+            ...(proof ? { proof } : {}),
+            requestId: String(body.requestId).trim(),
+          })));
+        },
+      }] : []),
     );
   }
   if (input.role === 'master' && input.catalog) {

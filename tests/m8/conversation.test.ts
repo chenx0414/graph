@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, Answer, Operation, OperationResult } from '../../src/core/types.ts';
+import type { ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -354,12 +354,16 @@ test('a pre-send failure returns the message to the queue instead of losing it',
   const created = await runtime.conversations.create({ text: '不要丢消息', requestId: 'create' });
   await runtime.host.runReady();
   const blocked = await runtime.conversations.view(created.conversationId);
-  expect(blocked.master?.status).toBe('blocked');
+  expect(blocked.master?.status).toBe('pending');
   expect(blocked.messages.find(message => message.role === 'user')!.state).toBe('pending');
-  // Answer the adapter_error with a retry, as the UI does.
-  const questions = await openTaskRuntimeQuestions(runtime, blocked.anchorTaskId);
-  expect(questions.map(question => question.kind)).toEqual(['adapter_error']);
-  await runtime.user.task(blocked.anchorTaskId).answer(questions[0]!.id, { type: 'retry' } as Answer, 'retry');
+  // The conversation master owns this execution problem and retries it itself.
+  const problems = await runtime.supervisor(blocked.anchorTaskId).listProblems() as { id: string; kind: string }[];
+  expect(problems.map(problem => problem.kind)).toEqual(['adapter_error']);
+  await runtime.supervisor(blocked.anchorTaskId).resolveProblem({
+    questionId: problems[0]!.id,
+    action: 'retry',
+    requestId: 'retry',
+  });
   await runtime.host.runReady();
   const after = await runtime.conversations.view(created.conversationId);
   expect(after.messages.find(message => message.role === 'user')!.state).toBe('delivered');

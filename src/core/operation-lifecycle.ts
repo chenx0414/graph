@@ -13,8 +13,9 @@ import { conversationForTask, pendingMessages, recordConversationOutput, release
 import { loadGraph, reactivate } from './graph.ts';
 import { resultHandoffDependents, resultHandoffFailure, settleResultHandoff } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
-import { closeUserWait, closeUserWaitForOperation, openUserWait } from './time-ledger.ts';
+import { closeUserWait, closeUserWaitForOperation } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
+import { insertQuestion } from './question-routing.ts';
 import {
   mergeUsageSource,
   normalizeTokenUsage,
@@ -445,10 +446,7 @@ export class OperationLifecycle {
       const node = this.nodeRow(taskId, nodeId);
       this.store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?").run(taskId, nodeId);
       this.store.db.prepare("UPDATE activations SET state='blocked' WHERE id=?").run(node.activation_id);
-      this.store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
-        .run(randomUUID(), taskId, nodeId, operationId, kind, canonicalJson(data));
-      openUserWait(this.store, taskId, nodeId);
-      this.store.event(taskId, 'question.opened', { nodeId, kind, data, operationId });
+      return insertQuestion(this.store, { taskId, nodeId, operationId, kind, data }).id;
     });
   }
 
@@ -689,9 +687,13 @@ export class OperationLifecycle {
         const reason = source === 'estimated'
           ? 'Agent returned only estimated usage for a finite budget'
           : 'Agent returned no accountable usage';
-        this.store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
-          .run(randomUUID(), operation.taskId, operation.nodeId, operation.id, 'unknown_usage', canonicalJson({ reason, usageSource: source }));
-        openUserWait(this.store, operation.taskId, operation.nodeId);
+        insertQuestion(this.store, {
+          taskId: operation.taskId,
+          nodeId: operation.nodeId,
+          operationId: operation.id,
+          kind: 'unknown_usage',
+          data: { reason, usageSource: source },
+        });
         this.store.event(operation.taskId, 'operation.unknown', { operationId: operation.id, reason: 'unknown_usage', usageSource: source });
       }
       return;

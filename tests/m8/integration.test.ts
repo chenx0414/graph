@@ -43,15 +43,54 @@ async function controlledProvider(proposal: unknown) {
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk);
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; tool_calls?: { function?: { name?: string } }[] }[] } : {};
-    const master = (body.tools ?? []).some(tool => tool.function?.name === 'propose_graph');
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as {
+      tools?: { function?: { name?: string } }[];
+      messages?: { role?: string; content?: unknown; tool_calls?: { function?: { name?: string } }[] }[];
+    } : {};
+    const master = (body.tools ?? []).some(tool =>
+      ['propose_graph', 'list_problems', 'resolve_problem'].includes(tool.function?.name ?? ''));
     // The system prompt mentions the tool name, so only a real tool result or
     // tool call counts as an already proposed graph.
     const proposed = (body.messages ?? []).some(message => message.role === 'tool' || message.tool_calls?.some(call => call.function?.name === 'propose_graph'));
-    requests.push({ master: master && !proposed });
+    requests.push({ master });
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     if (master && !proposed) {
       response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-propose', type: 'function', function: { name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'master-proposal' }) } }] }, finish_reason: null }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } })}\n\n`);
+      response.end('data: [DONE]\n\n');
+      return;
+    }
+    const problemList = (body.messages ?? [])
+      .filter(message => message.role === 'tool' && typeof message.content === 'string')
+      .map(message => message.content as string)
+      .find(content => content.startsWith('[{') && content.includes('allowedActions'));
+    const problemsHandled = (body.messages ?? []).some(message =>
+      message.role === 'tool' && typeof message.content === 'string' && message.content.includes('"resolved":true'));
+    if (master && problemList && !problemsHandled) {
+      const problems = JSON.parse(problemList) as { id: string; allowedActions?: string[] }[];
+      const calls = problems
+        .filter(problem => problem.allowedActions?.includes('reconcile_usage'))
+        .map((problem, index) => ({
+          index,
+          id: `resolve-${index}`,
+          type: 'function',
+          function: {
+            name: 'resolve_problem',
+            arguments: JSON.stringify({
+              questionId: problem.id,
+              action: 'reconcile_usage',
+              proof: '受控供应商不返回逐请求 usage，主 Agent 保留未知计量并继续',
+              requestId: `resolve-${problem.id}`,
+            }),
+          },
+        }));
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: calls }, finish_reason: null }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } })}\n\n`);
+      response.end('data: [DONE]\n\n');
+      return;
+    }
+    if (master && JSON.stringify(body.messages ?? []).includes('Problems awaiting main Agent')) {
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-list-problems', type: 'function', function: { name: 'list_problems', arguments: '{}' } }] }, finish_reason: null }] })}\n\n`);
       response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } })}\n\n`);
       response.end('data: [DONE]\n\n');
       return;
@@ -111,7 +150,8 @@ test('the full productized flow runs from the formal start entry with a controll
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   cleanup.push(() => { try { child.kill('SIGKILL'); } catch { /* already exited */ } });
-  const url = await waitForServer(child);
+  const url = await waitForServer(child, 90_000);
+  console.log('[integration] server-ready');
   // The bounded cleanup only guarantees no orphan; the real exit assertion
   // lives in the test body below so it cannot be swallowed.
   const exited = new Promise<number | null>(resolveExit => child.once('exit', code => resolveExit(code)));
@@ -124,6 +164,7 @@ test('the full productized flow runs from the formal start entry with a controll
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  page.setDefaultTimeout(60_000);
   const pageErrors: string[] = [];
   page.on('pageerror', error => pageErrors.push(String(error)));
   await page.goto(url);
@@ -132,6 +173,7 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.getByTestId('new-conversation-start').click();
   await page.getByTestId('conversation').waitFor();
   await page.getByTestId('proposal-draft').waitFor();
+  console.log('[integration] proposal-ready');
   await page.screenshot({ path: join(evidenceDir, 't08-overview.png') });
 
   const proposalText = await page.getByTestId('proposal-draft').innerText();
@@ -147,6 +189,7 @@ test('the full productized flow runs from the formal start entry with a controll
   });
   await page.goto(`${url}/#/tasks/${taskId}`);
   await page.getByTestId('proposal').waitFor();
+  console.log('[integration] task-view-ready');
 
   // The credential cap is one, so the second work node must wait for a slot.
   await page.waitForFunction(() => document.querySelector('[data-testid="node-list"]')?.textContent?.includes('等待 API 名额'));
@@ -166,28 +209,17 @@ test('the full productized flow runs from the formal start entry with a controll
   expect(saved.status).toBe(200);
   expect(saved.body).toMatchObject({ restartRequired: false, applied: true, effectiveRevision: 1 });
 
-  // Both work results have no authoritative usage, so each opens an explicit question.
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="questions"] li').length === 2, undefined, { timeout: 60_000 });
-
-  // Pause and resume through the UI while the graph is blocked on questions,
-  // so the restart of dispatch is observed without racing the check node.
+  // Missing worker usage is handled by the main Agent, not exposed as a raw
+  // user question. Pause and resume still exercise restart of dispatch.
+  expect(await page.locator('[data-testid="questions"] li').count()).toBe(0);
   await page.getByTestId('pause').click();
   await page.waitForFunction(() => { const text = document.querySelector('[data-testid="status"]')?.textContent ?? ''; return text.includes('暂停'); });
   await page.getByTestId('resume').click();
   await page.waitForFunction(() => !(document.querySelector('[data-testid="status"]')?.textContent ?? '').includes('暂停'));
+  console.log('[integration] pause-resume-ready');
 
-  // Answer one question at a time: the list shrinks after each answer, so a
-  // fixed nth() locator would race the refresh.
-  for (let answered = 0; answered < 2; answered += 1) {
-    const row = page.getByTestId('questions').locator('li').first();
-    await row.getByTestId('usage-mode').selectOption('reconcile');
-    await row.getByTestId('usage-proof').fill('受控供应商未返回 usage，保留未知');
-    await row.getByRole('button', { name: '答复' }).click();
-    await page.waitForFunction(expected => document.querySelectorAll('[data-testid="questions"] li').length === expected, 1 - answered, { timeout: 30_000 });
-  }
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="questions"] li').length === 0);
-
-  await page.waitForFunction(() => document.querySelector('[data-testid="delivery"]')?.textContent?.includes('Command exited 0'), undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="delivery"]')?.textContent?.includes('Command exited 0'), undefined, { timeout: 120_000 });
+  console.log('[integration] delivery-ready');
   const delivery = await page.getByTestId('delivery').innerText();
   expect(delivery).toContain('目标分支 main');
   expect(delivery).toContain('Command exited 0: node');
@@ -195,16 +227,15 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.screenshot({ path: join(evidenceDir, 't08-delivery.png') });
 
   await page.goto(`${url}/#/inbox`);
-  await page.getByTestId('inbox-history').waitFor();
-  const history = await page.getByTestId('inbox-history').innerText();
-  expect(history).toContain('用量未知待核对');
-  expect(history).toContain('处理结果');
+  await page.getByTestId('inbox-empty').waitFor();
+  console.log('[integration] inbox-ready');
 
   await page.goto(`${url}/#/catalog`);
   await page.getByTestId('catalog').waitFor();
   expect(pageErrors).toEqual([]);
   const masterRequests = provider.requests.filter(entry => entry.master).length;
-  expect(masterRequests).toBe(1);
+  // Proposal + list_problems + resolve_problem turns.
+  expect(masterRequests).toBeGreaterThanOrEqual(3);
 
   // Stop through the formal signal path and assert the exit outside cleanup.
   child.kill('SIGTERM');

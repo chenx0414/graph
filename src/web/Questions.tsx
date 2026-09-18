@@ -3,6 +3,17 @@ import { api } from './api.ts';
 import { describeQuestion } from './labels.ts';
 import { Button, Pill, toast } from './ui.tsx';
 
+function questionPrompt(kind: string, data: Record<string, unknown>) {
+  const text = (key: string) => typeof data[key] === 'string' && String(data[key]).trim() ? String(data[key]).trim() : undefined;
+  if (kind === 'permission') {
+    const grant = text('grant');
+    return grant ? `执行需要你授权：${grant}` : '执行需要你确认一项外部权限。';
+  }
+  if (kind === 'budget' || kind === 'reservation_exceeded') return '该 Agent 已达到当前额度边界，需要你决定是否追加预算。';
+  if (kind === 'human_check') return text('prompt') ?? '需要你完成一项人工验收。';
+  return text('prompt') ?? text('reason') ?? text('message') ?? '这项操作需要你确认。';
+}
+
 /** One open question answered through the authenticated task command path. */
 export function QuestionReply({ taskId, question, onDone }: {
   taskId: string;
@@ -32,9 +43,12 @@ export function QuestionReply({ taskId, question, onDone }: {
       <div className="row">
         <Pill tone="warn">{describeQuestion(question.kind)}</Pill>
         <code className="faint">{question.kind}</code>
-        <span>{question.data.prompt}</span>
+        <span>{questionPrompt(question.kind, question.data)}</span>
       </div>
-      <pre data-testid={`question-data-${question.id}`} style={{ maxWidth: '100%', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
+      <details style={{ maxWidth: '100%', margin: '4px 0' }}>
+        <summary className="muted" style={{ cursor: 'pointer' }}>查看技术详情</summary>
+        <pre data-testid={`question-data-${question.id}`} style={{ maxWidth: '100%', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
+      </details>
       <div className="row">
         {question.kind === 'budget' && <input className="input" style={{ width: 130 }} data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
         {question.kind === 'waiting' && <input className="input" style={{ width: 220 }} data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder="外部条件已满足的说明" />}

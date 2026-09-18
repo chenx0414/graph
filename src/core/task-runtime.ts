@@ -13,6 +13,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
+import { questionSummary } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
@@ -222,6 +223,30 @@ export async function openTaskRuntime(options: {
         if (nodes.some(row => (JSON.parse(row.spec) as NodeSpec).role === 'master')) continue;
         createMasterNode(task.id);
         store.event(task.id, 'task.master_recovered', { reason: 'dispatch was disabled when the task was created' });
+        created += 1;
+      }
+      // A master that parked on its own internal problem (missing credential,
+      // unavailable model) stays out of the scheduler until the environment
+      // changes. Since that problem never reaches the user, configuration
+      // recovery must explicitly clear it and give the master another attempt;
+      // a genuine user decision keeps the master parked.
+      for (const task of pending) {
+        const master = store.db.prepare(
+          "SELECT id,status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master' LIMIT 1",
+        ).get(task.id) as { id: string; status: string } | undefined;
+        if (!master) continue;
+        const parked = store.db.prepare(
+          "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND owner='main' LIMIT 1",
+        ).get(task.id, master.id);
+        if (!parked) continue;
+        const userQuestion = store.db.prepare(
+          "SELECT id FROM questions WHERE task_id=? AND status='open' AND owner='user' LIMIT 1",
+        ).get(task.id);
+        if (userQuestion) continue;
+        store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND status='open' AND owner='main'")
+          .run(canonicalJson({ type: 'retry' }), task.id, master.id);
+        store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(task.id, master.id);
+        store.event(task.id, 'task.master_recovered', { reason: 'internal problem parked while the environment was unavailable' });
         created += 1;
       }
       const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
@@ -506,7 +531,8 @@ export async function openTaskRuntime(options: {
           }, 0) };
           const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data,activation_id,valid,commit_sha FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as { node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string; activation_id: string; valid: number; commit_sha: string | null }[];
           const operations = operationSnapshots(store, taskId);
-          const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null }[];
+          const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null; owner: string }[];
+          const userQuestions = questions.filter(question => question.owner === 'user');
           const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
           const messages = (store.db.prepare("SELECT cursor,type,data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor").all(taskId) as { cursor: number; type: string; data: string }[]).map(row => {
             const message = JSON.parse(row.data) as { text?: string; request?: string; requirementVersion?: number };
@@ -524,9 +550,10 @@ export async function openTaskRuntime(options: {
             revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused),
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
-            status: task.paused ? (operations.some(op => op.workerActive) ? 'pausing' : 'paused') : questions.some(q => q.status === 'open') ? 'blocked' : task.phase,
+            status: task.paused ? (operations.some(op => op.workerActive) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operations: operations.map(row => ({ ...row.operation, state: row.state, reserved: row.reserved, workerActive: row.workerActive, result: row.result })),
-            questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
+            questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, owner: row.owner, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
+            internalProblemCount: questions.filter(row => row.owner === 'main' && row.status === 'open').length,
             worktrees: (store.db.prepare('SELECT instance_id,node_id,path,branch FROM worktrees WHERE task_id=?').all(taskId) as { instance_id: string; node_id: string; path: string; branch: string }[])
               .map(row => ({ instanceId: row.instance_id, nodeId: row.node_id, path: row.path, branch: row.branch })),
             integrationSha: task.integration_sha,
@@ -577,7 +604,7 @@ export async function openTaskRuntime(options: {
       const rows = store.db.prepare(`SELECT t.id,t.project_id AS projectId,t.request,t.phase,t.paused,t.accepted_proposal AS acceptedProposalVersion,
         t.conversation_id AS conversationId,
         (SELECT MAX(timestamp) FROM events WHERE task_id=t.id) AS updatedAt,
-        (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open') AS openQuestions
+        (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open' AND owner='user') AS openQuestions
         FROM tasks t WHERE t.phase!='chatting' ORDER BY t.created_seq`).all() as { id: string; projectId: string; request: string; phase: string; paused: number; acceptedProposalVersion: number | null; conversationId: string | null; updatedAt: number | null; openQuestions: number }[];
       return rows.map(row => ({
         id: row.id, projectId: row.projectId, request: row.request, phase: row.phase, conversationId: row.conversationId,
@@ -604,6 +631,14 @@ export async function openTaskRuntime(options: {
     const anchor = conversationRow(store, conversationId).anchor_task_id;
     const linked = (store.db.prepare('SELECT id FROM tasks WHERE conversation_id=?').all(conversationId) as { id: string }[]).map(row => row.id);
     return [...new Set([anchor, ...linked])];
+  };
+
+  const problemActions = (kind: string) => {
+    if (kind === 'unknown_usage') return ['reconcile_usage'] as const;
+    if (kind === 'waiting') return ['respond'] as const;
+    if (kind === 'rework' || kind === 'stalled') return ['respond', 'retry'] as const;
+    if (kind === 'git_dirty') return ['acknowledge'] as const;
+    return ['retry'] as const;
   };
 
   // Conversation entry: chat messages are durable and queue behind the master
@@ -661,7 +696,7 @@ export async function openTaskRuntime(options: {
       const rows = store.db.prepare(`SELECT c.id,c.title,c.project_id AS projectId,c.anchor_task_id AS anchorTaskId,c.created_at AS createdAt,
         c.archived_at AS archivedAt,
         (SELECT MAX(e.timestamp) FROM events e JOIN tasks t ON t.id=e.task_id WHERE t.conversation_id=c.id) AS updatedAt,
-        (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open') AS openQuestions,
+        (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open' AND q.owner='user') AS openQuestions,
         (SELECT COUNT(*) FROM tasks t WHERE t.conversation_id=c.id AND t.phase!='chatting') AS taskCount
         FROM conversations c WHERE c.archived_at IS ${archived ? 'NOT NULL' : 'NULL'}
         ORDER BY c.created_seq`).all() as { id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; archivedAt: number | null; updatedAt: number | null; openQuestions: number; taskCount: number }[];
@@ -751,22 +786,24 @@ export async function openTaskRuntime(options: {
       });
       const tasks = (store.db.prepare("SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; request: string; phase: string; paused: number; target_branch: string | null; accepted_proposal: number | null; integration_sha: string | null }[]).map(task => {
         const nodes = store.db.prepare('SELECT n.id,n.spec,n.status,n.stall_count,n.output_version,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(task.id) as { id: string; spec: string; status: string; stall_count: number; output_version: number; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null }[];
-        const questions = store.db.prepare('SELECT id,node_id,kind,status,data FROM questions WHERE task_id=? ORDER BY rowid').all(task.id) as { id: string; node_id: string; kind: string; status: string; data: string }[];
+        const questions = store.db.prepare('SELECT id,node_id,kind,status,data,owner FROM questions WHERE task_id=? ORDER BY rowid').all(task.id) as { id: string; node_id: string; kind: string; status: string; data: string; owner: string }[];
         const open = questions.filter(question => question.status === 'open');
+        const openForUser = open.filter(question => question.owner === 'user');
         const evidence = store.db.prepare('SELECT acceptance_id,valid FROM evidence WHERE task_id=? ORDER BY rowid').all(task.id) as { acceptance_id: string; valid: number }[];
         return {
           id: task.id, request: task.request, phase: task.phase, paused: Boolean(task.paused),
-          status: task.paused ? 'paused' : open.length ? 'blocked' : task.phase,
+          status: task.paused ? 'paused' : openForUser.length ? 'blocked' : task.phase,
           targetBranch: task.target_branch, acceptedProposalVersion: task.accepted_proposal, integrationSha: task.integration_sha,
-          openQuestions: open.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind, data: JSON.parse(question.data) as Json })),
+          openQuestions: openForUser.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind, data: JSON.parse(question.data) as Json })),
+          internalProblemCount: open.filter(question => question.owner === 'main').length,
           nodes: nodes.map(row => ({ id: row.id, kind: (JSON.parse(row.spec) as NodeSpec).kind, role: (JSON.parse(row.spec) as NodeSpec).role ?? null, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget, model: row.model, definitionVersion: row.definition_version, stallCount: row.stall_count, outputVersion: row.output_version })),
           cost: taskCost(task.id),
           evidence: evidence.map(item => ({ acceptanceId: item.acceptance_id, valid: Boolean(item.valid) })),
         };
       });
       const project = conversation.project_id ? store.db.prepare('SELECT root FROM projects WHERE id=?').get(conversation.project_id) as { root: string } | undefined : undefined;
-      const anchorQuestions = (store.db.prepare('SELECT id,node_id,operation_id,kind,status,data,answer FROM questions WHERE task_id=? ORDER BY rowid').all(conversation.anchor_task_id) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null }[])
-        .map(question => ({ id: question.id, nodeId: question.node_id, operationId: question.operation_id, kind: question.kind, status: question.status, data: JSON.parse(question.data) as Json, answer: question.answer ? JSON.parse(question.answer) as Json : null, taskId: conversation.anchor_task_id }));
+      const anchorQuestions = (store.db.prepare('SELECT id,node_id,operation_id,kind,status,data,answer,owner FROM questions WHERE task_id=? ORDER BY rowid').all(conversation.anchor_task_id) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null; owner: string }[])
+        .map(question => ({ id: question.id, nodeId: question.node_id, operationId: question.operation_id, kind: question.kind, status: question.status, owner: question.owner, data: JSON.parse(question.data) as Json, answer: question.answer ? JSON.parse(question.answer) as Json : null, taskId: conversation.anchor_task_id }));
       const ledgerCost = taskCost(conversation.anchor_task_id);
       // Unknown usage can be pending reconciliation before any priced
       // invocation exists (scripted adapters, recovery before settle); an open
@@ -805,7 +842,7 @@ export async function openTaskRuntime(options: {
         proposal,
         proposalHistory,
         accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at })),
-        master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, unlimited: Boolean(master.unlimited), budget: master.unlimited ? null : master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open') } : null,
+        master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, unlimited: Boolean(master.unlimited), budget: master.unlimited ? null : master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open' && question.owner === 'user') } : null,
         telemetry: {
           model: master?.model ?? null,
           thinkingLevel: conversation.thinking_level,
@@ -1025,15 +1062,15 @@ export async function openTaskRuntime(options: {
     inboxHistory(limit = 100) {
       ensureOpen();
       const cap = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 100;
-      return (store.db.prepare(`SELECT q.id,q.task_id AS taskId,q.node_id AS nodeId,q.kind,q.status,q.data,q.answer,
+      return (store.db.prepare(`SELECT q.id,q.task_id AS taskId,q.node_id AS nodeId,q.kind,q.status,q.data,q.answer,q.owner,
         t.request,t.project_id AS projectId,t.conversation_id AS conversationId
         FROM questions q JOIN tasks t ON t.id=q.task_id
-        WHERE q.status='resolved'
+        WHERE q.status='resolved' AND q.owner='user'
         ORDER BY q.rowid DESC LIMIT ?`).all(cap) as {
-        id: string; taskId: string; nodeId: string; kind: string; status: string; data: string; answer: string | null;
+        id: string; taskId: string; nodeId: string; kind: string; status: string; data: string; answer: string | null; owner: string;
         request: string; projectId: string; conversationId: string | null;
       }[]).map(row => ({
-        id: row.id, taskId: row.taskId, nodeId: row.nodeId, kind: row.kind, status: row.status,
+        id: row.id, taskId: row.taskId, nodeId: row.nodeId, kind: row.kind, status: row.status, owner: row.owner,
         data: JSON.parse(row.data) as Json,
         answer: row.answer ? JSON.parse(row.answer) as Json : null,
         request: row.request, projectId: row.projectId, conversationId: row.conversationId,
@@ -1215,6 +1252,81 @@ export async function openTaskRuntime(options: {
             const revised = applyRevision(store, taskId, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
             return { taskId, graphVersion: revised.version, cursor: revised.cursor };
           });
+        },
+        async listProblems() {
+          ensureOpen();
+          const conversation = conversationForTask(store, taskId);
+          if (!conversation) return [];
+          const tasks = conversationTaskIds(store, conversation.id);
+          const placeholders = tasks.map(() => '?').join(',');
+          return (store.db.prepare(`SELECT q.id,q.task_id,q.node_id,q.kind,q.data,
+              t.request,t.phase,n.status AS node_status,i.model
+            FROM questions q JOIN tasks t ON t.id=q.task_id
+            LEFT JOIN nodes n ON n.task_id=q.task_id AND n.id=q.node_id
+            LEFT JOIN instances i ON i.id=n.instance_id
+            WHERE q.owner='main' AND q.status='open' AND q.task_id IN (${placeholders})
+            ORDER BY q.rowid`).all(...tasks) as {
+              id: string; task_id: string; node_id: string; kind: string; data: string;
+              request: string; phase: string; node_status: string | null; model: string | null;
+            }[]).map(row => {
+              const data = JSON.parse(row.data) as Json;
+              return {
+                id: row.id,
+                taskId: row.task_id,
+                nodeId: row.node_id,
+                kind: row.kind,
+                summary: questionSummary(row.kind, data),
+                data,
+                taskRequest: row.request,
+                taskPhase: row.phase,
+                nodeStatus: row.node_status,
+                model: row.model,
+                allowedActions: problemActions(row.kind),
+              };
+            });
+        },
+        async resolveProblem(input: {
+          questionId: string;
+          action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage';
+          response?: string;
+          proof?: string;
+          requestId: string;
+        }) {
+          ensureOpen();
+          const conversation = conversationForTask(store, taskId);
+          if (!conversation) throw new RuntimeError('not_found', 'This master is not attached to a conversation');
+          const scopedTasks = conversationTaskIds(store, conversation.id);
+          const receipt = store.command(`problems:${taskId}`, input.requestId, input, () => {
+            const placeholders = scopedTasks.map(() => '?').join(',');
+            const row = store.db.prepare(`SELECT id,task_id,node_id,kind,data
+              FROM questions WHERE id=? AND owner='main' AND status='open' AND task_id IN (${placeholders})`)
+              .get(input.questionId, ...scopedTasks) as { id: string; task_id: string; node_id: string; kind: string; data: string } | undefined;
+            if (!row) throw new RuntimeError('not_found', 'No open main-Agent problem with that id');
+            const allowed = problemActions(row.kind) as readonly string[];
+            if (!allowed.includes(input.action)) {
+              throw new RuntimeError('invalid_answer', `Problem ${row.kind} does not accept ${input.action}`);
+            }
+            let answer: Answer;
+            if (input.action === 'retry') answer = { type: 'retry' };
+            else if (input.action === 'acknowledge') answer = { type: 'acknowledge' };
+            else if (input.action === 'respond') {
+              if (!input.response?.trim()) throw new RuntimeError('invalid_answer', 'A response is required');
+              answer = { type: 'respond', value: input.response.trim().slice(0, 4_000) };
+            } else {
+              if (!input.proof?.trim()) throw new RuntimeError('invalid_answer', 'A reconciliation rationale is required');
+              answer = { type: 'reconcile_usage', proof: input.proof.trim().slice(0, 4_000) };
+            }
+            execution.answer(row.task_id, row.id, answer);
+            store.event(row.task_id, 'problem.resolved', {
+              questionId: row.id,
+              nodeId: row.node_id,
+              kind: row.kind,
+              action: input.action,
+            });
+            return { questionId: row.id, taskId: row.task_id, action: input.action, resolved: true as const };
+          });
+          if (options.autoWake) execution.kick();
+          return receipt;
         },
       };
     },

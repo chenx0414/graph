@@ -36,6 +36,7 @@ export class Execution {
   private readonly autoWake: boolean;
   private readonly generation: number;
   private readonly lifecycle: OperationLifecycle;
+  private readonly unsubscribeStore: () => void;
   constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
@@ -47,6 +48,9 @@ export class Execution {
     if (extras.program) this.program = extras.program;
     if (extras.systemContext) this.systemContext = extras.systemContext;
     this.autoWake = Boolean(extras.autoWake);
+    this.unsubscribeStore = store.onEvent(type => {
+      if (this.autoWake && type === 'problem.routed') queueMicrotask(() => this.kick());
+    });
     this.lifecycle = new OperationLifecycle(store, {
       advance: taskId => this.advance(taskId),
     });
@@ -58,7 +62,11 @@ export class Execution {
     }
   }
 
-  async drain() { this.stopping = true; await Promise.allSettled([...this.pending]); }
+  async drain() {
+    this.stopping = true;
+    this.unsubscribeStore();
+    await Promise.allSettled([...this.pending]);
+  }
 
   report(id: string, generation: number, result: OperationResult) {
     const taskId = this.lifecycle.report(id, generation, result);
@@ -189,7 +197,14 @@ export class Execution {
     if (task.phase === 'chatting') {
       // Without a confirmed graph the conversation master is the only node that
       // may run; each turn consumes exactly one pending or queued user message.
-      return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' AND json_extract(spec,'$.role')='master' ORDER BY rowid").all(taskId) as ExecutionNodeRow[];
+      // A master parked on its own main-owned problem must not be retried by the
+      // drive loop: the identical failure would repeat forever. It resumes only
+      // after resolveProblem or configuration recovery clears that problem.
+      return this.store.db.prepare(`SELECT * FROM nodes n
+        WHERE n.task_id=? AND n.status='pending' AND json_extract(n.spec,'$.role')='master'
+          AND NOT EXISTS (SELECT 1 FROM questions q
+            WHERE q.task_id=n.task_id AND q.node_id=n.id AND q.status='open' AND q.owner='main')
+        ORDER BY n.rowid`).all(taskId) as ExecutionNodeRow[];
     }
     if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as ExecutionNodeRow[];
     if (task.phase !== 'running') return [];

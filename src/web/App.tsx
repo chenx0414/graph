@@ -25,7 +25,7 @@ type TaskView = {
   id: string; projectId: string; request: string; phase: string; status: string; paused: boolean; proposalVersion: number;
   acceptedProposalVersion: number | null; targetBranch: string | null; updatedAt: number | null;
   messages: { cursor: number; text: string; requirementVersion: number }[];
-  questions: { id: string; kind: string; status: string; nodeId: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown> }[];
+  questions: { id: string; kind: string; status: string; owner?: string; nodeId: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown> }[];
   nodes: NodeView[];
   evidence: { nodeId: string; acceptanceId: string; summary: string; valid: boolean; artifact?: { path: string; digest: string } }[];
   operations: { nodeId: string; state: string; result?: { output?: unknown } | null }[];
@@ -89,7 +89,7 @@ const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
 
 function statusText(view: TaskView) {
   if (view.paused) return TASK_LABEL[view.status] ?? view.status;
-  const open = view.questions.filter(question => question.status === 'open');
+  const open = view.questions.filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
   if (open.length) return open.map(question => QUESTION_LABEL[question.kind] ?? question.kind).join('、');
   return TASK_LABEL[view.status] ?? view.status;
 }
@@ -594,7 +594,7 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
         <Card key={task.id} testid={`inbox-${task.id}`} icon="inbox" tone="warn"
           title={<a href={`#/tasks/${task.id}`}>{task.request.slice(0, 70)}</a>}
           subtitle={`${task.projectId} · ${task.openQuestions} 个待处理问题`}>
-          <ul className="list">{(views[task.id]?.questions ?? []).filter(question => question.status === 'open').map(question => (
+          <ul className="list">{(views[task.id]?.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user').map(question => (
             <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => void load()} />
           ))}</ul>
         </Card>
@@ -648,7 +648,7 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
   if (loading && !view) return <Card><Spinner /></Card>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <Card><Spinner /></Card>;
-  const open = view.questions.filter(question => question.status === 'open');
+  const open = view.questions.filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
   const accepted = view.acceptedProposalVersion === view.proposalVersion && view.proposalVersion > 0;
   const usage = summarizeUsage(view.nodes, view.cost);
   const timeline = events ? buildTimeline(events) : [];
@@ -725,7 +725,7 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
                   <small>实例 {node.instanceId ? node.instanceId.slice(0, 8) : '未知'} · 用量 {node.used == null ? '未知' : formatTokens(node.used)}</small>
                 </div>
                 {waitingForSlot(node, settings, limits, startup?.limitAliases) && <Pill tone="warn">等待 API 名额</Pill>}
-                {node.status === 'blocked' && view.questions.some(question => question.status === 'open' && question.nodeId === node.id) && <Pill tone="warn">等待人工处理</Pill>}
+                {node.status === 'blocked' && view.questions.some(question => question.status === 'open' && (question.owner ?? 'user') === 'user' && question.nodeId === node.id) && <Pill tone="warn">等待人工处理</Pill>}
               </li>
             ))}
           </ul>

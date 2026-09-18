@@ -116,7 +116,7 @@ interface TaskHandle {
 | Operation / Invocation | 每次真实模型或工具动作一个 operation，模型实际请求有唯一 invocation；重试用新 ID 但同一额度归属。 |
 | Usage / Reservation | 按实例预留与结算；每条用量带 `authoritative`、`account_delta`、`estimated` 或 `unknown` 来源，供应商请求 ID 和原始归一化来源去重。 |
 | Artifact / Evidence / Acceptance | 绑定具体提交或内容摘要、输入版本、执行轮次和验收版本；不能以旧通过结论验证新代码。 |
-| Intervention / Grant / Command / Event | 问题范围、真实答复主体、权限上限、幂等回执与可续接更新记录。 |
+| Intervention / Grant / Command / Event | 问题范围、`owner=user|main` 分流、真实答复主体、权限上限、幂等回执与可续接更新记录。 |
 
 SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会话文件负责对话上下文，不反向覆盖任务状态。大型正文和产物用内容引用保存，数据库记录摘要与适用范围。首版不要求完整 event sourcing，也不自动删除历史记录。
 
@@ -140,6 +140,8 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 5. 结果明确则补记；确认未发生且可重做才重试；不明则保持阻塞等待核对。不能承诺任意外部操作恰好一次。
 
 模型用量来源按证据强度分为 `authoritative`（供应商逐请求返回值）、`account_delta`（可归属于本次发送的订阅/账户计量差额）、`estimated`（本地对请求上下文和响应文本的估算）与 `unknown`（无可用计数）。有限预算实例仅在 `authoritative` 或 `account_delta` 下继续；仅有 `estimated` 或 `unknown` 时仍执行“待核对并暂停该 Agent”的规则，核对后再重新发起并累计，不能将缺失用量记零。核对结论是供应商不提供该次失败调用的用量时，使用者/宿主可以用带说明的 `reconcile_usage` 显式放行：未记账调用保持 `unknown` 与费用 unknown，不折算为零；放行时必须按 invocation 去重累计同一 operation 内全部已知用量，并让已确认结果走与正常结算相同的 output、route、等待问题与版本路径，重复答复不得重复计费。`instances.unlimited=1` 的 Agent 没有有限上限可保护，缺失逐请求 usage 时先尝试账户差额，再使用明确标记的本地估算继续；两端都不可得时才记录 `operation.usage_unknown`、保持未知成本并继续，不创建阻塞问题，缺口留在报告中。重放会话和主管汇总子 Agent 统计不能重复扣除同一调用。见 [ADR 0017](adr/0017-unlimited-unknown-usage.md)。
+
+问题按 `owner` 分流：只有权限、预算、人工验收和明确需要用户决定的事项直接进入用户收件箱；恢复不明确、适配器错误、上下文拒绝、Git 冲突、用量异常、返工和停滞先路由给 main Agent。main Agent 读取结构化问题后，可以重试、调整图、回答 worker 或显式保留未知用量；用户界面只展示已经过这层处理的 `owner=user` 问题，避免把内部异常和原始 JSON 当作人工待办。见 [ADR 0018](adr/0018-main-agent-problem-routing.md)。
 
 暂停先关门，已发调用可结束，所有在途调用停稳后才报告 paused；长工具持续运行时保留 pausing 和对应记录，时长不限不意味着能虚报暂停成功。resume 不能解除未解决的预算或权限问题。
 
