@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
-import { assertWithinBudget, masterUnknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
+import { assertWithinBudget, unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
 import { openUserWait } from '../core/time-ledger.ts';
@@ -24,7 +24,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
       if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_input', 'A token reservation is required');
       if (store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Instance paused');
       if (nodeId
-        && !masterUnknownUsageIsNonBlocking(store, operation.instanceId, operation.taskId, nodeId)
+        && !unknownUsageIsNonBlocking(store, operation.instanceId)
         && store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open'").get(operation.taskId, nodeId)) {
         throw new RuntimeError('unknown_usage', 'Instance paused for unknown usage');
       }
@@ -55,7 +55,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
         if (!usage) {
           unknown = true;
           if (nodeId
-            && !masterUnknownUsageIsNonBlocking(store, operation.instanceId, operation.taskId, nodeId)
+            && !unknownUsageIsNonBlocking(store, operation.instanceId)
             && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
             const questionId = randomUUID();
             const data = { reason: 'Agent returned no authoritative usage' };

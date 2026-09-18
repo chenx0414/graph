@@ -102,7 +102,7 @@ test('the full productized flow runs from the formal start entry with a controll
       }],
     },
     credentials: { local: { secretRef: 'GRAPH_INTEGRATION_KEY' } },
-    limits: { credentials: { local: 1 } },
+    limits: { defaultBudgetTokens: 20_000_000, credentials: { local: 1 } },
   }, null, 2));
   const stateDir = join(workspace, 'state');
   const child = spawn(process.execPath, ['src/server/cli.ts', '--config', configPath, '--state-dir', stateDir, '--web-dir', webDir, '--port', '0', '--execute'], {

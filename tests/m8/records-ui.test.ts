@@ -166,6 +166,7 @@ test('unknown usage is reconciled with an explicit reason and the delivery panel
   cleanup.push(() => provider.close());
   const server = await openGraphServer({
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }], webDir,
+    limits: { defaultBudgetTokens: 20_000_000 },
     startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
     models: {
       entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],

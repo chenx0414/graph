@@ -224,6 +224,7 @@ test('unknown usage keeps the instance blocked across a later integration rechec
   let reviews = 0;
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
     actions: {
       work,
       late: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {

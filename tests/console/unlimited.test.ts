@@ -96,17 +96,19 @@ test('the v14 migration keeps existing finite instances finite and untouched', a
   expect(row).toEqual({ budget: 20_000_000, used: 17, unlimited: 0 });
 }, 60_000);
 
-test('unlimited worker instances still stop for unknown usage', async () => {
+test('unlimited worker instances continue when usage is missing', async () => {
   const { runtime, task } = await setup({
     work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage: null }) },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) },
+    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }] }) },
   });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
   const view = await task.view();
-  expect(view.questions).toMatchObject([{ kind: 'unknown_usage', nodeId: 'work' }]);
-  expect(view.nodes.find(node => node.id === 'work')).toMatchObject({ unlimited: true, budget: null, status: 'blocked' });
-  // The unknown-usage gate still stops further sends for non-master workers.
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'work')).toMatchObject({ unlimited: true, budget: null, status: 'succeeded' });
+  // There is no finite cap to protect, so the dependent check can run.
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect((await task.view()).phase).toBe('completed');
 }, 60_000);
 
 test('an invalid default budget is rejected instead of guessed', async () => {

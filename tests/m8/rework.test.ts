@@ -530,6 +530,7 @@ async function interruptedUnknown(check: 'usage' | 'reconcile') {
   };
   const server = await openGraphServer({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
     models: {
       entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
       apiKey: 'scripted-local-key', modelRuntime: provider.runtime, modelScheduler,
@@ -597,6 +598,7 @@ async function interruptedMixed(check: 'usage' | 'reconcile') {
   cleanup.push(() => provider.close());
   const server = await openGraphServer({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
     models: {
       entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
       apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
@@ -669,6 +671,7 @@ async function interruptedRework(check: 'usage' | 'reconcile') {
   const successorInputs: { dependencies: unknown; inputVersions: unknown }[] = [];
   const server = await openGraphServer({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
     models: {
       entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
       apiKey: 'scripted-local-key', modelRuntime: provider.runtime,

@@ -117,25 +117,15 @@ export function budgetSnapshot(store: TaskStore, instanceId: string): BudgetSnap
   };
 }
 
-/** Only an unlimited main Agent may continue when the provider omits usage.
- * Workers and finite-budget instances keep fail-closed accounting because
- * their graph contract still depends on authoritative usage. */
-export function masterUnknownUsageIsNonBlocking(
-  store: TaskStore,
-  instanceId: string | null | undefined,
-  taskId: string,
-  nodeId: string | null | undefined,
-) {
-  if (!instanceId || !nodeId) return false;
-  const row = store.db.prepare(`SELECT i.unlimited,n.spec
-    FROM instances i JOIN nodes n ON n.task_id=? AND n.id=?
-    WHERE i.id=?`).get(taskId, nodeId, instanceId) as { unlimited: number; spec: string } | undefined;
-  if (!row?.unlimited) return false;
-  try {
-    return (JSON.parse(row.spec) as { role?: string }).role === 'master';
-  } catch {
-    return false;
-  }
+/** Unlimited instances have no finite budget to protect, so missing provider
+ * usage is recorded as unknown without turning it into a blocking question.
+ * Finite instances keep the fail-closed path because their cap cannot be
+ * enforced without authoritative usage. */
+export function unknownUsageIsNonBlocking(store: TaskStore, instanceId: string | null | undefined) {
+  if (!instanceId) return false;
+  const row = store.db.prepare('SELECT unlimited FROM instances WHERE id=?')
+    .get(instanceId) as { unlimited: number } | undefined;
+  return Boolean(row?.unlimited);
 }
 
 function scopeInFlightUsage(store: TaskStore, scopeId: string) {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { RuntimeError, type ContainerSpec, type DependencySource, type Json, type LoopSpec, type NodeSpec, type OperationResult, type Proposal } from './types.ts';
 import type { TaskStore } from './store.ts';
-import { masterUnknownUsageIsNonBlocking } from './budget-ledger.ts';
+import { unknownUsageIsNonBlocking } from './budget-ledger.ts';
 
 const invalid = (reason: string): never => { throw new RuntimeError('invalid_proposal', reason); };
 
@@ -161,7 +161,7 @@ export function createActivation(store: TaskStore, taskId: string, nodeId: strin
 export function hasLockedQuestion(store: TaskStore, taskId: string, nodeId: string) {
   const node = store.db.prepare('SELECT instance_id FROM nodes WHERE task_id=? AND id=?')
     .get(taskId, nodeId) as { instance_id: string | null } | undefined;
-  const kinds = masterUnknownUsageIsNonBlocking(store, node?.instance_id, taskId, nodeId)
+  const kinds = unknownUsageIsNonBlocking(store, node?.instance_id)
     ? "kind IN ('budget','reservation_exceeded','permission')"
     : "kind IN ('budget','unknown_usage','reservation_exceeded','permission')";
   return Boolean(store.db.prepare(`SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND ${kinds}`).get(taskId, nodeId));

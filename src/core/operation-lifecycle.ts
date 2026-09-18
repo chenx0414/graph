@@ -7,7 +7,7 @@ import {
   recordCurrentModelUse,
   releaseOperationReservation,
   reserveOperation,
-  masterUnknownUsageIsNonBlocking,
+  unknownUsageIsNonBlocking,
 } from './budget-ledger.ts';
 import { conversationForTask, pendingMessages, recordConversationOutput, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
@@ -655,8 +655,7 @@ export class OperationLifecycle {
     const usage = operation.kind === 'agent'
       ? result.usage
       : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    const unknownUsageAllowed = usage === null
-      && masterUnknownUsageIsNonBlocking(this.store, operation.instanceId, operation.taskId, operation.nodeId);
+    const unknownUsageAllowed = usage === null && unknownUsageIsNonBlocking(this.store, operation.instanceId);
     if (!usage && !unknownUsageAllowed) {
       recordConversationOutput(this.store, operation, result);
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?")

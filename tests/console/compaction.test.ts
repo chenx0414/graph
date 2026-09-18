@@ -263,7 +263,7 @@ test('a summary without usage opens the unknown-usage hold like any other send',
   const provider = await compactionProvider(({ summary }) => summary
     ? { text: '## Goal\nno usage here', usage: null }
     : { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 } });
-  const { runtime, taskId } = await workerRuntime(root, provider);
+  const { runtime, taskId } = await workerRuntime(root, provider, { defaultBudgetTokens: 20_000_000 });
   await runtime.host.runReady();
   expect(provider.requests.filter(request => request.summary)).toHaveLength(1);
   const rows = purposes(root).filter(row => row.purpose === 'compaction');
