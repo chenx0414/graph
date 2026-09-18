@@ -205,6 +205,7 @@ export function useTranscriptFollow(key: string | null, active = false) {
           runwayRef.current = 0;
           setRunway(0);
         }
+        if (pinnedRef.current) wake();
         return;
       }
       const baseHeight = Math.max(0, content.scrollHeight - runwayRef.current);

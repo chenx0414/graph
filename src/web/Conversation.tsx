@@ -19,6 +19,7 @@ import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from '.
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
 import { Button, Icon, Pill, Spinner, StatusDot, toast } from './ui.tsx';
+import { usePacedStreamText } from './use-paced-stream.ts';
 import {
   activeToolStatus,
   buildTranscriptRows,
@@ -255,25 +256,29 @@ const AssistantMarkdownBlock = memo(function AssistantMarkdownBlock(input: {
 }, (previous, next) => previous.source === next.source && sameVeils(previous.veils, next.veils));
 
 function AssistantResponse({ row }: { row: Extract<TranscriptRow, { kind: 'assistant' }> }) {
-  const veils = useStreamVeils(row.text, row.id, row.streaming);
-  const blocks = splitMarkdownBlocks(row.text);
+  const paced = usePacedStreamText(row.text, row.id, row.streaming);
+  const visualStreaming = row.streaming || paced.revealing;
+  const veils = useStreamVeils(paced.text, row.id, visualStreaming);
+  const blocks = splitMarkdownBlocks(paced.text);
   return (
     <div
-      className={`message-row ${row.streaming ? 'process-row' : 'answer-row'}`}
+      className={`message-row ${visualStreaming ? 'process-row' : 'answer-row'}`}
       data-role="assistant"
-      data-answer={!row.streaming}
-      data-process={row.streaming}
-      data-testid={row.streaming ? 'streaming' : 'message-assistant'}
+      data-answer={!visualStreaming}
+      data-process={visualStreaming}
+      data-reveal-length={paced.length}
+      data-reveal-target={paced.targetLength}
+      data-testid={visualStreaming ? 'streaming' : 'message-assistant'}
     >
       <div className="message-stack">
-        <div className={`message-author ${row.streaming ? 'process-author' : ''}`}>
-          {row.streaming && <Icon name="spark" size={12} />}
-          {row.streaming ? '思考与过程 · 生成中' : '主 Agent · 最终回答'}
+        <div className={`message-author ${visualStreaming ? 'process-author' : ''}`}>
+          {visualStreaming && <Icon name="spark" size={12} />}
+          {visualStreaming ? '思考与过程 · 生成中' : '主 Agent · 最终回答'}
         </div>
-        <div className={`message-content ${row.streaming ? 'streaming-card' : 'answer-card'}`}>
+        <div className={`message-content ${visualStreaming ? 'streaming-card' : 'answer-card'}`}>
           <div className="streaming-markdown">
             {blocks.map((block, index) => {
-              const tail = row.streaming && index === blocks.length - 1;
+              const tail = visualStreaming && index === blocks.length - 1;
               const source = tail ? mendStreamingMarkdown(block.source) : block.source;
               const localVeils = veils.flatMap(veil => {
                 const start = Math.max(block.start, veil.start);
@@ -291,7 +296,7 @@ function AssistantResponse({ row }: { row: Extract<TranscriptRow, { kind: 'assis
               );
             })}
           </div>
-          {row.streaming && <span className="streaming-caret" aria-hidden="true" />}
+          {visualStreaming && <span className="streaming-caret" aria-hidden="true" />}
         </div>
       </div>
     </div>

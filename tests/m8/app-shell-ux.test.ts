@@ -586,7 +586,7 @@ test('live tool activity groups and streamed markdown follow the transcript tail
   expect(await tools.getAttribute('data-active')).toBe('true');
   expect(await tools.getAttribute('data-open')).toBe('true');
   expect(await tools.innerText()).toContain('正在读取 src/web/Conversation.tsx');
-  expect(await page.locator('.markdown-body h2').last().innerText()).toBe('实时输出');
+  await expect.poll(() => page.locator('.markdown-body h2').last().innerText()).toBe('实时输出');
   expect(await page.getByTestId('message-list').getAttribute('data-pinned')).toBe('true');
   await expect.poll(async () => page.getByTestId('message-list').evaluate(element => {
     const thread = element as HTMLElement;
@@ -602,6 +602,95 @@ test('live tool activity groups and streamed markdown follow the transcript tail
   expect(await page.getByTestId('message-list').getAttribute('data-pinned')).toBe('false');
   await page.getByTestId('jump-to-latest').click();
   await expect.poll(() => page.getByTestId('message-list').getAttribute('data-pinned')).toBe('true');
+});
+
+test('a coarse streamed delta is revealed progressively instead of landing as one block', async () => {
+  const root = await temp('coarse-stream');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/api/conversations/coarse-stream', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 'coarse-stream',
+      title: '粗粒度流',
+      projectId: 'alpha',
+      projectRoot: root,
+      workspaceProjectId: 'alpha',
+      anchorTaskId: 'anchor',
+      createdAt: Date.now(),
+      requirementVersion: 1,
+      paused: false,
+      messages: [],
+      messageCount: 0,
+      streams: [],
+      questions: [],
+      proposal: null,
+      proposalHistory: [],
+      accepted: [],
+      master: {
+        nodeId: 'master',
+        status: 'running',
+        model: 'local',
+        used: 42,
+        budget: null,
+        unlimited: true,
+        definitionVersion: 'main@1',
+        cost: { unknown: false, amount: 0 },
+      },
+      cost: { unknown: false, amount: 0 },
+      usage: { used: 42, budget: null, unlimited: true },
+      telemetry: {
+        model: 'local',
+        thinkingLevel: 'off',
+        cacheHitRate: null,
+        cachedInput: 0,
+        cacheInput: 0,
+        contextTokens: null,
+        contextLimit: null,
+        contextPercent: null,
+      },
+      tasks: [],
+      cursor: 0,
+    }),
+  }));
+  const fullText = '这是一段由供应商一次返回的完整长文本。客户端仍应按稳定节奏逐段揭示，而不是让它瞬间整块出现。'.repeat(4);
+  await page.route('**/api/conversations/coarse-stream/events/stream*', route => route.fulfill({
+    status: 200,
+    contentType: 'text/event-stream',
+    body: `data: ${JSON.stringify({
+      cursor: 1,
+      type: 'message.delta',
+      data: {
+        operationId: 'op-coarse',
+        entryId: 'op-coarse',
+        partId: 'text',
+        len: fullText.length,
+        reset: true,
+        text: fullText,
+      },
+    })}\n\n`,
+  }));
+
+  await page.goto(`${server.url}/#/conversations/coarse-stream`);
+  const streaming = page.getByTestId('streaming');
+  await streaming.waitFor();
+  const firstLength = Number(await streaming.getAttribute('data-reveal-length'));
+  expect(firstLength).toBeGreaterThan(0);
+  expect(firstLength).toBeLessThan(fullText.length);
+  await expect.poll(
+    () => streaming.getAttribute('data-reveal-length').then(Number),
+    { timeout: 5_000 },
+  ).toBe(fullText.length);
 });
 
 test('interrupted retry streams are removed before the durable final answer', async () => {
