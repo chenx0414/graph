@@ -15,12 +15,17 @@ import type { SendGate } from './controlled-openai.ts';
 
 /** What one provider send is for. Pi compaction and branch summaries are real
  * billed requests and must be attributable separately from normal turns. */
-export type InvocationPurpose = 'completion' | 'compaction' | 'branch_summary';
+export type InvocationPurpose = 'completion' | 'compaction' | 'branch_summary' | 'prompt_suggestion';
 
-export const INVOCATION_PURPOSES: readonly InvocationPurpose[] = ['completion', 'compaction', 'branch_summary'];
+export const INVOCATION_PURPOSES: readonly InvocationPurpose[] = ['completion', 'compaction', 'branch_summary', 'prompt_suggestion'];
 
 /** Task-store invocation gate: pause, unknown usage, and budget are checked before every provider send. */
-export function taskGate(store: TaskStore, operation: { id: string; taskId: string; instanceId: string; nodeId?: string }, model: ModelEntry): SendGate & { total(): TokenUsage | null; setPurpose(purpose: InvocationPurpose): void; check(reservation?: number): void } {
+export function taskGate(
+  store: TaskStore,
+  operation: { id: string; taskId: string; instanceId: string; nodeId?: string },
+  model: ModelEntry,
+  options: { optional?: boolean } = {},
+): SendGate & { total(): TokenUsage | null; setPurpose(purpose: InvocationPurpose): void; check(reservation?: number): void } {
   let unknown = false;
   let purpose: InvocationPurpose = 'completion';
   const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -67,7 +72,8 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
           .run(normalized ? canonicalJson(normalized) : null, canonicalJson(cost), id);
         if (!accountable) {
           unknown = true;
-          if (nodeId
+          if (!options.optional
+            && nodeId
             && !unknownUsageIsNonBlocking(store, operation.instanceId)
             && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
             const data = {

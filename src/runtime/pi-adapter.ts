@@ -22,6 +22,7 @@ import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGat
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
+import { generatePromptSuggestion, selectPromptSuggestionModel } from './prompt-suggestion.ts';
 import {
   createRestrictedProcessAgentSessionTransport,
   type AgentSession,
@@ -30,6 +31,7 @@ import {
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
+import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 
 export interface PiAdapterChannels {
   supervisor: (taskId: string) => {
@@ -83,6 +85,18 @@ function summarizeToolCall(name: string, args: unknown) {
 // runaway loop for user acknowledgement inside the 20M instance budget.
 const PI_SESSION_RESERVE = 2_000_000;
 const CONVERSATION_DELTA_FLUSH_MS = 60;
+const PROMPT_SUGGESTION_TIMEOUT_MS = 5_000;
+
+function combineKnownUsage(base: TokenUsage | null, extra: TokenUsage | null) {
+  if (!base || !extra) return base;
+  return {
+    input: base.input + extra.input,
+    output: base.output + extra.output,
+    cacheRead: base.cacheRead + extra.cacheRead,
+    cacheWrite: base.cacheWrite + extra.cacheWrite,
+    usageSource: mergeUsageSource(usageSourceOf(base), usageSourceOf(extra)),
+  };
+}
 
 /** Production Agent adapter: one Task Runtime operation opens a restored Pi instance and sends one prompt. */
 export function createPiAdapter(options: {
@@ -120,25 +134,25 @@ export function createPiAdapter(options: {
       const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
       const entry = options.directory().find(model => model.id === instance.model);
       if (!entry) throw new RuntimeError('model_unavailable', 'No configured model for this instance');
-      const entryNow = () => options.directory().find(model => model.id === entry.id) ?? entry;
-      const endpointChanged = (latest: ModelEntry) => latest.baseUrl !== entry.baseUrl || latest.api !== entry.api
-        || JSON.stringify(latest.headers ?? {}) !== JSON.stringify(entry.headers ?? {});
-      const resolveBinding = () => options.bindingFor?.(entry)
-        ?? (options.apiKeyFor?.(entry) || options.apiKey ? { credentialId: entry.credentialId ?? entry.id, apiKey: (options.apiKeyFor?.(entry) ?? options.apiKey)! } : undefined);
+      const modelNow = (candidate: ModelEntry) => options.directory().find(model => model.id === candidate.id) ?? candidate;
+      const endpointChanged = (candidate: ModelEntry, latest: ModelEntry) => latest.baseUrl !== candidate.baseUrl || latest.api !== candidate.api
+        || JSON.stringify(latest.headers ?? {}) !== JSON.stringify(candidate.headers ?? {});
+      const resolveBindingFor = (candidate: ModelEntry) => options.bindingFor?.(candidate)
+        ?? (options.apiKeyFor?.(candidate) || options.apiKey ? { credentialId: candidate.credentialId ?? candidate.id, apiKey: (options.apiKeyFor?.(candidate) ?? options.apiKey)! } : undefined);
       const bindingLimits = (value: { limit?: number; sharedGroupId?: string; groupLimit?: number }) => ({
         ...(value.limit !== undefined ? { limit: value.limit } : {}),
         ...(value.sharedGroupId ? { sharedGroupId: value.sharedGroupId } : {}),
         ...(value.groupLimit !== undefined ? { groupLimit: value.groupLimit } : {}),
       });
-      const resolveKey = () => {
-        const latest = entryNow();
-        if (endpointChanged(latest)) throw new RuntimeError('model_changed', `Model ${entry.id} endpoint or protocol changed while this request waited; it will be re-prepared`);
-        const binding = resolveBinding();
-        if (!binding) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
-        return binding.apiKey;
+      const resolveKeyFor = (candidate: ModelEntry) => {
+        const latest = modelNow(candidate);
+        if (endpointChanged(candidate, latest)) throw new RuntimeError('model_changed', `Model ${candidate.id} endpoint or protocol changed while this request waited; it will be re-prepared`);
+        const current = resolveBindingFor(candidate);
+        if (!current) throw new RuntimeError('model_unavailable', `No credential bound for model ${candidate.id}`);
+        return current.apiKey;
       };
-      const binding = resolveBinding();
-      if (!binding) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
+      const resolveBinding = () => resolveBindingFor(entry);
+      if (!resolveBinding()) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
       const scheduler = options.scheduler;
       // waiting_slot is what keeps a parked operation out of execution
       // accounting; a failed write must fail the operation, not be hidden.
@@ -150,8 +164,11 @@ export function createPiAdapter(options: {
           finishOperationCredentialWait(options.store, operation.id, now);
         }
       };
-      const slot = binding && scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)
-        ? {
+      const slotFor = (candidate: ModelEntry) => {
+        const binding = resolveBindingFor(candidate);
+        if (!binding) throw new RuntimeError('model_unavailable', `No credential bound for model ${candidate.id}`);
+        return scheduler && (binding.limit !== undefined || binding.groupLimit !== undefined)
+          ? {
             acquire: async (signal?: AbortSignal) => {
               // Waiting on a credential releases the execution slot; after the
               // credential slot is granted the operation must take an execution
@@ -166,18 +183,18 @@ export function createPiAdapter(options: {
                 // returned and the request re-queues under the new identity
                 // instead of sending with a stale or wrong-platform key.
                 for (;;) {
-                  if (endpointChanged(entryNow())) throw new RuntimeError('model_changed', `Model ${entry.id} endpoint or protocol changed while this request waited; it will be re-prepared`);
-                  const current = resolveBinding();
-                  if (!current) throw new RuntimeError('model_unavailable', `No credential bound for model ${entry.id}`);
+                  if (endpointChanged(candidate, modelNow(candidate))) throw new RuntimeError('model_changed', `Model ${candidate.id} endpoint or protocol changed while this request waited; it will be re-prepared`);
+                  const current = resolveBindingFor(candidate);
+                  if (!current) throw new RuntimeError('model_unavailable', `No credential bound for model ${candidate.id}`);
                   const request = { credentialId: current.credentialId, apiKey: current.apiKey, ...bindingLimits(current) };
                   releaseCredential = await scheduler.acquire({
                     ...request,
                     refresh: () => {
-                      const live = resolveBinding();
+                      const live = resolveBindingFor(candidate);
                       return live ? { credentialId: live.credentialId, apiKey: live.apiKey, ...bindingLimits(live) } : request;
                     },
                   }, signal);
-                  const after = resolveBinding();
+                  const after = resolveBindingFor(candidate);
                   if (after && after.credentialId === current.credentialId && after.apiKey === current.apiKey) break;
                   releaseCredential();
                   releaseCredential = undefined;
@@ -191,7 +208,10 @@ export function createPiAdapter(options: {
               }
             },
           }
-        : undefined;
+          : undefined;
+      };
+      const resolveKey = () => resolveKeyFor(entry);
+      const slot = slotFor(entry);
       const task = options.store.task(operation.taskId);
       const project = options.store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string };
       const definitionVersion = instance.definition_version ?? 'unknown@1';
@@ -278,7 +298,6 @@ export function createPiAdapter(options: {
                 },
               } : {}),
               onSubmit: output => { submitted = output; },
-              ...(conversation && spec.role === 'master' ? { onSuggestedPrompt: prompt => { suggestedPrompt = prompt; } } : {}),
             }),
           });
         } catch (error) {
@@ -348,7 +367,6 @@ export function createPiAdapter(options: {
         };
         const toolSummaries = new Map<string, string>();
         const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
-        let suggestedPrompt: string | undefined;
         const persistEntries = !conversation;
         let sawAssistantMessageEnd = false;
         const onEvent = (event: AgentSessionEvent) => {
@@ -418,12 +436,10 @@ export function createPiAdapter(options: {
           }
           if (!conversation) return;
           if (event.type === 'tool_execution_start') {
-            if (event.toolName === 'suggest_prompt') return;
             const summary = summarizeToolCall(event.toolName, event.args);
             toolSummaries.set(event.toolCallId, summary);
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary });
           } else if (event.type === 'tool_execution_end') {
-            if (event.toolName === 'suggest_prompt') return;
             const summary = toolSummaries.get(event.toolCallId) ?? event.toolName;
             toolActivity.push({ toolCallId: event.toolCallId, name: event.toolName, summary, state: event.isError ? 'error' : 'done' });
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError });
@@ -499,8 +515,8 @@ export function createPiAdapter(options: {
                     'Execution failures, recovery uncertainty, adapter/context errors, unknown usage and stalled or rework problems are yours to diagnose first. Use list_problems, then resolve_problem or revise_graph as appropriate. Never dump raw stack traces, JSON parsing errors, or internal state to the user. Only permission, quota, human acceptance, or a concrete decision that truly requires the user should appear as a user-facing question; ordinary user input may be requested in a normal chat reply.',
                     'For each worker, request the minimum sufficient context. Omit context for a normal fresh Agent. Use context.requiredFacts with transcript_range or tool_call only when the exact parent transcript or tool-call state is essential; Graph will then fork from context.sourceNode. Never specify a mode directly. Independent review and verification must use context.independence="model-excluded" and must not request transcript or tool-call facts.',
                     'For Fresh downstream Agents, choose each direct dependency edge in context.predecessors: result_handoff is the default for normal implementation handoffs and requires the predecessor to submit a structured result_handoff@1; evidence_only exposes acceptance/evidence/artifact refs without the predecessor work summary. Independent review and verification must use evidence_only, including when their predecessor is a review or verification node.',
-                    'Write normal prose replies for chat; use tools only to investigate, to record a prompt suggestion, or to submit a draft.',
-                    'After writing the normal reply, call suggest_prompt with one concise and specific message the user is most likely to send next. Omit the suggestion when there is no useful follow-up. The suggestion is only a composer hint and must never be sent automatically.',
+                    'Write normal prose replies for chat; use tools only to investigate or to submit a draft.',
+                    'Do not write, discuss, or mention composer suggestions. The console generates any optional next-message hint separately after your reply.',
                   ] : []),
                   'Use propose_graph to submit a validated task graph. Program nodes may use graph.command with input {"command":"...","args":[...]} for allowed build/test commands (including a headless browser test), graph.verify for independent review, and graph.human_check for user checks. Use workspace tools to inspect the project.',
                   `Configured models: ${models || '(none)'}. Implementation nodes must use the implementation model and review nodes must use the review model, both from the briefing catalog (for example coder@1, reviewer@1).`,
@@ -560,13 +576,54 @@ export function createPiAdapter(options: {
                 activationId: operation.activationId, operationId: operation.id, role: 'assistant', kind: 'message', text: reply,
               });
             }
+            let suggestedPrompt: string | undefined;
+            let suggestionUsage: TokenUsage | null = null;
+            const lastUserMessage = [...(operation.context.messages ?? [])].reverse()
+              .find(message => message.text.trim())?.text;
+            const suggestionEntry = conversation && lastUserMessage
+              ? selectPromptSuggestionModel(entry, options.directory())
+              : undefined;
+            if (suggestionEntry && reply.trim()) {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), PROMPT_SUGGESTION_TIMEOUT_MS);
+              timeout.unref?.();
+              const suggestionGate = taskGate(
+                options.store,
+                { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId },
+                suggestionEntry,
+                { optional: true },
+              );
+              suggestionGate.setPurpose('prompt_suggestion');
+              try {
+                suggestedPrompt = await generatePromptSuggestion({
+                  stream: controlledOpenAIStream(suggestionGate, resolveKeyFor(suggestionEntry), slotFor(suggestionEntry), suggestionEntry.api, {
+                    estimateMissing: true,
+                    ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+                  }),
+                  model: toPiModel(suggestionEntry),
+                  userMessage: lastUserMessage!,
+                  assistantReply: reply,
+                  signal: controller.signal,
+                });
+              } catch {
+                suggestedPrompt = undefined;
+              } finally {
+                clearTimeout(timeout);
+                suggestionUsage = suggestionGate.total();
+              }
+            }
             // The conversation output always carries the visible reply; worker
             // output keeps its existing submitted-or-text shape.
             const output: Json = conversation
               ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
               : (submitted ?? { text });
             const resultHandoff = resultHandoffFromSubmission(submitted);
-            return { outcome: 'completed', output, ...(resultHandoff ? { resultHandoff } : {}), usage: gate.total() };
+            return {
+              outcome: 'completed',
+              output,
+              ...(resultHandoff ? { resultHandoff } : {}),
+              usage: combineKnownUsage(gate.total(), suggestionUsage),
+            };
           } finally {
             activeInstances.delete(operation.id);
             await session.close();

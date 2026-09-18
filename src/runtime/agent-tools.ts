@@ -60,7 +60,6 @@ export function agentTools(input: {
     requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
   };
   onSubmit?: (output: Json) => void;
-  onSuggestedPrompt?: (prompt: string) => void;
 }): ToolDefinition[] {
   const root = realpathSync(input.workspace);
   const readRoots = (input.readRoots ?? []).map(item => realpathSync(item));
@@ -123,16 +122,6 @@ export function agentTools(input: {
   }
   if (input.role === 'master' && input.supervisor) {
     tools.push(
-      {
-        name: 'suggest_prompt', label: 'Suggest next prompt', description: 'Record one concise next user prompt to show as an optional composer suggestion. This never sends anything automatically and must not replace the normal reply.',
-        parameters: Type.Object({ prompt: Type.String() }),
-        execute: async (_id: string, params: unknown) => {
-          const prompt = String(fields(params).prompt).trim();
-          if (!prompt || prompt.length > 500) throw new Error('A prompt suggestion must be between 1 and 500 characters');
-          input.onSuggestedPrompt?.(prompt);
-          return text('Recorded prompt suggestion');
-        },
-      },
       {
         name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson must use the schema shown in the briefing. Keep the optional decisions list current: it is frozen with this draft version and passed to workers after confirmation.',
         parameters: Type.Object({ proposalJson: Type.String(), requestId: Type.String() }),

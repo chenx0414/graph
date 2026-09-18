@@ -201,7 +201,7 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
     expect(request.tools).not.toContain('write_file');
     expect(request.tools).not.toContain('run_command');
     expect(request.tools).toContain('read');
-    expect(request.tools).toContain('suggest_prompt');
+    expect(request.tools).not.toContain('suggest_prompt');
   }
   expect(JSON.stringify(masterRequests[0]!.messages)).toContain('ongoing conversation');
   // The post-confirmation briefing carries recorded execution facts.
@@ -355,3 +355,49 @@ test('the Main Agent recipe compiles its capabilities into the conversation mast
   expect(request).toContain('main-research');
   expect(request).toContain('SKILL.md');
 });
+
+test('a separate low-grade model creates the composer suggestion from isolated context', async () => {
+  const root = await temp('isolated-suggestion');
+  const mainProvider = await openaiServer([{ text: '这是正常的最终回答。' }]);
+  const suggestionProvider = await openaiServer([{ text: '“继续检查测试覆盖和失败分支。”' }]);
+  cleanup.push(() => mainProvider.close());
+  cleanup.push(() => suggestionProvider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    models: {
+      entries: [
+        {
+          id: 'main-model', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+          baseUrl: mainProvider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+        },
+        {
+          id: 'suggestion-model', provider: 'graph-openai', grade: 'low', api: 'openai-completions',
+          baseUrl: suggestionProvider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+        },
+      ],
+      credentialFor: entry => ({
+        credentialId: entry.id,
+        apiKey: entry.id === 'main-model' ? 'main-key' : 'suggestion-key',
+      }),
+      modelRuntime: mainProvider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'main-model' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '你能做什么？', requestId: 'isolated-suggestion' });
+  await runtime.host.runReady();
+  const view = await runtime.conversations.view(created.conversationId);
+  const assistant = view.messages.find(message => message.role === 'assistant')!;
+  expect(assistant.text).toBe('这是正常的最终回答。');
+  expect((assistant.data as { suggestedPrompt?: unknown } | null)?.suggestedPrompt)
+    .toBe('继续检查测试覆盖和失败分支。');
+
+  expect(mainProvider.requests).toHaveLength(1);
+  expect(JSON.stringify(mainProvider.requests[0])).not.toContain('suggest_prompt');
+  expect(suggestionProvider.requests).toHaveLength(1);
+  const suggestionRequest = JSON.stringify(suggestionProvider.requests[0]);
+  expect(suggestionRequest).toContain('你能做什么？');
+  expect(suggestionRequest).toContain('这是正常的最终回答。');
+  expect(suggestionRequest).not.toContain('propose_graph creates a draft');
+  expect(suggestionRequest).not.toContain('Feature tasks:');
+}, 120_000);
