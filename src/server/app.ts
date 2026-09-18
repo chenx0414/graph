@@ -210,12 +210,14 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return runtime.conversations.list({ archived: query.archived === 'true' });
   });
   app.post('/api/conversations', async request => {
-    const body = request.body as { projectId?: string; title?: string; text?: string; attachments?: AttachmentInput[]; requestId: string };
+    const body = request.body as { projectId?: string; title?: string; text?: string; attachments?: AttachmentInput[]; model?: string; thinkingLevel?: string; requestId: string };
     return runtime.conversations.create({
       ...(body.projectId ? { projectId: body.projectId } : {}),
       ...(body.title ? { title: body.title } : {}),
       ...(body.text ? { text: body.text } : {}),
       ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
+      ...(body.model ? { model: body.model } : {}),
+      ...(body.thinkingLevel ? { thinkingLevel: body.thinkingLevel } : {}),
       requestId: body.requestId,
     });
   });

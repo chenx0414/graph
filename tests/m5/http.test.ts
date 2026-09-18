@@ -199,3 +199,44 @@ test('event cursor reconnects after the HTTP client disconnects while the host k
   expect(JSON.parse((await get(`/api/tasks/${begun.taskId}`)).body).phase).toBe('completed');
   expect(app.hasRoute({ method: 'GET', url: '/api/tasks/:taskId/events/stream' })).toBe(true);
 });
+
+test('creating a conversation over HTTP applies the selected model and thinking level', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m5-http-model-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'project', root }],
+    actions: {},
+    models: {
+      entries: [
+        {
+          id: 'm1', provider: 'fixture', grade: 'medium' as const, api: 'openai-completions' as const,
+          baseUrl: 'http://127.0.0.1/v1', contextWindow: 1000, maxTokens: 100, reasoning: false,
+        },
+        {
+          id: 'm2', provider: 'fixture', grade: 'high' as const, api: 'openai-completions' as const,
+          baseUrl: 'http://127.0.0.1/v1', contextWindow: 2000, maxTokens: 100, reasoning: true, defaultThinkingLevel: 'low' as const,
+        },
+      ],
+      apiKey: 'test',
+      modelRuntime: {} as never,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm1' },
+  });
+  cleanup.push(() => runtime.close());
+  const app = await createApp(runtime, { origin });
+  cleanup.push(() => app.close());
+  const home = await app.inject({ method: 'GET', url: '/', headers: { origin } });
+  const cookie = String(home.headers['set-cookie'] ?? '');
+  const headers = { origin, cookie, 'content-type': 'application/json' };
+
+  const created = await app.inject({
+    method: 'POST',
+    url: '/api/conversations',
+    headers,
+    payload: JSON.stringify({ text: '选模型', model: 'm2', thinkingLevel: 'high', requestId: 'http-model' }),
+  });
+  expect(created.statusCode).toBe(200);
+  const { conversationId } = created.json() as { conversationId: string };
+  expect((await runtime.conversations.view(conversationId)).telemetry).toMatchObject({ model: 'm2', thinkingLevel: 'high' });
+});
