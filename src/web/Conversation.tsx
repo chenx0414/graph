@@ -17,6 +17,14 @@ import { Markdown } from './Markdown.tsx';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
 import { Button, Icon, Pill, Spinner, StatusDot, toast } from './ui.tsx';
+import {
+  activeToolStatus,
+  buildTranscriptRows,
+  toolActionLabel,
+  toolGroupSummary,
+  type TranscriptRow,
+} from './transcript-model.ts';
+import { useTranscriptFollow } from './use-transcript-follow.ts';
 
 type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean }[] };
 export type ConversationSummary = {
@@ -308,10 +316,10 @@ function MessageRow({ message }: { message: ConversationMessage }) {
   }
   if (message.role === 'assistant') {
     return (
-      <div className="message-row" data-role="assistant" data-testid="message-assistant">
+      <div className="message-row answer-row" data-role="assistant" data-answer="true" data-testid="message-assistant">
         <div className="message-stack">
-          <div className="message-author">主 Agent</div>
-          <div className="message-content"><Markdown text={message.text} /></div>
+          <div className="message-author">主 Agent · 最终回答</div>
+          <div className="message-content answer-card"><Markdown text={message.text} /></div>
         </div>
       </div>
     );
@@ -320,6 +328,119 @@ function MessageRow({ message }: { message: ConversationMessage }) {
     return <div className="message-row" data-role="tool" data-testid="message-tool"><div className="message-stack"><div className="message-content">工具 · {message.text}</div></div></div>;
   }
   return <div className="message-row" data-role="system" data-testid="message-system"><div className="message-stack"><div className="message-content">{message.text}</div></div></div>;
+}
+
+function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refresh' {
+  if (name === 'list_dir') return 'folder';
+  if (name === 'search' || name === 'glob' || name === 'web_search') return 'search';
+  if (name === 'run_command') return 'bolt';
+  if (['write_file', 'apply_patch', 'edit'].includes(name)) return 'file';
+  if (name === 'fetch') return 'refresh';
+  return 'file';
+}
+
+function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools' }> }) {
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const open = manualOpen ?? row.active;
+  const summary = row.active ? activeToolStatus(row.tools) : toolGroupSummary(row.tools);
+  return (
+    <section
+      className="tool-activity-group"
+      data-testid="tool-activity-group"
+      data-active={row.active}
+      data-open={open}
+      data-error={row.tools.some(tool => tool.error)}
+    >
+      <button
+        type="button"
+        className="tool-group-toggle"
+        onClick={() => setManualOpen(current => !(current ?? row.active))}
+        aria-expanded={open}
+        aria-label={open ? '收起工具活动' : '展开工具活动'}
+      >
+        <span className="tool-group-indicator" aria-hidden="true">
+          {row.active ? <span className="working-pulse" /> : <Icon name={row.tools.some(tool => tool.error) ? 'alert' : 'check'} size={13} />}
+        </span>
+        <span className="tool-group-copy">
+          <strong>{summary}</strong>
+          <span>{row.active ? '进行中' : `${row.tools.length} 项活动`}</span>
+        </span>
+        <Icon name="chevron" size={14} className="tool-group-chevron" />
+      </button>
+      <div className="tool-group-content" aria-hidden={!open}>
+        <div className="tool-group-content-inner">
+          <ol className="tool-activity-list">
+            {row.tools.map(tool => (
+              <li key={tool.id} data-error={tool.error} data-done={tool.done}>
+                <span className="tool-activity-icon"><Icon name={toolIcon(tool.name)} size={14} /></span>
+                <span className="tool-activity-label">{toolActionLabel(tool.name)}</span>
+                <span className="tool-activity-summary" title={tool.summary}>{tool.summary}</span>
+                <span className="tool-activity-state">{tool.error ? '失败' : tool.done ? '完成' : '进行中'}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function stableMarkdownCut(text: string) {
+  let offset = 0;
+  let cut = 0;
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    const next = offset + line.length + 1;
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+    } else if (!inFence && !line.trim()) {
+      cut = next;
+    }
+    offset = next;
+  }
+  return cut;
+}
+
+function StreamingMarkdown({ text }: { text: string }) {
+  const cut = stableMarkdownCut(text);
+  const settled = text.slice(0, cut);
+  const tail = text.slice(cut);
+  return (
+    <div className="streaming-markdown">
+      {settled && <Markdown text={settled} />}
+      {tail && (
+        <div className="streaming-tail" data-testid="streaming-fade" key={`${cut}:${tail.length}`}>
+          <Markdown text={tail} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TranscriptRowView({ row }: { row: TranscriptRow }) {
+  if (row.kind === 'message') return <MessageRow message={row.message} />;
+  if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
+  if (row.kind === 'thinking') {
+    return (
+      <div className="message-row agent-status-row" data-role="assistant" data-testid="agent-thinking">
+        <div className="agent-working">
+          <span className="working-pulse" aria-hidden="true" />
+          正在思考…
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="message-row process-row" data-role="assistant" data-process="true" data-testid="streaming">
+      <div className="message-stack">
+        <div className="message-author process-author"><Icon name="spark" size={12} />思考与过程 · 生成中</div>
+        <div className="message-content streaming-card">
+          <StreamingMarkdown text={row.text} />
+          <span className="streaming-caret" aria-hidden="true" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DraftVersionToc({ history, selectedVersion, scope, onSelectVersion }: {
@@ -675,7 +796,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
-  const threadRef = useRef<HTMLDivElement>(null);
+  const transcriptFollow = useTranscriptFollow(conversationTab === 'chat' ? view?.id ?? null : null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
     // One event usually means several records changed; coalesce the refetches.
@@ -718,13 +839,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   }, [view]);
   const busy = view?.master?.status === 'preparing' || view?.master?.status === 'running';
   const snapshot = conversationProjectionSnapshot(projection, { busy: Boolean(busy) });
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      const thread = threadRef.current;
-      if (thread) thread.scrollTop = thread.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [snapshot.messages.length, snapshot.streaming.length, view?.proposal?.version, view?.tasks.length]);
   if (loading && !view) return <p>加载中…</p>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <p>加载中…</p>;
@@ -781,6 +895,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         method: 'POST',
         body: JSON.stringify({ text: outgoing, attachments: outgoingAttachments, requestId: `msg-${crypto.randomUUID()}` }),
       });
+      transcriptFollow.scrollToLatest('smooth');
       reload();
       onChanged?.();
     } catch (reason) {
@@ -849,6 +964,12 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     ?? (activeProposal ? `草稿 v${activeProposal.version}` : activeProposalSummary ? `草稿 v${activeProposalSummary.version}` : '详情');
   const hasDrawerContent = drawer === 'proposal' ? Boolean(activeProposal) : Boolean(detailTask);
   const displayMessages = snapshot.messages;
+  const transcriptRows = buildTranscriptRows({
+    messages: displayMessages,
+    liveTools: snapshot.liveTools,
+    streaming: snapshot.streaming,
+    busy: Boolean(busy),
+  });
   const graphState = {
     taskCount: tasks.length,
     evidenceCount: tasks.reduce((count, task) => count + task.evidence.filter(item => item.valid).length, 0),
@@ -980,22 +1101,17 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       <div className="conversation-body" data-drawer={drawerOpen} data-view={conversationTab}>
         {conversationTab === 'chat' ? (
           <div className="conversation-main">
-          <div className="conversation-thread" data-testid="message-list" ref={threadRef}>
+          <div className="conversation-thread-shell">
+          <div
+            className="conversation-thread"
+            data-testid="message-list"
+            data-pinned={transcriptFollow.pinned}
+            ref={transcriptFollow.threadRef}
+            onScroll={transcriptFollow.onScroll}
+          >
+          <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
-          {displayMessages.map(message => <MessageRow key={message.id} message={message} />)}
-          {snapshot.liveTools.map(tool => (
-            <div key={tool.toolCallId} className="message-row" data-role="tool" data-testid="tool-activity">
-              <div className="message-stack"><div className="message-content">工具 · {tool.name} {tool.summary} {tool.done ? '（完成）' : '（进行中）'}</div></div>
-            </div>
-          ))}
-          {snapshot.streaming.map(([operationId, chunk]) => (
-            <div key={operationId} className="message-row" data-role="assistant" data-testid="streaming">
-              <div className="message-stack">
-                <div className="message-author">主 Agent · 正在输入…</div>
-                <div className="message-content streaming-card"><Markdown text={chunk} /></div>
-              </div>
-            </div>
-          ))}
+          {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} />)}
 
           {!view.tasks.length && (
             <div className="thread-action-card" data-testid="no-conversation-tasks">
@@ -1096,6 +1212,19 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                 <Button size="sm" data-testid="bind-submit" disabled={!bindId} onClick={() => void act(() => api(`/api/conversations/${id}/bind`, { method: 'POST', body: JSON.stringify({ projectId: bindId, requestId: crypto.randomUUID() }) }))}>绑定</Button>
               </div>
             </section>
+          )}
+          </div>
+          </div>
+          {transcriptFollow.showJump && (
+            <button
+              type="button"
+              className="jump-to-latest"
+              data-testid="jump-to-latest"
+              onClick={() => transcriptFollow.scrollToLatest('smooth')}
+            >
+              <Icon name="chevron" size={13} />
+              回到最新
+            </button>
           )}
           </div>
 

@@ -14,9 +14,11 @@ export interface ConversationMessage {
 
 export interface LiveTool {
   toolCallId: string;
+  operationId: string;
   name: string;
   summary: string;
   done: boolean;
+  error: boolean;
 }
 
 export interface ConversationProjectionState {
@@ -41,6 +43,7 @@ export interface ConversationProjectionEvent {
     toolCallId?: string;
     toolName?: string;
     summary?: string;
+    isError?: boolean;
   };
 }
 
@@ -48,6 +51,15 @@ export interface ConversationHistoryRequest {
   direction: 'before' | 'after';
   cursor: number;
 }
+
+const TERMINAL_OPERATION_EVENTS = new Set([
+  'operation.result',
+  'operation.interrupted',
+  'operation.not_sent',
+  'operation.report_rejected',
+  'operation.reconciled',
+  'context.rejected',
+]);
 
 export interface ConversationProjectionSnapshot {
   messages: ConversationMessage[];
@@ -160,12 +172,22 @@ export function applyConversationEvent(
         ...state.liveTools,
         [data.toolCallId]: {
           toolCallId: data.toolCallId,
+          operationId: data.operationId ?? 'stream',
           name: data.toolName ?? 'tool',
           summary: data.summary ?? '',
           done: data.phase === 'end',
+          error: data.isError === true,
         },
       },
     };
+  }
+  if (TERMINAL_OPERATION_EVENTS.has(event.type) && data?.operationId) {
+    const liveText = { ...state.liveText };
+    delete liveText[data.operationId];
+    const liveTools = Object.fromEntries(
+      Object.entries(state.liveTools).filter(([, tool]) => tool.operationId !== data.operationId),
+    );
+    return { ...state, liveText, liveTools };
   }
   const message = data?.message;
   if (!message || (event.type !== 'message.created' && event.type !== 'message.updated')) return state;

@@ -73,6 +73,7 @@ function summarizeToolCall(name: string, args: unknown) {
 // This bound covers a long planning or coding session while still stopping a
 // runaway loop for user acknowledgement inside the 20M instance budget.
 const PI_SESSION_RESERVE = 2_000_000;
+const CONVERSATION_DELTA_FLUSH_MS = 60;
 
 /** Production Agent adapter: one Task Runtime operation opens a restored Pi instance and sends one prompt. */
 export function createPiAdapter(options: {
@@ -328,7 +329,7 @@ export function createPiAdapter(options: {
         const flushDeltas = (force: boolean) => {
           if (!conversation || !streamed.buffer) return;
           const now = Date.now();
-          if (!force && now - streamed.lastFlush < 150) return;
+          if (!force && now - streamed.lastFlush < CONVERSATION_DELTA_FLUSH_MS) return;
           const text = streamed.buffer;
           streamed.buffer = '';
           streamed.lastFlush = now;

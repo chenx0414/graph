@@ -478,14 +478,195 @@ test('agent markdown renders and tool activity appears before the final answer',
   await page.goto(`${server.url}/#/conversations/synthetic`);
   await page.getByTestId('conversation').waitFor();
   await page.locator('.markdown-body h2').waitFor();
+  expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.locator('.markdown-body strong').innerText()).toBe('完成');
   expect(await page.locator('.markdown-body code').innerText()).toBe('code');
   const order = await page.locator('.conversation-thread').innerText();
-  expect(order.indexOf('工具 · read README.md')).toBeLessThan(order.indexOf('主 Agent'));
+  expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
+  expect(await page.getByTestId('tool-activity-group').getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
   expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
   expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('关闭');
+});
+
+test('live tool activity groups and streamed markdown follow the transcript tail', async () => {
+  const root = await temp('stream');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+
+  const messages = Array.from({ length: 24 }, (_, index) => ({
+    id: `history-${index}`,
+    seq: index + 1,
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    kind: 'chat',
+    text: `历史消息 ${index + 1}`,
+    data: null,
+    state: 'done',
+    operationId: null,
+    turn: 1,
+    createdAt: index + 1,
+    updatedAt: index + 1,
+  }));
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/api/conversations/streaming', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 'streaming',
+      title: '实时流',
+      projectId: 'alpha',
+      projectRoot: root,
+      workspaceProjectId: 'alpha',
+      anchorTaskId: 'anchor',
+      createdAt: Date.now(),
+      requirementVersion: 1,
+      paused: false,
+      messages,
+      messageCount: messages.length,
+      questions: [],
+      proposal: null,
+      proposalHistory: [],
+      accepted: [],
+      master: {
+        nodeId: 'master',
+        status: 'running',
+        model: 'local',
+        used: 42,
+        budget: null,
+        unlimited: true,
+        definitionVersion: 'main@1',
+        cost: { unknown: false, amount: 0 },
+      },
+      cost: { unknown: false, amount: 0 },
+      usage: { used: 42, budget: null, unlimited: true },
+      telemetry: {
+        model: 'local',
+        thinkingLevel: 'off',
+        cacheHitRate: null,
+        cachedInput: 0,
+        cacheInput: 0,
+        contextTokens: null,
+        contextLimit: null,
+        contextPercent: null,
+      },
+      tasks: [],
+      cursor: 0,
+    }),
+  }));
+  await page.route('**/api/conversations/streaming/events/stream*', route => {
+    const events = [
+      { cursor: 1, type: 'message.tool', data: { operationId: 'op-live', phase: 'start', toolCallId: 'tool-live', toolName: 'read', summary: 'src/web/Conversation.tsx' } },
+      { cursor: 2, type: 'message.delta', data: { operationId: 'op-live', text: '## 实时输出\n\n' } },
+      { cursor: 3, type: 'message.delta', data: { operationId: 'op-live', text: '正在平滑追加内容。' } },
+    ];
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    });
+  });
+
+  await page.goto(`${server.url}/#/conversations/streaming`);
+  await page.getByTestId('streaming').waitFor();
+  await page.getByTestId('streaming-fade').waitFor();
+  expect(await page.getByTestId('streaming').innerText()).toContain('思考与过程 · 生成中');
+  const tools = page.getByTestId('tool-activity-group');
+  await tools.waitFor();
+  expect(await tools.getAttribute('data-active')).toBe('true');
+  expect(await tools.getAttribute('data-open')).toBe('true');
+  expect(await tools.innerText()).toContain('正在读取 src/web/Conversation.tsx');
+  expect(await page.locator('.markdown-body h2').last().innerText()).toBe('实时输出');
+  expect(await page.getByTestId('message-list').getAttribute('data-pinned')).toBe('true');
+  await expect.poll(async () => page.getByTestId('message-list').evaluate(element => {
+    const thread = element as HTMLElement;
+    return thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+  })).toBeLessThanOrEqual(4);
+
+  await page.waitForTimeout(160);
+  await page.getByTestId('message-list').evaluate(element => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  await page.getByTestId('jump-to-latest').waitFor();
+  await page.getByTestId('jump-to-latest').click();
+  await expect.poll(() => page.getByTestId('message-list').getAttribute('data-pinned')).toBe('true');
+});
+
+test('interrupted retry streams are removed before the durable final answer', async () => {
+  const root = await temp('retry-stream');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const view = {
+    id: 'retry-stream',
+    title: '重试流',
+    projectId: 'alpha',
+    projectRoot: root,
+    workspaceProjectId: 'alpha',
+    anchorTaskId: 'anchor',
+    createdAt: Date.now(),
+    requirementVersion: 1,
+    paused: false,
+    messages: [{
+      id: 'user', seq: 1, role: 'user', kind: 'chat', text: '你好', data: null,
+      state: 'delivered', operationId: 'op-old', turn: 1, createdAt: Date.now(), updatedAt: Date.now(),
+    }],
+    messageCount: 1,
+    questions: [],
+    proposal: null,
+    proposalHistory: [],
+    accepted: [],
+    master: { nodeId: 'master', status: 'succeeded', model: 'local', used: 0, budget: null, unlimited: true, definitionVersion: 'main@1', cost: { unknown: false, amount: 0 } },
+    cost: { unknown: false, amount: 0 },
+    usage: { used: 0, budget: null, unlimited: true },
+    telemetry: { model: 'local', thinkingLevel: 'off', cacheHitRate: null, cachedInput: 0, cacheInput: 0, contextTokens: null, contextLimit: null, contextPercent: null },
+    tasks: [],
+    cursor: 0,
+  };
+  await page.route('**/api/conversations/retry-stream', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(view),
+  }));
+  await page.route('**/api/conversations/retry-stream/events/stream*', route => {
+    const events = [
+      { cursor: 1, type: 'message.delta', data: { operationId: 'op-old', text: '旧的流式回答' } },
+      { cursor: 2, type: 'message.tool', data: { operationId: 'op-old', phase: 'start', toolCallId: 'old-tool', toolName: 'read', summary: 'old.md' } },
+      { cursor: 3, type: 'operation.interrupted', data: { operationId: 'op-old' } },
+      { cursor: 4, type: 'message.delta', data: { operationId: 'op-final', text: '最终回答' } },
+      { cursor: 5, type: 'message.created', data: { message: { id: 'final', seq: 2, role: 'assistant', kind: 'chat', text: '最终回答', data: null, state: 'done', operationId: 'op-final', turn: 2, createdAt: Date.now(), updatedAt: Date.now() } } },
+      { cursor: 6, type: 'operation.result', data: { operationId: 'op-final' } },
+    ];
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    });
+  });
+
+  await page.goto(`${server.url}/#/conversations/retry-stream`);
+  const answer = page.getByTestId('message-assistant');
+  await answer.waitFor();
+  expect(await answer.innerText()).toContain('最终回答');
+  expect(await page.getByTestId('streaming').count()).toBe(0);
+  expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
+  expect(await page.getByTestId('message-assistant').count()).toBe(1);
 });
 
 test('the composer model control switches model and thinking as one persisted selection', async () => {

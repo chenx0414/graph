@@ -147,3 +147,59 @@ test('tool records render before the final assistant answer for the same turn', 
   expect(conversationProjectionSnapshot(state, { busy: false }).messages.map(item => item.id))
     .toEqual(['user', 'tool', 'assistant']);
 });
+
+test('terminal operation events discard abandoned live output without touching the active attempt', () => {
+  let state = createConversationProjection();
+  for (const [operationId, text] of [['abandoned', '旧输出'], ['active', '新输出']] as const) {
+    state = applyConversationEvent(state, {
+      type: 'message.delta',
+      data: { operationId, text },
+    });
+    state = applyConversationEvent(state, {
+      type: 'message.tool',
+      data: { operationId, toolCallId: `tool-${operationId}`, toolName: 'read', summary: `${operationId}.md`, phase: 'start' },
+    });
+  }
+
+  state = applyConversationEvent(state, {
+    type: 'operation.interrupted',
+    data: { operationId: 'abandoned' },
+  });
+
+  expect(conversationProjectionSnapshot(state, { busy: true })).toMatchObject({
+    streaming: [['active', '新输出']],
+    liveTools: [{ operationId: 'active', toolCallId: 'tool-active' }],
+  });
+});
+
+test('interrupted retries do not push the durable final answer above stale stream rows', () => {
+  let state = createConversationProjection();
+  for (const operationId of ['attempt-1', 'attempt-2']) {
+    state = applyConversationEvent(state, {
+      type: 'message.delta',
+      data: { operationId, text: `${operationId} partial` },
+    });
+    state = applyConversationEvent(state, {
+      type: 'operation.interrupted',
+      data: { operationId },
+    });
+  }
+  state = applyConversationEvent(state, {
+    type: 'message.created',
+    data: {
+      message: message({
+        id: 'final',
+        seq: 2,
+        role: 'assistant',
+        text: 'final answer',
+        operationId: 'attempt-3',
+      }),
+    },
+  });
+
+  expect(conversationProjectionSnapshot(state, { busy: false })).toMatchObject({
+    messages: [{ id: 'final', text: 'final answer' }],
+    streaming: [],
+    liveTools: [],
+  });
+});
