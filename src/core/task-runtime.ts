@@ -873,6 +873,15 @@ export async function openTaskRuntime(options: {
       const attachments = cleanAttachments(input.attachments);
       const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'chat', text: input.text, attachments }, () => {
         if (!input.text.trim() && !attachments.length) throw new RuntimeError('invalid_input', 'A nonempty message or attachment is required');
+        // A new user message is an explicit retry for a master parked on its own
+        // transient internal problem; otherwise that turn would never run again.
+        const parked = store.db.prepare(
+          "SELECT id,kind FROM questions WHERE task_id=? AND node_id='master' AND status='open' AND owner='main'",
+        ).all(conversation.anchor_task_id) as { id: string; kind: string }[];
+        for (const question of parked) {
+          if (!['adapter_error', 'execution_failed', 'context_rejected', 'recovery', 'git_conflict'].includes(question.kind)) continue;
+          store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson({ type: 'retry' }), question.id);
+        }
         const node = store.db.prepare("SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string } | undefined;
         const anchor = store.task(conversation.anchor_task_id);
         const state = anchor.paused || (node && ['preparing', 'running', 'blocked'].includes(node.status)) ? 'queued' : 'pending';

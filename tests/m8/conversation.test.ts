@@ -370,6 +370,31 @@ test('a pre-send failure returns the message to the queue instead of losing it',
   expect(after.messages.find(message => message.role === 'assistant')?.text).toBe('第二次成功');
 });
 
+test('an uncertain master turn leaves a plain-language notice and a new message retries it', async () => {
+  const root = await temp('interrupted');
+  let attempts = 0;
+  const runtime = await withRuntime(root, async () => {
+    attempts += 1;
+    if (attempts === 1) throw new SyntaxError('Unterminated string in JSON at position 64472 (line 1 column 64473)');
+    return { outcome: 'completed', output: { text: '第二次成功' }, usage };
+  });
+  const created = await runtime.conversations.create({ text: '你好', requestId: 'create' });
+  await runtime.host.runReady();
+  const interrupted = await runtime.conversations.view(created.conversationId);
+  const notice = interrupted.messages.find(message => message.kind === 'error');
+  // The user gets an actionable sentence, never the raw parse error.
+  expect(notice?.text).toContain('输出被截断');
+  expect(notice?.text ?? '').not.toContain('SyntaxError');
+  expect(interrupted.master?.status).toBe('pending');
+  const problems = await runtime.supervisor(interrupted.anchorTaskId).listProblems() as { id: string; kind: string }[];
+  expect(problems.map(problem => problem.kind)).toEqual(['recovery']);
+  // A new user message is an explicit retry and releases the parked master.
+  await runtime.conversations.chat(created.conversationId, { text: '再试一次', requestId: 'retry' });
+  await runtime.host.runReady();
+  const after = await runtime.conversations.view(created.conversationId);
+  expect(after.messages.find(message => message.role === 'assistant')?.text).toBe('第二次成功');
+});
+
 async function openTaskRuntimeQuestions(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, taskId: string) {
   return runtime.user.task(taskId).view().then(view => view.questions.filter(question => question.status === 'open'));
 }

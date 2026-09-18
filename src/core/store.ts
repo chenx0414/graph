@@ -33,7 +33,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 25) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 26) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -359,6 +359,27 @@ export class TaskStore {
         this.db.exec('CREATE INDEX IF NOT EXISTS questions_owner_status ON questions(owner,status);');
       }
       this.db.exec('PRAGMA user_version=25;');
+    });
+    if (version < 26) this.transaction(() => {
+      // v25 defaulted every pre-existing question to owner='user'. Internal
+      // execution problems that a conversation master can take over must not
+      // stay in the user's inbox after an upgrade; only real decisions,
+      // permissions, budget and human checks remain user-owned.
+      const columns = new Set((this.db.prepare('PRAGMA table_info(questions)').all() as { name: string }[]).map(row => row.name));
+      if (columns.has('owner')) {
+        this.db.exec(`
+          UPDATE questions SET owner='main'
+          WHERE owner='user'
+            AND kind NOT IN ('permission','budget','reservation_exceeded','human_check')
+            AND NOT (kind='waiting' AND json_extract(data,'$.requestType')='model_access')
+            AND task_id IN (
+              SELECT t.id FROM tasks t
+              JOIN conversations c ON c.id=t.conversation_id
+              JOIN nodes n ON n.task_id=c.anchor_task_id AND json_extract(n.spec,'$.role')='master'
+            );
+        `);
+      }
+      this.db.exec('PRAGMA user_version=26;');
     });
   }
   transaction<T>(action: () => T): T {

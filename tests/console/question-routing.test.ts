@@ -83,3 +83,31 @@ test('a problem on the master node itself parks instead of re-waking the same ma
   expect(store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='problem.parked'").get())
     .toEqual({ count: 1 });
 });
+
+test('upgrading reclassifies legacy internal questions so they leave the user inbox', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-question-upgrade-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'tasks.sqlite');
+  let store = new TaskStore(path);
+  store.transaction(() => {
+    // Rewind to the pre-owner shape, then seed the legacy open questions that
+    // the upgrade must classify: one genuine permission and one recovery.
+    store.db.exec('DROP INDEX IF EXISTS questions_owner_status; ALTER TABLE questions DROP COLUMN owner; PRAGMA user_version=24;');
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase,conversation_id) VALUES('anchor','p','chat',1,'chatting','c')").run();
+    store.db.prepare("INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES('c','p','anchor','chat',1,1)").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,activation_id,status) VALUES('anchor','master','{\"role\":\"master\"}','a','succeeded')").run();
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase,conversation_id) VALUES('work','p','work',2,'running','c')").run();
+    store.db.prepare("INSERT INTO nodes(task_id,id,spec,activation_id,status) VALUES('work','work','{}','w','blocked')").run();
+    store.db.prepare("INSERT INTO questions(id,task_id,node_id,kind,data,status) VALUES('rec','work','work','recovery','{\"reason\":\"SyntaxError\"}','open')").run();
+    store.db.prepare("INSERT INTO questions(id,task_id,node_id,kind,data,status) VALUES('perm','work','work','permission','{\"grant\":\"mcp:demo:write\"}','open')").run();
+  });
+  store.close();
+  store = new TaskStore(path);
+  cleanup.push(async () => store.close());
+  expect(store.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 26 });
+  expect(store.db.prepare('SELECT id,kind,owner FROM questions ORDER BY id').all()).toEqual([
+    { id: 'perm', kind: 'permission', owner: 'user' },
+    { id: 'rec', kind: 'recovery', owner: 'main' },
+  ]);
+});

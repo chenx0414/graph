@@ -9,7 +9,7 @@ import {
   reserveOperation,
   unknownUsageIsNonBlocking,
 } from './budget-ledger.ts';
-import { conversationForTask, pendingMessages, recordConversationOutput, releaseMessages } from './conversation.ts';
+import { conversationForTask, pendingMessages, recordConversationInterruption, recordConversationOutput, releaseMessages } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
 import { resultHandoffDependents, resultHandoffFailure, settleResultHandoff } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
@@ -273,6 +273,7 @@ export class OperationLifecycle {
       this.markNotSent(row, { resetNode: false });
       releaseMessages(this.store, operationId);
       this.block(row.task_id, row.node_id, 'adapter_error', { reason }, row.id);
+      recordConversationInterruption(this.store, operationFrom(row), reason);
     });
   }
 
@@ -437,6 +438,7 @@ export class OperationLifecycle {
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=? WHERE id=?")
         .run(Number(!quiescent), operation.id);
       this.block(operation.taskId, operation.nodeId, 'recovery', { reason: String(error) }, operation.id);
+      recordConversationInterruption(this.store, operation, String(error));
       return true;
     });
   }

@@ -98,6 +98,16 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
   store.event(conversationRow(store, row.conversation_id).anchor_task_id, 'message.updated', { message: publicMessage(row) });
 }
 
+/** Turn an internal failure into a short, actionable line for the chat. Raw
+ * exception text, stack traces and JSON stay in the problem ledger. */
+export function turnFailureText(reason: string) {
+  if (/unterminated string|unexpected end of json|json/i.test(reason)) {
+    return '主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。';
+  }
+  if (/unknown usage|usage/i.test(reason)) return '主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。';
+  return '主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。';
+}
+
 /** Persist the durable side of one master turn: its assistant reply and the
  * summarized tool activity. Idempotent per operation. */
 export function recordConversationOutput(store: TaskStore, operation: Operation, result: OperationResult) {
@@ -151,12 +161,33 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
       conversationId: conversation.id,
       role: 'system',
       kind: 'error',
-      text: `主 Agent 本轮未完成：${(reason ?? '').slice(0, 500)}`,
+      text: turnFailureText(reason ?? ''),
       state: 'done',
       operationId: operation.id,
       turn: operation.attempt,
     });
   }
+}
+
+/** Record one plain-language interruption for a master turn whose outcome is
+ * uncertain and which will therefore not reach recordConversationOutput. */
+export function recordConversationInterruption(store: TaskStore, operation: Operation, reason: string) {
+  if (operation.kind !== 'agent') return;
+  const nodeSpec = JSON.parse((store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
+    .get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+  if (nodeSpec.role !== 'master') return;
+  const conversation = conversationForTask(store, operation.taskId);
+  if (!conversation) return;
+  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='system' AND kind='error' LIMIT 1").get(operation.id)) return;
+  appendMessage(store, {
+    conversationId: conversation.id,
+    role: 'system',
+    kind: 'error',
+    text: turnFailureText(reason),
+    state: 'done',
+    operationId: operation.id,
+    turn: operation.attempt,
+  });
 }
 
 /** A pre-send refusal proves the model never saw the message, so it queues
