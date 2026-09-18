@@ -184,12 +184,19 @@ export class OperationLifecycle {
             eventReason: 'Recovered before dispatch',
           });
         } else {
-          this.store.db.prepare("UPDATE operations SET state='unknown',waiting_slot=0 WHERE id=?").run(row.id);
+          // A new process owns no live worker, so a recorded dispatch is
+          // uncertain and must stop holding an execution slot. Leaving
+          // worker_active=1 would starve every later agent and block usage
+          // reconciliation.
+          this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,waiting_slot=0 WHERE id=?").run(row.id);
           this.block(row.task_id, row.node_id, 'recovery', {
             reason: 'Dispatch was recorded; external outcome and worker liveness require reconciliation',
           }, row.id);
         }
       }
+      // Rows already marked unknown by an earlier process can keep a stale
+      // worker flag as well (for example after a crash during reconciliation).
+      this.store.db.prepare("UPDATE operations SET worker_active=0 WHERE state='unknown' AND worker_active=1").run();
       return generation;
     });
   }

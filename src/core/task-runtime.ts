@@ -1216,6 +1216,7 @@ export async function openTaskRuntime(options: {
         });
       },
       async drive() { ensureOpen(); return execution.drive(); },
+      async pump() { ensureOpen(); return execution.pump(); },
       async report(id: string, generation: number, result: OperationResult) { ensureOpen(); execution.report(id, generation, result); },
       async reconcile(id: string) { ensureOpen(); await execution.reconcile(id); },
       /** Create master nodes for pending tasks after a hot configuration apply. */

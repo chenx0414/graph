@@ -52,7 +52,12 @@ export async function openGraphServer(options: Parameters<typeof openTaskRuntime
     if (loop || stopped) return;
     loop = (async () => {
       while (!stopped) {
-        if (driving) await runtime.host.drive();
+        if (driving) {
+          // Pump never waits for a worker to settle, so one hung provider stream
+          // cannot block every other conversation. Errors are retried next tick.
+          try { await runtime.host.pump(); }
+          catch { /* keep the drive loop alive */ }
+        }
         await new Promise(resolve => setTimeout(resolve, driving ? 40 : 200));
       }
     })();

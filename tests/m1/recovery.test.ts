@@ -61,6 +61,9 @@ test.each(['intent', 'dispatched'])('hard restart recovers %s conservatively and
   const restored = await task.view();
   expect(restored.nodes[0]).toMatchObject({ instanceId: operation.instanceId, used: 30, reserved: stage === 'intent' ? 0 : 100 });
   expect(restored.operations[1]!.state).toBe(stage === 'intent' ? 'not_sent' : 'unknown');
+  // A restarted process owns no live worker, so a recovered dispatch must not
+  // keep holding an execution slot.
+  expect(restored.operations[1]!.workerActive).toBe(false);
   await expect(runtime.host.report(operation.id, operation.generation, result)).rejects.toMatchObject({ code: 'stale_generation' });
   if (stage === 'intent') {
     expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
@@ -69,7 +72,8 @@ test.each(['intent', 'dispatched'])('hard restart recovers %s conservatively and
     expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
     expect(restored.questions[0]).toMatchObject({ kind: 'recovery', status: 'open' });
     await task.pause('pause');
-    expect((await task.view()).status).toBe('pausing');
+    // The restarted process owns no live worker, so pause is immediate.
+    expect((await task.view()).status).toBe('paused');
     await runtime.host.reconcile(operation.id);
     expect((await task.view()).status).toBe('paused');
     await task.resume('resume');

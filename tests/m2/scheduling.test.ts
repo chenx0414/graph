@@ -57,6 +57,33 @@ test('drive starts an independent successor before a slow sibling finishes', asy
   expect((await task.view()).phase).toBe('completed');
 });
 
+test('pump dispatches a new conversation even while an earlier master worker hangs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-pump-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  let calls = 0;
+  let releaseHang!: () => void;
+  const hang = new Promise<void>(resolve => { releaseHang = resolve; });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
+      calls += 1;
+      if (calls === 1) { await hang; return { outcome: 'completed' as const, output: { text: 'first eventually' }, usage }; }
+      return { outcome: 'completed' as const, output: { text: 'second reply' }, usage };
+    } } },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  cleanup.push(async () => releaseHang());
+  await runtime.conversations.create({ text: 'first', requestId: 'first' });
+  expect(await runtime.host.pump()).toEqual({ dispatched: 1 });
+  const second = await runtime.conversations.create({ text: 'second', requestId: 'second' });
+  // A hung worker on the first master must not starve the second conversation.
+  expect(await runtime.host.pump()).toEqual({ dispatched: 1 });
+  await waitUntil(async () => (await runtime.conversations.view(second.conversationId)).messages.some(message => message.role === 'assistant'));
+  const view = await runtime.conversations.view(second.conversationId);
+  expect(view.messages.find(message => message.role === 'assistant')?.text).toBe('second reply');
+});
+
 test('nested workers share the ten-agent pool and the master never becomes an eleventh', async () => {
   const release = deferred();
   let peak = 0; let active = 0;

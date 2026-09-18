@@ -37,6 +37,7 @@ export class Execution {
   private readonly generation: number;
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
+  private pumping = false;
   constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
@@ -65,7 +66,13 @@ export class Execution {
   async drain() {
     this.stopping = true;
     this.unsubscribeStore();
-    await Promise.allSettled([...this.pending]);
+    // Shutdown is bounded. A provider stream can hang indefinitely; the
+    // operation is already durable and is recovered on the next start, so the
+    // daemon must not wait past its stop deadline for that worker.
+    await Promise.race([
+      Promise.allSettled([...this.pending]),
+      new Promise<void>(resolve => setTimeout(resolve, 2_000)),
+    ]);
   }
 
   report(id: string, generation: number, result: OperationResult) {
@@ -157,6 +164,26 @@ export class Execution {
       return { dispatched };
     } finally {
       this.driveActive -= 1;
+    }
+  }
+
+  /** Dispatch every currently-ready node and return without waiting for the
+   * workers. The long-running host loop uses this so a hung worker can never
+   * starve unrelated tasks; callers that need completion use drive(). */
+  async pump() {
+    if (this.stopping || this.pumping) return { dispatched: 0 };
+    this.pumping = true;
+    try {
+      let dispatched = 0;
+      for (const node of this.readyNodes()) {
+        const spec = JSON.parse(node.spec) as NodeSpec;
+        if (this.remainingSlots(spec.kind) <= 0) continue;
+        void this.run(node).catch(() => undefined);
+        dispatched += 1;
+      }
+      return { dispatched };
+    } finally {
+      this.pumping = false;
     }
   }
 
