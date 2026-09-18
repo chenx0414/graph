@@ -1,6 +1,7 @@
 import type { TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
 import type { CapabilityRecord } from '../catalog/capability-library.ts';
+import { tokenUsageTotal, type TokenUsage } from '../runtime/call-broker.ts';
 
 export interface TalentSample {
   kind: 'task' | 'chat';
@@ -67,7 +68,9 @@ export function talentExperience(store: TaskStore, id: string, options: { versio
     const finished = ['succeeded', 'skipped', 'retired'].includes(row.status);
     const unsuccessful = ['failed', 'blocked'].includes(row.status);
     const usageKnown = invocations.length > 0 && invocations.every(invocation => invocation.usage !== null);
-    const tokens = usageKnown ? invocations.reduce((sum, invocation) => sum + Object.values(JSON.parse(invocation.usage!) as Record<string, number>).reduce((inner, value) => inner + value, 0), 0) : null;
+    const tokens = usageKnown
+      ? invocations.reduce((sum, invocation) => sum + tokenUsageTotal(JSON.parse(invocation.usage!) as TokenUsage), 0)
+      : null;
     const timings = operations.map(operation => operation.dispatched_at !== null && operation.settled_at !== null
       ? Math.max(0, operation.settled_at - operation.dispatched_at - operation.waiting_ms)
       : null);

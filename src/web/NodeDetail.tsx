@@ -5,8 +5,9 @@ import { costText, ErrorBox, useTaskStream } from './shared.tsx';
 import { Button, Empty, Pill, Spinner, Stat } from './ui.tsx';
 
 interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
-interface Operation { id: string; state: string; runMs: number | null; waitingMs: number; waitingSlot: boolean; result: { output?: unknown } | null; usage: Record<string, number> | null }
-interface Invocation { id: string; model: string; purpose?: string; usage: Record<string, number> | null; cost: { unknown?: boolean; amount?: number; currency?: string } | null }
+interface UsageCounts { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; usageSource?: string }
+interface Operation { id: string; state: string; runMs: number | null; waitingMs: number; waitingSlot: boolean; result: { output?: unknown } | null; usage: UsageCounts | null }
+interface Invocation { id: string; model: string; purpose?: string; usage: UsageCounts | null; usageSource?: string; cost: { unknown?: boolean; amount?: number; currency?: string } | null }
 interface Question { id: string; kind: string; status: string }
 interface Evidence { acceptanceId: string; valid: boolean; commitSha: string | null }
 interface ContextDetail {
@@ -76,10 +77,26 @@ function formatMs(value: number | null) {
   return `${(value / 1_000).toFixed(1)}s`;
 }
 
-function usageText(usage: Record<string, number> | null) {
+const USAGE_SOURCE_LABEL: Record<string, string> = {
+  authoritative: '权威计量',
+  account_delta: '订阅差额',
+  estimated: '本地估算',
+  unknown: '未知',
+};
+
+function usageTotal(usage: UsageCounts | null) {
+  if (!usage) return 0;
+  return (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+}
+
+function usageText(usage: UsageCounts | null) {
   if (!usage) return '未知';
-  const total = Object.values(usage).reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0);
+  const total = usageTotal(usage);
   return `${total.toLocaleString('en-US')} tokens`;
+}
+
+function sourceLabel(source: string | undefined, usage: UsageCounts | null) {
+  return USAGE_SOURCE_LABEL[source ?? usage?.usageSource ?? 'unknown'] ?? '未知';
 }
 
 const CONTEXT_PURPOSE_LABEL: Record<string, string> = {
@@ -193,7 +210,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
   const timing = data.timing ?? { totalMs: null, runMs: null, waitingMs: 0, pauseMs: null, userWaitMs: null, inProgress: false };
   const knownTokens = data.instance
     ? data.instance.used
-    : data.invocations.reduce((sum, invocation) => sum + (invocation.usage ? Object.values(invocation.usage).reduce((inner, value) => inner + value, 0) : 0), 0);
+    : data.invocations.reduce((sum, invocation) => sum + usageTotal(invocation.usage), 0);
   const costAmounts: Record<string, number> = {};
   let unknownCost = false;
   for (const invocation of data.invocations) {
@@ -404,7 +421,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
             <li key={operation.id} className="list-item" style={{ display: 'block' }}>
               <div className="row">
                 <Pill tone={operation.state === 'succeeded' ? 'success' : operation.state === 'interrupted' || operation.state === 'unknown' ? 'warn' : 'info'}>{operation.state}</Pill>
-                <span className="muted">运行 {formatMs(operation.runMs)}{operation.waitingMs ? ` · 等待名额 ${formatMs(operation.waitingMs)}` : ''} · 用量 {usageText(operation.usage)}</span>
+                <span className="muted">运行 {formatMs(operation.runMs)}{operation.waitingMs ? ` · 等待名额 ${formatMs(operation.waitingMs)}` : ''} · 用量 {usageText(operation.usage)} · {sourceLabel(undefined, operation.usage)}</span>
               </div>
               {operation.result?.output !== undefined && <pre style={{ marginTop: 6 }}>{JSON.stringify(operation.result.output, null, 2).slice(0, 2_000)}</pre>}
             </li>
@@ -417,7 +434,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
         <ul className="list" data-testid="node-invocations">
           {data.invocations.map(invocation => (
             <li key={invocation.id} className="list-item">
-              <span className="grow">{invocation.model} · {usageText(invocation.usage)}{invocation.purpose === 'compaction' ? ' · 上下文摘要' : ''}</span>
+              <span className="grow">{invocation.model} · {usageText(invocation.usage)} · {sourceLabel(invocation.usageSource, invocation.usage)}{invocation.purpose === 'compaction' ? ' · 上下文摘要' : ''}</span>
               <span className="muted">{invocation.cost === null || invocation.cost.unknown ? '费用未知' : `${invocation.cost.amount?.toFixed(6) ?? '?'} ${invocation.cost.currency ?? ''}`}</span>
             </li>
           ))}

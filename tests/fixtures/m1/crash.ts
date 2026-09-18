@@ -5,7 +5,7 @@ const root = process.argv[2]!;
 const stage = process.argv[3]!;
 const result = { outcome: 'completed' as const, output: { artifact: join(root, 'artifact.txt') }, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
 process.on('message', () => {});
-const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: {
+const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], limits: { defaultBudgetTokens: 20_000_000 }, actions: {
   work: { kind: 'agent', reserveTokens: 100, prepare: async operation => {
     if (operation.attempt === 1) return async () => ({ outcome: 'continue', output: null, usage: { input: 20, output: 10, cacheRead: 0, cacheWrite: 0 } });
     if (stage === 'intent') { process.send?.({ taskId: operation.taskId, operation }); await new Promise(() => {}); }

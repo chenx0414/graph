@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream, type AssistantMessage, type Model } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model } from '@earendil-works/pi-ai';
 import { streamSimple as openaiStreamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import { streamSimple as anthropicStreamSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
+import { estimateContextTokens, estimateTextTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { ModelApi } from '../catalog/models.ts';
 import type { TokenUsage } from './call-broker.ts';
 
@@ -22,7 +23,13 @@ function parseUsage(value: unknown): TokenUsage | null {
   if (![input, output, cache].every(value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) return null;
   if ((cache as number) > (input as number)) return null;
   if (raw.total_tokens !== undefined && raw.total_tokens !== (input as number) + (output as number)) return null;
-  return { input: (input as number) - (cache as number), output: output as number, cacheRead: cache as number, cacheWrite: 0 };
+  return {
+    input: (input as number) - (cache as number),
+    output: output as number,
+    cacheRead: cache as number,
+    cacheWrite: 0,
+    usageSource: 'authoritative',
+  };
 }
 
 function parseAnthropicUsage(value: unknown): TokenUsage | null {
@@ -33,7 +40,13 @@ function parseAnthropicUsage(value: unknown): TokenUsage | null {
   const cacheRead = raw.cache_read_input_tokens ?? 0;
   const cacheWrite = raw.cache_creation_input_tokens ?? 0;
   if (![input, output, cacheRead, cacheWrite].every(item => typeof item === 'number' && Number.isSafeInteger(item) && item >= 0)) return null;
-  return { input: input as number, output: output as number, cacheRead: cacheRead as number, cacheWrite: cacheWrite as number };
+  return {
+    input: input as number,
+    output: output as number,
+    cacheRead: cacheRead as number,
+    cacheWrite: cacheWrite as number,
+    usageSource: 'authoritative',
+  };
 }
 
 async function readUsage(response: Response, api: 'openai-completions' | 'anthropic-messages' = 'openai-completions'): Promise<TokenUsage | null> {
@@ -101,7 +114,7 @@ export interface GatedProviderFetchOptions {
   onResponse?: (id: string, response: Response, release: () => void) => Promise<void> | void;
 }
 
-const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, usageSource: 'authoritative' };
 const RETRYABLE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT']);
 
 function transportCode(error: unknown) {
@@ -148,8 +161,119 @@ export interface StreamSlot {
   acquire(signal?: AbortSignal): Promise<() => void>;
 }
 
+export interface AccountUsageDeltaInput {
+  model: Model<ModelApi>;
+  context: Context;
+  /** A fresh clone owned by the callback; it may be consumed. */
+  response: Response;
+}
+
+export interface ControlledStreamUsageOptions {
+  /** Estimate a successful response when neither per-request nor account-level usage exists. */
+  estimateMissing?: boolean;
+  /** Provider adapter hook. It must return the account-level delta attributable to this send. */
+  accountUsageDelta?: (input: AccountUsageDeltaInput) => Promise<TokenUsage | null> | TokenUsage | null;
+}
+
+function textFromContent(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(textFromContent).join('');
+  if (!value || typeof value !== 'object') return '';
+  const item = value as Record<string, unknown>;
+  if (typeof item.text === 'string') return item.text;
+  if (typeof item.thinking === 'string') return item.thinking;
+  if (typeof item.partial_json === 'string') return item.partial_json;
+  if (item.input !== undefined) return JSON.stringify(item.input);
+  if (typeof item.content === 'string') return item.content;
+  return '';
+}
+
+function openAIOutputText(body: unknown, contentType: string): string {
+  if (contentType.includes('application/json')) {
+    const message = (body as { choices?: { message?: unknown }[] }).choices?.[0]?.message;
+    if (!message || typeof message !== 'object') return '';
+    const record = message as { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown[] };
+    return [
+      textFromContent(record.content),
+      typeof record.reasoning_content === 'string' ? record.reasoning_content : '',
+      ...(Array.isArray(record.tool_calls) ? record.tool_calls.map(call => JSON.stringify(call)) : []),
+    ].join('');
+  }
+  return '';
+}
+
+function anthropicOutputText(body: unknown, contentType: string): string {
+  if (contentType.includes('application/json')) {
+    const content = (body as { content?: unknown }).content;
+    return textFromContent(content);
+  }
+  return '';
+}
+
+async function estimateMissingUsage(response: Response, api: 'openai-completions' | 'anthropic-messages', context: Context): Promise<TokenUsage | null> {
+  if (!response.ok) return null;
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const decoder = new TextDecoder();
+  const contentType = response.headers.get('content-type') ?? '';
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (text.length > 8_000_000) { void reader.cancel(); return null; }
+    }
+    text += decoder.decode();
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+
+  let outputText = '';
+  if (contentType.includes('application/json')) {
+    try {
+      const body = JSON.parse(text) as unknown;
+      outputText = api === 'anthropic-messages' ? anthropicOutputText(body, contentType) : openAIOutputText(body, contentType);
+    } catch {
+      return null;
+    }
+  } else {
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      let event: Record<string, unknown>;
+      try { event = JSON.parse(payload) as Record<string, unknown>; } catch { continue; }
+      if (api === 'anthropic-messages') {
+        if (event.type === 'content_block_delta') outputText += textFromContent(event.delta);
+      } else {
+        const delta = (event.choices as { delta?: unknown }[] | undefined)?.[0]?.delta;
+        if (delta && typeof delta === 'object') {
+          const record = delta as { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown[] };
+          outputText += textFromContent(record.content);
+          if (typeof record.reasoning_content === 'string') outputText += record.reasoning_content;
+          if (Array.isArray(record.tool_calls)) outputText += record.tool_calls.map(call => JSON.stringify(call)).join('');
+        }
+      }
+    }
+  }
+
+  const input = estimateContextTokens(context).tokens;
+  const output = estimateTextTokens(outputText);
+  if (input <= 0 && output <= 0) return null;
+  return { input, output, cacheRead: 0, cacheWrite: 0, usageSource: 'estimated' };
+}
+
 /** Controlled lower-level adapter, currently verified for OpenAI chat-completions SSE. */
-export function controlledOpenAIStream(broker: SendGate, apiKey: string | (() => string), slot?: StreamSlot, api: ModelApi = 'openai-completions'): StreamFn {
+export function controlledOpenAIStream(
+  broker: SendGate,
+  apiKey: string | (() => string),
+  slot?: StreamSlot,
+  api: ModelApi = 'openai-completions',
+  usageOptions: ControlledStreamUsageOptions = {},
+): StreamFn {
   if (api !== 'openai-completions' && api !== 'anthropic-messages') throw new Error('Unverified model transport');
   return (model, context, options) => {
     const output = createAssistantMessageEventStream();
@@ -183,7 +307,59 @@ export function controlledOpenAIStream(broker: SendGate, apiKey: string | (() =>
               onResponse: (id, response, release) => {
                 // Consuming the evidence clone to the end also proves the
                 // provider finished sending, so it can release the slot too.
-                evidence = readUsage(response.clone(), api).then(usage => { broker.settle(id, usage); release(); }, () => { broker.settle(id, null); release(); });
+                // Optional clones are created before the first await: the response
+                // wrapper locks the original body immediately after this callback.
+                const providerEvidence = response.clone();
+                const accountEvidence = usageOptions.accountUsageDelta ? response.clone() : undefined;
+                const estimateEvidence = usageOptions.estimateMissing ? response.clone() : undefined;
+                const discard = (evidence: Response | undefined) => {
+                  if (!evidence) return;
+                  void evidence.body?.cancel().catch(() => undefined);
+                };
+                evidence = (async () => {
+                  try {
+                    const authoritative = await readUsage(providerEvidence, api);
+                    if (authoritative) {
+                      discard(accountEvidence);
+                      discard(estimateEvidence);
+                      broker.settle(id, authoritative);
+                      return;
+                    }
+                    if (usageOptions.accountUsageDelta && accountEvidence) {
+                      let delta: TokenUsage | null = null;
+                      try {
+                        delta = await usageOptions.accountUsageDelta({
+                          model: model as Model<ModelApi>,
+                          context,
+                          response: accountEvidence,
+                        });
+                      } catch {
+                        delta = null;
+                      } finally {
+                        discard(accountEvidence);
+                      }
+                      if (delta) {
+                        discard(estimateEvidence);
+                        broker.settle(id, { ...delta, usageSource: 'account_delta' });
+                        return;
+                      }
+                    }
+                    if (usageOptions.estimateMissing && estimateEvidence) {
+                      const estimated = await estimateMissingUsage(estimateEvidence, api, context);
+                      if (estimated) {
+                        broker.settle(id, estimated);
+                        return;
+                      }
+                    }
+                    broker.settle(id, null);
+                  } catch {
+                    discard(accountEvidence);
+                    discard(estimateEvidence);
+                    broker.settle(id, null);
+                  } finally {
+                    release();
+                  }
+                })();
               },
             });
           },

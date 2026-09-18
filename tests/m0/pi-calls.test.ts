@@ -212,7 +212,10 @@ test('a provably unsent request is retried as a new gated invocation', async () 
   expect(calls).toBe(2);
   expect(gate.dispatches).toHaveLength(2);
   expect(new Set(gate.dispatches).size).toBe(2);
-  expect(gate.settled).toEqual([{ id: gate.dispatches[0], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }]);
+  expect(gate.settled).toEqual([{
+    id: gate.dispatches[0],
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, usageSource: 'authoritative' },
+  }]);
 });
 
 test('a pause during retry backoff stops the resend', async () => {

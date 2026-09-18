@@ -92,6 +92,7 @@ test('a worker node projects real Pi entries, its session reference and operatio
   expect(first.operations[0]).toMatchObject({ state: 'succeeded', waitingMs: 0 });
   expect(first.operations[0]!.runMs).not.toBeNull();
   expect(first.invocations.length).toBeGreaterThanOrEqual(2);
+  expect(first.invocations.every(invocation => invocation.usageSource === 'authoritative')).toBe(true);
   expect(first.entryCount).toBe(first.entries.length);
 
   // Restarting the daemon keeps the same projection.

@@ -16,6 +16,13 @@ import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation, openUserWait } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
 import {
+  mergeUsageSource,
+  normalizeTokenUsage,
+  tokenUsageTotal,
+  usageSourceOf,
+  type UsageSource,
+} from '../runtime/call-broker.ts';
+import {
   RuntimeError,
   type Answer,
   type Json,
@@ -97,7 +104,23 @@ function operationFrom(row: OperationDbRow) {
 }
 
 function tokenTotal(usage: TokenUsage) {
-  return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+  return tokenUsageTotal(usage);
+}
+
+function sumKnownUsage(rows: { usage: string | null }[]) {
+  const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  let source: UsageSource | undefined;
+  for (const row of rows) {
+    if (!row.usage) continue;
+    const usage = JSON.parse(row.usage) as TokenUsage;
+    total.input += usage.input;
+    total.output += usage.output;
+    total.cacheRead += usage.cacheRead;
+    total.cacheWrite += usage.cacheWrite;
+    const next = usageSourceOf(usage);
+    source = source ? mergeUsageSource(source, next) : next;
+  }
+  return { ...total, usageSource: source ?? 'unknown' } satisfies TokenUsage;
 }
 
 /**
@@ -340,7 +363,11 @@ export class OperationLifecycle {
       const invocations = this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=?')
         .all(operation.id) as { usage: string | null }[];
       const known = invocations.map(item => item.usage ? JSON.parse(item.usage) as TokenUsage : null);
-      const unknown = known.some(value => value === null);
+      const unknown = known.some(value => {
+        if (!value) return true;
+        const source = usageSourceOf(value);
+        return source === 'unknown' || (source === 'estimated' && !unknownUsageIsNonBlocking(this.store, operation.instanceId));
+      });
       const total = known.reduce((sum, value) => sum + (value ? tokenTotal(value) : 0), 0);
       const state = invocations.length ? 'interrupted' : 'not_sent';
       this.store.db.prepare(`UPDATE operations
@@ -506,20 +533,13 @@ export class OperationLifecycle {
     const operation = operationFrom(row);
     const result = JSON.parse(row.result) as OperationResult;
     if (answer.type === 'usage') {
-      this.settle(operation, { ...result, usage: answer.usage });
+      this.settle(operation, { ...result, usage: normalizeTokenUsage(answer.usage) });
       return;
     }
-    const known = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL')
-      .all(operationId) as { usage: string }[]).reduce<TokenUsage>((sum, item) => {
-        const usage = JSON.parse(item.usage) as TokenUsage;
-        return {
-          input: sum.input + usage.input,
-          output: sum.output + usage.output,
-          cacheRead: sum.cacheRead + usage.cacheRead,
-          cacheWrite: sum.cacheWrite + usage.cacheWrite,
-        };
-      }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-    this.settle(operation, { ...result, usage: known });
+    const knownRows = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL')
+      .all(operationId) as { usage: string }[]);
+    const known = sumKnownUsage(knownRows);
+    this.settle(operation, { ...result, usage: known }, { reconciled: true });
     this.store.event(operation.taskId, 'operation.usage_reconciled', {
       operationId,
       decision: 'usage_unavailable',
@@ -552,19 +572,13 @@ export class OperationLifecycle {
         ? this.store.db.prepare('SELECT model FROM instances WHERE id=?').get(row.instance_id) as { model: string | null }
         : undefined;
       const entry = instance?.model ? models?.().find(model => model.id === instance.model) : undefined;
+      const usage = normalizeTokenUsage(answer.usage);
       this.store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?')
-        .run(canonicalJson(answer.usage), canonicalJson(estimateCost(answer.usage, entry?.cost, entry?.pricing)), unknown[0]!.id);
+        .run(canonicalJson(usage), canonicalJson(estimateCost(usage, entry?.cost, entry?.pricing)), unknown[0]!.id);
     }
-    const known = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL')
-      .all(row.id) as { usage: string }[]).reduce<TokenUsage>((sum, item) => {
-        const usage = JSON.parse(item.usage) as TokenUsage;
-        return {
-          input: sum.input + usage.input,
-          output: sum.output + usage.output,
-          cacheRead: sum.cacheRead + usage.cacheRead,
-          cacheWrite: sum.cacheWrite + usage.cacheWrite,
-        };
-      }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    const knownRows = (this.store.db.prepare('SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL')
+      .all(row.id) as { usage: string }[]);
+    const known = sumKnownUsage(knownRows);
     const total = tokenTotal(known);
     if (total > 0 && row.instance_id) {
       commitUsage(this.store, row.instance_id, total);
@@ -630,7 +644,7 @@ export class OperationLifecycle {
     });
   }
 
-  private settle(operation: Operation, result: OperationResult) {
+  private settle(operation: Operation, result: OperationResult, options: { reconciled?: boolean } = {}) {
     if (!result || !['completed', 'continue', 'waiting', 'failed', 'skipped'].includes(result.outcome)) {
       throw new RuntimeError('invalid_result', 'Unexpected operation outcome');
     }
@@ -652,11 +666,17 @@ export class OperationLifecycle {
         throw new RuntimeError('result_conflict', 'Known result cannot change during usage reconciliation');
       }
     }
-    const usage = operation.kind === 'agent'
+    const rawUsage = operation.kind === 'agent'
       ? result.usage
-      : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    const unknownUsageAllowed = usage === null && unknownUsageIsNonBlocking(this.store, operation.instanceId);
-    if (!usage && !unknownUsageAllowed) {
+      : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, usageSource: 'authoritative' as const };
+    const normalizedUsage = rawUsage ? normalizeTokenUsage(rawUsage) : null;
+    const source = usageSourceOf(normalizedUsage);
+    const estimatedRequiresReconciliation = source === 'estimated' && !options.reconciled;
+    const missingUsage = !normalizedUsage
+      || (source === 'unknown' && !options.reconciled)
+      || (estimatedRequiresReconciliation && !unknownUsageIsNonBlocking(this.store, operation.instanceId));
+    const unknownUsageAllowed = missingUsage && unknownUsageIsNonBlocking(this.store, operation.instanceId);
+    if (missingUsage && !unknownUsageAllowed) {
       recordConversationOutput(this.store, operation, result);
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?")
         .run(canonicalJson(result), operation.id);
@@ -666,20 +686,25 @@ export class OperationLifecycle {
         .run(canonicalJson({ result }), operation.id);
       closeUserWaitForOperation(this.store, operation.id);
       if (!this.store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
+        const reason = source === 'estimated'
+          ? 'Agent returned only estimated usage for a finite budget'
+          : 'Agent returned no accountable usage';
         this.store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
-          .run(randomUUID(), operation.taskId, operation.nodeId, operation.id, 'unknown_usage', canonicalJson({ reason: 'Agent returned no authoritative usage' }));
+          .run(randomUUID(), operation.taskId, operation.nodeId, operation.id, 'unknown_usage', canonicalJson({ reason, usageSource: source }));
         openUserWait(this.store, operation.taskId, operation.nodeId);
-        this.store.event(operation.taskId, 'operation.unknown', { operationId: operation.id, reason: 'unknown_usage' });
+        this.store.event(operation.taskId, 'operation.unknown', { operationId: operation.id, reason: 'unknown_usage', usageSource: source });
       }
       return;
     }
-    if (!usage) {
+    if (missingUsage) {
       this.store.event(operation.taskId, 'operation.usage_unknown', {
         operationId: operation.id,
         nodeId: operation.nodeId,
         policy: 'non_blocking_unlimited',
+        usageSource: source,
       });
     }
+    const usage = missingUsage ? null : normalizedUsage;
     const values = usage ? [usage.input, usage.output, usage.cacheRead, usage.cacheWrite] : [];
     const total = values.reduce((sum, value) => sum + value, 0);
     if (usage && (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total))) {

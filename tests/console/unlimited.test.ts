@@ -111,6 +111,36 @@ test('unlimited worker instances continue when usage is missing', async () => {
   expect((await task.view()).phase).toBe('completed');
 }, 60_000);
 
+test('unlimited instances accept estimated usage while finite budgets fail closed', async () => {
+  const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0, usageSource: 'estimated' as const };
+  const action = {
+    kind: 'agent' as const,
+    reserveTokens: 100,
+    prepare: async () => async () => ({ outcome: 'completed' as const, output: null, usage }),
+  };
+  const unlimited = await setup({ work: action, check: {
+    kind: 'program',
+    prepare: async () => async () => ({
+      outcome: 'completed' as const,
+      output: null,
+      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }],
+    }),
+  } });
+  expect(await unlimited.runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect((await unlimited.task.view()).nodes.find(node => node.id === 'work'))
+    .toMatchObject({ status: 'succeeded', used: 50, unlimited: true });
+
+  const finite = await setup({ work: action, check: {
+    kind: 'program',
+    prepare: async () => async () => ({ outcome: 'completed' as const, output: null }),
+  } }, { defaultBudgetTokens: 1_000 });
+  expect(await finite.runtime.host.runReady()).toEqual({ dispatched: 1 });
+  const blocked = await finite.task.view();
+  expect(blocked.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'blocked', used: 0, unlimited: false });
+  expect(blocked.questions).toMatchObject([{ kind: 'unknown_usage', nodeId: 'work', status: 'open' }]);
+  expect(blocked.questions[0]!.data).toMatchObject({ usageSource: 'estimated' });
+}, 60_000);
+
 test('an invalid default budget is rejected instead of guessed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-unlimited-invalid-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

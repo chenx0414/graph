@@ -87,7 +87,7 @@ test('the anthropic Messages transport sends the native request shape and normal
   expect(server.requests[0]!.body).toMatchObject({ model: 'claude-test', max_tokens: 64, stream: true });
   expect(dispatches()).toBe(1);
   // 25 non-cache input, 7 output, 10 cache read, 5 cache write.
-  expect(settled).toEqual([{ input: 25, output: 7, cacheRead: 10, cacheWrite: 5 }]);
+  expect(settled).toEqual([{ input: 25, output: 7, cacheRead: 10, cacheWrite: 5, usageSource: 'authoritative' }]);
 }, 60_000);
 
 test('a missing anthropic usage event settles as unknown instead of zero', async () => {

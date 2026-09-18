@@ -65,6 +65,7 @@ test('duplicate commands and reports do not double-merge or change a settled res
   ]);
   const options = {
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
     actions: reviewed.actions,
   };
   const runtime = await openTaskRuntime(options);
@@ -107,6 +108,7 @@ test('unknown usage after a git write waits for the user and does not replay the
   ]);
   const options = {
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
     actions: reviewed.actions,
   };
   let runtime = await openTaskRuntime(options);

@@ -10,6 +10,7 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { taskGate } from '../../src/runtime/task-gate.ts';
+import { tokenUsageTotal, type TokenUsage } from '../../src/runtime/call-broker.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 
@@ -86,7 +87,7 @@ function instanceTotals(root: string) {
     const sums = new Map<string, number>();
     for (const row of invocations) {
       if (!row.usage) continue;
-      const tokens = Object.values(JSON.parse(row.usage) as Record<string, number>).reduce((sum, value) => sum + value, 0);
+      const tokens = tokenUsageTotal(JSON.parse(row.usage) as TokenUsage);
       sums.set(row.instance_id, (sums.get(row.instance_id) ?? 0) + tokens);
     }
     return instances.map(instance => ({ id: instance.id, used: instance.used, expected: sums.get(instance.id) ?? 0 }));
@@ -159,7 +160,7 @@ test('a real auto-compaction is booked as its own invocation and keeps the origi
     expect(row.model).toBe('local');
   }
   // Every invocation counts once into the instance total.
-  const invocationTokens = rows.reduce((sum, row) => sum + (row.usage ? Object.values(JSON.parse(row.usage) as Record<string, number>).reduce((inner, value) => inner + value, 0) : 0), 0);
+  const invocationTokens = rows.reduce((sum, row) => sum + (row.usage ? tokenUsageTotal(JSON.parse(row.usage) as TokenUsage) : 0), 0);
   expect(view.instance?.used).toBe(invocationTokens);
   // The summary is a separate line and the original worker entry is still there.
   expect(view.invocations.filter(invocation => invocation.purpose === 'compaction').length).toBe(compaction.length);

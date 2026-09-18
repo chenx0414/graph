@@ -1,7 +1,44 @@
 import { DatabaseSync } from 'node:sqlite';
 
-/** Disjoint token counts. Reasoning is part of output; cache subsets aren't added twice. */
-export interface TokenUsage { input: number; output: number; cacheRead: number; cacheWrite: number }
+export type UsageSource = 'authoritative' | 'account_delta' | 'estimated' | 'unknown';
+
+export const USAGE_SOURCES: readonly UsageSource[] = ['authoritative', 'account_delta', 'estimated', 'unknown'];
+
+/** Disjoint token counts. Reasoning is part of output; cache subsets aren't added twice.
+ * `usageSource` describes where the counts came from. Legacy/provider-native values
+ * may omit it; normalization treats counts without provenance as authoritative. */
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  usageSource?: UsageSource;
+}
+
+function isUsageSource(value: unknown): value is UsageSource {
+  return typeof value === 'string' && USAGE_SOURCES.includes(value as UsageSource);
+}
+
+export function usageSourceOf(usage: TokenUsage | null | undefined): UsageSource {
+  if (!usage) return 'unknown';
+  if (usage.usageSource === undefined) return 'authoritative';
+  return isUsageSource(usage.usageSource) ? usage.usageSource : 'unknown';
+}
+
+export function normalizeTokenUsage(usage: TokenUsage): TokenUsage {
+  return { ...usage, usageSource: usageSourceOf(usage) };
+}
+
+export function mergeUsageSource(current: UsageSource, next: UsageSource): UsageSource {
+  if (current === 'unknown' || next === 'unknown') return 'unknown';
+  if (current === 'estimated' || next === 'estimated') return 'estimated';
+  if (current === 'account_delta' || next === 'account_delta') return 'account_delta';
+  return 'authoritative';
+}
+
+export function tokenUsageTotal(usage: Pick<TokenUsage, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>) {
+  return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+}
 type Account = { instance: string; budget: number; used: number; paused: number; hold: string | null };
 type Call = { id: string; reserved: number; state: string; usage: string | null };
 

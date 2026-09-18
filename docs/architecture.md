@@ -114,7 +114,7 @@ interface TaskHandle {
 | AgentDefinitionVersion / CapabilityVersion | 已发布版本不可变；模型等级推荐与具体模型分开。 |
 | AgentInstance / Activation | 实例与 Agent 节点双向唯一；Activation 区分重复激活，执行轮次区分实现/检查/审查循环。 |
 | Operation / Invocation | 每次真实模型或工具动作一个 operation，模型实际请求有唯一 invocation；重试用新 ID 但同一额度归属。 |
-| Usage / Reservation | 按实例预留与结算；供应商请求 ID 和原始归一化来源去重。 |
+| Usage / Reservation | 按实例预留与结算；每条用量带 `authoritative`、`account_delta`、`estimated` 或 `unknown` 来源，供应商请求 ID 和原始归一化来源去重。 |
 | Artifact / Evidence / Acceptance | 绑定具体提交或内容摘要、输入版本、执行轮次和验收版本；不能以旧通过结论验证新代码。 |
 | Intervention / Grant / Command / Event | 问题范围、真实答复主体、权限上限、幂等回执与可续接更新记录。 |
 
@@ -139,7 +139,7 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 4. 崩溃重启后先核查仍在运行的 worker、操作意图及外部结果。代次只阻止旧结果改变正式状态，不能撤销已经发出的系统调用。
 5. 结果明确则补记；确认未发生且可重做才重试；不明则保持阻塞等待核对。不能承诺任意外部操作恰好一次。
 
-用量未知与恢复重试同时发生时，有限预算实例继续执行“待核对并暂停该 Agent”的规则；核对后再重新发起并累计，不能将缺失用量记零。核对结论是供应商不提供该次失败调用的用量时，使用者/宿主可以用带说明的 `reconcile_usage` 显式放行：未记账调用保持 `unknown` 与费用 unknown，不折算为零；放行时必须按 invocation 去重累计同一 operation 内全部已知用量，并让已确认结果走与正常结算相同的 output、route、等待问题与版本路径，重复答复不得重复计费。`instances.unlimited=1` 的 Agent 没有有限上限可保护，缺失 usage 时记录 `operation.usage_unknown`、保持未知成本并继续，不创建阻塞问题。缺口留在报告中。重放会话和主管汇总子 Agent 统计不能重复扣除同一调用。见 [ADR 0017](adr/0017-unlimited-unknown-usage.md)。
+模型用量来源按证据强度分为 `authoritative`（供应商逐请求返回值）、`account_delta`（可归属于本次发送的订阅/账户计量差额）、`estimated`（本地对请求上下文和响应文本的估算）与 `unknown`（无可用计数）。有限预算实例仅在 `authoritative` 或 `account_delta` 下继续；仅有 `estimated` 或 `unknown` 时仍执行“待核对并暂停该 Agent”的规则，核对后再重新发起并累计，不能将缺失用量记零。核对结论是供应商不提供该次失败调用的用量时，使用者/宿主可以用带说明的 `reconcile_usage` 显式放行：未记账调用保持 `unknown` 与费用 unknown，不折算为零；放行时必须按 invocation 去重累计同一 operation 内全部已知用量，并让已确认结果走与正常结算相同的 output、route、等待问题与版本路径，重复答复不得重复计费。`instances.unlimited=1` 的 Agent 没有有限上限可保护，缺失逐请求 usage 时先尝试账户差额，再使用明确标记的本地估算继续；两端都不可得时才记录 `operation.usage_unknown`、保持未知成本并继续，不创建阻塞问题，缺口留在报告中。重放会话和主管汇总子 Agent 统计不能重复扣除同一调用。见 [ADR 0017](adr/0017-unlimited-unknown-usage.md)。
 
 暂停先关门，已发调用可结束，所有在途调用停稳后才报告 paused；长工具持续运行时保留 pausing 和对应记录，时长不限不意味着能虚报暂停成功。resume 不能解除未解决的预算或权限问题。
 

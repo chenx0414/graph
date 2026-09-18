@@ -6,6 +6,7 @@ import { canonicalJson, type TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
 import { contextView } from './context.ts';
 import { nodeOperationRuns } from './operation-lifecycle.ts';
+import { usageSourceOf, type TokenUsage } from '../runtime/call-broker.ts';
 
 export interface NodeEntryInput {
   taskId: string;
@@ -263,7 +264,17 @@ export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query:
   const operations = nodeOperationRuns(store, taskId, nodeId);
   const invocations = (store.db.prepare(`SELECT i.id,i.model,i.usage,i.cost,i.purpose FROM invocations i JOIN operations o ON o.id=i.operation_id
     WHERE o.task_id=? AND o.node_id=? ORDER BY i.rowid`).all(taskId, nodeId) as { id: string; model: string; usage: string | null; cost: string | null; purpose: string }[])
-    .map(row => ({ id: row.id, model: row.model, purpose: row.purpose, usage: row.usage ? JSON.parse(row.usage) as Json : null, cost: row.cost ? JSON.parse(row.cost) as Json : null }));
+    .map(row => {
+      const usage = row.usage ? JSON.parse(row.usage) as TokenUsage : null;
+      return {
+        id: row.id,
+        model: row.model,
+        purpose: row.purpose,
+        usage,
+        usageSource: usageSourceOf(usage),
+        cost: row.cost ? JSON.parse(row.cost) as Json : null,
+      };
+    });
   const questions = (store.db.prepare("SELECT id,kind,status,data FROM questions WHERE task_id=? AND node_id=? ORDER BY rowid").all(taskId, nodeId) as { id: string; kind: string; status: string; data: string }[])
     .map(row => ({ id: row.id, kind: row.kind, status: row.status, data: JSON.parse(row.data) as Json }));
   const evidence = (store.db.prepare('SELECT acceptance_id,valid,commit_sha FROM evidence WHERE task_id=? AND node_id=? ORDER BY rowid').all(taskId, nodeId) as { acceptance_id: string; valid: number; commit_sha: string | null }[])

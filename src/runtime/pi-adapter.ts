@@ -13,11 +13,12 @@ import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Propos
 import type { TaskStore } from '../core/store.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationForTask } from '../core/conversation.ts';
+import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityPermissionRequest } from './capabilities.ts';
 import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
-import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
+import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
@@ -91,6 +92,8 @@ export function createPiAdapter(options: {
   modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   capabilitySecrets?: () => Record<string, string>;
+  /** Optional provider adapter for subscription/account-level usage deltas. */
+  accountUsageDelta?: ControlledStreamUsageOptions['accountUsageDelta'];
   channels?: PiAdapterChannels;
   transport?: AgentSessionTransport;
 }): ActionAdapter {
@@ -422,7 +425,11 @@ export function createPiAdapter(options: {
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry), stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api),
+            model: toPiModel(entry),
+            stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
+              estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
+              ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+            }),
             thinkingLevel,
             tools,
             allowedToolNames: [...capabilityOperation.allowedToolNames],

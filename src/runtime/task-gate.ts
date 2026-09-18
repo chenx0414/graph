@@ -4,7 +4,14 @@ import { assertWithinBudget, unknownUsageIsNonBlocking } from '../core/budget-le
 import { RuntimeError, type Json } from '../core/types.ts';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
 import { openUserWait } from '../core/time-ledger.ts';
-import type { TokenUsage } from './call-broker.ts';
+import {
+  mergeUsageSource,
+  normalizeTokenUsage,
+  tokenUsageTotal,
+  usageSourceOf,
+  type TokenUsage,
+  type UsageSource,
+} from './call-broker.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 /** What one provider send is for. Pi compaction and branch summaries are real
@@ -18,6 +25,7 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
   let unknown = false;
   let purpose: InvocationPurpose = 'completion';
   const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  let totalSource: UsageSource | undefined;
   const nodeId = operation.nodeId ?? (store.db.prepare('SELECT node_id FROM operations WHERE id=?').get(operation.id) as { node_id: string } | undefined)?.node_id;
   return {
     check(reservation = 0) {
@@ -46,27 +54,43 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
       store.transaction(() => {
         const row = store.db.prepare('SELECT usage FROM invocations WHERE id=?').get(id) as { usage: string | null } | undefined;
         if (!row) throw new RuntimeError('not_found', 'Unknown invocation');
+        const normalized = usage ? normalizeTokenUsage(usage) : null;
+        const source = usageSourceOf(normalized);
         if (row.usage !== null) {
-          if (row.usage !== canonicalJson(usage)) throw new RuntimeError('result_conflict', 'Conflicting usage evidence');
+          if (row.usage !== canonicalJson(normalized)) throw new RuntimeError('result_conflict', 'Conflicting usage evidence');
           return;
         }
-        const cost = usage ? estimateCost(usage, model.cost, model.pricing) : { unknown: true };
-        store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?').run(usage ? canonicalJson(usage) : null, canonicalJson(cost), id);
-        if (!usage) {
+        const accountable = normalized !== null
+          && source !== 'unknown'
+          && (source !== 'estimated' || unknownUsageIsNonBlocking(store, operation.instanceId));
+        const cost = accountable ? estimateCost(normalized, model.cost, model.pricing) : { unknown: true };
+        store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?')
+          .run(normalized ? canonicalJson(normalized) : null, canonicalJson(cost), id);
+        if (!accountable) {
           unknown = true;
           if (nodeId
             && !unknownUsageIsNonBlocking(store, operation.instanceId)
             && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {
             const questionId = randomUUID();
-            const data = { reason: 'Agent returned no authoritative usage' };
+            const data = {
+              reason: source === 'estimated'
+                ? 'Agent returned only estimated usage for a finite budget'
+                : 'Agent returned no accountable usage',
+              usageSource: source,
+            };
             store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data) VALUES(?,?,?,?,?,?)')
               .run(questionId, operation.taskId, nodeId, operation.id, 'unknown_usage', canonicalJson(data));
             openUserWait(store, operation.taskId, nodeId);
             // The stream must see the question even though no node status changed.
             store.event(operation.taskId, 'question.opened', { nodeId, kind: 'unknown_usage', data, operationId: operation.id });
           }
-        } else {
-          total.input += usage.input; total.output += usage.output; total.cacheRead += usage.cacheRead; total.cacheWrite += usage.cacheWrite;
+        } else if (normalized) {
+          total.input += normalized.input;
+          total.output += normalized.output;
+          total.cacheRead += normalized.cacheRead;
+          total.cacheWrite += normalized.cacheWrite;
+          const source = usageSourceOf(normalized);
+          totalSource = totalSource ? mergeUsageSource(totalSource, source) : source;
         }
       });
     },
@@ -74,11 +98,24 @@ export function taskGate(store: TaskStore, operation: { id: string; taskId: stri
       if (!INVOCATION_PURPOSES.includes(next)) throw new RuntimeError('invalid_input', `Unknown invocation purpose ${next}`);
       purpose = next;
     },
-    total() { return unknown ? null : total; },
+    total() {
+      return unknown ? null : { ...total, usageSource: totalSource ?? 'authoritative' };
+    },
   };
 }
 
 export function invocationRows(store: TaskStore, taskId: string) {
   const rows = store.db.prepare('SELECT i.id,i.operation_id,i.instance_id,i.model,i.usage,i.cost FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=? ORDER BY i.rowid').all(taskId) as { id: string; operation_id: string; instance_id: string; model: string; usage: string | null; cost: string | null }[];
-  return rows.map(row => ({ id: row.id, operationId: row.operation_id, instanceId: row.instance_id, model: row.model, usage: row.usage ? JSON.parse(row.usage) as TokenUsage : null, cost: row.cost ? JSON.parse(row.cost) as Json : null }));
+  return rows.map(row => {
+    const usage = row.usage ? JSON.parse(row.usage) as TokenUsage : null;
+    return {
+      id: row.id,
+      operationId: row.operation_id,
+      instanceId: row.instance_id,
+      model: row.model,
+      usage,
+      usageSource: usageSourceOf(usage),
+      cost: row.cost ? JSON.parse(row.cost) as Json : null,
+    };
+  });
 }
