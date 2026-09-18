@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { markdownTableAlignments, markdownTableRow } from './markdown.ts';
 
 function safeHref(value: string) {
   return /^(https?:|mailto:|#\/)/i.test(value) ? value : undefined;
@@ -100,6 +101,45 @@ export function Markdown({ text }: { text: string }) {
     if (/^---+$/.test(line)) {
       blocks.push(<hr key={`block-${key++}`} />);
       index += 1;
+      continue;
+    }
+
+    const header = markdownTableRow(line);
+    const divider = index + 1 < lines.length ? markdownTableRow(lines[index + 1] ?? '') : null;
+    const alignments = divider ? markdownTableAlignments(divider) : null;
+    if (header && alignments && header.length === alignments.length) {
+      const rows: string[][] = [];
+      let cursor = index + 2;
+      while (cursor < lines.length && (lines[cursor] ?? '').trim()) {
+        const row = markdownTableRow(lines[cursor] ?? '');
+        if (!row) break;
+        rows.push(alignments.map((_, column) => row[column] ?? ''));
+        cursor += 1;
+      }
+      const tableKey = key++;
+      blocks.push(
+        <div className="markdown-table-wrap" key={`block-${tableKey}`}>
+          <table>
+            <thead>
+              <tr>
+                {header.map((cell, column) => (
+                  <th key={`head-${column}`} data-align={alignments[column] ?? undefined}>{inline(cell, `table-${tableKey}-head-${column}`)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`row-${rowIndex}`}>
+                  {row.map((cell, column) => (
+                    <td key={`cell-${column}`} data-align={alignments[column] ?? undefined}>{inline(cell, `table-${tableKey}-${rowIndex}-${column}`)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      index = cursor;
       continue;
     }
 

@@ -451,7 +451,7 @@ test('agent markdown renders and tool activity appears before the final answer',
       requirementVersion: 1,
       paused: false,
       messages: [
-        { id: 'answer', seq: 2, role: 'assistant', kind: 'chat', text: '## 结果\n\n- **完成**\n\n`code`', data: null, state: 'done', operationId: 'op', turn: 1, createdAt: Date.now(), updatedAt: Date.now() },
+        { id: 'answer', seq: 2, role: 'assistant', kind: 'chat', text: '## 结果\n\n- **完成**\n\n`code`\n\n| Agent | 作用 |\n| :--- | ---: |\n| coder | 实现 |\n| reviewer | 审查 |', data: null, state: 'done', operationId: 'op', turn: 1, createdAt: Date.now(), updatedAt: Date.now() },
         { id: 'tool', seq: 3, role: 'tool', kind: 'tool', text: 'read README.md', data: { toolCallId: 'tool-1' }, state: 'done', operationId: 'op', turn: 1, createdAt: Date.now(), updatedAt: Date.now() },
       ],
       messageCount: 2,
@@ -481,6 +481,10 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.locator('.markdown-body strong').innerText()).toBe('完成');
   expect(await page.locator('.markdown-body code').innerText()).toBe('code');
+  expect(await page.locator('.markdown-body table').count()).toBe(1);
+  expect(await page.locator('.markdown-body th').nth(0).innerText()).toBe('Agent');
+  expect(await page.locator('.markdown-body th').nth(1).getAttribute('data-align')).toBe('right');
+  expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
   expect(await page.getByTestId('tool-activity-group').getAttribute('data-open')).toBe('false');
