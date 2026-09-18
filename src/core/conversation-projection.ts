@@ -54,6 +54,7 @@ export interface ConversationHistoryRequest {
 
 const TERMINAL_OPERATION_EVENTS = new Set([
   'operation.result',
+  'operation.unknown',
   'operation.interrupted',
   'operation.not_sent',
   'operation.report_rejected',

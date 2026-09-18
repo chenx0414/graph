@@ -189,6 +189,11 @@ export class OperationLifecycle {
           // worker_active=1 would starve every later agent and block usage
           // reconciliation.
           this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,waiting_slot=0 WHERE id=?").run(row.id);
+          this.store.event(row.task_id, 'operation.unknown', {
+            operationId: row.id,
+            reason: 'Recovered after restart with no live worker',
+            quiescent: true,
+          });
           this.block(row.task_id, row.node_id, 'recovery', {
             reason: 'Dispatch was recorded; external outcome and worker liveness require reconciliation',
           }, row.id);
@@ -444,6 +449,13 @@ export class OperationLifecycle {
       }
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=? WHERE id=?")
         .run(Number(!quiescent), operation.id);
+      // Terminal for the live transcript: the stream must stop showing an
+      // unfinished answer even though the operation is not settled.
+      this.store.event(operation.taskId, 'operation.unknown', {
+        operationId: operation.id,
+        reason: String(error),
+        quiescent,
+      });
       this.block(operation.taskId, operation.nodeId, 'recovery', { reason: String(error) }, operation.id);
       recordConversationInterruption(this.store, operation, String(error));
       return true;

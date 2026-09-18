@@ -172,6 +172,17 @@ test('terminal operation events discard abandoned live output without touching t
   });
 });
 
+test('an uncertain operation also ends its live stream so the answer stops flashing', () => {
+  let state = createConversationProjection();
+  state = applyConversationEvent(state, { type: 'message.delta', data: { operationId: 'uncertain', text: '一半的回答' } });
+  state = applyConversationEvent(state, {
+    type: 'message.tool',
+    data: { operationId: 'uncertain', toolCallId: 'tool-1', toolName: 'read', summary: 'a.md', phase: 'start' },
+  });
+  state = applyConversationEvent(state, { type: 'operation.unknown', data: { operationId: 'uncertain' } });
+  expect(conversationProjectionSnapshot(state, { busy: true })).toMatchObject({ streaming: [], liveTools: [] });
+});
+
 test('interrupted retries do not push the durable final answer above stale stream rows', () => {
   let state = createConversationProjection();
   for (const operationId of ['attempt-1', 'attempt-2']) {
