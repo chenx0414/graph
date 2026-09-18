@@ -395,6 +395,40 @@ test('an uncertain master turn leaves a plain-language notice and a new message 
   expect(after.messages.find(message => message.role === 'assistant')?.text).toBe('第二次成功');
 });
 
+test('a restart keeps a parked master parked until a configuration change revives it', async () => {
+  const root = await temp('parked-restart');
+  let firstRuns = 0;
+  let secondRuns = 0;
+  const first = await withRuntime(root, async () => {
+    firstRuns += 1;
+    throw new Error('adapter exploded before dispatch');
+  });
+  const created = await first.conversations.create({ text: 'hi', requestId: 'create' });
+  await first.host.runReady();
+  const view = await first.conversations.view(created.conversationId);
+  expect(await first.supervisor(view.anchorTaskId).listProblems()).toHaveLength(1);
+  await first.close();
+
+  // Startup recovery must not replay a deterministic failure forever.
+  const second = await withRuntime(root, async () => {
+    secondRuns += 1;
+    return { outcome: 'completed', output: { text: '配置变更后成功' }, usage };
+  });
+  const reopened = await second.conversations.view(created.conversationId);
+  expect(reopened.master?.status).toBe('pending');
+  expect(await second.supervisor(reopened.anchorTaskId).listProblems()).toHaveLength(1);
+  expect(secondRuns).toBe(0);
+
+  // A real configuration apply clears the parked problem and retries.
+  second.host.recoverMasters();
+  await second.host.runReady();
+  const after = await second.conversations.view(created.conversationId);
+  expect(after.messages.find(message => message.role === 'assistant')?.text).toBe('配置变更后成功');
+  expect(await second.supervisor(reopened.anchorTaskId).listProblems()).toHaveLength(0);
+  expect(firstRuns).toBe(1);
+  expect(secondRuns).toBe(1);
+});
+
 async function openTaskRuntimeQuestions(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, taskId: string) {
   return runtime.user.task(taskId).view().then(view => view.questions.filter(question => question.status === 'open'));
 }

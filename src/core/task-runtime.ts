@@ -209,7 +209,7 @@ export async function openTaskRuntime(options: {
       .run(id, taskId, nodeId, definitionVersion ?? null, model ?? null, budget ?? 0, budget === null ? 1 : 0);
     return id;
   };
-  const recoverMasterNodes = () => {
+  const recoverMasterNodes = (recoverOptions: { reviveParked?: boolean } = {}) => {
     if (!options.master || !masterModel() || !masterDefinitionVersion()) return 0;
     return store.transaction(() => {
       const pending = (store.db.prepare("SELECT id, project_id, phase FROM tasks WHERE phase IN ('discussing','chatting') ORDER BY created_seq").all() as { id: string; project_id: string; phase: string }[])
@@ -227,10 +227,10 @@ export async function openTaskRuntime(options: {
       }
       // A master that parked on its own internal problem (missing credential,
       // unavailable model) stays out of the scheduler until the environment
-      // changes. Since that problem never reaches the user, configuration
-      // recovery must explicitly clear it and give the master another attempt;
-      // a genuine user decision keeps the master parked.
-      for (const task of pending) {
+      // changes. Only a real configuration apply revives it; a plain restart
+      // must not replay a deterministic failure forever. A genuine user
+      // decision keeps the master parked even then.
+      for (const task of recoverOptions.reviveParked ? pending : []) {
         const master = store.db.prepare(
           "SELECT id,status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master' LIMIT 1",
         ).get(task.id) as { id: string; status: string } | undefined;
@@ -1220,7 +1220,7 @@ export async function openTaskRuntime(options: {
       async report(id: string, generation: number, result: OperationResult) { ensureOpen(); execution.report(id, generation, result); },
       async reconcile(id: string) { ensureOpen(); await execution.reconcile(id); },
       /** Create master nodes for pending tasks after a hot configuration apply. */
-      recoverMasters() { ensureOpen(); return recoverMasterNodes(); },
+      recoverMasters() { ensureOpen(); return recoverMasterNodes({ reviveParked: true }); },
     },
     supervisor(taskId: string) {
       ensureOpen(); store.task(taskId);
