@@ -100,7 +100,7 @@ test('the Agent combination library renders and compiles recipes over filesystem
   await writeFile(join(root, 'graph', 'agent-combinations.json'), JSON.stringify({
     version: 1,
     combinations: [{
-      id: 'review', name: '代码审查', description: '组合已有能力。', recommendedGrade: 'high', review: true, tags: ['审查'],
+      id: 'review', name: 'Alice_reviewer', description: '组合已有能力。', recommendedGrade: 'high', review: true, tags: ['审查'],
       resources: [
         { resourceId: 'reviewer', version: '1.0.0', role: 'identity', required: true },
         { resourceId: 'research', version: '1.0.0', role: 'skill', required: true },
@@ -125,7 +125,7 @@ test('the Agent combination library renders and compiles recipes over filesystem
   const list = page.getByTestId('agent-combination-list');
   await list.waitFor();
   const text = await list.innerText();
-  expect(text).toContain('代码审查');
+  expect(text).toContain('Alice_reviewer');
   expect(text).toContain('Reviewer');
   expect(text).toContain('Research');
   expect(text).toContain('Search');

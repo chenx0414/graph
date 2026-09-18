@@ -434,7 +434,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       if (!existing) {
         await server.runtime.catalog.saveAgentCombination({
           id: 'main',
-          name: 'Main Agent',
+          name: 'Atlas_main',
           description: '持续面对用户、规划任务、设计并监控 Graph，并在确认范围内组装和调用 subagents。',
           mode: 'main',
           recommendedGrade: 'high',

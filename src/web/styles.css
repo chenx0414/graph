@@ -1883,6 +1883,7 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   font-size: 12px;
   font-weight: 600;
 }
+.recipe-form label > small { color: var(--faint); font-size: 10.5px; line-height: 1.45; }
 .recipe-form input[type="text"],
 .recipe-form input:not([type]),
 .recipe-form textarea,

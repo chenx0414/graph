@@ -36,20 +36,6 @@ type CapabilityConfigItem = {
   error?: string;
 };
 
-const AGENT_COMBINATION_LABEL: Record<string, string> = {
-  main: 'Main Agent',
-  code: '代码实现',
-  test: '测试编写',
-  review: '代码审查',
-  'e2e-test': '端到端测试',
-  security: '安全检查',
-  gate: '目标把关',
-  ship: '上线与运维',
-  'literature-search': '文献检索',
-  'paper-writing': '论文写作',
-  'paper-polish': '论文润色',
-};
-
 const MAIN_AGENT_SYSTEM_CAPABILITIES = [
   '任务规划',
   'Graph 设计',
@@ -280,13 +266,17 @@ function AgentCombinationEditor(input: {
     <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) input.onClose(); }}>
       <aside className="resource-detail-drawer recipe-editor" role="dialog" aria-modal="true" aria-label="Agent 配方编辑器">
         <header className="resource-detail-head">
-          <div><h2>{input.initial ? '编辑 Agent 配方' : '新建 Agent 配方'}</h2><p>配方只组合已有能力，编译后直接生成可派发定义。</p></div>
+          <div><h2>{input.initial ? '编辑 Agent 配方' : '新建 Agent 配方'}</h2><p>配方只组合已有能力，编译后直接生成可派发定义。显示名称建议采用“名字_角色”。</p></div>
           <button type="button" className="icon-button" onClick={input.onClose} aria-label="关闭"><Icon name="close" size={16} /></button>
         </header>
         <div className="resource-detail-body recipe-form">
           <div className="form-grid">
-            <label><span>ID</span><input data-testid="agent-recipe-id" value={id} disabled={main} onChange={event => setId(event.target.value)} placeholder="code" /></label>
-            <label><span>名称</span><input value={name} onChange={event => setName(event.target.value)} placeholder="代码实现" /></label>
+            <label><span>ID</span><input data-testid="agent-recipe-id" value={id} disabled={main} onChange={event => setId(event.target.value)} placeholder="coder" /></label>
+            <label>
+              <span>显示名称</span>
+              <input data-testid="agent-recipe-name" value={name} onChange={event => setName(event.target.value)} placeholder={id.trim() ? `Bob_${id.trim()}` : 'Bob_coder'} />
+              <small>使用“名字_角色”，例如 Bob_coder、Alice_reviewer。</small>
+            </label>
           </div>
           <label><span>说明</span><textarea value={description} onChange={event => setDescription(event.target.value)} rows={3} /></label>
           {main && (
@@ -342,7 +332,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
   const query = resourceQuery.trim().toLowerCase();
   const filtered = active.items.filter(item => !query || [item.id, item.name, item.description, item.source, item.kind, item.role].some(value => value?.toLowerCase().includes(query)));
   const filteredAgents = agentCombinations.filter(item => !query || [
-    item.id, item.name, item.description, AGENT_COMBINATION_LABEL[item.id], item.recommendedGrade, ...item.tags,
+    item.id, item.name, item.description, item.recommendedGrade, ...item.tags,
     ...item.resources.map(resource => resource.resourceId),
   ].some(value => value?.toLowerCase().includes(query)));
   const visibleAgents = filteredAgents.slice(0, resourceLimits.agents ?? 40);
@@ -418,7 +408,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                   <div className="agent-combination-list" data-testid="agent-combination-list">
                     {visibleAgents.map(item => (
                       <article className="agent-combination-item" key={item.id} data-testid={`agent-combination-${item.id}`}>
-                        <header><strong>{AGENT_COMBINATION_LABEL[item.id] ?? item.name}</strong><code>{item.id}</code></header>
+                        <header><strong>{item.name}</strong><code>{item.id}</code></header>
                         <p>{item.description}</p>
                         <div className="chip-row">
                           <Pill tone={item.status === 'valid' ? 'success' : 'danger'}>{item.status === 'valid' ? '可编译' : '引用有误'}</Pill>

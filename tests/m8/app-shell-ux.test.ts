@@ -767,7 +767,7 @@ test('the resource library groups reusable assets and includes graph architectur
   await writeFile(join(root, 'graph', 'agent-combinations.json'), JSON.stringify({
     version: 1,
     combinations: [{
-      id: 'code', name: '代码实现', description: '组合架构身份与研究 Skill。', recommendedGrade: 'medium', review: false, tags: ['编码'],
+      id: 'code', name: 'Bob_coder', description: '组合架构身份与研究 Skill。', recommendedGrade: 'medium', review: false, tags: ['编码'],
       resources: [{ resourceId: 'architect', version: '1.0.0', role: 'identity', required: true }, { resourceId: 'research', version: '1.0.0', role: 'skill', required: true }],
     }],
   }));
@@ -837,7 +837,8 @@ test('the resource library groups reusable assets and includes graph architectur
 
   await page.getByTestId('resource-nav-agents').click();
   await page.getByTestId('resource-section-agents').waitFor();
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('代码实现');
+  expect(await page.getByTestId('agent-combination-code').innerText()).toContain('Bob_coder');
+  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('Bob_coder');
   expect(await page.getByTestId('resource-section-agents').innerText()).toContain('可编译');
   expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
 

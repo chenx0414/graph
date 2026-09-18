@@ -130,6 +130,7 @@ test('the daemon seeds and compiles the Main Agent recipe for the resource libra
   expect(combinations).toEqual([
     expect.objectContaining({
       id: 'main',
+      name: 'Atlas_main',
       mode: 'main',
       status: 'valid',
       resources: [],
