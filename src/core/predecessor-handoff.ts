@@ -1,5 +1,6 @@
-import { isAbsolute } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { digest } from './context.ts';
 import { GraphPlan, type GraphState } from './graph.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
@@ -159,6 +160,81 @@ function normalizeDraft(value: unknown): ResultHandoffDraft | undefined {
 
 export function resultHandoffFromSubmission(value: Json | undefined) {
   return normalizeDraft(value);
+}
+
+/** Resolve a work-copy-relative path, refusing anything that escapes the workspace. */
+function withinWorkspace(workspace: string, path: string) {
+  const root = resolve(workspace);
+  const target = resolve(root, path);
+  const rel = relative(root, target);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) ? target : undefined;
+}
+
+/**
+ * Digest the file the worker actually left in its work copy. The host reads the
+ * bytes itself, so a handoff never depends on a model-reported digest.
+ */
+function workspaceDigest(workspace: string | undefined, path: string) {
+  if (!workspace) return undefined;
+  const target = withinWorkspace(workspace, path);
+  if (!target) return undefined;
+  try {
+    return createHash('sha256').update(readFileSync(target)).digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
+export interface ResultHandoffRecoveryContext {
+  workspace?: string;
+  /**
+   * Recorded identity for an artifact the worker named loosely, such as the
+   * logical `namespace/name` instead of the id the publish call returned.
+   */
+  rebindArtifact?(change: { artifactId?: unknown; version?: unknown; uri?: unknown }): {
+    artifactId: string; version: number; digest?: string;
+  } | undefined;
+}
+
+/** Read a version the worker wrote as either a number or a numeric string. */
+function versionNumber(value: unknown) {
+  const version = typeof value === 'number' ? value
+    : typeof value === 'string' && /^[1-9][0-9]*$/.test(value) ? Number(value) : undefined;
+  return version !== undefined && Number.isSafeInteger(version) && version > 0 ? version : undefined;
+}
+
+/**
+ * Rebuild an admissible draft from a submission the worker wrote against its own
+ * work copy: relative file paths are resolved inside the operation workspace,
+ * their digests recomputed from the bytes on disk, and loose artifact references
+ * bound to the recorded version. Anything that cannot be tied to real workspace
+ * or recorded artifact content still fails closed.
+ */
+export function recoverResultHandoffDraft(value: Json | undefined, context: ResultHandoffRecoveryContext) {
+  const direct = normalizeDraft(value);
+  if (direct || !value || typeof value !== 'object' || Array.isArray(value)) return direct;
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.changes)) return undefined;
+  const changes = raw.changes.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const change = { ...(item as Record<string, unknown>) };
+    if (typeof change.path === 'string' && context.workspace) {
+      const target = withinWorkspace(context.workspace, change.path);
+      if (target) {
+        change.path = target;
+        const actual = workspaceDigest(context.workspace, target);
+        if (actual) change.digest = actual;
+      }
+    }
+    const bound = context.rebindArtifact?.(change);
+    if (bound) {
+      change.artifactId = bound.artifactId;
+      change.version = bound.version;
+      if (bound.digest) change.digest = bound.digest;
+    }
+    return change;
+  });
+  return normalizeDraft({ ...raw, changes });
 }
 
 export function validatePredecessorPolicies(proposal: Proposal, plan: GraphPlan, nodes: Map<string, NodeSpec>) {
@@ -400,11 +476,106 @@ export function resultHandoffFailure(result: OperationResult) {
   return { reason: typeof details.reason === 'string' ? details.reason : 'Result handoff validation failed' };
 }
 
+export interface ResultHandoffRepair {
+  operationId: string;
+  reason: string;
+  submitted: Json;
+}
+
+/**
+ * The latest settled attempt on this activation, when its only remaining defect
+ * is the handoff its worker submitted. That work is already on disk, so a retry
+ * must reconcile the submission instead of running the task briefing again.
+ */
+export function resultHandoffRepair(store: TaskStore, input: { taskId: string; nodeId: string; activationId: string }): ResultHandoffRepair | undefined {
+  const row = store.db.prepare(`SELECT id,result FROM operations
+    WHERE task_id=? AND node_id=? AND activation_id=? AND result IS NOT NULL
+    ORDER BY rowid DESC LIMIT 1`).get(input.taskId, input.nodeId, input.activationId) as { id: string; result: string } | undefined;
+  if (!row) return undefined;
+  const result = JSON.parse(row.result) as OperationResult;
+  const failure = resultHandoffFailure(result);
+  if (!failure) return undefined;
+  const output = result.output as Record<string, unknown>;
+  return { operationId: row.id, reason: failure.reason, submitted: (output.previousOutput ?? null) as Json };
+}
+
+/**
+ * A retry after landed work carries the failure and the previous submission,
+ * never the original task briefing, and asks for the submission to be repaired
+ * instead of the implementation to be redone.
+ */
+export function renderResultHandoffRepair(repair: ResultHandoffRepair) {
+  const submitted = JSON.stringify(repair.submitted, null, 2);
+  return [
+    `Retry after a failed handoff on operation ${repair.operationId}.`,
+    `Failure: ${repair.reason}`,
+    'The previous attempt already did the work in this work copy. Reconcile the submission instead of redoing the implementation:',
+    '- Do not rewrite, re-create or re-explore files the previous attempt already produced.',
+    '- Resubmit the same work through submit_result, corrected to the required schema.',
+    '- If the work is genuinely incomplete, report outcome "partial" or "blocked" with the remaining gap instead of starting over.',
+    'Previous submission (repair this, do not discard it):',
+    submitted.length > 12_000 ? `${submitted.slice(0, 12_000)}\n…truncated` : submitted,
+  ].join('\n');
+}
+
 function submittedDraft(result: OperationResult) {
   const direct = normalizeDraft(result.resultHandoff);
   if (direct) return direct;
   if (!result.output || typeof result.output !== 'object' || Array.isArray(result.output)) return undefined;
   return normalizeDraft((result.output as Record<string, unknown>).resultHandoff);
+}
+
+/**
+ * Every place an unnormalised handoff can hide. Adapters normalise a valid
+ * submission into result.resultHandoff; when normalisation rejects it, the
+ * untouched submission is still in the operation output, either nested under
+ * "resultHandoff" or as the output itself.
+ */
+function recoveryCandidates(result: OperationResult): Json[] {
+  const candidates: Json[] = [];
+  if (result.resultHandoff !== undefined) candidates.push(result.resultHandoff as unknown as Json);
+  if (result.output && typeof result.output === 'object' && !Array.isArray(result.output)) {
+    const nested = (result.output as Record<string, unknown>).resultHandoff;
+    if (nested !== undefined) candidates.push(nested as Json);
+  }
+  if (result.output !== undefined) candidates.push(result.output);
+  return candidates;
+}
+
+/** The namespace/name a worker may write instead of the published artifact id. */
+function logicalArtifactRef(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  const marker = '/artifacts/';
+  const at = value.indexOf(marker);
+  const parts = (at >= 0 ? value.slice(at + marker.length) : value).replace(/@[0-9]+$/, '').split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return undefined;
+  try {
+    return { namespace: decodeURIComponent(parts[0]), name: decodeURIComponent(parts[1]) };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What the host recorded for an artifact this worker published. Accepts the id
+ * the publish call returned, or the logical reference the worker wrote instead,
+ * and always answers with the recorded identity and digest.
+ */
+function recordedArtifact(store: TaskStore, taskId: string, change: { artifactId?: unknown; version?: unknown; uri?: unknown }) {
+  const version = versionNumber(change.version);
+  if (version === undefined) return undefined;
+  const columns = 'artifact_id,version,digest';
+  if (typeof change.artifactId === 'string') {
+    const direct = store.db.prepare(`SELECT ${columns} FROM artifacts WHERE task_id=? AND artifact_id=? AND version=?`)
+      .get(taskId, change.artifactId, version) as { artifact_id: string; version: number; digest: string } | undefined;
+    if (direct) return { artifactId: direct.artifact_id, version: Number(direct.version), digest: direct.digest };
+  }
+  const logical = logicalArtifactRef(change.uri) ?? logicalArtifactRef(change.artifactId);
+  if (!logical) return undefined;
+  const row = store.db.prepare(`SELECT ${columns} FROM artifacts
+    WHERE task_id=? AND namespace=? AND name=? AND version=? AND state='published'`)
+    .get(taskId, logical.namespace, logical.name, version) as { artifact_id: string; version: number; digest: string } | undefined;
+  return row ? { artifactId: row.artifact_id, version: Number(row.version), digest: row.digest } : undefined;
 }
 
 export function settleResultHandoff(
@@ -414,7 +585,13 @@ export function settleResultHandoff(
   result: OperationResult,
 ) {
   if (!requiresResultHandoff(proposal, operation.nodeId) || result.outcome !== 'completed') return result;
-  const draft = submittedDraft(result);
+  const recovery: ResultHandoffRecoveryContext = {
+    ...(operation.workspace ? { workspace: operation.workspace } : {}),
+    rebindArtifact: change => recordedArtifact(store, operation.taskId, change),
+  };
+  const draft = submittedDraft(result)
+    ?? recoveryCandidates(result).reduce<ResultHandoffDraft | undefined>(
+      (found, candidate) => found ?? recoverResultHandoffDraft(candidate, recovery), undefined);
   if (!draft) return failedHandoffResult(result, 'A downstream edge requires a valid result_handoff@1 submission');
   const summaryLimit = resultSummaryLimit(proposal, operation.nodeId);
   if (draft.workSummary.length > summaryLimit) {
@@ -422,7 +599,8 @@ export function settleResultHandoff(
   }
   const artifacts = new Set((result.artifacts ?? []).map(artifact => `${artifact.path}\u0000${artifact.digest}`));
   const invalidArtifact = draft.changes.find(change =>
-    change.path && change.digest && !artifacts.has(`${change.path}\u0000${change.digest}`));
+    change.path && change.digest && !artifacts.has(`${change.path}\u0000${change.digest}`)
+      && workspaceDigest(operation.workspace, change.path) !== change.digest);
   if (invalidArtifact) {
     return failedHandoffResult(result, `Result handoff artifact reference does not match the operation result: ${invalidArtifact.path}`);
   }

@@ -18,7 +18,7 @@ import {
   releaseMessages,
 } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
-import { resultHandoffDependents, resultHandoffFailure, settleResultHandoff } from './predecessor-handoff.ts';
+import { requiresResultHandoff, resultHandoffDependents, resultHandoffFailure, settleResultHandoff } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
@@ -574,6 +574,33 @@ export class OperationLifecycle {
     });
   }
 
+  /**
+   * Resolve the `context_rejected` problems an earlier handoff failure created
+   * on the dependents of this node, once the handoff they were missing exists.
+   */
+  private clearStaleHandoffRejections(operation: Operation, proposal: Proposal) {
+    for (const target of resultHandoffDependents(proposal, operation.nodeId)) {
+      const rows = this.store.db.prepare(`SELECT id,data FROM questions
+        WHERE task_id=? AND node_id=? AND kind='context_rejected' AND status='open'`)
+        .all(operation.taskId, target) as { id: string; data: string }[];
+      for (const row of rows) {
+        const data = JSON.parse(row.data) as { sourceNodeId?: string; policy?: string };
+        if (data.sourceNodeId !== operation.nodeId || data.policy !== 'result_handoff') continue;
+        this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?")
+          .run(canonicalJson({ type: 'handoff_repaired', operationId: operation.id }), row.id);
+        this.store.event(operation.taskId, 'context.handoff_repaired', {
+          nodeId: target,
+          sourceNodeId: operation.nodeId,
+          sourceOperationId: operation.id,
+        });
+        if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'")
+          .get(operation.taskId, target)) {
+          this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(operation.taskId, target);
+        }
+      }
+    }
+  }
+
   private answerUnknownUsage(
     operationId: string,
     answer: { type: 'usage'; usage: TokenUsage; proof: string } | { type: 'reconcile_usage'; proof: string },
@@ -821,6 +848,11 @@ export class OperationLifecycle {
         this.store.event(operation.taskId, 'context.rejected', { nodeId: target, ...data });
         if (!existing) this.block(operation.taskId, target, 'context_rejected', data);
       }
+    } else if (result.outcome === 'completed' && requiresResultHandoff(proposal, operation.nodeId)) {
+      // A handoff that now validates proves the earlier rejections wrong. Clear
+      // the stale downstream blocks instead of making the main Agent retry every
+      // dependent problem after its cause is already gone.
+      this.clearStaleHandoffRejections(operation, proposal);
     }
     const rework = result.outcome === 'completed' && isReworkDecision(result.output);
     if (result.outcome === 'completed' && !rework && proposal.acceptance.some(item =>

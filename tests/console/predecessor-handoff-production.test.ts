@@ -248,3 +248,94 @@ test('rework invalidates the old result handoff and injects the new activation v
   expect(rows[0]?.body).toContain('WORK_SUMMARY_V1');
   expect(rows[1]?.body).toContain('WORK_SUMMARY_V2');
 }, 120_000);
+
+test('retrying a failed handoff sends a repair delta instead of the full task briefing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-retry-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  const briefings: string[] = [];
+  const nextBriefings: string[] = [];
+  const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace }],
+    actions: {
+      work: {
+        kind: 'agent',
+        reserveTokens: 100,
+        prepare: async operation => {
+          briefings.push(operation.context.briefing ?? '');
+          const attempt = briefings.length;
+          return async () => attempt === 1
+            // The first attempt reported completion but submitted a handoff the
+            // host cannot repair: no objective, no schema version.
+            ? { outcome: 'completed', output: { schemaVersion: 1, workSummary: 'BROKEN_SUBMISSION_SENTINEL' }, usage }
+            : { outcome: 'completed', output: handoff('REPAIRED_HANDOFF_SENTINEL'), resultHandoff: handoff('REPAIRED_HANDOFF_SENTINEL'), usage };
+        },
+      },
+      next: {
+        kind: 'agent',
+        reserveTokens: 100,
+        prepare: async operation => {
+          nextBriefings.push(operation.context.briefing ?? '');
+          return async () => ({ outcome: 'completed', output: { text: 'downstream done' }, usage });
+        },
+      },
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({
+          outcome: 'completed',
+          output: null,
+          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
+        }),
+      },
+    },
+  });
+  cleanup.push(() => runtime.close());
+  const { taskId } = await runtime.user.begin({
+    projectId: 'p',
+    request: 'TASK_BRIEFING_SENTINEL: build the parser and hand it to the next Agent',
+    requestId: 'begin',
+  });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1,
+    summary: 'Retry after an invalid handoff must reconcile, not re-implement.',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      {
+        id: 'next', kind: 'agent', action: 'next', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
+        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
+      },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  const failed = await runtime.user.task(taskId).view();
+  const problem = failed.questions.find(question => question.nodeId === 'work' && question.kind === 'execution_failed');
+  expect(problem).toBeTruthy();
+  expect(problem!.data).toMatchObject({
+    output: { error: { code: 'result_handoff_invalid' } },
+  });
+  expect(briefings).toHaveLength(1);
+  expect(briefings[0]).toContain('TASK_BRIEFING_SENTINEL');
+
+  await runtime.user.task(taskId).answer(problem!.id, { type: 'retry' }, 'retry');
+  await runtime.host.drive();
+
+  expect(briefings).toHaveLength(2);
+  expect(briefings[1]).not.toContain('TASK_BRIEFING_SENTINEL');
+  expect(briefings[1]).toContain('BROKEN_SUBMISSION_SENTINEL');
+  expect(briefings[1]).toContain('result_handoff@1');
+  expect(runtime.events(taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
+  expect(nextBriefings).toEqual([expect.stringContaining('REPAIRED_HANDOFF_SENTINEL')]);
+  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
+    expect.objectContaining({
+      sourceNodeId: 'work',
+      resultHandoff: expect.objectContaining({ workSummary: 'REPAIRED_HANDOFF_SENTINEL' }),
+    }),
+  ]);
+}, 120_000);

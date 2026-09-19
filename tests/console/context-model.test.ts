@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -15,7 +16,14 @@ import {
   resolveAgentContext,
 } from '../../src/core/context.ts';
 import { loadGraph } from '../../src/core/graph.ts';
-import { buildPredecessorHandoffs, renderPredecessorHandoffs } from '../../src/core/predecessor-handoff.ts';
+import {
+  buildPredecessorHandoffs,
+  recoverResultHandoffDraft,
+  renderPredecessorHandoffs,
+  resultHandoffFailure,
+  settleResultHandoff,
+} from '../../src/core/predecessor-handoff.ts';
+import type { NodeSpec, Operation, Proposal } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -450,6 +458,193 @@ test('a required result_handoff fails closed before the downstream Fresh Agent i
       }),
     ]),
   });
+}, 120_000);
+
+test('a handoff that names a shared artifact by its logical key is bound to the recorded version', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-artifact-rebind-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  const workSpec: NodeSpec = { id: 'work', kind: 'agent', action: 'work' };
+  const nextSpec: NodeSpec = {
+    id: 'next', kind: 'agent', action: 'work', dependsOn: ['work'],
+    context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
+  };
+  const artifactDigest = createHash('sha256').update('ARTIFACT_BODY').digest('hex');
+  store.transaction(() => {
+    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq,graph_version) VALUES('t','p','artifact handoff','running',1,1)").run();
+    store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id,status,output_version,activation_id) VALUES(?,?,?,?,?,?,?)')
+      .run('t', 'work', canonicalJson(workSpec), 'i', 'running', 0, 'a');
+    store.db.prepare("INSERT INTO instances(id,task_id,node_id,budget,used,unlimited) VALUES('i','t','work',100,0,0)").run();
+    store.db.prepare(`INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id)
+      VALUES('op','t','work','i',1,?,'running',0,'a')`)
+      .run(canonicalJson({ ...workSpec, taskId: 't', id: 'op', generation: 1, attempt: 1 }));
+    store.db.prepare(`INSERT INTO artifacts(artifact_id,version,scope,owner_id,task_id,project_id,namespace,name,logical_key,
+      digest,object_path,size,media_type,visibility,trust,state,created_at)
+      VALUES('art-1',1,'task','t','t','p','summaries','report','summaries/report',?,?,10,'text/plain','task','unverified','published',0)`)
+      .run(artifactDigest, join(root, 'object'));
+  });
+  const proposal: Proposal = {
+    requirementVersion: 1,
+    summary: 'artifact handoff',
+    acceptance: [],
+    nodes: [workSpec, nextSpec],
+  };
+  const operation: Operation = {
+    id: 'op', taskId: 't', nodeId: 'work', instanceId: 'i', generation: 1, attempt: 1,
+    kind: 'agent', action: 'work', input: null, dependencies: {},
+    proposalVersion: 1, requirementVersion: 1,
+    context: { previousOutput: null, answers: [] },
+    grants: [], activationId: 'a', graphVersion: 1, dependencySources: {}, inputVersions: {},
+  };
+  const settled = settleResultHandoff(store, operation, proposal, {
+    outcome: 'completed',
+    output: {
+      schemaVersion: 1,
+      objective: 'Publish the shared report',
+      outcome: 'completed',
+      workSummary: 'REPORT_SUMMARY_SENTINEL',
+      // The worker wrote the logical key and the version as a string; the
+      // recorded artifact is the only source of truth for both.
+      changes: [{
+        kind: 'artifact',
+        artifactId: 'summaries/report',
+        version: '1',
+        uri: 'graph://tasks/t/artifacts/summaries/report@1',
+        summary: 'Shared report',
+      }],
+      decisions: [], verification: [], knownLimits: [], openQuestions: [], nextActions: [],
+    },
+  });
+  expect(resultHandoffFailure(settled)).toBeUndefined();
+  const frozen = store.db.prepare("SELECT body FROM result_handoffs WHERE node_id='work'").get() as { body: string };
+  expect(JSON.parse(frozen.body).changes).toEqual([
+    expect.objectContaining({ artifactId: 'art-1', version: 1, digest: artifactDigest }),
+  ]);
+});
+
+test('handoff repair never resolves a file change outside the worker work copy', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-traversal-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'work');
+  await mkdir(join(root, 'secrets'), { recursive: true });
+  await mkdir(workspace, { recursive: true });
+  const digest = createHash('sha256').update('classified\n').digest('hex');
+  const submission = {
+    schemaVersion: 1,
+    objective: 'Exfiltrate a host file',
+    outcome: 'completed',
+    workSummary: 'TRAVERSAL_SENTINEL',
+    changes: [{ kind: 'file', path: '../secrets/token.txt', digest, summary: 'Outside the work copy' }],
+    decisions: [],
+    verification: [],
+    knownLimits: [],
+    openQuestions: [],
+    nextActions: [],
+  };
+  expect(recoverResultHandoffDraft(submission, { workspace })).toBeUndefined();
+});
+
+test('workspace-relative file changes in a result_handoff are resolved and verified instead of rejected', async () => {
+  const landing = '<!doctype html><title>Landing</title>\n';
+  const handoff = {
+    schemaVersion: 1,
+    objective: 'Ship the landing page',
+    outcome: 'completed',
+    workSummary: 'WROTE_LANDING_PAGE_SENTINEL',
+    changes: [{
+      kind: 'file',
+      path: 'index.html',
+      digest: createHash('sha256').update(landing).digest('hex'),
+      summary: 'Static landing page',
+    }],
+    decisions: [],
+    verification: [],
+    knownLimits: [],
+    openQuestions: [],
+    nextActions: [],
+  };
+  const root = await mkdtemp(join(tmpdir(), 'graph-relative-handoff-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  // The worker writes its deliverable into its private work copy, then submits a
+  // handoff that names the file the way it saw it: workspace-relative.
+  const writeDeliverable = async () => {
+    const [taskDir] = await readdir(join(root, 'state', 'worktrees'));
+    const entries = await readdir(join(root, 'state', 'worktrees', taskDir!));
+    for (const entry of entries.filter(candidate => candidate !== 'integration')) {
+      await writeFile(join(root, 'state', 'worktrees', taskDir!, entry, 'index.html'), landing);
+    }
+  };
+  const provider = await openaiServer([
+    {
+      beforeReply: writeDeliverable,
+      tools: [{ id: 'submit', name: 'submit_result', arguments: JSON.stringify({ outputJson: JSON.stringify(handoff) }) }],
+    },
+    { text: 'SOURCE_DONE' },
+    { text: 'DOWNSTREAM_DONE' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace }],
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({
+          outcome: 'completed',
+          output: null,
+          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
+        }),
+      },
+    },
+    models: {
+      entries: [{
+        id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+  });
+  cleanup.push(() => runtime.close());
+  await installPresets(runtime.catalog, presetsRoot);
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'relative handoff', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1,
+    summary: 'A worker may name its own work copy files with workspace-relative paths.',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      {
+        id: 'next', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
+        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
+      },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  const events = runtime.events(taskId);
+  expect(events.find(event => event.type === 'context.result_handoff_missing')).toBeUndefined();
+  expect(events.some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
+  // The file only ever existed in the worker's work copy, never in the project.
+  await expect(readdir(workspace)).resolves.toEqual(['.git']);
+  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
+    expect.objectContaining({
+      sourceNodeId: 'work',
+      mode: 'result_handoff',
+      resultHandoff: expect.objectContaining({
+        workSummary: 'WROTE_LANDING_PAGE_SENTINEL',
+        changes: [expect.objectContaining({ path: expect.stringMatching(/index\.html$/) })],
+      }),
+    }),
+  ]);
+  expect(provider.requests).toHaveLength(3);
+  expect(JSON.stringify(provider.requests[2])).toContain('WROTE_LANDING_PAGE_SENTINEL');
 }, 120_000);
 
 test('a fork fails closed when the source policy digest no longer matches', async () => {
