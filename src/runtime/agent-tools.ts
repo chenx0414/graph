@@ -90,9 +90,17 @@ export function agentTools(input: {
       },
     }]),
     {
-      name: 'list_dir', label: 'List directory', description: 'List files in a workspace directory.',
+      name: 'list_dir', label: 'List directory', description: 'List files in a workspace directory or a permitted read-only capability directory.',
       parameters: Type.Object({ path: Type.String() }),
-      execute: async (_id, params) => text((await listBounded(root, String(fields(params).path || '.'))).join('\n')),
+      execute: async (_id, params) => {
+        const requested = String(fields(params).path || '.');
+        if (isAbsolute(requested)) {
+          const mount = [root, ...readRoots].find(candidate => requested === candidate || requested.startsWith(`${candidate}${sep}`));
+          if (!mount) throw new Error('Path is outside the workspace');
+          return text((await listBounded(mount, requested)).join('\n'));
+        }
+        return text((await listBounded(root, requested)).join('\n'));
+      },
     },
     {
       name: 'submit_result', label: 'Submit result', description: 'Submit structured JSON output for this operation.',

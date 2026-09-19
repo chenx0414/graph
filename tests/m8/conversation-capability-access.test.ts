@@ -1,4 +1,4 @@
-import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -69,6 +69,68 @@ test('an unbound Main Agent can call a definition-bound MCP without a permission
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.questions).toEqual([]);
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('GitHub search completed');
+}, 120_000);
+
+test('an unbound Main Agent can read the writable capability library', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-main-capability-read-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const capability = join(capabilityRoot, 'mcp', 'github');
+  await mkdir(capability, { recursive: true });
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({
+    id: 'github',
+    kind: 'mcp',
+    version: '1.0.0',
+    name: 'GitHub',
+    command: 'node',
+    args: ['./server.mjs'],
+    networkDomains: ['github.com'],
+  }, null, 2));
+
+  const provider = await openaiServer([
+    { tools: [{ id: 'read-capability', name: 'read', arguments: JSON.stringify({ path: join(await realpath(capability), 'capability.json') }) }] },
+    { tools: [{ id: 'list-capability', name: 'list_dir', arguments: JSON.stringify({ path: await realpath(capability) }) }] },
+    { text: 'Capability manifest read completed.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({
+    text: '读取 GitHub 能力包的 capability.json。',
+    requestId: 'main-capability-read',
+  });
+  await runtime.host.runReady();
+
+  const toolResult = (provider.requests[1] as { messages?: { role?: string; content?: string }[] }).messages
+    ?.find(message => message.role === 'tool')?.content ?? '';
+  expect(toolResult).toContain('"name": "GitHub"');
+  expect(toolResult).not.toContain('Path is outside the workspace');
+  const listed = (provider.requests[2] as { messages?: { role?: string; content?: string }[] }).messages
+    ?.filter(message => message.role === 'tool').at(-1)?.content ?? '';
+  expect(listed).toContain('capability.json');
+  expect(listed).not.toContain('Path is outside the workspace');
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.questions).toEqual([]);
+  expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Capability manifest read completed');
 }, 120_000);
 
 test('an unrestricted Pi extension does not deadlock a bound MCP call in the same Main Agent turn', async () => {

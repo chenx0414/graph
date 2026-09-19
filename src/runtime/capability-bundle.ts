@@ -32,6 +32,8 @@ export interface CapabilityOperationOptions {
   role?: string;
   readOnly?: boolean;
   grants?: string[];
+  /** Host-selected read-only roots outside the workspace, such as the user's capability library. */
+  additionalReadRoots?: string[];
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
   hostTools(input: { readRoots: readonly string[] }): ToolDefinition[];
 }
@@ -127,7 +129,8 @@ export class CapabilityBundleVersion {
         ...(options.readOnly ? { readOnly: true } : {}),
         ...(options.onPermissionRequired ? { onPermissionRequired: options.onPermissionRequired } : {}),
       });
-      const hostTools = options.hostTools({ readRoots: loaded.readRoots });
+      const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
+      const hostTools = options.hostTools({ readRoots });
       const tools = Object.freeze([...hostTools, ...loaded.tools]);
       const prompts = capabilityPrompts({
         definitionVersion: this.definitionVersion ?? 'unknown@1',
@@ -155,7 +158,7 @@ export class CapabilityBundleVersion {
         readOnly: Boolean(options.readOnly),
         piExtensionRuntime: {
           env: loaded.env,
-          readRoots: loaded.readRoots,
+          readRoots,
           writeRoots: loaded.writeRoots,
           networkDomains: loaded.networkDomains,
           allowUnrestrictedNetwork: loaded.allowUnrestrictedNetwork,
@@ -180,7 +183,7 @@ export class CapabilityBundleVersion {
         },
         report: loaded.report,
         skillPaths: Object.freeze([...loaded.skillPaths]),
-        readRoots: Object.freeze([...loaded.readRoots]),
+        readRoots,
         writeRoots: Object.freeze([...loaded.writeRoots]),
         env: Object.freeze({ ...loaded.env }),
         networkDomains: Object.freeze([...loaded.networkDomains]),
