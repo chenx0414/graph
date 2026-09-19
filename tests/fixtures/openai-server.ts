@@ -20,7 +20,13 @@ export async function openaiServer(plans: ResponsePlan[]) {
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
-    requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+    const body = Buffer.concat(chunks).toString();
+    if (!body.trim()) {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'empty request body' }));
+      return;
+    }
+    requests.push(JSON.parse(body));
     authorizations.push(req.headers.authorization ?? '');
     headerList.push(Object.fromEntries(Object.entries(req.headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(', ') : value ?? ''])));
     const plan = plans.shift() ?? { text: 'Unexpected extra request' };

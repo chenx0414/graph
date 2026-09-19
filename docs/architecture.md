@@ -170,3 +170,5 @@ Graph 管理任务集成分支和每实例工作副本；实现、审查与程�
 ## 首批必须验证的假设
 
 详细出口见 [M0](implementation-plan.md#m0-兼容性与调用控制验证)。未验证前不能宣称已具备：完整 Pi 请求计量、扩展不能绕过权限、每调用暂停、崩溃后没有重复副作用、最终合并与已验证提交一致。它们是实施任务，不是需要重新访谈的产品选择。
+
+访问策略在 operation 准入时由 `graph.config.json` 的有效配置解析并冻结。`standard` 保留 workspace、命令白名单、声明网络和普通审批；`full` 预设自动批准 `permission` 与 `system_change`，向 Agent、MCP、Pi extension 和程序命令传递宿主文件系统、任意可执行文件、无限制网络、本地绑定、全部 Unix socket 和可选 Apple Events。默认仍保护 credential stores、Graph 正式状态与 Git metadata；预算、暂停、计量、并发、恢复、审计和任务图确认始终独立。运行中的 operation 不热改策略，回退只影响下一次准入。见 [ADR 0024](adr/0024-full-access-policy.md)。

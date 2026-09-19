@@ -204,9 +204,17 @@ export interface RestrictedCommand {
   input?: string;
   readPaths: string[];
   writePaths: string[];
+  /** Host mode replaces the workspace/read/write allowlists with the host root. */
+  filesystem?: 'bounded' | 'host';
+  /** Paths denied for both read and write in host filesystem mode. */
+  protectedPaths?: string[];
+  /** Narrow subtrees that remain usable inside an otherwise protected root. */
+  protectedPathExceptions?: string[];
   denyWrite?: string[];
   /** Graph-managed caches may contain their own VCS metadata. */
   allowGitMetadataWrites?: string[];
+  /** High-risk full-access switch that allows host Git metadata writes. */
+  allowGitMetadataWritesAll?: boolean;
   timeoutMs?: number;
   onRequest?: (request: unknown) => Promise<unknown>;
   /** Confirmed program checks may bind and reach loopback for local app/browser tests. */
@@ -219,6 +227,10 @@ export interface RestrictedCommand {
   allowLocalBinding?: boolean;
   /** Explicit Unix socket roots for local capability daemons. */
   unixSockets?: string[];
+  /** Host mode may opt into every AF_UNIX endpoint. */
+  allowAllUnixSockets?: boolean;
+  /** High-risk macOS integration; launches code outside the sandbox. */
+  allowAppleEvents?: boolean;
   /** Host-selected environment for the restricted process; worker input must never populate this. */
   env?: Record<string, string>;
   /** Keep stdin open so the trusted host can steer a long-running worker. */
@@ -382,11 +394,12 @@ export async function openRestrictedExecutor() {
             allowUnixSockets: unixSockets,
           };
       const scratchDir = command.scratchDir ? await canonicalGrant(command.scratchDir) : cwd;
-      if (!writePaths.some(root => scratchDir === root || scratchDir.startsWith(root === '/' ? '/' : root + '/'))) {
+      const hostFilesystem = command.filesystem === 'host';
+      if (!hostFilesystem && !writePaths.some(root => scratchDir === root || scratchDir.startsWith(root === '/' ? '/' : root + '/'))) {
         throw new Error('Worker scratch directory requires a write grant');
       }
-      const homeDir = join(scratchDir, '.worker-home');
-      const tempDir = join(scratchDir, '.worker-tmp');
+      const homeDir = hostFilesystem ? (command.env?.HOME ?? process.env.HOME ?? join(scratchDir, '.worker-home')) : join(scratchDir, '.worker-home');
+      const tempDir = hostFilesystem ? (process.env.TMPDIR ?? '/tmp') : join(scratchDir, '.worker-tmp');
       // The macOS Git shim resolves its developer directory through
       // /private/var/select and then executes the Command Line Tools binaries.
       const systemReads = ['/System', '/usr', '/bin', '/sbin', '/Library/Apple', '/dev'];
@@ -395,10 +408,39 @@ export async function openRestrictedExecutor() {
       // localhost). The resolver reads /etc/hosts and friends, and the
       // profile's subpath filters only match directories.
       if (existsSync('/etc')) systemReads.push(realpathSync('/etc'));
-      const allowedReads = [...systemReads, cwd, scratchDir, ...readPaths, ...unixSockets];
+      const allowedReads = hostFilesystem ? ['/'] : [...systemReads, cwd, scratchDir, ...readPaths, ...unixSockets];
       const deviceWrites = ['/dev/stdout', '/dev/stderr', '/dev/null', '/dev/tty', '/dev/dtracehelper', '/dev/autofs_nowait'];
-      const gitPaths = await gitMetadataPaths(writePaths, scratchDir, allowGitMetadataWrites);
-      const profile = pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths], gitPaths);
+      const protectedPaths = hostFilesystem
+        ? [...new Set((command.protectedPaths ?? []).map(path => resolve(path)))]
+        : [];
+      const protectedPathExceptions = hostFilesystem
+        ? [...new Set((command.protectedPathExceptions ?? []).map(path => resolve(path)))]
+        : [];
+      const strictProtectedPaths = protectedPaths.filter(path =>
+        !protectedPathExceptions.some(exception => exception === path || exception.startsWith(`${path}/`)));
+      const gitPaths = hostFilesystem ? [] : await gitMetadataPaths(writePaths, scratchDir, allowGitMetadataWrites);
+      const profile = hostFilesystem
+        ? [
+            '(allow file-read-metadata)',
+            ...(command.allowGitMetadataWritesAll ? [] : [
+              '(deny file-read* (regex #"(^|/)\\.git(/|$)"))',
+              '(deny file-write* (regex #"(^|/)\\.git(/|$)"))',
+            ]),
+            ...protectedPaths.flatMap(path => [
+              `(deny file-read* (literal ${JSON.stringify(path)}))`,
+              `(deny file-read* (subpath ${JSON.stringify(path)}))`,
+              `(deny file-write* (literal ${JSON.stringify(path)}))`,
+              `(deny file-write* (subpath ${JSON.stringify(path)}))`,
+            ]),
+            `(allow file-read* (subpath ${JSON.stringify(cwd)}))`,
+            ...protectedPathExceptions.flatMap(path => [
+              `(allow file-read* (subpath ${JSON.stringify(path)}))`,
+              `(allow file-write* (subpath ${JSON.stringify(path)}))`,
+            ]),
+            `(allow file-read* (subpath ${JSON.stringify(scratchDir)}))`,
+            `(allow file-write* (subpath ${JSON.stringify(scratchDir)}))`,
+          ].join('\n')
+        : pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths], gitPaths);
       // SRT's dynamic proxy enforces one process-global allowlist. An
       // unrestricted Pi extension can live for the whole Agent turn, so it
       // cannot hold that lock without deadlocking host-side MCP calls from the
@@ -455,20 +497,32 @@ export async function openRestrictedExecutor() {
       const commandText = [command.executable, ...command.args].map(quote).join(' ');
       // Even setup writes happen after confinement. A mutable cwd must never
       // cause the host to create directories outside the original grant.
-      const launch = `/bin/mkdir -p ${quote(homeDir)} ${quote(tempDir)} && exec ${commandText}`;
+      const launch = hostFilesystem
+        ? `exec ${commandText}`
+        : `/bin/mkdir -p ${quote(homeDir)} ${quote(tempDir)} && exec ${commandText}`;
       const releaseNetwork = command.allowUnrestrictedNetwork
         ? async () => undefined
         : await acquireNetworkConfig(command.localNetwork ? [] : command.networkDomains ?? [], unixSockets);
       try {
         const wrapped = await SandboxManager.wrapWithSandbox(
           launch, '/bin/sh', {
-            network,
-            filesystem: {
-              denyRead: ['/'], allowRead: allowedReads,
-              allowWrite: writePaths,
+          network,
+          filesystem: {
+              denyRead: hostFilesystem ? strictProtectedPaths : ['/'],
+              allowRead: allowedReads,
+              allowWrite: hostFilesystem ? ['/'] : writePaths,
               // Remove SRT's unrelated default writable log/scratch directories.
-              denyWrite: ['/tmp/claude', '/private/tmp/claude', join(homedir(), '.npm/_logs'), join(homedir(), '.claude/debug'), ...(command.denyWrite ?? [])],
+              denyWrite: [
+                '/tmp/claude',
+                '/private/tmp/claude',
+                join(homedir(), '.npm/_logs'),
+                join(homedir(), '.claude/debug'),
+                ...(hostFilesystem ? strictProtectedPaths : protectedPaths),
+                ...(command.denyWrite ?? []),
+              ],
             },
+            ...(command.allowAllUnixSockets ? { allowAllUnixSockets: true } : {}),
+            ...(command.allowAppleEvents ? { allowAppleEvents: true } : {}),
           },
         );
         const extracted = extractWrapper(wrapped, launch);

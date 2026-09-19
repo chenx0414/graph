@@ -2,7 +2,6 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { normalizeDomainPattern } from '../core/domains.ts';
-import { isLocalMcpCommand, LOCAL_MCP_COMMANDS } from '../core/mcp-commands.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import type { CapabilityKind, CapabilityRecord } from './capability-library.ts';
 
@@ -234,9 +233,6 @@ async function validateFiles(directory: string, manifest: CapabilityManifest) {
   }
   if (manifest.kind === 'mcp' && !manifest.command && !manifest.url) {
     throw new RuntimeError('invalid_capability', `${directory} is an MCP capability without command or url`);
-  }
-  if (manifest.kind === 'mcp' && manifest.command && !isAbsolute(manifest.command) && !isLocalMcpCommand(manifest.command)) {
-    throw new RuntimeError('invalid_capability', `${directory} MCP command must be absolute or one of ${LOCAL_MCP_COMMANDS.join(', ')}`);
   }
   if (manifest.kind === 'extension' || manifest.kind === 'pi-extension') {
     const entry = manifest.entry ?? './index.mjs';

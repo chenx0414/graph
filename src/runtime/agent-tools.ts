@@ -5,7 +5,8 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { CapabilityRecord, Catalog } from '../catalog/catalog.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { Json, NodeSpec, Proposal } from '../core/types.ts';
-import { listBounded, readBounded, writeBounded } from './bounded-path.ts';
+import { isHostRead, isHostWrite, type ResolvedAccessPolicy } from '../core/access-policy.ts';
+import { listBounded, listHost, readBounded, readHost, writeBounded, writeHost } from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
 
 type Supervisor = {
@@ -49,6 +50,7 @@ export function agentTools(input: {
   workspace: string;
   role?: NodeSpec['role'];
   readRoots?: string[];
+  access?: ResolvedAccessPolicy;
   /** Discussion turns investigate without writing business files or running commands. */
   readOnly?: boolean;
   run?: (command: string, args: string[]) => Promise<{ code: number | null; stdout: string; stderr: string }>;
@@ -66,6 +68,12 @@ export function agentTools(input: {
 }): ToolDefinition[] {
   const root = realpathSync(input.workspace);
   const readRoots = (input.readRoots ?? []).map(item => realpathSync(item));
+  const hostRead = isHostRead(input.access);
+  const hostWrite = isHostWrite(input.access);
+  const pathOptions = {
+    ...(input.access?.filesystem.gitMetadata === 'writable' ? { allowGitMetadata: true } : {}),
+    ...(input.access?.protectedPaths.length ? { protectedPaths: input.access.protectedPaths } : {}),
+  };
   const tools: ToolDefinition[] = [
     {
       name: 'read', label: 'Read file', description: 'Read a UTF-8 file from the instance workspace or a bound capability.',
@@ -73,6 +81,7 @@ export function agentTools(input: {
       execute: async (_id, params) => {
         const requested = String(fields(params).path);
         if (isAbsolute(requested)) {
+          if (hostRead) return text(await readHost(requested, pathOptions));
           const mount = [root, ...readRoots].find(candidate => requested === candidate || requested.startsWith(`${candidate}${sep}`));
           if (!mount) throw new Error('Path is outside the workspace');
           return text(await readBounded(mount, requested));
@@ -85,7 +94,9 @@ export function agentTools(input: {
       parameters: Type.Object({ path: Type.String(), content: Type.String() }),
       execute: async (_id: string, params: unknown) => {
         const body = fields(params);
-        await writeBounded(root, String(body.path), String(body.content));
+        const requested = String(body.path);
+        if (hostWrite && isAbsolute(requested)) await writeHost(requested, String(body.content), pathOptions);
+        else await writeBounded(root, requested, String(body.content));
         return text(`Wrote ${body.path}`);
       },
     }]),
@@ -95,6 +106,7 @@ export function agentTools(input: {
       execute: async (_id, params) => {
         const requested = String(fields(params).path || '.');
         if (isAbsolute(requested)) {
+          if (hostRead) return text((await listHost(requested, pathOptions)).join('\n'));
           const mount = [root, ...readRoots].find(candidate => requested === candidate || requested.startsWith(`${candidate}${sep}`));
           if (!mount) throw new Error('Path is outside the workspace');
           return text((await listBounded(mount, requested)).join('\n'));

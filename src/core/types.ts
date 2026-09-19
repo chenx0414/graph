@@ -170,6 +170,7 @@ export interface TaskWatch extends AsyncIterableIterator<TaskUpdate> { return():
 
 export type { TokenUsage } from '../runtime/call-broker.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
+import type { ResolvedAccessPolicy } from './access-policy.ts';
 export interface EvidenceInput { acceptanceId: string; summary: string; artifact: { path: string; digest: string } }
 export interface ArtifactInput { id: string; path: string; digest: string }
 export interface ArtifactVersion extends ArtifactInput { nodeId: string; operationId: string; activationId: string }
@@ -193,6 +194,8 @@ export interface Operation {
     agentContext?: ResolvedAgentContext;
   };
   grants: string[];
+  /** Effective access policy frozen when this operation was admitted. */
+  accessPolicy?: ResolvedAccessPolicy;
   activationId: string; graphVersion: number;
   dependencySources: Record<string, DependencySource[]>;
   inputVersions: Record<string, { activationId: string; outputVersion: number }[]>;

@@ -476,7 +476,28 @@ export class OperationLifecycle {
       const node = this.nodeRow(taskId, nodeId);
       this.store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?").run(taskId, nodeId);
       this.store.db.prepare("UPDATE activations SET state='blocked' WHERE id=?").run(node.activation_id);
-      return insertQuestion(this.store, { taskId, nodeId, operationId, kind, data }).id;
+      let autoAnswer: { answer: Answer; policyDigest: string; resume?: boolean } | undefined;
+      if (operationId && kind === 'permission') {
+        const operation = this.get(operationId);
+        const grant = data && typeof data === 'object' && !Array.isArray(data) && typeof data.grant === 'string'
+          ? data.grant
+          : undefined;
+        if (operation?.operation.accessPolicy?.autoApprove.permission && grant) {
+          autoAnswer = {
+            answer: { type: 'grant', grant },
+            policyDigest: operation.operation.accessPolicy.digest,
+            resume: true,
+          };
+        }
+      }
+      return insertQuestion(this.store, {
+        taskId,
+        nodeId,
+        operationId,
+        kind,
+        data,
+        ...(autoAnswer ? { autoAnswer } : {}),
+      }).id;
     });
   }
 
@@ -842,6 +863,9 @@ export class OperationLifecycle {
     this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'")
       .run(canonicalJson({ result }), operation.id);
     closeUserWaitForOperation(this.store, operation.id);
+    const autoApprovedPermission = result.outcome === 'waiting'
+      && Boolean(result.question?.grant)
+      && operation.accessPolicy?.autoApprove.permission === true;
     if (result.outcome === 'waiting') {
       if (!result.question?.prompt.trim()) throw new RuntimeError('invalid_result', 'Waiting requires a question');
       if (result.question.grant) {
@@ -861,7 +885,9 @@ export class OperationLifecycle {
       : undefined;
     recordConversationOutput(this.store, operation, result);
     const queuedAfter = conversation ? pendingMessages(this.store, conversation.id, 1).length : 0;
-    const nextStatus = conversation && result.outcome === 'completed' && queuedAfter
+    const nextStatus = autoApprovedPermission
+      ? 'pending'
+      : conversation && result.outcome === 'completed' && queuedAfter
       ? 'pending'
       : result.outcome === 'completed'
         ? 'succeeded'

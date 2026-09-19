@@ -67,7 +67,7 @@ export function workspaceCommandNode(input: {
         || !Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string')) {
         throw new RuntimeError('invalid_adapter', 'graph.command requires input {command, args}');
       }
-      validateWorkspaceCommand(command.command, command.args);
+      if (operation.accessPolicy?.commands !== 'host') validateWorkspaceCommand(command.command, command.args);
       const root = (store.db.prepare('SELECT root FROM projects WHERE id=?')
         .get(store.task(operation.taskId).project_id) as { root: string } | undefined)?.root;
       // Non-git projects have no work copy; their agent instances work in the
@@ -100,6 +100,7 @@ export function workspaceCommandNode(input: {
           scratchDir: join(input.scratchRoot ?? workspace, 'checks', operation.id),
           gate,
           localNetwork: true,
+          ...(operation.accessPolicy ? { access: operation.accessPolicy } : {}),
           ...(extraReads.length ? { readPaths: extraReads } : {}),
           ...(input.program?.env ? { env: input.program.env } : {}),
         });

@@ -238,6 +238,7 @@ export function createPiAdapter(options: {
           settle: (id, usage) => gate.settle(id, usage),
         };
         const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+        const accessPolicy = operation.accessPolicy;
         // Discussion turns must investigate without modifying the project; the
         // same read-only boundary applies to conversation masters after the
         // draft is confirmed.
@@ -254,8 +255,9 @@ export function createPiAdapter(options: {
           ? ['github.com', 'raw.githubusercontent.com', 'api.github.com']
           : [];
         const retrievalDomains = [...new Set([...(options.network?.retrievalDomains ?? []), ...systemDomains])];
-        const retrieval = retrievalDomains.length
-          ? createRetrievalBroker({ domains: retrievalDomains, gate })
+        const unrestrictedRetrieval = accessPolicy?.network === 'unrestricted';
+        const retrieval = retrievalDomains.length || unrestrictedRetrieval
+          ? createRetrievalBroker({ domains: retrievalDomains, gate, ...(unrestrictedRetrieval ? { unrestricted: true } : {}) })
           : undefined;
         try {
           const bundle = await openCapabilityBundle({
@@ -279,7 +281,12 @@ export function createPiAdapter(options: {
           const masterReadRoots = spec.role === 'master'
             ? [...new Set([capabilityRoot, graphRoot].filter((path): path is string => Boolean(path)))]
             : [];
-          commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
+          commands = await openWorkspaceCommandRunner({
+            workspace,
+            scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'),
+            gate,
+            ...(accessPolicy ? { access: accessPolicy } : {}),
+          });
           capabilityOperation = await bundle.openOperation({
             workspace,
             scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'),
@@ -287,11 +294,13 @@ export function createPiAdapter(options: {
             action: spec.action,
             ...(spec.role ? { role: spec.role } : {}),
             ...(discussion ? { readOnly: true } : {}),
+            ...(accessPolicy ? { access: accessPolicy } : {}),
             ...(masterReadRoots.length ? { additionalReadRoots: masterReadRoots } : {}),
             grants: operation.grants,
             onPermissionRequired: request => { permissionRequest ??= request; },
             hostTools: ({ readRoots }) => agentTools({
               workspace, ...(spec.role ? { role: spec.role } : {}),
+              ...(accessPolicy ? { access: accessPolicy } : {}),
               ...(discussion ? { readOnly: true } : {}),
               ...(readRoots.length ? { readRoots: [...readRoots] } : {}),
               run: (command, args) => commands!.run(command, args),
@@ -364,6 +373,7 @@ export function createPiAdapter(options: {
                     },
                     proposeSystemChange: async change => {
                       const proposalId = randomUUID();
+                      const autoApproved = operation.accessPolicy?.autoApprove.systemChange === true;
                       const question = insertQuestion(options.store, {
                         taskId: operation.taskId,
                         nodeId: operation.nodeId,
@@ -381,12 +391,23 @@ export function createPiAdapter(options: {
                           ...(change.risk ? { risk: change.risk } : {}),
                           prompt: `系统优化待批准：${change.title}`,
                         },
+                        ...(autoApproved && operation.accessPolicy ? {
+                          autoAnswer: {
+                            answer: {
+                              type: 'respond',
+                              value: { decision: 'approved', proposalId },
+                            },
+                            policyDigest: operation.accessPolicy.digest,
+                          },
+                        } : {}),
                       });
                       return {
                         proposalId,
                         questionId: question.id,
-                        status: 'awaiting_user_approval',
-                        instruction: 'Stop after reporting the proposal. The user must approve it before apply_system_change can run.',
+                        status: autoApproved ? 'auto_approved' : 'awaiting_user_approval',
+                        instruction: autoApproved
+                          ? 'Full access policy approved this proposal. Call apply_system_change now with this proposalId, then report the verified result.'
+                          : 'Stop after reporting the proposal. The user must approve it before apply_system_change can run.',
                       };
                     },
                     applySystemChange: proposalId => {
@@ -624,9 +645,16 @@ export function createPiAdapter(options: {
             ...(capabilityOperation.writeRoots.length ? { writeRoots: [...capabilityOperation.writeRoots] } : {}),
             ...(Object.keys(capabilityOperation.env).length ? { env: { ...capabilityOperation.env } } : {}),
             ...(capabilityOperation.networkDomains.length ? { networkDomains: [...capabilityOperation.networkDomains] } : {}),
-            ...(capabilityOperation.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
-            ...(capabilityOperation.allowLocalBinding ? { allowLocalBinding: true } : {}),
+            ...(capabilityOperation.allowUnrestrictedNetwork || accessPolicy?.network === 'unrestricted' ? { allowUnrestrictedNetwork: true } : {}),
+            ...(capabilityOperation.allowLocalBinding || accessPolicy?.piExtensions.localBinding ? { allowLocalBinding: true } : {}),
             ...(capabilityOperation.unixSockets.length ? { unixSockets: [...capabilityOperation.unixSockets] } : {}),
+            ...(accessPolicy?.piExtensions.unixSockets === 'all' ? { allowAllUnixSockets: true } : {}),
+            ...(accessPolicy?.piExtensions.appleEvents ? { allowAppleEvents: true } : {}),
+            ...(accessPolicy ? {
+              filesystemAccess: accessPolicy.filesystem.read === 'host' || accessPolicy.filesystem.write === 'host' ? 'host' : 'bounded',
+              protectedPaths: accessPolicy.protectedPaths,
+              allowGitMetadataWritesAll: accessPolicy.filesystem.gitMetadata === 'writable',
+            } : {}),
             ...(capabilityOperation.piExtensionPaths.length ? { piExtensionPaths: [...capabilityOperation.piExtensionPaths] } : {}),
             piExtensionTools: [...capabilityOperation.piExtensionTools],
             systemPrompt: capabilityOperation.prompts.system,
@@ -689,6 +717,7 @@ export function createPiAdapter(options: {
                 pendingSystemChanges: (options.store.db.prepare("SELECT COUNT(*) AS count FROM questions WHERE status='open' AND kind='system_change'").get() as { count: number }).count,
               }
               : null;
+            const fullAccess = accessPolicy?.mode === 'full';
             const hint = spec.role === 'master'
               ? [
                   ...(discussion ? [
@@ -698,7 +727,9 @@ export function createPiAdapter(options: {
                     'After confirmation the graph runs as a separate feature task. Answer progress questions from the "Conversation and execution status" section of the briefing with concrete recorded facts; when the user wants to change confirmed scope, explain the impact and require an explicit new task or confirmed change.',
                     'Before proposing a graph, inspect the project and query the user capability directory with search_resources/get_resource. Search is discovery only; once a capability is bound into the Agent definition, its tools are available under the default capability-bypass runtime policy. Never invent capabilities from memory.',
                     'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. Recipe names use a human-readable identity plus role, such as Bob_coder or Alice_reviewer; preserve that name when presenting the Agent and pair it with the stable id@version. You may save or edit recipes and compile them directly.',
-                    'You can inspect and improve Graph itself without a bound project. Use inspect_graph_system/read_system_capabilities for live self-awareness. To add or update a capability, first inspect the public source and prepare an exact capability bundle, then call propose_system_change. This creates a user question and does not change anything. Only after the user approves may you call apply_system_change with that proposalId. Never edit capability files, configuration files or credentials directly.',
+                    fullAccess
+                      ? 'You can inspect and improve Graph itself without a bound project. Use inspect_graph_system/read_system_capabilities for live self-awareness. Full access is active for this operation, so propose_system_change is auto-approved: after it returns auto_approved, call apply_system_change with that proposalId in the same turn and report the verified result. Never edit capability files, configuration files or credentials directly.'
+                      : 'You can inspect and improve Graph itself without a bound project. Use inspect_graph_system/read_system_capabilities for live self-awareness. To add or update a capability, first inspect the public source and prepare an exact capability bundle, then call propose_system_change. This creates a user question and does not change anything. Only after the user approves may you call apply_system_change with that proposalId. Never edit capability files, configuration files or credentials directly.',
                     'You have read-only access to existing capability bundles under the configured capability root. Use that access to inspect manifests and files before proposing a change. Direct capability writes remain forbidden; install or update only through propose_system_change and, after approval, apply_system_change.',
                     'You also have read-only access to the running Graph application/source tree reported as application.root by read_system_capabilities. Inspect it to diagnose runtime and configuration problems and to prepare precise fixes; direct source edits remain forbidden.',
                     'If the system pulse shows invalid capabilities, failed nodes, open internal problems or pending system changes, inspect them before making unrelated planning claims. When a concrete defect is actionable, explain the evidence and propose a bounded system change instead of silently changing the system.',

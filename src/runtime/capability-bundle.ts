@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
+import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import {
   capabilityPrompts,
   loadCapabilities,
@@ -34,6 +35,8 @@ export interface CapabilityOperationOptions {
   grants?: string[];
   /** Host-selected read-only roots outside the workspace, such as the user's capability library. */
   additionalReadRoots?: string[];
+  /** Effective access policy frozen for this operation. */
+  access?: ResolvedAccessPolicy;
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
   hostTools(input: { readRoots: readonly string[] }): ToolDefinition[];
 }
@@ -129,6 +132,7 @@ export class CapabilityBundleVersion {
         ...(options.grants ? { grants: options.grants } : {}),
         ...(options.readOnly ? { readOnly: true } : {}),
         ...(options.onPermissionRequired ? { onPermissionRequired: options.onPermissionRequired } : {}),
+        ...(options.access ? { access: options.access } : {}),
       });
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
       const hostTools = options.hostTools({ readRoots });
@@ -156,6 +160,7 @@ export class CapabilityBundleVersion {
       const toolPolicyDigest = digest(effectiveToolPolicy);
       const runtimePolicyDigest = digest({
         bundleRuntimePolicyDigest: this.runtimePolicyDigest,
+        accessPolicyDigest: options.access?.digest ?? null,
         readOnly: Boolean(options.readOnly),
         piExtensionRuntime: {
           env: loaded.env,

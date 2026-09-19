@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { TaskStore } from '../../src/core/store.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -126,4 +128,98 @@ test('an unbound Main Agent can propose, receive approval, and install a capabil
     status: 'available',
   });
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('已安装');
+}, 120_000);
+
+test('full access auto-approves a capability proposal and lets the same Main Agent apply it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-system-auto-approval-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const proposalChange = {
+    kind: 'capability',
+    capability: {
+      manifest: {
+        id: 'auto-approved-mcp',
+        kind: 'mcp',
+        version: '1.0.0',
+        name: 'Auto Approved MCP',
+        description: 'A capability installed through full access mode',
+        url: 'https://example.test/mcp',
+      },
+    },
+  };
+  let runtime: Awaited<ReturnType<typeof openTaskRuntime>>;
+  const provider = await openaiServer([
+    {
+      tools: [{
+        id: 'propose-system-change',
+        name: 'propose_system_change',
+        arguments: JSON.stringify({
+          title: '安装自动批准 MCP',
+          problem: '完全访问模式下应自动批准系统变更。',
+          changeJson: JSON.stringify(proposalChange),
+          impact: '后续配方可以绑定它。',
+          risk: '仅测试。',
+        }),
+      }],
+    },
+    {
+      tools: [{
+        id: 'apply-system-change',
+        name: 'apply_system_change',
+        arguments: () => {
+          const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+          const row = store.db.prepare(
+            "SELECT json_extract(data,'$.proposalId') AS proposalId FROM questions WHERE kind='system_change' ORDER BY rowid DESC LIMIT 1",
+          ).get() as { proposalId?: string } | undefined;
+          store.close();
+          if (!row?.proposalId) throw new Error('Auto-approved proposal is not available yet');
+          return JSON.stringify({ proposalId: row.proposalId });
+        },
+      }],
+    },
+    { text: '自动批准并安装完成。' },
+  ]);
+  cleanup.push(() => provider.close());
+  runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    access: () => fullAccessPolicy(),
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    systemContext: {
+      systemSummary: async () => ({
+        configuredModels: [{ id: 'local', grade: 'high' }],
+        capabilities: { root: capabilityRoot, entries: 0 },
+      }),
+    },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({
+    text: '安装自动批准 MCP。',
+    requestId: 'system-auto-create',
+  });
+  await runtime.host.runReady();
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.questions.find(question => question.kind === 'system_change')).toMatchObject({
+    status: 'resolved',
+    answer: { type: 'respond', value: { decision: 'approved' } },
+  });
+  expect(runtime.catalog.capability('auto-approved-mcp')).toMatchObject({
+    id: 'auto-approved-mcp',
+    status: 'available',
+  });
 }, 120_000);

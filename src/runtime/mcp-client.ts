@@ -16,6 +16,13 @@ export interface StdioEndpoint {
     networkDomains?: string[];
     allowUnrestrictedNetwork?: boolean;
     allowGitMetadataWrites?: string[];
+    allowGitMetadataWritesAll?: boolean;
+    allowLocalBinding?: boolean;
+    allowAllUnixSockets?: boolean;
+    allowAppleEvents?: boolean;
+    filesystem?: 'bounded' | 'host';
+    protectedPaths?: string[];
+    protectedPathExceptions?: string[];
     keepStdinOpen?: boolean;
     onSpawn?: (process: { kill(signal?: NodeJS.Signals): boolean; end(): void }) => void;
     onStdout?: (chunk: string) => void;
@@ -32,6 +39,13 @@ export interface StdioEndpoint {
   networkDomains?: string[];
   allowUnrestrictedNetwork?: boolean;
   allowGitMetadataWrites?: string[];
+  allowGitMetadataWritesAll?: boolean;
+  allowLocalBinding?: boolean;
+  allowAllUnixSockets?: boolean;
+  allowAppleEvents?: boolean;
+  filesystem?: 'bounded' | 'host';
+  protectedPaths?: string[];
+  protectedPathExceptions?: string[];
 }
 
 export interface HttpEndpoint {
@@ -100,6 +114,13 @@ export function stdioExchange(endpoint: StdioEndpoint): McpExchange {
           ...(endpoint.networkDomains?.length ? { networkDomains: endpoint.networkDomains } : {}),
           ...(endpoint.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
           ...(endpoint.allowGitMetadataWrites?.length ? { allowGitMetadataWrites: endpoint.allowGitMetadataWrites } : {}),
+          ...(endpoint.allowGitMetadataWritesAll ? { allowGitMetadataWritesAll: true } : {}),
+          ...(endpoint.allowLocalBinding ? { allowLocalBinding: true } : {}),
+          ...(endpoint.allowAllUnixSockets ? { allowAllUnixSockets: true } : {}),
+          ...(endpoint.allowAppleEvents ? { allowAppleEvents: true } : {}),
+          ...(endpoint.filesystem ? { filesystem: endpoint.filesystem } : {}),
+          ...(endpoint.protectedPaths?.length ? { protectedPaths: endpoint.protectedPaths } : {}),
+          ...(endpoint.protectedPathExceptions?.length ? { protectedPathExceptions: endpoint.protectedPathExceptions } : {}),
           keepStdinOpen: true,
           onSpawn: process => { processControl = process; },
           onStdout: (chunk) => {

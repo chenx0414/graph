@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -14,6 +15,7 @@ import {
   type MessageRow,
 } from './conversation.ts';
 import { Execution } from './execution.ts';
+import { resolveAccessPolicy, type AccessPolicy } from './access-policy.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
 import { acquireOwner } from './owner.ts';
@@ -129,6 +131,8 @@ export async function openTaskRuntime(options: {
   /** Default per-instance budget for new instances. null/absent means no
    * cumulative token cap; a positive integer keeps the finite-budget gate. */
   limits?: { defaultBudgetTokens?: number | null };
+  /** Hot-reloadable access policy used for the next admitted operation. */
+  access?: () => AccessPolicy | undefined;
   /** Hot-reloadable configuration view. When present, entries, preferences,
    * credential bindings, master model, projects and default budget are read
    * per use instead of from the static options captured at startup. */
@@ -336,6 +340,11 @@ export async function openTaskRuntime(options: {
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
       ...(options.program ? { program: options.program } : {}),
+      access: () => resolveAccessPolicy(options.access?.(), {
+        home: homedir(),
+        stateDir,
+        graphHome: options.catalog?.capabilityRoot ? resolve(options.catalog.capabilityRoot, '..') : resolve(homedir(), '.graph'),
+      }),
       ...(options.systemContext ? {
         systemContext: {
           resources: true,

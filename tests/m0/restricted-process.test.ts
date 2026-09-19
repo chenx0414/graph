@@ -98,6 +98,77 @@ test('worker preparation writes only to its granted scratch directory, even with
   } finally { broker.close(); }
 });
 
+test('host filesystem mode reaches outside the workspace while protected paths stay denied', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-filesystem-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const outside = join(root, 'outside.txt'); await writeFile(outside, 'outside');
+  await mkdir(join(workspace, '.git'));
+  const gitHead = join(workspace, '.git', 'HEAD'); await writeFile(gitHead, 'ref: refs/heads/main\n');
+  const protectedDir = join(root, 'protected'); await mkdir(protectedDir);
+  const protectedFile = join(protectedDir, 'state.sqlite'); await writeFile(protectedFile, 'formal');
+  const scratch = join(root, 'scratch'); await mkdir(scratch);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  const script = `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const results = {};
+    const attempt = (key, action) => { try { action(); results[key] = 'allowed'; } catch { results[key] = 'denied'; } };
+    attempt('outsideRead', () => readFileSync(${JSON.stringify(outside)}, 'utf8'));
+    attempt('outsideWrite', () => writeFileSync(${JSON.stringify(join(root, 'created.txt'))}, 'created'));
+    attempt('protectedRead', () => readFileSync(${JSON.stringify(protectedFile)}, 'utf8'));
+    attempt('protectedWrite', () => writeFileSync(${JSON.stringify(join(protectedDir, 'new.sqlite'))}, 'bad'));
+    attempt('gitWrite', () => writeFileSync(${JSON.stringify(gitHead)}, 'ref: refs/heads/changed\\n'));
+    console.log(JSON.stringify(results));
+  `;
+  await writeFile(join(workspace, 'probe.mjs'), script);
+  try {
+    const result = await executor.run({
+      broker,
+      cwd: workspace,
+      scratchDir: scratch,
+      executable: process.execPath,
+      args: ['probe.mjs'],
+      filesystem: 'host',
+      protectedPaths: [protectedDir],
+      readPaths: [],
+      writePaths: [],
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      outsideRead: 'allowed',
+      outsideWrite: 'allowed',
+      protectedRead: 'denied',
+      protectedWrite: 'denied',
+      gitWrite: 'denied',
+    });
+    expect(await readFile(join(root, 'created.txt'), 'utf8')).toBe('created');
+    expect(await readFile(protectedFile, 'utf8')).toBe('formal');
+    expect(await readFile(gitHead, 'utf8')).toBe('ref: refs/heads/main\n');
+  } finally { broker.close(); }
+});
+
+test('host filesystem mode writes Git metadata only through the explicit high-risk switch', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-git-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(join(workspace, '.git'), { recursive: true });
+  const scratch = join(root, 'scratch'); await mkdir(scratch);
+  const head = join(workspace, '.git', 'HEAD'); await writeFile(head, 'ref: refs/heads/main\n');
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const result = await executor.run({
+      broker,
+      cwd: workspace,
+      scratchDir: scratch,
+      executable: process.execPath,
+      args: ['-e', `require('fs').writeFileSync(${JSON.stringify(head)}, 'ref: refs/heads/high-risk\\n')`],
+      filesystem: 'host',
+      allowGitMetadataWritesAll: true,
+      readPaths: [],
+      writePaths: [],
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(await readFile(head, 'utf8')).toBe('ref: refs/heads/high-risk\n');
+  } finally { broker.close(); }
+});
+
 test('Graph-managed provisioning caches may write VCS metadata without weakening workspace Git protection', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-provisioning-cache-'))); dirs.push(root);
   const workspace = join(root, 'workspace'); await mkdir(workspace);

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { RuntimeError } from '../core/types.ts';
+import { defaultAccessPolicy, parseAccessPolicy, type AccessPolicy } from '../core/access-policy.ts';
 import { MODEL_THINKING_LEVELS, type ModelApi, type ModelCost, type ModelEntry, type ModelGrade, type ModelPricing, type ModelThinkingLevel } from '../catalog/models.ts';
 
 /** Versioned on-disk configuration. Secrets are never stored here; a credential
@@ -30,13 +31,22 @@ export interface GraphConfig {
   models: { entries: ConfiguredModel[]; preferences: Partial<Record<ModelGrade, string[]>> } | null;
   credentials: Record<string, CredentialConfig>;
   limits: LimitsConfig;
+  access: AccessPolicy;
 }
 
 const GRADES: ModelGrade[] = ['low', 'medium', 'high', 'highest'];
 const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function emptyGraphConfig(): GraphConfig {
-  return { path: null, configured: false, projects: [], models: null, credentials: {}, limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null } };
+  return {
+    path: null,
+    configured: false,
+    projects: [],
+    models: null,
+    credentials: {},
+    limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
+    access: defaultAccessPolicy(),
+  };
 }
 
 export function defaultConfigPath(cwd: string) {
@@ -250,7 +260,15 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
     models = { entries, preferences };
   }
 
-  return { path: configPath, configured: true, projects, models, credentials, limits };
+  return {
+    path: configPath,
+    configured: true,
+    projects,
+    models,
+    credentials,
+    limits,
+    access: parseAccessPolicy(root.access, 'access'),
+  };
 }
 
 export async function loadGraphConfig(configPath: string): Promise<GraphConfig> {

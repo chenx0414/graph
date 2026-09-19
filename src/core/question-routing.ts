@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { conversationForTask } from './conversation.ts';
 import { openUserWait } from './time-ledger.ts';
-import type { Json } from './types.ts';
+import type { Answer, Json } from './types.ts';
 
 export type QuestionOwner = 'user' | 'main';
 
@@ -51,6 +51,11 @@ export function insertQuestion(store: TaskStore, input: {
   operationId?: string | null;
   kind: string;
   data: Json;
+  autoAnswer?: {
+    answer: Answer;
+    policyDigest: string;
+    resume?: boolean;
+  };
 }) {
   const id = randomUUID();
   const preferred = questionOwner(input.kind, input.data);
@@ -66,7 +71,30 @@ export function insertQuestion(store: TaskStore, input: {
     'INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)',
   ).run(id, input.taskId, input.nodeId, input.operationId ?? null, input.kind, canonicalJson(input.data), owner);
 
-  if (owner === 'main' && conversation && master) {
+  if (input.autoAnswer) {
+    if (input.kind === 'permission' && input.autoAnswer.answer.type === 'grant') {
+      const requested = record(input.data)?.grant;
+      if (input.autoAnswer.answer.grant !== requested) {
+        throw new Error('Automatic grant must match the requested capability');
+      }
+      store.db.prepare('INSERT OR IGNORE INTO task_grants VALUES(?,?)').run(input.taskId, input.autoAnswer.answer.grant);
+    }
+    store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?")
+      .run(canonicalJson(input.autoAnswer.answer), id);
+    if (input.autoAnswer.resume) {
+      store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(input.taskId, input.nodeId);
+      store.db.prepare("UPDATE activations SET state='pending' WHERE id=(SELECT activation_id FROM nodes WHERE task_id=? AND id=?)")
+        .run(input.taskId, input.nodeId);
+    }
+    store.event(input.taskId, 'question.auto_approved', {
+      questionId: id,
+      nodeId: input.nodeId,
+      operationId: input.operationId ?? null,
+      kind: input.kind,
+      answer: input.autoAnswer.answer as unknown as Json,
+      policyDigest: input.autoAnswer.policyDigest,
+    });
+  } else if (owner === 'main' && conversation && master) {
     const routing = {
       questionId: id,
       taskId: input.taskId,
@@ -85,13 +113,15 @@ export function insertQuestion(store: TaskStore, input: {
     openUserWait(store, input.taskId, input.nodeId);
   }
 
-  store.event(input.taskId, 'question.opened', {
-    nodeId: input.nodeId,
-    kind: input.kind,
-    data: input.data,
-    operationId: input.operationId ?? null,
-    questionId: id,
-    owner,
-  });
+  if (!input.autoAnswer) {
+    store.event(input.taskId, 'question.opened', {
+      nodeId: input.nodeId,
+      kind: input.kind,
+      data: input.data,
+      operationId: input.operationId ?? null,
+      questionId: id,
+      owner,
+    });
+  }
   return { id, owner };
 }

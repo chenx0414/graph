@@ -297,6 +297,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }));
     return {
       configuredModels: configured,
+      access: live.access(),
       agentCombinations: graphServer?.runtime.catalog.agentCombinations() ?? catalogCombinations,
       agentDefinitions: graphServer?.runtime.catalog.availableAgentDefinitions() ?? [],
       architectures: GRAPH_ARCHITECTURES,
@@ -384,6 +385,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       ...(bootstrap.toolPrompt ? { bootstrapToolPrompt: bootstrap.toolPrompt } : {}),
     },
     limits: { defaultBudgetTokens: live.defaultBudgetTokens() },
+    access: () => live.access(),
     config: { revision: () => live.revision() },
     autoDrive: options.mode === 'execute' || options.dynamic === true,
     port: options.port,

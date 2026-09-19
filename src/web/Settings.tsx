@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { Setup } from './Setup.tsx';
 import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
+import type { AccessPolicy } from '../core/access-policy.ts';
+import { FULL_ACCESS_CONFIRMATION } from '../core/access-confirmation.ts';
 
 type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -19,6 +21,7 @@ type RawConfig = {
   models?: { entries: RawModel[] };
   credentials?: Record<string, RawCredential>;
   limits?: { credentials?: Record<string, number>; sharedGroups?: Record<string, number> };
+  access?: AccessPolicy;
 };
 type ConfigResponse = { revision: number; config: RawConfig & { path: string | null; credentials?: Record<string, RawCredential & { configured?: boolean }> } };
 type TestResult = { ok: boolean; model?: string; credentialId?: string; status?: number; latencyMs?: number; message?: string };
@@ -49,6 +52,24 @@ type UsageResponse = { plans: SubscriptionPlan[] };
 type ApiError = Error & { code?: string; field?: string };
 
 const GRADES = ['low', 'medium', 'high', 'highest'];
+
+const STANDARD_ACCESS: AccessPolicy = {
+  mode: 'standard',
+  autoApprove: { permission: false, systemChange: false },
+  filesystem: { read: 'workspace-and-bound', write: 'workspace-and-bound', gitMetadata: 'protected', credentialStores: 'protected' },
+  network: 'declared',
+  commands: 'allowlisted',
+  piExtensions: { runtime: 'declared', localBinding: false, unixSockets: 'declared', appleEvents: false },
+};
+
+const FULL_ACCESS: AccessPolicy = {
+  mode: 'full',
+  autoApprove: { permission: true, systemChange: true },
+  filesystem: { read: 'host', write: 'host', gitMetadata: 'protected', credentialStores: 'protected' },
+  network: 'unrestricted',
+  commands: 'host',
+  piExtensions: { runtime: 'host', localBinding: true, unixSockets: 'all', appleEvents: false },
+};
 
 function emptyModel(): RawModel {
   return {
@@ -122,6 +143,7 @@ function toDraft(config: ConfigResponse['config']): RawConfig {
     ...(config.models ? { models: { entries: config.models.entries } } : {}),
     credentials,
     limits: config.limits ?? {},
+    access: config.access ?? STANDARD_ACCESS,
   };
 }
 
@@ -290,6 +312,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
     { id: 'settings-overview', label: '常规' },
     { id: 'settings-git', label: 'Git 准备' },
     { id: 'settings-models', label: '模型' },
+    { id: 'settings-access', label: '访问模式' },
     { id: 'settings-archived', label: '归档对话' },
   ];
   const visibleSections = sections.filter(section => section.label.toLowerCase().includes(search.trim().toLowerCase()));
@@ -351,6 +374,8 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [plansError, setPlansError] = useState('');
+  const [accessPhrase, setAccessPhrase] = useState('');
+  const accessConfirmed = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saveInFlight = useRef(false);
   const savePending = useRef(false);
@@ -370,6 +395,8 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
       const detected = detectedResponse.credentials;
       const merged = mergeSubscriptionCredentials(toDraft(response.config), detected);
       const next = merged.config;
+      accessConfirmed.current = next.access?.mode === 'full';
+      setAccessPhrase('');
       clearTimeout(saveTimer.current);
       editVersion.current = merged.changed ? 1 : 0;
       savePending.current = false;
@@ -410,7 +437,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
   }, []);
   useEffect(() => { void api<Startup>('/api/startup').then(startup => setEffectiveRevision(startup.effectiveRevision ?? null)).catch(() => undefined); }, []);
 
-  const configurationPage = ['settings-overview', 'settings-git', 'settings-models'].includes(active);
+  const configurationPage = ['settings-overview', 'settings-git', 'settings-models', 'settings-access'].includes(active);
   if (!configurationPage) return <div className="settings-page-empty" data-testid="settings-page" data-page={active} />;
   if (!draft) return (
     <div className="settings-page-loading" data-testid="settings-page" data-page={active}>
@@ -441,7 +468,11 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
     try {
       const response = await api<{ revision: number; effectiveRevision?: number; restartRequired: boolean; applied?: boolean; reason?: string; configured?: boolean }>('/api/config', {
         method: 'POST',
-        body: JSON.stringify({ expectedRevision, document: { ...document, version: 1 } }),
+        body: JSON.stringify({
+          expectedRevision,
+          document: { ...document, version: 1 },
+          ...(accessConfirmed.current ? { accessConfirmation: FULL_ACCESS_CONFIRMATION } : {}),
+        }),
       });
       latestRevision.current = response.revision;
       setRevision(response.revision);
@@ -584,6 +615,91 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
 
       {active === 'settings-git' && <section id="settings-git" className="settings-section">
       <ProjectGitCard />
+      </section>}
+
+      {active === 'settings-access' && <section id="settings-access" className="settings-section">
+        <Card title="完全访问模式" icon="settings" subtitle="运行中的操作保留创建时的策略；修改只影响下一次准入">
+          <div className="chip-row">
+            <Pill tone={draft.access?.mode === 'full' ? 'danger' : 'success'} testid="access-mode">
+              {draft.access?.mode === 'full' ? '完全访问' : '标准访问'}
+            </Pill>
+            <Pill tone="info">策略冻结于 operation</Pill>
+          </div>
+          {draft.access?.mode !== 'full' ? <>
+            <p className="field-hint">
+              自动批准运行授权和系统变更，开放宿主工作路径、任意命令、网络、Pi extension 本地绑定与 Unix socket。
+              凭据库、Graph 状态和 Git metadata 默认继续受保护。
+            </p>
+            <Field label={`输入 ${FULL_ACCESS_CONFIRMATION} 以启用`}>
+              <input
+                className="input"
+                style={{ width: 320 }}
+                data-testid="access-confirmation"
+                value={accessPhrase}
+                onChange={event => setAccessPhrase(event.target.value)}
+              />
+            </Field>
+            <div className="row" style={{ marginTop: 8 }}>
+              <Button
+                variant="danger"
+                data-testid="access-enable-full"
+                disabled={accessPhrase !== FULL_ACCESS_CONFIRMATION}
+                onClick={() => {
+                  accessConfirmed.current = true;
+                  mutate(next => { next.access = structuredClone(FULL_ACCESS); });
+                  scheduleSave(0);
+                }}
+              >启用完全访问</Button>
+            </div>
+          </> : <>
+            <div className="row">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  data-testid="access-git-metadata"
+                  checked={draft.access.filesystem.gitMetadata === 'writable'}
+                  onChange={event => mutate(next => { next.access!.filesystem.gitMetadata = event.target.checked ? 'writable' : 'protected'; })}
+                />
+                <span>允许写 Git metadata</span>
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  data-testid="access-credential-stores"
+                  checked={draft.access.filesystem.credentialStores === 'readable'}
+                  onChange={event => mutate(next => { next.access!.filesystem.credentialStores = event.target.checked ? 'readable' : 'protected'; })}
+                />
+                <span>允许读取凭据库</span>
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  data-testid="access-apple-events"
+                  checked={draft.access.piExtensions.appleEvents}
+                  onChange={event => mutate(next => { next.access!.piExtensions.appleEvents = event.target.checked; })}
+                />
+                <span>允许 Apple Events 与启动外部应用</span>
+              </label>
+            </div>
+            <p className="field-hint">
+              当前：宿主文件系统、任意命令、无限制网络、全部 Unix socket。
+              Apple Events 会启动 sandbox 外应用，是高风险管理能力。
+            </p>
+            <div className="row" style={{ marginTop: 8 }}>
+              <Button
+                variant="danger"
+                data-testid="access-disable-full"
+                onClick={() => {
+                  accessConfirmed.current = false;
+                  setAccessPhrase('');
+                  mutate(next => { next.access = structuredClone(STANDARD_ACCESS); });
+                  scheduleSave(0);
+                }}
+              >回退到标准访问</Button>
+            </div>
+          </>}
+          {error?.code === 'confirmation_required' && <p className="field-error" data-testid="access-confirmation-error">{error.message}</p>}
+        </Card>
       </section>}
 
       {active === 'settings-models' && <section className="settings-feature">

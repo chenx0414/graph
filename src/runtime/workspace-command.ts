@@ -1,8 +1,9 @@
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RuntimeError } from '../core/types.ts';
+import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 
 const READ_ONLY_GIT = new Set(['status', 'diff', 'log', 'show']);
@@ -74,6 +75,20 @@ export function validateWorkspaceCommand(command: string, args: string[]): Resol
   throw new RuntimeError('permission', `Command ${command} is not allowed in a work copy`);
 }
 
+function resolveHostCommand(command: string, args: string[]): ResolvedCommand {
+  if (command === 'node') return resolveNodeCommand(args);
+  const candidates = command.includes('/')
+    ? [command]
+    : (process.env.PATH ?? '').split(':').filter(Boolean).map(directory => `${directory}/${command}`);
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return { executable: candidate, args };
+    } catch { /* keep looking */ }
+  }
+  throw new RuntimeError('permission', `Command ${command} was not found on PATH`);
+}
+
 /**
  * Build/test entry point for an Agent work copy.
  *
@@ -87,13 +102,15 @@ export async function openWorkspaceCommandRunner(input: {
   readPaths?: string[];
   env?: Record<string, string>;
   localNetwork?: boolean;
+  access?: ResolvedAccessPolicy;
 }) {
   const workspace = await realpath(input.workspace);
   let acquired: Awaited<ReturnType<typeof acquireRestrictedExecutor>> | undefined;
   let closed = false;
   return {
     async run(command: string, args: string[]): Promise<CommandResult> {
-      const resolved = validateWorkspaceCommand(command, args);
+      const hostCommands = input.access?.commands === 'host';
+      const resolved = hostCommands ? resolveHostCommand(command, args) : validateWorkspaceCommand(command, args);
       if (!acquired) acquired = await acquireRestrictedExecutor();
       await mkdir(input.scratchDir, { recursive: true, mode: 0o700 });
       const scratchDir = await realpath(input.scratchDir);
@@ -103,6 +120,15 @@ export async function openWorkspaceCommandRunner(input: {
         executable: resolved.executable, args: resolved.args,
         readPaths: [workspace, dirname(resolved.executable), ...(resolved.readPaths ?? []), ...(input.readPaths ?? [])],
         writePaths: [workspace, scratchDir],
+        ...(hostCommands ? {
+          filesystem: 'host' as const,
+          protectedPaths: input.access?.protectedPaths ?? [],
+          allowUnrestrictedNetwork: input.access?.network === 'unrestricted',
+          allowLocalBinding: input.access?.piExtensions.localBinding === true,
+          allowAllUnixSockets: input.access?.piExtensions.unixSockets === 'all',
+          allowAppleEvents: input.access?.piExtensions.appleEvents === true,
+          allowGitMetadataWritesAll: input.access?.filesystem.gitMetadata === 'writable',
+        } : {}),
         timeoutMs: 120_000,
         ...(Object.keys(environment).length ? { env: environment } : {}),
         ...(input.localNetwork ? { localNetwork: true } : {}),

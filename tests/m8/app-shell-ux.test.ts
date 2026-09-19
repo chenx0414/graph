@@ -765,8 +765,8 @@ test('a coarse streamed delta is revealed progressively instead of landing as on
   await page.goto(`${server.url}/#/conversations/coarse-stream`);
   const streaming = page.getByTestId('streaming');
   await streaming.waitFor();
+  await expect.poll(async () => Number(await streaming.getAttribute('data-reveal-length'))).toBeGreaterThan(0);
   const firstLength = Number(await streaming.getAttribute('data-reveal-length'));
-  expect(firstLength).toBeGreaterThan(0);
   expect(firstLength).toBeLessThan(fullText.length);
   await expect.poll(
     () => streaming.getAttribute('data-reveal-length').then(Number),

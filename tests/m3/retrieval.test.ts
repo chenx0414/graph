@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -45,7 +46,7 @@ async function retrievalServer() {
   };
 }
 
-async function retrievalTask(plans: ResponsePlan[], network: { retrievalDomains?: string[] } | undefined = { retrievalDomains: ['127.0.0.1'] }) {
+async function retrievalTask(plans: ResponsePlan[], network: { retrievalDomains?: string[]; unrestricted?: boolean } | undefined = { retrievalDomains: ['127.0.0.1'] }) {
   const root = await mkdtemp(join(tmpdir(), 'graph-retrieval-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'project');
@@ -54,7 +55,8 @@ async function retrievalTask(plans: ResponsePlan[], network: { retrievalDomains?
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
-    network,
+    network: network?.retrievalDomains ? { retrievalDomains: network.retrievalDomains } : {},
+    ...(network?.unrestricted ? { access: () => fullAccessPolicy() } : {}),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
     actions: { check: { kind: 'program', prepare: async () => async () => ({
       outcome: 'completed', output: null,
@@ -142,4 +144,15 @@ test('no retrieval tool is exposed without granted domains', async () => {
   const { runtime, provider } = await retrievalTask([{ text: 'Nothing to do.' }], {});
   await runtime.host.drive();
   expect(JSON.stringify(provider.requests[0])).not.toContain('"name":"fetch"');
+});
+
+test('full access exposes retrieval for any host while keeping redirect and content bounds', async () => {
+  const server = await retrievalServer();
+  cleanup.push(() => server.close());
+  const { runtime, provider, task } = await retrievalTask(fetchPlan(`${server.base}/text`), { unrestricted: true });
+  await runtime.host.drive();
+  expect((await task.view()).questions).toEqual([]);
+  expect(provider.requests).toHaveLength(2);
+  expect(JSON.stringify(provider.requests[1])).toContain('retrieval body');
+  expect(server.hits).toEqual(['/text']);
 });

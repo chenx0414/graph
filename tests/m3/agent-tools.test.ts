@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { agentTools } from '../../src/runtime/agent-tools.ts';
 import { Catalog } from '../../src/catalog/catalog.ts';
+import { fullAccessPolicy, resolveAccessPolicy } from '../../src/core/access-policy.ts';
 import { TaskStore } from '../../src/core/store.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -71,6 +72,30 @@ test('a workspace tool still creates nested files and lists directories inside t
   });
   expect((await call('read', { path: 'src/web/index.html' })).content[0]).toMatchObject({ text: '<html>ok</html>' });
   expect((await call('read', { path: join(await realpath(scope), 'src/web/index.html') })).content[0]).toMatchObject({ text: '<html>ok</html>' });
+});
+
+test('full access reads and writes host paths while protected state stays unavailable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-full-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const scope = join(root, 'workspace');
+  const stateDir = join(root, 'state');
+  const graphHome = join(root, 'graph');
+  await mkdir(scope);
+  await mkdir(stateDir);
+  await mkdir(graphHome);
+  await writeFile(join(root, 'outside.txt'), 'outside');
+  await writeFile(join(stateDir, 'tasks.sqlite'), 'formal');
+  const access = resolveAccessPolicy(fullAccessPolicy(), { home: root, stateDir, graphHome });
+  const tools = agentTools({ workspace: scope, access });
+  const call = (name: string, params: Record<string, unknown>) =>
+    (tools.find(item => item.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { type: string; text?: string }[] }>)('probe', params);
+
+  expect((await call('read', { path: join(root, 'outside.txt') })).content[0]).toMatchObject({ text: 'outside' });
+  await expect(call('write_file', { path: join(root, 'created.txt'), content: 'created' }))
+    .resolves.toMatchObject({ details: {} });
+  expect(await readFile(join(root, 'created.txt'), 'utf8')).toBe('created');
+  await expect(call('read', { path: join(stateDir, 'tasks.sqlite') })).rejects.toThrow(/protected/i);
+  await expect(call('write_file', { path: join(stateDir, 'new.sqlite'), content: 'bad' })).rejects.toThrow(/protected/i);
 });
 
 test('the main Agent cannot author composer suggestions as part of its reply', async () => {

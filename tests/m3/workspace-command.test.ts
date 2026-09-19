@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { fullAccessPolicy, resolveAccessPolicy } from '../../src/core/access-policy.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { openWorkspaceCommandRunner, resolveNodeCommand, validateWorkspaceCommand } from '../../src/runtime/workspace-command.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -215,4 +216,28 @@ test('checks can resolve loopback host names inside the sandbox', async () => {
   const result = await runner.run('node', ['resolve.mjs']);
   expect(result.code, result.stderr || result.stdout).toBe(0);
   expect(result.stdout.trim()).toMatch(/^(127\.0\.0\.1|::1)$/);
+});
+
+test('full access commands may execute outside the workspace allowlist', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-command-full-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  const output = join(root, 'outside.txt');
+  await mkdir(workspace);
+  const access = resolveAccessPolicy(fullAccessPolicy(), {
+    home: root,
+    stateDir: join(root, 'state'),
+    graphHome: join(root, 'graph'),
+  });
+  const runner = await openWorkspaceCommandRunner({
+    workspace,
+    scratchDir: join(root, 'scratch'),
+    access,
+    gate: { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
+  });
+  cleanup.push(() => runner.close());
+
+  const result = await runner.run('node', ['-e', `require('fs').writeFileSync(${JSON.stringify(output)}, 'outside')`]);
+  expect(result.code, result.stderr).toBe(0);
+  expect(await readFile(output, 'utf8')).toBe('outside');
 });

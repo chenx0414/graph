@@ -58,11 +58,16 @@ export interface AgentSessionRequest {
   skillPaths?: string[];
   readRoots?: string[];
   writeRoots?: string[];
+  filesystemAccess?: 'bounded' | 'host';
+  protectedPaths?: string[];
+  allowGitMetadataWritesAll?: boolean;
   env?: Record<string, string>;
   networkDomains?: string[];
   allowUnrestrictedNetwork?: boolean;
   allowLocalBinding?: boolean;
   unixSockets?: string[];
+  allowAllUnixSockets?: boolean;
+  allowAppleEvents?: boolean;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
   systemPrompt?: string;

@@ -11,6 +11,7 @@ import { normalizeDomainPattern } from '../core/domains.ts';
 import { isLocalMcpCommand, LOCAL_MCP_COMMANDS } from '../core/mcp-commands.ts';
 import { canonicalJson } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
+import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
 import { allowedDomain, normalizeDomains } from './domains.ts';
 import { externallyGated } from './pi-instance.ts';
@@ -650,11 +651,13 @@ async function localConnection(input: {
   manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
   networkDomains?: string[];
   allowUnrestrictedNetwork?: boolean;
+  access?: ResolvedAccessPolicy;
   secrets?: CapabilitySecrets;
   provisioning?: { plan: McpProvisioningPlan; phase: 'provision' | 'runtime' };
   timeoutMs?: number;
+  hostCommands?: boolean;
 }): Promise<McpExchange> {
-  const resolved = await resolveLocalMcpCommand(input.manifest.command);
+  const resolved = await resolveLocalMcpCommand(input.manifest.command, input.hostCommands === true);
   const args = Array.isArray(input.manifest.args) && input.manifest.args.every(value => typeof value === 'string') ? input.manifest.args as string[] : [];
   const grants = await runGrants(input.workspace, input.scratchDir);
   const env = {
@@ -662,6 +665,11 @@ async function localConnection(input: {
     ...(input.provisioning ? mcpProvisioningEnvironment(input.provisioning.plan, input.provisioning.phase) : {}),
   };
   const provisioningPaths = input.provisioning ? [input.provisioning.plan.root] : [];
+  const protectedPathExceptions = [
+    input.snapshot,
+    ...resolved.readPaths,
+    ...provisioningPaths,
+  ];
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
     command: resolved.executable,
@@ -674,6 +682,15 @@ async function localConnection(input: {
     timeoutMs: input.timeoutMs ?? 30_000,
     ...(input.networkDomains?.length ? { networkDomains: input.networkDomains } : {}),
     ...(input.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
+    ...(input.access ? {
+      filesystem: input.access.filesystem.read === 'host' || input.access.filesystem.write === 'host' ? 'host' as const : 'bounded' as const,
+      protectedPaths: input.access.protectedPaths,
+      ...(protectedPathExceptions.length ? { protectedPathExceptions } : {}),
+      allowGitMetadataWritesAll: input.access.filesystem.gitMetadata === 'writable',
+      allowLocalBinding: input.access.piExtensions.localBinding,
+      allowAllUnixSockets: input.access.piExtensions.unixSockets === 'all',
+      allowAppleEvents: input.access.piExtensions.appleEvents,
+    } : {}),
   });
 }
 
@@ -685,6 +702,9 @@ async function ensureMcpProvisioned(input: {
   scratchDir: string;
   secrets?: CapabilitySecrets;
   runtimeDomains?: string[];
+  hostCommands?: boolean;
+  allowUnrestrictedNetwork?: boolean;
+  access?: ResolvedAccessPolicy;
 }): Promise<McpProvisioningPlan | undefined> {
   const plan = await mcpProvisioningPlan(input.manifest, input.snapshot, input.secrets);
   if (!plan) return undefined;
@@ -703,6 +723,9 @@ async function ensureMcpProvisioned(input: {
       provisioning: { plan, phase: 'provision' },
       networkDomains: [...new Set([...plan.domains, ...(input.runtimeDomains ?? [])])],
       timeoutMs: 120_000,
+      ...(input.hostCommands ? { hostCommands: true } : {}),
+      ...(input.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
+      ...(input.access ? { access: input.access } : {}),
     });
     await listMcpTools(connection);
     await writeFile(plan.readyFile, `${plan.key}\n`, { mode: 0o600 });
@@ -741,7 +764,7 @@ function findExecutable(command: string) {
   return undefined;
 }
 
-async function resolveLocalMcpCommand(value: unknown): Promise<{
+async function resolveLocalMcpCommand(value: unknown, hostCommands = false): Promise<{
   executable: string;
   argsPrefix: string[];
   readPaths: string[];
@@ -758,7 +781,7 @@ async function resolveLocalMcpCommand(value: unknown): Promise<{
       readPaths: localNodeReadPaths(runtime),
     };
   }
-  if (!isLocalMcpCommand(command) && !isAbsolute(command)) {
+  if (!hostCommands && !isLocalMcpCommand(command) && !isAbsolute(command)) {
     throw new RuntimeError(
       'capability_unavailable',
       `A local MCP command must be one of ${LOCAL_MCP_COMMANDS.join(', ')} or an absolute executable path`,
@@ -795,6 +818,7 @@ async function resolveLocalMcpCommand(value: unknown): Promise<{
 async function extensionConnection(input: {
   executor: Awaited<ReturnType<typeof acquireRestrictedExecutor>>['executor']; gate: SendGate;
   manifest: McpManifest; snapshot: string; workspace: string; scratchDir: string; readOnly?: boolean;
+  access?: ResolvedAccessPolicy;
 }): Promise<McpExchange> {
   const entryValue = typeof input.manifest.entry === 'string' && input.manifest.entry.trim() ? input.manifest.entry : './index.mjs';
   const entry = isAbsolute(entryValue) ? entryValue : resolve(input.snapshot, entryValue);
@@ -810,6 +834,15 @@ async function extensionConnection(input: {
     // Extension register() and every tool call share this restriction, so a
     // bound extension cannot write business files during discussion.
     writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],
+    ...(input.access ? {
+      filesystem: input.access.filesystem.read === 'host' || input.access.filesystem.write === 'host' ? 'host' as const : 'bounded' as const,
+      protectedPaths: input.access.protectedPaths,
+      protectedPathExceptions: [input.snapshot, entry, dirname(entry)],
+      allowGitMetadataWritesAll: input.access.filesystem.gitMetadata === 'writable',
+      allowLocalBinding: input.access.piExtensions.localBinding,
+      allowAllUnixSockets: input.access.piExtensions.unixSockets === 'all',
+      allowAppleEvents: input.access.piExtensions.appleEvents,
+    } : {}),
   });
 }
 
@@ -988,6 +1021,8 @@ export async function loadCapabilities(input: {
   /** APP/keychain values merged over the daemon environment for MCP config. */
   secrets?: CapabilitySecrets;
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
+  /** Effective host access policy for this operation. */
+  access?: ResolvedAccessPolicy;
 }): Promise<LoadedCapabilities> {
   const skillPaths: string[] = [];
   const piExtensionPaths: string[] = [];
@@ -1145,14 +1180,24 @@ export async function loadCapabilities(input: {
       if (record.kind === 'extension') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
-        connection = await extensionConnection({ executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir, ...(input.readOnly ? { readOnly: true } : {}) });
+        connection = await extensionConnection({
+          executor: acquired.executor,
+          gate: input.gate,
+          manifest,
+          snapshot,
+          workspace: input.workspace,
+          scratchDir: input.scratchDir,
+          ...(input.readOnly ? { readOnly: true } : {}),
+          ...(input.access ? { access: input.access } : {}),
+        });
         loadedReason = input.readOnly ? '只读讨论模式：本地扩展在 scratch 只读范围加载' : null;
       } else if (typeof manifest.command === 'string') {
-        if (manifest.networkAccess !== undefined && manifest.networkAccess !== 'unrestricted') {
+        const fullNetwork = input.access?.network === 'unrestricted';
+        if (!fullNetwork && manifest.networkAccess !== undefined && manifest.networkAccess !== 'unrestricted') {
           throw new RuntimeError('capability_unavailable', 'MCP networkAccess must be "unrestricted"');
         }
-        networkAccess = manifest.networkAccess === 'unrestricted' ? 'unrestricted' : undefined;
-        if (networkAccess && manifest.networkDomains !== undefined) {
+        networkAccess = fullNetwork || manifest.networkAccess === 'unrestricted' ? 'unrestricted' : undefined;
+        if (!fullNetwork && networkAccess && manifest.networkDomains !== undefined) {
           throw new RuntimeError('capability_unavailable', 'MCP cannot combine networkDomains with unrestricted network access');
         }
         networkDomains = networkAccess ? [] : manifestNetworkDomains(manifest, input.mcpDomains ?? [], input.secrets);
@@ -1170,6 +1215,9 @@ export async function loadCapabilities(input: {
           scratchDir: input.scratchDir,
           ...(input.secrets ? { secrets: input.secrets } : {}),
           ...(networkDomains.length ? { runtimeDomains: networkDomains } : {}),
+          ...(input.access?.commands === 'host' ? { hostCommands: true } : {}),
+          ...(fullNetwork ? { allowUnrestrictedNetwork: true } : {}),
+          ...(input.access ? { access: input.access } : {}),
         });
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
@@ -1177,9 +1225,11 @@ export async function loadCapabilities(input: {
           executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir,
           ...(input.readOnly ? { readOnly: true } : {}),
           ...(provisioning ? { provisioning: { plan: provisioning, phase: 'runtime' } } : {}),
+          ...(input.access?.commands === 'host' ? { hostCommands: true } : {}),
           ...(networkDomains.length ? { networkDomains } : {}),
           ...(networkAccess ? { allowUnrestrictedNetwork: true } : {}),
           ...(input.secrets ? { secrets: input.secrets } : {}),
+          ...(input.access ? { access: input.access } : {}),
         });
         loadedReason = input.readOnly ? '只读讨论模式：本地能力在只读范围加载' : null;
       } else {
@@ -1238,6 +1288,11 @@ export async function loadCapabilities(input: {
     await close();
     throw error;
   }
+  if (input.access?.network === 'unrestricted') {
+    runtimeNetworkDomains.clear();
+    runtimeUnrestrictedNetwork = true;
+  }
+  if (input.access?.piExtensions.localBinding) runtimeLocalBinding = true;
   return {
     skillPaths, piExtensionPaths, piExtensionTools, readRoots, writeRoots, env,
     networkDomains: [...runtimeNetworkDomains],

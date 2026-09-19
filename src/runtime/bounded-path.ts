@@ -1,11 +1,29 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, realpath, writeFile as writeFileHost } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 
 const GIT_METADATA = '.git';
 
+export interface BoundedPathOptions {
+  allowGitMetadata?: boolean;
+  allowSymlinks?: boolean;
+  protectedPaths?: string[];
+}
+
 function outside(): never { throw new Error('Path is outside the workspace'); }
+
+function within(root: string, target: string) {
+  return root === sep ? target.startsWith(sep) : target === root || target.startsWith(`${root}${sep}`);
+}
+
+function protectedPath(target: string, protectedPaths: string[]) {
+  return protectedPaths.some(path => target === path || target.startsWith(`${path}${sep}`));
+}
+
+function containsGitMetadata(target: string) {
+  return target.split(sep).includes(GIT_METADATA);
+}
 
 /**
  * Resolve a caller-supplied relative path under a trusted root.
@@ -17,7 +35,7 @@ function outside(): never { throw new Error('Path is outside the workspace'); }
 export async function resolveBounded(root: string, relative: string, mode: 'read' | 'write') {
   if (typeof relative !== 'string' || relative.length === 0 || relative.includes('\0')) throw new Error('A nonempty path is required');
   const target = resolve(root, relative);
-  if (target !== root && !target.startsWith(`${root}${sep}`)) outside();
+  if (!within(root, target)) outside();
   if (target === root) return target;
   const parts = target.slice(root.length + 1).split(sep);
   let current = root;
@@ -43,6 +61,53 @@ export async function resolveBounded(root: string, relative: string, mode: 'read
     if (await realpath(current) !== current) throw new Error(`Path changed while resolving ${part}`);
   }
   return target;
+}
+
+async function resolveHostPath(path: string, mode: 'read' | 'write', options: BoundedPathOptions = {}) {
+  if (typeof path !== 'string' || path.length === 0 || path.includes('\0')) throw new Error('A nonempty path is required');
+  if (!path.startsWith(sep)) throw new Error('Host access requires an absolute path');
+  const requested = resolve(path);
+  if (!options.allowGitMetadata && containsGitMetadata(requested)) throw new Error('Git metadata cannot be accessed through workspace tools');
+  if (protectedPath(requested, options.protectedPaths ?? [])) throw new Error('Path is protected by the current access policy');
+
+  let target: string;
+  try {
+    target = await realpath(requested);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || mode === 'read') throw error;
+    const parent = await realpath(dirname(requested));
+    target = join(parent, requested.slice(dirname(requested).length + 1));
+  }
+  if (!options.allowGitMetadata && containsGitMetadata(target)) throw new Error('Git metadata cannot be accessed through workspace tools');
+  if (protectedPath(target, options.protectedPaths ?? [])) throw new Error('Path is protected by the current access policy');
+  return target;
+}
+
+export async function readHost(path: string, options: BoundedPathOptions = {}) {
+  const target = await resolveHostPath(path, 'read', options);
+  const info = await lstat(target);
+  if (!info.isFile()) throw new Error('A file path is required');
+  return readFile(target, 'utf8');
+}
+
+export async function writeHost(path: string, content: string, options: BoundedPathOptions = {}) {
+  const target = await resolveHostPath(path, 'write', options);
+  const existing = await lstat(target).catch(() => undefined);
+  if (existing) {
+    if (existing.isSymbolicLink()) throw new Error('Path changed during write');
+    if (!existing.isFile()) throw new Error('A file path is required');
+    if (existing.nlink > 1) throw new Error('Refusing to overwrite a multiply-linked file');
+  } else {
+    await mkdir(dirname(target), { recursive: true });
+  }
+  await writeFileHost(target, content, 'utf8');
+}
+
+export async function listHost(path: string, options: BoundedPathOptions = {}) {
+  const target = await resolveHostPath(path, 'read', options);
+  const info = await lstat(target);
+  if (!info.isDirectory()) throw new Error('Not a directory');
+  return readdir(target);
 }
 
 async function openBounded(root: string, relative: string, mode: 'read' | 'write') {

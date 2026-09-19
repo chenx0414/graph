@@ -13,13 +13,13 @@ export interface RetrievalResult {
 
 const TEXTUAL = /^(text\/|application\/(json|xml|xhtml\+xml)|.*\+json)/;
 
-function checkedUrl(value: string, domains: string[]) {
+function checkedUrl(value: string, domains: string[], unrestricted = false) {
   let url: URL;
   try { url = new URL(value); }
   catch { throw new RuntimeError('retrieval_denied', `Not a valid URL: ${value}`); }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new RuntimeError('retrieval_denied', `Only http and https retrieval is allowed: ${url.protocol}`);
   if (url.username || url.password) throw new RuntimeError('retrieval_denied', 'URLs with embedded credentials are not allowed');
-  if (!allowedDomain(domains, url.hostname)) throw new RuntimeError('retrieval_denied', `Host ${url.hostname} is not in the granted retrieval domains`);
+  if (!unrestricted && !allowedDomain(domains, url.hostname)) throw new RuntimeError('retrieval_denied', `Host ${url.hostname} is not in the granted retrieval domains`);
   return url;
 }
 
@@ -58,12 +58,12 @@ async function readBody(response: Response, maxBytes: number) {
  * are limited to textual content, and the body is bounded. Each attempt passes
  * the same send gate as model calls, so pause and budget stop the next fetch.
  */
-export function createRetrievalBroker(input: { domains: string[]; gate: RestrictedGate; timeoutMs?: number; maxBytes?: number }) {
+export function createRetrievalBroker(input: { domains: string[]; gate: RestrictedGate; unrestricted?: boolean; timeoutMs?: number; maxBytes?: number }) {
   const domains = normalizeDomains(input.domains);
   return {
     domains,
     async fetch(urlText: string): Promise<RetrievalResult> {
-      const url = checkedUrl(urlText, domains);
+      const url = checkedUrl(urlText, domains, input.unrestricted === true);
       const invocationId = randomUUID();
       let failure: unknown;
       let result: RetrievalResult | undefined;

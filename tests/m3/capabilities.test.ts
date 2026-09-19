@@ -6,10 +6,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { CapabilityLibrary } from '../../src/catalog/capability-library.ts';
+import { Catalog } from '../../src/catalog/catalog.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { TaskStore } from '../../src/core/store.ts';
+import { fullAccessPolicy, resolveAccessPolicy } from '../../src/core/access-policy.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { capabilityConfigViews } from '../../src/catalog/capability-config.ts';
-import { verifyMcpCapability } from '../../src/runtime/capabilities.ts';
+import { loadCapabilities, verifyMcpCapability } from '../../src/runtime/capabilities.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -547,3 +550,80 @@ test('a packaged Electron runtime grants its own bundle frameworks to sandboxed 
   ]);
   expect(nodeReadPaths('/usr/local/bin/node', undefined)).toEqual(['/usr/local/bin']);
 });
+
+test('full access runs a previously disallowed MCP command and reaches a remote endpoint without a declared domain', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-mcp-full-access-')));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const bin = join(root, 'bin');
+  const workspace = join(root, 'workspace');
+  const scratch = join(root, 'scratch');
+  await mkdir(capabilityRoot, { recursive: true });
+  await mkdir(bin, { recursive: true });
+  await mkdir(workspace);
+  await mkdir(scratch);
+  await symlink(process.execPath, join(bin, 'custom-mcp'));
+  const local = join(capabilityRoot, 'local-custom');
+  await mkdir(local, { recursive: true });
+  await copyFile(join(fixtureDir, 'mcp-read-capability-server.mjs'), join(local, 'server.mjs'));
+  await writeFile(join(local, 'capability.json'), JSON.stringify({
+    id: 'local-custom',
+    kind: 'mcp',
+    version: '1.0.0',
+    name: 'Local custom command',
+    command: 'custom-mcp',
+    args: ['./server.mjs'],
+  }));
+  const remote = join(capabilityRoot, 'remote-open');
+  await mkdir(remote);
+  const remoteServer = await remoteMcp();
+  cleanup.push(() => remoteServer.close());
+  await writeFile(join(remote, 'capability.json'), JSON.stringify({
+    id: 'remote-open',
+    kind: 'mcp',
+    version: '1.0.0',
+    name: 'Remote without declaration',
+    url: remoteServer.url,
+  }));
+
+  const store = new TaskStore(join(root, 'catalog.sqlite'));
+  cleanup.push(async () => { store.close(); });
+  const catalog = new Catalog(store, { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') });
+  await catalog.refresh();
+  catalog.publishDefinition('coder', {
+    recommendedGrade: 'high',
+    capabilities: [
+      { id: 'local-custom', version: '1.0.0' },
+      { id: 'remote-open', version: '1.0.0' },
+    ],
+  });
+  const access = resolveAccessPolicy(fullAccessPolicy(), {
+    home: root,
+    stateDir: join(root, 'state'),
+    graphHome: join(root, 'graph'),
+  });
+  const gate = { dispatch: <T>(_id: string, _reservation: number, send: () => T) => send(), settle: () => undefined };
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath ?? ''}`;
+  try {
+    const loaded = await loadCapabilities({
+      catalog,
+      definitionVersion: 'coder@1',
+      workspace,
+      scratchDir: scratch,
+      gate,
+      access,
+    });
+    try {
+      expect(loaded.tools.map(tool => tool.name)).toEqual(expect.arrayContaining([
+        'mcp_local_custom_search_repositories',
+        'mcp_remote_open_echo',
+      ]));
+      expect(loaded.allowUnrestrictedNetwork).toBe(true);
+    } finally {
+      await loaded.close();
+    }
+  } finally {
+    process.env.PATH = originalPath;
+  }
+}, 120_000);

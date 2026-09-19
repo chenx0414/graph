@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
+import { resolveAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { assertWithinBudget, recordModelUse } from './budget-ledger.ts';
 import { conversationDigest, conversationForTask, deliverMessages, pendingMessages } from './conversation.ts';
 import { digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
@@ -7,6 +8,7 @@ import { loadGraph } from './graph.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
+import { insertQuestion } from './question-routing.ts';
 import { buildPredecessorHandoffs, outputSchemaForNode, renderPredecessorHandoffs, requiresResultHandoff } from './predecessor-handoff.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
@@ -33,12 +35,13 @@ export class Execution {
   private readonly scratchRoot?: string;
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean };
+  private readonly access?: () => ResolvedAccessPolicy;
   private readonly autoWake: boolean;
   private readonly generation: number;
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -48,6 +51,7 @@ export class Execution {
     if (extras.scratchRoot) this.scratchRoot = extras.scratchRoot;
     if (extras.program) this.program = extras.program;
     if (extras.systemContext) this.systemContext = extras.systemContext;
+    if (extras.access) this.access = extras.access;
     this.autoWake = Boolean(extras.autoWake);
     this.unsubscribeStore = store.onEvent(type => {
       if (this.autoWake && type === 'problem.routed') queueMicrotask(() => this.kick());
@@ -322,12 +326,29 @@ export class Execution {
       recordModelUse(this.store, node.instance_id, identity);
       if (spec.model && spec.model !== selected.id) this.store.event(node.task_id, 'model.switched', { nodeId: node.id, from: spec.model, to: selected.id, instanceId: node.instance_id });
     }
+    const accessPolicy = this.access?.() ?? resolveAccessPolicy(undefined);
     const baseGrants = JSON.parse((this.store.db.prepare('SELECT grants FROM projects WHERE id=?').get(this.store.task(node.task_id).project_id) as { grants: string }).grants) as string[];
     const grants = [...new Set([...baseGrants, ...(this.store.db.prepare('SELECT grant FROM task_grants WHERE task_id=?').all(node.task_id) as { grant: string }[]).map(row => row.grant)])];
     const requiredGrant = adapter.grant;
     if (requiredGrant && !grants.includes(requiredGrant)) {
-      this.store.transaction(() => this.block(node, 'permission', { grant: requiredGrant }));
-      return false;
+      if (accessPolicy.autoApprove.permission) {
+        this.store.transaction(() => {
+          insertQuestion(this.store, {
+            taskId: node.task_id,
+            nodeId: node.id,
+            kind: 'permission',
+            data: { grant: requiredGrant },
+            autoAnswer: {
+              answer: { type: 'grant', grant: requiredGrant },
+              policyDigest: accessPolicy.digest,
+            },
+          });
+        });
+        grants.push(requiredGrant);
+      } else {
+        this.store.transaction(() => this.block(node, 'permission', { grant: requiredGrant }));
+        return false;
+      }
     }
     if (occupiedSlots(this.store, spec.kind === 'agent' ? 'agent' : 'program') >= executionLimit(spec.kind === 'agent' ? 'agent' : 'program')) return false;
     const reservation = spec.kind === 'agent' ? adapter.reserveTokens : 0;
@@ -418,6 +439,7 @@ export class Execution {
               ...(agentContext ? { agentContext } : {}),
             },
             grants,
+            accessPolicy,
             activationId: node.activation_id,
             graphVersion: task.graph_version,
             dependencySources,

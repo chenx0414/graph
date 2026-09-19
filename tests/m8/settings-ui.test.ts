@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
+import { FULL_ACCESS_CONFIRMATION } from '../../src/core/access-confirmation.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -183,6 +184,35 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect((await (await restartedApi.get('/api/config')).text())).toBe(before);
   await openPage('常规');
   expect(await page.getByTestId('config-revision').innerText()).toBe('1');
+}, 120_000);
+
+test('settings enables and rolls back full access only after the typed confirmation', async () => {
+  const dir = await temp('access-mode');
+  const stub = await stubProvider();
+  const path = await configFile(dir, stub.baseUrl);
+  const daemon = await start(dir, path);
+  const api = await session(daemon.url);
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/settings`);
+  await page.getByTestId('settings-page').waitFor();
+  await page.locator('.settings-nav-item').filter({ hasText: '访问模式' }).click();
+  await page.getByTestId('access-mode').waitFor();
+  expect(await page.getByTestId('access-mode').innerText()).toContain('标准访问');
+
+  await page.getByTestId('access-confirmation').fill('not the phrase');
+  expect(await page.getByTestId('access-enable-full').isDisabled()).toBe(true);
+  await page.getByTestId('access-confirmation').fill(FULL_ACCESS_CONFIRMATION);
+  await page.getByTestId('access-enable-full').click();
+  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(1);
+  expect(await page.getByTestId('access-mode').innerText()).toContain('完全访问');
+  const full = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
+  expect(full.config.access).toMatchObject({ mode: 'full', filesystem: { read: 'host' } });
+
+  await page.getByTestId('access-disable-full').click();
+  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(2);
+  expect(await page.getByTestId('access-mode').innerText()).toContain('标准访问');
 }, 120_000);
 
 test('removing a model bound to an unfinished task is refused and the daemon keeps the binding', async () => {

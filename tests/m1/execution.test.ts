@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { defaultAccessPolicy, fullAccessPolicy, type AccessPolicy } from '../../src/core/access-policy.ts';
 import type { ActionAdapter } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -57,12 +58,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function singleAgent(actions: Record<string, ActionAdapter>) {
+async function singleAgent(actions: Record<string, ActionAdapter>, access?: () => AccessPolicy) {
   const root = await mkdtemp(join(tmpdir(), 'graph-execution-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   // This suite verifies the finite-budget acceptance path; new instances are
   // unlimited by default, so pin the legacy cap explicitly.
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions, limits: { defaultBudgetTokens: 20_000_000 } };
+  const options = {
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'project', root }],
+    actions,
+    limits: { defaultBudgetTokens: 20_000_000 },
+    ...(access ? { access } : {}),
+  };
   const runtime = await openTaskRuntime(options);
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Work', requestId: 'begin' });
@@ -257,6 +264,77 @@ test('new capability grants require a scoped user answer, persist, and do not cl
   await restored.user.task(taskId).resume('resume');
   expect(await restored.host.runReady()).toEqual({ dispatched: 1 });
   expect(sends).toBe(1);
+});
+
+test('full access auto-approves a required grant and freezes its policy on the operation', async () => {
+  let seen: unknown;
+  let policy: AccessPolicy = fullAccessPolicy();
+  let grant = 'artifact:write';
+  const { runtime, task } = await singleAgent({
+    work: {
+      kind: 'agent',
+      reserveTokens: 100,
+      get grant() { return grant; },
+      prepare: async operation => async () => {
+        seen = operation.accessPolicy;
+        expect(operation.grants).toContain('artifact:write');
+        return { outcome: 'continue', output: null, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
+      },
+    },
+  }, () => policy);
+
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  const view = await task.view();
+  expect(view.questions).toEqual([
+    expect.objectContaining({
+      kind: 'permission',
+      status: 'resolved',
+      answer: expect.objectContaining({ type: 'grant', grant: 'artifact:write' }),
+    }),
+  ]);
+  expect(seen).toMatchObject({
+    mode: 'full',
+    authorization: 'bypass',
+    digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+  });
+
+  policy = defaultAccessPolicy();
+  grant = 'publish';
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect((await task.view()).questions).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'permission', status: 'open', data: { grant: 'publish' } }),
+  ]));
+});
+
+test('full access auto-approves a grant requested by an operation result and retries the node', async () => {
+  let sends = 0;
+  const { runtime, task } = await singleAgent({
+    work: {
+      kind: 'agent',
+      reserveTokens: 100,
+      prepare: async () => async () => {
+        sends += 1;
+        if (sends === 1) {
+          return {
+            outcome: 'waiting',
+            output: null,
+            question: { prompt: 'Remote MCP needs a grant', grant: 'mcp:remote:echo' },
+            usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 },
+          };
+        }
+        return { outcome: 'continue', output: { granted: true }, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
+      },
+    },
+  }, () => fullAccessPolicy());
+
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  const afterGrant = await task.view();
+  expect(afterGrant.questions).toEqual([
+    expect.objectContaining({ kind: 'permission', status: 'resolved', answer: { type: 'grant', grant: 'mcp:remote:echo' } }),
+  ]);
+  expect(afterGrant.nodes[0]).toMatchObject({ status: 'pending' });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(sends).toBe(2);
 });
 
 test('usage above the reservation is counted once but requires acknowledgement before further dispatch', async () => {

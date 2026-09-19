@@ -1,4 +1,5 @@
 import { RuntimeError } from '../core/types.ts';
+import type { AccessPolicy } from '../core/access-policy.ts';
 import type { ModelGrade } from '../catalog/models.ts';
 import type { ConfiguredModel, GraphConfig } from './config.ts';
 
@@ -36,6 +37,7 @@ export interface LiveConfig {
   credentialFor(entry: { id: string }): ResolvedCredential | undefined;
   masterModel(): string | undefined;
   defaultBudgetTokens(): number | null;
+  access(): AccessPolicy;
   enabled(): boolean;
   status(): { configured: boolean; modelCount: number; enabledModelCount: number; effectiveRevision: number; limitAliases: Record<string, string> };
   resolvedCredentialIds(): string[];
@@ -183,6 +185,7 @@ export function createLiveConfig(options: { env: Record<string, string | undefin
     masterModel: () => state.masterModel,
     resolvedCredentialIds: () => state.resolvedCredentialIds,
     defaultBudgetTokens: () => state.config.limits.defaultBudgetTokens,
+    access: () => structuredClone(state.config.access),
     enabled: () => state.enabled,
     status: () => ({
       configured: state.enabled,

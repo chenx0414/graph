@@ -22,6 +22,7 @@ export function sanitizeConfig(config: GraphConfig, env: Record<string, string |
       ...(credential.sharedLimitGroupId ? { sharedLimitGroupId: credential.sharedLimitGroupId } : {}),
     }])),
     limits: config.limits,
+    access: config.access,
   };
 }
 
