@@ -46,6 +46,9 @@ export interface ResultHandoffDraft {
     kind: 'file' | 'artifact' | 'external';
     path?: string;
     digest?: string;
+    artifactId?: string;
+    version?: number;
+    uri?: string;
     summary: string;
   }[];
   decisions: {
@@ -79,7 +82,7 @@ export interface PredecessorHandoffProjection {
   sourceActivationId: string;
   outputVersion: number;
   mode: PredecessorHandoffMode;
-  artifactRefs: { path: string; digest: string }[];
+  artifactRefs: { path: string; digest: string; artifactId?: string; version?: number; uri?: string }[];
   evidenceRefs: { acceptanceId: string; summary: string; path: string; digest: string }[];
   resultHandoff?: ResultHandoff;
   resultHandoffDigest?: string;
@@ -106,7 +109,7 @@ export interface ContextHandoffPackage {
   summary: string;
   decisions: string[];
   acceptance: { id: string; description: string; checkNode: string }[];
-  artifactRefs: { path: string; digest: string }[];
+  artifactRefs: { path: string; digest: string; artifactId?: string; version?: number; uri?: string }[];
   predecessorPolicies: PredecessorHandoffPolicy[];
   predecessorHandoffs: PredecessorHandoffProjection[];
   outputSchema: { kind: string; version: number };
@@ -171,8 +174,15 @@ export interface TaskWatch extends AsyncIterableIterator<TaskUpdate> { return():
 export type { TokenUsage } from '../runtime/call-broker.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
 import type { ResolvedAccessPolicy } from './access-policy.ts';
-export interface EvidenceInput { acceptanceId: string; summary: string; artifact: { path: string; digest: string } }
-export interface ArtifactInput { id: string; path: string; digest: string }
+export interface ArtifactReference {
+  path: string;
+  digest: string;
+  artifactId?: string;
+  version?: number;
+  uri?: string;
+}
+export interface EvidenceInput { acceptanceId: string; summary: string; artifact: ArtifactReference }
+export interface ArtifactInput extends ArtifactReference { id: string }
 export interface ArtifactVersion extends ArtifactInput { nodeId: string; operationId: string; activationId: string }
 export interface DependencySource {
   nodeId: string;

@@ -510,7 +510,7 @@ export class Execution {
                 reviewNode
                   ? 'Submit the normal independent_review JSON with an additional top-level "resultHandoff" object shaped as:'
                   : 'Call submit_result with outputJson exactly shaped as:',
-                '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<absolute path when present>","digest":"<sha256 when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
+                '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<absolute path when present>","digest":"<sha256 when present>","artifactId":"<shared artifact id when published>","version":"<exact shared version>","uri":"<artifact uri when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
                 'Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
               ].join('\n')
             : '';

@@ -4,6 +4,7 @@ import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
+import { ArtifactWorkspace } from './artifact-workspace.ts';
 import {
   appendMessage,
   conversationForTask,
@@ -172,6 +173,7 @@ export async function openTaskRuntime(options: {
   let execution: Execution;
   let catalog: Catalog;
   let git: GitIntegration;
+  let artifacts: ArtifactWorkspace;
   const channels: Partial<PiAdapterChannels> = {};
   const ensureOpen = () => { if (closed) throw new RuntimeError('closed', 'Runtime is closed'); };
   const createMasterNode = (taskId: string) => {
@@ -305,6 +307,7 @@ export async function openTaskRuntime(options: {
     });
     await catalog.refresh();
     git = new GitIntegration(store, stateDir);
+    artifacts = new ArtifactWorkspace(store, join(stateDir, 'artifact-workspace'));
     const slotScheduler: ModelScheduler = options.models?.modelScheduler ? options.models.modelScheduler : createModelScheduler();
     if (options.models) {
       store.transaction(() => {
@@ -312,7 +315,7 @@ export async function openTaskRuntime(options: {
       });
     }
     const fallback = options.models || options.live ? createPiAdapter({
-      store, instancesDir: join(stateDir, 'instances'), catalog, directory: liveEntries,
+      store, instancesDir: join(stateDir, 'instances'), catalog, directory: liveEntries, artifacts,
       apiKey: options.models?.apiKey ?? '', modelRuntime: options.models!.modelRuntime,
       ...(options.models?.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
       ...(options.live ? { bindingFor: (entry: ModelEntry) => options.live!.credentialFor(entry) } : {}),
@@ -1213,6 +1216,45 @@ export async function openTaskRuntime(options: {
         const prep = git.preparation(projectId);
         if (!prep) throw new RuntimeError('not_found', `No preparation recorded for ${projectId}`);
         return prep;
+      },
+    },
+    artifacts: {
+      list(taskId: string, query: {
+        namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
+        includeRetired?: boolean; latestOnly?: boolean; limit?: number; cursor?: string;
+      } = {}) {
+        ensureOpen();
+        return artifacts.list({ taskId, ...query });
+      },
+      get(taskId: string, artifactId: string, version?: number) {
+        ensureOpen();
+        return artifacts.get(taskId, artifactId, version);
+      },
+      read(taskId: string, artifactId: string, version: number, maxBytes?: number) {
+        ensureOpen();
+        return artifacts.read(taskId, artifactId, version, maxBytes);
+      },
+      retire(input: { taskId: string; artifactId: string; version: number; reason: string; requestId: string }) {
+        ensureOpen();
+        return artifacts.retire(input.taskId, input.artifactId, input.version, input.reason, input.requestId);
+      },
+      promote(input: { taskId: string; artifactId: string; version: number; requestId: string }) {
+        ensureOpen();
+        return artifacts.promote({ ...input, promotedBy: 'user' });
+      },
+      listConversation(conversationId: string, query: {
+        namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
+        includeRetired?: boolean; latestOnly?: boolean; limit?: number;
+      } = {}) {
+        ensureOpen();
+        const ids = conversationTaskIds(store, conversationId);
+        const records = ids.flatMap(taskId => artifacts.list({ taskId, ...query, limit: 200 }).artifacts);
+        const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 100)));
+        return {
+          artifacts: records.sort((left, right) => right.createdAt - left.createdAt).slice(0, limit),
+          nextCursor: null,
+          total: records.length,
+        };
       },
     },
     conversations,

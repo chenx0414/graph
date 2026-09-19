@@ -49,6 +49,7 @@ async function inspect(dbPath: string) {
       scopeColumns: (store.db.prepare('PRAGMA table_info(budget_scopes)').all() as { name: string }[]).map(column => column.name),
       resultHandoffColumns: (store.db.prepare('PRAGMA table_info(result_handoffs)').all() as { name: string }[]).map(column => column.name),
       questionColumns: (store.db.prepare('PRAGMA table_info(questions)').all() as { name: string }[]).map(column => column.name),
+      artifactColumns: (store.db.prepare('PRAGMA table_info(artifacts)').all() as { name: string }[]).map(column => column.name),
       preparation: store.db.prepare("SELECT state,repo_root,baseline_sha FROM project_preparation WHERE project_id='legacy'").get() as { state: string; repo_root: string; baseline_sha: string } | undefined,
       newNodes: store.db.prepare("SELECT COUNT(*) AS count FROM node_entries WHERE task_id<>'legacy-task'").get() as { count: number },
     };
@@ -97,7 +98,7 @@ for (const fixture of ['v13', 'v17'] as const) {
     await daemon.close();
 
     const upgraded = await inspect(dbPath);
-    expect(upgraded.version).toBe(27);
+    expect(upgraded.version).toBe(28);
     expect(upgraded.instance).toMatchObject({ budget: 20_000_000, used: 12_345, unlimited: 0, models_used: '["legacy-model"]' });
     expect(JSON.parse(upgraded.cost.cost)).toEqual({ amount: 0.001, currency: 'USD' });
     expect(upgraded.pauseColumns.sort()).toEqual(['pause_ms', 'pause_since', 'user_wait_ms', 'user_wait_since']);
@@ -109,6 +110,9 @@ for (const fixture of ['v13', 'v17'] as const) {
       'operation_id', 'activation_id', 'output_version', 'schema_kind', 'body', 'digest',
     ]));
     expect(upgraded.questionColumns).toContain('owner');
+    expect(upgraded.artifactColumns).toEqual(expect.arrayContaining([
+      'artifact_id', 'version', 'scope', 'namespace', 'digest', 'object_path', 'producer_operation_id',
+    ]));
 
     // Phase B: the same file runs a scripted worker through Git preparation.
     const runtime = await openTaskRuntime({
@@ -163,7 +167,7 @@ test('v23 renumbers legacy handoffs before enforcing one version per task', asyn
   raw.close();
   const store = new TaskStore(dbPath);
   try {
-    expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(27);
+    expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(28);
     expect(store.db.prepare('SELECT id,version FROM context_handoffs ORDER BY version').all())
       .toEqual([{ id: 'h1', version: 1 }, { id: 'h2', version: 2 }, { id: 'h3', version: 3 }]);
   } finally {

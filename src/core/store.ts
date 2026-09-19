@@ -33,7 +33,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 27) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 28) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -397,6 +397,77 @@ export class TaskStore {
         );
         CREATE INDEX IF NOT EXISTS conversation_streams_scope ON conversation_streams(conversation_id, updated_at);
         PRAGMA user_version=27;
+      `);
+    });
+    if (version < 28) this.transaction(() => {
+      // Shared artifacts are immutable, task-scoped published objects. SQLite
+      // owns discovery, provenance and versioning; the filesystem only stores
+      // content-addressed bytes.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS artifacts(
+          artifact_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          scope TEXT NOT NULL CHECK(scope IN ('task','project')),
+          owner_id TEXT NOT NULL,
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          project_id TEXT,
+          namespace TEXT NOT NULL,
+          name TEXT NOT NULL,
+          logical_key TEXT NOT NULL,
+          digest TEXT NOT NULL,
+          object_path TEXT NOT NULL,
+          size INTEGER NOT NULL,
+          media_type TEXT NOT NULL,
+          schema_kind TEXT,
+          schema_version INTEGER,
+          title TEXT,
+          summary TEXT,
+          tags TEXT NOT NULL DEFAULT '[]',
+          producer_node_id TEXT,
+          producer_instance_id TEXT,
+          producer_operation_id TEXT,
+          producer_activation_id TEXT,
+          producer_output_version INTEGER,
+          visibility TEXT NOT NULL,
+          trust TEXT NOT NULL,
+          state TEXT NOT NULL,
+          supersedes_artifact_id TEXT,
+          supersedes_version INTEGER,
+          metadata TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL,
+          retired_at INTEGER,
+          PRIMARY KEY(artifact_id,version)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS artifacts_logical_version
+          ON artifacts(scope,owner_id,namespace,name,version);
+        CREATE INDEX IF NOT EXISTS artifacts_task ON artifacts(task_id,created_at);
+        CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id,created_at);
+        CREATE INDEX IF NOT EXISTS artifacts_digest ON artifacts(digest);
+        CREATE INDEX IF NOT EXISTS artifacts_state ON artifacts(scope,owner_id,state,created_at);
+
+        CREATE TABLE IF NOT EXISTS artifact_links(
+          id TEXT PRIMARY KEY,
+          artifact_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          subject_kind TEXT NOT NULL,
+          subject_id TEXT NOT NULL,
+          relation TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE(artifact_id,version,subject_kind,subject_id,relation)
+        );
+        CREATE INDEX IF NOT EXISTS artifact_links_subject ON artifact_links(subject_kind,subject_id);
+
+        CREATE TABLE IF NOT EXISTS artifact_events(
+          cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          artifact_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          data TEXT NOT NULL,
+          timestamp INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS artifact_events_scope ON artifact_events(task_id,cursor);
+        PRAGMA user_version=28;
       `);
     });
   }

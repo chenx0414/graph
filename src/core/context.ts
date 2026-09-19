@@ -289,7 +289,9 @@ function validateHandoffPackage(context: ResolvedAgentContext, handoff: ContextH
     throw new RuntimeError('context_rejected', 'Context handoff requires the frozen acceptance contract');
   }
   if (!Array.isArray(handoff.artifactRefs) || handoff.artifactRefs.some(ref =>
-    !ref || typeof ref.path !== 'string' || !ref.path.trim() || !/^[a-f0-9]{64}$/.test(ref.digest))) {
+    !ref || typeof ref.path !== 'string' || !ref.path.trim() || !/^[a-f0-9]{64}$/.test(ref.digest)
+    || ((ref.artifactId === undefined) !== (ref.version === undefined))
+    || (ref.artifactId !== undefined && (!ref.artifactId.trim() || typeof ref.version !== 'number' || !Number.isSafeInteger(ref.version) || ref.version < 1)))) {
     throw new RuntimeError('context_rejected', 'Context handoff requires artifact references with exact digests');
   }
   if (!Array.isArray(handoff.predecessorPolicies) || !Array.isArray(handoff.predecessorHandoffs)) {

@@ -92,15 +92,26 @@ function normalizeDraft(value: unknown): ResultHandoffDraft | undefined {
     if (!summary || !['file', 'artifact', 'external'].includes(String(change.kind))) return undefined;
     const path = change.path === undefined ? undefined : text(change.path, 2_000);
     const artifactDigest = change.digest === undefined ? undefined : text(change.digest, 64);
+    const artifactId = change.artifactId === undefined ? undefined : text(change.artifactId, 200);
+    const artifactVersion = change.version === undefined
+      ? undefined
+      : typeof change.version === 'number' ? change.version : null;
+    const uri = change.uri === undefined ? undefined : text(change.uri, 500);
     if ((path === undefined) !== (change.path === undefined) || (artifactDigest === undefined) !== (change.digest === undefined)) return undefined;
     if (path && !isAbsolute(path)) return undefined;
     if (artifactDigest && !/^[a-f0-9]{64}$/.test(artifactDigest)) return undefined;
-    if ((change.kind === 'file' || change.kind === 'artifact') && !path) return undefined;
-    if (change.kind === 'artifact' && (!path || !artifactDigest)) return undefined;
+    if ((artifactId === undefined) !== (artifactVersion === undefined)) return undefined;
+    if (artifactId && !uri) return undefined;
+    if (artifactVersion === null || (artifactVersion !== undefined && (!Number.isSafeInteger(artifactVersion) || artifactVersion < 1))) return undefined;
+    if (change.kind === 'file' && (!path || !artifactDigest)) return undefined;
+    if (change.kind === 'artifact' && !((path && artifactDigest) || (artifactId && artifactVersion))) return undefined;
     changes.push({
       kind: change.kind as ResultHandoffDraft['changes'][number]['kind'],
       ...(path ? { path } : {}),
       ...(artifactDigest ? { digest: artifactDigest } : {}),
+      ...(artifactId ? { artifactId } : {}),
+      ...(artifactVersion !== undefined ? { version: artifactVersion } : {}),
+      ...(uri ? { uri } : {}),
       summary,
     });
   }
@@ -254,7 +265,7 @@ function evidenceProjection(store: TaskStore, source: {
   operationId: string;
   activationId: string;
   outputVersion: number;
-  artifacts: { path: string; digest: string }[];
+  artifacts: { path: string; digest: string; artifactId?: string; version?: number; uri?: string }[];
 }): { artifactRefs: { path: string; digest: string }[]; evidenceRefs: PredecessorHandoffProjection['evidenceRefs'] } {
   const rows = store.db.prepare('SELECT data FROM evidence WHERE operation_id=? ORDER BY rowid').all(source.operationId) as { data: string }[];
   const evidenceRefs = rows.flatMap(row => {
@@ -272,7 +283,13 @@ function evidenceProjection(store: TaskStore, source: {
     }];
   });
   return {
-    artifactRefs: source.artifacts.map(artifact => ({ path: artifact.path, digest: artifact.digest })),
+      artifactRefs: source.artifacts.map(artifact => ({
+        path: artifact.path,
+        digest: artifact.digest,
+        ...(artifact.artifactId ? { artifactId: artifact.artifactId } : {}),
+        ...(artifact.version !== undefined ? { version: artifact.version } : {}),
+        ...(artifact.uri ? { uri: artifact.uri } : {}),
+      })),
     evidenceRefs,
   };
 }
@@ -409,6 +426,14 @@ export function settleResultHandoff(
   if (invalidArtifact) {
     return failedHandoffResult(result, `Result handoff artifact reference does not match the operation result: ${invalidArtifact.path}`);
   }
+  const invalidSharedArtifact = draft.changes.find(change => {
+    if (!change.artifactId || change.version === undefined) return false;
+    return !store.db.prepare('SELECT 1 FROM artifacts WHERE artifact_id=? AND version=?')
+      .get(change.artifactId, change.version);
+  });
+  if (invalidSharedArtifact) {
+    return failedHandoffResult(result, `Result handoff shared artifact does not exist: ${invalidSharedArtifact.artifactId}@${invalidSharedArtifact.version}`);
+  }
   const node = store.db.prepare('SELECT instance_id,activation_id,output_version FROM nodes WHERE task_id=? AND id=?')
     .get(operation.taskId, operation.nodeId) as { instance_id: string | null; activation_id: string; output_version: number };
   if (!node.instance_id || node.activation_id !== operation.activationId) {
@@ -473,7 +498,8 @@ export function renderPredecessorHandoffs(projections: PredecessorHandoffProject
       if (handoff.nextActions.length) lines.push(`  Next actions: ${handoff.nextActions.join('; ')}`);
     }
     if (projection.artifactRefs.length) {
-      lines.push(`  Artifacts: ${projection.artifactRefs.map(item => `${item.path} (${item.digest})`).join('; ')}`);
+      lines.push(`  Artifacts: ${projection.artifactRefs.map(item =>
+        `${item.uri ?? item.path} (${item.digest})`).join('; ')}`);
     }
     if (projection.evidenceRefs.length) {
       lines.push(`  Evidence: ${projection.evidenceRefs.map(item => `${item.acceptanceId}: ${item.path} (${item.digest})`).join('; ')}`);

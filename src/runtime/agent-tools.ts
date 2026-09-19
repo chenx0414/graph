@@ -6,6 +6,7 @@ import type { CapabilityRecord, Catalog } from '../catalog/catalog.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { Json, NodeSpec, Proposal } from '../core/types.ts';
 import { isHostRead, isHostWrite, type ResolvedAccessPolicy } from '../core/access-policy.ts';
+import type { ArtifactPage, ArtifactRecord, ArtifactTrust, PublishArtifactInput } from '../core/artifact-workspace.ts';
 import { listBounded, listHost, readBounded, readHost, writeBounded, writeHost } from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
 
@@ -20,6 +21,34 @@ type Supervisor = {
     proof?: string;
     requestId: string;
   }): Promise<unknown>;
+};
+
+type ArtifactToolService = {
+  allowedNamespaces: string[];
+  canPromote: boolean;
+  list(query: {
+    namespace?: string;
+    prefix?: string;
+    schema?: string;
+    tag?: string;
+    trust?: ArtifactTrust;
+    includeRetired?: boolean;
+    latestOnly?: boolean;
+    limit?: number;
+    cursor?: string;
+  }): ArtifactPage;
+  get(artifactId: string, version?: number): ArtifactRecord;
+  read(artifactId: string, version: number, maxBytes?: number): Promise<{
+    record: ArtifactRecord;
+    text: string | null;
+    truncated: boolean;
+    path: string;
+    bytes: number;
+    events: { type: string; data: Json; timestamp: number }[];
+  }>;
+  publish(input: Omit<PublishArtifactInput, 'taskId' | 'workspace' | 'producer'>): Promise<ArtifactRecord>;
+  retire(artifactId: string, version: number, reason: string, requestId: string): ArtifactRecord;
+  promote?(input: { artifactId: string; version: number; requestId: string }): Promise<ArtifactRecord>;
 };
 
 function text(value: string) {
@@ -57,6 +86,7 @@ export function agentTools(input: {
   fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
   catalog?: Catalog;
+  artifacts?: ArtifactToolService;
   systemContext?: {
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     systemDiagnostics?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -114,6 +144,136 @@ export function agentTools(input: {
         return text((await listBounded(root, requested)).join('\n'));
       },
     },
+    ...(input.artifacts ? [{
+      name: 'artifact_list',
+      label: 'List shared artifacts',
+      description: 'List published task artifacts. This is the discovery surface for literature sets, plans, review reports and deliverables; it returns metadata only. Use artifact_read for bounded content.',
+      parameters: Type.Object({
+        namespace: Type.Optional(Type.String()),
+        prefix: Type.Optional(Type.String()),
+        schema: Type.Optional(Type.String()),
+        tag: Type.Optional(Type.String()),
+        trust: Type.Optional(Type.String()),
+        includeRetired: Type.Optional(Type.Boolean()),
+        latestOnly: Type.Optional(Type.Boolean()),
+        limit: Type.Optional(Type.Number()),
+        cursor: Type.Optional(Type.String()),
+      }),
+      execute: async (_id: string, params: unknown) => {
+        const body = fields(params);
+        const trust = typeof body.trust === 'string' && body.trust.trim() ? body.trust.trim() : undefined;
+        if (trust && !['unverified', 'reviewed', 'accepted'].includes(trust)) throw new Error('Unsupported artifact trust');
+        return text(JSON.stringify(input.artifacts!.list({
+          ...(typeof body.namespace === 'string' && body.namespace.trim() ? { namespace: body.namespace.trim() } : {}),
+          ...(typeof body.prefix === 'string' && body.prefix.trim() ? { prefix: body.prefix.trim() } : {}),
+          ...(typeof body.schema === 'string' && body.schema.trim() ? { schema: body.schema.trim() } : {}),
+          ...(typeof body.tag === 'string' && body.tag.trim() ? { tag: body.tag.trim() } : {}),
+          ...(trust ? { trust: trust as ArtifactTrust } : {}),
+          ...(typeof body.includeRetired === 'boolean' ? { includeRetired: body.includeRetired } : {}),
+          ...(typeof body.latestOnly === 'boolean' ? { latestOnly: body.latestOnly } : {}),
+          ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+          ...(typeof body.cursor === 'string' && body.cursor.trim() ? { cursor: body.cursor.trim() } : {}),
+        })));
+      },
+    }, {
+      name: 'artifact_get',
+      label: 'Get shared artifact metadata',
+      description: 'Read one immutable artifact version by artifactId and optional version. Omit version to inspect the latest published version; formal work must freeze the returned version explicitly.',
+      parameters: Type.Object({ artifactId: Type.String(), version: Type.Optional(Type.Number()) }),
+      execute: async (_id: string, params: unknown) => {
+        const body = fields(params);
+        const artifactId = String(body.artifactId).trim();
+        if (!artifactId || artifactId.length > 200) throw new Error('A bounded artifactId is required');
+        return text(JSON.stringify(input.artifacts!.get(
+          artifactId,
+          typeof body.version === 'number' ? body.version : undefined,
+        )));
+      },
+    }, {
+      name: 'artifact_read',
+      label: 'Read shared artifact',
+      description: 'Read bounded content from one exact artifact version. Text content is returned directly within maxBytes; binary content returns its immutable read-only path and metadata instead of base64.',
+      parameters: Type.Object({
+        artifactId: Type.String(),
+        version: Type.Number(),
+        maxBytes: Type.Optional(Type.Number()),
+      }),
+      execute: async (_id: string, params: unknown) => {
+        const body = fields(params);
+        const artifactId = String(body.artifactId).trim();
+        const version = Number(body.version);
+        if (!artifactId || !Number.isSafeInteger(version) || version < 1) throw new Error('artifactId and a positive exact version are required');
+        return text(JSON.stringify(await input.artifacts!.read(
+          artifactId,
+          version,
+          typeof body.maxBytes === 'number' ? body.maxBytes : undefined,
+        )));
+      },
+    }, {
+      name: 'artifact_publish',
+      label: 'Publish shared artifact',
+      description: `Publish an immutable artifact version from a file inside this Agent's private workspace or from direct text content. Allowed namespaces: ${input.artifacts.allowedNamespaces.join(', ')}. Publishing never overwrites an earlier version; use expectedVersion for compare-and-swap.`,
+      parameters: Type.Object({
+        namespace: Type.String(),
+        name: Type.String(),
+        sourcePath: Type.Optional(Type.String()),
+        content: Type.Optional(Type.String()),
+        mediaType: Type.Optional(Type.String()),
+        schema: Type.Optional(Type.String()),
+        title: Type.Optional(Type.String()),
+        summary: Type.Optional(Type.String()),
+        tags: Type.Optional(Type.Array(Type.String())),
+        expectedVersion: Type.Optional(Type.Number()),
+        requestId: Type.String(),
+      }),
+      execute: async (_id: string, params: unknown) => {
+        const body = fields(params);
+        const namespace = String(body.namespace).trim();
+        if (!input.artifacts!.allowedNamespaces.includes(namespace)) throw new Error(`Namespace ${namespace} is not writable by this Agent`);
+        const tags = Array.isArray(body.tags) ? body.tags.map(String) : undefined;
+        const expectedVersion = typeof body.expectedVersion === 'number' ? body.expectedVersion : undefined;
+        return text(JSON.stringify(await input.artifacts!.publish({
+          namespace,
+          name: String(body.name),
+          ...(typeof body.sourcePath === 'string' && body.sourcePath.trim() ? { sourcePath: body.sourcePath } : {}),
+          ...(typeof body.content === 'string' ? { content: body.content } : {}),
+          ...(typeof body.mediaType === 'string' && body.mediaType.trim() ? { mediaType: body.mediaType.trim() } : {}),
+          ...(typeof body.schema === 'string' && body.schema.trim() ? { schema: body.schema.trim() } : {}),
+          ...(typeof body.title === 'string' && body.title.trim() ? { title: body.title.trim() } : {}),
+          ...(typeof body.summary === 'string' && body.summary.trim() ? { summary: body.summary.trim() } : {}),
+          ...(tags ? { tags } : {}),
+          ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+          requestId: String(body.requestId),
+        })));
+      },
+    }, ...(input.artifacts.canPromote ? [{
+      name: 'artifact_retire',
+      label: 'Retire shared artifact version',
+      description: 'Retire one published artifact version without deleting its immutable bytes. Use only when a version is superseded or withdrawn; existing evidence and handoff references remain explainable.',
+      parameters: Type.Object({ artifactId: Type.String(), version: Type.Number(), reason: Type.String(), requestId: Type.String() }),
+      execute: async (_id: string, params: unknown) => {
+        const body = fields(params);
+        return text(JSON.stringify(input.artifacts!.retire(
+          String(body.artifactId),
+          Number(body.version),
+          String(body.reason),
+          String(body.requestId),
+        )));
+      },
+    }, {
+      name: 'artifact_promote',
+      label: 'Promote artifact to project knowledge',
+      description: 'Explicitly promote one exact task artifact version into project-scoped shared knowledge for future tasks in the same project. This does not mutate or retire the source version.',
+      parameters: Type.Object({ artifactId: Type.String(), version: Type.Number(), requestId: Type.String() }),
+      execute: async (_id: string, params: unknown) => {
+        const body = fields(params);
+        return text(JSON.stringify(await input.artifacts!.promote!({
+          artifactId: String(body.artifactId),
+          version: Number(body.version),
+          requestId: String(body.requestId),
+        })));
+      },
+    }] : [])] : []),
     {
       name: 'submit_result', label: 'Submit result', description: 'Submit structured JSON output for this operation.',
       parameters: Type.Object({ outputJson: Type.String() }),

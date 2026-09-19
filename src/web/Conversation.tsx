@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { api } from './api.ts';
+import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { ComposerTelemetry } from './ComposerTelemetry.tsx';
 import {
@@ -100,7 +101,7 @@ type ProposalVersion = {
   accepted: boolean;
 };
 type DrawerPage = 'acceptance' | 'nodes' | 'decisions' | 'task';
-type ConversationTab = 'chat' | 'graph';
+type ConversationTab = 'chat' | 'graph' | 'artifacts';
 type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; owner?: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string };
 type ConversationView = {
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;
@@ -805,6 +806,18 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
           Graph 看板
           {proposal && <span className="conversation-tab-count">{proposal.spec.nodes.length}</span>}
         </button>
+        <button
+          type="button"
+          role="tab"
+          className="conversation-tab"
+          data-testid="conversation-tab-artifacts"
+          data-active={conversationTab === 'artifacts'}
+          aria-selected={conversationTab === 'artifacts'}
+          onClick={() => setConversationTab('artifacts')}
+        >
+          <Icon name="box" size={15} />
+          共享产物
+        </button>
       </nav>
 
       {paused && (
@@ -1024,6 +1037,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             </div>
           </div>
         </div>
+        ) : conversationTab === 'artifacts' ? (
+          <ArtifactWorkspace conversationId={view.id} projectBound={Boolean(view.projectId)} />
         ) : activeProposal ? (
           <ConversationGraphBoard
             proposal={activeProposal}

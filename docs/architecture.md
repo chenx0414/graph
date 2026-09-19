@@ -120,6 +120,8 @@ interface TaskHandle {
 
 SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会话文件负责对话上下文，不反向覆盖任务状态。大型正文和产物用内容引用保存，数据库记录摘要与适用范围。首版不要求完整 event sourcing，也不自动删除历史记录。
 
+共享产物空间是任务级不可变对象库：文件内容按 SHA-256 存放于 Graph 受保护状态目录，SQLite 保存 `Artifact` 逻辑身份、version、namespace、producer、schema、trust、生命周期和事件。正式引用使用 `artifactId + version + digest`，绝对路径仅作为本机 materialization。Agent 通过 `artifact_list/get/read/publish/retire` 发现和发布文献集、Plan、Review Report 与交付文件；Main Agent 可显式 promotion 到项目级知识。私有 worktree 继续负责代码，integration branch 继续负责最终交付。见 [ADR 0025](adr/0025-shared-artifact-workspace.md)。
+
 ## 调度与图修订
 
 - 一次执行一个功能任务；所有 Agent 调用进入同一 10 名额池，主管计入。同实例不能并行激活两次，等待依赖/结果释放名额。

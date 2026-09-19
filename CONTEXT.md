@@ -21,6 +21,15 @@ _Avoid_：流程编辑器（首版不提供手工编辑任务图）
 **共享空间**：
 Agent 之间共享任务说明、证据与产物的空间；代码修改在各自独立工作副本中产生，通过合并集成。
 
+**共享产物空间（Artifact Workspace）**：
+任务级、发布式、不可变版本的共享存储。Agent 从私有 workspace 发布文件或文本，其他 Agent 通过逻辑 URI 和精确版本读取；它承载内容与发现，不替代任务图、handoff 或 Evidence。
+
+**Artifact 版本**：
+同一 namespace/name 下的一次不可变发布，正式引用为 `artifactId + version + digest`。逻辑名可以继续演进，但已冻结的版本和 digest 不得原地修改。
+
+**项目共享产物**：
+由任务级 artifact 通过显式 promotion 提升到项目范围的知识条目。它可被同项目后续任务发现，但不会自动绕过来源任务、信任和生命周期记录。
+
 **主管（Master Agent）**：
 直接与使用者对话，在已确认需求和额度范围内组织执行、调整任务图的 Agent，计入同时运行的 Agent 数量。main agent 指同一角色。
 _Avoid_：路由节点（仅决定下一步流向，不等同于主管）

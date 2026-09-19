@@ -12,6 +12,7 @@ import { digest, recordContextSession } from '../core/context.ts';
 import { resultHandoffFromSubmission } from '../core/predecessor-handoff.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
+import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationForTask, publishConversationDelta } from '../core/conversation.ts';
@@ -75,12 +76,21 @@ function summarizeToolCall(name: string, args: unknown) {
   const body = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {};
   const target = (key: string) => typeof body[key] === 'string' ? body[key] as string : undefined;
   const summary = name === 'read' || name === 'write_file' || name === 'list_dir' ? target('path') ?? name
+    : name === 'artifact_publish' ? [target('namespace'), target('name')].filter(Boolean).join('/') || name
+      : name === 'artifact_get' || name === 'artifact_read' || name === 'artifact_retire' ? `${target('artifactId') ?? name}${typeof body.version === 'number' ? `@${body.version}` : ''}`
+        : name === 'artifact_list' ? target('namespace') ?? target('prefix') ?? name
     : name === 'run_command' ? [target('command'), ...(Array.isArray(body.args) ? (body.args as unknown[]).map(String) : [])].filter(Boolean).join(' ')
       : name === 'fetch' ? target('url') ?? name
         : name === 'propose_graph' ? 'draft'
           : name === 'submit_result' ? 'structured result'
             : name;
   return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
+}
+
+function artifactNamespaces(spec: NodeSpec) {
+  if (spec.role === 'master') return ['plans', 'research', 'reviews', 'deliverables', 'summaries'];
+  if (/review|verify|critic|jury/i.test(spec.action)) return ['reviews', 'summaries'];
+  return ['plans', 'research', 'deliverables', 'summaries'];
 }
 
 // One Pi operation is a whole session of provider calls, not a single request.
@@ -106,6 +116,7 @@ export function createPiAdapter(options: {
   store: TaskStore;
   instancesDir: string;
   catalog: Catalog;
+  artifacts?: ArtifactWorkspace;
   directory: () => ModelEntry[];
   /** Fallback key for entries without a per-model credential binding. */
   apiKey?: string;
@@ -259,6 +270,30 @@ export function createPiAdapter(options: {
         const retrieval = retrievalDomains.length || unrestrictedRetrieval
           ? createRetrievalBroker({ domains: retrievalDomains, gate, ...(unrestrictedRetrieval ? { unrestricted: true } : {}) })
           : undefined;
+        const artifactService = options.artifacts ? {
+          allowedNamespaces: artifactNamespaces(spec),
+          canPromote: spec.role === 'master',
+          list: (query: Parameters<ArtifactWorkspace['list']>[0]) => options.artifacts!.list({ ...query, taskId: operation.taskId }),
+          get: (artifactId: string, version?: number) => options.artifacts!.get(operation.taskId, artifactId, version),
+          read: (artifactId: string, version: number, maxBytes?: number) => options.artifacts!.read(operation.taskId, artifactId, version, maxBytes),
+          publish: (input: Parameters<ArtifactWorkspace['publish']>[0]) => options.artifacts!.publish({
+            ...input,
+            taskId: operation.taskId,
+            workspace,
+            producer: {
+              nodeId: operation.nodeId,
+              instanceId: operation.instanceId!,
+              operationId: operation.id,
+              activationId: operation.activationId,
+            },
+          }),
+          retire: (artifactId: string, version: number, reason: string, requestId: string) => options.artifacts!.retire(operation.taskId, artifactId, version, reason, requestId),
+          promote: (input: Parameters<ArtifactWorkspace['promote']>[0]) => options.artifacts!.promote({
+            ...input,
+            taskId: operation.taskId,
+            promotedBy: instance.definition_version ?? operation.nodeId,
+          }),
+        } : undefined;
         try {
           const bundle = await openCapabilityBundle({
             catalog: options.catalog,
@@ -305,6 +340,7 @@ export function createPiAdapter(options: {
               ...(readRoots.length ? { readRoots: [...readRoots] } : {}),
               run: (command, args) => commands!.run(command, args),
               ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
+              ...(artifactService ? { artifacts: artifactService } : {}),
               ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog } : {}),
               ...(channels?.systemContext ? {
                 systemContext: {
@@ -334,8 +370,20 @@ export function createPiAdapter(options: {
                           ORDER BY cursor DESC LIMIT 1) AS createdAt
                         FROM questions WHERE kind='unknown_usage' AND status='open' ORDER BY rowid DESC LIMIT 50`).all();
                       const capabilities = options.catalog?.capabilities() ?? [];
+                      const artifactStats = options.store.db.prepare(`SELECT
+                        COUNT(*) AS versions,
+                        COUNT(DISTINCT artifact_id) AS artifacts,
+                        COALESCE(SUM(size),0) AS bytes
+                        FROM artifacts`).get() as { versions: number; artifacts: number; bytes: number };
                       return {
                         summary,
+                        artifactWorkspace: {
+                          scope: 'task',
+                          artifacts: Number(artifactStats.artifacts),
+                          versions: Number(artifactStats.versions),
+                          bytes: Number(artifactStats.bytes),
+                          published: (options.store.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE state='published'").get() as { count: number }).count,
+                        },
                         pendingSystemChanges: questions.filter(question => question.kind === 'system_change').map(question => {
                           const data = JSON.parse(question.data) as Record<string, Json>;
                           const change = data.change && typeof data.change === 'object' && !Array.isArray(data.change)
@@ -737,6 +785,7 @@ export function createPiAdapter(options: {
                     'Execution failures, recovery uncertainty, adapter/context errors, unknown usage and stalled or rework problems are yours to diagnose first. Use list_problems, then resolve_problem or revise_graph as appropriate. Never dump raw stack traces, JSON parsing errors, or internal state to the user. Only permission, quota, human acceptance, or a concrete decision that truly requires the user should appear as a user-facing question; ordinary user input may be requested in a normal chat reply.',
                     'For each worker, request the minimum sufficient context. Omit context for a normal fresh Agent. Use context.requiredFacts with transcript_range or tool_call only when the exact parent transcript or tool-call state is essential; Graph will then fork from context.sourceNode. Never specify a mode directly. Independent review and verification must use context.independence="model-excluded" and must not request transcript or tool-call facts.',
                     'For Fresh downstream Agents, choose each direct dependency edge in context.predecessors: result_handoff is the default for normal implementation handoffs and requires the predecessor to submit a structured result_handoff@1; evidence_only exposes acceptance/evidence/artifact refs without the predecessor work summary. Independent review and verification must use evidence_only, including when their predecessor is a review or verification node.',
+                    'Use artifact_list to discover already published task artifacts and artifact_read for bounded content. Publish plans, research results, review reports and deliverables with artifact_publish so non-direct dependencies and the user can find exact immutable versions; never place large shared content only inside your private worktree.',
                     'Write normal prose replies for chat; use tools only to investigate or to submit a draft.',
                     'Do not write, discuss, or mention composer suggestions. The console generates any optional next-message hint separately after your reply.',
                   ] : []),
@@ -761,7 +810,7 @@ export function createPiAdapter(options: {
                     `System pulse: ${JSON.stringify(systemPulse)}`,
                   ] : []),
                 ].join('\n')
-              : `\nUse workspace tools to read and edit files. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
+              : `\nUse workspace tools to read and edit files. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.${retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : ''}`;
             if (persistEntries) {
               appendNodeEntry(options.store, {
                 taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,

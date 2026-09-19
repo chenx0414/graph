@@ -780,7 +780,9 @@ export class OperationLifecycle {
     const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
       .get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
     if (new Set(result.artifacts?.map(artifact => artifact.id)).size !== (result.artifacts?.length ?? 0)
-      || result.artifacts?.some(artifact => !artifact.id.trim() || !isAbsolute(artifact.path) || !/^[a-f0-9]{64}$/.test(artifact.digest))) {
+      || result.artifacts?.some(artifact => !artifact.id.trim() || !isAbsolute(artifact.path) || !/^[a-f0-9]{64}$/.test(artifact.digest)
+        || ((artifact.artifactId === undefined) !== (artifact.version === undefined))
+        || (artifact.artifactId !== undefined && (!artifact.artifactId.trim() || typeof artifact.version !== 'number' || !Number.isSafeInteger(artifact.version) || artifact.version < 1)))) {
       throw new RuntimeError('invalid_evidence', 'Artifacts require unique IDs, absolute paths and SHA-256 digests');
     }
     if (result.outcome === 'skipped' && !nodeSpec.optional) {
@@ -834,7 +836,9 @@ export class OperationLifecycle {
         || !proposal.acceptance.some(item => item.id === evidence.acceptanceId && item.checkNode === operation.nodeId)) {
         throw new RuntimeError('invalid_evidence', 'Evidence must come from the assigned program check');
       }
-      if (!evidence.summary.trim() || !isAbsolute(evidence.artifact.path) || !/^[a-f0-9]{64}$/.test(evidence.artifact.digest)) {
+      if (!evidence.summary.trim() || !isAbsolute(evidence.artifact.path) || !/^[a-f0-9]{64}$/.test(evidence.artifact.digest)
+        || ((evidence.artifact.artifactId === undefined) !== (evidence.artifact.version === undefined))
+        || (evidence.artifact.artifactId !== undefined && (!evidence.artifact.artifactId.trim() || typeof evidence.artifact.version !== 'number' || !Number.isSafeInteger(evidence.artifact.version) || evidence.artifact.version < 1))) {
         throw new RuntimeError('invalid_evidence', 'Evidence requires a summary, absolute artifact path and SHA-256 digest');
       }
       this.store.db.prepare(`INSERT INTO evidence(

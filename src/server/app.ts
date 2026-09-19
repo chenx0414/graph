@@ -230,6 +230,22 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(query.limit ? { limit: Number(query.limit) } : {}),
     });
   });
+  app.get('/api/conversations/:conversationId/artifacts', async request => {
+    const { conversationId } = request.params as { conversationId: string };
+    const query = request.query as Record<string, string | undefined>;
+    return runtime.artifacts.listConversation(conversationId, {
+      ...(query.namespace ? { namespace: query.namespace } : {}),
+      ...(query.prefix ? { prefix: query.prefix } : {}),
+      ...(query.schema ? { schema: query.schema } : {}),
+      ...(query.tag ? { tag: query.tag } : {}),
+      ...(query.trust && ['unverified', 'reviewed', 'accepted'].includes(query.trust)
+        ? { trust: query.trust as 'unverified' | 'reviewed' | 'accepted' }
+        : {}),
+      ...(query.includeRetired === 'true' ? { includeRetired: true } : {}),
+      ...(query.latestOnly === 'false' ? { latestOnly: false } : {}),
+      ...(query.limit ? { limit: Number(query.limit) } : {}),
+    });
+  });
   app.get('/api/conversations/:conversationId/draft-graph', async request => {
     const params = request.params as { conversationId: string };
     const query = request.query as { version?: string };
@@ -425,6 +441,68 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       })),
       containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost,
     };
+  });
+  app.get('/api/tasks/:taskId/artifacts', async request => {
+    const { taskId } = request.params as { taskId: string };
+    const query = request.query as Record<string, string | undefined>;
+    return runtime.artifacts.list(taskId, {
+      ...(query.namespace ? { namespace: query.namespace } : {}),
+      ...(query.prefix ? { prefix: query.prefix } : {}),
+      ...(query.schema ? { schema: query.schema } : {}),
+      ...(query.tag ? { tag: query.tag } : {}),
+      ...(query.trust && ['unverified', 'reviewed', 'accepted'].includes(query.trust)
+        ? { trust: query.trust as 'unverified' | 'reviewed' | 'accepted' }
+        : {}),
+      ...(query.includeRetired === 'true' ? { includeRetired: true } : {}),
+      ...(query.latestOnly === 'false' ? { latestOnly: false } : {}),
+      ...(query.limit ? { limit: Number(query.limit) } : {}),
+      ...(query.cursor ? { cursor: query.cursor } : {}),
+    });
+  });
+  app.get('/api/tasks/:taskId/artifacts/:artifactId', async request => {
+    const { taskId, artifactId } = request.params as { taskId: string; artifactId: string };
+    const version = (request.query as { version?: string }).version;
+    return runtime.artifacts.get(taskId, artifactId, version ? Number(version) : undefined);
+  });
+  app.get('/api/tasks/:taskId/artifacts/:artifactId/:version/content', async (request, reply) => {
+    const { taskId, artifactId, version } = request.params as { taskId: string; artifactId: string; version: string };
+    const result = await runtime.artifacts.read(taskId, artifactId, Number(version));
+    if ((request.query as { download?: string }).download === 'true') {
+      reply.header('content-disposition', `attachment; filename="${result.record.name}"`);
+      return reply.type(result.record.mediaType).send(await readFile(result.path));
+    }
+    return {
+      artifact: result.record,
+      text: result.text,
+      truncated: result.truncated,
+      bytes: result.bytes,
+      events: result.events,
+    };
+  });
+  app.post('/api/tasks/:taskId/artifacts/:artifactId/:version/retire', async request => {
+    const { taskId, artifactId, version } = request.params as { taskId: string; artifactId: string; version: string };
+    const body = request.body as { reason?: unknown; requestId?: unknown };
+    if (typeof body?.reason !== 'string' || typeof body?.requestId !== 'string') {
+      throw new RuntimeError('invalid_input', 'reason and requestId are required');
+    }
+    return runtime.artifacts.retire({
+      taskId,
+      artifactId,
+      version: Number(version),
+      reason: body.reason,
+      requestId: body.requestId,
+    });
+  });
+  app.post('/api/tasks/:taskId/artifacts/:artifactId/:version/promote', async request => {
+    const { taskId, artifactId, version } = request.params as { taskId: string; artifactId: string; version: string };
+    const body = request.body as { requestId?: unknown };
+    if (typeof body?.requestId !== 'string') throw new RuntimeError('invalid_input', 'requestId is required');
+    return runtime.artifacts.promote({
+      taskId,
+      artifactId,
+      version: Number(version),
+      requestId: body.requestId,
+    });
   });
   app.get('/api/catalog', async () => ({
     definitions: runtime.catalog.definitions(),
