@@ -1020,6 +1020,119 @@ test('the resource library groups reusable assets and includes graph architectur
   expect(architectures).toContain('对抗式验证');
 });
 
+test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name, enabled state and recipe usage', async () => {
+  const root = await temp('recipe-picker');
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const skills = ['alpha-skill', 'beta-skill', 'gamma-skill'];
+  await Promise.all(skills.map(async id => {
+    const directory = join(capabilityRoot, 'skills', id);
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'SKILL.md'), `# ${id}\n`);
+    await writeFile(join(directory, 'capability.json'), JSON.stringify({
+      id,
+      kind: 'skill',
+      version: '1.0.0',
+      name: `${id.replace('-skill', '').replace(/^./, letter => letter.toUpperCase())} Skill`,
+    }));
+  }));
+  const mcp = join(capabilityRoot, 'mcp', 'jira');
+  await mkdir(mcp, { recursive: true });
+  await writeFile(join(mcp, 'capability.json'), JSON.stringify({
+    id: 'jira',
+    kind: 'mcp',
+    version: '1.0.0',
+    name: 'Jira MCP',
+    command: 'node',
+    args: ['./server.mjs'],
+  }));
+  const extension = join(capabilityRoot, 'pi-extensions', 'browser');
+  await mkdir(extension, { recursive: true });
+  await writeFile(join(extension, 'capability.json'), JSON.stringify({
+    id: 'browser',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Browser Extension',
+    entry: './index.mjs',
+  }));
+  await writeFile(join(extension, 'index.mjs'), 'export default function () {}\n');
+  const recipesPath = join(root, 'graph', 'agent-combinations.json');
+  const resource = (resourceId: string) => ({ resourceId, version: '1.0.0', role: 'skill', required: true });
+  await writeFile(recipesPath, JSON.stringify({
+    version: 1,
+    combinations: [
+      {
+        id: 'worker',
+        name: 'Worker',
+        description: 'Current recipe.',
+        recommendedGrade: 'medium',
+        review: false,
+        tags: ['worker'],
+        resources: [resource('beta-skill')],
+      },
+      {
+        id: 'gamma-a',
+        name: 'Gamma A',
+        description: 'Uses gamma.',
+        recommendedGrade: 'medium',
+        review: false,
+        tags: [],
+        resources: [resource('gamma-skill')],
+      },
+      {
+        id: 'gamma-b',
+        name: 'Gamma B',
+        description: 'Uses gamma too.',
+        recommendedGrade: 'medium',
+        review: false,
+        tags: [],
+        resources: [resource('gamma-skill')],
+      },
+    ],
+  }));
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+    catalog: { capabilityRoot, recipesPath },
+  });
+  cleanup.push(() => server.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/catalog/agents`);
+  await page.getByTestId('agent-combination-worker').waitFor();
+  await page.getByTestId('agent-combination-worker').getByRole('button', { name: '编辑' }).click();
+  const picker = page.getByTestId('recipe-picker-skills');
+  const optionLabels = () => picker.locator('[data-testid^="recipe-option-skill-"]').allTextContents();
+
+  await expect.poll(optionLabels).toEqual([
+    'Alpha Skillalpha-skill@1.0.0 · 0 个配方',
+    'Beta Skillbeta-skill@1.0.0 · 1 个配方',
+    'Gamma Skillgamma-skill@1.0.0 · 2 个配方',
+  ]);
+
+  await page.getByTestId('recipe-capability-sort').selectOption('enabled');
+  await expect.poll(optionLabels).toEqual([
+    'Beta Skillbeta-skill@1.0.0 · 1 个配方',
+    'Alpha Skillalpha-skill@1.0.0 · 0 个配方',
+    'Gamma Skillgamma-skill@1.0.0 · 2 个配方',
+  ]);
+
+  await page.getByTestId('recipe-capability-sort').selectOption('popular');
+  await expect.poll(optionLabels).toEqual([
+    'Gamma Skillgamma-skill@1.0.0 · 2 个配方',
+    'Beta Skillbeta-skill@1.0.0 · 1 个配方',
+    'Alpha Skillalpha-skill@1.0.0 · 0 个配方',
+  ]);
+
+  await page.getByTestId('recipe-capability-search').fill('jira');
+  expect(await page.getByTestId('recipe-picker-skills').innerText()).toContain('没有匹配的能力');
+  expect(await page.getByTestId('recipe-picker-mcp').innerText()).toContain('Jira MCP');
+  expect(await page.getByTestId('recipe-picker-extensions').innerText()).toContain('没有匹配的能力');
+});
+
 test('the resource config page saves capability credentials and verifies the selected MCP', async () => {
   const root = await temp('resource-config');
   const capabilityRoot = join(root, 'graph', 'capabilities');

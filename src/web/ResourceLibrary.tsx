@@ -36,6 +36,54 @@ type CapabilityConfigItem = {
   error?: string;
 };
 
+type CapabilitySort = 'alphabetical' | 'enabled' | 'popular';
+
+const CAPABILITY_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function capabilityUsage(combinations: AgentCombinationView[]) {
+  const usage = new Map<string, number>();
+  for (const combination of combinations) {
+    const seen = new Set<string>();
+    for (const resource of combination.resources) {
+      if (seen.has(resource.resourceId)) continue;
+      seen.add(resource.resourceId);
+      usage.set(resource.resourceId, (usage.get(resource.resourceId) ?? 0) + 1);
+    }
+  }
+  return usage;
+}
+
+function capabilityMatches(item: CapabilityRecord, query: string) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const haystack = [item.id, item.name, item.description, item.source, item.kind, item.role]
+    .filter(Boolean).join('\n').toLowerCase();
+  return terms.every(term => haystack.includes(term));
+}
+
+function orderedCapabilities(input: {
+  items: CapabilityRecord[];
+  selected: Set<string>;
+  query: string;
+  sort: CapabilitySort;
+  usage: Map<string, number>;
+}) {
+  const compareNames = (left: CapabilityRecord, right: CapabilityRecord) =>
+    CAPABILITY_COLLATOR.compare(left.name ?? left.id, right.name ?? right.id) || CAPABILITY_COLLATOR.compare(left.id, right.id);
+  return input.items.filter(item => capabilityMatches(item, input.query)).sort((left, right) => {
+    if (input.sort === 'enabled') {
+      const leftEnabled = input.selected.has(`${left.id}@${left.version}`);
+      const rightEnabled = input.selected.has(`${right.id}@${right.version}`);
+      if (leftEnabled !== rightEnabled) return leftEnabled ? -1 : 1;
+    }
+    if (input.sort === 'popular') {
+      const difference = (input.usage.get(right.id) ?? 0) - (input.usage.get(left.id) ?? 0);
+      if (difference) return difference;
+    }
+    return compareNames(left, right);
+  });
+}
+
 const MAIN_AGENT_SYSTEM_CAPABILITIES = [
   '任务规划',
   'Graph 设计',
@@ -174,6 +222,7 @@ function CapabilityConfigPanel({ items }: { items: CapabilityConfigItem[] }) {
 
 function AgentCombinationEditor(input: {
   capabilities: CapabilityRecord[];
+  combinations: AgentCombinationView[];
   initial?: AgentCombinationView;
   onClose(): void;
   onSaved(): void;
@@ -203,8 +252,11 @@ function AgentCombinationEditor(input: {
     ...selected('pi-extension'),
     ...selected('extension'),
   ]));
+  const [capabilityQuery, setCapabilityQuery] = useState('');
+  const [capabilitySort, setCapabilitySort] = useState<CapabilitySort>('alphabetical');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const usage = capabilityUsage(input.combinations);
 
   const toggle = (setter: (value: Set<string>) => void, current: Set<string>, key: string) => {
     const next = new Set(current);
@@ -249,19 +301,30 @@ function AgentCombinationEditor(input: {
       setSaving(false);
     }
   };
-  const picker = (items: CapabilityRecord[], keys: Set<string>, setter: (value: Set<string>) => void) => (
-    <div className="recipe-picker">
-      {items.length ? items.map(item => {
+  const picker = (
+    testid: string,
+    items: CapabilityRecord[],
+    keys: Set<string>,
+    setter: (value: Set<string>) => void,
+  ) => {
+    const visible = orderedCapabilities({ items, selected: keys, query: capabilityQuery, sort: capabilitySort, usage });
+    return (
+    <div className="recipe-picker" data-testid={testid}>
+      {visible.length ? visible.map(item => {
         const key = `${item.id}@${item.version}`;
         return (
-          <label key={key} className="recipe-option">
+          <label key={key} className="recipe-option" data-testid={`recipe-option-${item.kind}-${item.id}`}>
             <input type="checkbox" checked={keys.has(key)} onChange={() => toggle(setter, keys, key)} />
-            <span><strong>{item.name ?? item.id}</strong><small>{item.id}@{item.version}</small></span>
+            <span>
+              <strong>{item.name ?? item.id}</strong>
+              <small>{item.id}@{item.version} · {usage.get(item.id) ?? 0} 个配方</small>
+            </span>
           </label>
         );
-      }) : <p className="muted">暂无可选能力。</p>}
+      }) : <p className="muted">{items.length ? '没有匹配的能力。' : '暂无可选能力。'}</p>}
     </div>
-  );
+    );
+  };
   return createPortal(
     <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) input.onClose(); }}>
       <aside className="resource-detail-drawer recipe-editor" role="dialog" aria-modal="true" aria-label="Agent 配方编辑器">
@@ -296,9 +359,35 @@ function AgentCombinationEditor(input: {
               {promptCapabilities.map(item => <option key={`${item.id}@${item.version}`} value={`${item.id}@${item.version}`}>{item.name ?? item.id} · {item.id}@{item.version}</option>)}
             </select>
           </section>
-          <section className="recipe-section"><h3>Skills</h3>{picker(skills, skillKeys, setSkillKeys)}</section>
-          <section className="recipe-section"><h3>MCP</h3>{picker(mcp, mcpKeys, setMcpKeys)}</section>
-          <section className="recipe-section"><h3>Pi / Graph extensions</h3>{picker(extensions, extensionKeys, setExtensionKeys)}</section>
+          <div className="recipe-picker-toolbar">
+            <label className="recipe-search">
+              <Icon name="search" size={14} />
+              <input
+                type="search"
+                data-testid="recipe-capability-search"
+                value={capabilityQuery}
+                onChange={event => setCapabilityQuery(event.target.value)}
+                placeholder="检索 Skills、MCP、Pi extensions…"
+                aria-label="检索配方能力"
+              />
+            </label>
+            <label className="recipe-sort">
+              <span>排序</span>
+              <select
+                data-testid="recipe-capability-sort"
+                value={capabilitySort}
+                onChange={event => setCapabilitySort(event.target.value as CapabilitySort)}
+                aria-label="能力排序"
+              >
+                <option value="alphabetical">名称 A→Z</option>
+                <option value="enabled">已开启优先</option>
+                <option value="popular">热门优先</option>
+              </select>
+            </label>
+          </div>
+          <section className="recipe-section"><h3>Skills</h3>{picker('recipe-picker-skills', skills, skillKeys, setSkillKeys)}</section>
+          <section className="recipe-section"><h3>MCP</h3>{picker('recipe-picker-mcp', mcp, mcpKeys, setMcpKeys)}</section>
+          <section className="recipe-section"><h3>Pi / Graph extensions</h3>{picker('recipe-picker-extensions', extensions, extensionKeys, setExtensionKeys)}</section>
           {error && <div className="form-error">{error}</div>}
           <div className="recipe-actions">
             <Button variant="ghost" onClick={input.onClose}>取消</Button>
@@ -478,7 +567,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
         </div>,
         document.body,
       )}
-      {editing !== undefined && <AgentCombinationEditor capabilities={capabilities} {...(editing ? { initial: editing } : {})} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); window.dispatchEvent(new Event('graph:settings-changed')); toast('配方已保存', 'success'); }} />}
+      {editing !== undefined && <AgentCombinationEditor capabilities={capabilities} combinations={agentCombinations} {...(editing ? { initial: editing } : {})} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); window.dispatchEvent(new Event('graph:settings-changed')); toast('配方已保存', 'success'); }} />}
     </div>
   );
 }
