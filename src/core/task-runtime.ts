@@ -659,6 +659,9 @@ export async function openTaskRuntime(options: {
     if (kind === 'waiting') return ['respond'] as const;
     if (kind === 'rework' || kind === 'stalled') return ['respond', 'retry'] as const;
     if (kind === 'git_dirty') return ['acknowledge'] as const;
+    // A result the harness could not use is repairable by re-asking the worker,
+    // and escalatable when the main Agent cannot judge the gap itself.
+    if (kind === 'result_noncompliant' || kind === 'context_rejected') return ['retry', 'escalate'] as const;
     return ['retry'] as const;
   };
 
@@ -1376,7 +1379,7 @@ export async function openTaskRuntime(options: {
         },
         async resolveProblem(input: {
           questionId: string;
-          action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage';
+          action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage' | 'escalate';
           response?: string;
           proof?: string;
           requestId: string;
@@ -1394,6 +1397,13 @@ export async function openTaskRuntime(options: {
             const allowed = problemActions(row.kind) as readonly string[];
             if (!allowed.includes(input.action)) {
               throw new RuntimeError('invalid_answer', `Problem ${row.kind} does not accept ${input.action}`);
+            }
+            if (input.action === 'escalate') {
+              // The main Agent cannot judge this gap itself, so it hands the
+              // decision to the user with its own explanation attached.
+              if (!input.response?.trim()) throw new RuntimeError('invalid_answer', 'An explanation is required to escalate a problem to the user');
+              execution.escalate(row.task_id, row.id, input.response.trim().slice(0, 4_000));
+              return { questionId: row.id, taskId: row.task_id, action: input.action, resolved: true as const };
             }
             let answer: Answer;
             if (input.action === 'retry') answer = { type: 'retry' };

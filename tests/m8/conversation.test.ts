@@ -1033,3 +1033,111 @@ test('message state changes are published so incremental caches stay in sync', a
   expect(retried.messages.find(message => message.id === retriedId)!.state).toBe('pending');
   expect(updates(retriedId)).toContain('pending');
 });
+
+test('a worker result the harness cannot use is routed to the main Agent and escalatable to the user', async () => {
+  const root = await temp('noncompliant');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const seen: Operation[] = [];
+  let runs = 0;
+  const handoff = (workSummary: string) => ({
+    schemaVersion: 1 as const,
+    objective: 'Escalated handoff',
+    outcome: 'completed' as const,
+    workSummary,
+    changes: [],
+    decisions: [],
+    verification: [],
+    knownLimits: [],
+    openQuestions: [],
+    nextActions: [],
+  });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    actions: {
+      master: scripted(() => ({ outcome: 'completed', output: { text: '已经处理。' }, usage })),
+      work: {
+        kind: 'agent',
+        reserveTokens: 100,
+        prepare: async operation => {
+          seen.push(operation);
+          runs += 1;
+          return async () => runs === 1
+            // Finished the work but submitted a document the harness cannot use.
+            ? { outcome: 'completed', output: { schemaVersion: 1, workSummary: 'BROKEN_HANDOFF_SENTINEL' }, usage }
+            : { outcome: 'completed', output: handoff('FIXED_AFTER_ESCALATION'), resultHandoff: handoff('FIXED_AFTER_ESCALATION'), usage };
+        },
+      },
+      next: scripted(() => ({ outcome: 'completed', output: { text: '下游完成' }, usage })),
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({
+          outcome: 'completed',
+          output: null,
+          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(project, 'ok.txt'), digest: 'a'.repeat(64) } }],
+        }),
+      },
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: 'TASK_REQUEST_SENTINEL：实现并交接', requestId: 'create' });
+  await runtime.host.runReady();
+  const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await runtime.supervisor(anchor).propose({
+    requirementVersion: 1,
+    summary: '交接文档不合规时只修复文档',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      {
+        id: 'next', kind: 'agent', action: 'next', definitionVersion: 'coder@1', model: 'm', dependsOn: ['work'],
+        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
+      },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
+    ],
+  }, 'proposal');
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  await runtime.host.drive();
+
+  // The main Agent owns the problem, and it carries the exact defective fields.
+  const problems = await runtime.supervisor(anchor).listProblems() as {
+    id: string; kind: string; data: { defects?: { path: string; class: string }[] };
+  }[];
+  expect(problems.map(problem => problem.kind)).toEqual(['result_noncompliant']);
+  expect(problems[0]!.data.defects).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'objective', class: 'semantic' })]));
+  // Nothing reached the user yet, and the worker was not re-run.
+  const beforeEscalation = await runtime.conversations.view(created.conversationId);
+  expect(beforeEscalation.messages.filter(message => message.role === 'user')).toHaveLength(1);
+  expect(seen).toHaveLength(1);
+
+  // The main Agent cannot judge the gap, so it escalates with its own explanation.
+  await runtime.supervisor(anchor).resolveProblem({
+    questionId: problems[0]!.id,
+    action: 'escalate',
+    response: '交接文档缺少 objective，需要你确认目标表述后再继续。',
+    requestId: 'escalate',
+  });
+  const escalated = await runtime.conversations.view(created.conversationId);
+  const decision = escalated.tasks.find(task => task.id === confirmed.taskId)!.openQuestions.find(question => question.kind === 'waiting');
+  expect(decision?.data).toMatchObject({
+    requestType: 'noncompliance_decision',
+    prompt: expect.stringContaining('需要你确认目标表述'),
+    defects: expect.arrayContaining([expect.objectContaining({ path: 'objective' })]),
+  });
+
+  // The user decides, and that decision reaches the worker's repair attempt.
+  await runtime.user.task(confirmed.taskId).answer(
+    decision!.id,
+    { type: 'respond', value: 'USER_DECISION_SENTINEL：目标按交付页描述。' },
+    'answer',
+  );
+  await runtime.host.drive();
+  expect(seen).toHaveLength(2);
+  expect(seen[1]!.context.briefing).toContain('USER_DECISION_SENTINEL');
+  expect(seen[1]!.context.briefing).not.toContain('TASK_REQUEST_SENTINEL');
+  expect(seen[1]!.context.briefing).toContain('BROKEN_HANDOFF_SENTINEL');
+  expect(runtime.events(confirmed.taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
+}, 120_000);

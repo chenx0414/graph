@@ -23,7 +23,9 @@ function record(value: Json): Record<string, Json> | null {
 export function questionOwner(kind: string, data: Json): QuestionOwner {
   if (DIRECT_USER_KINDS.has(kind)) return 'user';
   const body = record(data);
-  if (kind === 'waiting' && body?.requestType === 'model_access') return 'user';
+  // A worker or the main Agent may hand a decision back to the user through a
+  // waiting question; those request types are the user's to answer.
+  if (kind === 'waiting' && (body?.requestType === 'model_access' || body?.requestType === 'noncompliance_decision')) return 'user';
   return 'main';
 }
 

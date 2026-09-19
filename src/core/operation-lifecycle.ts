@@ -18,7 +18,7 @@ import {
   releaseMessages,
 } from './conversation.ts';
 import { loadGraph, reactivate } from './graph.ts';
-import { requiresResultHandoff, resultHandoffDependents, resultHandoffFailure, settleResultHandoff } from './predecessor-handoff.ts';
+import { requiresResultHandoff, resultHandoffDependents, settleResultHandoff, submissionDefect } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
@@ -539,7 +539,7 @@ export class OperationLifecycle {
           throw new RuntimeError('invalid_answer', 'A system change must be approved or rejected');
         }
       } else if (!(question.kind === 'waiting' && answer.type === 'respond')
-        && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected', 'recovery'].includes(question.kind) && answer.type === 'retry')
+        && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected', 'recovery', 'result_noncompliant'].includes(question.kind) && answer.type === 'retry')
         && !(['reservation_exceeded', 'human_check', 'git_dirty'].includes(question.kind) && answer.type === 'acknowledge')
         && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
         throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
@@ -571,6 +571,40 @@ export class OperationLifecycle {
         if (resume.length) reactivate(this.store, taskId, resume);
       }
       this.hooks.advance(taskId);
+    });
+  }
+
+  /**
+   * Hand a main-owned problem to the user with the main Agent's explanation.
+   * The node stays blocked until the user answers; the answer then becomes part
+   * of the next attempt's context, so the worker receives the missing decision.
+   */
+  escalate(taskId: string, questionId: string, prompt: string) {
+    this.transaction(() => {
+      const row = this.store.db.prepare(`SELECT node_id,kind,data FROM questions
+        WHERE id=? AND task_id=? AND status='open'`).get(questionId, taskId) as
+        { node_id: string; kind: string; data: string } | undefined;
+      if (!row) throw new RuntimeError('invalid_question', 'No open question in this task');
+      const source = JSON.parse(row.data) as Json;
+      this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?")
+        .run(canonicalJson({ type: 'escalated', prompt }), questionId);
+      const escalated = insertQuestion(this.store, {
+        taskId,
+        nodeId: row.node_id,
+        kind: 'waiting',
+        data: {
+          requestType: 'noncompliance_decision',
+          prompt,
+          escalatedFrom: row.kind,
+          defects: (source as Record<string, Json> | null)?.defects ?? [],
+        } as Json,
+      });
+      this.store.event(taskId, 'problem.escalated', {
+        questionId,
+        nodeId: row.node_id,
+        kind: row.kind,
+        escalatedTo: escalated.id,
+      });
     });
   }
 
@@ -820,34 +854,25 @@ export class OperationLifecycle {
       throw new RuntimeError('invalid_result', 'Router must return a declared case');
     }
     result = settleResultHandoff(this.store, operation, proposal, result);
-    const handoffFailure = resultHandoffFailure(result);
+    const handoffFailure = submissionDefect(result);
+    // Hoisted: the problem must be opened after the operation's own questions are
+    // reconciled below, or that reconciliation would close it in the same settle.
+    const handoffData = handoffFailure ? {
+      reason: handoffFailure.reason,
+      defects: handoffFailure.defects as unknown as Json,
+      sourceNodeId: operation.nodeId,
+      sourceOperationId: operation.id,
+      policy: handoffFailure.policy,
+      resume: (handoffFailure.policy === 'result_handoff'
+        ? resultHandoffDependents(proposal, operation.nodeId)
+        : []) as unknown as Json,
+    } : undefined;
     if (handoffFailure) {
-      for (const target of resultHandoffDependents(proposal, operation.nodeId)) {
-        const data = {
-          reason: handoffFailure.reason,
-          code: 'context_rejected',
-          sourceNodeId: operation.nodeId,
-          sourceOperationId: operation.id,
-          policy: 'result_handoff',
-        };
-        const existing = this.store.db.prepare(
-          "SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='context_rejected' AND status='open'",
-        ).get(operation.taskId, target);
-        this.store.event(operation.taskId, 'context.result_handoff_missing', {
-          nodeId: target,
-          sourceNodeId: operation.nodeId,
-          sourceOperationId: operation.id,
-          reason: handoffFailure.reason,
-        });
-        this.store.event(operation.taskId, 'context.handoff_rejected', {
-          nodeId: target,
-          sourceNodeId: operation.nodeId,
-          sourceOperationId: operation.id,
-          reason: handoffFailure.reason,
-        });
-        this.store.event(operation.taskId, 'context.rejected', { nodeId: target, ...data });
-        if (!existing) this.block(operation.taskId, target, 'context_rejected', data);
-      }
+      // The work itself is intact; only the submitted document is unusable. That
+      // is one problem for the main Agent to repair or escalate, never a failed
+      // operation plus one rejection per dependent. Dependents stay unready on
+      // their own because this node never reached succeeded.
+      this.store.event(operation.taskId, 'context.result_noncompliant', { nodeId: operation.nodeId, operationId: operation.id, ...handoffData });
     } else if (result.outcome === 'completed' && requiresResultHandoff(proposal, operation.nodeId)) {
       // A handoff that now validates proves the earlier rejections wrong. Clear
       // the stale downstream blocks instead of making the main Agent retry every
@@ -940,7 +965,9 @@ export class OperationLifecycle {
       operation.taskId,
       operation.nodeId,
     );
-    if (result.outcome === 'failed' && !nodeSpec.optional) {
+    if (handoffData) {
+      this.block(operation.taskId, operation.nodeId, 'result_noncompliant', handoffData, operation.id);
+    } else if (result.outcome === 'failed' && !nodeSpec.optional) {
       this.block(operation.taskId, operation.nodeId, 'execution_failed', { output: result.output }, operation.id);
     }
     if (total > row.reserved) {

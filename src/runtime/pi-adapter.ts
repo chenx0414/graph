@@ -9,7 +9,7 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
-import { resultHandoffFromSubmission } from '../core/predecessor-handoff.ts';
+import { inspectResultHandoffSubmission, resultHandoffFromSubmission, resultHandoffRecoveryContext } from '../core/predecessor-handoff.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import type { TaskStore } from '../core/store.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
@@ -44,7 +44,7 @@ export interface PiAdapterChannels {
     listProblems(): Promise<unknown>;
     resolveProblem(input: {
       questionId: string;
-      action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage';
+      action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage' | 'escalate';
       response?: string;
       proof?: string;
       requestId: string;
@@ -520,6 +520,15 @@ export function createPiAdapter(options: {
                 },
               } : {}),
               onSubmit: output => { submitted = output; },
+              ...(operation.context.outputSchema?.kind === 'result_handoff' ? {
+                validateSubmission: (output: Json) => {
+                  const inspection = inspectResultHandoffSubmission(
+                    output,
+                    resultHandoffRecoveryContext(options.store, { taskId: operation.taskId, workspace }),
+                  );
+                  return inspection.draft ? { ok: true as const } : { ok: false as const, defects: inspection.defects };
+                },
+              } : {}),
             }),
           });
         } catch (error) {
@@ -782,7 +791,7 @@ export function createPiAdapter(options: {
                     'You also have read-only access to the running Graph application/source tree reported as application.root by read_system_capabilities. Inspect it to diagnose runtime and configuration problems and to prepare precise fixes; direct source edits remain forbidden.',
                     'If the system pulse shows invalid capabilities, failed nodes, open internal problems or pending system changes, inspect them before making unrelated planning claims. When a concrete defect is actionable, explain the evidence and propose a bounded system change instead of silently changing the system.',
                     'Use read_system_capabilities to check configured subscriptions, models, graph architectures, current Agent recipes and their compiled definitions before designing or assembling the graph. Only `agentCombinations` and `agentDefinitions` in its current response are the source of truth; a definition mentioned in earlier conversation history but absent there is retired and must never be offered or dispatched. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
-                    'Execution failures, recovery uncertainty, adapter/context errors, unknown usage and stalled or rework problems are yours to diagnose first. Use list_problems, then resolve_problem or revise_graph as appropriate. Never dump raw stack traces, JSON parsing errors, or internal state to the user. Only permission, quota, human acceptance, or a concrete decision that truly requires the user should appear as a user-facing question; ordinary user input may be requested in a normal chat reply.',
+                    'Execution failures, recovery uncertainty, adapter/context errors, unknown usage and stalled or rework problems are yours to diagnose first. Use list_problems, then resolve_problem or revise_graph as appropriate. A result_noncompliant problem means the worker finished and its work is intact, but the result it submitted could not be used: the problem lists the exact defective fields, so retry to have the same worker correct only its submission, and escalate only when the defect needs a decision the user alone can make. Never dump raw stack traces, JSON parsing errors, or internal state to the user. Only permission, quota, human acceptance, or a concrete decision that truly requires the user should appear as a user-facing question; ordinary user input may be requested in a normal chat reply.',
                     'For each worker, request the minimum sufficient context. Omit context for a normal fresh Agent. Use context.requiredFacts with transcript_range or tool_call only when the exact parent transcript or tool-call state is essential; Graph will then fork from context.sourceNode. Never specify a mode directly. Independent review and verification must use context.independence="model-excluded" and must not request transcript or tool-call facts.',
                     'For Fresh downstream Agents, choose each direct dependency edge in context.predecessors: result_handoff is the default for normal implementation handoffs and requires the predecessor to submit a structured result_handoff@1; evidence_only exposes acceptance/evidence/artifact refs without the predecessor work summary. Independent review and verification must use evidence_only, including when their predecessor is a review or verification node.',
                     'Use artifact_list to discover already published task artifacts and artifact_read for bounded content. Publish plans, research results, review reports and deliverables with artifact_publish so non-direct dependencies and the user can find exact immutable versions; never place large shared content only inside your private worktree.',

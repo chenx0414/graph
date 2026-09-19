@@ -358,7 +358,9 @@ test('a program result without its required acceptance evidence is blocked inste
   await runtime.host.runReady();
   await runtime.host.runReady();
   const result = await task.view();
-  expect(result).toMatchObject({ phase: 'running', status: 'blocked', evidence: [], questions: [{ kind: 'recovery' }] });
+  // A check that produced no usable evidence is a refused document, not an
+  // unobservable external outcome: it becomes a repair problem for the owner.
+  expect(result).toMatchObject({ phase: 'running', status: 'blocked', evidence: [], questions: [{ kind: 'result_noncompliant' }] });
   expect(result.nodes[1]!.status).toBe('blocked');
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
 });

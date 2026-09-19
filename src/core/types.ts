@@ -202,6 +202,8 @@ export interface Operation {
     messages?: { id?: string; text: string; requirementVersion: number; attachments?: AttachmentInput[] }[];
     briefing?: string;
     agentContext?: ResolvedAgentContext;
+    /** Structured result this operation must submit, so tools can validate in-turn. */
+    outputSchema?: { kind: 'agent_result' | 'result_handoff' | 'independent_review'; version: number };
   };
   grants: string[];
   /** Effective access policy frozen when this operation was admitted. */

@@ -75,87 +75,153 @@ function evidenceRefs(value: unknown): string[] | undefined {
   return stringList(value, 20, 300);
 }
 
-function normalizeDraft(value: unknown): ResultHandoffDraft | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const raw = value as Record<string, unknown>;
-  if (raw.schemaVersion !== 1) return undefined;
-  const objective = text(raw.objective, 500);
-  const workSummary = text(raw.workSummary, MAX_SUMMARY_CHARS);
-  if (!objective || !workSummary) return undefined;
-  if (raw.outcome !== 'completed' && raw.outcome !== 'partial' && raw.outcome !== 'blocked') return undefined;
+/**
+ * Why a submission was rejected, and who can fix it:
+ * - representation: the host can often rebuild it from recorded truth (paths,
+ *   digests, versions, artifact identity) - never worth redoing the work.
+ * - semantic: only the worker knows the answer (missing objective, verdict...).
+ * - safety: the claim cannot be tied to real content and must stay refused.
+ */
+export type HandoffDefectClass = 'representation' | 'semantic' | 'safety';
 
-  if (!Array.isArray(raw.changes) || raw.changes.length > 100) return undefined;
+export interface HandoffDefect {
+  /** JSON-ish location of the offending field, for example changes[3].path. */
+  path: string;
+  class: HandoffDefectClass;
+  expected: string;
+  got: string;
+}
+
+export interface HandoffInspection {
+  draft?: ResultHandoffDraft;
+  defects: HandoffDefect[];
+}
+
+function preview(value: unknown) {
+  if (value === undefined) return 'missing';
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined) return String(value);
+  return encoded.length > 120 ? `${encoded.slice(0, 117)}...` : encoded;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Structural inspection of a final (already host-normalised) handoff. Collects
+ * every defect instead of stopping at the first one, so a worker can fix a whole
+ * shape in one turn and the main Agent can see exactly what is missing.
+ */
+function inspectDraft(value: unknown): HandoffInspection {
+  const defects: HandoffDefect[] = [];
+  const reject = (path: string, defectClass: HandoffDefectClass, expected: string, got: unknown) => {
+    defects.push({ path, class: defectClass, expected, got: preview(got) });
+  };
+  if (!isRecord(value)) {
+    reject('$', 'semantic', 'a JSON object', value);
+    return { defects };
+  }
+  const raw = value;
+  if (raw.schemaVersion !== 1) reject('schemaVersion', 'semantic', 'the number 1', raw.schemaVersion);
+  const objective = text(raw.objective, 500);
+  if (!objective) reject('objective', 'semantic', 'a nonempty string of at most 500 characters', raw.objective);
+  const workSummary = text(raw.workSummary, MAX_SUMMARY_CHARS);
+  if (!workSummary) reject('workSummary', 'semantic', `a nonempty string of at most ${MAX_SUMMARY_CHARS} characters`, raw.workSummary);
+  const outcome = raw.outcome === 'completed' || raw.outcome === 'partial' || raw.outcome === 'blocked' ? raw.outcome : undefined;
+  if (!outcome) reject('outcome', 'semantic', 'one of completed, partial, blocked', raw.outcome);
+
   const changes: ResultHandoffDraft['changes'] = [];
-  for (const item of raw.changes) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-    const change = item as Record<string, unknown>;
-    const summary = text(change.summary, 500);
-    if (!summary || !['file', 'artifact', 'external'].includes(String(change.kind))) return undefined;
-    const path = change.path === undefined ? undefined : text(change.path, 2_000);
-    const artifactDigest = change.digest === undefined ? undefined : text(change.digest, 64);
-    const artifactId = change.artifactId === undefined ? undefined : text(change.artifactId, 200);
-    const artifactVersion = change.version === undefined
-      ? undefined
-      : typeof change.version === 'number' ? change.version : null;
-    const uri = change.uri === undefined ? undefined : text(change.uri, 500);
-    if ((path === undefined) !== (change.path === undefined) || (artifactDigest === undefined) !== (change.digest === undefined)) return undefined;
-    if (path && !isAbsolute(path)) return undefined;
-    if (artifactDigest && !/^[a-f0-9]{64}$/.test(artifactDigest)) return undefined;
-    if ((artifactId === undefined) !== (artifactVersion === undefined)) return undefined;
-    if (artifactId && !uri) return undefined;
-    if (artifactVersion === null || (artifactVersion !== undefined && (!Number.isSafeInteger(artifactVersion) || artifactVersion < 1))) return undefined;
-    if (change.kind === 'file' && (!path || !artifactDigest)) return undefined;
-    if (change.kind === 'artifact' && !((path && artifactDigest) || (artifactId && artifactVersion))) return undefined;
+  if (!Array.isArray(raw.changes)) reject('changes', 'semantic', 'an array of at most 100 changes', raw.changes);
+  else if (raw.changes.length > 100) reject('changes', 'semantic', 'an array of at most 100 changes', raw.changes.length);
+  else for (const [index, item] of raw.changes.entries()) {
+    const at = `changes[${index}]`;
+    if (!isRecord(item)) { reject(at, 'semantic', 'a change object', item); continue; }
+    const summary = text(item.summary, 500);
+    if (!summary) reject(`${at}.summary`, 'semantic', 'a nonempty string of at most 500 characters', item.summary);
+    if (!['file', 'artifact', 'external'].includes(String(item.kind))) {
+      reject(`${at}.kind`, 'semantic', 'one of file, artifact, external', item.kind);
+      continue;
+    }
+    const path = item.path === undefined ? undefined : text(item.path, 2_000);
+    if (item.path !== undefined && path === undefined) reject(`${at}.path`, 'representation', 'a path string of at most 2000 characters', item.path);
+    if (path && !isAbsolute(path)) reject(`${at}.path`, 'representation', 'an absolute path or a path inside the work copy', item.path);
+    const digest = item.digest === undefined ? undefined : text(item.digest, 64);
+    if (item.digest !== undefined && (digest === undefined || !/^[a-f0-9]{64}$/.test(digest))) {
+      reject(`${at}.digest`, 'representation', 'a sha256 hex digest', item.digest);
+    }
+    const artifactId = item.artifactId === undefined ? undefined : text(item.artifactId, 200);
+    const artifactVersion = item.version === undefined ? undefined : versionNumber(item.version);
+    if (item.version !== undefined && artifactVersion === undefined) reject(`${at}.version`, 'representation', 'a positive integer version', item.version);
+    if ((artifactId === undefined) !== (artifactVersion === undefined)) {
+      reject(`${at}.artifactId`, 'representation', 'artifactId and version together', item.artifactId);
+    }
+    if (artifactId && !text(item.uri, 500)) reject(`${at}.uri`, 'representation', 'the artifact uri returned by artifact_publish', item.uri);
+    if (item.kind === 'file' && !path) reject(`${at}.path`, 'representation', 'a path inside the work copy', item.path);
+    else if (item.kind === 'file' && !digest) {
+      reject(`${at}.digest`, 'representation', 'a file that exists in the work copy so the host can hash it', item.digest);
+    }
+    if (item.kind === 'artifact' && !((path && digest) || (artifactId && artifactVersion !== undefined))) {
+      reject(`${at}`, 'representation', 'an artifact change needs a published artifactId with version, or a path with digest', item);
+    }
+    if (!summary) continue;
     changes.push({
-      kind: change.kind as ResultHandoffDraft['changes'][number]['kind'],
+      kind: item.kind as ResultHandoffDraft['changes'][number]['kind'],
       ...(path ? { path } : {}),
-      ...(artifactDigest ? { digest: artifactDigest } : {}),
+      ...(digest ? { digest } : {}),
       ...(artifactId ? { artifactId } : {}),
       ...(artifactVersion !== undefined ? { version: artifactVersion } : {}),
-      ...(uri ? { uri } : {}),
+      ...(text(item.uri, 500) ? { uri: text(item.uri, 500)! } : {}),
       summary,
     });
   }
 
-  if (!Array.isArray(raw.decisions) || raw.decisions.length > 50) return undefined;
   const decisions: ResultHandoffDraft['decisions'] = [];
-  for (const item of raw.decisions) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-    const decision = item as Record<string, unknown>;
-    const decisionText = text(decision.decision, 800);
-    const rationale = text(decision.rationale, 1_000);
-    const refs = evidenceRefs(decision.evidenceRefs ?? []);
-    if (!decisionText || !rationale || !refs) return undefined;
-    decisions.push({ decision: decisionText, rationale, evidenceRefs: refs });
+  if (!Array.isArray(raw.decisions) || raw.decisions.length > 50) reject('decisions', 'semantic', 'an array of at most 50 decisions', raw.decisions);
+  else for (const [index, item] of raw.decisions.entries()) {
+    const at = `decisions[${index}]`;
+    if (!isRecord(item)) { reject(at, 'semantic', 'a decision object', item); continue; }
+    const decision = text(item.decision, 800);
+    const rationale = text(item.rationale, 1_000);
+    const refs = evidenceRefs(item.evidenceRefs ?? []);
+    if (!decision) reject(`${at}.decision`, 'semantic', 'a nonempty string of at most 800 characters', item.decision);
+    if (!rationale) reject(`${at}.rationale`, 'semantic', 'a nonempty string of at most 1000 characters', item.rationale);
+    if (!refs) reject(`${at}.evidenceRefs`, 'semantic', 'an array of at most 20 short strings', item.evidenceRefs);
+    if (decision && rationale && refs) decisions.push({ decision, rationale, evidenceRefs: refs });
   }
 
-  if (!Array.isArray(raw.verification) || raw.verification.length > 50) return undefined;
   const verification: ResultHandoffDraft['verification'] = [];
-  for (const item of raw.verification) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-    const check = item as Record<string, unknown>;
-    const summary = text(check.summary, 800);
-    const refs = evidenceRefs(check.evidenceRefs ?? []);
-    if (!summary || !refs || !['pass', 'fail', 'unknown'].includes(String(check.result))) return undefined;
-    verification.push({ summary, result: check.result as 'pass' | 'fail' | 'unknown', evidenceRefs: refs });
+  if (!Array.isArray(raw.verification) || raw.verification.length > 50) reject('verification', 'semantic', 'an array of at most 50 checks', raw.verification);
+  else for (const [index, item] of raw.verification.entries()) {
+    const at = `verification[${index}]`;
+    if (!isRecord(item)) { reject(at, 'semantic', 'a verification object', item); continue; }
+    const summary = text(item.summary, 800);
+    const refs = evidenceRefs(item.evidenceRefs ?? []);
+    const result = ['pass', 'fail', 'unknown'].includes(String(item.result)) ? item.result as 'pass' | 'fail' | 'unknown' : undefined;
+    if (!summary) reject(`${at}.summary`, 'semantic', 'a nonempty string of at most 800 characters', item.summary);
+    if (!result) reject(`${at}.result`, 'semantic', 'one of pass, fail, unknown', item.result);
+    if (!refs) reject(`${at}.evidenceRefs`, 'semantic', 'an array of at most 20 short strings', item.evidenceRefs);
+    if (summary && result && refs) verification.push({ summary, result, evidenceRefs: refs });
   }
 
   const knownLimits = stringList(raw.knownLimits ?? []);
   const openQuestions = stringList(raw.openQuestions ?? []);
   const nextActions = stringList(raw.nextActions ?? []);
-  if (!knownLimits || !openQuestions || !nextActions) return undefined;
+  if (!knownLimits) reject('knownLimits', 'semantic', 'an array of at most 50 short strings', raw.knownLimits);
+  if (!openQuestions) reject('openQuestions', 'semantic', 'an array of at most 50 short strings', raw.openQuestions);
+  if (!nextActions) reject('nextActions', 'semantic', 'an array of at most 50 short strings', raw.nextActions);
+
+  if (defects.length || !objective || !workSummary || !outcome || !knownLimits || !openQuestions || !nextActions) {
+    return { defects };
+  }
   return {
-    schemaVersion: 1,
-    objective,
-    outcome: raw.outcome,
-    workSummary,
-    changes,
-    decisions,
-    verification,
-    knownLimits,
-    openQuestions,
-    nextActions,
+    draft: { schemaVersion: 1, objective, outcome, workSummary, changes, decisions, verification, knownLimits, openQuestions, nextActions },
+    defects: [],
   };
+}
+
+function normalizeDraft(value: unknown): ResultHandoffDraft | undefined {
+  return inspectDraft(value).draft;
 }
 
 export function resultHandoffFromSubmission(value: Json | undefined) {
@@ -204,17 +270,16 @@ function versionNumber(value: unknown) {
 }
 
 /**
- * Rebuild an admissible draft from a submission the worker wrote against its own
- * work copy: relative file paths are resolved inside the operation workspace,
- * their digests recomputed from the bytes on disk, and loose artifact references
- * bound to the recorded version. Anything that cannot be tied to real workspace
- * or recorded artifact content still fails closed.
+ * Apply everything the host can establish on its own: relative paths are
+ * resolved inside the work copy, digests recomputed from the bytes on disk,
+ * missing file digests filled in, and loose artifact references bound to the
+ * recorded version. Whatever the host cannot establish is left untouched for
+ * the inspector to report.
  */
-export function recoverResultHandoffDraft(value: Json | undefined, context: ResultHandoffRecoveryContext) {
-  const direct = normalizeDraft(value);
-  if (direct || !value || typeof value !== 'object' || Array.isArray(value)) return direct;
+function rebaseSubmission(value: unknown, context: ResultHandoffRecoveryContext) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
-  if (!Array.isArray(raw.changes)) return undefined;
+  if (!Array.isArray(raw.changes)) return raw;
   const changes = raw.changes.map(item => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
     const change = { ...(item as Record<string, unknown>) };
@@ -223,7 +288,9 @@ export function recoverResultHandoffDraft(value: Json | undefined, context: Resu
       if (target) {
         change.path = target;
         const actual = workspaceDigest(context.workspace, target);
-        if (actual) change.digest = actual;
+        // The bytes on disk are the truth for anything the worker wrote; a
+        // model-reported digest is only kept when the host cannot check it.
+        if (actual && (change.kind === 'file' || change.digest === undefined)) change.digest = actual;
       }
     }
     const bound = context.rebindArtifact?.(change);
@@ -234,7 +301,55 @@ export function recoverResultHandoffDraft(value: Json | undefined, context: Resu
     }
     return change;
   });
-  return normalizeDraft({ ...raw, changes });
+  return { ...raw, changes };
+}
+
+export interface HandoffInspectionResult {
+  /** Present only when the submission is usable after host repair. */
+  draft?: ResultHandoffDraft;
+  /** Everything still wrong, in the worker's own field coordinates. */
+  defects: HandoffDefect[];
+  /** The host had to supply or correct at least one field. */
+  repaired: boolean;
+}
+
+/**
+ * Inspect a worker submission the way the harness will: accept what already
+ * validates, otherwise rebuild from recorded truth and report the leftovers.
+ * The tool call and the settle path share this so a worker gets the same answer
+ * inside its turn as the harness would give after it.
+ */
+export function inspectResultHandoffSubmission(value: Json | undefined, context: ResultHandoffRecoveryContext = {}): HandoffInspectionResult {
+  const direct = inspectDraft(value);
+  const rebased = rebaseSubmission(value, context);
+  if (!rebased) return { defects: direct.defects, repaired: false };
+  const after = inspectDraft(rebased);
+  // The host re-establishes what it can (work-copy paths, digests, artifact
+  // identity) before judging the submission, so a worker is never failed for a
+  // field the harness can fill in itself.
+  if (after.draft) return { draft: after.draft, defects: [], repaired: !direct.draft };
+  return { defects: after.defects.length ? after.defects : direct.defects, repaired: true };
+}
+
+/**
+ * Rebuild an admissible draft from a submission the worker wrote against its own
+ * work copy. Anything that cannot be tied to real workspace or recorded artifact
+ * content still fails closed.
+ */
+export function recoverResultHandoffDraft(value: Json | undefined, context: ResultHandoffRecoveryContext) {
+  return inspectResultHandoffSubmission(value, context).draft;
+}
+
+/**
+ * The host truth a handoff may be rebuilt from: the worker's work copy and the
+ * artifacts this task actually recorded. Tool calls and settle share it so a
+ * worker is judged the same way before and after its turn ends.
+ */
+export function resultHandoffRecoveryContext(store: TaskStore, operation: { taskId: string; workspace?: string }): ResultHandoffRecoveryContext {
+  return {
+    ...(operation.workspace ? { workspace: operation.workspace } : {}),
+    rebindArtifact: change => recordedArtifact(store, operation.taskId, change),
+  };
 }
 
 export function validatePredecessorPolicies(proposal: Proposal, plan: GraphPlan, nodes: Map<string, NodeSpec>) {
@@ -458,12 +573,12 @@ export function buildPredecessorHandoffs(store: TaskStore, graph: GraphState, sp
   return { policies, projections };
 }
 
-function failedHandoffResult(result: OperationResult, reason: string): OperationResult {
+function failedHandoffResult(result: OperationResult, reason: string, defects: HandoffDefect[] = []): OperationResult {
   const { resultHandoff: _discarded, ...rest } = result;
   return {
     ...rest,
     outcome: 'failed',
-    output: { error: { code: 'result_handoff_invalid', reason }, previousOutput: result.output },
+    output: { error: { code: 'result_handoff_invalid', reason, defects: defects as unknown as Json }, previousOutput: result.output },
   };
 }
 
@@ -473,13 +588,50 @@ export function resultHandoffFailure(result: OperationResult) {
   if (!error || typeof error !== 'object' || Array.isArray(error)) return undefined;
   const details = error as Record<string, unknown>;
   if (details.code !== 'result_handoff_invalid') return undefined;
-  return { reason: typeof details.reason === 'string' ? details.reason : 'Result handoff validation failed' };
+  const defects = Array.isArray(details.defects) ? details.defects as HandoffDefect[] : [];
+  return { reason: typeof details.reason === 'string' ? details.reason : 'Result handoff validation failed', defects };
+}
+
+/**
+ * Anything a worker submitted that the harness refused to use, whatever part of
+ * the result it was: the handoff, the review report or the acceptance evidence.
+ * All of them mean "the work may be fine, the document is not", so they share
+ * one recovery route instead of becoming an uncertain external outcome.
+ */
+export function submissionDefect(result: OperationResult): { reason: string; defects: HandoffDefect[]; policy: 'result_handoff' | 'result' } | undefined {
+  const handoff = resultHandoffFailure(result);
+  if (handoff) return { ...handoff, policy: 'result_handoff' };
+  if (result.outcome !== 'failed' || !result.output || typeof result.output !== 'object' || Array.isArray(result.output)) return undefined;
+  const error = (result.output as Record<string, unknown>).error;
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return undefined;
+  const details = error as Record<string, unknown>;
+  if (details.code !== 'result_noncompliant') return undefined;
+  return {
+    reason: typeof details.reason === 'string' ? details.reason : 'The submitted result could not be used',
+    defects: Array.isArray(details.defects) ? details.defects as HandoffDefect[] : [],
+    policy: 'result',
+  };
+}
+
+/** Wrap a refused result so the main Agent can repair it without redoing work. */
+export function nonCompliantResult(result: OperationResult, reason: string, defects: HandoffDefect[]): OperationResult {
+  const { evidence: _evidence, artifacts: _artifacts, resultHandoff: _handoff, ...rest } = result;
+  return {
+    ...rest,
+    outcome: 'failed',
+    output: { error: { code: 'result_noncompliant', reason, defects: defects as unknown as Json }, previousOutput: result.output },
+  };
 }
 
 export interface ResultHandoffRepair {
   operationId: string;
   reason: string;
   submitted: Json;
+}
+
+export interface ResultHandoffRepairDecision {
+  questionId?: string;
+  value: Json;
 }
 
 /**
@@ -493,7 +645,7 @@ export function resultHandoffRepair(store: TaskStore, input: { taskId: string; n
     ORDER BY rowid DESC LIMIT 1`).get(input.taskId, input.nodeId, input.activationId) as { id: string; result: string } | undefined;
   if (!row) return undefined;
   const result = JSON.parse(row.result) as OperationResult;
-  const failure = resultHandoffFailure(result);
+  const failure = submissionDefect(result);
   if (!failure) return undefined;
   const output = result.output as Record<string, unknown>;
   return { operationId: row.id, reason: failure.reason, submitted: (output.previousOutput ?? null) as Json };
@@ -504,25 +656,23 @@ export function resultHandoffRepair(store: TaskStore, input: { taskId: string; n
  * never the original task briefing, and asks for the submission to be repaired
  * instead of the implementation to be redone.
  */
-export function renderResultHandoffRepair(repair: ResultHandoffRepair) {
+export function renderResultHandoffRepair(repair: ResultHandoffRepair, input: { decisions?: ResultHandoffRepairDecision[] } = {}) {
   const submitted = JSON.stringify(repair.submitted, null, 2);
+  const decisions = input.decisions?.length
+    ? ['Decisions taken since the failed attempt (apply them; they are the reason for this repair):',
+        ...input.decisions.map(decision => `- ${JSON.stringify(decision.value)}`)].join('\n')
+    : '';
   return [
     `Retry after a failed handoff on operation ${repair.operationId}.`,
     `Failure: ${repair.reason}`,
+    decisions,
     'The previous attempt already did the work in this work copy. Reconcile the submission instead of redoing the implementation:',
     '- Do not rewrite, re-create or re-explore files the previous attempt already produced.',
     '- Resubmit the same work through submit_result, corrected to the required schema.',
     '- If the work is genuinely incomplete, report outcome "partial" or "blocked" with the remaining gap instead of starting over.',
     'Previous submission (repair this, do not discard it):',
     submitted.length > 12_000 ? `${submitted.slice(0, 12_000)}\n…truncated` : submitted,
-  ].join('\n');
-}
-
-function submittedDraft(result: OperationResult) {
-  const direct = normalizeDraft(result.resultHandoff);
-  if (direct) return direct;
-  if (!result.output || typeof result.output !== 'object' || Array.isArray(result.output)) return undefined;
-  return normalizeDraft((result.output as Record<string, unknown>).resultHandoff);
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -540,6 +690,20 @@ function recoveryCandidates(result: OperationResult): Json[] {
   }
   if (result.output !== undefined) candidates.push(result.output);
   return candidates;
+}
+
+/**
+ * Inspect every place the submission can hide and keep the candidate that came
+ * closest to valid, so the reported defects describe the worker's own shape.
+ */
+function inspectSubmission(result: OperationResult, recovery: ResultHandoffRecoveryContext): HandoffInspectionResult {
+  let best: HandoffInspectionResult = { defects: [], repaired: false };
+  for (const candidate of recoveryCandidates(result)) {
+    const inspection = inspectResultHandoffSubmission(candidate, recovery);
+    if (inspection.draft) return inspection;
+    if (!best.repaired || (inspection.defects.length && inspection.defects.length < best.defects.length)) best = inspection;
+  }
+  return best;
 }
 
 /** The namespace/name a worker may write instead of the published artifact id. */
@@ -585,32 +749,40 @@ export function settleResultHandoff(
   result: OperationResult,
 ) {
   if (!requiresResultHandoff(proposal, operation.nodeId) || result.outcome !== 'completed') return result;
-  const recovery: ResultHandoffRecoveryContext = {
-    ...(operation.workspace ? { workspace: operation.workspace } : {}),
-    rebindArtifact: change => recordedArtifact(store, operation.taskId, change),
-  };
-  const draft = submittedDraft(result)
-    ?? recoveryCandidates(result).reduce<ResultHandoffDraft | undefined>(
-      (found, candidate) => found ?? recoverResultHandoffDraft(candidate, recovery), undefined);
-  if (!draft) return failedHandoffResult(result, 'A downstream edge requires a valid result_handoff@1 submission');
+  const recovery = resultHandoffRecoveryContext(store, operation);
+  const inspected = inspectSubmission(result, recovery);
+  const draft = inspected.draft;
+  if (!draft) {
+    return failedHandoffResult(result, 'A downstream edge requires a valid result_handoff@1 submission', inspected.defects);
+  }
   const summaryLimit = resultSummaryLimit(proposal, operation.nodeId);
   if (draft.workSummary.length > summaryLimit) {
-    return failedHandoffResult(result, `Result handoff workSummary exceeds the downstream limit of ${summaryLimit} characters`);
+    return failedHandoffResult(result, `Result handoff workSummary exceeds the downstream limit of ${summaryLimit} characters`, [{
+      path: 'workSummary', class: 'semantic', expected: `at most ${summaryLimit} characters`, got: `${draft.workSummary.length} characters`,
+    }]);
   }
   const artifacts = new Set((result.artifacts ?? []).map(artifact => `${artifact.path}\u0000${artifact.digest}`));
-  const invalidArtifact = draft.changes.find(change =>
+  const invalidIndex = draft.changes.findIndex(change =>
     change.path && change.digest && !artifacts.has(`${change.path}\u0000${change.digest}`)
       && workspaceDigest(operation.workspace, change.path) !== change.digest);
-  if (invalidArtifact) {
-    return failedHandoffResult(result, `Result handoff artifact reference does not match the operation result: ${invalidArtifact.path}`);
+  if (invalidIndex >= 0) {
+    const invalid = draft.changes[invalidIndex]!;
+    return failedHandoffResult(result, `Result handoff artifact reference does not match the operation result: ${invalid.path}`, [{
+      path: `changes[${invalidIndex}]`, class: 'safety',
+      expected: 'a path and digest that match the bytes in the work copy', got: `${invalid.path} (${invalid.digest})`,
+    }]);
   }
-  const invalidSharedArtifact = draft.changes.find(change => {
+  const invalidSharedIndex = draft.changes.findIndex(change => {
     if (!change.artifactId || change.version === undefined) return false;
     return !store.db.prepare('SELECT 1 FROM artifacts WHERE artifact_id=? AND version=?')
       .get(change.artifactId, change.version);
   });
-  if (invalidSharedArtifact) {
-    return failedHandoffResult(result, `Result handoff shared artifact does not exist: ${invalidSharedArtifact.artifactId}@${invalidSharedArtifact.version}`);
+  if (invalidSharedIndex >= 0) {
+    const invalid = draft.changes[invalidSharedIndex]!;
+    return failedHandoffResult(result, `Result handoff shared artifact does not exist: ${invalid.artifactId}@${invalid.version}`, [{
+      path: `changes[${invalidSharedIndex}].artifactId`, class: 'safety',
+      expected: 'a published artifact of this task', got: `${invalid.artifactId}@${invalid.version}`,
+    }]);
   }
   const node = store.db.prepare('SELECT instance_id,activation_id,output_version FROM nodes WHERE task_id=? AND id=?')
     .get(operation.taskId, operation.nodeId) as { instance_id: string | null; activation_id: string; output_version: number };

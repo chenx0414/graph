@@ -18,6 +18,7 @@ import {
 import { loadGraph } from '../../src/core/graph.ts';
 import {
   buildPredecessorHandoffs,
+  inspectResultHandoffSubmission,
   recoverResultHandoffDraft,
   renderPredecessorHandoffs,
   resultHandoffFailure,
@@ -438,25 +439,24 @@ test('a required result_handoff fails closed before the downstream Fresh Agent i
   expect(provider.requests).toHaveLength(1);
   const events = runtime.events(taskId);
   expect(events.some(event => event.type === 'context.result_handoff_frozen')).toBe(false);
-  expect(events.some(event => event.type === 'context.result_handoff_missing'
-    && (event.data as { nodeId?: string }).nodeId === 'next')).toBe(true);
-  expect(events.some(event => event.type === 'context.rejected'
-    && (event.data as { nodeId?: string }).nodeId === 'next')).toBe(true);
+  // One problem for whoever owns execution, not one failure plus one rejection
+  // per dependent: the downstream node simply never becomes ready.
+  expect(events.some(event => event.type === 'context.result_noncompliant'
+    && (event.data as { nodeId?: string }).nodeId === 'work')).toBe(true);
   await expect(runtime.user.task(taskId).view()).resolves.toMatchObject({
-    questions: expect.arrayContaining([
+    questions: [
       expect.objectContaining({
         nodeId: 'work',
-        kind: 'execution_failed',
+        kind: 'result_noncompliant',
         data: expect.objectContaining({
-          output: expect.objectContaining({ error: expect.objectContaining({ code: 'result_handoff_invalid' }) }),
+          reason: expect.stringContaining('result_handoff@1'),
+          defects: expect.arrayContaining([expect.objectContaining({ path: 'objective', class: 'semantic' })]),
+          sourceNodeId: 'work',
+          policy: 'result_handoff',
+          resume: ['next'],
         }),
       }),
-      expect.objectContaining({
-        nodeId: 'next',
-        kind: 'context_rejected',
-        data: expect.objectContaining({ sourceNodeId: 'work', policy: 'result_handoff' }),
-      }),
-    ]),
+    ],
   });
 }, 120_000);
 
@@ -522,6 +522,30 @@ test('a handoff that names a shared artifact by its logical key is bound to the 
   expect(JSON.parse(frozen.body).changes).toEqual([
     expect.objectContaining({ artifactId: 'art-1', version: 1, digest: artifactDigest }),
   ]);
+});
+
+test('the host supplies the digest and absolute path a worker left out', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-digest-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'work');
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, 'page.html'), 'PAGE_BODY');
+  const inspected = inspectResultHandoffSubmission({
+    schemaVersion: 1,
+    objective: 'Ship the page',
+    outcome: 'completed',
+    workSummary: 'Wrote the page',
+    // The worker names the file it wrote and nothing else.
+    changes: [{ kind: 'file', path: 'page.html', summary: 'Landing page' }],
+    decisions: [], verification: [], knownLimits: [], openQuestions: [], nextActions: [],
+  }, { workspace });
+  expect(inspected.repaired).toBe(true);
+  expect(inspected.draft?.changes).toEqual([{
+    kind: 'file',
+    path: join(workspace, 'page.html'),
+    digest: createHash('sha256').update('PAGE_BODY').digest('hex'),
+    summary: 'Landing page',
+  }]);
 });
 
 test('handoff repair never resolves a file change outside the worker work copy', async () => {

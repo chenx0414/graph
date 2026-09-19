@@ -9,7 +9,7 @@ import { independentReviewReady, implementerModels, isReviewer, pickModel } from
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
 import { insertQuestion } from './question-routing.ts';
-import { buildPredecessorHandoffs, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
+import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
@@ -18,6 +18,13 @@ import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type AttachmentInput, type ContextHandoffPackage, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
 
 type ExecutionNodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
+
+/**
+ * Settlement failures that describe a result the harness refuses to use, as
+ * opposed to an external outcome nobody can observe. Those stay with the work
+ * and become a repair problem instead of an uncertain operation.
+ */
+const SUBMISSION_DEFECT_CODES = new Set(['invalid_result', 'invalid_evidence']);
 
 /** Private execution state machine. Every mutation shares the task command/event transaction. */
 export class Execution {
@@ -116,6 +123,12 @@ export class Execution {
   /** Called only inside the authenticated user command transaction. */
   answer(taskId: string, questionId: string, answer: Answer) {
     this.lifecycle.answer(taskId, questionId, answer, this.models);
+  }
+
+  /** Hand a main-owned problem to the user with an explanation. */
+  escalate(taskId: string, questionId: string, prompt: string) {
+    this.lifecycle.escalate(taskId, questionId, prompt);
+    if (this.autoWake) this.kick();
   }
 
   finish(taskId: string) { this.deliver(taskId); }
@@ -502,6 +515,7 @@ export class Execution {
           const outputSchema = reviewNode
             ? { kind: 'independent_review', version: 1 } as const
             : proposal ? outputSchemaForNode(proposal, node.id) : { kind: 'agent_result', version: 1 } as const;
+          intent.context.outputSchema = outputSchema;
           const schemaInstruction = resultHandoffRequired
             ? [
                 reviewNode
@@ -510,8 +524,8 @@ export class Execution {
                 reviewNode
                   ? 'Submit the normal independent_review JSON with an additional top-level "resultHandoff" object shaped as:'
                   : 'Call submit_result with outputJson exactly shaped as:',
-                '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<absolute path, or a path relative to your work copy>","digest":"<sha256 when present>","artifactId":"<shared artifact id when published>","version":"<exact shared version>","uri":"<artifact uri when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
-                'The host checks every file change against the bytes in your work copy: give the path you actually wrote and its real sha256, and keep every top-level field even when its list is empty. Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
+                '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<the path you wrote; relative to your work copy is fine>","digest":"<sha256, or omit it and the host hashes the file>","artifactId":"<shared artifact id when published>","version":"<exact shared version>","uri":"<artifact uri when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
+                'The host checks every file change against the bytes in your work copy, so name the files you actually wrote; keep every top-level field even when its list is empty. Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
               ].join('\n')
             : '';
           // A retry whose previous attempt already landed the work is a handoff
@@ -520,7 +534,7 @@ export class Execution {
           const repair = spec.kind === 'agent'
             ? resultHandoffRepair(this.store, { taskId: node.task_id, nodeId: node.id, activationId: node.activation_id })
             : undefined;
-          if (repair) intent.context.briefing = renderResultHandoffRepair(repair);
+          if (repair) intent.context.briefing = renderResultHandoffRepair(repair, { decisions: answers });
           intent.context.briefing = [
             intent.context.briefing,
             renderPredecessorHandoffs(predecessor.projections),
@@ -664,7 +678,18 @@ export class Execution {
         const merged = await this.git.exclusive(node.task_id, () => this.git!.integrate(operation));
         if (merged && !merged.ok) result = { ...result, outcome: 'failed', output: { conflicts: merged.conflicts } };
       }
-      this.report(operation.id, operation.generation, result);
+      try {
+        this.report(operation.id, operation.generation, result);
+      } catch (error) {
+        // A refused document is not an uncertain external outcome: the worker
+        // finished and we hold its result. Keep the work, record the refusal and
+        // hand the defects to whoever owns execution instead of parking the node
+        // as unknown and re-running the implementation.
+        if (!(error instanceof RuntimeError) || !SUBMISSION_DEFECT_CODES.has(error.code)) throw error;
+        this.report(operation.id, operation.generation, nonCompliantResult(result, error.message, [{
+          path: '$', class: 'semantic', expected: 'a result the harness can settle', got: error.message,
+        }]));
+      }
     } catch (error) {
       // A gate refusal means the refused send never happened. With no prior
       // provider request the operation is not_sent; after partial work it is

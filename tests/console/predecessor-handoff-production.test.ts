@@ -315,10 +315,10 @@ test('retrying a failed handoff sends a repair delta instead of the full task br
   await runtime.host.drive();
 
   const failed = await runtime.user.task(taskId).view();
-  const problem = failed.questions.find(question => question.nodeId === 'work' && question.kind === 'execution_failed');
+  const problem = failed.questions.find(question => question.nodeId === 'work' && question.kind === 'result_noncompliant');
   expect(problem).toBeTruthy();
   expect(problem!.data).toMatchObject({
-    output: { error: { code: 'result_handoff_invalid' } },
+    defects: expect.arrayContaining([expect.objectContaining({ path: 'objective', class: 'semantic' })]),
   });
   expect(briefings).toHaveLength(1);
   expect(briefings[0]).toContain('TASK_BRIEFING_SENTINEL');
@@ -338,4 +338,109 @@ test('retrying a failed handoff sends a repair delta instead of the full task br
       resultHandoff: expect.objectContaining({ workSummary: 'REPAIRED_HANDOFF_SENTINEL' }),
     }),
   ]);
+}, 120_000);
+
+test('an unusable handoff is refused inside the worker turn with field-level defects', async () => {
+  const provider = await openaiServer([
+    {
+      tools: [{
+        id: 'bad',
+        name: 'submit_result',
+        arguments: JSON.stringify({ outputJson: JSON.stringify({ schemaVersion: 1, workSummary: 'NO_OBJECTIVE_SENTINEL' }) }),
+      }],
+    },
+    {
+      tools: [{
+        id: 'fixed',
+        name: 'submit_result',
+        arguments: JSON.stringify({ outputJson: JSON.stringify(handoff('FIXED_IN_TURN_SENTINEL')) }),
+      }],
+    },
+    { text: 'WORKER_DONE' },
+    { text: 'DOWNSTREAM_DONE' },
+  ]);
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-inturn-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const { runtime } = await runtimeWithProvider(root, provider);
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'in-turn handoff', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1,
+    summary: 'A refused submission must come back to the worker while its turn is open.',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      {
+        id: 'next', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
+        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
+      },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  // The retry inside the same turn carries the refusal and the exact fields.
+  const afterRefusal = JSON.stringify(provider.requests[1]);
+  expect(afterRefusal).toContain('submit_result refused');
+  expect(afterRefusal).toContain('objective');
+  expect(afterRefusal).toContain('semantic');
+  expect(afterRefusal).toContain('Do not redo or rewrite the implementation');
+  // The corrected submission settled normally, with no problem handed back up.
+  const view = await runtime.user.task(taskId).view();
+  expect(view.questions).toEqual([]);
+  expect(runtime.events(taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
+  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
+    expect.objectContaining({
+      sourceNodeId: 'work',
+      resultHandoff: expect.objectContaining({ workSummary: 'FIXED_IN_TURN_SENTINEL' }),
+    }),
+  ]);
+}, 120_000);
+
+test('a result the harness refuses at settlement is a repair problem, not an unknown outcome', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-settle-defect-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace, { recursive: true });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace }],
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({
+          outcome: 'completed',
+          output: null,
+          // Unusable: an acceptance artifact path must be absolute.
+          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: 'evidence.txt', digest: 'a'.repeat(64) } }],
+        }),
+      },
+    },
+  });
+  cleanup.push(() => runtime.close());
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'settle defect', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1,
+    summary: 'A refused result stays with the work instead of becoming unknown.',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [{ id: 'check', kind: 'program', action: 'check' }],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  const view = await runtime.user.task(taskId).view();
+  expect(view.questions.map(question => question.kind)).toEqual(['result_noncompliant']);
+  expect(view.questions[0]!.data).toMatchObject({
+    defects: expect.arrayContaining([expect.objectContaining({ path: '$', class: 'semantic' })]),
+  });
+  // The operation is settled with a known result, never parked as unknown.
+  const settleOperation = view.operations[0]!;
+  expect(settleOperation.state).toBe('succeeded');
+  expect(settleOperation.workerActive).toBe(false);
+  expect((settleOperation.result as { outcome?: string }).outcome).toBe('failed');
+  expect(view.nodes[0]).toMatchObject({ status: 'blocked', reserved: 0 });
+  const events = runtime.events(taskId);
+  expect(events.some(event => event.type === 'operation.unknown')).toBe(false);
+  expect(events.some(event => event.type === 'context.result_noncompliant')).toBe(true);
 }, 120_000);

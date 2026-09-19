@@ -18,7 +18,7 @@ type Supervisor = {
   listProblems?(): Promise<unknown>;
   resolveProblem?(input: {
     questionId: string;
-    action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage';
+    action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage' | 'escalate';
     response?: string;
     proof?: string;
     requestId: string;
@@ -131,6 +131,12 @@ export function agentTools(input: {
     requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
   };
   onSubmit?: (output: Json) => void;
+  /**
+   * Reject a submission the harness cannot use, in the worker's own field
+   * coordinates, so it can be corrected inside the same turn instead of being
+   * discovered after the operation ended.
+   */
+  validateSubmission?: (output: Json) => { ok: true } | { ok: false; defects: { path: string; class: string; expected: string; got: string }[] };
 }): ToolDefinition[] {
   const root = realpathSync(input.workspace);
   const readRoots = (input.readRoots ?? []).map(item => realpathSync(item));
@@ -327,7 +333,16 @@ export function agentTools(input: {
       name: 'submit_result', label: 'Submit result', description: 'Submit structured JSON output for this operation.',
       parameters: Type.Object({ outputJson: Type.String() }),
       execute: async (_id, params) => {
-        input.onSubmit?.(JSON.parse(String(fields(params).outputJson)) as Json);
+        const output = JSON.parse(String(fields(params).outputJson)) as Json;
+        const verdict = input.validateSubmission?.(output);
+        if (verdict && !verdict.ok) {
+          throw new Error([
+            'submit_result refused: the harness cannot use this result yet.',
+            ...verdict.defects.map(defect => `- ${defect.path} (${defect.class}): expected ${defect.expected}; got ${defect.got}`),
+            'Correct these fields and call submit_result again with the same work. Do not redo or rewrite the implementation; whatever you already wrote stays in place.',
+          ].join('\n'));
+        }
+        input.onSubmit?.(output);
         return text('Recorded structured result');
       },
     },
@@ -381,7 +396,7 @@ export function agentTools(input: {
         parameters: Type.Object({}),
         execute: async () => text(JSON.stringify(await input.supervisor!.listProblems!())),
       }, {
-        name: 'resolve_problem', label: 'Resolve execution problem', description: 'Resolve one main-Agent-owned execution problem after diagnosis. Use retry for transient execution/context failures, acknowledge only when the obstacle is externally cleared, respond when the worker asked a question, and reconcile_usage only when the provider cannot supply authoritative usage and the rationale is recorded.',
+        name: 'resolve_problem', label: 'Resolve execution problem', description: 'Resolve one main-Agent-owned execution problem after diagnosis. Use retry for transient execution/context failures and for a result_noncompliant problem whose defects you can correct by re-asking the worker (the worker is told what is missing and does not redo the work); acknowledge only when the obstacle is externally cleared; respond when the worker asked a question; reconcile_usage only when the provider cannot supply authoritative usage and the rationale is recorded; escalate when the defect needs a decision only the user can make - that resolves your problem and opens a user question with your explanation attached, so the user answer becomes part of the next attempt.',
         parameters: Type.Object({
           questionId: Type.String(),
           action: Type.String(),
@@ -392,14 +407,14 @@ export function agentTools(input: {
         execute: async (_id: string, params: unknown) => {
           const body = fields(params);
           const action = String(body.action).trim();
-          if (!['retry', 'acknowledge', 'respond', 'reconcile_usage'].includes(action)) {
+          if (!['retry', 'acknowledge', 'respond', 'reconcile_usage', 'escalate'].includes(action)) {
             throw new Error('Unsupported problem action');
           }
           const response = typeof body.response === 'string' ? body.response.trim() : undefined;
           const proof = typeof body.proof === 'string' ? body.proof.trim() : undefined;
           return text(JSON.stringify(await input.supervisor!.resolveProblem!({
             questionId: String(body.questionId).trim(),
-            action: action as 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage',
+            action: action as 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage' | 'escalate',
             ...(response ? { response } : {}),
             ...(proof ? { proof } : {}),
             requestId: String(body.requestId).trim(),
