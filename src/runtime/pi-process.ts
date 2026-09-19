@@ -10,6 +10,7 @@ import type {
 } from './agent-session.ts';
 import { nodeReadPaths } from './capabilities.ts';
 import { graphNodeRuntime } from './workspace-command.ts';
+import { graphApplicationRoot } from './graph-root.ts';
 import { isExternallyGated } from './pi-instance.ts';
 import { acquireRestrictedExecutor } from './restricted-process.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -99,7 +100,7 @@ export async function openPiProcess(options: PiProcessOptions) {
   const canonicalScratch = await realpath(scratchDir);
   const configPath = join(stateDir, 'pi-worker.json');
   const workerPath = fileURLToPath(new URL('./pi-worker.ts', import.meta.url));
-  const appRoot = await realpath(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
+  const appRoot = await realpath(graphApplicationRoot());
   const skillPaths = await Promise.all((options.skillPaths ?? []).map(path => realpath(path)));
   const piExtensionPaths = await Promise.all((options.piExtensionPaths ?? []).map(path => realpath(path)));
   const capabilityReadRoots = await Promise.all((options.readRoots ?? []).map(path => realpath(path)));

@@ -16,6 +16,7 @@ import { graphHome as resolveGraphHome } from '../catalog/graph-home.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
+import { graphApplicationRoot } from '../runtime/graph-root.ts';
 import { openGraphServer } from './host.ts';
 import { createUsageService } from './usage.ts';
 
@@ -330,6 +331,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
             liveCapabilities.filter(entry => entry.kind === kind).length,
           ]),
         ),
+      },
+      application: {
+        root: graphApplicationRoot(),
+        mode: process.versions.electron ? 'packaged' : 'source',
       },
     };
   };

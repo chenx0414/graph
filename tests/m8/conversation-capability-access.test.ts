@@ -1,6 +1,7 @@
 import { chmod, copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -131,6 +132,119 @@ test('an unbound Main Agent can read the writable capability library', async () 
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.questions).toEqual([]);
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Capability manifest read completed');
+}, 120_000);
+
+test('an unbound Main Agent can inspect the running Graph source read-only', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-main-source-read-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const graphRoot = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
+
+  const provider = await openaiServer([
+    { tools: [{ id: 'read-source', name: 'read', arguments: JSON.stringify({ path: join(graphRoot, 'package.json') }) }] },
+    { tools: [{ id: 'list-source', name: 'list_dir', arguments: JSON.stringify({ path: join(graphRoot, 'src') }) }] },
+    { text: 'Graph source read completed.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({
+    text: '读取 Graph 的 package.json，并列出 src。',
+    requestId: 'main-source-read',
+  });
+  await runtime.host.runReady();
+
+  const packageJson = (provider.requests[1] as { messages?: { role?: string; content?: string }[] }).messages
+    ?.find(message => message.role === 'tool')?.content ?? '';
+  expect(packageJson).toContain('"name": "graph"');
+  expect(packageJson).not.toContain('Path is outside the workspace');
+  const listed = (provider.requests[2] as { messages?: { role?: string; content?: string }[] }).messages
+    ?.filter(message => message.role === 'tool').at(-1)?.content ?? '';
+  expect(listed).toContain('runtime');
+  expect(listed).not.toContain('Path is outside the workspace');
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.questions).toEqual([]);
+  expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Graph source read completed');
+}, 120_000);
+
+test('a worker Agent cannot inspect the Graph source tree', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-worker-source-read-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace);
+  const graphRoot = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
+
+  const provider = await openaiServer([
+    { tools: [{ id: 'read-source', name: 'read', arguments: JSON.stringify({ path: join(graphRoot, 'package.json') }) }] },
+    { text: 'Out-of-scope source read handled.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace }],
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({
+          outcome: 'completed' as const,
+          output: null,
+          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
+        }),
+      },
+    },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Read a file.', requestId: 'worker-source-read-begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1,
+    summary: 'Read a file',
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'worker-source-read-proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'worker-source-read-accept' });
+  await runtime.host.drive();
+
+  const toolResult = (provider.requests[1] as { messages?: { role?: string; content?: string }[] }).messages
+    ?.find(message => message.role === 'tool')?.content ?? '';
+  expect(toolResult).toContain('Path is outside the workspace');
+  expect(toolResult).not.toContain('"name": "graph"');
 }, 120_000);
 
 test('an unrestricted Pi extension does not deadlock a bound MCP call in the same Main Agent turn', async () => {

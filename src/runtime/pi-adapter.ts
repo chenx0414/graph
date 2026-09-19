@@ -18,6 +18,7 @@ import { conversationForTask, publishConversationDelta } from '../core/conversat
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityPermissionRequest } from './capabilities.ts';
 import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
+import { graphApplicationRoot } from './graph-root.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
@@ -272,6 +273,12 @@ export function createPiAdapter(options: {
           const capabilityRoot = spec.role === 'master' && options.catalog?.capabilityRootPath()
             ? await realpath(options.catalog.capabilityRootPath()!).catch(() => undefined)
             : undefined;
+          const graphRoot = spec.role === 'master'
+            ? await realpath(graphApplicationRoot()).catch(() => undefined)
+            : undefined;
+          const masterReadRoots = spec.role === 'master'
+            ? [...new Set([capabilityRoot, graphRoot].filter((path): path is string => Boolean(path)))]
+            : [];
           commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'), gate });
           capabilityOperation = await bundle.openOperation({
             workspace,
@@ -280,7 +287,7 @@ export function createPiAdapter(options: {
             action: spec.action,
             ...(spec.role ? { role: spec.role } : {}),
             ...(discussion ? { readOnly: true } : {}),
-            ...(capabilityRoot ? { additionalReadRoots: [capabilityRoot] } : {}),
+            ...(masterReadRoots.length ? { additionalReadRoots: masterReadRoots } : {}),
             grants: operation.grants,
             onPermissionRequired: request => { permissionRequest ??= request; },
             hostTools: ({ readRoots }) => agentTools({
@@ -693,6 +700,7 @@ export function createPiAdapter(options: {
                     'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. Recipe names use a human-readable identity plus role, such as Bob_coder or Alice_reviewer; preserve that name when presenting the Agent and pair it with the stable id@version. You may save or edit recipes and compile them directly.',
                     'You can inspect and improve Graph itself without a bound project. Use inspect_graph_system/read_system_capabilities for live self-awareness. To add or update a capability, first inspect the public source and prepare an exact capability bundle, then call propose_system_change. This creates a user question and does not change anything. Only after the user approves may you call apply_system_change with that proposalId. Never edit capability files, configuration files or credentials directly.',
                     'You have read-only access to existing capability bundles under the configured capability root. Use that access to inspect manifests and files before proposing a change. Direct capability writes remain forbidden; install or update only through propose_system_change and, after approval, apply_system_change.',
+                    'You also have read-only access to the running Graph application/source tree reported as application.root by read_system_capabilities. Inspect it to diagnose runtime and configuration problems and to prepare precise fixes; direct source edits remain forbidden.',
                     'If the system pulse shows invalid capabilities, failed nodes, open internal problems or pending system changes, inspect them before making unrelated planning claims. When a concrete defect is actionable, explain the evidence and propose a bounded system change instead of silently changing the system.',
                     'Use read_system_capabilities to check configured subscriptions, models, graph architectures, current Agent recipes and their compiled definitions before designing or assembling the graph. Only `agentCombinations` and `agentDefinitions` in its current response are the source of truth; a definition mentioned in earlier conversation history but absent there is retired and must never be offered or dispatched. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
                     'Execution failures, recovery uncertainty, adapter/context errors, unknown usage and stalled or rework problems are yours to diagnose first. Use list_problems, then resolve_problem or revise_graph as appropriate. Never dump raw stack traces, JSON parsing errors, or internal state to the user. Only permission, quota, human acceptance, or a concrete decision that truly requires the user should appear as a user-facing question; ordinary user input may be requested in a normal chat reply.',

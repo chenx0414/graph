@@ -8,6 +8,7 @@ import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { CapabilityBinding, CapabilityRecord, Catalog } from '../catalog/catalog.ts';
 import { normalizeDomainPattern } from '../core/domains.ts';
+import { isLocalMcpCommand, LOCAL_MCP_COMMANDS } from '../core/mcp-commands.ts';
 import { canonicalJson } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
@@ -528,25 +529,96 @@ async function localConnection(input: {
   allowUnrestrictedNetwork?: boolean;
   secrets?: CapabilitySecrets;
 }): Promise<McpExchange> {
-  // Helper processes use the bundled node binary when the app is packaged.
-  const nodeCommand = graphNodeRuntime().execPath;
-  const command = input.manifest.command === 'node' ? nodeCommand : input.manifest.command;
-  if (typeof command !== 'string' || !isAbsolute(command)) {
-    throw new RuntimeError('capability_unavailable', 'A local MCP capability requires capability.json with an absolute command or "node"');
-  }
+  const resolved = await resolveLocalMcpCommand(input.manifest.command);
   const args = Array.isArray(input.manifest.args) && input.manifest.args.every(value => typeof value === 'string') ? input.manifest.args as string[] : [];
   const grants = await runGrants(input.workspace, input.scratchDir);
   const env = environmentValues(input.manifest.env, input.secrets);
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
-    command, args: args.map(arg => resolveMcpArg(input.snapshot, arg, input.secrets)),
+    command: resolved.executable,
+    args: [...resolved.argsPrefix, ...args.map(arg => resolveMcpArg(input.snapshot, arg, input.secrets))],
     ...(env ? { env } : {}),
-    readPaths: [input.snapshot, ...nodeReadPaths(nodeCommand, process.env.GRAPH_APP_NODE ? undefined : process.versions.electron as string | undefined)],
+    readPaths: [input.snapshot, ...resolved.readPaths],
     // Discussion turns may read the business directory but only write scratch.
     writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],
     ...(input.networkDomains?.length ? { networkDomains: input.networkDomains } : {}),
     ...(input.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
   });
+}
+
+function localMcpSearchDirectories(command: string) {
+  const configured = (process.env.PATH ?? '').split(':').filter(Boolean);
+  const common = [
+    join(homedir(), '.local', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ];
+  const preferred = command === 'uvx'
+    ? [join(homedir(), '.local', 'bin'), ...common]
+    : command === 'npx'
+      ? ['/opt/homebrew/bin', '/usr/local/bin', ...common]
+      : common;
+  return [...new Set([...configured, ...preferred])];
+}
+
+function findExecutable(command: string) {
+  for (const directory of localMcpSearchDirectories(command)) {
+    const candidate = resolve(directory, command);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch { /* keep looking */ }
+  }
+  return undefined;
+}
+
+async function resolveLocalMcpCommand(value: unknown): Promise<{
+  executable: string;
+  argsPrefix: string[];
+  readPaths: string[];
+}> {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new RuntimeError('capability_unavailable', 'A local MCP capability requires capability.json with a command');
+  }
+  const command = value.trim();
+  if (command === 'node') {
+    const runtime = graphNodeRuntime();
+    return {
+      executable: runtime.execPath,
+      argsPrefix: [],
+      readPaths: nodeReadPaths(runtime.execPath, runtime.electron),
+    };
+  }
+  if (!isLocalMcpCommand(command) && !isAbsolute(command)) {
+    throw new RuntimeError(
+      'capability_unavailable',
+      `A local MCP command must be one of ${LOCAL_MCP_COMMANDS.join(', ')} or an absolute executable path`,
+    );
+  }
+
+  const candidate = isAbsolute(command) ? command : findExecutable(command);
+  if (!candidate) throw new RuntimeError('capability_unavailable', `Local MCP command "${command}" was not found on PATH`);
+  try {
+    accessSync(candidate, constants.X_OK);
+  } catch {
+    throw new RuntimeError('capability_unavailable', `Local MCP command "${command}" is not executable`);
+  }
+  const target = await realpath(candidate);
+  const baseReadPaths = [...new Set([dirname(candidate), dirname(target)])];
+  if (command === 'npx') {
+    const runtime = graphNodeRuntime();
+    return {
+      executable: runtime.execPath,
+      argsPrefix: [target],
+      // npx-cli.js loads npm's package files relative to its real path.
+      readPaths: [...new Set([
+        ...nodeReadPaths(runtime.execPath, runtime.electron),
+        ...baseReadPaths,
+        dirname(dirname(target)),
+      ])],
+    };
+  }
+  return { executable: candidate, argsPrefix: [], readPaths: baseReadPaths };
 }
 
 /** Extensions load only inside the restricted worker, never in the background process. */

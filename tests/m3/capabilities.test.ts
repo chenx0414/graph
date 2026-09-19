@@ -1,10 +1,11 @@
-import { cp, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
+import { CapabilityLibrary } from '../../src/catalog/capability-library.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { capabilityConfigViews } from '../../src/catalog/capability-config.ts';
@@ -125,6 +126,48 @@ function checkAction(workspace: string) {
     }),
   };
 }
+
+test('allowlisted local MCP commands resolve through PATH and start the server', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-mcp-command-path-')));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const bin = join(root, 'bin');
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  await mkdir(bin, { recursive: true });
+  await symlink(process.execPath, join(bin, 'uvx'));
+  await writeFile(join(bin, 'npx'), [
+    "import { pathToFileURL } from 'node:url';",
+    "await import(pathToFileURL(process.argv[2]).href);",
+  ].join('\n'), { mode: 0o755 });
+
+  for (const command of ['uvx', 'npx']) {
+    const capability = join(capabilityRoot, `${command}-lookup`);
+    await mkdir(capability, { recursive: true });
+    await copyFile(join(fixtureDir, 'mcp-read-capability-server.mjs'), join(capability, 'server.mjs'));
+    await writeFile(join(capability, 'capability.json'), JSON.stringify({
+      id: `${command}-lookup`,
+      kind: 'mcp',
+      version: '1.0.0',
+      name: `${command} lookup`,
+      command,
+      args: ['./server.mjs'],
+      networkDomains: ['github.com'],
+    }, null, 2));
+  }
+
+  const library = new CapabilityLibrary({ capabilityRoot });
+  await library.refresh();
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath ?? ''}`;
+  try {
+    for (const command of ['uvx', 'npx']) {
+      const result = await verifyMcpCapability(library.capability(`${command}-lookup`, '1.0.0')!);
+      expect(result.ok, result.message).toBe(true);
+      expect(result.tools).toEqual(['search_repositories']);
+    }
+  } finally {
+    process.env.PATH = originalPath;
+  }
+}, 120_000);
 
 test('a definition-bound skill is loaded into the production worker prompt and readable', async () => {
   const { root, workspace } = await project();
