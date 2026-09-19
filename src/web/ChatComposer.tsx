@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
+import { FullAccessToggle } from './FullAccessToggle.tsx';
 import { Icon, toast } from './ui.tsx';
 
 export type ChatAttachment = { name: string; type: string; size: number; text: string };
@@ -255,6 +256,7 @@ export function ChatComposer({
             event.currentTarget.value = '';
           }}
         />
+        <FullAccessToggle />
         {leftActions}
         <div className="composer-spacer" />
         <button type="button" className="icon-button primary" data-testid={sendTestId} disabled={sendDisabled} onClick={onSend} aria-label="发送消息">

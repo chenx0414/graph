@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import Fastify from 'fastify';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { RuntimeError, type AttachmentInput } from '../core/types.ts';
-import { FULL_ACCESS_CONFIRMATION } from '../core/access-confirmation.ts';
 import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
 import { layoutGraph } from './layout.ts';
@@ -127,19 +126,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       };
     });
     app.post('/api/config', async request => {
-      const body = request.body as { expectedRevision?: unknown; document?: unknown; accessConfirmation?: unknown };
+      const body = request.body as { expectedRevision?: unknown; document?: unknown };
       if (typeof body?.expectedRevision !== 'number' || !Number.isInteger(body.expectedRevision) || body.expectedRevision < 0) {
         throw new RuntimeError('invalid_input', 'expectedRevision must be a nonnegative integer');
       }
       const current = await options.config!.store.snapshot();
-      const nextAccess = body.document && typeof body.document === 'object' && !Array.isArray(body.document)
-        ? (body.document as { access?: { mode?: unknown } }).access
-        : undefined;
-      if (current.config.access.mode !== 'full'
-        && nextAccess?.mode === 'full'
-        && body.accessConfirmation !== FULL_ACCESS_CONFIRMATION) {
-        throw new RuntimeError('confirmation_required', `Enabling full access requires the confirmation phrase ${FULL_ACCESS_CONFIRMATION}`);
-      }
       const nextModels = (body.document as { models?: { entries?: { id?: unknown }[] } })?.models?.entries;
       const nextIds = new Set(Array.isArray(nextModels) ? nextModels.map(entry => String(entry?.id ?? '')) : []);
       const removed = runtime.modelsInUse().filter(id => !nextIds.has(id));

@@ -5,7 +5,6 @@ import { afterEach, expect, test } from 'vitest';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
 import { createModelScheduler } from '../../src/runtime/model-scheduler.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
-import { FULL_ACCESS_CONFIRMATION } from '../../src/core/access-confirmation.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -109,7 +108,7 @@ test('a clean app enables dispatch and keeps the same daemon, master instance an
   expect(daemon.server.driving()).toBe(true);
 }, 60_000);
 
-test('full access configuration requires the typed confirmation and applies live', async () => {
+test('full access configuration applies live without a separate confirmation phrase', async () => {
   const provider = await openaiServer([{ text: 'ok' }]);
   cleanup.push(() => provider.close());
   const { daemon, projectRoot } = await fixture('full-access', { document: modelDocument(provider) });
@@ -120,18 +119,10 @@ test('full access configuration requires the typed confirmation and applies live
     access: fullAccessPolicy(),
   };
 
-  const denied = await fetch(`${daemon.url}/api/config`, {
-    method: 'POST',
-    headers: api.headers,
-    body: JSON.stringify({ expectedRevision: 0, document }),
-  });
-  expect(denied.status).toBe(400);
-  expect(await denied.json()).toMatchObject({ code: 'confirmation_required' });
-
   const applied = await fetch(`${daemon.url}/api/config`, {
     method: 'POST',
     headers: api.headers,
-    body: JSON.stringify({ expectedRevision: 0, document, accessConfirmation: FULL_ACCESS_CONFIRMATION }),
+    body: JSON.stringify({ expectedRevision: 0, document }),
   });
   expect(applied.status).toBe(200);
   expect(await applied.json()).toMatchObject({ applied: true, effectiveRevision: 1 });

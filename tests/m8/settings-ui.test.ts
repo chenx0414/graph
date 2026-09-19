@@ -7,7 +7,6 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
-import { FULL_ACCESS_CONFIRMATION } from '../../src/core/access-confirmation.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -186,7 +185,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.getByTestId('config-revision').innerText()).toBe('1');
 }, 120_000);
 
-test('settings enables and rolls back full access only after the typed confirmation', async () => {
+test('chat composer toggles full access with one click and settings no longer hosts the control', async () => {
   const dir = await temp('access-mode');
   const stub = await stubProvider();
   const path = await configFile(dir, stub.baseUrl);
@@ -195,24 +194,37 @@ test('settings enables and rolls back full access only after the typed confirmat
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/settings`);
-  await page.getByTestId('settings-page').waitFor();
-  await page.locator('.settings-nav-item').filter({ hasText: '访问模式' }).click();
-  await page.getByTestId('access-mode').waitFor();
-  expect(await page.getByTestId('access-mode').innerText()).toContain('标准访问');
+  await page.goto(`${daemon.url}/#/`);
+  const toggle = page.getByTestId('full-access-toggle');
+  await toggle.waitFor();
+  expect(await toggle.evaluate(element => element.parentElement?.classList.contains('chat-composer-controls'))).toBe(true);
+  expect(await toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(await toggle.innerText()).toContain('完全访问');
+  await page.setViewportSize({ width: 390, height: 800 });
+  expect(await page.locator('.new-chat-composer .chat-composer-controls').evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
 
-  await page.getByTestId('access-confirmation').fill('not the phrase');
-  expect(await page.getByTestId('access-enable-full').isDisabled()).toBe(true);
-  await page.getByTestId('access-confirmation').fill(FULL_ACCESS_CONFIRMATION);
-  await page.getByTestId('access-enable-full').click();
+  await toggle.click();
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(1);
-  expect(await page.getByTestId('access-mode').innerText()).toContain('完全访问');
+  await expect.poll(async () => toggle.getAttribute('aria-pressed')).toBe('true');
   const full = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
   expect(full.config.access).toMatchObject({ mode: 'full', filesystem: { read: 'host' } });
 
-  await page.getByTestId('access-disable-full').click();
+  await toggle.click();
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(2);
-  expect(await page.getByTestId('access-mode').innerText()).toContain('标准访问');
+  await expect.poll(async () => toggle.getAttribute('aria-pressed')).toBe('false');
+  const standard = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
+  expect(standard.config.access).toMatchObject({ mode: 'standard', filesystem: { read: 'workspace-and-bound' } });
+
+  await page.goto(`${daemon.url}/#/settings`);
+  await page.getByTestId('settings-page').waitFor();
+  expect(await page.locator('.settings-nav-item').filter({ hasText: '访问模式' }).count()).toBe(0);
+
+  const created = await (await api.post('/api/conversations', {
+    text: '测试聊天输入区的完全访问开关。',
+    requestId: 'full-access-toggle-conversation',
+  })).json() as { conversationId: string };
+  await page.goto(`${daemon.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('full-access-toggle').waitFor();
 }, 120_000);
 
 test('removing a model bound to an unfinished task is refused and the daemon keeps the binding', async () => {
