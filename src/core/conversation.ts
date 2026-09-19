@@ -103,7 +103,7 @@ export function clearConversationStream(store: TaskStore, operationId: string) {
 export function conversationStreams(store: TaskStore, conversationId: string) {
   return (store.db.prepare(`SELECT s.* FROM conversation_streams s
     JOIN operations o ON o.id=s.operation_id
-    WHERE s.conversation_id=? AND o.state IN ('intent','dispatched','unknown')
+    WHERE s.conversation_id=? AND o.state IN ('intent','dispatched')
     ORDER BY s.updated_at`).all(conversationId) as unknown as ConversationStreamRow[]).map(row => ({
     operationId: row.operation_id,
     entryId: row.entry_id,
@@ -176,7 +176,7 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
 /** Turn an internal failure into a short, actionable line for the chat. Raw
  * exception text, stack traces and JSON stay in the problem ledger. */
 export function turnFailureText(reason: string) {
-  if (/unterminated string|unexpected end of json|json/i.test(reason)) {
+  if (/unterminated string|unexpected end of json|json|output token limit|truncated/i.test(reason)) {
     return '主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。';
   }
   if (/unknown usage|usage/i.test(reason)) return '主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。';

@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -117,6 +118,50 @@ test('conversation model and thinking selection applies to the next master turn'
   expect(clamped).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
   expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
 });
+
+test('an output-limit turn settles with a retry notice instead of staying in progress', async () => {
+  const root = await temp('output-limit');
+  const provider = await openaiServer([{
+    thinking: 'This reasoning consumed the entire output budget. '.repeat(200),
+    finishReason: 'length',
+    usage: {
+      prompt_tokens: 128,
+      completion_tokens: 256,
+      prompt_tokens_details: { cached_tokens: 0 },
+      completion_tokens_details: { reasoning_tokens: 256 },
+    },
+  }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+        reasoning: true,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({ text: '这个问题需要很长的思考。', requestId: 'output-limit-create' });
+  await runtime.host.runReady();
+
+  const view = await runtime.conversations.view(created.conversationId);
+  const notice = view.messages.find(message => message.role === 'system' && message.kind === 'error');
+  expect(notice?.text).toContain('输出被截断');
+  expect(view.master?.status).not.toBe('dispatched');
+}, 30_000);
 
 test('new conversations inherit the master model default thinking level', async () => {
   const root = await temp('default-thinking');

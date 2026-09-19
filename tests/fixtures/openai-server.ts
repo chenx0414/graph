@@ -6,7 +6,9 @@ import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 
 export interface ResponsePlan {
   text?: string;
+  thinking?: string;
   tools?: { id: string; name: string; arguments: string | (() => string) }[];
+  finishReason?: 'stop' | 'length' | 'tool_calls';
   usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number }; completion_tokens_details?: { reasoning_tokens: number } } | null;
   status?: number;
   error?: string;
@@ -44,9 +46,12 @@ export async function openaiServer(plans: ResponsePlan[]) {
         type: 'function',
         function: { name: tool.name, arguments: typeof tool.arguments === 'function' ? tool.arguments() : tool.arguments },
       })) }
-      : { role: 'assistant', content: plan.text ?? 'Local response' };
+      : plan.thinking
+        ? { role: 'assistant', reasoning_content: plan.thinking }
+        : { role: 'assistant', content: plan.text ?? 'Local response' };
+    const finishReason = plan.finishReason ?? (plan.tools ? 'tool_calls' : 'stop');
     res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
-    res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: plan.tools ? 'tool_calls' : 'stop' }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
+    res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
     res.end('data: [DONE]\n\n');
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

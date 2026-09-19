@@ -60,4 +60,7 @@ test('live deltas persist a recoverable snapshot and append only the new suffix'
 
   store.db.prepare("UPDATE operations SET state='succeeded' WHERE id='op'").run();
   expect(conversationStreams(store, 'conversation')).toEqual([]);
+
+  store.db.prepare("UPDATE operations SET state='unknown' WHERE id='op'").run();
+  expect(conversationStreams(store, 'conversation')).toEqual([]);
 });

@@ -826,6 +826,13 @@ export function createPiAdapter(options: {
             if (result.stopReason === 'error') {
               return { outcome: 'failed', output: { error: result.errorMessage ?? 'Model request failed' }, usage: gate.total() };
             }
+            if (result.stopReason === 'length') {
+              return {
+                outcome: 'failed',
+                output: { error: 'Model response hit the output token limit before completing the reply' },
+                usage: gate.total(),
+              };
+            }
             if (permissionRequest) {
               return {
                 outcome: 'waiting', output: { permission: { grant: permissionRequest.grant, capabilityId: permissionRequest.capabilityId, tool: permissionRequest.tool } },

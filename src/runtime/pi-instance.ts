@@ -32,6 +32,7 @@ const PI_PACKAGE_VERSION = (() => {
     return 'unknown';
   }
 })();
+const SESSION_CLOSE_TIMEOUT_MS = 5_000;
 
 /** Mark a tool whose execute already passes the send gate at its own effect boundary. */
 export function externallyGated<T extends ToolDefinition>(tool: T): T {
@@ -311,7 +312,14 @@ export async function openPiInstance(options: PiInstanceOptions) {
     },
     async close() {
       session.dispose();
-      await session.agent.waitForIdle();
+      const idle = session.agent.waitForIdle().catch(() => undefined);
+      await Promise.race([
+        idle,
+        new Promise<void>(resolve => {
+          const timeout = setTimeout(resolve, SESSION_CLOSE_TIMEOUT_MS);
+          timeout.unref?.();
+        }),
+      ]);
     },
   };
 }
