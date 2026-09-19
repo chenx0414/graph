@@ -78,6 +78,23 @@ function fields(params: unknown) {
   return params as Record<string, unknown>;
 }
 
+function resourceReference(rawId: unknown, explicitVersion: unknown) {
+  let id = String(rawId ?? '').trim();
+  let version = typeof explicitVersion === 'string' && explicitVersion.trim()
+    ? explicitVersion.trim()
+    : undefined;
+  const separator = id.lastIndexOf('@');
+  if (separator > 0 && separator < id.length - 1) {
+    const embeddedVersion = id.slice(separator + 1).trim();
+    if (version && version !== embeddedVersion) {
+      throw new Error(`Conflicting versions for capability ${id.slice(0, separator)}`);
+    }
+    version = embeddedVersion;
+    id = id.slice(0, separator);
+  }
+  return { id, version };
+}
+
 function capabilityView(record: CapabilityRecord) {
   return {
     id: record.id,
@@ -417,15 +434,20 @@ export function agentTools(input: {
     });
     tools.push(
       {
-        name: 'get_resource', label: 'Get capability details', description: 'Read one capability from the user capability directory by id or id@version. Reading details does not bind it; definition-bound capabilities are available to the Agent under the default capability-bypass runtime policy.',
+        name: 'get_resource', label: 'Get capability details', description: 'Read one capability returned by search_resources by id or id@version. This never reads Agent recipes or definitions; use get_agent_combination with the recipe id (for example coder, not coder@5). Reading details does not bind the capability.',
         parameters: Type.Object({ id: Type.String(), version: Type.Optional(Type.String()) }),
         execute: async (_id, params) => {
           const body = fields(params);
-          const id = String(body.id).trim();
+          const { id, version } = resourceReference(body.id, body.version);
           if (!id || id.length > 160) throw new Error('A bounded resource id is required');
-          const version = typeof body.version === 'string' && body.version.trim() ? body.version.trim() : undefined;
           const entry = input.catalog!.capability(id, version);
-          if (!entry) throw new Error(`Unknown capability ${id}${version ? `@${version}` : ''}`);
+          if (!entry) {
+            const recipe = input.catalog!.agentCombination(id);
+            const hint = recipe
+              ? ` "${id}" is an Agent recipe id; use get_agent_combination instead.`
+              : ' Use the exact id and version returned by search_resources.';
+            throw new Error(`Unknown capability ${id}${version ? `@${version}` : ''}.${hint}`);
+          }
           return text(JSON.stringify(capabilityView(entry)));
         },
       },

@@ -205,6 +205,8 @@ test('only the master receives read-only resource and system inventory tools', a
   expect(search.items).toEqual([expect.objectContaining({ id: 'reviewer' })]);
   const detail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer' })).content[0]!.text!) as { grantsNoPermission: boolean };
   expect(detail.grantsNoPermission).toBe(true);
+  const versionedDetail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer@1.0.0' })).content[0]!.text!) as { id: string; version: string };
+  expect(versionedDetail).toMatchObject({ id: 'reviewer', version: '1.0.0' });
   const combinations = JSON.parse((await execute('list_agent_combinations')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
   expect(combinations.items).toEqual([expect.objectContaining({ id: 'review' })]);
   const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'review' })).content[0]!.text!) as { resolved: { resourceId: string; version: string }[] };

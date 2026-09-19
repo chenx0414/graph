@@ -134,6 +134,95 @@ test('an unbound Main Agent can read the writable capability library', async () 
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Capability manifest read completed');
 }, 120_000);
 
+test('an unbound Main Agent can resolve the versioned resource id returned by search', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-main-capability-versioned-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const reviewer = join(capabilityRoot, 'reviewer');
+  await mkdir(reviewer, { recursive: true });
+  await writeFile(join(reviewer, 'agent.md'), 'Review changes independently.\n');
+  await writeFile(join(reviewer, 'capability.json'), JSON.stringify({
+    id: 'reviewer',
+    kind: 'prompt',
+    role: 'agent',
+    version: '1.0.0',
+    name: 'Reviewer',
+    description: 'Independent review identity',
+  }, null, 2));
+
+  let provider!: Awaited<ReturnType<typeof openaiServer>>;
+  provider = await openaiServer([
+    {
+      tools: [{
+        id: 'search-resource',
+        name: 'search_resources',
+        arguments: JSON.stringify({ query: 'reviewer', kind: 'prompt', role: 'agent' }),
+      }],
+    },
+    {
+      tools: [{
+        id: 'get-resource',
+        name: 'get_resource',
+        arguments: () => {
+          const messages = (provider.requests[1] as { messages?: { role?: string; content?: unknown }[] }).messages ?? [];
+          const content = messages.filter(message => message.role === 'tool').at(-1)?.content;
+          if (typeof content !== 'string') throw new Error('search_resources did not return a text result');
+          const search = JSON.parse(content) as { items: { id: string; version: string }[] };
+          const item = search.items[0];
+          if (!item) throw new Error('search_resources returned no matches');
+          return JSON.stringify({ id: `${item.id}@${item.version}` });
+        },
+      }],
+    },
+    { text: 'Versioned capability resolved.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({
+    text: '先搜索 reviewer 能力，再读取搜索结果的完整详情。',
+    requestId: 'main-versioned-capability',
+  });
+  await runtime.host.runReady();
+
+  const messages = (provider.requests[2] as { messages?: { role?: string; content?: unknown }[] }).messages ?? [];
+  const detailText = messages.filter(message => message.role === 'tool').at(-1)?.content;
+  expect(typeof detailText).toBe('string');
+  expect(JSON.parse(detailText as string)).toMatchObject({
+    id: 'reviewer',
+    version: '1.0.0',
+    name: 'Reviewer',
+  });
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.messages.filter(message =>
+    message.role === 'tool'
+    && message.data !== null
+    && typeof message.data === 'object'
+    && !Array.isArray(message.data)
+    && message.data.isError === true,
+  )).toEqual([]);
+  expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Versioned capability resolved');
+}, 120_000);
+
 test('an unbound Main Agent can inspect the running Graph source read-only', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-main-source-read-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
