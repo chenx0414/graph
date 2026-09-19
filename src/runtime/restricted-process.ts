@@ -190,6 +190,9 @@ process.on('message', (message, handle) => {
 dgram.Socket.prototype.bind = function () { deny(); };
 `;
 
+/** A model turn can legitimately include large tool results and inline images. */
+const MAX_WORKER_REQUEST_BYTES = 32 * 1024 * 1024;
+
 export interface RestrictedGate {
   dispatch<T>(id: string, reservation: number, send: () => T): T;
   settle(id: string, usage: TokenUsage | null): void;
@@ -717,14 +720,16 @@ export async function openRestrictedExecutor() {
           timer?.unref?.();
           const channel = child.stdio[3] as Duplex;
           channel.setEncoding('utf8');
-          let pending = '', requests = Promise.resolve();
+          let pending = '', pendingBytes = 0, requests = Promise.resolve();
           channel.on('error', () => {}); // A worker may exit after an in-flight request.
           channel.on('data', data => {
             pending += data;
-            if (pending.length > 1_000_000) { child.kill(); return; }
+            pendingBytes += Buffer.byteLength(data, 'utf8');
+            if (pendingBytes > MAX_WORKER_REQUEST_BYTES) { child.kill(); return; }
             let newline: number;
             while ((newline = pending.indexOf('\n')) !== -1) {
               const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
+              pendingBytes -= Buffer.byteLength(line, 'utf8') + 1;
               requests = requests.then(async () => {
                 let reply;
                 try {

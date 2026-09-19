@@ -23,7 +23,7 @@ export function createWorkerRequests(options: {
         context = { messages: [{ role: 'user', content: request.prompt, timestamp: Date.now() }] };
       } else {
         const candidate = request.context as Context | undefined;
-        if (!candidate || !Array.isArray(candidate.messages) || JSON.stringify(candidate).length > 1_000_000) throw new Error('Invalid model context');
+        if (!candidate || !Array.isArray(candidate.messages)) throw new Error('Invalid model context');
         context = {
           messages: candidate.messages,
           ...(typeof candidate.systemPrompt === 'string' ? { systemPrompt: candidate.systemPrompt } : {}),

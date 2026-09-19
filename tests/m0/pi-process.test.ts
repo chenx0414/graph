@@ -321,6 +321,58 @@ test('a multibyte response near the stdout buffer boundary is not truncated on e
   await process.close();
 }, 120_000);
 
+test('a large tool result can cross the worker request boundary without terminating the Agent', async () => {
+  const { root, project } = await workspace('pi-large-tool-result');
+  const extension = join(project, 'large-extension.mjs');
+  await writeFile(join(project, 'payload.txt'), 'x'.repeat(1_200_000));
+  await writeFile(extension, `
+    import { readFileSync } from 'node:fs';
+    export default function (pi) {
+      pi.registerTool({
+        name: 'large_probe',
+        label: 'Large probe',
+        description: 'Return a large tool result.',
+        parameters: { type: 'object', properties: {} },
+        async execute() {
+          return {
+            content: [{ type: 'text', text: readFileSync(new URL('./payload.txt', import.meta.url), 'utf8') }],
+            details: {},
+          };
+        },
+      });
+    }
+  `);
+  const provider = await openaiServer([
+    { tools: [{ id: 'large-probe', name: 'large_probe', arguments: '{}' }] },
+    { text: 'The large tool result completed.' },
+  ]);
+  cleanup.push(() => provider.close());
+  provider.model.contextWindow = 2_000_000;
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-large-tool-result');
+  cleanup.push(() => gate.close());
+  const process = await openPiProcess({
+    binding: { instanceId: 'agent-large-tool-result', nodeId: 'work', definitionVersion: 'coder@1' },
+    workspace: project,
+    stateDir: join(root, 'state'),
+    model: provider.model,
+    stream: controlledOpenAIStream(gate, 'scripted-local-key'),
+    tools: [],
+    piExtensionPaths: [extension],
+    piExtensionTools: ['large_probe'],
+    broker: gate,
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  });
+  const inspect = await process.prompt('Run the large probe');
+  expect(provider.requests).toHaveLength(2);
+  expect(inspect.messages.at(-1)).toMatchObject({
+    role: 'assistant',
+    content: [{ type: 'text', text: 'The large tool result completed.' }],
+  });
+  await process.close();
+}, 120_000);
+
 test('the production process path requires and verifies the persisted capability digest', async () => {
   const { root, project } = await workspace('pi-process-digest');
   const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-digest');
