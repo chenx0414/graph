@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,6 +80,15 @@ function parseInspect(stdout: string): PiWorkerInspect {
   return result.inspect;
 }
 
+async function capabilityEntryRoot(entry: string) {
+  let directory = dirname(entry);
+  while (directory !== dirname(directory)) {
+    if (existsSync(join(directory, 'capability.json'))) return realpath(directory);
+    directory = dirname(directory);
+  }
+  return realpath(dirname(entry));
+}
+
 /** Run one AgentSession in an independent, OS-restricted Pi process.
  * The host keeps identity, credentials, gates and concrete tools; the child
  * receives only the exact capability bundle and proxy tool schemas. */
@@ -106,7 +116,8 @@ export async function openPiProcess(options: PiProcessOptions) {
   const capabilityReadRoots = await Promise.all((options.readRoots ?? []).map(path => realpath(path)));
   const capabilityWriteRoots = await Promise.all((options.writeRoots ?? []).map(path => realpath(path)));
   const unixSockets = await Promise.all((options.unixSockets ?? []).map(path => realpath(path)));
-  const extensionReadRoots = await Promise.all(piExtensionPaths.map(path => realpath(dirname(path))));
+  const extensionReadRoots = await Promise.all(piExtensionPaths.map(capabilityEntryRoot));
+  const protectedReadPathExceptions = [...new Set([...skillPaths, ...extensionReadRoots])];
   const forkSource = options.forkFrom ? await realpath(options.forkFrom.sessionFile) : undefined;
   const forkFrom = forkSource
     ? { sessionFile: forkSource, ...(options.forkFrom?.leafId ? { leafId: options.forkFrom.leafId } : {}) }
@@ -201,6 +212,9 @@ export async function openPiProcess(options: PiProcessOptions) {
     ...(options.filesystemAccess ? { filesystem: options.filesystemAccess } : {}),
     ...(options.protectedPaths?.length ? { protectedPaths: options.protectedPaths } : {}),
     ...(options.filesystemAccess === 'host' ? { protectedPathExceptions: [stateDir] } : {}),
+    ...(options.filesystemAccess === 'host' && protectedReadPathExceptions.length
+      ? { protectedReadPathExceptions }
+      : {}),
     ...(options.allowGitMetadataWritesAll ? { allowGitMetadataWritesAll: true } : {}),
     ...(Object.keys(helperEnv).length ? { env: helperEnv } : {}),
     ...(options.networkDomains?.length ? { networkDomains: options.networkDomains } : {}),

@@ -177,6 +177,65 @@ test('a bound Pi extension can load sibling modules from its capability director
   await process.close();
 }, 120_000);
 
+test('a bound Pi extension remains readable when its capability directory is inside a protected host root', async () => {
+  const { root, project } = await workspace('pi-extension-protected-root');
+  const protectedRoot = join(root, 'protected');
+  const extensionRoot = join(protectedRoot, 'extension');
+  const entryDirectory = join(extensionRoot, 'dist', 'extensions', 'agent-browser');
+  const scriptDirectory = join(extensionRoot, 'dist', 'scripts');
+  await mkdir(entryDirectory, { recursive: true });
+  await mkdir(scriptDirectory, { recursive: true });
+  await writeFile(join(extensionRoot, 'capability.json'), JSON.stringify({
+    id: 'protected-extension',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Protected extension',
+    entry: './dist/extensions/agent-browser/index.mjs',
+  }));
+  await writeFile(join(scriptDirectory, 'agent-browser-target.mjs'), `export const value = 'protected-extension-ok';\n`);
+  await writeFile(join(entryDirectory, 'index.mjs'), `
+    import { value } from '../../scripts/agent-browser-target.mjs';
+    export default function (pi) {
+      pi.registerTool({
+        name: 'protected_extension_probe',
+        label: 'Protected extension probe',
+        description: 'Prove a protected capability directory is readable.',
+        parameters: { type: 'object', properties: {} },
+        async execute() {
+          return { content: [{ type: 'text', text: value }], details: {} };
+        },
+      });
+    }
+  `);
+  const provider = await openaiServer([{ text: 'The protected extension loaded.' }]);
+  cleanup.push(() => provider.close());
+  const gate = new CallBroker(join(root, 'protected-calls.sqlite'), 'agent-protected-extension');
+  cleanup.push(() => gate.close());
+  const process = await openPiProcess({
+    binding: { instanceId: 'agent-protected-extension', nodeId: 'work', definitionVersion: 'coder@1' },
+    workspace: project,
+    stateDir: join(root, 'state'),
+    model: provider.model,
+    stream: controlledOpenAIStream(gate, 'scripted-local-key'),
+    tools: [],
+    readRoots: [extensionRoot],
+    piExtensionPaths: [join(entryDirectory, 'index.mjs')],
+    piExtensionTools: ['protected_extension_probe'],
+    systemPrompt: 'Use the protected extension.',
+    appendSystemPrompt: 'protected_extension_probe is declared by the bound extension.',
+    bundleDigest: 'd'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+    filesystemAccess: 'host',
+    protectedPaths: [protectedRoot],
+    broker: gate,
+  });
+  const inspect = await process.prompt('Load the protected extension');
+  expect(inspect.extensionErrors).toEqual([]);
+  expect(inspect.activeTools).toContain('protected_extension_probe');
+  await process.close();
+}, 120_000);
+
 test('the process host never exposes the provider credential to the Agent process', async () => {
   const { root, project } = await workspace('pi-credential');
   const provider = await openaiServer([{ text: 'Host-owned credential' }]);

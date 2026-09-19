@@ -146,6 +146,48 @@ test('host filesystem mode reaches outside the workspace while protected paths s
   } finally { broker.close(); }
 });
 
+test('host filesystem mode grants narrow read exceptions inside protected roots without granting writes', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-read-exception-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const protectedRoot = join(root, 'protected'); await mkdir(protectedRoot);
+  const readable = join(protectedRoot, 'extension'); await mkdir(readable);
+  const readableFile = join(readable, 'index.mjs'); await writeFile(readableFile, 'export default true;\n');
+  const secretFile = join(protectedRoot, 'credentials.json'); await writeFile(secretFile, '{"token":"secret"}');
+  const scratch = join(root, 'scratch'); await mkdir(scratch);
+  await writeFile(join(workspace, 'probe.mjs'), `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const results = {};
+    const attempt = (key, action) => { try { action(); results[key] = 'allowed'; } catch { results[key] = 'denied'; } };
+    attempt('extensionRead', () => readFileSync(${JSON.stringify(readableFile)}, 'utf8'));
+    attempt('extensionWrite', () => writeFileSync(${JSON.stringify(join(readable, 'new.mjs'))}, 'bad'));
+    attempt('siblingRead', () => readFileSync(${JSON.stringify(secretFile)}, 'utf8'));
+    console.log(JSON.stringify(results));
+  `);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const result = await executor.run({
+      broker,
+      cwd: workspace,
+      scratchDir: scratch,
+      executable: process.execPath,
+      args: ['probe.mjs'],
+      filesystem: 'host',
+      protectedPaths: [protectedRoot],
+      protectedReadPathExceptions: [readable],
+      readPaths: [],
+      writePaths: [],
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      extensionRead: 'allowed',
+      extensionWrite: 'denied',
+      siblingRead: 'denied',
+    });
+    expect(await readFile(readableFile, 'utf8')).toBe('export default true;\n');
+    expect(await readFile(secretFile, 'utf8')).toBe('{"token":"secret"}');
+  } finally { broker.close(); }
+});
+
 test('host filesystem mode writes Git metadata only through the explicit high-risk switch', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-git-'))); dirs.push(root);
   const workspace = join(root, 'workspace'); await mkdir(join(workspace, '.git'), { recursive: true });

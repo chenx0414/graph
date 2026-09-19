@@ -208,8 +208,10 @@ export interface RestrictedCommand {
   filesystem?: 'bounded' | 'host';
   /** Paths denied for both read and write in host filesystem mode. */
   protectedPaths?: string[];
-  /** Narrow subtrees that remain usable inside an otherwise protected root. */
+  /** Narrow subtrees that remain readable and writable inside an otherwise protected root. */
   protectedPathExceptions?: string[];
+  /** Narrow subtrees that remain readable, but not writable, inside an otherwise protected root. */
+  protectedReadPathExceptions?: string[];
   denyWrite?: string[];
   /** Graph-managed caches may contain their own VCS metadata. */
   allowGitMetadataWrites?: string[];
@@ -416,7 +418,15 @@ export async function openRestrictedExecutor() {
       const protectedPathExceptions = hostFilesystem
         ? [...new Set((command.protectedPathExceptions ?? []).map(path => resolve(path)))]
         : [];
-      const strictProtectedPaths = protectedPaths.filter(path =>
+      const protectedReadPathExceptions = hostFilesystem
+        ? [...new Set([
+            ...protectedPathExceptions,
+            ...(command.protectedReadPathExceptions ?? []).map(path => resolve(path)),
+          ])]
+        : [];
+      const strictProtectedReadPaths = protectedPaths.filter(path =>
+        !protectedReadPathExceptions.some(exception => exception === path || exception.startsWith(`${path}/`)));
+      const strictProtectedWritePaths = protectedPaths.filter(path =>
         !protectedPathExceptions.some(exception => exception === path || exception.startsWith(`${path}/`)));
       const gitPaths = hostFilesystem ? [] : await gitMetadataPaths(writePaths, scratchDir, allowGitMetadataWrites);
       const profile = hostFilesystem
@@ -433,8 +443,10 @@ export async function openRestrictedExecutor() {
               `(deny file-write* (subpath ${JSON.stringify(path)}))`,
             ]),
             `(allow file-read* (subpath ${JSON.stringify(cwd)}))`,
-            ...protectedPathExceptions.flatMap(path => [
+            ...protectedReadPathExceptions.flatMap(path => [
               `(allow file-read* (subpath ${JSON.stringify(path)}))`,
+            ]),
+            ...protectedPathExceptions.flatMap(path => [
               `(allow file-write* (subpath ${JSON.stringify(path)}))`,
             ]),
             `(allow file-read* (subpath ${JSON.stringify(scratchDir)}))`,
@@ -508,7 +520,7 @@ export async function openRestrictedExecutor() {
           launch, '/bin/sh', {
           network,
           filesystem: {
-              denyRead: hostFilesystem ? strictProtectedPaths : ['/'],
+              denyRead: hostFilesystem ? strictProtectedReadPaths : ['/'],
               allowRead: allowedReads,
               allowWrite: hostFilesystem ? ['/'] : writePaths,
               // Remove SRT's unrelated default writable log/scratch directories.
@@ -517,7 +529,7 @@ export async function openRestrictedExecutor() {
                 '/private/tmp/claude',
                 join(homedir(), '.npm/_logs'),
                 join(homedir(), '.claude/debug'),
-                ...(hostFilesystem ? strictProtectedPaths : protectedPaths),
+                ...(hostFilesystem ? strictProtectedWritePaths : protectedPaths),
                 ...(command.denyWrite ?? []),
               ],
             },
