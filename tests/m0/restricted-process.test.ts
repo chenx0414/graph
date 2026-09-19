@@ -188,6 +188,45 @@ test('host filesystem mode grants narrow read exceptions inside protected roots 
   } finally { broker.close(); }
 });
 
+test('host filesystem mode keeps an explicitly granted work copy usable inside a protected root', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-protected-workspace-'))); dirs.push(root);
+  const protectedRoot = join(root, 'state'); await mkdir(protectedRoot);
+  const workspace = join(protectedRoot, 'worktrees', 'task', 'worker'); await mkdir(workspace, { recursive: true });
+  const scratch = join(protectedRoot, 'instances', 'worker', 'scratch'); await mkdir(scratch, { recursive: true });
+  await writeFile(join(workspace, 'input.txt'), 'input');
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-protected-workspace');
+  await writeFile(join(workspace, 'probe.mjs'), `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const results = {};
+    const attempt = (key, action) => { try { action(); results[key] = 'allowed'; } catch { results[key] = 'denied'; } };
+    attempt('workspaceRead', () => readFileSync('input.txt', 'utf8'));
+    attempt('workspaceWrite', () => writeFileSync('output.txt', 'output'));
+    attempt('formalRead', () => readFileSync(${JSON.stringify(join(protectedRoot, 'tasks.sqlite'))}, 'utf8'));
+    console.log(JSON.stringify(results));
+  `);
+  try {
+    const result = await executor.run({
+      broker,
+      cwd: workspace,
+      scratchDir: scratch,
+      executable: process.execPath,
+      args: ['probe.mjs'],
+      filesystem: 'host',
+      protectedPaths: [protectedRoot],
+      protectedPathExceptions: [workspace, scratch],
+      readPaths: [workspace],
+      writePaths: [workspace, scratch],
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      workspaceRead: 'allowed',
+      workspaceWrite: 'allowed',
+      formalRead: 'denied',
+    });
+    expect(await readFile(join(workspace, 'output.txt'), 'utf8')).toBe('output');
+  } finally { broker.close(); }
+});
+
 test('host filesystem mode writes Git metadata only through the explicit high-risk switch', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-git-'))); dirs.push(root);
   const workspace = join(root, 'workspace'); await mkdir(join(workspace, '.git'), { recursive: true });

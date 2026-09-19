@@ -418,13 +418,21 @@ export async function openRestrictedExecutor() {
       const protectedPaths = hostFilesystem
         ? [...new Set((command.protectedPaths ?? []).map(path => resolve(path)))]
         : [];
+      const grantedWriteExceptions = hostFilesystem ? [...new Set([...writePaths, scratchDir])] : [];
+      const grantedReadExceptions = hostFilesystem
+        ? [...new Set([cwd, scratchDir, ...readPaths, ...writePaths, ...unixSockets])]
+        : [];
       const protectedPathExceptions = hostFilesystem
-        ? [...new Set((command.protectedPathExceptions ?? []).map(path => resolve(path)))]
+        ? [...new Set([
+            ...(command.protectedPathExceptions ?? []).map(path => resolve(path)),
+            ...grantedWriteExceptions,
+          ])]
         : [];
       const protectedReadPathExceptions = hostFilesystem
         ? [...new Set([
             ...protectedPathExceptions,
             ...(command.protectedReadPathExceptions ?? []).map(path => resolve(path)),
+            ...grantedReadExceptions,
           ])]
         : [];
       const strictProtectedReadPaths = protectedPaths.filter(path =>

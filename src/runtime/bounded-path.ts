@@ -9,6 +9,10 @@ export interface BoundedPathOptions {
   allowGitMetadata?: boolean;
   allowSymlinks?: boolean;
   protectedPaths?: string[];
+  /** Explicit narrow read grants inside otherwise protected roots. */
+  protectedReadPathExceptions?: string[];
+  /** Explicit narrow read/write grants inside otherwise protected roots. */
+  protectedWritePathExceptions?: string[];
 }
 
 function outside(): never { throw new Error('Path is outside the workspace'); }
@@ -17,8 +21,11 @@ function within(root: string, target: string) {
   return root === sep ? target.startsWith(sep) : target === root || target.startsWith(`${root}${sep}`);
 }
 
-function protectedPath(target: string, protectedPaths: string[]) {
-  return protectedPaths.some(path => target === path || target.startsWith(`${path}${sep}`));
+function protectedPath(target: string, protectedPaths: string[], exceptions: string[]) {
+  return protectedPaths.some(path => {
+    if (!within(path, target)) return false;
+    return !exceptions.some(exception => within(exception, target));
+  });
 }
 
 function containsGitMetadata(target: string) {
@@ -68,7 +75,10 @@ async function resolveHostPath(path: string, mode: 'read' | 'write', options: Bo
   if (!path.startsWith(sep)) throw new Error('Host access requires an absolute path');
   const requested = resolve(path);
   if (!options.allowGitMetadata && containsGitMetadata(requested)) throw new Error('Git metadata cannot be accessed through workspace tools');
-  if (protectedPath(requested, options.protectedPaths ?? [])) throw new Error('Path is protected by the current access policy');
+  const exceptions = mode === 'read'
+    ? [...(options.protectedReadPathExceptions ?? []), ...(options.protectedWritePathExceptions ?? [])]
+    : options.protectedWritePathExceptions ?? [];
+  if (protectedPath(requested, options.protectedPaths ?? [], exceptions)) throw new Error('Path is protected by the current access policy');
 
   let target: string;
   try {
@@ -79,7 +89,7 @@ async function resolveHostPath(path: string, mode: 'read' | 'write', options: Bo
     target = join(parent, requested.slice(dirname(requested).length + 1));
   }
   if (!options.allowGitMetadata && containsGitMetadata(target)) throw new Error('Git metadata cannot be accessed through workspace tools');
-  if (protectedPath(target, options.protectedPaths ?? [])) throw new Error('Path is protected by the current access policy');
+  if (protectedPath(target, options.protectedPaths ?? [], exceptions)) throw new Error('Path is protected by the current access policy');
   return target;
 }
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -240,4 +240,42 @@ test('full access commands may execute outside the workspace allowlist', async (
   const result = await runner.run('node', ['-e', `require('fs').writeFileSync(${JSON.stringify(output)}, 'outside')`]);
   expect(result.code, result.stderr).toBe(0);
   expect(await readFile(output, 'utf8')).toBe('outside');
+});
+
+test('full access commands can work inside a Graph worktree nested under protected state', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-command-full-state-')));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const stateDir = join(root, 'state');
+  const workspace = join(stateDir, 'worktrees', 'task', 'worker');
+  const scratch = join(stateDir, 'instances', 'worker', 'command-scratch');
+  const formal = join(stateDir, 'tasks.sqlite');
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, 'input.txt'), 'work copy');
+  await writeFile(formal, 'formal state');
+  const access = resolveAccessPolicy(fullAccessPolicy(), {
+    home: root,
+    stateDir,
+    graphHome: join(root, 'graph'),
+  });
+  const runner = await openWorkspaceCommandRunner({
+    workspace,
+    scratchDir: scratch,
+    access,
+    gate: { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
+  });
+  cleanup.push(() => runner.close());
+
+  const script = `
+    const fs = require('node:fs');
+    const results = {};
+    const attempt = (key, action) => { try { action(); results[key] = 'allowed'; } catch (error) { results[key] = error.code; } };
+    attempt('read', () => { if (fs.readFileSync('input.txt', 'utf8') !== 'work copy') throw new Error('bad input'); });
+    attempt('write', () => fs.writeFileSync('output.txt', 'output'));
+    attempt('formal', () => fs.readFileSync(${JSON.stringify(formal)}, 'utf8'));
+    console.log(JSON.stringify(results));
+  `;
+  const result = await runner.run('node', ['-e', script]);
+  expect(result.code, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout)).toEqual({ read: 'allowed', write: 'allowed', formal: 'EPERM' });
+  expect(await readFile(join(workspace, 'output.txt'), 'utf8')).toBe('output');
 });

@@ -136,9 +136,13 @@ export function agentTools(input: {
   const readRoots = (input.readRoots ?? []).map(item => realpathSync(item));
   const hostRead = isHostRead(input.access);
   const hostWrite = isHostWrite(input.access);
+  const protectedReadPathExceptions = [...new Set([root, ...readRoots])];
+  const protectedWritePathExceptions = hostWrite ? [root] : [];
   const pathOptions = {
     ...(input.access?.filesystem.gitMetadata === 'writable' ? { allowGitMetadata: true } : {}),
     ...(input.access?.protectedPaths.length ? { protectedPaths: input.access.protectedPaths } : {}),
+    ...(protectedReadPathExceptions.length ? { protectedReadPathExceptions } : {}),
+    ...(protectedWritePathExceptions.length ? { protectedWritePathExceptions } : {}),
   };
   const tools: ToolDefinition[] = [
     {
