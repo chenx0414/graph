@@ -23,6 +23,12 @@ export interface CapabilityManifest {
   headersEnv?: Record<string, string>;
   /** Host patterns this MCP process may reach; `${ENV}` may resolve to a base URL. */
   networkDomains?: string[];
+  /** Package-manager setup policy. Manager is inferred from uvx/npx when omitted. */
+  provisioning?: {
+    manager?: 'uv' | 'npm';
+    /** Extra hosts needed only while installing the MCP's dependencies. */
+    domains?: string[];
+  };
   /** Explicit opt-in for browser-style MCPs that must reach arbitrary public hosts. */
   networkAccess?: 'unrestricted';
   /** Graph extension or Pi extension entry file. */
@@ -96,6 +102,29 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
   const command = raw.command === undefined ? undefined : text(raw.command, `${path}.command`);
   const args = stringList(raw.args, `${path}.args`);
   const url = raw.url === undefined ? undefined : text(raw.url, `${path}.url`);
+  let provisioning: CapabilityManifest['provisioning'];
+  if (raw.provisioning !== undefined) {
+    if (!raw.provisioning || typeof raw.provisioning !== 'object' || Array.isArray(raw.provisioning)) {
+      throw new RuntimeError('invalid_capability', `${path}.provisioning must be an object`);
+    }
+    const value = raw.provisioning as Record<string, unknown>;
+    const manager = value.manager === undefined ? undefined : text(value.manager, `${path}.provisioning.manager`);
+    if (manager && manager !== 'uv' && manager !== 'npm') {
+      throw new RuntimeError('invalid_capability', `${path}.provisioning.manager must be uv or npm`);
+    }
+    const expected = command === 'uvx' ? 'uv' : command === 'npx' ? 'npm' : undefined;
+    if (!expected) {
+      throw new RuntimeError('invalid_capability', `${path}.provisioning is only valid for local uvx or npx MCP commands`);
+    }
+    if (manager && manager !== expected) {
+      throw new RuntimeError('invalid_capability', `${path}.provisioning.manager does not match command ${command}`);
+    }
+    const provisioningDomains = networkDomains(value.domains, `${path}.provisioning.domains`);
+    provisioning = {
+      manager: (manager ?? expected) as 'uv' | 'npm',
+      ...(provisioningDomains ? { domains: provisioningDomains } : {}),
+    };
+  }
   const headers = stringMap(raw.headers, `${path}.headers`);
   const headersEnv = stringMap(raw.headersEnv, `${path}.headersEnv`);
   const domains = networkDomains(raw.networkDomains, `${path}.networkDomains`);
@@ -169,6 +198,7 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
     ...(command ? { command } : {}),
     ...(args ? { args } : {}),
     ...(url ? { url } : {}),
+    ...(provisioning ? { provisioning } : {}),
     ...(headers ? { headers } : {}),
     ...(headersEnv ? { headersEnv } : {}),
     ...(domains ? { networkDomains: domains } : {}),

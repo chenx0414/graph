@@ -140,6 +140,32 @@ test('MCP network declarations accept host patterns and environment references b
   ]));
 });
 
+test('MCP provisioning keeps installer domains separate from runtime network', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-provisioning-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await capability(root, 'valid', {
+    id: 'valid', kind: 'mcp', version: '1.0.0', name: 'Valid', command: 'uvx',
+    provisioning: { manager: 'uv', domains: ['downloads.example.test', '${PROVISION_TOKEN_HOST}'] },
+    networkDomains: ['api.example.test'],
+  });
+  await capability(root, 'mismatch', {
+    id: 'mismatch', kind: 'mcp', version: '1.0.0', name: 'Mismatch', command: 'uvx',
+    provisioning: { manager: 'npm' },
+  });
+  await capability(root, 'unsupported', {
+    id: 'unsupported', kind: 'mcp', version: '1.0.0', name: 'Unsupported', command: 'node',
+    provisioning: { domains: ['downloads.example.test'] },
+  });
+
+  const library = new CapabilityLibrary({ capabilityRoot: root });
+  await library.refresh();
+  expect(library.capabilities()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'valid', status: 'available' }),
+    expect.objectContaining({ id: 'mismatch', status: 'invalid', error: expect.stringContaining('does not match command') }),
+    expect.objectContaining({ id: 'unsupported', status: 'invalid', error: expect.stringContaining('only valid for local uvx or npx') }),
+  ]));
+});
+
 test('Pi extension runtime declarations are validated separately from MCP network fields', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-capability-runtime-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

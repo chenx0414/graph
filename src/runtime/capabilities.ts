@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { accessSync, constants, existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,11 @@ export interface CapabilityLoadFact {
   tools?: string[];
   networkDomains?: string[];
   networkAccess?: 'unrestricted';
+  provisioning?: {
+    manager: 'uv' | 'npm';
+    domains: string[];
+    path: string;
+  };
   runtime?: Json;
 }
 
@@ -66,6 +71,10 @@ export interface ResolvedCapabilityFact {
   url?: string;
   networkDomains?: string[];
   networkAccess?: 'unrestricted';
+  provisioning?: {
+    manager: 'uv' | 'npm';
+    domains: string[];
+  };
 }
 
 interface McpManifest {
@@ -73,6 +82,7 @@ interface McpManifest {
   args?: unknown;
   entry?: unknown;
   url?: unknown;
+  provisioning?: unknown;
   headers?: unknown;
   headersEnv?: unknown;
   env?: unknown;
@@ -80,6 +90,26 @@ interface McpManifest {
   networkDomains?: unknown;
   networkAccess?: unknown;
   runtime?: unknown;
+}
+
+const UV_PROVISIONING_DOMAINS = [
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+  'pypi.org',
+  'files.pythonhosted.org',
+] as const;
+
+const NPM_PROVISIONING_DOMAINS = [
+  'registry.npmjs.org',
+] as const;
+
+interface McpProvisioningPlan {
+  manager: 'uv' | 'npm';
+  domains: string[];
+  root: string;
+  readyFile: string;
+  key: string;
 }
 
 /** A remote MCP operation the task has not pre-authorized; the user answers with this exact grant. */
@@ -391,12 +421,10 @@ function environmentValues(env: unknown, secrets: CapabilitySecrets = {}) {
   return values;
 }
 
-/** Resolve capability-declared host patterns; base URLs are reduced to their hostname. */
-function manifestNetworkDomains(manifest: McpManifest, granted: string[] = [], secrets: CapabilitySecrets = {}) {
-  const declared = manifest.networkDomains;
+function resolveManifestDomains(declared: unknown, label: string, granted: string[] = [], secrets: CapabilitySecrets = {}) {
   if (declared === undefined) return normalizeDomains(granted);
   if (!Array.isArray(declared) || declared.some(value => typeof value !== 'string' || !value.trim())) {
-    throw new RuntimeError('capability_unavailable', 'MCP networkDomains must be an array of nonempty strings');
+    throw new RuntimeError('capability_unavailable', `${label} must be an array of nonempty strings`);
   }
   const resolved: string[] = [];
   for (const value of declared as string[]) {
@@ -406,7 +434,7 @@ function manifestNetworkDomains(manifest: McpManifest, granted: string[] = [], s
       if (!replacement) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
       return replacement;
     });
-    if (expanded.includes('$')) throw new RuntimeError('capability_unavailable', `MCP networkDomains contains an invalid environment reference: ${value}`);
+    if (expanded.includes('$')) throw new RuntimeError('capability_unavailable', `${label} contains an invalid environment reference: ${value}`);
     let host = expanded;
     try {
       const url = new URL(expanded);
@@ -415,13 +443,82 @@ function manifestNetworkDomains(manifest: McpManifest, granted: string[] = [], s
       host = url.hostname;
     } catch (error) {
       if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(expanded)) {
-        throw new RuntimeError('capability_unavailable', `MCP network domain URL is invalid: ${value}`);
+        throw new RuntimeError('capability_unavailable', `${label} URL is invalid: ${value}`);
       }
     }
     try { resolved.push(normalizeDomainPattern(host)); }
-    catch { throw new RuntimeError('capability_unavailable', `MCP networkDomains contains an invalid host: ${host}`); }
+    catch { throw new RuntimeError('capability_unavailable', `${label} contains an invalid host: ${host}`); }
   }
   return normalizeDomains([...granted, ...resolved]);
+}
+
+/** Resolve capability-declared host patterns; base URLs are reduced to their hostname. */
+function manifestNetworkDomains(manifest: McpManifest, granted: string[] = [], secrets: CapabilitySecrets = {}) {
+  return resolveManifestDomains(manifest.networkDomains, 'MCP networkDomains', granted, secrets);
+}
+
+async function mcpProvisioningPlan(manifest: McpManifest, snapshot: string, secrets: CapabilitySecrets = {}): Promise<McpProvisioningPlan | undefined> {
+  const command = typeof manifest.command === 'string' ? manifest.command.trim() : '';
+  const inferred = command === 'uvx' ? 'uv' : command === 'npx' ? 'npm' : undefined;
+  if (!inferred && manifest.provisioning !== undefined) {
+    throw new RuntimeError('capability_unavailable', 'MCP provisioning is only valid for uvx or npx commands');
+  }
+  if (!inferred) return undefined;
+  let manager = inferred as 'uv' | 'npm';
+  let extraDomains: unknown;
+  if (manifest.provisioning !== undefined) {
+    if (!manifest.provisioning || typeof manifest.provisioning !== 'object' || Array.isArray(manifest.provisioning)) {
+      throw new RuntimeError('capability_unavailable', 'MCP provisioning must be an object');
+    }
+    const value = manifest.provisioning as Record<string, unknown>;
+    if (value.manager !== undefined) {
+      if (value.manager !== 'uv' && value.manager !== 'npm') {
+        throw new RuntimeError('capability_unavailable', 'MCP provisioning.manager must be uv or npm');
+      }
+      if (value.manager !== inferred) {
+        throw new RuntimeError('capability_unavailable', `MCP provisioning.manager does not match command ${command}`);
+      }
+      manager = value.manager;
+    }
+    extraDomains = value.domains;
+  }
+  const defaults = manager === 'uv' ? UV_PROVISIONING_DOMAINS : NPM_PROVISIONING_DOMAINS;
+  const domains = resolveManifestDomains(extraDomains, 'MCP provisioning.domains', [...defaults], secrets);
+  const key = createHash('sha256').update(canonicalJson({
+    command,
+    args: manifest.args,
+    provisioning: { manager, domains },
+  })).digest('hex');
+  const root = join(snapshot, '.graph-provisioning', key);
+  return {
+    manager,
+    domains,
+    root,
+    readyFile: join(root, '.ready'),
+    key,
+  };
+}
+
+function mcpProvisioningEnvironment(plan: McpProvisioningPlan, phase: 'provision' | 'runtime') {
+  const cache = join(plan.root, 'cache');
+  if (plan.manager === 'uv') {
+    return {
+      UV_CACHE_DIR: cache,
+      UV_PYTHON_INSTALL_DIR: join(plan.root, 'python'),
+      UV_NO_PROGRESS: '1',
+      ...(phase === 'runtime' ? { UV_OFFLINE: '1' } : {}),
+    };
+  }
+  return {
+    npm_config_cache: cache,
+    npm_config_update_notifier: 'false',
+    npm_config_fund: 'false',
+    npm_config_audit: 'false',
+    ...(phase === 'runtime' ? {
+      npm_config_offline: 'true',
+      npm_config_prefer_offline: 'true',
+    } : {}),
+  };
 }
 
 /** A granted remote MCP endpoint; the runtime allowlist is checked before any request. */
@@ -461,9 +558,18 @@ export async function verifyMcpCapability(record: CapabilityRecord, secrets: Cap
       workspace = await mkdtemp(join(tmpdir(), 'graph-capability-check-'));
       const scratch = join(workspace, 'scratch');
       await mkdir(scratch, { recursive: true, mode: 0o700 });
+      const domains = manifestNetworkDomains(manifest, [], secrets);
+      const provisioning = await ensureMcpProvisioned({
+        gate,
+        manifest,
+        snapshot,
+        workspace,
+        scratchDir: scratch,
+        ...(secrets ? { secrets } : {}),
+        ...(domains.length ? { runtimeDomains: domains } : {}),
+      });
       const acquired = await acquireRestrictedExecutor();
       release = acquired.release;
-      const domains = manifestNetworkDomains(manifest, [], secrets);
       connection = await localConnection({
         executor: acquired.executor,
         gate,
@@ -472,6 +578,7 @@ export async function verifyMcpCapability(record: CapabilityRecord, secrets: Cap
         workspace,
         scratchDir: scratch,
         secrets,
+        ...(provisioning ? { provisioning: { plan: provisioning, phase: 'runtime' } } : {}),
         ...(domains.length ? { networkDomains: domains } : {}),
         ...(manifest.networkAccess === 'unrestricted' ? { allowUnrestrictedNetwork: true } : {}),
       });
@@ -496,6 +603,21 @@ export function nodeReadPaths(execPath = process.execPath, electron = process.ve
   return electron ? [macos, dirname(macos)] : [macos];
 }
 
+function localNodeReadPaths(runtime: { execPath: string; electron?: string | undefined }) {
+  return [...new Set([
+    ...nodeReadPaths(runtime.execPath, runtime.electron),
+    ...(runtime.execPath.startsWith('/opt/homebrew/')
+      ? [
+        '/opt/homebrew/opt',
+        '/opt/homebrew/lib',
+        '/opt/homebrew/Cellar',
+        '/opt/homebrew/etc/openssl@3',
+        '/opt/homebrew/etc/openssl@1.1',
+      ].filter(existsSync)
+      : []),
+  ])];
+}
+
 async function runGrants(workspace: string, scratchDir: string) {
   // The verified OS sandbox requires canonical, already-existing grants.
   const canonicalWorkspace = await realpath(workspace);
@@ -518,6 +640,7 @@ function stableFact(fact: CapabilityLoadFact) {
     tools: fact.tools ?? [],
     networkDomains: fact.networkDomains ?? [],
     networkAccess: fact.networkAccess ?? null,
+    provisioning: fact.provisioning ?? null,
     runtime: fact.runtime ?? null,
   };
 }
@@ -528,22 +651,68 @@ async function localConnection(input: {
   networkDomains?: string[];
   allowUnrestrictedNetwork?: boolean;
   secrets?: CapabilitySecrets;
+  provisioning?: { plan: McpProvisioningPlan; phase: 'provision' | 'runtime' };
+  timeoutMs?: number;
 }): Promise<McpExchange> {
   const resolved = await resolveLocalMcpCommand(input.manifest.command);
   const args = Array.isArray(input.manifest.args) && input.manifest.args.every(value => typeof value === 'string') ? input.manifest.args as string[] : [];
   const grants = await runGrants(input.workspace, input.scratchDir);
-  const env = environmentValues(input.manifest.env, input.secrets);
+  const env = {
+    ...(environmentValues(input.manifest.env, input.secrets) ?? {}),
+    ...(input.provisioning ? mcpProvisioningEnvironment(input.provisioning.plan, input.provisioning.phase) : {}),
+  };
+  const provisioningPaths = input.provisioning ? [input.provisioning.plan.root] : [];
   return stdioExchange({
     executor: input.executor, gate: input.gate, cwd: grants.workspace, scratchDir: grants.scratchDir,
     command: resolved.executable,
     args: [...resolved.argsPrefix, ...args.map(arg => resolveMcpArg(input.snapshot, arg, input.secrets))],
-    ...(env ? { env } : {}),
-    readPaths: [input.snapshot, ...resolved.readPaths],
+    ...(Object.keys(env).length ? { env } : {}),
+    readPaths: [input.snapshot, ...resolved.readPaths, ...provisioningPaths],
     // Discussion turns may read the business directory but only write scratch.
-    writePaths: input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir],
+    writePaths: [...(input.readOnly ? [grants.scratchDir] : [grants.workspace, grants.scratchDir]), ...provisioningPaths],
+    ...(provisioningPaths.length ? { allowGitMetadataWrites: provisioningPaths } : {}),
+    timeoutMs: input.timeoutMs ?? 30_000,
     ...(input.networkDomains?.length ? { networkDomains: input.networkDomains } : {}),
     ...(input.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
   });
+}
+
+async function ensureMcpProvisioned(input: {
+  gate: SendGate;
+  manifest: McpManifest;
+  snapshot: string;
+  workspace: string;
+  scratchDir: string;
+  secrets?: CapabilitySecrets;
+  runtimeDomains?: string[];
+}): Promise<McpProvisioningPlan | undefined> {
+  const plan = await mcpProvisioningPlan(input.manifest, input.snapshot, input.secrets);
+  if (!plan) return undefined;
+  await mkdir(plan.root, { recursive: true, mode: 0o700 });
+  if (existsSync(plan.readyFile)) return plan;
+  const acquired = await acquireRestrictedExecutor();
+  try {
+    const connection = await localConnection({
+      executor: acquired.executor,
+      gate: input.gate,
+      manifest: input.manifest,
+      snapshot: input.snapshot,
+      workspace: input.workspace,
+      scratchDir: input.scratchDir,
+      ...(input.secrets ? { secrets: input.secrets } : {}),
+      provisioning: { plan, phase: 'provision' },
+      networkDomains: [...new Set([...plan.domains, ...(input.runtimeDomains ?? [])])],
+      timeoutMs: 120_000,
+    });
+    await listMcpTools(connection);
+    await writeFile(plan.readyFile, `${plan.key}\n`, { mode: 0o600 });
+    return plan;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RuntimeError('capability_unavailable', `${plan.manager} provisioning failed: ${message}`);
+  } finally {
+    await acquired.release();
+  }
 }
 
 function localMcpSearchDirectories(command: string) {
@@ -586,7 +755,7 @@ async function resolveLocalMcpCommand(value: unknown): Promise<{
     return {
       executable: runtime.execPath,
       argsPrefix: [],
-      readPaths: nodeReadPaths(runtime.execPath, runtime.electron),
+      readPaths: localNodeReadPaths(runtime),
     };
   }
   if (!isLocalMcpCommand(command) && !isAbsolute(command)) {
@@ -612,8 +781,9 @@ async function resolveLocalMcpCommand(value: unknown): Promise<{
       argsPrefix: [target],
       // npx-cli.js loads npm's package files relative to its real path.
       readPaths: [...new Set([
-        ...nodeReadPaths(runtime.execPath, runtime.electron),
+        ...localNodeReadPaths(runtime),
         ...baseReadPaths,
+        dirname(dirname(runtime.execPath)),
         dirname(dirname(target)),
       ])],
     };
@@ -774,6 +944,11 @@ export async function resolveCapabilityFacts(
     const networkDomains = Array.isArray(manifest.networkDomains)
       ? manifest.networkDomains.filter((domain): domain is string => typeof domain === 'string')
       : undefined;
+    const provisioningManager = manifest.command === 'uvx'
+      ? 'uv' as const
+      : manifest.command === 'npx'
+        ? 'npm' as const
+        : undefined;
     facts.push({
       id: bound.id,
       version: bound.version,
@@ -785,6 +960,12 @@ export async function resolveCapabilityFacts(
       ...(typeof manifest.url === 'string' ? { url: manifest.url } : {}),
       ...(networkDomains?.length ? { networkDomains } : {}),
       ...(networkAccess ? { networkAccess } : {}),
+      ...(provisioningManager ? {
+        provisioning: {
+          manager: provisioningManager,
+          domains: [...(provisioningManager === 'uv' ? UV_PROVISIONING_DOMAINS : NPM_PROVISIONING_DOMAINS)],
+        },
+      } : {}),
     });
   }
   return facts.sort((left, right) =>
@@ -960,6 +1141,7 @@ export async function loadCapabilities(input: {
       let loadedReason: string | null = null;
       let networkDomains: string[] = [];
       let networkAccess: 'unrestricted' | undefined;
+      let provisioning: McpProvisioningPlan | undefined;
       if (record.kind === 'extension') {
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
@@ -980,11 +1162,21 @@ export async function loadCapabilities(input: {
             ...(input.onPermissionRequired ? { onPermissionRequired: input.onPermissionRequired } : {}),
           };
         }
+        provisioning = await ensureMcpProvisioned({
+          gate: input.gate,
+          manifest,
+          snapshot,
+          workspace: input.workspace,
+          scratchDir: input.scratchDir,
+          ...(input.secrets ? { secrets: input.secrets } : {}),
+          ...(networkDomains.length ? { runtimeDomains: networkDomains } : {}),
+        });
         const acquired = await acquireRestrictedExecutor();
         releases.push(acquired.release);
         connection = await localConnection({
           executor: acquired.executor, gate: input.gate, manifest, snapshot, workspace: input.workspace, scratchDir: input.scratchDir,
           ...(input.readOnly ? { readOnly: true } : {}),
+          ...(provisioning ? { provisioning: { plan: provisioning, phase: 'runtime' } } : {}),
           ...(networkDomains.length ? { networkDomains } : {}),
           ...(networkAccess ? { allowUnrestrictedNetwork: true } : {}),
           ...(input.secrets ? { secrets: input.secrets } : {}),
@@ -1033,6 +1225,13 @@ export async function loadCapabilities(input: {
         ...(discovered.length ? { tools: discovered.map(tool => mcpToolName(bound.id, tool.name)) } : {}),
         ...(networkDomains.length ? { networkDomains } : {}),
         ...(networkAccess ? { networkAccess } : {}),
+        ...(provisioning ? {
+          provisioning: {
+            manager: provisioning.manager,
+            domains: provisioning.domains,
+            path: provisioning.root,
+          },
+        } : {}),
       });
     }
   } catch (error) {

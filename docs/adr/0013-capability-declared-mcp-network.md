@@ -67,3 +67,7 @@ mcp:<capabilityId>:<toolName>
 - 已导入的 MCP 可以按自身服务域名联网，不必在 APP 全局维护一份模糊白名单。
 - 能力作者必须准确声明实际依赖；漏声明时请求 fail closed 并返回具体失败，而不是自动回退到无限制网络。
 - Playwright 一类浏览器 MCP 的任意站点访问是明确的单能力选择，不会把其他 MCP 一起变成无限制网络。
+
+2026-09-19 起，`uvx` 与 `npx` 的依赖安装网络从运行时 `networkDomains` 分离，见
+[ADR 0023](0023-mcp-provisioning-runtime-network-split.md)。`networkDomains` 仍只描述
+MCP 运行期间访问的服务；包管理器预置域名不得写入运行时授权。

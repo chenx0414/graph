@@ -57,6 +57,7 @@ export async function capabilityConfigView(record: CapabilityRecord, values: Rec
     for (const [name, value] of Object.entries(manifest.env ?? {})) for (const env of envRefs(value)) add(env, `环境变量 ${name}`);
     for (const arg of manifest.args ?? []) for (const env of envRefs(arg)) add(env, '启动参数');
     for (const domain of manifest.networkDomains ?? []) for (const env of envRefs(domain)) add(env, '网络域名');
+    for (const domain of manifest.provisioning?.domains ?? []) for (const env of envRefs(domain)) add(env, '预置网络域名');
     for (const env of envRefs(manifest.url)) add(env, '远程地址');
     const configured = [...fields.keys()].filter(env => Boolean(values[env]?.trim()));
     const missing = [...fields.keys()].filter(env => !configured.includes(env));

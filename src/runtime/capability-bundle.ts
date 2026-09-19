@@ -96,6 +96,7 @@ export class CapabilityBundleVersion {
         declaredTools: fact.declaredTools ?? [],
         networkDomains: fact.networkDomains ?? [],
         networkAccess: fact.networkAccess ?? null,
+        provisioning: fact.provisioning ?? null,
       })),
     };
     this.toolPolicyDigest = digest(staticToolPolicy);

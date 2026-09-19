@@ -1,4 +1,4 @@
-import { cp, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -167,6 +167,67 @@ test('allowlisted local MCP commands resolve through PATH and start the server',
   } finally {
     process.env.PATH = originalPath;
   }
+}, 120_000);
+
+test('package-manager provisioning domains are separate from the MCP runtime network', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-mcp-provisioning-')));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const capability = join(capabilityRoot, 'uvx-provisioning');
+  const bin = join(root, 'bin');
+  await mkdir(capability, { recursive: true });
+  await mkdir(bin, { recursive: true });
+
+  const network = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/plain' });
+    response.end('ok');
+  });
+  await new Promise<void>(resolve => network.listen(0, '127.0.0.1', resolve));
+  cleanup.push(() => new Promise<void>((resolve, reject) => {
+    network.closeAllConnections();
+    network.close(error => error ? reject(error) : resolve());
+  }));
+  const probeUrl = `http://127.0.0.1:${(network.address() as AddressInfo).port}/probe`;
+
+  await copyFile(join(fixtureDir, 'mcp-provisioning-server.mjs'), join(capability, 'server.mjs'));
+  await writeFile(join(bin, 'uvx'), [
+    `#!${process.execPath}`,
+    "import { pathToFileURL } from 'node:url';",
+    "await import(pathToFileURL(process.argv[2]).href);",
+  ].join('\n'), { mode: 0o755 });
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({
+    id: 'uvx-provisioning',
+    kind: 'mcp',
+    version: '1.0.0',
+    name: 'uvx provisioning probe',
+    command: 'uvx',
+    args: ['./server.mjs'],
+    env: { MCP_PROVISION_PROBE_URL: probeUrl },
+    provisioning: {
+      manager: 'uv',
+      domains: ['127.0.0.1'],
+    },
+  }, null, 2));
+
+  const library = new CapabilityLibrary({ capabilityRoot });
+  await library.refresh();
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath ?? ''}`;
+  try {
+    const result = await verifyMcpCapability(library.capability('uvx-provisioning', '1.0.0')!);
+    expect(result.ok, result.message).toBe(true);
+    expect(result.tools).toEqual(['runtime_network_blocked']);
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  const provisioningRoot = join(capability, '.graph-provisioning');
+  const [key] = await readdir(provisioningRoot);
+  expect(key).toMatch(/^[a-f0-9]{64}$/);
+  expect(await readFile(join(provisioningRoot, key!, '.ready'), 'utf8')).toContain(key!);
+  const phases = await readFile(join(provisioningRoot, key!, 'cache', 'phases.log'), 'utf8');
+  expect(phases).toContain('provision');
+  expect(phases).toContain('runtime');
 }, 120_000);
 
 test('a definition-bound skill is loaded into the production worker prompt and readable', async () => {

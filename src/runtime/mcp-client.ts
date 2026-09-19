@@ -15,6 +15,7 @@ export interface StdioEndpoint {
     input?: string; readPaths: string[]; writePaths: string[]; timeoutMs?: number;
     networkDomains?: string[];
     allowUnrestrictedNetwork?: boolean;
+    allowGitMetadataWrites?: string[];
     keepStdinOpen?: boolean;
     onSpawn?: (process: { kill(signal?: NodeJS.Signals): boolean; end(): void }) => void;
     onStdout?: (chunk: string) => void;
@@ -30,6 +31,7 @@ export interface StdioEndpoint {
   timeoutMs?: number;
   networkDomains?: string[];
   allowUnrestrictedNetwork?: boolean;
+  allowGitMetadataWrites?: string[];
 }
 
 export interface HttpEndpoint {
@@ -97,6 +99,7 @@ export function stdioExchange(endpoint: StdioEndpoint): McpExchange {
           timeoutMs: endpoint.timeoutMs ?? 30_000,
           ...(endpoint.networkDomains?.length ? { networkDomains: endpoint.networkDomains } : {}),
           ...(endpoint.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
+          ...(endpoint.allowGitMetadataWrites?.length ? { allowGitMetadataWrites: endpoint.allowGitMetadataWrites } : {}),
           keepStdinOpen: true,
           onSpawn: process => { processControl = process; },
           onStdout: (chunk) => {

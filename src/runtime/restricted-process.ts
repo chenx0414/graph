@@ -205,6 +205,8 @@ export interface RestrictedCommand {
   readPaths: string[];
   writePaths: string[];
   denyWrite?: string[];
+  /** Graph-managed caches may contain their own VCS metadata. */
+  allowGitMetadataWrites?: string[];
   timeoutMs?: number;
   onRequest?: (request: unknown) => Promise<unknown>;
   /** Confirmed program checks may bind and reach loopback for local app/browser tests. */
@@ -261,8 +263,9 @@ function pinnedFilesystemProfile(readPaths: string[], writePaths: string[], gitP
 }
 
 /** Every existing Git metadata entry under the write grants, without following symlinks. */
-async function gitMetadataPaths(roots: string[], scratchDir: string) {
+async function gitMetadataPaths(roots: string[], scratchDir: string, allowGitMetadataWrites: string[] = []) {
   const insideScratch = (path: string) => path === scratchDir || path.startsWith(`${scratchDir}/`);
+  const insideAllowedCache = (path: string) => allowGitMetadataWrites.some(root => path === root || path.startsWith(`${root}/`));
   const found = new Set<string>();
   let entriesSeen = 0;
   for (const root of roots) {
@@ -271,6 +274,7 @@ async function gitMetadataPaths(roots: string[], scratchDir: string) {
     while (stack.length) {
       const dir = stack.pop()!;
       if (insideScratch(dir)) continue;
+      if (insideAllowedCache(dir)) continue;
       let entries;
       try { entries = await readdir(dir, { withFileTypes: true }); }
       catch { continue; } // File roots, device nodes and vanished directories have nothing to scan.
@@ -366,6 +370,7 @@ export async function openRestrictedExecutor() {
       const cwd = await canonicalGrant(command.cwd);
       const readPaths = await Promise.all(command.readPaths.map(canonicalGrant));
       const writePaths = await Promise.all(command.writePaths.map(canonicalGrant));
+      const allowGitMetadataWrites = await Promise.all((command.allowGitMetadataWrites ?? []).map(canonicalGrant));
       const unixSockets = await Promise.all((command.unixSockets ?? []).map(canonicalGrant));
       const allowLocalBinding = Boolean(command.localNetwork || command.allowLocalBinding);
       const network = command.localNetwork
@@ -392,7 +397,7 @@ export async function openRestrictedExecutor() {
       if (existsSync('/etc')) systemReads.push(realpathSync('/etc'));
       const allowedReads = [...systemReads, cwd, scratchDir, ...readPaths, ...unixSockets];
       const deviceWrites = ['/dev/stdout', '/dev/stderr', '/dev/null', '/dev/tty', '/dev/dtracehelper', '/dev/autofs_nowait'];
-      const gitPaths = await gitMetadataPaths(writePaths, scratchDir);
+      const gitPaths = await gitMetadataPaths(writePaths, scratchDir, allowGitMetadataWrites);
       const profile = pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths], gitPaths);
       // SRT's dynamic proxy enforces one process-global allowlist. An
       // unrestricted Pi extension can live for the whole Agent turn, so it

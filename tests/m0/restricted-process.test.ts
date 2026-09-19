@@ -98,6 +98,40 @@ test('worker preparation writes only to its granted scratch directory, even with
   } finally { broker.close(); }
 });
 
+test('Graph-managed provisioning caches may write VCS metadata without weakening workspace Git protection', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-provisioning-cache-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const cache = join(root, 'cache'); await mkdir(cache);
+  const scratch = join(root, 'scratch'); await mkdir(scratch);
+  await mkdir(join(workspace, '.git'));
+  const workspaceHead = join(workspace, '.git', 'HEAD');
+  const cacheConfig = join(cache, '.git', 'config');
+  await writeFile(workspaceHead, 'ref: refs/heads/main\n');
+  await writeFile(join(workspace, 'probe.mjs'), `
+    import { mkdirSync, writeFileSync } from 'node:fs';
+    const results = {};
+    const attempt = (key, action) => { try { action(); results[key] = 'allowed'; } catch { results[key] = 'denied'; } };
+    attempt('workspaceGit', () => writeFileSync(${JSON.stringify(workspaceHead)}, 'bad'));
+    attempt('cacheGit', () => {
+      mkdirSync(${JSON.stringify(join(cache, '.git'))}, { recursive: true });
+      writeFileSync(${JSON.stringify(cacheConfig)}, 'cache-owned');
+    });
+    console.log(JSON.stringify(results));
+  `);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const result = await executor.run({
+      broker, cwd: workspace, scratchDir: scratch, executable: process.execPath, args: ['probe.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace, cache, scratch],
+      allowGitMetadataWrites: [cache],
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ workspaceGit: 'denied', cacheGit: 'allowed' });
+    expect(await readFile(workspaceHead, 'utf8')).toBe('ref: refs/heads/main\n');
+    expect(await readFile(cacheConfig, 'utf8')).toBe('cache-owned');
+  } finally { broker.close(); }
+});
+
 test('unix socket grants also authorize their directory metadata', async () => {
   const root = await realpath(await mkdtemp('/private/tmp/graph-unix-socket-')); dirs.push(root);
   const workspace = join(root, 'workspace');
