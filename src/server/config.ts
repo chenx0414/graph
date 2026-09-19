@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { RuntimeError } from '../core/types.ts';
 import { defaultAccessPolicy, parseAccessPolicy, type AccessPolicy } from '../core/access-policy.ts';
-import { MODEL_THINKING_LEVELS, type ModelApi, type ModelCost, type ModelEntry, type ModelGrade, type ModelPricing, type ModelThinkingLevel } from '../catalog/models.ts';
+import { MODEL_INPUTS, MODEL_THINKING_LEVELS, type ModelApi, type ModelCost, type ModelEntry, type ModelGrade, type ModelInput, type ModelPricing, type ModelThinkingLevel } from '../catalog/models.ts';
 
 /** Versioned on-disk configuration. Secrets are never stored here; a credential
  * keeps a `secretRef` naming the environment variable that holds the key. */
@@ -152,6 +152,7 @@ function parseModel(raw: unknown, path: string, credentials: Record<string, Cred
     baseUrl: asString(entry.baseUrl, `${path}.baseUrl`),
     contextWindow: positiveInt(entry.contextWindow, `${path}.contextWindow`),
     maxTokens: positiveInt(entry.maxTokens, `${path}.maxTokens`),
+    ...(entry.input !== undefined ? { input: modelInputs(entry.input, `${path}.input`) } : {}),
     reasoning: optionalBoolean(entry.reasoning, `${path}.reasoning`) ?? true,
     ...(entry.defaultThinkingLevel !== undefined
       ? { defaultThinkingLevel: modelThinkingLevel(entry.defaultThinkingLevel, `${path}.defaultThinkingLevel`) }
@@ -172,6 +173,17 @@ function modelThinkingLevel(value: unknown, path: string): ModelThinkingLevel {
     invalid(`${path} must be one of ${MODEL_THINKING_LEVELS.join(', ')}`);
   }
   return level as ModelThinkingLevel;
+}
+
+function modelInputs(value: unknown, path: string): ModelInput[] {
+  const values = asArray(value, path).map((item, index) => asString(item, `${path}[${index}]`));
+  if (values.length === 0) invalid(`${path} must contain at least one input modality`);
+  if (!values.includes('text')) invalid(`${path} must include "text"`);
+  for (const value of values) {
+    if (!MODEL_INPUTS.includes(value as ModelInput)) invalid(`${path} contains unsupported input modality "${value}"`);
+  }
+  if (new Set(values).size !== values.length) invalid(`${path} must not contain duplicate input modalities`);
+  return values as ModelInput[];
 }
 
 /** Parse a version 1 config document. Relative project roots resolve against

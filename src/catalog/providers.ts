@@ -1,4 +1,4 @@
-import type { ModelApi, ModelGrade, ModelPricing } from './models.ts';
+import type { ModelApi, ModelGrade, ModelInput, ModelPricing } from './models.ts';
 import { snapshotFor, snapshotPricing } from './price-snapshot.ts';
 
 /** One first-class connection template: a provider label, the transport Graph
@@ -11,6 +11,7 @@ export interface ProviderTemplateModel {
   grade: ModelGrade;
   contextWindow: number;
   maxTokens: number;
+  input?: ModelInput[];
   /** Set only with a verifiable source; absent means the price is unknown. */
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   pricing?: ModelPricing;
@@ -38,8 +39,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://platform.openai.com/docs/api-reference/chat',
     notes: ['API key 登录；本轮只启用 Chat Completions 传输。仅支持 Responses 的模型需另行验收后才会标注可用。'],
     models: [
-      { id: 'gpt-4o', grade: 'highest', contextWindow: 128_000, maxTokens: 16_384 },
-      { id: 'gpt-4o-mini', grade: 'medium', contextWindow: 128_000, maxTokens: 16_384 },
+      { id: 'gpt-4o', grade: 'highest', contextWindow: 128_000, maxTokens: 16_384, input: ['text', 'image'] },
+      { id: 'gpt-4o-mini', grade: 'medium', contextWindow: 128_000, maxTokens: 16_384, input: ['text', 'image'] },
     ],
   },
   {
@@ -52,8 +53,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://platform.claude.com/docs/en/api/overview',
     notes: ['API key 登录；使用原生 Messages 传输，不复用 OpenAI 请求格式。'],
     models: [
-      { id: 'claude-sonnet-4-5', grade: 'highest', contextWindow: 200_000, maxTokens: 8_192 },
-      { id: 'claude-haiku-4-5', grade: 'medium', contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'claude-sonnet-4-5', grade: 'highest', contextWindow: 200_000, maxTokens: 8_192, input: ['text', 'image'] },
+      { id: 'claude-haiku-4-5', grade: 'medium', contextWindow: 200_000, maxTokens: 8_192, input: ['text', 'image'] },
     ],
   },
   {
@@ -65,7 +66,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://ai.google.dev/gemini-api/docs/openai',
     notes: ['使用官方 OpenAI 兼容模式；工具与用量按兼容层实际行为验收后才算可用。'],
     models: [
-      { id: 'gemini-2.0-flash', grade: 'medium', contextWindow: 1_048_576, maxTokens: 8_192 },
+      { id: 'gemini-2.0-flash', grade: 'medium', contextWindow: 1_048_576, maxTokens: 8_192, input: ['text', 'image'] },
     ],
   },
   {
@@ -130,6 +131,7 @@ export function templateModelEntry(template: ProviderTemplate, model: ProviderTe
     baseUrl: template.baseUrl,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
+    ...(model.input ? { input: model.input } : {}),
     credentialId,
     ...(model.cost ? { cost: model.cost } : {}),
     ...(model.pricing ? { pricing: model.pricing } : {}),

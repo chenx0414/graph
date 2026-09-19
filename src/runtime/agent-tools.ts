@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { isAbsolute, sep } from 'node:path';
+import { extname, isAbsolute, sep } from 'node:path';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { CapabilityRecord, Catalog } from '../catalog/catalog.ts';
@@ -7,7 +7,9 @@ import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { Json, NodeSpec, Proposal } from '../core/types.ts';
 import { isHostRead, isHostWrite, type ResolvedAccessPolicy } from '../core/access-policy.ts';
 import type { ArtifactPage, ArtifactRecord, ArtifactTrust, PublishArtifactInput } from '../core/artifact-workspace.ts';
-import { listBounded, listHost, readBounded, readHost, writeBounded, writeHost } from './bounded-path.ts';
+import {
+  listBounded, listHost, readBounded, readBoundedBytes, readHost, readHostBytes, writeBounded, writeHost,
+} from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
 
 type Supervisor = {
@@ -53,6 +55,23 @@ type ArtifactToolService = {
 
 function text(value: string) {
   return { content: [{ type: 'text' as const, text: value }], details: {} };
+}
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.bmp': 'image/bmp',
+  '.gif': 'image/gif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+};
+
+function imageMimeType(path: string) {
+  return IMAGE_MIME_TYPES[extname(path).toLowerCase()];
+}
+
+function image(data: Buffer, mimeType: string) {
+  return { content: [{ type: 'image' as const, data: data.toString('base64'), mimeType }], details: {} };
 }
 
 function fields(params: unknown) {
@@ -106,17 +125,26 @@ export function agentTools(input: {
   };
   const tools: ToolDefinition[] = [
     {
-      name: 'read', label: 'Read file', description: 'Read a UTF-8 file from the instance workspace or a bound capability.',
+      name: 'read', label: 'Read file', description: 'Read a UTF-8 file or supported image from the instance workspace or a bound capability.',
       parameters: Type.Object({ path: Type.String() }),
       execute: async (_id, params) => {
         const requested = String(fields(params).path);
+        const mimeType = imageMimeType(requested);
         if (isAbsolute(requested)) {
-          if (hostRead) return text(await readHost(requested, pathOptions));
+          if (hostRead) {
+            return mimeType
+              ? image(await readHostBytes(requested, pathOptions), mimeType)
+              : text(await readHost(requested, pathOptions));
+          }
           const mount = [root, ...readRoots].find(candidate => requested === candidate || requested.startsWith(`${candidate}${sep}`));
           if (!mount) throw new Error('Path is outside the workspace');
-          return text(await readBounded(mount, requested));
+          return mimeType
+            ? image(await readBoundedBytes(mount, requested), mimeType)
+            : text(await readBounded(mount, requested));
         }
-        return text(await readBounded(root, requested));
+        return mimeType
+          ? image(await readBoundedBytes(root, requested), mimeType)
+          : text(await readBounded(root, requested));
       },
     },
     ...(input.readOnly ? [] : [{

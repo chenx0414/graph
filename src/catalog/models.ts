@@ -2,6 +2,8 @@ import { RuntimeError, type Json } from '../core/types.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
 
 export type ModelGrade = 'low' | 'medium' | 'high' | 'highest';
+export const MODEL_INPUTS = ['text', 'image'] as const;
+export type ModelInput = (typeof MODEL_INPUTS)[number];
 /** Transports Graph has actually verified against a provider contract. */
 export type ModelApi = 'openai-completions' | 'anthropic-messages';
 export const MODEL_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -25,6 +27,8 @@ export interface ModelEntry {
   baseUrl: string;
   contextWindow: number;
   maxTokens: number;
+  /** Input modalities exposed to the Agent kernel. Legacy config defaults to text. */
+  input?: ModelInput[];
   /** Whether the model accepts a non-off thinking level. Legacy config without
    * this field is treated as reasoning-capable. */
   reasoning?: boolean;

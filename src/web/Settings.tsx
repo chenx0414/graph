@@ -4,6 +4,7 @@ import { Setup } from './Setup.tsx';
 import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 import { STANDARD_ACCESS } from './access-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
+import type { ModelInput } from '../catalog/models.ts';
 
 type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -11,6 +12,7 @@ const THINKING_LEVELS: ModelThinkingLevel[] = ['off', 'minimal', 'low', 'medium'
 type RawModel = {
   id: string; provider: string; modelId?: string; grade: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
   contextWindow: number; maxTokens: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: Cost;
+  input?: ModelInput[];
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string };
   headers?: Record<string, string>;
 };
@@ -62,6 +64,7 @@ function emptyModel(): RawModel {
     baseUrl: 'http://127.0.0.1:8080/v1',
     contextWindow: 32768,
     maxTokens: 4096,
+    input: ['text'],
     reasoning: true,
     defaultThinkingLevel: 'medium',
     credentialId: '',
@@ -104,6 +107,7 @@ function modelFromSubscription(plan: SubscriptionPlan, model: SubscriptionModel,
     baseUrl: model.baseUrl,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
+    input: ['text'],
     reasoning: model.reasoning,
     defaultThinkingLevel: model.reasoning ? 'medium' : 'off',
     credentialId: plan.credential?.id ?? plan.id,
@@ -736,6 +740,17 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
                       onChange={event => mutate(next => { next.models!.entries[index]!.reasoning = event.target.checked; })}
                     />
                     <span>可思考模型</span>
+                  </label>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      data-testid={`model-${index}-images`}
+                      checked={(model.input ?? ['text']).includes('image')}
+                      onChange={event => mutate(next => {
+                        next.models!.entries[index]!.input = event.target.checked ? ['text', 'image'] : ['text'];
+                      })}
+                    />
+                    <span>支持图片输入</span>
                   </label>
                 </div>
                 <div className="row">

@@ -90,6 +90,13 @@ export async function readHost(path: string, options: BoundedPathOptions = {}) {
   return readFile(target, 'utf8');
 }
 
+export async function readHostBytes(path: string, options: BoundedPathOptions = {}) {
+  const target = await resolveHostPath(path, 'read', options);
+  const info = await lstat(target);
+  if (!info.isFile()) throw new Error('A file path is required');
+  return readFile(target);
+}
+
 export async function writeHost(path: string, content: string, options: BoundedPathOptions = {}) {
   const target = await resolveHostPath(path, 'write', options);
   const existing = await lstat(target).catch(() => undefined);
@@ -138,6 +145,12 @@ async function openBounded(root: string, relative: string, mode: 'read' | 'write
 export async function readBounded(root: string, relative: string) {
   const handle = await openBounded(root, relative, 'read');
   try { return await handle.readFile({ encoding: 'utf8' }); }
+  finally { await handle.close(); }
+}
+
+export async function readBoundedBytes(root: string, relative: string) {
+  const handle = await openBounded(root, relative, 'read');
+  try { return await handle.readFile(); }
   finally { await handle.close(); }
 }
 

@@ -108,6 +108,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.getByTestId('settings-action-strip').count()).toBe(0);
   expect(await page.getByTestId('model-0-price').innerText()).toContain('价格未知');
   expect(await page.getByTestId('model-0-reasoning').isChecked()).toBe(true);
+  expect(await page.getByTestId('model-0-images').isChecked()).toBe(false);
   expect(stub.requests).toHaveLength(0);
 
   await page.getByTestId('credential-add').click();
@@ -127,6 +128,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.getByTestId('model-1-context').fill('4096');
   await page.getByTestId('model-1-maxTokens').fill('256');
   await page.getByTestId('model-1-reasoning').uncheck();
+  await page.getByTestId('model-1-images').check();
   await page.getByTestId('limit-group-add').click();
   await page.getByTestId('limit-group-0').fill('4');
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
@@ -144,6 +146,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.locator('[data-testid="model-row-1"] .model-advanced summary').click();
   expect(await page.getByTestId('model-1-id').inputValue()).toBe('second-model');
   expect(await page.getByTestId('model-1-reasoning').isChecked()).toBe(false);
+  expect(await page.getByTestId('model-1-images').isChecked()).toBe(true);
   await page.locator('[data-testid="credential-row-1"] .credential-advanced summary').click();
   expect(await page.getByTestId('credential-1-group').inputValue()).toBe('group-1');
   expect(await page.getByTestId('credential-1-state').innerText()).toBe('缺失');
@@ -160,6 +163,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(JSON.parse(configText).config.credentials.second.configured).toBe(false);
   expect(JSON.parse(configText).config.credentials.second.secretRef).toBe('GRAPH_SYNTH_KEY_2');
   expect(JSON.parse(configText).config.models.entries[1].reasoning).toBe(false);
+  expect(JSON.parse(configText).config.models.entries[1].input).toEqual(['text', 'image']);
   expect(JSON.parse(configText).config.limits.sharedGroups['group-1']).toBe(4);
 
   // The connection test only runs on an explicit click and reaches the right model and credential.

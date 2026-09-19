@@ -62,7 +62,7 @@ function toPiModel(entry: ModelEntry): Model<ModelApi> {
   const headers = modelRequestHeaders(entry);
   return {
     id: entry.modelId ?? entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
-    reasoning: entry.reasoning !== false, input: ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
+    reasoning: entry.reasoning !== false, input: entry.input ?? ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
     // Pi's Model.cost is required numeric metadata; Graph billing uses catalog cost, never this placeholder.
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     // Gateway routing headers (for example x-opencode-session) must travel

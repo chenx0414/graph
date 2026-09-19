@@ -60,6 +60,26 @@ test('legacy models default to reasoning-capable and explicit opt-out is preserv
   ]);
 });
 
+test('model input modalities are explicit, ordered, and validated', () => {
+  const document = (input?: string[]) => ({
+    version: 1,
+    projects: [],
+    credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+    models: { entries: [
+      { ...modelEntry('http://127.0.0.1:1'), id: 'legacy' },
+      { ...modelEntry('http://127.0.0.1:1'), id: 'vision', ...(input ? { input } : {}) },
+    ] },
+  });
+  const parsed = parseGraphConfig(document(['text', 'image']), '/tmp/graph.config.json');
+  expect(parsed.models?.entries.map(model => [model.id, model.input])).toEqual([
+    ['legacy', undefined],
+    ['vision', ['text', 'image']],
+  ]);
+  expect(() => parseGraphConfig(document(['image']), '/tmp/graph.config.json')).toThrow(/must include "text"/);
+  expect(() => parseGraphConfig(document(['text', 'audio']), '/tmp/graph.config.json')).toThrow(/unsupported input modality/);
+  expect(() => parseGraphConfig(document(['text', 'text']), '/tmp/graph.config.json')).toThrow(/must not contain duplicate/);
+});
+
 async function post(daemon: GraphDaemon, api: Session, path: string, body: unknown) {
   const response = await fetch(`${daemon.url}${path}`, { method: 'POST', headers: api.headers, body: JSON.stringify(body) });
   return { status: response.status, body: await response.json() as Record<string, unknown> };
