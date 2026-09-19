@@ -539,7 +539,7 @@ export class OperationLifecycle {
           throw new RuntimeError('invalid_answer', 'A system change must be approved or rejected');
         }
       } else if (!(question.kind === 'waiting' && answer.type === 'respond')
-        && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind) && answer.type === 'retry')
+        && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected', 'recovery'].includes(question.kind) && answer.type === 'retry')
         && !(['reservation_exceeded', 'human_check', 'git_dirty'].includes(question.kind) && answer.type === 'acknowledge')
         && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
         throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
