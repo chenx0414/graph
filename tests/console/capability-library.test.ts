@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -247,6 +247,59 @@ test('Pi extension runtime materializes writable roots but leaves read-only path
   expect(existsSync(join(scratchDir, 'writable'))).toBe(true);
   expect(loaded.readRoots).toContain(join(scratchDir, 'read-only'));
   expect(loaded.env.PATH).toContain(dirname(graphNodeRuntime().execPath));
+});
+
+test('Pi extension runtime commands resolve from common user bin directories when the app PATH is minimal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-runtime-path-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'capabilities');
+  const userBin = join(root, '.local', 'bin');
+  const targetBin = join(root, 'tool', 'bin');
+  const command = 'graph-extension-fixture';
+  await Promise.all([mkdir(userBin, { recursive: true }), mkdir(targetBin, { recursive: true })]);
+  await writeFile(join(targetBin, command), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await symlink(join(targetBin, command), join(userBin, command));
+  await capability(capabilityRoot, 'runtime-path', {
+    id: 'runtime-path',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Runtime path',
+    entry: './index.mjs',
+    runtime: { commands: [command] },
+  }, { 'index.mjs': 'export default () => {};\n' });
+
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot, recipesPath: join(root, 'agent-combinations.json') });
+  await catalog.refresh();
+  catalog.publishDefinition('master', {
+    recommendedGrade: 'high',
+    capabilities: [{ id: 'runtime-path', version: '1.0.0' }],
+  });
+
+  const originalPath = process.env.PATH;
+  const originalHome = process.env.HOME;
+  process.env.PATH = '/usr/bin:/bin';
+  process.env.HOME = root;
+  try {
+    const loaded = await loadCapabilities({
+      catalog,
+      definitionVersion: 'master@1',
+      workspace: root,
+      scratchDir: join(root, 'scratch'),
+      gate: { dispatch: (_id, _reservation, send) => send(), settle: () => undefined },
+    });
+    try {
+      expect(loaded.env.PATH).toContain(userBin);
+      expect(loaded.readRoots).toContain(userBin);
+      expect(loaded.readRoots).toContain(await realpath(targetBin));
+    } finally {
+      await loaded.close();
+    }
+  } finally {
+    process.env.PATH = originalPath;
+    process.env.HOME = originalHome;
+  }
 });
 
 test('recipes validate against the current capability projection and compile to a versioned definition', async () => {

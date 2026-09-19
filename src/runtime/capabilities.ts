@@ -273,7 +273,7 @@ async function resolveRuntimeCommand(command: string, snapshot: string) {
     ? command
     : command.includes('/') || command.includes('\\')
       ? resolve(snapshot, command)
-      : (process.env.PATH ?? '').split(':').filter(Boolean).map(directory => resolve(directory, command)).find(path => {
+      : localCommandSearchDirectories(command).map(directory => resolve(directory, command)).find(path => {
           try { accessSync(path, constants.X_OK); return true; }
           catch { return false; }
         });
@@ -738,7 +738,7 @@ async function ensureMcpProvisioned(input: {
   }
 }
 
-function localMcpSearchDirectories(command: string) {
+function localCommandSearchDirectories(command: string) {
   const configured = (process.env.PATH ?? '').split(':').filter(Boolean);
   const common = [
     join(homedir(), '.local', 'bin'),
@@ -754,7 +754,7 @@ function localMcpSearchDirectories(command: string) {
 }
 
 function findExecutable(command: string) {
-  for (const directory of localMcpSearchDirectories(command)) {
+  for (const directory of localCommandSearchDirectories(command)) {
     const candidate = resolve(directory, command);
     try {
       accessSync(candidate, constants.X_OK);
