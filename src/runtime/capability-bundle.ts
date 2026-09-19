@@ -47,6 +47,12 @@ export interface CapabilityOperation {
   readonly report: LoadedCapabilities['report'];
   readonly skillPaths: readonly string[];
   readonly readRoots: readonly string[];
+  readonly writeRoots: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  readonly networkDomains: readonly string[];
+  readonly allowUnrestrictedNetwork: boolean;
+  readonly allowLocalBinding: boolean;
+  readonly unixSockets: readonly string[];
   readonly piExtensionPaths: readonly string[];
   readonly piExtensionTools: readonly string[];
   close(): Promise<void>;
@@ -147,6 +153,15 @@ export class CapabilityBundleVersion {
       const runtimePolicyDigest = digest({
         bundleRuntimePolicyDigest: this.runtimePolicyDigest,
         readOnly: Boolean(options.readOnly),
+        piExtensionRuntime: {
+          env: loaded.env,
+          readRoots: loaded.readRoots,
+          writeRoots: loaded.writeRoots,
+          networkDomains: loaded.networkDomains,
+          allowUnrestrictedNetwork: loaded.allowUnrestrictedNetwork,
+          allowLocalBinding: loaded.allowLocalBinding,
+          unixSockets: loaded.unixSockets,
+        },
       });
       const allowedToolNames = Object.freeze([...new Set([
         ...tools.map(tool => tool.name),
@@ -166,6 +181,12 @@ export class CapabilityBundleVersion {
         report: loaded.report,
         skillPaths: Object.freeze([...loaded.skillPaths]),
         readRoots: Object.freeze([...loaded.readRoots]),
+        writeRoots: Object.freeze([...loaded.writeRoots]),
+        env: Object.freeze({ ...loaded.env }),
+        networkDomains: Object.freeze([...loaded.networkDomains]),
+        allowUnrestrictedNetwork: loaded.allowUnrestrictedNetwork,
+        allowLocalBinding: loaded.allowLocalBinding,
+        unixSockets: Object.freeze([...loaded.unixSockets]),
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
         piExtensionTools: Object.freeze([...loaded.piExtensionTools]),
         close: () => loaded!.close(),

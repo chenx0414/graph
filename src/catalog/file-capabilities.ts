@@ -27,6 +27,17 @@ export interface CapabilityManifest {
   /** Graph extension or Pi extension entry file. */
   entry?: string;
   tools?: { name: string; description?: string }[];
+  /** Host runtime requirements for a trusted Pi extension. */
+  runtime?: {
+    commands?: string[];
+    env?: Record<string, string>;
+    readPaths?: string[];
+    writePaths?: string[];
+    networkDomains?: string[];
+    networkAccess?: 'unrestricted';
+    allowLocalBinding?: boolean;
+    unixSockets?: string[];
+  };
   tags?: string[];
   [key: string]: unknown;
 }
@@ -107,6 +118,46 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
       };
     });
   }
+  let runtime: CapabilityManifest['runtime'];
+  if (raw.runtime !== undefined) {
+    if (!raw.runtime || typeof raw.runtime !== 'object' || Array.isArray(raw.runtime)) {
+      throw new RuntimeError('invalid_capability', `${path}.runtime must be an object`);
+    }
+    if (kind !== 'pi-extension') throw new RuntimeError('invalid_capability', `${path}.runtime is only valid for Pi extensions`);
+    const value = raw.runtime as Record<string, unknown>;
+    const commands = stringList(value.commands, `${path}.runtime.commands`);
+    if (commands?.some(command => /[\0\r\n;|&`$<>]/.test(command))) {
+      throw new RuntimeError('invalid_capability', `${path}.runtime.commands contains an invalid command`);
+    }
+    const runtimeEnv = stringMap(value.env, `${path}.runtime.env`);
+    if (runtimeEnv && Object.keys(runtimeEnv).some(name => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) {
+      throw new RuntimeError('invalid_capability', `${path}.runtime.env contains an invalid variable name`);
+    }
+    const readPaths = stringList(value.readPaths, `${path}.runtime.readPaths`);
+    const writePaths = stringList(value.writePaths, `${path}.runtime.writePaths`);
+    const runtimeDomains = networkDomains(value.networkDomains, `${path}.runtime.networkDomains`);
+    const networkAccess = value.networkAccess === undefined ? undefined : text(value.networkAccess, `${path}.runtime.networkAccess`);
+    if (networkAccess && networkAccess !== 'unrestricted') {
+      throw new RuntimeError('invalid_capability', `${path}.runtime.networkAccess must be "unrestricted"`);
+    }
+    if (runtimeDomains && networkAccess) {
+      throw new RuntimeError('invalid_capability', `${path} cannot combine runtime networkDomains with unrestricted network access`);
+    }
+    if (value.allowLocalBinding !== undefined && typeof value.allowLocalBinding !== 'boolean') {
+      throw new RuntimeError('invalid_capability', `${path}.runtime.allowLocalBinding must be boolean`);
+    }
+    const unixSockets = stringList(value.unixSockets, `${path}.runtime.unixSockets`);
+    runtime = {
+      ...(commands ? { commands } : {}),
+      ...(runtimeEnv ? { env: runtimeEnv } : {}),
+      ...(readPaths ? { readPaths } : {}),
+      ...(writePaths ? { writePaths } : {}),
+      ...(runtimeDomains ? { networkDomains: runtimeDomains } : {}),
+      ...(networkAccess ? { networkAccess: networkAccess as 'unrestricted' } : {}),
+      ...(value.allowLocalBinding !== undefined ? { allowLocalBinding: value.allowLocalBinding as boolean } : {}),
+      ...(unixSockets ? { unixSockets } : {}),
+    };
+  }
   return {
     ...raw,
     id,
@@ -124,6 +175,7 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
     ...(networkAccess ? { networkAccess: networkAccess as 'unrestricted' } : {}),
     ...(entry ? { entry } : {}),
     ...(tools ? { tools } : {}),
+    ...(runtime ? { runtime } : {}),
     ...(tags ? { tags } : {}),
   };
 }

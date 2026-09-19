@@ -29,6 +29,16 @@ export function normalizeDomains(domains: string[] | undefined) {
   return [...new Set((domains ?? []).map(domain => domain.trim().toLowerCase().replace(/^\./, '')).filter(Boolean))];
 }
 
+/** SRT matches host entries literally; Graph treats a bare domain as its subtree. */
+export function sandboxNetworkDomains(domains: string[] | undefined) {
+  const expanded: string[] = [];
+  for (const domain of normalizeDomains(domains)) {
+    expanded.push(domain);
+    if (!domain.startsWith('*.') && !ipv4(domain) && domain !== 'localhost') expanded.push(`*.${domain}`);
+  }
+  return [...new Set(expanded)];
+}
+
 /** A granted domain matches itself and any subdomain; `*.example.com` matches subdomains only. */
 export function allowedDomain(domains: string[], hostname: string) {
   const host = hostname.toLowerCase();

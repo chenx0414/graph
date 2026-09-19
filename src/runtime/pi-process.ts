@@ -103,6 +103,8 @@ export async function openPiProcess(options: PiProcessOptions) {
   const skillPaths = await Promise.all((options.skillPaths ?? []).map(path => realpath(path)));
   const piExtensionPaths = await Promise.all((options.piExtensionPaths ?? []).map(path => realpath(path)));
   const capabilityReadRoots = await Promise.all((options.readRoots ?? []).map(path => realpath(path)));
+  const capabilityWriteRoots = await Promise.all((options.writeRoots ?? []).map(path => realpath(path)));
+  const unixSockets = await Promise.all((options.unixSockets ?? []).map(path => realpath(path)));
   const extensionReadRoots = await Promise.all(piExtensionPaths.map(path => realpath(dirname(path))));
   const forkSource = options.forkFrom ? await realpath(options.forkFrom.sessionFile) : undefined;
   const forkFrom = forkSource
@@ -147,6 +149,18 @@ export async function openPiProcess(options: PiProcessOptions) {
     onEvent: event => options.onEvent?.(event as AgentSessionEvent),
   });
   const runtime = graphNodeRuntime();
+  const helperEnv: Record<string, string> = {
+    ...(options.env ?? {}),
+    ...(runtime.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+  };
+  if (options.env?.PATH !== undefined) {
+    helperEnv.PATH = [...new Set([
+      dirname(runtime.execPath),
+      ...options.env.PATH.split(':').filter(Boolean),
+      '/usr/bin',
+      '/bin',
+    ])].join(':');
+  }
   const acquired = await acquireRestrictedExecutor();
   const check = (options.broker as { check?: (reservation?: number) => void }).check;
   let control: { write(message: unknown): boolean; kill(): boolean } | undefined;
@@ -173,12 +187,18 @@ export async function openPiProcess(options: PiProcessOptions) {
       ...skillPaths,
       ...piExtensionPaths,
       ...capabilityReadRoots,
+      ...capabilityWriteRoots,
+      ...unixSockets,
       ...extensionReadRoots,
       ...(forkSource ? [forkSource] : []),
       ...(await Promise.all(nodeReadPaths(runtime.execPath, runtime.electron).map(path => realpath(path)))),
     ],
-    writePaths: [stateDir, ...(options.readOnly ? [] : [workspace])],
-    ...(runtime.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}),
+    writePaths: [stateDir, ...capabilityWriteRoots, ...unixSockets, ...(options.readOnly ? [] : [workspace])],
+    ...(Object.keys(helperEnv).length ? { env: helperEnv } : {}),
+    ...(options.networkDomains?.length ? { networkDomains: options.networkDomains } : {}),
+    ...(options.allowUnrestrictedNetwork ? { allowUnrestrictedNetwork: true } : {}),
+    ...(options.allowLocalBinding ? { allowLocalBinding: true } : {}),
+    ...(unixSockets.length ? { unixSockets } : {}),
     keepStdinOpen: true,
     ...(typeof check === 'function' ? { preflight: () => check.call(options.broker) } : {}),
     onSpawn: processControl => {

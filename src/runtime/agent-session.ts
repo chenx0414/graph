@@ -57,6 +57,12 @@ export interface AgentSessionRequest {
   tools?: ToolDefinition[];
   skillPaths?: string[];
   readRoots?: string[];
+  writeRoots?: string[];
+  env?: Record<string, string>;
+  networkDomains?: string[];
+  allowUnrestrictedNetwork?: boolean;
+  allowLocalBinding?: boolean;
+  unixSockets?: string[];
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
   systemPrompt?: string;

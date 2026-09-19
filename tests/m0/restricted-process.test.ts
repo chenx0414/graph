@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { sandboxNetworkDomains } from '../../src/core/domains.ts';
 import { openRestrictedExecutor } from '../../src/runtime/restricted-process.ts';
 import { createWorkerRequests } from '../../src/runtime/worker-requests.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
@@ -20,6 +21,15 @@ let executor: Awaited<ReturnType<typeof openRestrictedExecutor>>;
 beforeAll(async () => { executor = await openRestrictedExecutor(); });
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
 afterAll(async () => { await executor?.close(); });
+
+test('bare capability domains match their subdomains in the OS network boundary', () => {
+  expect(sandboxNetworkDomains(['github.com', '*.example.com', '127.0.0.1'])).toEqual([
+    'github.com',
+    '*.github.com',
+    '*.example.com',
+    '127.0.0.1',
+  ]);
+});
 
 test('real macOS workers allow granted writes and block host state, credentials, symlinks, subprocess and network bypasses', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-sandbox-'))); dirs.push(root);
@@ -88,6 +98,42 @@ test('worker preparation writes only to its granted scratch directory, even with
   } finally { broker.close(); }
 });
 
+test('unix socket grants also authorize their directory metadata', async () => {
+  const root = await realpath(await mkdtemp('/private/tmp/graph-unix-socket-')); dirs.push(root);
+  const workspace = join(root, 'workspace');
+  const socketDir = join(root, 'socket');
+  await mkdir(workspace);
+  await mkdir(socketDir);
+  await writeFile(join(workspace, 'probe.mjs'), `
+    import { readdirSync } from 'node:fs';
+    import { createServer } from 'node:net';
+    import { join } from 'node:path';
+    readdirSync(${JSON.stringify(socketDir)});
+    const server = createServer();
+    server.listen(join(${JSON.stringify(socketDir)}, 'probe.sock'), () => {
+      console.log('bound');
+      server.close();
+    });
+  `);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const result = await executor.run({
+      broker,
+      cwd: workspace,
+      executable: process.execPath,
+      args: ['probe.mjs'],
+      readPaths: [dirname(process.execPath)],
+      writePaths: [workspace, socketDir],
+      unixSockets: [socketDir],
+      allowLocalBinding: true,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe('bound');
+  } finally {
+    broker.close();
+  }
+});
+
 test('restricted workers reach only explicitly granted outbound domains', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-network-'))); dirs.push(root);
   const workspace = join(root, 'workspace'); await mkdir(workspace);
@@ -131,32 +177,64 @@ test('restricted workers reach only explicitly granted outbound domains', async 
 test('explicit unrestricted network mode reaches the network but still cannot bind listeners', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-unrestricted-network-'))); dirs.push(root);
   const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const declaredTmp = join(workspace, 'declared-tmp'); await mkdir(declaredTmp);
   const server = createServer((_request, response) => response.end('reachable'));
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port;
   await writeFile(join(workspace, 'network.mjs'), `
+    import { writeFileSync } from 'node:fs';
     import { createServer } from 'node:http';
     const response = await fetch(${JSON.stringify(`http://127.0.0.1:${port}/probe`)});
+    writeFileSync('declared-tmp/probe.txt', 'ok');
     let bind = 'allowed';
     try {
       const listener = createServer();
       await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve); });
       listener.close();
     } catch { bind = 'denied'; }
-    console.log(JSON.stringify({ network: await response.text(), bind }));
+    console.log(JSON.stringify({ network: await response.text(), bind, tmp: process.env.TMPDIR }));
   `);
   const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
   try {
     const result = await executor.run({
       broker, cwd: workspace, executable: process.execPath, args: ['network.mjs'],
       readPaths: [dirname(process.execPath)], writePaths: [workspace], allowUnrestrictedNetwork: true,
+      env: { TMPDIR: declaredTmp },
     });
     expect(result.code, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ network: 'reachable', bind: 'denied' });
+    expect(JSON.parse(result.stdout)).toEqual({ network: 'reachable', bind: 'denied', tmp: declaredTmp });
+    expect(await readFile(join(declaredTmp, 'probe.txt'), 'utf8')).toBe('ok');
   } finally {
     broker.close();
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('macOS browser runtime keeps Chrome startup, nested-process, and DNS dependencies available', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-browser-profile-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  const profilePath = join(root, 'sandbox.sb');
+  const previousDump = process.env.GRAPH_SANDBOX_PROFILE_DUMP;
+  process.env.GRAPH_SANDBOX_PROFILE_DUMP = profilePath;
+  try {
+    const result = await executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['-e', ''],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace],
+      allowUnrestrictedNetwork: true, allowLocalBinding: true, timeoutMs: 5_000,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    const profile = await readFile(profilePath, 'utf8');
+    expect(profile).toContain('(allow mach-register (global-name-regex #"^com\\.google\\.chrome(?:\\.|$)"))');
+    expect(profile).toContain('(allow mach-lookup (global-name "com.apple.SystemConfiguration.DNSConfiguration"))');
+    expect(profile).toContain('(allow sysctl-read (sysctl-name "kern.hv_vmm_present"))');
+    expect(profile).toContain('(allow network-outbound (remote unix-socket (literal "/private/var/run/mDNSResponder")))');
+    expect(profile).toContain('(allow file-read-metadata (literal "/etc"))');
+  } finally {
+    if (previousDump === undefined) delete process.env.GRAPH_SANDBOX_PROFILE_DUMP;
+    else process.env.GRAPH_SANDBOX_PROFILE_DUMP = previousDump;
+    broker.close();
   }
 });
 
@@ -200,6 +278,62 @@ test('unrestricted network does not leak proxy access into a concurrent no-netwo
     expect(JSON.parse((await unrestricted).stdout)).toEqual({ network: 'reachable' });
     expect(hits).toBe(1);
   } finally {
+    broker.close();
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('an unrestricted worker does not block a concurrent allowlisted host call', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-network-concurrency-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const started = join(workspace, 'started.txt');
+  const release = join(workspace, 'release.txt');
+  const server = createServer((_request, response) => response.end('reachable'));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/probe`;
+  await writeFile(join(workspace, 'unrestricted.mjs'), `
+    import { existsSync, writeFileSync } from 'node:fs';
+    writeFileSync(${JSON.stringify(started)}, 'yes');
+    await new Promise(resolve => {
+      const timer = setInterval(() => {
+        if (!existsSync(${JSON.stringify(release)})) return;
+        clearInterval(timer);
+        resolve();
+      }, 20);
+    });
+    console.log('released');
+  `);
+  await writeFile(join(workspace, 'allowlisted.mjs'), `
+    const response = await fetch(${JSON.stringify(url)});
+    console.log(await response.text());
+  `);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  let unrestricted: ReturnType<typeof executor.run> | undefined;
+  let allowlisted: ReturnType<typeof executor.run> | undefined;
+  try {
+    unrestricted = executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['unrestricted.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace], allowUnrestrictedNetwork: true,
+    });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await readFile(started, 'utf8').catch(() => undefined)) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    expect(await readFile(started, 'utf8')).toBe('yes');
+    allowlisted = executor.run({
+      broker, cwd: workspace, executable: process.execPath, args: ['allowlisted.mjs'],
+      readPaths: [dirname(process.execPath)], writePaths: [workspace], networkDomains: ['127.0.0.1'],
+    });
+    const result = await Promise.race([
+      allowlisted,
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('allowlisted call was blocked by unrestricted worker')), 1_500)),
+    ]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe('reachable');
+  } finally {
+    await writeFile(release, 'yes');
+    await Promise.allSettled([...(unrestricted ? [unrestricted] : []), ...(allowlisted ? [allowlisted] : [])]);
     broker.close();
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));

@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
-import { normalizeDomains } from '../core/domains.ts';
+import { sandboxNetworkDomains } from '../core/domains.ts';
 import type { TokenUsage } from './call-broker.ts';
 
 /**
@@ -211,8 +211,12 @@ export interface RestrictedCommand {
   localNetwork?: boolean;
   /** MCP-only outbound allowlist for the restricted process. */
   networkDomains?: string[];
-  /** Explicit browser-MCP mode; still cannot bind or use Unix sockets. */
+  /** Explicit browser-MCP mode; network remains mediated by the SRT proxy. */
   allowUnrestrictedNetwork?: boolean;
+  /** Allow loopback listeners/connectors for local browser daemons and Chrome CDP. */
+  allowLocalBinding?: boolean;
+  /** Explicit Unix socket roots for local capability daemons. */
+  unixSockets?: string[];
   /** Host-selected environment for the restricted process; worker input must never populate this. */
   env?: Record<string, string>;
   /** Keep stdin open so the trusted host can steer a long-running worker. */
@@ -325,12 +329,14 @@ export async function openRestrictedExecutor() {
   if (process.platform !== 'darwin') throw new Error('Restricted execution has only been verified on macOS');
   const noNetwork = { allowedDomains: [], deniedDomains: [], allowLocalBinding: false, allowUnixSockets: [] };
   const baseFilesystem = { denyRead: ['/'], allowWrite: [], denyWrite: [] };
-  let unrestrictedNetwork = false;
-  await SandboxManager.initialize({ network: noNetwork, filesystem: baseFilesystem }, async () => unrestrictedNetwork, false);
+  await SandboxManager.initialize({ network: noNetwork, filesystem: baseFilesystem }, async () => false, false);
   if (!SandboxManager.isSandboxingEnabled()) throw new Error('OS sandbox unavailable');
   let networkTail: Promise<void> = Promise.resolve();
-  async function acquireNetworkConfig(domains: string[], unrestricted = false): Promise<() => void> {
-    if (!domains.length && !unrestricted) return () => {};
+  async function acquireNetworkConfig(
+    domains: string[],
+    unixSockets: string[] = [],
+  ): Promise<() => void> {
+    if (!domains.length && !unixSockets.length) return () => {};
     const previous = networkTail;
     let release!: () => void;
     networkTail = new Promise<void>(resolve => { release = resolve; });
@@ -339,15 +345,18 @@ export async function openRestrictedExecutor() {
     // reads the manager config. Serialize different allowlists so a process
     // can never inherit another capability's network grant.
     SandboxManager.updateConfig({
-      network: { allowedDomains: normalizeDomains(domains), deniedDomains: [], allowLocalBinding: false, allowUnixSockets: [] },
+      network: {
+        allowedDomains: sandboxNetworkDomains(domains),
+        deniedDomains: [],
+        allowLocalBinding: false,
+        allowUnixSockets: unixSockets,
+      },
       filesystem: baseFilesystem,
     });
-    unrestrictedNetwork = unrestricted;
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      unrestrictedNetwork = false;
       SandboxManager.updateConfig({ network: noNetwork, filesystem: baseFilesystem });
       release();
     };
@@ -357,13 +366,15 @@ export async function openRestrictedExecutor() {
       const cwd = await canonicalGrant(command.cwd);
       const readPaths = await Promise.all(command.readPaths.map(canonicalGrant));
       const writePaths = await Promise.all(command.writePaths.map(canonicalGrant));
+      const unixSockets = await Promise.all((command.unixSockets ?? []).map(canonicalGrant));
+      const allowLocalBinding = Boolean(command.localNetwork || command.allowLocalBinding);
       const network = command.localNetwork
-        ? { allowedDomains: [], deniedDomains: [], allowLocalBinding: true, allowUnixSockets: [] }
+        ? { allowedDomains: [], deniedDomains: [], allowLocalBinding: true, allowUnixSockets: unixSockets }
         : {
-            allowedDomains: normalizeDomains(command.networkDomains),
+            allowedDomains: sandboxNetworkDomains(command.networkDomains),
             deniedDomains: [],
-            allowLocalBinding: false,
-            allowUnixSockets: [],
+            allowLocalBinding,
+            allowUnixSockets: unixSockets,
           };
       const scratchDir = command.scratchDir ? await canonicalGrant(command.scratchDir) : cwd;
       if (!writePaths.some(root => scratchDir === root || scratchDir.startsWith(root === '/' ? '/' : root + '/'))) {
@@ -379,33 +390,70 @@ export async function openRestrictedExecutor() {
       // localhost). The resolver reads /etc/hosts and friends, and the
       // profile's subpath filters only match directories.
       if (existsSync('/etc')) systemReads.push(realpathSync('/etc'));
-      const allowedReads = [...systemReads, cwd, scratchDir, ...readPaths];
+      const allowedReads = [...systemReads, cwd, scratchDir, ...readPaths, ...unixSockets];
       const deviceWrites = ['/dev/stdout', '/dev/stderr', '/dev/null', '/dev/tty', '/dev/dtracehelper', '/dev/autofs_nowait'];
       const gitPaths = await gitMetadataPaths(writePaths, scratchDir);
       const profile = pinnedFilesystemProfile(allowedReads, [...deviceWrites, ...writePaths], gitPaths);
-      // SRT reads allowLocalBinding from its initialized config, so a per-run
-      // custom config cannot widen it. Confirmed program checks get loopback
-      // listen/inbound/outbound plus the Chromium rendezvous services appended
-      // here; every other restricted run keeps the no-network profile. Bind and
-      // inbound stay limited to loopback addresses, never "*:*".
-      // SRT reads allowLocalBinding from its initialized config, so a per-run
-      // custom config cannot widen it. Confirmed program checks get loopback
-      // inbound/outbound plus the Chromium rendezvous services appended here,
-      // and every bind is denied: the only listening sockets are the host's
-      // loopback listeners, whose duplicated fds the check receives. Every
-      // other restricted run keeps the no-network profile.
-      const localNetworkProfile = command.localNetwork
-        ? '\n(allow network-inbound (local ip "localhost:*"))\n(allow network-outbound (remote ip "localhost:*"))\n(deny network-bind)'
-          + '\n(allow mach-register (global-name-regex #"^org\\.chromium\\."))\n(allow mach-lookup (global-name-regex #"^org\\.chromium\\."))'
-        : '';
+      // SRT's dynamic proxy enforces one process-global allowlist. An
+      // unrestricted Pi extension can live for the whole Agent turn, so it
+      // cannot hold that lock without deadlocking host-side MCP calls from the
+      // same turn. Give only that process a static direct-network profile
+      // instead; allowlisted executions still use the serialized SRT proxy.
+      const networkProfile: string[] = [];
+      if (command.allowUnrestrictedNetwork) {
+        networkProfile.push('(allow network-outbound)');
+      }
+      if (command.localNetwork) {
+        networkProfile.push(
+          '(allow network-inbound (local ip "localhost:*"))',
+          '(allow network-outbound (remote ip "localhost:*"))',
+          '(deny network-bind)',
+        );
+      } else if (command.allowLocalBinding) {
+        networkProfile.push(
+          '(allow network-bind (local ip "*:*"))',
+          '(allow network-inbound (local ip "*:*"))',
+          '(allow network-outbound (remote ip "localhost:*"))',
+        );
+      }
+      if (command.localNetwork || command.allowLocalBinding) {
+        networkProfile.push(
+          '(allow mach-register (global-name-regex #"^org\\.chromium\\."))',
+          '(allow mach-lookup (global-name-regex #"^org\\.chromium\\."))',
+          '(allow mach-register (global-name-regex #"^com\\.google\\.chrome(?:\\.|$)"))',
+          '(allow mach-lookup (global-name-regex #"^com\\.google\\.chrome(?:\\.|$)"))',
+          // macOS name resolution goes through mDNSResponder rather than a
+          // plain DNS socket, so direct-network browser processes need this
+          // additional lookup even when network-outbound is unrestricted.
+          '(allow mach-lookup (global-name "com.apple.mDNSResponder"))',
+          '(allow mach-lookup (global-name "com.apple.SystemConfiguration.DNSConfiguration"))',
+          '(allow system-socket (socket-domain AF_UNIX))',
+          '(allow network-outbound (remote unix-socket (literal "/private/var/run/mDNSResponder")))',
+          '(allow file-read* (literal "/Library/Preferences/com.apple.networkd.plist"))',
+          '(allow file-read-metadata (literal "/var"))',
+          '(allow file-read-metadata (literal "/etc"))',
+          // Chrome reads kern.hv_vmm_present during startup on macOS. The
+          // sandbox runtime otherwise denies that read and Chrome aborts.
+          '(allow sysctl-read (sysctl-name "kern.hv_vmm_present"))',
+        );
+      }
+      if (unixSockets.length) {
+        networkProfile.push('(allow system-socket (socket-domain AF_UNIX))');
+        for (const path of unixSockets) {
+          networkProfile.push(
+            `(allow network-bind (local unix-socket (subpath ${JSON.stringify(path)})))`,
+            `(allow network-outbound (remote unix-socket (subpath ${JSON.stringify(path)})))`,
+          );
+        }
+      }
+      const localNetworkProfile = networkProfile.length ? `\n${networkProfile.join('\n')}` : '';
       const commandText = [command.executable, ...command.args].map(quote).join(' ');
       // Even setup writes happen after confinement. A mutable cwd must never
       // cause the host to create directories outside the original grant.
       const launch = `/bin/mkdir -p ${quote(homeDir)} ${quote(tempDir)} && exec ${commandText}`;
-      const releaseNetwork = await acquireNetworkConfig(
-        command.localNetwork ? [] : normalizeDomains(command.networkDomains),
-        Boolean(command.allowUnrestrictedNetwork),
-      );
+      const releaseNetwork = command.allowUnrestrictedNetwork
+        ? async () => undefined
+        : await acquireNetworkConfig(command.localNetwork ? [] : command.networkDomains ?? [], unixSockets);
       try {
         const wrapped = await SandboxManager.wrapWithSandbox(
           launch, '/bin/sh', {
@@ -453,15 +501,27 @@ export async function openRestrictedExecutor() {
         return await new Promise((resolve, reject) => {
           const invocationId = randomUUID();
           const spawnProcess = () => {
-          const proxyEnvironment = command.allowUnrestrictedNetwork || command.networkDomains?.length
-            // The SRT wrapper normally applies these variables through `env`.
-            // Keep it to the proxy port and force allowlisted traffic through
-            // that port instead of direct private-network attempts.
+          const proxyEnvironment = command.allowUnrestrictedNetwork
+            // The static direct-network profile must not inherit the dynamic
+            // proxy that belongs to another execution's allowlist.
             ? {
-                ...Object.fromEntries(Object.entries(extracted.environment).map(([name, value]) => [name, value.replaceAll('localhost', '127.0.0.1')])),
-                NO_PROXY: '', no_proxy: '', NODE_USE_ENV_PROXY: '1',
+                ...Object.fromEntries(Object.entries(extracted.environment).filter(([name]) =>
+                  !/^(?:http|https|all|grpc|ftp)_proxy$/i.test(name)
+                  && name !== 'NODE_USE_ENV_PROXY'
+                  && name !== 'TMPDIR' && name !== 'TMP' && name !== 'TEMP')),
+                NO_PROXY: '*', no_proxy: '*',
               }
-            : {};
+            : command.networkDomains?.length
+              // The SRT wrapper normally applies these variables through `env`.
+              // Keep it to the proxy port and force allowlisted traffic through
+              // that port instead of direct private-network attempts.
+              ? {
+                  ...Object.fromEntries(Object.entries(extracted.environment)
+                    .filter(([name]) => name !== 'TMPDIR' && name !== 'TMP' && name !== 'TEMP')
+                    .map(([name, value]) => [name, value.replaceAll('localhost', '127.0.0.1')])),
+                  NO_PROXY: '', no_proxy: '', NODE_USE_ENV_PROXY: '1',
+                }
+              : {};
             const spawned = spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
               cwd, detached: true, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}), ...proxyEnvironment, ...guardEnv },
               stdio,

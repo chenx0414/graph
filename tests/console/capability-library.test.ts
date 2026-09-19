@@ -1,11 +1,13 @@
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { CapabilityLibrary } from '../../src/catalog/capability-library.ts';
 import { Catalog } from '../../src/catalog/catalog.ts';
 import { TaskStore } from '../../src/core/store.ts';
+import { loadCapabilities } from '../../src/runtime/capabilities.ts';
+import { graphNodeRuntime } from '../../src/runtime/workspace-command.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -136,6 +138,89 @@ test('MCP network declarations accept host patterns and environment references b
     expect.objectContaining({ id: 'all', status: 'invalid', error: expect.stringContaining('networkDomains') }),
     expect.objectContaining({ id: 'skill', status: 'invalid', error: expect.stringContaining('only valid for MCP') }),
   ]));
+});
+
+test('Pi extension runtime declarations are validated separately from MCP network fields', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-runtime-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await capability(root, 'runtime', {
+    id: 'runtime',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Runtime',
+    entry: './index.mjs',
+    runtime: {
+      commands: ['node'],
+      env: { GRAPH_RUNTIME_MARKER: 'ok' },
+      networkAccess: 'unrestricted',
+      allowLocalBinding: true,
+      unixSockets: ['/private/tmp/graph-runtime-${uid}'],
+    },
+  }, { 'index.mjs': 'export default () => {};\n' });
+  await capability(root, 'bad-runtime', {
+    id: 'bad-runtime',
+    kind: 'skill',
+    version: '1.0.0',
+    name: 'Bad runtime',
+    runtime: { commands: ['node'] },
+  }, { 'SKILL.md': '# Bad runtime\n' });
+  await capability(root, 'bad-network', {
+    id: 'bad-network',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Bad network',
+    entry: './index.mjs',
+    runtime: { networkAccess: 'unrestricted', networkDomains: ['example.test'] },
+  }, { 'index.mjs': 'export default () => {};\n' });
+
+  const library = new CapabilityLibrary({ capabilityRoot: root });
+  await library.refresh();
+  expect(library.capabilities()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'runtime', status: 'available' }),
+    expect.objectContaining({ id: 'bad-runtime', status: 'invalid', error: expect.stringContaining('only valid for Pi extensions') }),
+    expect.objectContaining({ id: 'bad-network', status: 'invalid', error: expect.stringContaining('cannot combine') }),
+  ]));
+});
+
+test('Pi extension runtime materializes writable roots but leaves read-only paths untouched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-runtime-load-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'capabilities');
+  await capability(capabilityRoot, 'runtime', {
+    id: 'runtime',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Runtime',
+    entry: './index.mjs',
+    runtime: {
+      commands: ['node'],
+      readPaths: ['${scratchDir}/read-only'],
+      writePaths: ['${scratchDir}/writable'],
+    },
+  }, { 'index.mjs': 'export default () => {};\n' });
+
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot, recipesPath: join(root, 'agent-combinations.json') });
+  await catalog.refresh();
+  catalog.publishDefinition('master', {
+    recommendedGrade: 'high',
+    capabilities: [{ id: 'runtime', version: '1.0.0' }],
+  });
+  const scratchDir = join(root, 'scratch');
+  const loaded = await loadCapabilities({
+    catalog,
+    definitionVersion: 'master@1',
+    workspace: root,
+    scratchDir,
+    gate: { dispatch: (_id, _reservation, send) => send(), settle: () => undefined },
+  });
+  cleanup.push(() => loaded.close());
+
+  expect(existsSync(join(scratchDir, 'read-only'))).toBe(false);
+  expect(existsSync(join(scratchDir, 'writable'))).toBe(true);
+  expect(loaded.readRoots).toContain(join(scratchDir, 'read-only'));
+  expect(loaded.env.PATH).toContain(dirname(graphNodeRuntime().execPath));
 });
 
 test('recipes validate against the current capability projection and compile to a versioned definition', async () => {

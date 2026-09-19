@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from '@earendil-works/pi-ai';
@@ -30,6 +30,7 @@ export interface CapabilityLoadFact {
   tools?: string[];
   networkDomains?: string[];
   networkAccess?: 'unrestricted';
+  runtime?: Json;
 }
 
 export interface LoadedCapabilities {
@@ -37,6 +38,12 @@ export interface LoadedCapabilities {
   piExtensionPaths: string[];
   piExtensionTools: string[];
   readRoots: string[];
+  writeRoots: string[];
+  env: Record<string, string>;
+  networkDomains: string[];
+  allowUnrestrictedNetwork: boolean;
+  allowLocalBinding: boolean;
+  unixSockets: string[];
   tools: ToolDefinition[];
   prompts: { agent: string | null; tool: string | null };
   digest: string;
@@ -71,6 +78,7 @@ interface McpManifest {
   tools?: unknown;
   networkDomains?: unknown;
   networkAccess?: unknown;
+  runtime?: unknown;
 }
 
 /** A remote MCP operation the task has not pre-authorized; the user answers with this exact grant. */
@@ -120,6 +128,178 @@ function declaredTools(manifest: McpManifest) {
       description: typeof tool.description === 'string' ? tool.description : `Pi extension tool ${tool.name}`,
     };
   });
+}
+
+interface PiExtensionRuntime {
+  commands?: string[];
+  env?: Record<string, string>;
+  readPaths?: string[];
+  writePaths?: string[];
+  networkDomains?: string[];
+  networkAccess?: 'unrestricted';
+  allowLocalBinding?: boolean;
+  unixSockets?: string[];
+}
+
+interface ResolvedPiExtensionRuntime {
+  env: Record<string, string>;
+  readPaths: string[];
+  writePaths: string[];
+  networkDomains: string[];
+  allowUnrestrictedNetwork: boolean;
+  allowLocalBinding: boolean;
+  unixSockets: string[];
+}
+
+function runtimeDeclaration(value: unknown): PiExtensionRuntime | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RuntimeError('capability_unavailable', 'Pi extension runtime must be an object');
+  }
+  const raw = value as Record<string, unknown>;
+  const strings = (value: unknown, label: string): string[] | undefined => {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim())) {
+      throw new RuntimeError('capability_unavailable', `${label} must be an array of nonempty strings`);
+    }
+    return value.map(item => (item as string).trim());
+  };
+  const env = raw.env === undefined ? undefined : raw.env;
+  if (env !== undefined && (!env || typeof env !== 'object' || Array.isArray(env) ||
+      Object.entries(env as Record<string, unknown>).some(([name, value]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || typeof value !== 'string'))) {
+    throw new RuntimeError('capability_unavailable', 'Pi extension runtime.env must be a string map with valid variable names');
+  }
+  const networkAccess = raw.networkAccess === undefined
+    ? undefined
+    : raw.networkAccess === 'unrestricted'
+      ? 'unrestricted' as const
+      : (() => { throw new RuntimeError('capability_unavailable', 'Pi extension runtime.networkAccess must be "unrestricted"'); })();
+  const networkDomains = strings(raw.networkDomains, 'Pi extension runtime.networkDomains');
+  if (networkDomains && networkAccess) {
+    throw new RuntimeError('capability_unavailable', 'Pi extension runtime cannot combine networkDomains with unrestricted network access');
+  }
+  if (raw.allowLocalBinding !== undefined && typeof raw.allowLocalBinding !== 'boolean') {
+    throw new RuntimeError('capability_unavailable', 'Pi extension runtime.allowLocalBinding must be boolean');
+  }
+  return {
+    ...(strings(raw.commands, 'Pi extension runtime.commands') ? { commands: strings(raw.commands, 'Pi extension runtime.commands')! } : {}),
+    ...(env ? { env: Object.fromEntries(Object.entries(env as Record<string, string>).map(([name, value]) => [name, value.trim()])) } : {}),
+    ...(strings(raw.readPaths, 'Pi extension runtime.readPaths') ? { readPaths: strings(raw.readPaths, 'Pi extension runtime.readPaths')! } : {}),
+    ...(strings(raw.writePaths, 'Pi extension runtime.writePaths') ? { writePaths: strings(raw.writePaths, 'Pi extension runtime.writePaths')! } : {}),
+    ...(networkDomains ? { networkDomains } : {}),
+    ...(networkAccess ? { networkAccess } : {}),
+    ...(raw.allowLocalBinding !== undefined ? { allowLocalBinding: raw.allowLocalBinding as boolean } : {}),
+    ...(strings(raw.unixSockets, 'Pi extension runtime.unixSockets') ? { unixSockets: strings(raw.unixSockets, 'Pi extension runtime.unixSockets')! } : {}),
+  };
+}
+
+function runtimePlaceholders(input: {
+  snapshot: string;
+  workspace: string;
+  scratchDir: string;
+  stateDir: string;
+  secrets: CapabilitySecrets;
+}) {
+  return {
+    HOME: homedir(),
+    uid: String(typeof process.getuid === 'function' ? process.getuid() : ''),
+    pid: String(process.pid),
+    snapshot: input.snapshot,
+    workspace: input.workspace,
+    scratchDir: input.scratchDir,
+    stateDir: input.stateDir,
+    ...input.secrets,
+  } satisfies Record<string, string>;
+}
+
+function expandRuntimeValue(value: string, placeholders: Record<string, string>, label: string) {
+  const expanded = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, braced: string | undefined, plain: string | undefined) => {
+    const name = braced ?? plain!;
+    const replacement = placeholders[name] ?? process.env[name];
+    if (replacement === undefined) throw new RuntimeError('capability_unavailable', `${label} requires environment variable ${name}`);
+    return replacement;
+  });
+  if (expanded.includes('$')) throw new RuntimeError('capability_unavailable', `${label} contains an invalid environment reference`);
+  return expanded;
+}
+
+function runtimePath(value: string, snapshot: string, placeholders: Record<string, string>, label: string) {
+  const expanded = expandRuntimeValue(value, placeholders, label);
+  return resolve(isAbsolute(expanded) ? expanded : resolve(snapshot, expanded));
+}
+
+async function resolveRuntimeCommand(command: string, snapshot: string) {
+  const runtime = graphNodeRuntime();
+  if (command === 'node') {
+    return {
+      command,
+      path: resolve(runtime.execPath),
+      readPaths: nodeReadPaths(runtime.execPath, runtime.electron),
+    };
+  }
+  const candidate = isAbsolute(command)
+    ? command
+    : command.includes('/') || command.includes('\\')
+      ? resolve(snapshot, command)
+      : (process.env.PATH ?? '').split(':').filter(Boolean).map(directory => resolve(directory, command)).find(path => {
+          try { accessSync(path, constants.X_OK); return true; }
+          catch { return false; }
+        });
+  if (!candidate) throw new RuntimeError('capability_unavailable', `Pi extension runtime command ${command} was not found on PATH`);
+  try { accessSync(candidate, constants.X_OK); }
+  catch { throw new RuntimeError('capability_unavailable', `Pi extension runtime command ${command} is not executable`); }
+  const target = await realpath(candidate);
+  return {
+    command,
+    path: resolve(candidate),
+    readPaths: [...new Set([dirname(resolve(candidate)), dirname(target)])],
+  };
+}
+
+async function resolvePiExtensionRuntime(input: {
+  manifest: McpManifest;
+  snapshot: string;
+  workspace: string;
+  scratchDir: string;
+  stateDir: string;
+  secrets: CapabilitySecrets;
+}): Promise<ResolvedPiExtensionRuntime | undefined> {
+  const runtime = runtimeDeclaration(input.manifest.runtime);
+  if (!runtime) return undefined;
+  const placeholders = runtimePlaceholders(input);
+  const readPaths = new Set<string>();
+  const writePaths = new Set<string>();
+  const networkDomains = new Set<string>();
+  const unixSockets = new Set<string>();
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(runtime.env ?? {})) {
+    env[name] = expandRuntimeValue(value, placeholders, `Pi extension runtime.env.${name}`);
+  }
+  for (const value of runtime.readPaths ?? []) readPaths.add(runtimePath(value, input.snapshot, placeholders, 'Pi extension runtime.readPaths'));
+  for (const value of runtime.writePaths ?? []) writePaths.add(runtimePath(value, input.snapshot, placeholders, 'Pi extension runtime.writePaths'));
+  for (const value of runtime.unixSockets ?? []) {
+    const path = runtimePath(value, input.snapshot, placeholders, 'Pi extension runtime.unixSockets');
+    unixSockets.add(path);
+    readPaths.add(path);
+    writePaths.add(path);
+  }
+  for (const value of runtime.networkDomains ?? []) {
+    networkDomains.add(expandRuntimeValue(value, placeholders, 'Pi extension runtime.networkDomains'));
+  }
+  for (const command of runtime.commands ?? []) {
+    const resolved = await resolveRuntimeCommand(command, input.snapshot);
+    for (const path of resolved.readPaths) readPaths.add(path);
+    env.PATH = [...new Set([...resolved.readPaths, ...(env.PATH ? env.PATH.split(':') : [])])].join(':');
+  }
+  return {
+    env,
+    readPaths: [...readPaths],
+    writePaths: [...writePaths],
+    networkDomains: [...networkDomains],
+    allowUnrestrictedNetwork: runtime.networkAccess === 'unrestricted',
+    allowLocalBinding: runtime.allowLocalBinding === true,
+    unixSockets: [...unixSockets],
+  };
 }
 
 async function manifestOf(snapshot: string) {
@@ -337,6 +517,7 @@ function stableFact(fact: CapabilityLoadFact) {
     tools: fact.tools ?? [],
     networkDomains: fact.networkDomains ?? [],
     networkAccess: fact.networkAccess ?? null,
+    runtime: fact.runtime ?? null,
   };
 }
 
@@ -559,6 +740,12 @@ export async function loadCapabilities(input: {
   const piExtensionPaths: string[] = [];
   const piExtensionTools: string[] = [];
   const readRoots: string[] = [];
+  const writeRoots: string[] = [];
+  const env: Record<string, string> = {};
+  const runtimeNetworkDomains = new Set<string>();
+  const runtimeUnixSockets = new Set<string>();
+  let runtimeUnrestrictedNetwork = false;
+  let runtimeLocalBinding = false;
   const tools: ToolDefinition[] = [];
   let agentPrompt: string | null = input.bootstrap?.agent?.trim() || null;
   let toolPrompt: string | null = input.bootstrap?.tool?.trim() || null;
@@ -573,13 +760,33 @@ export async function loadCapabilities(input: {
     skillPaths,
     piExtensionPaths,
     piExtensionTools,
+    writeRoots,
+    env,
+    networkDomains: [...runtimeNetworkDomains],
+    allowUnrestrictedNetwork: runtimeUnrestrictedNetwork,
+    allowLocalBinding: runtimeLocalBinding,
+    unixSockets: [...runtimeUnixSockets],
     prompts: { agent: agentPrompt, tool: toolPrompt },
     tools: tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as unknown as Json })),
   })).digest('hex');
-  if (!input.definitionVersion) return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report };
+  if (!input.definitionVersion) return {
+    skillPaths, piExtensionPaths, piExtensionTools, readRoots, writeRoots, env,
+    networkDomains: [...runtimeNetworkDomains],
+    allowUnrestrictedNetwork: runtimeUnrestrictedNetwork,
+    allowLocalBinding: runtimeLocalBinding,
+    unixSockets: [...runtimeUnixSockets],
+    tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report,
+  };
   let definition;
   try { definition = input.catalog.definition(input.definitionVersion); }
-  catch { return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report }; } // Unpublished definitions keep briefing-only behavior.
+  catch { return {
+    skillPaths, piExtensionPaths, piExtensionTools, readRoots, writeRoots, env,
+    networkDomains: [...runtimeNetworkDomains],
+    allowUnrestrictedNetwork: runtimeUnrestrictedNetwork,
+    allowLocalBinding: runtimeLocalBinding,
+    unixSockets: [...runtimeUnixSockets],
+    tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report,
+  }; } // Unpublished definitions keep briefing-only behavior.
   try {
     const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
       ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
@@ -630,11 +837,45 @@ export async function loadCapabilities(input: {
         piExtensionPaths.push(entry);
         piExtensionTools.push(...declared.map(tool => tool.name));
         readRoots.push(snapshot);
+        const runtime = await resolvePiExtensionRuntime({
+          manifest,
+          snapshot,
+          workspace: input.workspace,
+          scratchDir: input.scratchDir,
+          stateDir: dirname(input.scratchDir),
+          secrets: input.secrets ?? {},
+        });
+        if (runtime) {
+          for (const [name, value] of Object.entries(runtime.env)) env[name] = value;
+          for (const path of [...runtime.writePaths, ...runtime.unixSockets]) {
+            await mkdir(path, { recursive: true, mode: 0o700 });
+          }
+          readRoots.push(...runtime.readPaths);
+          writeRoots.push(...runtime.writePaths);
+          for (const domain of runtime.networkDomains) runtimeNetworkDomains.add(domain);
+          for (const path of runtime.unixSockets) runtimeUnixSockets.add(path);
+          runtimeUnrestrictedNetwork ||= runtime.allowUnrestrictedNetwork;
+          runtimeLocalBinding ||= runtime.allowLocalBinding;
+        }
         report.push({
           id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: true,
-          reason: `独立 Pi 进程内加载；声明工具 ${declared.length} 个`,
+          reason: [
+            `独立 Pi 进程内加载；声明工具 ${declared.length} 个`,
+            runtime ? `运行时声明：命令 ${runtime.env.PATH ? '已解析' : '无'}，网络 ${runtime.allowUnrestrictedNetwork ? '不受限' : runtime.networkDomains.length ? runtime.networkDomains.join(', ') : '无'}，Unix socket ${runtime.unixSockets.length}` : '',
+          ].filter(Boolean).join('；'),
           path: entry,
           ...(declared.length ? { tools: declared.map(tool => tool.name) } : {}),
+          ...(runtime ? {
+            runtime: {
+              env: Object.keys(runtime.env).sort(),
+              readPaths: runtime.readPaths,
+              writePaths: runtime.writePaths,
+              networkDomains: runtime.networkDomains,
+              networkAccess: runtime.allowUnrestrictedNetwork ? 'unrestricted' : null,
+              allowLocalBinding: runtime.allowLocalBinding,
+              unixSockets: runtime.unixSockets,
+            } as unknown as Json,
+          } : {}),
         });
         continue;
       }
@@ -726,7 +967,14 @@ export async function loadCapabilities(input: {
     await close();
     throw error;
   }
-  return { skillPaths, piExtensionPaths, piExtensionTools, readRoots, tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report };
+  return {
+    skillPaths, piExtensionPaths, piExtensionTools, readRoots, writeRoots, env,
+    networkDomains: [...runtimeNetworkDomains],
+    allowUnrestrictedNetwork: runtimeUnrestrictedNetwork,
+    allowLocalBinding: runtimeLocalBinding,
+    unixSockets: [...runtimeUnixSockets],
+    tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report,
+  };
 }
 
 /** Build the identity and capability-awareness prompts from the exact loaded bundle.
