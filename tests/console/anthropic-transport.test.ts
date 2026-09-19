@@ -12,7 +12,7 @@ afterEach(async () => { for (const action of cleanup.reverse()) await action(); 
 
 interface Recorded { url: string; headers: Record<string, string>; body: unknown }
 
-async function anthropicServer(options: { events?: string[]; status?: number; body?: unknown } = {}) {
+async function anthropicServer(options: { events?: string[]; status?: number; body?: unknown; holdOpen?: boolean } = {}) {
   const requests: Recorded[] = [];
   const events = options.events ?? [
     'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[],"stop_reason":null,"usage":{"input_tokens":25,"output_tokens":0,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}\n\n',
@@ -37,7 +37,7 @@ async function anthropicServer(options: { events?: string[]; status?: number; bo
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     for (const event of events) res.write(event);
-    res.end();
+    if (!options.holdOpen) res.end();
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -73,6 +73,16 @@ async function consume(stream: AssistantMessageEventStream | Promise<AssistantMe
   return events;
 }
 
+function bounded<T>(promise: Promise<T>, milliseconds: number, label: string) {
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error(`${label} did not settle within ${milliseconds}ms`)), milliseconds);
+      timeout.unref?.();
+    }),
+  ]);
+}
+
 test('the anthropic Messages transport sends the native request shape and normalizes cache usage', async () => {
   const server = await anthropicServer();
   const { gate, settled, dispatches } = collectingGate();
@@ -100,6 +110,15 @@ test('a missing anthropic usage event settles as unknown instead of zero', async
   const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), { messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }, { apiKey: 'ignored', maxTokens: 64 });
   await consume(stream);
   expect(settled).toEqual([null]);
+}, 60_000);
+
+test('a completed anthropic SSE response settles before the server closes the connection', async () => {
+  const server = await anthropicServer({ holdOpen: true });
+  const { gate, settled } = collectingGate();
+  const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), { messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }, { apiKey: 'ignored', maxTokens: 64 });
+  const events = await bounded(consume(stream), 1_000, 'completed anthropic response');
+  expect(events.some(event => event.type === 'error')).toBe(false);
+  expect(settled).toEqual([{ input: 25, output: 7, cacheRead: 10, cacheWrite: 5, usageSource: 'authoritative' }]);
 }, 60_000);
 
 test('an anthropic error response is a transport failure, not a provider success', async () => {

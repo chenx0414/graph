@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -160,6 +160,78 @@ test('an output-limit turn settles with a retry notice instead of staying in pro
   const view = await runtime.conversations.view(created.conversationId);
   const notice = view.messages.find(message => message.role === 'system' && message.kind === 'error');
   expect(notice?.text).toContain('输出被截断');
+  expect(view.master?.status).not.toBe('dispatched');
+}, 30_000);
+
+test('a tool-use response that keeps SSE open does not stall the following turn', async () => {
+  const root = await temp('tool-use-output-limit');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const images = ['1.png', '2.png', '3.png', '4.png'].map(name => join(project, name));
+  for (const image of images) await writeFile(image, Buffer.alloc(512 * 1024, 7));
+  const provider = await openaiServer([
+    {
+      finishReason: 'tool_calls',
+      tools: images.map((image, index) => ({
+        id: `read-image-${index}`,
+        name: 'read',
+        arguments: JSON.stringify({ path: image }),
+      })),
+    },
+    { text: 'First reply.' },
+    {
+      thinking: 'I will publish the plan without supplying its content. '.repeat(100),
+      finishReason: 'tool_calls',
+      tools: [{
+        id: 'publish-without-content',
+        name: 'artifact_publish',
+        arguments: JSON.stringify({
+          namespace: 'plans',
+          name: 'truncated-plan',
+          requestId: 'truncated-plan-1',
+        }),
+      }],
+      usage: {
+        prompt_tokens: 128,
+        completion_tokens: 256,
+        prompt_tokens_details: { cached_tokens: 0 },
+        completion_tokens_details: { reasoning_tokens: 256 },
+      },
+      holdOpen: true,
+    },
+    { text: 'The publish error was handled.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local',
+        provider: 'graph-openai',
+        grade: 'high',
+        api: 'openai-completions',
+        baseUrl: provider.model.baseUrl,
+        contextWindow: 32_000,
+        maxTokens: 256,
+        reasoning: true,
+      }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({ projectId: 'p', text: '开始。', requestId: 'tool-limit-create' });
+  await runtime.host.runReady();
+  await runtime.conversations.chat(created.conversationId, { text: '继续，按推荐处理。', requestId: 'tool-limit-follow-up' });
+  await runtime.host.runReady();
+
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('publish error was handled');
   expect(view.master?.status).not.toBe('dispatched');
 }, 30_000);
 

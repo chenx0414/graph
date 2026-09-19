@@ -13,6 +13,8 @@ export interface ResponsePlan {
   status?: number;
   error?: string;
   redirect?: string;
+  /** Keep the HTTP response open after the SSE [DONE] marker. */
+  holdOpen?: boolean;
   beforeReply?: () => Promise<void> | void;
 }
 export async function openaiServer(plans: ResponsePlan[]) {
@@ -39,20 +41,23 @@ export async function openaiServer(plans: ResponsePlan[]) {
       return;
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    const delta = plan.tools
-      ? { role: 'assistant', tool_calls: plan.tools.map((tool, index) => ({
+    const delta: Record<string, unknown> = { role: 'assistant' };
+    if (plan.thinking) delta.reasoning_content = plan.thinking;
+    if (plan.tools) {
+      delta.tool_calls = plan.tools.map((tool, index) => ({
         index,
         id: tool.id,
         type: 'function',
         function: { name: tool.name, arguments: typeof tool.arguments === 'function' ? tool.arguments() : tool.arguments },
-      })) }
-      : plan.thinking
-        ? { role: 'assistant', reasoning_content: plan.thinking }
-        : { role: 'assistant', content: plan.text ?? 'Local response' };
+      }));
+    } else if (!plan.thinking) {
+      delta.content = plan.text ?? 'Local response';
+    }
     const finishReason = plan.finishReason ?? (plan.tools ? 'tool_calls' : 'stop');
     res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
-    res.end('data: [DONE]\n\n');
+    if (plan.holdOpen) res.write('data: [DONE]\n\n');
+    else res.end('data: [DONE]\n\n');
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;

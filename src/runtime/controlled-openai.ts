@@ -53,44 +53,71 @@ async function readUsage(response: Response, api: 'openai-completions' | 'anthro
   // A bounded clone observes raw evidence; an SDK's zero-filled error is not evidence.
   const reader = response.body?.getReader();
   if (!reader) return null;
+  const contentType = response.headers.get('content-type') ?? '';
+  let received = 0;
   let text = '';
   const decoder = new TextDecoder();
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text += decoder.decode(value, { stream: true });
-      if (text.length > 8_000_000) { void reader.cancel(); return null; }
-    }
-    text += decoder.decode();
-    if (api === 'anthropic-messages') {
-      if (response.headers.get('content-type')?.includes('application/json')) {
-        const body = JSON.parse(text) as { usage?: unknown };
-        return parseAnthropicUsage(body.usage);
+    if (contentType.includes('application/json')) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > 8_000_000) { void reader.cancel(); return null; }
+        text += decoder.decode(value, { stream: true });
       }
-      // Anthropic streams input/cache usage once at message_start and the
-      // cumulative output tokens on each message_delta.
-      let usage: TokenUsage | null = null;
-      for (const line of text.split('\n')) {
-        if (!line.startsWith('data:')) continue;
-        let event: { type?: string; message?: { usage?: unknown }; usage?: unknown };
-        try { event = JSON.parse(line.slice(5)); } catch { continue; }
+      text += decoder.decode();
+      const body = JSON.parse(text) as { usage?: unknown };
+      return api === 'anthropic-messages' ? parseAnthropicUsage(body.usage) : parseUsage(body.usage);
+    }
+
+    // The SDK ends its event stream at the protocol terminator ([DONE] for
+    // OpenAI, message_stop for Anthropic). The raw evidence connection can
+    // still stay open behind a proxy or keep-alive, so waiting for EOF here
+    // would hold the model response hostage indefinitely.
+    let usage: TokenUsage | null = null;
+    let buffered = '';
+    const processLine = (line: string): boolean => {
+      if (!line.startsWith('data:')) return false;
+      const payload = line.slice(5).trim();
+      if (!payload) return false;
+      if (api === 'openai-completions' && payload === '[DONE]') return true;
+      let event: { type?: string; message?: { usage?: unknown }; usage?: unknown };
+      try { event = JSON.parse(payload) as typeof event; } catch { return false; }
+      if (api === 'anthropic-messages') {
         if (event.type === 'message_start') {
           usage = parseAnthropicUsage(event.message?.usage) ?? usage;
         } else if (event.type === 'message_delta' && usage) {
-          const delta = parseAnthropicUsage({ ...(event.usage as object | undefined), input_tokens: usage.input, cache_read_input_tokens: usage.cacheRead, cache_creation_input_tokens: usage.cacheWrite });
+          const delta = parseAnthropicUsage({
+            ...(event.usage as object | undefined),
+            input_tokens: usage.input,
+            cache_read_input_tokens: usage.cacheRead,
+            cache_creation_input_tokens: usage.cacheWrite,
+          });
           if (delta) usage = delta;
         }
+        return event.type === 'message_stop';
       }
-      return usage;
+      if (event.usage) usage = parseUsage(event.usage);
+      return false;
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > 8_000_000) { void reader.cancel(); return null; }
+      buffered += decoder.decode(value, { stream: true });
+      const lines = buffered.split('\n');
+      buffered = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!processLine(line)) continue;
+        void reader.cancel();
+        return usage;
+      }
     }
-    if (response.headers.get('content-type')?.includes('application/json')) return parseUsage(JSON.parse(text).usage);
-    let usage: TokenUsage | null = null;
-    for (const line of text.split('\n')) {
-      if (!line.startsWith('data:') || line.slice(5).trim() === '[DONE]') continue;
-      const data = JSON.parse(line.slice(5));
-      if (data.usage) usage = parseUsage(data.usage);
-    }
+    buffered += decoder.decode();
+    if (buffered) processLine(buffered);
     return usage;
   } catch { return null; }
   finally { reader.releaseLock(); }
@@ -117,6 +144,71 @@ export interface GatedProviderFetchOptions {
 const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, usageSource: 'authoritative' };
 const RETRYABLE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT']);
 
+function isTerminalSseLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('data:')) return false;
+  const payload = trimmed.slice(5).trim();
+  if (payload === '[DONE]') return true;
+  try {
+    const event = JSON.parse(payload) as { type?: unknown };
+    return event.type === 'message_stop';
+  } catch {
+    return false;
+  }
+}
+
+/** Some SSE providers send the protocol terminator but keep the HTTP body
+ * open. The OpenAI SDK waits for body EOF even after [DONE], so expose the
+ * semantic end of the event stream as EOF at the fetch boundary. */
+function boundedSseBody(body: ReadableStream<Uint8Array>, release: () => void) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffered = '';
+  let finished = false;
+  const finish = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+    if (finished) return;
+    finished = true;
+    release();
+    controller.close();
+  };
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (finished) return;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          buffered += decoder.decode();
+          if (buffered) controller.enqueue(encoder.encode(buffered));
+          finish(controller);
+          return;
+        }
+        buffered += decoder.decode(value, { stream: true });
+        let newline = buffered.indexOf('\n');
+        while (newline !== -1) {
+          const line = buffered.slice(0, newline + 1);
+          buffered = buffered.slice(newline + 1);
+          controller.enqueue(encoder.encode(line));
+          if (isTerminalSseLine(line)) {
+            controller.enqueue(encoder.encode('\n'));
+            finish(controller);
+            void reader.cancel().catch(() => undefined);
+            return;
+          }
+          newline = buffered.indexOf('\n');
+        }
+      }
+    },
+    async cancel() {
+      if (!finished) {
+        finished = true;
+        release();
+        await reader.cancel().catch(() => undefined);
+      }
+    },
+  });
+}
+
 function transportCode(error: unknown) {
   if (!(error instanceof Error) || error.name === 'AbortError') return undefined;
   const cause = (error as { cause?: unknown }).cause;
@@ -142,7 +234,10 @@ export async function gatedProviderFetch(
       void options.onResponse?.(id, response, () => release?.());
       if (!response.body) { release?.(); return response; }
       // Capacity covers the whole body, not just the headers.
-      const wrapped = response.body.pipeThrough(new TransformStream({ flush() { release?.(); } }));
+      const contentType = response.headers.get('content-type') ?? '';
+      const wrapped = contentType.includes('text/event-stream')
+        ? boundedSseBody(response.body, () => release?.())
+        : response.body.pipeThrough(new TransformStream({ flush() { release?.(); } }));
       return new Response(wrapped, { status: response.status, statusText: response.statusText, headers: response.headers });
     } catch (error) {
       release?.();

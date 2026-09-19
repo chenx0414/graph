@@ -22,6 +22,32 @@ async function consume(stream: ReturnType<ReturnType<typeof controlledOpenAIStre
   }
 }
 
+function bounded<T>(promise: Promise<T>, milliseconds: number, label: string) {
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error(`${label} did not settle within ${milliseconds}ms`)), milliseconds);
+      timeout.unref?.();
+    }),
+  ]);
+}
+
+test('a completed SSE response settles before the provider closes its connection', async () => {
+  const provider = await openaiServer([{ text: 'already complete', holdOpen: true }]);
+  cleanup.push(() => provider.close());
+  const context: Context = { messages: [{ role: 'user', content: 'Answer now.', timestamp: 1 }] };
+  const tracked = collectingGate();
+
+  await bounded(
+    consume(controlledOpenAIStream(tracked.gate, 'key')(provider.model, context, { apiKey: 'ignored' })),
+    1_000,
+    'completed SSE response',
+  );
+
+  expect(tracked.settled).toHaveLength(1);
+  expect(tracked.settled[0]).toMatchObject({ usageSource: 'authoritative', output: 10 });
+});
+
 test('usage provenance prefers provider, then account delta, then local estimation', async () => {
   const provider = await openaiServer([
     { text: 'authoritative answer' },
