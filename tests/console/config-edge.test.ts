@@ -31,7 +31,8 @@ async function fixture(name: string, options: { document: Record<string, unknown
   await writeFile(configPath, JSON.stringify({ version: 1, revision: 0, projects: [{ id: 'p', root: projectRoot }], ...options.document }, null, 2));
   const stateDir = join(root, 'state');
   const env = options.env ?? {};
-  const daemon = await startGraphDaemon({ configPath, stateDir, webDir: web, port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
+  const graphHome = join(root, 'graph');
+  const daemon = await startGraphDaemon({ configPath, stateDir, graphHome, webDir: web, port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
   cleanup.push(() => daemon.close());
   const api = await session(daemon.url);
   const token = (await readFile(join(stateDir, 'app-token'), 'utf8')).trim();
@@ -127,7 +128,7 @@ test('a rejected candidate never reaches disk and survives a restart (UC-R02)', 
   await daemon.close();
   // The file on disk is still the accepted one: a restart with the same key
   // view stays configured.
-  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
+  const restarted = await startGraphDaemon({ configPath, stateDir, graphHome: join(stateDir, '..', 'graph'), webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
   cleanup.push(() => restarted.close());
   const token2 = (await readFile(join(stateDir, 'app-token'), 'utf8')).trim();
   const restartedSession = await session(restarted.url);
@@ -155,7 +156,7 @@ test('revoking a key through the bridge disables the binding and survives restar
   await daemon.close();
   // The APP relaunch re-injects the keychain value into env; the explicit
   // revocation must still win.
-  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env: { ...env, GRAPH_LOCAL_KEY: 'real-key' }, log: () => undefined });
+  const restarted = await startGraphDaemon({ configPath, stateDir, graphHome: join(stateDir, '..', 'graph'), webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env: { ...env, GRAPH_LOCAL_KEY: 'real-key' }, log: () => undefined });
   cleanup.push(() => restarted.close());
   const restartedSession = await session(restarted.url);
   const startup = await (await fetch(`${restarted.url}/api/startup`, { headers: restartedSession.headers })).json() as { configured: boolean };
@@ -298,7 +299,7 @@ test('revocation persistence failure is reported and never silently re-enables a
   await daemon.close();
   // With the obstruction removed, revocation reports success and survives restart.
   await rm(join(stateDir, 'revoked-secrets.json'), { recursive: true, force: true });
-  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
+  const restarted = await startGraphDaemon({ configPath, stateDir, graphHome: join(stateDir, '..', 'graph'), webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
   cleanup.push(() => restarted.close());
   const token2 = (await readFile(join(stateDir, 'app-token'), 'utf8')).trim();
   const ok = await fetch(`${restarted.url}/api/app/secret`, {
@@ -307,7 +308,7 @@ test('revocation persistence failure is reported and never silently re-enables a
   }).then(response => response.json() as Promise<Record<string, unknown>>);
   expect(ok).toMatchObject({ applied: true });
   await restarted.close();
-  const again = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env: { ...env, GRAPH_LOCAL_KEY: 'real-key' }, log: () => undefined });
+  const again = await startGraphDaemon({ configPath, stateDir, graphHome: join(stateDir, '..', 'graph'), webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env: { ...env, GRAPH_LOCAL_KEY: 'real-key' }, log: () => undefined });
   cleanup.push(() => again.close());
   const session2 = await session(again.url);
   const startup2 = await (await fetch(`${again.url}/api/startup`, { headers: session2.headers })).json() as { configured: boolean };
@@ -322,7 +323,7 @@ test('a corrupt revocation file starts fail-closed instead of re-enabling keys (
   await daemon.close();
   await writeFile(join(stateDir, 'revoked-secrets.json'), '{"not":"an array"}\n');
   const logs: string[] = [];
-  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: line => logs.push(line) });
+  const restarted = await startGraphDaemon({ configPath, stateDir, graphHome: join(stateDir, '..', 'graph'), webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: line => logs.push(line) });
   cleanup.push(() => restarted.close());
   const api = await session(restarted.url);
   const startup = await (await fetch(`${restarted.url}/api/startup`, { headers: api.headers })).json() as { configured: boolean };
@@ -360,7 +361,7 @@ test('concurrent revocations of two connections persist both refs (UC-R09-R2)', 
   expect(results.every(result => result.applied === true)).toBe(true);
   expect(JSON.parse(await readFile(join(stateDir, 'revoked-secrets.json'), 'utf8'))).toEqual(['KEY_A', 'KEY_B']);
   await daemon.close();
-  const restarted = await startGraphDaemon({ configPath, stateDir, webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
+  const restarted = await startGraphDaemon({ configPath, stateDir, graphHome: join(stateDir, '..', 'graph'), webDir: join(stateDir, '..', 'web'), port: 0, mode: 'execute', dynamic: true, env, log: () => undefined });
   cleanup.push(() => restarted.close());
   const restartedSession = await session(restarted.url);
   const startup = await (await fetch(`${restarted.url}/api/startup`, { headers: restartedSession.headers })).json() as { enabledModelCount: number };

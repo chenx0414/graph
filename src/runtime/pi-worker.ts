@@ -16,7 +16,17 @@ import type { AgentSessionInspect } from './agent-session.ts';
 interface Reply { ok: boolean; value?: unknown; error?: string }
 
 async function writeFully(stream: NodeJS.WriteStream, text: string) {
-  if (!stream.write(text)) await once(stream, 'drain');
+  // Wait for the callback, not only for `drain`. A string write can return
+  // true based on the JavaScript string length while its UTF-8 representation
+  // already fills the OS pipe. Calling process.exit() at that point truncates
+  // the result, which is especially visible for Chinese text and emoji.
+  await new Promise<void>((resolve, reject) => {
+    stream.write(text, error => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  if (stream.writableLength > 0) await once(stream, 'drain');
 }
 
 async function main() {

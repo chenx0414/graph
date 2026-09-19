@@ -27,7 +27,7 @@ async function fixture(name: string, options: { document: Record<string, unknown
   await mkdir(projectRoot, { recursive: true });
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, revision: 0, projects: [{ id: 'p', root: projectRoot }], ...options.document }, null, 2));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'execute', dynamic: true, env: options.env ?? {}, log: () => undefined });
+  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir: web, port: 0, mode: 'execute', dynamic: true, env: options.env ?? {}, log: () => undefined });
   cleanup.push(() => daemon.close());
   return { root, projectRoot, configPath, daemon, projectId: 'p' };
 }

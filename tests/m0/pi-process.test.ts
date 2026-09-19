@@ -228,6 +228,40 @@ test('a model response larger than 64 KiB crosses the worker channel intact', as
   await process.close();
 }, 120_000);
 
+test('a multibyte response near the stdout buffer boundary is not truncated on exit', async () => {
+  const { root, project } = await workspace('pi-large-multibyte-response');
+  // Keep the JavaScript string just under the stdout high-water mark while
+  // making its UTF-8 representation cross the 64 KiB pipe boundary.
+  const text = '你好'.repeat(31_000);
+  expect(text.length).toBeLessThan(64 * 1024);
+  expect(Buffer.byteLength(text)).toBeGreaterThan(64 * 1024);
+  const provider = await openaiServer([{ text }]);
+  cleanup.push(() => provider.close());
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-large-multibyte-response');
+  cleanup.push(() => gate.close());
+  const process = await openPiProcess({
+    binding: { instanceId: 'agent-large-multibyte-response', nodeId: 'work', definitionVersion: 'coder@1' },
+    workspace: project,
+    stateDir: join(root, 'state'),
+    model: provider.model,
+    stream: controlledOpenAIStream(gate, 'scripted-local-key'),
+    tools: [],
+    broker: gate,
+    bundleDigest: 'f'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  });
+  const inspect = await process.prompt('Return a large multibyte response');
+  const assistant = inspect.messages.at(-1) as { role?: string; stopReason?: string; content?: { type?: string; text?: string }[] };
+  expect(assistant.role).toBe('assistant');
+  expect(assistant.stopReason).toBe('stop');
+  expect(assistant.content?.[0]?.type).toBe('text');
+  expect(assistant.content?.[0]?.text).toHaveLength(text.length);
+  expect(assistant.content?.[0]?.text?.slice(0, 12)).toBe('你好你好你好你好你好你好');
+  expect(assistant.content?.[0]?.text?.slice(-12)).toBe('你好你好你好你好你好你好');
+  await process.close();
+}, 120_000);
+
 test('the production process path requires and verifies the persisted capability digest', async () => {
   const { root, project } = await workspace('pi-process-digest');
   const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-digest');

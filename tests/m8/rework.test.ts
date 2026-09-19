@@ -100,7 +100,7 @@ test('credential aliases resolving to the same actual key share one limit', asyn
       limits: { credentials: { 'cred-a': 1, 'cred-b': 1 } },
     }));
     const daemon = await startGraphDaemon({
-      configPath, stateDir: join(root, 'state'), webDir: join(process.cwd(), 'dist', 'web'), port: 0, mode: 'execute',
+      configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir: join(process.cwd(), 'dist', 'web'), port: 0, mode: 'execute',
       env: { KEY_A: 'one-actual-key', KEY_B: 'one-actual-key' }, log: () => undefined,
     });
     cleanup.push(() => daemon.close());
@@ -197,7 +197,7 @@ test('tasks record the effective revision immediately after a hot apply', async 
   await writeFile(join(web, 'index.html'), '<!doctype html><html><body><div id="root">Graph</div></body></html>');
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: {}, limits: {} }, null, 2));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'view', env: {}, log: () => undefined });
+  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir: web, port: 0, mode: 'view', env: {}, log: () => undefined });
   cleanup.push(() => daemon.close());
   const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
   const cookie = home.headers.get('set-cookie') ?? '';
@@ -209,7 +209,7 @@ test('tasks record the effective revision immediately after a hot apply', async 
   // The save was applied to this daemon, so the very next task records the new revision.
   expect(firstEvents.find(event => event.type === 'task.created')?.data.configRevision).toBe(1);
   await daemon.close();
-  const restarted = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'view', env: {}, log: () => undefined });
+  const restarted = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir: web, port: 0, mode: 'view', env: {}, log: () => undefined });
   cleanup.push(() => restarted.close());
   const home2 = await fetch(restarted.url, { headers: { origin: restarted.url } });
   const headers2 = { origin: restarted.url, cookie: home2.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };

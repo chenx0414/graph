@@ -144,7 +144,15 @@ test('the full productized flow runs from the formal start entry with a controll
     limits: { defaultBudgetTokens: 20_000_000, credentials: { local: 1 } },
   }, null, 2));
   const stateDir = join(workspace, 'state');
-  const child = spawn(process.execPath, ['src/server/cli.ts', '--config', configPath, '--state-dir', stateDir, '--web-dir', webDir, '--port', '0', '--execute'], {
+  const child = spawn(process.execPath, [
+    'src/server/cli.ts',
+    '--config', configPath,
+    '--state-dir', stateDir,
+    '--graph-home', join(workspace, 'graph'),
+    '--web-dir', webDir,
+    '--port', '0',
+    '--execute',
+  ], {
     cwd: process.cwd(),
     env: { ...process.env, GRAPH_INTEGRATION_KEY: 'synthetic-integration-key' },
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -48,7 +48,7 @@ test('a price refresh changes future invocations and leaves recorded cost snapsh
     credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
   });
   await writeFile(configPath, JSON.stringify({ ...document(2, 4, 'r1'), revision: 0 }, null, 2));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir: web, port: 0, mode: 'execute', dynamic: true, env: {}, log: () => undefined });
+  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir: web, port: 0, mode: 'execute', dynamic: true, env: {}, log: () => undefined });
   cleanup.push(() => daemon.close());
   const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
   const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };

@@ -645,10 +645,11 @@ export async function openRestrictedExecutor() {
           const timer = command.timeoutMs ? setTimeout(killTree, command.timeoutMs) : undefined;
           timer?.unref?.();
           const channel = child.stdio[3] as Duplex;
+          channel.setEncoding('utf8');
           let pending = '', requests = Promise.resolve();
           channel.on('error', () => {}); // A worker may exit after an in-flight request.
           channel.on('data', data => {
-            pending += String(data);
+            pending += data;
             if (pending.length > 1_000_000) { child.kill(); return; }
             let newline: number;
             while ((newline = pending.indexOf('\n')) !== -1) {
@@ -663,12 +664,14 @@ export async function openRestrictedExecutor() {
               });
             }
           });
+          child.stdout!.setEncoding('utf8');
+          child.stderr!.setEncoding('utf8');
           child.stdout!.on('data', data => {
-            const chunk = String(data);
+            const chunk = data;
             stdout += chunk;
             command.onStdout?.(chunk);
           });
-          child.stderr!.on('data', data => { stderr += String(data); });
+          child.stderr!.on('data', data => { stderr += data; });
           child.on('error', error => { closePendingListeners(); reject(error); });
           child.on('close', (code, signal) => {
             if (timer) clearTimeout(timer);
