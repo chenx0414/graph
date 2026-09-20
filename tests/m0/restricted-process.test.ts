@@ -549,6 +549,22 @@ test('a check cannot overwrite a host listener with a duplicate request id', asy
   } finally { broker.close(); }
 });
 
+test('a local-network check loads its guard when the scratch path contains spaces', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-guard-spaces-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const scratchDir = join(root, 'Application Support', 'scratch'); await mkdir(scratchDir, { recursive: true });
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const result = await executor.run({
+      broker, cwd: workspace, scratchDir, executable: process.execPath,
+      args: ['-e', "console.log('guard-loaded')"],
+      readPaths: [dirname(process.execPath)], writePaths: [root], localNetwork: true,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe('guard-loaded');
+  } finally { broker.close(); }
+});
+
 test('replacing a granted subdirectory with a symlink cannot redirect a later host grant', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-grant-swap-'))); dirs.push(root);
   const workspace = join(root, "worker's files"); await mkdir(workspace);

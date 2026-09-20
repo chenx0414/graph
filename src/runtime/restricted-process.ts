@@ -194,6 +194,12 @@ dgram.Socket.prototype.bind = function () { deny(); };
 const MAX_WORKER_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_WORKER_REPLY_BYTES = 32 * 1024 * 1024;
 
+/** NODE_OPTIONS is whitespace-tokenized, so generated options need shell-style quoting. */
+function quotedNodeOption(value: string) {
+  if (!/[\s"\\]/.test(value)) return value;
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+}
+
 /**
  * Serialize one host reply for the worker channel.
  *
@@ -586,7 +592,7 @@ export async function openRestrictedExecutor() {
         // --test-isolation=none keeps node --test files in the process that owns
         // the IPC channel; an isolation child would have no route to the host.
         const guardEnv = listenGuard
-          ? { NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', `--require=${listenGuard}`].filter(Boolean).join(' ') }
+          ? { NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', quotedNodeOption(`--require=${listenGuard}`)].filter(Boolean).join(' ') }
           : {};
         // Host listeners stay open until their handle is actually written to the
         // channel: Node queues handle sends behind an unacknowledged one and
