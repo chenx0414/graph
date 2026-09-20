@@ -1,0 +1,101 @@
+# Graph Troubleshooting
+
+## 开始前
+
+先读取实时事实，而不是先猜：
+
+1. `read_system_capabilities`
+2. `inspect_graph_system`
+3. `list_problems`
+4. 相关 task、node run、operation 和 session
+5. 本 docs 索引和相关主题页
+
+## 任务没有推进
+
+检查：
+
+- task phase、node status 和依赖；
+- 是否有 open internal problem；
+- 是否达到并发或预算边界；
+- operation 是否处于 dispatched/running；
+- worker/session 是否仍存在；
+- 最近是否有 result handoff、artifact 或 evidence；
+- 是否连续多轮没有实质进展。
+
+如果 operation 结果不明，按 recovery 规则核查，不直接 retry 可能有副作用的动作。
+
+## 工具不可用
+
+检查：
+
+- definition 是否绑定正确 capability version；
+- capability status 是否 invalid 或 unavailable；
+- node run 中是否记录了 load fact；
+- host policy、read-only、network 或 pause 是否阻止调用；
+- tool 是否在 disabled list；
+- provider 是否真的收到对应 tool schema。
+
+区分“未发现”“已注册”“已启用”“本次已加载”和“可执行”。这些状态不是同义词。
+
+## 模型不可用
+
+检查：
+
+- `configuredModels`；
+- credential 是否配置；
+- model grade 和 review 排除规则；
+- 当前 instance 的 model；
+- provider/network 错误；
+- quota window。
+
+缺少模型时向用户提出明确 model access 请求，不能静默换成不相关模型。
+
+## 上下文或 handoff 失败
+
+检查：
+
+- context mode 和 source node；
+- predecessor handoff policy；
+- artifact/evidence version；
+- required facts；
+- capability/tool/runtime digest；
+- Fresh/Fork 限制。
+
+独立审查必须 Fresh、evidence-only 和模型排除；不能因为 handoff 缺失而继承实现 transcript。
+
+## 恢复不明
+
+核查外部结果并保留证据：
+
+- Git refs、index、worktree；
+- artifact registry；
+- operation journal；
+- command/MCP 输出；
+- session file 和 worker process。
+
+明确时才重试；不明确时创建或处理 recovery problem。
+
+## 需要系统变更
+
+先定位到具体文件、行为或配置。用 `propose_system_change` 给出：
+
+- problem；
+- proposed change；
+- impact；
+- risk；
+- validation method。
+
+用户批准后应用并验证。不要把临时绕路描述成永久修复。
+
+## 汇报格式
+
+对用户汇报时包含：
+
+- 观察到的事实；
+- 根因或仍不确定的部分；
+- 已采取的动作；
+- 证据；
+- 影响；
+- 下一步或需要用户决定的事项。
+
+不要倾倒原始错误栈；Main Agent 应先整理。

@@ -1,0 +1,58 @@
+# Graph Capabilities
+
+Graph 的“能力”是版本化、可绑定的外部工具或指令资源。能力安装不等于扩权；Agent definition 绑定能力后，其已发现工具默认可在现有沙箱和任务边界内调用。
+
+## 能力类型
+
+### Skill
+
+Skill 是一组按需读取的指令和资源，通常包含 `SKILL.md`。System prompt 只应提供 skill 的名称、描述和绝对路径；模型需要时再读取正文。
+
+### MCP
+
+MCP server 可以是本地 stdio 进程，也可以是远程 HTTP 服务。Graph 负责连接、工具发现、调用门、网络域、错误和清理。远程 MCP 在只读讨论阶段可能不加载。
+
+### Graph Extension
+
+Graph extension 由受限 worker 加载，按最小 `register(api)` 接口暴露工具。它仍经过 Graph 调用 gate。
+
+### Pi Extension
+
+Pi extension 可以注册工具和生命周期 hook。Graph 只在定义的 capability bundle 中加载已绑定 extension，并把允许的 tool 名称加入 Agent session。
+
+### Prompt
+
+Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版本位于 `.graph/prompts`；definition 中绑定的 prompt 仍是版本化能力。
+
+## Tool surface
+
+一个 Agent 的实际 tool surface 由以下来源合并：
+
+1. role 对应的 host tools；
+2. definition 绑定的 capability tools；
+3. Pi extension 注册且允许的 tools；
+4. 当前 operation 的 read-only、pause、access policy 和 disabled-tool policy。
+
+模型可见的 `<tools>` 文本和 provider 的可执行 tool schema 必须来自同一个实际启用集合。关闭工具时，两者都应移除。
+
+## Capability binding
+
+Agent definition 引用精确 `id@version`。恢复 session 时核对 capability/bundle/runtime digest；不一致 fail closed，不能自动绑定“最新版”。
+
+## 网络和运行边界
+
+- 本地 MCP 的 provisioning 网络与 runtime 网络分离。
+- Runtime 网络由 capability manifest 声明，默认拒绝未声明域名。
+- Extension 没有自动网络权限。
+- 命令、MCP 和工具仍在 OS sandbox 内运行。
+- `networkDomains`、工具自报 annotation 或 MCP 描述都不是权限本身。
+
+## 发现与诊断
+
+- `search_resources`：搜索能力库，只用于发现。
+- `get_resource`：读取一个能力 metadata；不等于绑定。
+- `read_system_capabilities`：读取当前定义、模型和配置事实。
+- `inspect_graph_system`：读取无效能力、失败节点和开放问题。
+- Node run：查看某实例实际加载的 capability facts 和 tools。
+
+当用户问“为什么没有某个工具”时，先检查 definition 是否绑定、capability 是否有效、实际 session 是否加载，以及 host policy 是否禁用；不要根据历史对话推断。

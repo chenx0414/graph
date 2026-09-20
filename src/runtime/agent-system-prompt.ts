@@ -1,0 +1,256 @@
+export type AgentPromptOrigin = 'editable' | 'generated' | 'pi';
+
+export interface AgentPromptPart {
+  id: string;
+  title: string;
+  origin: AgentPromptOrigin;
+  content: string;
+  source?: string;
+}
+
+export type AgentPromptSectionId =
+  | 'identity'
+  | 'tools'
+  | 'rules'
+  | 'docs'
+  | 'project_context'
+  | 'capabilities'
+  | 'cwd'
+  | 'pi_cwd';
+
+export interface AgentPromptSection {
+  id: AgentPromptSectionId;
+  title: string;
+  parts: AgentPromptPart[];
+}
+
+export interface AgentToolPromptEntry {
+  name: string;
+  description: string;
+  source: string;
+  version?: string;
+  parameters: string[];
+  permission: string;
+  available: boolean;
+}
+
+export interface AgentCapabilityPromptEntry {
+  id: string;
+  version: string;
+  kind: string;
+  name: string;
+  description?: string;
+  tools: string[];
+  path?: string;
+  networkDomains?: string[];
+  reason?: string;
+}
+
+export interface ComposeAgentSystemPromptInput {
+  identity: string;
+  definitionVersion: string;
+  toolGuidance: string;
+  rules: {
+    common: string;
+    role: string;
+    runtime?: string;
+  };
+  docs: {
+    root: string;
+    index: string;
+  };
+  projectContext?: {
+    path: string;
+    content: string;
+  };
+  tools: AgentToolPromptEntry[];
+  capabilities: AgentCapabilityPromptEntry[];
+  cwd: string;
+  piCwd?: string;
+}
+
+export interface ComposedAgentSystemPrompt {
+  sections: AgentPromptSection[];
+  text: string;
+  previewSections: AgentPromptSection[];
+  previewText: string;
+}
+
+function section(
+  id: AgentPromptSectionId,
+  title: string,
+  parts: AgentPromptPart[],
+): AgentPromptSection {
+  return { id, title, parts: parts.filter(part => part.content.trim()) };
+}
+
+function renderedSection(sectionValue: AgentPromptSection) {
+  const content = sectionValue.parts
+    .map(part => part.content.trim())
+    .filter(Boolean)
+    .join('\n\n');
+  return `<${sectionValue.id}>\n${content}\n</${sectionValue.id}>`;
+}
+
+function toolLines(tools: readonly AgentToolPromptEntry[]) {
+  if (!tools.length) return '(none)';
+  return tools.map(tool => {
+    const source = tool.version ? `${tool.source}@${tool.version}` : tool.source;
+    const parameters = tool.parameters.length ? tool.parameters.join(', ') : 'none';
+    const availability = tool.available ? '' : 'unavailable; ';
+    return `- ${tool.name} (${source}; ${availability}${tool.permission}; parameters: ${parameters}): ${tool.description}`;
+  }).join('\n');
+}
+
+function capabilityLines(capabilities: readonly AgentCapabilityPromptEntry[]) {
+  if (!capabilities.length) return '(none)';
+  return capabilities.map(capability => {
+    const tools = capability.tools.length ? `tools=${capability.tools.join(', ')}` : 'tools=none';
+    const network = capability.networkDomains?.length
+      ? `; network=${capability.networkDomains.join(', ')}`
+      : '';
+    const path = capability.path ? `; path=${capability.path}` : '';
+    const reason = capability.reason ? `; ${capability.reason}` : '';
+    const description = capability.description ? `: ${capability.description}` : '';
+    return `- ${capability.kind} ${capability.id}@${capability.version} (${capability.name})${description}: ${tools}${network}${path}${reason}`;
+  }).join('\n');
+}
+
+export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): ComposedAgentSystemPrompt {
+  const tools = section('tools', 'Tools', [
+    {
+      id: 'tools.guidance',
+      title: 'Tool guidance',
+      origin: 'editable',
+      content: input.toolGuidance,
+      source: 'tools/<role>.md',
+    },
+    {
+      id: 'tools.inventory',
+      title: 'Available tools',
+      origin: 'generated',
+      content: [
+        `Definition: ${input.definitionVersion}`,
+        toolLines(input.tools),
+      ].join('\n'),
+    },
+  ]);
+
+  const rules = section('rules', 'Rules', [
+    {
+      id: 'rules.common',
+      title: 'Common rules',
+      origin: 'editable',
+      content: input.rules.common,
+      source: 'rules/common.md',
+    },
+    {
+      id: 'rules.role',
+      title: 'Role rules',
+      origin: 'editable',
+      content: input.rules.role,
+      source: 'rules/<role>.md',
+    },
+    ...(input.rules.runtime ? [{
+      id: 'rules.runtime',
+      title: 'Runtime rules',
+      origin: 'editable' as const,
+      content: input.rules.runtime,
+      source: 'runtime/*.md',
+    }] : []),
+  ]);
+
+  const docs = section('docs', 'Documentation', [
+    {
+      id: 'docs.root',
+      title: 'Documentation root',
+      origin: 'generated',
+      content: [
+        'Graph documentation is read on demand; do not treat every topic as current context.',
+        `- Documentation root: ${input.docs.root}`,
+        `- Index: ${joinDisplayPath(input.docs.root, 'INDEX.md')}`,
+        '- Resolve docs/... paths relative to the documentation root, not the business workspace.',
+      ].join('\n'),
+    },
+    {
+      id: 'docs.index',
+      title: 'Documentation index and reading protocol',
+      origin: 'editable',
+      content: input.docs.index,
+      source: 'docs/INDEX.md',
+    },
+  ]);
+
+  const projectContext = section('project_context', 'Project context', [{
+    id: 'project_context.instructions',
+    title: 'Project instructions',
+    origin: 'generated',
+    content: input.projectContext
+      ? [
+          'Project-specific instructions and guidelines:',
+          '',
+          `<project_instructions path="${input.projectContext.path}">`,
+          input.projectContext.content.trim(),
+          '</project_instructions>',
+        ].join('\n')
+      : 'No project-specific AGENTS.md or equivalent instruction file was found in this worktree.',
+    ...(input.projectContext ? { source: input.projectContext.path } : {}),
+  }]);
+
+  const capabilities = section('capabilities', 'Capabilities', [{
+    id: 'capabilities.inventory',
+    title: 'Loaded capabilities',
+    origin: 'generated',
+    content: [
+      'Skills, MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
+      capabilityLines(input.capabilities),
+    ].join('\n'),
+  }]);
+
+  const cwd = section('cwd', 'Working directory', [{
+    id: 'cwd.worktree',
+    title: 'Git worktree',
+    origin: 'generated',
+    content: [
+      input.cwd,
+      '',
+      'This is the Git worktree assigned to the current Agent operation. Relative paths resolve here; it is not necessarily the project root or another Agent worktree.',
+    ].join('\n'),
+  }]);
+
+  const sections = [
+    section('identity', 'Identity', [{
+      id: 'identity.agent',
+      title: 'Agent identity',
+      origin: 'editable',
+      content: input.identity,
+      source: 'agents/<definition-id>.md',
+    }]),
+    tools,
+    rules,
+    docs,
+    projectContext,
+    capabilities,
+    cwd,
+  ];
+  const text = sections.map(renderedSection).join('\n\n');
+  const piCwd = input.piCwd
+    ? section('pi_cwd', 'Pi generated working directory', [{
+        id: 'pi_cwd.current',
+        title: 'Pi Current working directory',
+        origin: 'pi',
+        content: `Current working directory: ${input.piCwd}`,
+      }])
+    : undefined;
+  const previewSections = piCwd ? [...sections, piCwd] : sections;
+  return {
+    sections,
+    text,
+    previewSections,
+    previewText: previewSections.map(renderedSection).join('\n\n'),
+  };
+}
+
+function joinDisplayPath(root: string, name: string) {
+  return `${root.replace(/[\\/]+$/, '')}/${name}`;
+}

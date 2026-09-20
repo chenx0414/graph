@@ -281,7 +281,8 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   const bootstrap = await loadPresetBootstrap(presetsRoot, log);
   const agentContext = openAgentContextLibrary(join(userGraphHome, 'prompts'), {
     ...(bootstrap.prompts.main ? { identity: bootstrap.prompts.main } : {}),
-    ...(bootstrap.toolPrompt ? { toolAwareness: bootstrap.toolPrompt } : {}),
+    ...(bootstrap.toolPrompt ? { mainTools: bootstrap.toolPrompt } : {}),
+    ...(Object.keys(bootstrap.agentDocs).length ? { docs: bootstrap.agentDocs } : {}),
   });
   await agentContext.ensure();
   let catalogCapabilities: import('../catalog/catalog.ts').CapabilityRecord[] = [];
@@ -338,6 +339,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
             liveCapabilities.filter(entry => entry.kind === kind).length,
           ]),
         ),
+      },
+      agentContext: {
+        root: agentContext.root,
+        docsRoot: agentContext.docsRoot,
       },
       application: {
         root: graphApplicationRoot(),

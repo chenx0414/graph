@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { mkdir, realpath } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
 import { ArtifactWorkspace } from './artifact-workspace.ts';
 import {
@@ -16,7 +16,7 @@ import {
   type MessageRow,
 } from './conversation.ts';
 import { Execution } from './execution.ts';
-import { resolveAccessPolicy, type AccessPolicy } from './access-policy.ts';
+import { resolveAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
 import { acquireOwner } from './owner.ts';
@@ -1102,6 +1102,14 @@ export async function openTaskRuntime(options: {
   };
 
   const runtime = {
+    currentAccessPolicy(): ResolvedAccessPolicy {
+      ensureOpen();
+      return resolveAccessPolicy(options.access?.(), {
+        home: homedir(),
+        stateDir,
+        graphHome: options.agentContext ? dirname(options.agentContext.root) : join(homedir(), '.graph'),
+      });
+    },
     /** Scheduler facts: which credentials are busy and which requests wait. */
     modelLimits(): { active: Record<string, number>; queued: Record<string, number> } {
       ensureOpen();
@@ -1170,6 +1178,19 @@ export async function openTaskRuntime(options: {
           container: { id: container.id, parent: container.parent ?? null, outputs: container.outputs },
         };
       }
+    },
+    /** Read-only workspace identity for prompt preview and diagnostics. */
+    agentWorkspace(taskId: string, nodeId: string) {
+      ensureOpen();
+      const row = store.db.prepare('SELECT instance_id,spec FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as
+        { instance_id: string | null; spec: string } | undefined;
+      if (!row) throw new RuntimeError('not_found', `Unknown node ${nodeId}`);
+      const task = store.task(taskId);
+      const spec = JSON.parse(row.spec) as NodeSpec;
+      const workspace = git.workspace(taskId, row.instance_id, nodeId, spec.kind);
+      if (workspace) return workspace;
+      const project = store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string } | undefined;
+      return project?.root ?? null;
     },
     /** Read-only path completion for conversation @-references. */
     projectEntries(projectId: string, query = '', limit = 80) {

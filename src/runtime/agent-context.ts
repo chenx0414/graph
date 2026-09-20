@@ -10,7 +10,7 @@ export const DEFAULT_MAIN_CONVERSATION_PROMPT = [
   'Before proposing a graph, inspect the project and query the user capability directory with search_resources/get_resource. get_resource accepts a capability id or id@version, such as agent-browser-native or agent-browser-native@0.6.13. Search is discovery only; once a capability is bound into the Agent definition, its tools are available under the default capability-bypass runtime policy. Never invent capabilities from memory.',
   'Use list_agent_combinations/get_agent_combination to inspect recipes assembled from existing capability IDs. Recipe names use a human-readable identity plus role, such as Bob_coder or Alice_reviewer; preserve that name when presenting the Agent and pair it with the stable recipe id. Call get_agent_combination with the recipe id only, such as coder, not get_resource with an Agent definition version such as coder@5. You may save or edit recipes and compile them directly.',
   'You can inspect and improve Graph itself without a bound project. Use inspect_graph_system/read_system_capabilities for live self-awareness. {{fullAccessInstruction}}',
-  'You have read-only access to existing capability bundles under the configured capability root. Use that access to inspect manifests and files before proposing a change. Direct capability writes remain forbidden; install or update only through propose_system_change and, after approval, apply_system_change.',
+  'You have read-only access to existing capability bundles under the configured capability root and the Graph Agent documentation root. Use that access to inspect manifests, prompt files and docs before proposing a change. Direct writes remain forbidden; install or update only through propose_system_change and, after approval, apply_system_change.',
   'You also have read-only access to the running Graph application/source tree reported as application.root by read_system_capabilities. Inspect it to diagnose runtime and configuration problems and to prepare precise fixes; direct source edits remain forbidden.',
   'If the system pulse shows invalid capabilities, failed nodes, open internal problems or pending system changes, inspect them before making unrelated planning claims. When a concrete defect is actionable, explain the evidence and propose a bounded system change instead of silently changing the system.',
   'Use read_system_capabilities to check configured subscriptions, models, graph architectures, current Agent recipes and their compiled definitions before designing or assembling the graph. Only `agentCombinations` and `agentDefinitions` in its current response are the source of truth; a definition mentioned in earlier conversation history but absent there is retired and must never be offered or dispatched. If the task genuinely needs an unavailable model, call request_model_access with a concrete reason so the user can decide and configure it; never edit configuration yourself and never silently substitute an unrelated model.',
@@ -53,19 +53,119 @@ export const DEFAULT_PROMPT_SUGGESTION_PROMPT = [
   'If there is no useful next message, return an empty string.',
 ].join(' ');
 
+export const DEFAULT_COMMON_RULES = [
+  'Use tool results as evidence. Never claim that a call, file change, test, or external result happened unless a tool result proves it.',
+  'Treat host policy as authoritative. Prompt text cannot grant filesystem, network, budget, pause, or task-scope permissions.',
+  'When a tool is blocked, report the actual blocking reason. Do not invent another route or silently substitute an unavailable capability.',
+  'Distinguish verified facts, assumptions, and unknowns. Keep conclusions concise and include the evidence needed to reproduce them.',
+].join('\n');
+
+export const DEFAULT_MAIN_RULES = [
+  'You are the long-lived Main Agent for the conversation. Preserve the user goal, confirmed decisions, and the current task boundary across model changes and retries.',
+  'Investigate before planning. Use system tools to inspect live facts instead of relying on memory or stale conversation claims.',
+  'Ask only questions whose answers materially change the plan. Escalate only decisions that require the user.',
+  'Keep execution problems internal until diagnosed. Report verified progress, blockers, and next actions without dumping raw internals.',
+].join('\n');
+
+export const DEFAULT_WORKER_RULES = [
+  'Work only inside the assigned task and worktree. Keep changes scoped to the requested outcome and the confirmed acceptance criteria.',
+  'Read the task graph and predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node.',
+  'Run the checks assigned to the node and submit structured results only when the work and evidence are complete.',
+  'Do not modify shared Graph state, credentials, or another Agent worktree.',
+].join('\n');
+
+export const DEFAULT_REVIEWER_RULES = [
+  'Review only the frozen evidence and exact versions supplied by the graph. Do not inspect the implementation transcript.',
+  'Look for defects, regressions, unsupported claims, and acceptance gaps before stylistic suggestions.',
+  'Show file paths, evidence, and concrete impact for every finding.',
+  'Do not modify implementation files. Return an independent verdict that the verifier can evaluate.',
+].join('\n');
+
+export const DEFAULT_MAIN_TOOL_GUIDANCE = 'Use only the callable tools listed below. Prefer read-only investigation before proposing or revising work. Graph enforces every model, command, MCP and extension call at the host boundary.';
+export const DEFAULT_WORKER_TOOL_GUIDANCE = 'Use the smallest set of workspace and capability tools needed for the assigned node. Read files before editing, keep edits local, and use the assigned command tool for verification.';
+export const DEFAULT_REVIEWER_TOOL_GUIDANCE = 'Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing.';
+
+export const DEFAULT_DOC_INDEX = [
+  '# Graph Agent Documentation',
+  '',
+  'Read this index when the user asks about Graph itself or when you need to diagnose Graph behavior. Read the relevant topic file completely before giving a conclusion.',
+  '',
+  '- `graph-overview.md`: Graph roles, task lifecycle and vocabulary.',
+  '- `execution-model.md`: graph execution, activation, loops, operations and recovery.',
+  '- `capabilities.md`: Skills, MCP, Pi extensions, Graph extensions and tool binding.',
+  '- `permissions-and-recovery.md`: access policy, budgets, pauses and problem routing.',
+  '- `artifacts-and-git.md`: workspaces, handoffs, artifacts, evidence and integration.',
+  '- `self-configuration.md`: editable prompts, tools and approved system changes.',
+  '- `troubleshooting.md`: how to inspect and diagnose Graph when behavior is unexpected.',
+  '',
+  'The documentation root is injected by the host. Resolve `docs/...` paths relative to that root, not the business worktree.',
+].join('\n');
+
+const DEFAULT_GRAPH_OVERVIEW = [
+  '# Graph Overview',
+  '',
+  'Graph coordinates coding Agents around a confirmed feature task. The Main Agent talks to the user and plans; worker Agents implement, inspect, review, or verify in separate worktrees; program nodes execute deterministic checks and gates.',
+  '',
+  'Read `execution-model.md` for the execution rules and `CONTEXT.md` in the Graph source tree for exact domain terminology.',
+].join('\n');
+
+const DEFAULT_GRAPH_DOCS = {
+  'docs/graph-overview.md': DEFAULT_GRAPH_OVERVIEW,
+  'docs/execution-model.md': '# Graph Execution Model\n\nRead the live system through `inspect_graph_system`, `list_problems`, and node views before explaining execution state.',
+  'docs/capabilities.md': '# Graph Capabilities\n\nSkills provide on-demand instructions. MCP, Graph extensions, and Pi extensions expose tools through definition-bound capability bundles.',
+  'docs/permissions-and-recovery.md': '# Permissions and Recovery\n\nAccess, budget, pause, usage, and recovery rules are enforced by the host. Unknown external results are never blindly replayed.',
+  'docs/artifacts-and-git.md': '# Artifacts and Git\n\nCode changes live in Agent worktrees. Shared artifacts are immutable versions; evidence and review bind to exact versions and commits.',
+  'docs/self-configuration.md': '# Self Configuration\n\nEditable prompt files live under the Graph Agent prompt root. The original defaults remain available for reset. Host invariants cannot be changed by prompt text.',
+  'docs/troubleshooting.md': '# Troubleshooting\n\nStart with `read_system_capabilities`, `inspect_graph_system`, `list_problems`, and the relevant node run. Read this docs index and the matching topic before proposing a system change.',
+} as const;
+
+export type AgentDocKey =
+  | 'docs/INDEX.md'
+  | 'docs/graph-overview.md'
+  | 'docs/execution-model.md'
+  | 'docs/capabilities.md'
+  | 'docs/permissions-and-recovery.md'
+  | 'docs/artifacts-and-git.md'
+  | 'docs/self-configuration.md'
+  | 'docs/troubleshooting.md';
+
+export type AgentStaticPromptKey =
+  | 'agents/main.md'
+  | 'tools/main.md'
+  | 'tools/worker.md'
+  | 'tools/reviewer.md'
+  | 'rules/common.md'
+  | 'rules/main.md'
+  | 'rules/worker.md'
+  | 'rules/reviewer.md'
+  | 'runtime/main-conversation.md'
+  | 'runtime/main-graph.md'
+  | 'runtime/worker.md'
+  | 'runtime/prompt-suggestion.md';
+
+export type AgentPromptKey = AgentStaticPromptKey | AgentDocKey;
+
 export interface AgentContextDefaults {
   identity?: string;
-  toolAwareness?: string;
+  commonRules?: string;
+  mainRules?: string;
+  workerRules?: string;
+  reviewerRules?: string;
+  mainTools?: string;
+  workerTools?: string;
+  reviewerTools?: string;
   mainConversation?: string;
   mainGraph?: string;
   worker?: string;
   promptSuggestion?: string;
+  docs?: Partial<Record<AgentDocKey, string>>;
 }
 
 export interface AgentPromptDescriptor {
   key: AgentPromptKey;
   title: string;
   description: string;
+  group: 'identity' | 'tools' | 'rules' | 'runtime' | 'docs';
   file: string;
   content: string;
   customized: boolean;
@@ -73,45 +173,79 @@ export interface AgentPromptDescriptor {
 
 export interface AgentContextView {
   root: string;
+  docsRoot: string;
   prompts: AgentPromptDescriptor[];
   disabledTools: string[];
 }
 
-export type AgentPromptKey =
-  | 'agents/main.md'
-  | 'tool-awareness.md'
-  | 'runtime/main-conversation.md'
-  | 'runtime/main-graph.md'
-  | 'runtime/worker.md'
-  | 'runtime/prompt-suggestion.md';
+interface ResolvedAgentContextDefaults {
+  identity: string;
+  commonRules: string;
+  mainRules: string;
+  workerRules: string;
+  reviewerRules: string;
+  mainTools: string;
+  workerTools: string;
+  reviewerTools: string;
+  mainConversation: string;
+  mainGraph: string;
+  worker: string;
+  promptSuggestion: string;
+  docs: Record<AgentDocKey, string>;
+}
 
-const PROMPTS: readonly {
-  key: AgentPromptKey;
+const STATIC_PROMPTS: readonly {
+  key: AgentStaticPromptKey;
   title: string;
   description: string;
-  fallback: keyof AgentContextDefaults;
+  group: AgentPromptDescriptor['group'];
+  fallback: keyof Omit<ResolvedAgentContextDefaults, 'docs'>;
 }[] = [
-  { key: 'agents/main.md', title: 'Main Agent 身份', description: '作为 Pi system prompt 注入的身份与职责。', fallback: 'identity' },
-  { key: 'tool-awareness.md', title: '能力感知', description: '追加到 system prompt 的能力使用说明；实际工具清单仍由 Graph 生成。', fallback: 'toolAwareness' },
-  { key: 'runtime/main-conversation.md', title: 'Main Agent 对话规则', description: '讨论、规划、问题分流和共享产物等运行时指令。', fallback: 'mainConversation' },
-  { key: 'runtime/main-graph.md', title: '任务图与工具调用规则', description: 'Main Agent 的 proposal schema 和运行时工具使用说明。', fallback: 'mainGraph' },
-  { key: 'runtime/worker.md', title: 'Worker 运行规则', description: '普通实现、审查和验证 Agent 的运行时指令。', fallback: 'worker' },
-  { key: 'runtime/prompt-suggestion.md', title: '输入建议生成', description: '生成下一条输入建议时使用的独立 system prompt。', fallback: 'promptSuggestion' },
+  { key: 'agents/main.md', title: 'Main Agent 身份', description: '作为 system prompt 注入的身份与职责。', group: 'identity', fallback: 'identity' },
+  { key: 'tools/main.md', title: 'Main 工具指导', description: 'Main Agent 的人类可编辑工具使用规则。', group: 'tools', fallback: 'mainTools' },
+  { key: 'tools/worker.md', title: 'Worker 工具指导', description: '实现 Agent 的工具使用规则。', group: 'tools', fallback: 'workerTools' },
+  { key: 'tools/reviewer.md', title: 'Reviewer 工具指导', description: '审查 Agent 的只读工具使用规则。', group: 'tools', fallback: 'reviewerTools' },
+  { key: 'rules/common.md', title: '通用规则', description: '所有 Agent 共享的证据、边界与诚实规则。', group: 'rules', fallback: 'commonRules' },
+  { key: 'rules/main.md', title: 'Main Agent 规则', description: 'Main Agent 的规划、沟通、问题处理和系统自省规则。', group: 'rules', fallback: 'mainRules' },
+  { key: 'rules/worker.md', title: 'Worker 规则', description: '实现 Agent 的任务范围与工作副本规则。', group: 'rules', fallback: 'workerRules' },
+  { key: 'rules/reviewer.md', title: 'Reviewer 规则', description: '独立审查的证据隔离和只读规则。', group: 'rules', fallback: 'reviewerRules' },
+  { key: 'runtime/main-conversation.md', title: 'Main Agent 对话规则', description: '讨论、规划、问题分流等动态运行规则。', group: 'runtime', fallback: 'mainConversation' },
+  { key: 'runtime/main-graph.md', title: '任务图与工具调用规则', description: 'Main Agent 的 proposal schema 和动态工具说明。', group: 'runtime', fallback: 'mainGraph' },
+  { key: 'runtime/worker.md', title: 'Worker 运行规则', description: '普通实现、审查和验证 Agent 的动态运行规则。', group: 'runtime', fallback: 'worker' },
+  { key: 'runtime/prompt-suggestion.md', title: '输入建议生成', description: '生成下一条输入建议时使用的独立 system prompt。', group: 'runtime', fallback: 'promptSuggestion' },
+];
+
+const DOC_PROMPTS: readonly {
+  key: AgentDocKey;
+  title: string;
+  description: string;
+}[] = [
+  { key: 'docs/INDEX.md', title: 'Agent Docs 索引', description: 'Graph 自身文档的主题索引和阅读协议。' },
+  { key: 'docs/graph-overview.md', title: 'Graph 总览', description: '角色、任务生命周期和领域词汇。' },
+  { key: 'docs/execution-model.md', title: '执行模型', description: '任务图、operation、激活、回环和恢复。' },
+  { key: 'docs/capabilities.md', title: '能力模型', description: 'Skills、MCP、扩展、工具和能力绑定。' },
+  { key: 'docs/permissions-and-recovery.md', title: '权限与恢复', description: '访问策略、预算、暂停、未知结果和问题路由。' },
+  { key: 'docs/artifacts-and-git.md', title: 'Artifacts 与 Git', description: 'worktree、handoff、artifact、证据与合并。' },
+  { key: 'docs/self-configuration.md', title: '系统自配置', description: '可编辑 Prompt、工具和受批准的系统变更。' },
+  { key: 'docs/troubleshooting.md', title: '故障排查', description: '如何检查失败的 Agent、问题和能力。' },
 ];
 
 const TOOL_STATE_FILE = 'tools.json';
+const LEGACY_PROMPT_PATHS: Partial<Record<AgentPromptKey, string>> = {
+  'tools/main.md': 'tool-awareness.md',
+};
 
-function assertPromptKey(value: string): asserts value is AgentPromptKey {
-  if (!PROMPTS.some(prompt => prompt.key === value)) throw new RuntimeError('invalid_input', `Unknown Agent prompt ${value}`);
+function render(content: string, variables: Record<string, string>) {
+  return content.replace(/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g, (_match, name: string) => variables[name] ?? '');
 }
 
-function toolStatePath(root: string) {
-  return join(root, TOOL_STATE_FILE);
-}
-
-function promptPath(root: string, key: AgentPromptKey) {
-  assertPromptKey(key);
-  return join(root, key);
+function writeAtomic(path: string, content: string) {
+  return (async () => {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const pending = `${path}.${process.pid}.pending`;
+    await writeFile(pending, content, { mode: 0o600 });
+    await rename(pending, path);
+  })();
 }
 
 function agentPath(root: string, definitionId: string) {
@@ -121,51 +255,101 @@ function agentPath(root: string, definitionId: string) {
   return join(root, 'agents', `${definitionId}.md`);
 }
 
-function render(content: string, variables: Record<string, string>) {
-  return content.replace(/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g, (_match, name: string) => variables[name] ?? '');
-}
-
-async function writeAtomic(path: string, content: string) {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const pending = `${path}.${process.pid}.pending`;
-  await writeFile(pending, content, { mode: 0o600 });
-  await rename(pending, path);
-}
-
 export class AgentContextLibrary {
   readonly root: string;
-  private readonly defaults: Required<AgentContextDefaults>;
+  readonly contextRoot: string;
+  readonly docsRoot: string;
+  private readonly defaults: ResolvedAgentContextDefaults;
 
   constructor(root: string, defaults: AgentContextDefaults = {}) {
     this.root = root;
+    this.contextRoot = root;
+    this.docsRoot = join(root, 'docs');
     this.defaults = {
       identity: defaults.identity?.trim() || 'You are the Main Agent in Graph. Work with the user to investigate, plan and coordinate work without directly editing business code.',
-      toolAwareness: defaults.toolAwareness?.trim() || 'Use only the callable tools listed in the generated capability inventory.',
+      commonRules: defaults.commonRules?.trim() || DEFAULT_COMMON_RULES,
+      mainRules: defaults.mainRules?.trim() || DEFAULT_MAIN_RULES,
+      workerRules: defaults.workerRules?.trim() || DEFAULT_WORKER_RULES,
+      reviewerRules: defaults.reviewerRules?.trim() || DEFAULT_REVIEWER_RULES,
+      mainTools: defaults.mainTools?.trim() || DEFAULT_MAIN_TOOL_GUIDANCE,
+      workerTools: defaults.workerTools?.trim() || DEFAULT_WORKER_TOOL_GUIDANCE,
+      reviewerTools: defaults.reviewerTools?.trim() || DEFAULT_REVIEWER_TOOL_GUIDANCE,
       mainConversation: defaults.mainConversation?.trim() || DEFAULT_MAIN_CONVERSATION_PROMPT,
       mainGraph: defaults.mainGraph?.trim() || DEFAULT_MAIN_GRAPH_PROMPT,
       worker: defaults.worker?.trim() || DEFAULT_WORKER_PROMPT,
       promptSuggestion: defaults.promptSuggestion?.trim() || DEFAULT_PROMPT_SUGGESTION_PROMPT,
+      docs: Object.fromEntries(DOC_PROMPTS.map(({ key }) => [
+        key,
+        defaults.docs?.[key]?.trim() || (key === 'docs/INDEX.md' ? DEFAULT_DOC_INDEX : DEFAULT_GRAPH_DOCS[key]),
+      ])) as Record<AgentDocKey, string>,
     };
   }
 
+  private promptPath(key: AgentPromptKey) {
+    this.descriptor(key);
+    return join(this.root, key);
+  }
+
+  private descriptor(key: AgentPromptKey): Omit<AgentPromptDescriptor, 'file' | 'content' | 'customized'> {
+    const staticPrompt = STATIC_PROMPTS.find(prompt => prompt.key === key);
+    if (staticPrompt) return staticPrompt;
+    const doc = DOC_PROMPTS.find(prompt => prompt.key === key);
+    if (!doc) throw new RuntimeError('invalid_input', `Unknown Agent prompt ${key}`);
+    return { ...doc, group: 'docs' };
+  }
+
+  private descriptors(): AgentPromptDescriptor[] {
+    return [
+      ...STATIC_PROMPTS.map(prompt => ({
+        ...prompt,
+        file: this.promptPath(prompt.key),
+        content: this.defaults[prompt.fallback],
+        customized: false,
+      })),
+      ...DOC_PROMPTS.map(prompt => ({
+        ...prompt,
+        group: 'docs' as const,
+        file: this.promptPath(prompt.key),
+        content: this.defaults.docs[prompt.key],
+        customized: false,
+      })),
+    ];
+  }
+
+  private defaultContent(key: AgentPromptKey) {
+    const descriptor = this.descriptor(key);
+    if (descriptor.group === 'docs') return this.defaults.docs[key as AgentDocKey];
+    return this.defaults[STATIC_PROMPTS.find(prompt => prompt.key === key)!.fallback];
+  }
+
   async ensure() {
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    await mkdir(this.docsRoot, { recursive: true, mode: 0o700 });
     const readme = [
-      '# Graph Agent Prompt Library',
+      '# Graph Agent Context Library',
       '',
       'These files are read before the next Agent operation and can be edited here or in Graph.',
       'Graph seeds the defaults on first launch and never overwrites an existing file.',
+      'Use Reset in the Agent Context panel to restore the original built-in version.',
       '',
-      ...PROMPTS.map(prompt => `- ${prompt.key}: ${prompt.description}`),
-      '- agents/<definition-id>.md: optional identity override for any other compiled Agent definition such as coder or reviewer.',
+      'identity: agents/',
+      'tool guidance: tools/',
+      'rules: rules/',
+      'Graph documentation: docs/',
+      'runtime-only prompts: runtime/',
     ].join('\n');
     await writeFile(join(this.root, 'README.md'), `${readme}\n`, { mode: 0o600, flag: 'wx' }).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     });
-    for (const prompt of PROMPTS) {
-      const path = promptPath(this.root, prompt.key);
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      await writeFile(path, `${this.defaults[prompt.fallback].trimEnd()}\n`, { mode: 0o600, flag: 'wx' }).catch(error => {
+    for (const descriptor of this.descriptors()) {
+      await mkdir(dirname(descriptor.file), { recursive: true, mode: 0o700 });
+      const legacyPath = LEGACY_PROMPT_PATHS[descriptor.key];
+      const legacy = legacyPath
+        ? await readFile(join(this.root, legacyPath), 'utf8').catch(error => {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+            throw error;
+          })
+        : undefined;
+      await writeFile(descriptor.file, `${(legacy?.trim() ? legacy : descriptor.content).trimEnd()}\n`, { mode: 0o600, flag: 'wx' }).catch(error => {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       });
     }
@@ -173,8 +357,7 @@ export class AgentContextLibrary {
 
   async prompt(key: AgentPromptKey, variables: Record<string, string> = {}) {
     const custom = await this.override(key);
-    const template = custom ?? this.defaults[PROMPTS.find(prompt => prompt.key === key)!.fallback];
-    return render(template, variables).trimEnd();
+    return render(custom ?? this.defaultContent(key), variables).trimEnd();
   }
 
   /** Identity override for any published Agent definition. Main is the
@@ -194,7 +377,14 @@ export class AgentContextLibrary {
   }
 
   async override(key: AgentPromptKey) {
-    return readFile(promptPath(this.root, key), 'utf8').catch(error => {
+    const current = await readFile(this.promptPath(key), 'utf8').catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (current !== undefined) return current;
+    const legacyPath = LEGACY_PROMPT_PATHS[key];
+    if (!legacyPath) return undefined;
+    return readFile(join(this.root, legacyPath), 'utf8').catch(error => {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       throw error;
     });
@@ -203,14 +393,18 @@ export class AgentContextLibrary {
   async savePrompt(key: AgentPromptKey, content: string) {
     if (!content.trim()) throw new RuntimeError('invalid_input', 'Prompt content must not be empty');
     if (content.length > 250_000) throw new RuntimeError('invalid_input', 'Prompt content must be at most 250000 characters');
-    await writeAtomic(promptPath(this.root, key), content.trimEnd() + '\n');
+    await writeAtomic(this.promptPath(key), content.trimEnd() + '\n');
+  }
+
+  async resetPrompt(key: AgentPromptKey) {
+    await writeAtomic(this.promptPath(key), `${this.defaultContent(key).trimEnd()}\n`);
   }
 
   async disabledTools() {
     try {
-      const value = JSON.parse(await readFile(toolStatePath(this.root), 'utf8')) as { disabled?: unknown };
+      const value = JSON.parse(await readFile(join(this.root, TOOL_STATE_FILE), 'utf8')) as { disabled?: unknown };
       if (!Array.isArray(value.disabled) || value.disabled.some(name => typeof name !== 'string' || !name.trim())) {
-        throw new RuntimeError('invalid_config', `${toolStatePath(this.root)} must contain a disabled string array`);
+        throw new RuntimeError('invalid_config', `${join(this.root, TOOL_STATE_FILE)} must contain a disabled string array`);
       }
       return [...new Set(value.disabled.map(name => name.trim()))].sort();
     } catch (error) {
@@ -224,25 +418,20 @@ export class AgentContextLibrary {
     for (const name of disabled) {
       if (name.length > 240 || /[\0\r\n]/.test(name)) throw new RuntimeError('invalid_input', `Invalid tool name ${name}`);
     }
-    await writeAtomic(toolStatePath(this.root), `${JSON.stringify({ version: 1, disabled }, null, 2)}\n`);
+    await writeAtomic(join(this.root, TOOL_STATE_FILE), `${JSON.stringify({ version: 1, disabled }, null, 2)}\n`);
     return disabled;
   }
 
   async view(variables: Record<string, string> = {}): Promise<AgentContextView> {
-    const prompts = await Promise.all(PROMPTS.map(async prompt => {
+    const prompts = await Promise.all(this.descriptors().map(async prompt => {
       const custom = await this.override(prompt.key);
-      const defaults = this.defaults[prompt.fallback];
-      const template = custom ?? defaults;
       return {
-        key: prompt.key,
-        title: prompt.title,
-        description: prompt.description,
-        file: promptPath(this.root, prompt.key),
-        content: render(template, variables).trimEnd(),
-        customized: custom !== undefined && custom.trimEnd() !== defaults.trimEnd(),
+        ...prompt,
+        content: render(custom ?? prompt.content, variables).trimEnd(),
+        customized: custom !== undefined && custom.trimEnd() !== this.defaultContent(prompt.key).trimEnd(),
       };
     }));
-    return { root: this.root, prompts, disabledTools: await this.disabledTools() };
+    return { root: this.root, docsRoot: this.docsRoot, prompts, disabledTools: await this.disabledTools() };
   }
 }
 

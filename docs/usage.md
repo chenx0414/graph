@@ -52,6 +52,24 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 
 确认后若要新增功能，主 Agent 会把它作为新的功能任务讨论与确认，原任务的验收范围不被静默修改。讨论阶段的主 Agent 只有读取类工具，不会修改项目文件或派发实现工作。
 
+## Agent 上下文与 Prompt
+
+聊天窗口顶部的「Agent 上下文」显示下一轮实际组装的 system prompt、可编辑来源以及工具与能力。组装顺序固定为 `identity → tools → rules → docs → project_context → capabilities → cwd`；预览同时标出「可编辑」「动态生成」和「Pi 自动追加」，所以看到的是最终拼接结果，而不是分散片段的猜测。
+
+可编辑内容集中存放在 `~/.graph/prompts`，首次启动只播种缺失文件，不覆盖已有修改：
+
+```text
+agents/      身份，例如 main.md
+tools/       工具使用指导；tools.json 保存 Main Agent 的 disabled list
+rules/       通用规则与 main/worker/reviewer 角色规则
+docs/        Graph 自身的按需文档，INDEX.md 是稳定入口
+runtime/     仅特定运行阶段使用的动态 Prompt
+```
+
+`docs/` 只把根路径、`INDEX.md` 和阅读协议注入 system prompt，正文由 Agent 在需要时读取。每个 Agent operation 的 `<cwd>` 使用该实例实际 Git worktree，而不是项目根目录或其它 Agent 的目录。
+
+在「最终 Prompt」页可直接查看完整预览；在「可编辑来源」页修改并保存，改动从下一轮开始生效；「恢复默认」只覆盖选中的可编辑文件，Graph 始终保留代码内置原版。工具页关闭某个工具后，它同时从 provider tool schema、session allowlist 和最终 Prompt 的工具清单中移除，但不会改变宿主权限、预算、审计或恢复规则。旧版 `tool-awareness.md` 会在首次升级时迁移为 `tools/main.md`，原文件仍保留作人工备份。
+
 ## 桌面 APP（开发预览）
 
 A1–A2 提供 Electron 桌面壳与首次运行向导：APP 负责启动守护进程（`--port 0` 自动选端口、显式状态目录）并在窗口中加载控制台；关闭窗口不停止守护进程，再次启动 APP 会聚焦或重开窗口，退出 APP 触发与 CLI 相同的 5 秒有界停止。密钥边界不变：配置文件只保存 `secretRef`，APP 只把解密后的值放进子进程环境变量。

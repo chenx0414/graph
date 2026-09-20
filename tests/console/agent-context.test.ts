@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -51,6 +51,21 @@ test('tool enablement is persisted as a normalized list', async () => {
     version: 1,
     disabled: ['run_command', 'write_file'],
   });
+});
+
+test('legacy tool awareness is migrated into the structured tools directory', async () => {
+  const root = await temp();
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await writeFile(join(root, 'tool-awareness.md'), 'Legacy custom tool guidance.\n', { mode: 0o600 });
+
+  const library = openAgentContextLibrary(root);
+  await library.ensure();
+
+  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe('Legacy custom tool guidance.\n');
+  expect(await library.prompt('tools/main.md')).toBe('Legacy custom tool guidance.');
+
+  await library.resetPrompt('tools/main.md');
+  expect(await library.prompt('tools/main.md')).toContain('Use only the callable tools listed below.');
 });
 
 test('unknown prompt keys and invalid tool names are refused', async () => {

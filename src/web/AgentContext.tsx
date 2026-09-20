@@ -3,10 +3,27 @@ import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { Button, Icon, Pill, Spinner, toast } from './ui.tsx';
 
+type PromptOrigin = 'editable' | 'generated' | 'pi';
+
+export interface AgentPromptPartView {
+  id: string;
+  title: string;
+  origin: PromptOrigin;
+  content: string;
+  source?: string;
+}
+
+export interface AgentPromptSectionView {
+  id: string;
+  title: string;
+  parts: AgentPromptPartView[];
+}
+
 export interface AgentPromptView {
   key: string;
   title: string;
   description: string;
+  group: 'identity' | 'tools' | 'rules' | 'runtime' | 'docs';
   file: string;
   content: string;
   customized: boolean;
@@ -16,20 +33,68 @@ export interface AgentToolView {
   name: string;
   description: string;
   source: string;
+  version: string | null;
+  capabilityId: string | null;
+  parameters: string[];
+  permission: string;
   enabled: boolean;
+  available: boolean;
+  runtimeAvailable: boolean | null;
+}
+
+export interface AgentCapabilityView {
+  id: string;
+  version: string;
+  kind: string;
+  name: string;
+  description?: string;
+  tools: string[];
+  networkDomains?: string[];
+  reason?: string;
 }
 
 export interface AgentContextView {
   root: string;
+  docsRoot: string;
   definitionVersion: string | null;
   prompts: AgentPromptView[];
   disabledTools: string[];
   tools: AgentToolView[];
+  capabilities: AgentCapabilityView[];
+  preview: {
+    sections: AgentPromptSectionView[];
+    text: string;
+  };
+}
+
+const GROUP_LABELS: Record<AgentPromptView['group'], string> = {
+  identity: '身份',
+  tools: '工具指导',
+  rules: '规则',
+  runtime: '运行时',
+  docs: 'Graph Docs',
+};
+
+const ORIGIN_LABELS: Record<PromptOrigin, string> = {
+  editable: '可编辑',
+  generated: '动态生成',
+  pi: 'Pi 自动追加',
+};
+
+function originTone(origin: PromptOrigin) {
+  return origin === 'editable' ? 'accent' : origin === 'generated' ? 'neutral' : 'warn';
+}
+
+function availabilityText(tool: AgentToolView) {
+  if (!tool.enabled) return '已关闭';
+  if (!tool.available) return '当前不可用';
+  if (tool.runtimeAvailable === null) return '待 operation 确认';
+  return '当前可用';
 }
 
 export function AgentContextBar({ conversationId }: { conversationId: string }) {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<'prompts' | 'tools'>('prompts');
+  const [tab, setTab] = useState<'preview' | 'prompts' | 'tools'>('preview');
   const [data, setData] = useState<AgentContextView | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
@@ -38,7 +103,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = async () => {
+  async function load() {
     setError('');
     const next = await api<AgentContextView>(`/api/agent-context?conversationId=${encodeURIComponent(conversationId)}`);
     setData(next);
@@ -49,7 +114,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
       setDraft(current.content);
     }
     setLoading(false);
-  };
+  }
 
   useEffect(() => {
     let active = true;
@@ -70,8 +135,17 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     return () => { active = false; };
   }, [conversationId]);
 
+  const groupedPrompts = useMemo(() => {
+    const groups = new Map<AgentPromptView['group'], AgentPromptView[]>();
+    for (const prompt of data?.prompts ?? []) {
+      const items = groups.get(prompt.group) ?? [];
+      items.push(prompt);
+      groups.set(prompt.group, items);
+    }
+    return groups;
+  }, [data]);
   const selected = data?.prompts.find(prompt => prompt.key === selectedPrompt) ?? null;
-  const enabledTools = useMemo(() => data?.tools.filter(tool => !disabled.includes(tool.name)).length ?? 0, [data, disabled]);
+  const enabledTools = useMemo(() => data?.tools.filter(tool => tool.enabled && tool.available).length ?? 0, [data]);
   const customized = data?.prompts.filter(prompt => prompt.customized).length ?? 0;
 
   function selectPrompt(prompt: AgentPromptView) {
@@ -98,6 +172,24 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     }
   }
 
+  async function resetPrompt() {
+    if (!selected || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await api('/api/agent-context/prompts/reset', {
+        method: 'POST',
+        body: JSON.stringify({ key: selected.key }),
+      });
+      await load();
+      toast(`已恢复 ${selected.title} 的原始版本`, 'success');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveTools() {
     if (saving) return;
     setSaving(true);
@@ -108,7 +200,16 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
         body: JSON.stringify({ disabled }),
       });
       setDisabled(saved.disabledTools);
-      setData(current => current ? { ...current, disabledTools: saved.disabledTools, tools: current.tools.map(tool => ({ ...tool, enabled: !saved.disabledTools.includes(tool.name) })) } : current);
+      setData(current => current ? {
+        ...current,
+        disabledTools: saved.disabledTools,
+        tools: current.tools.map(tool => ({
+          ...tool,
+          enabled: !saved.disabledTools.includes(tool.name),
+          available: !saved.disabledTools.includes(tool.name) && tool.available,
+        })),
+      } : current);
+      await load();
       toast('工具选择已保存；下一轮生效', 'success');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -140,7 +241,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
           <span>
             <strong>Agent 上下文</strong>
             <small>
-              {data ? `${data.prompts.length} 层 Prompt · ${enabledTools}/${data.tools.length} 个工具可用` : '正在读取…'}
+              {data ? `${data.prompts.length} 个来源 · ${enabledTools}/${data.tools.length} 个工具可用` : '正在读取…'}
               {customized ? ` · ${customized} 个自定义` : ''}
             </small>
           </span>
@@ -150,41 +251,76 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
 
       {open && createPortal(
         <div className="agent-context-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
-          <aside className="agent-context-drawer" role="dialog" aria-modal="true" aria-label="Agent Prompt 与工具" data-testid="agent-context-drawer">
+          <aside className="agent-context-drawer" role="dialog" aria-modal="true" aria-label="Agent 上下文" data-testid="agent-context-drawer">
             <header className="agent-context-head">
               <div>
-                <h2>Agent Prompt 与工具</h2>
-                <p>统一管理注入给 Main Agent 和 Pi 的指令。保存后从下一轮开始生效。</p>
+                <h2>Agent 上下文</h2>
+                <p>完整预览、可编辑来源和实际工具视图共用同一套组装规则；保存后从下一轮生效。</p>
               </div>
               <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label="关闭"><Icon name="close" size={16} /></button>
             </header>
             <div className="agent-context-body">
               <nav className="agent-context-tabs" role="tablist" aria-label="Agent 上下文页面">
-                <button type="button" role="tab" data-active={tab === 'prompts'} aria-selected={tab === 'prompts'} onClick={() => setTab('prompts')}>
-                  Prompt <span>{data?.prompts.length ?? 0}</span>
+                <button type="button" role="tab" data-testid="agent-context-tab-preview" data-active={tab === 'preview'} aria-selected={tab === 'preview'} onClick={() => setTab('preview')}>
+                  最终 Prompt <span>{data?.preview.sections.length ?? 0}</span>
+                </button>
+                <button type="button" role="tab" data-testid="agent-context-tab-prompts" data-active={tab === 'prompts'} aria-selected={tab === 'prompts'} onClick={() => setTab('prompts')}>
+                  可编辑来源 <span>{data?.prompts.length ?? 0}</span>
                 </button>
                 <button type="button" role="tab" data-testid="agent-context-tab-tools" data-active={tab === 'tools'} aria-selected={tab === 'tools'} onClick={() => setTab('tools')}>
-                  工具 <span>{data?.tools.length ?? 0}</span>
+                  工具与能力 <span>{data?.tools.length ?? 0}</span>
                 </button>
               </nav>
               {error && <div className="form-error">{error}</div>}
-              {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'prompts' ? (
+              {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'preview' ? (
+                <div className="agent-preview-panel" data-testid="agent-context-preview">
+                  <div className="agent-preview-meta">
+                    <span>Definition <code>{data?.definitionVersion ?? '未配置'}</code></span>
+                    <span>Docs <code>{data?.docsRoot}</code></span>
+                  </div>
+                  <div className="agent-preview-sections">
+                    {data?.preview.sections.map(section => (
+                      <section key={section.id} className="agent-preview-section" data-section={section.id}>
+                        <header>
+                          <strong>{section.title}</strong>
+                          <code>&lt;{section.id}&gt;</code>
+                        </header>
+                        {section.parts.map(part => (
+                          <article key={part.id} className="agent-preview-part">
+                            <div>
+                              <strong>{part.title}</strong>
+                              <Pill tone={originTone(part.origin)}>{ORIGIN_LABELS[part.origin]}</Pill>
+                              {part.source && <code>{part.source}</code>}
+                            </div>
+                            <pre>{part.content}</pre>
+                          </article>
+                        ))}
+                      </section>
+                    ))}
+                  </div>
+                </div>
+              ) : tab === 'prompts' ? (
                 <div className="agent-prompt-layout">
                   <div className="agent-prompt-list" data-testid="agent-prompt-list">
-                    {data?.prompts.map(prompt => (
-                      <button
-                        type="button"
-                        key={prompt.key}
-                        data-testid={`agent-prompt-${prompt.key}`}
-                        data-active={prompt.key === selectedPrompt}
-                        onClick={() => selectPrompt(prompt)}
-                      >
-                        <span>
-                          <strong>{prompt.title}</strong>
-                          <small>{prompt.description}</small>
-                        </span>
-                        {prompt.customized && <Pill tone="accent">自定义</Pill>}
-                      </button>
+                    {[...groupedPrompts.entries()].map(([group, prompts]) => (
+                      <div className="agent-prompt-group" key={group}>
+                        <span className="agent-prompt-group-label">{GROUP_LABELS[group]}</span>
+                        {prompts.map(prompt => (
+                          <button
+                            type="button"
+                            key={prompt.key}
+                            data-testid={`agent-prompt-${prompt.key}`}
+                            data-active={prompt.key === selectedPrompt}
+                            onClick={() => selectPrompt(prompt)}
+                          >
+                            <span>
+                              <strong>{prompt.title}</strong>
+                              <small>{prompt.description}</small>
+                            </span>
+                            {prompt.customized && <Pill tone="accent">自定义</Pill>}
+                          </button>
+                        ))}
+                      </div>
                     ))}
                   </div>
                   <div className="agent-prompt-editor">
@@ -207,9 +343,12 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                         />
                         <div className="agent-context-actions">
                           <span className="muted">支持 `{'{{models}}'}`、`{'{{requirementVersion}}'}`、`{'{{selfModelSection}}'}` 等运行时变量。</span>
-                          <Button variant="primary" size="sm" icon="check" disabled={saving || !draft.trim()} onClick={() => void savePrompt()}>
-                            {saving ? '保存中…' : '保存 Prompt'}
-                          </Button>
+                          <span className="agent-context-action-buttons">
+                            <Button size="sm" icon="refresh" disabled={saving} onClick={() => void resetPrompt()}>恢复默认</Button>
+                            <Button variant="primary" size="sm" icon="check" disabled={saving || !draft.trim()} onClick={() => void savePrompt()}>
+                              {saving ? '保存中…' : '保存 Prompt'}
+                            </Button>
+                          </span>
                         </div>
                       </>
                     ) : <p className="muted">没有可编辑的 Prompt。</p>}
@@ -218,28 +357,53 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
               ) : (
                 <div className="agent-tool-panel" data-testid="agent-tool-panel">
                   <div className="agent-tool-panel-head">
-                    <p>关闭工具只会从 Main Agent 的工具清单中移除；权限、预算和审计规则保持不变。</p>
+                    <p>关闭工具会同时从实际工具 surface 和最终 Prompt 中移除；权限、预算和审计规则保持不变。</p>
                     <Button size="sm" variant="primary" icon="check" disabled={saving} onClick={() => void saveTools()}>保存工具选择</Button>
                   </div>
-                  <div className="agent-tool-list">
-                    {data?.tools.map(tool => (
-                      <label className="agent-tool-row" key={tool.name} data-enabled={!disabled.includes(tool.name)}>
-                        <input
-                          type="checkbox"
-                          data-testid={`agent-tool-${tool.name}`}
-                          checked={!disabled.includes(tool.name)}
-                          onChange={event => setDisabled(current => event.target.checked
-                            ? current.filter(name => name !== tool.name)
-                            : [...new Set([...current, tool.name])])}
-                        />
-                        <span>
-                          <strong>{tool.name}</strong>
-                          <small>{tool.description || '无说明'}</small>
-                        </span>
-                        <Pill tone="neutral">{tool.source}</Pill>
-                      </label>
-                    ))}
-                    {!data?.tools.length && <p className="muted">首次运行 Main Agent 后会显示完整工具清单。</p>}
+                  <div className="agent-tool-panel-body">
+                    <div className="agent-tool-section">
+                      <header><strong>Tools</strong><span>{data?.tools.length ?? 0}</span></header>
+                      <div className="agent-tool-list">
+                        {data?.tools.map(tool => (
+                          <label className="agent-tool-row" key={tool.name} data-enabled={tool.enabled && tool.available}>
+                            <input
+                              type="checkbox"
+                              data-testid={`agent-tool-${tool.name}`}
+                              checked={!disabled.includes(tool.name)}
+                              onChange={event => setDisabled(current => event.target.checked
+                                ? current.filter(name => name !== tool.name)
+                                : [...new Set([...current, tool.name])])}
+                            />
+                            <span>
+                              <strong>{tool.name}</strong>
+                              <small>{tool.description || '无说明'}</small>
+                              <small>参数：{tool.parameters.length ? tool.parameters.join(', ') : '未声明'} · 权限：{tool.permission}</small>
+                            </span>
+                            <span className="agent-tool-status">
+                              <Pill tone="neutral">{tool.source}{tool.version ? `@${tool.version}` : ''}</Pill>
+                              <Pill tone={!tool.enabled || !tool.available ? 'warn' : 'accent'}>{availabilityText(tool)}</Pill>
+                            </span>
+                          </label>
+                        ))}
+                        {!data?.tools.length && <p className="muted">首次运行 Main Agent 后会显示实际工具清单。</p>}
+                      </div>
+                    </div>
+                    <div className="agent-tool-section">
+                      <header><strong>Capabilities</strong><span>{data?.capabilities.length ?? 0}</span></header>
+                      <div className="agent-capability-list">
+                        {data?.capabilities.map(capability => (
+                          <div className="agent-capability-row" key={`${capability.id}@${capability.version}`}>
+                            <span>
+                              <strong>{capability.name}</strong>
+                              <small>{capability.kind} · {capability.id}@{capability.version}</small>
+                            </span>
+                            <span>{capability.tools.length ? capability.tools.join(', ') : '无工具'}</span>
+                            {capability.networkDomains?.length ? <small>Needs domains</small> : null}
+                          </div>
+                        ))}
+                        {!data?.capabilities.length && <p className="muted">当前定义没有绑定额外能力。</p>}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

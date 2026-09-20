@@ -1,0 +1,67 @@
+# Graph Self Configuration
+
+## 目标
+
+Graph 把 Agent 可编辑上下文集中到固定目录：
+
+```text
+~/.graph/prompts/
+  agents/
+  tools/
+  rules/
+  docs/
+  runtime/
+  tools.json
+```
+
+首次启动播种默认文件，之后不覆盖用户修改。用户可以通过聊天头部查看最终拼装结果、编辑来源文件、开关工具，或恢复某个文件的原始默认版本。
+
+## 结构化 Composer
+
+Graph 自己组装最终 system prompt，顺序为：
+
+```text
+identity -> tools -> rules -> docs -> project_context -> capabilities -> cwd
+```
+
+Pi 在 0.85.1 中还会自动追加 `Current working directory`。UI 必须把这段标成 Pi-generated，不把它和 Graph 可编辑文件混在一起。
+
+## 可编辑、生成和 Pi 内容
+
+- **editable**：用户维护的 identity、tool guidance、rules、docs index 和 runtime prompt 文件。
+- **generated**：从当前 definition、实际工具、capability load facts、项目 instructions 和 worktree 拼出的内容。
+- **pi**：Pi 自身自动追加的 system prompt 内容，例如 cwd。
+
+用户编辑 editable 文本不能改变 generated 事实，也不能改变 host-enforced authority。
+
+## 工具选择
+
+Main Agent 的工具选择保存为 disabled list。关闭工具时：
+
+- provider tool schema 不再提供该工具；
+- Agent session allowlist 不再启用；
+- system prompt 的 tools/capabilities section 同步更新。
+
+工具详情应显示来源、版本、参数、权限摘要和当前可用性。UI 不伪造实际 tool surface；如果需要 operation 运行后才能确认的动态工具，应明确显示 unknown 或 unavailable。
+
+## 系统变更
+
+直接编辑可编辑 prompt 文件是用户配置行为。安装、更新或替换 capability 属于系统变更：
+
+1. Main Agent 用 `propose_system_change` 创建提案；
+2. 用户批准；
+3. Main Agent 用 `apply_system_change` 应用；
+4. Host 重新扫描并验证。
+
+完全访问模式可以自动批准运行授权，但仍应保留提案、验证和审计。
+
+## 原版恢复
+
+Graph 在代码/preset 中保留每个默认 prompt 和 docs 文件的原始版本。恢复默认只覆盖对应可编辑文件，不修改能力缓存、用户工具清单或项目文件。
+
+## 不应宣称
+
+- 不能宣称 prompt 文件就是权限。
+- 不能宣称关闭工具就卸载了 extension 的全部 hook。
+- 不能宣称生成内容可以由用户直接编辑。
+- 不能把未读取的 docs 内容当成当前事实。

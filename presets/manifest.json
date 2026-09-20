@@ -6,6 +6,7 @@
       "main": "bootstrap/master/agent.md"
     },
     "toolPrompt": "bootstrap/tool-awareness/tool.md",
+    "agentDocs": "bootstrap/agent-docs",
     "definitions": [
       { "id": "master", "recommendedGrade": "high" },
       { "id": "coder", "recommendedGrade": "medium" },

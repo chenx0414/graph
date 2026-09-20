@@ -37,7 +37,7 @@ export async function openGraphServer(options: Parameters<typeof openTaskRuntime
   const agentContext = options.agentContext ?? openAgentContextLibrary(join(options.stateDir, 'prompts'));
   await agentContext.ensure();
   const runtime = await openTaskRuntime({ ...options, agentContext, autoWake: Boolean(options.autoDrive) });
-  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}), ...(options.usage ? { usage: options.usage } : {}), agentContext });
+  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}), ...(options.usage ? { usage: options.usage } : {}), ...(options.systemContext ? { systemContext: options.systemContext } : {}), agentContext });
   let address: string;
   try {
     address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });

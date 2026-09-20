@@ -56,6 +56,8 @@ test('presets publish only immutable Graph bootstrap definitions and prompts', a
   const { runtime, bootstrap } = await runtimeAt(root);
   expect(bootstrap.prompts.master).toContain('Master Agent identity');
   expect(bootstrap.toolPrompt).toContain('Capability awareness');
+  expect(bootstrap.agentDocs['docs/INDEX.md']).toContain('# Graph Agent Documentation');
+  expect(bootstrap.agentDocs['docs/execution-model.md']).toContain('# Graph Execution Model');
   const first = await installPresets(runtime.catalog, presetsRoot);
   expect(first).toMatchObject({ available: true, failed: [] });
   expect(first.installed).toEqual(['master', 'coder', 'reviewer', 'tester']);

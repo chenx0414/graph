@@ -1508,10 +1508,23 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
 
   await page.getByTestId('agent-context-open').click();
   await page.getByTestId('agent-context-drawer').waitFor();
+  await page.getByTestId('agent-context-preview').waitFor();
+  const preview = await page.getByTestId('agent-context-preview').innerText();
+  expect(preview).toContain('<identity>');
+  expect(preview).toContain('<tools>');
+  expect(preview).toContain('<rules>');
+  expect(preview).toContain('<docs>');
+  expect(preview).toContain('<project_context>');
+  expect(preview).toContain('<capabilities>');
+  expect(preview).toContain('<cwd>');
+  expect(preview).toContain('Pi 自动追加');
+  await page.getByTestId('agent-context-tab-prompts').click();
   await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();
   await page.getByTestId('agent-prompt-editor').fill('CUSTOM CONVERSATION {{fullAccessInstruction}}');
   await page.getByRole('button', { name: '保存 Prompt' }).click();
   await expect.poll(() => agentContext.override('runtime/main-conversation.md')).toContain('CUSTOM CONVERSATION');
+  await page.getByRole('button', { name: '恢复默认' }).click();
+  await expect.poll(() => agentContext.override('runtime/main-conversation.md')).not.toContain('CUSTOM CONVERSATION');
 
   await page.getByTestId('agent-context-tab-tools').click();
   await page.getByTestId('agent-tool-write_file').uncheck();
