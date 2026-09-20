@@ -362,7 +362,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                           spellCheck={false}
                         />
                         <div className="agent-context-actions">
-                          <span className="muted">支持 `{'{{models}}'}`、`{'{{requirementVersion}}'}`、`{'{{selfModelSection}}'}` 等运行时变量。</span>
+                          <span className="muted">支持 `{'{{models}}'}`、`{'{{requirementVersion}}'}` 等运行时变量；实时系统状态通过 `read_system_capabilities` 按需读取。</span>
                           <span className="agent-context-action-buttons">
                             <Button size="sm" icon="refresh" disabled={saving} onClick={() => void resetPrompt()}>恢复默认</Button>
                             <Button variant="primary" size="sm" icon="check" disabled={saving || !draft.trim()} onClick={() => void savePrompt()}>

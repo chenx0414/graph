@@ -285,7 +285,7 @@ test('the real Pi master can search the resource library and open a model-access
     'propose_system_change', 'apply_system_change', 'request_model_access',
   ]));
   expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
-  expect(JSON.stringify(provider.requests[0]!.messages)).toContain('Graph system self-model');
+  expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('Graph system self-model');
   expect(provider.requests.some(request => {
     const messages = JSON.stringify(request.messages);
     return messages.includes('reviewer') && messages.includes('1.0.0');

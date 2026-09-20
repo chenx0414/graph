@@ -66,7 +66,7 @@ docs/        Graph 自身的按需文档，INDEX.md 是稳定入口
 runtime/     仅特定运行阶段使用的动态 Prompt
 ```
 
-`docs/` 只把根路径、`INDEX.md` 和阅读协议注入 system prompt，正文由 Agent 在需要时读取。每个 Agent operation 的 `<cwd>` 使用该实例实际 Git worktree，而不是项目根目录或其它 Agent 的目录。
+`docs/` 只把根路径、`INDEX.md` 和阅读协议注入 system prompt，正文由 Agent 在需要时读取。模型目录、订阅计划、配额、配方和系统健康等动态事实不常驻 system prompt；Agent 在需要时调用 `read_system_capabilities` 或 `inspect_graph_system`。每个 Agent operation 的 `<cwd>` 使用该实例实际 Git worktree，而不是项目根目录或其它 Agent 的目录。
 
 在「最终 Prompt」页可直接查看完整预览；在「可编辑来源」页修改并保存，改动从下一轮开始生效；「恢复默认」只覆盖选中的可编辑文件，Graph 始终保留代码内置原版。工具页关闭某个工具后，它同时从 provider tool schema、session allowlist 和最终 Prompt 的工具清单中移除，但不会改变宿主权限、预算、审计或恢复规则。旧版 `tool-awareness.md` 会在首次升级时迁移为 `tools/main.md`，原文件仍保留作人工备份。
 
