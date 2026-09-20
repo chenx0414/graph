@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import type { Api, Model, Context, AssistantMessageEvent } from '@earendil-works/pi-ai';
+import type { Api, Model, Context } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { RestrictedGate } from './restricted-process.ts';
+import { encodeAssistantStream } from './assistant-stream-frames.ts';
 
 /** Capability targets and model credentials are selected by the host, never the worker. */
 export function createWorkerRequests(options: {
@@ -32,9 +33,11 @@ export function createWorkerRequests(options: {
       }
       const stream = await options.stream(options.model, context);
       if (request.events === true) {
-        const events: AssistantMessageEvent[] = [];
-        for await (const event of stream) events.push(event);
-        return { events };
+        // Every event carries the shared live `partial` message, so the raw
+        // event list is quadratic in the response length. Send compact frames
+        // plus the terminal settlement instead and let the worker replay them.
+        const frames = await encodeAssistantStream(stream);
+        return { frames, settlement: await stream.result() };
       }
       return stream.result();
     }

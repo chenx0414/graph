@@ -192,6 +192,31 @@ dgram.Socket.prototype.bind = function () { deny(); };
 
 /** A model turn can legitimately include large tool results and inline images. */
 const MAX_WORKER_REQUEST_BYTES = 32 * 1024 * 1024;
+const MAX_WORKER_REPLY_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Serialize one host reply for the worker channel.
+ *
+ * The reply can carry anything a tool or a model stream produced, so it may be
+ * enormous or not JSON-encodable at all. Such a reply becomes a bounded refusal
+ * the worker can surface as an error: a reply that kills the daemon takes every
+ * other task down with it, which is never the better outcome.
+ */
+export function encodeWorkerReply(reply: unknown, maxBytes = MAX_WORKER_REPLY_BYTES) {
+  let encoded: string | undefined;
+  try {
+    encoded = JSON.stringify(reply);
+  } catch (error) {
+    return JSON.stringify({ ok: false, error: `Worker reply could not be serialized: ${String(error)}` });
+  }
+  if (encoded === undefined) {
+    return JSON.stringify({ ok: false, error: 'Worker reply could not be serialized' });
+  }
+  if (Buffer.byteLength(encoded, 'utf8') > maxBytes) {
+    return JSON.stringify({ ok: false, error: `Worker reply exceeded ${maxBytes} bytes and was refused` });
+  }
+  return encoded;
+}
 
 export interface RestrictedGate {
   dispatch<T>(id: string, reservation: number, send: () => T): T;
@@ -744,7 +769,13 @@ export async function openRestrictedExecutor() {
                   if (!command.onRequest) throw new Error('Worker requests not enabled');
                   reply = { ok: true, value: await command.onRequest(JSON.parse(line)) };
                 } catch (error) { reply = { ok: false, error: String(error) }; }
-                if (!channel.destroyed) channel.write(JSON.stringify(reply) + '\n');
+                if (!channel.destroyed) channel.write(`${encodeWorkerReply(reply)}\n`);
+              }).catch(error => {
+                // A request the host cannot answer leaves the worker waiting
+                // forever, so reap the tree and record it. Letting this reject
+                // would be an unhandled rejection that kills the whole daemon.
+                stderr += `Worker request handling failed: ${String(error)}\n`;
+                killTree();
               });
             }
           });

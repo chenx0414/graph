@@ -683,3 +683,42 @@ test('an extension or MCP process can request authorized reads and models only t
     expect(gate.inspect().used).toBe(50);
   } finally { gate.close(); await provider.close(); resource.closeAllConnections(); await new Promise<void>(resolve => resource.close(() => resolve())); }
 });
+
+test('a host reply that cannot be serialized is refused instead of killing the daemon', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-reply-limit-'))); dirs.push(root);
+  const workspace = join(root, 'worker'); await mkdir(workspace);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  // The worker asks the host once and prints exactly the reply it receives.
+  const worker = `
+    const { Socket } = require('net');
+    const readline = require('readline');
+    const channel = new Socket({ fd: 3, readable: true, writable: true });
+    const replies = readline.createInterface({ input: channel })[Symbol.asyncIterator]();
+    (async () => {
+      channel.write(JSON.stringify({ operation: 'ask' }) + '\\n');
+      const reply = await replies.next();
+      process.stdout.write(String(reply.value));
+      process.exit(0);
+    })();
+  `;
+  const run = (value: unknown) => executor.run({
+    broker, cwd: workspace, executable: process.execPath, args: ['-e', worker],
+    readPaths: [dirname(process.execPath)], writePaths: [workspace],
+    timeoutMs: 10_000,
+    onRequest: async () => value,
+  });
+  try {
+    // A value JSON.stringify cannot encode must not escape the reply handler.
+    const unserializable = await run(1n);
+    expect(unserializable.code, unserializable.stderr).toBe(0);
+    expect(JSON.parse(unserializable.stdout.trim())).toMatchObject({ ok: false });
+
+    // Neither may a reply large enough to exhaust the channel, whatever its size.
+    const oversized = await run('x'.repeat(48 * 1024 * 1024));
+    expect(oversized.code, oversized.stderr).toBe(0);
+    const reply = JSON.parse(oversized.stdout.trim()) as { ok: boolean; error?: string };
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toMatch(/too large|exceeded/i);
+    expect(oversized.stdout.length).toBeLessThan(1024);
+  } finally { broker.close(); }
+}, 60_000);

@@ -6,6 +6,8 @@ import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 
 export interface ResponsePlan {
   text?: string;
+  /** Stream the answer as these content deltas instead of one block. */
+  chunks?: string[];
   thinking?: string;
   tools?: { id: string; name: string; arguments: string | (() => string) }[];
   finishReason?: 'stop' | 'length' | 'tool_calls';
@@ -54,7 +56,13 @@ export async function openaiServer(plans: ResponsePlan[]) {
       delta.content = plan.text ?? 'Local response';
     }
     const finishReason = plan.finishReason ?? (plan.tools ? 'tool_calls' : 'stop');
-    res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+    if (plan.chunks) {
+      for (const chunk of plan.chunks) {
+        res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta: { role: 'assistant', content: chunk }, finish_reason: null }] })}\n\n`);
+      }
+    } else {
+      res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+    }
     res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
     if (plan.holdOpen) res.write('data: [DONE]\n\n');
     else res.end('data: [DONE]\n\n');

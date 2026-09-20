@@ -287,6 +287,48 @@ test('a model response larger than 64 KiB crosses the worker channel intact', as
   await process.close();
 }, 120_000);
 
+test('a long streamed response crosses the worker channel without resending every partial', async () => {
+  const { root, project } = await workspace('pi-streamed-response');
+  // Many deltas over a long answer: shipping the raw event list would repeat the
+  // whole response once per delta and eventually exceed every string limit.
+  const chunks = Array.from({ length: 8_000 }, (_, index) => `chunk-${index}; `);
+  const text = chunks.join('');
+  // Far past the 32 MiB worker-reply budget if every delta repeated the partial.
+  expect(text.length).toBeGreaterThan(90_000);
+  const provider = await openaiServer([{ chunks }]);
+  cleanup.push(() => provider.close());
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-streamed-response');
+  cleanup.push(() => gate.close());
+  const observed: { type?: string; assistantMessageEvent?: { type?: string; delta?: string; partial?: unknown }; message?: unknown }[] = [];
+  const agent = await openPiProcess({
+    binding: { instanceId: 'agent-streamed-response', nodeId: 'work', definitionVersion: 'coder@1' },
+    workspace: project,
+    stateDir: join(root, 'state'),
+    model: provider.model,
+    stream: controlledOpenAIStream(gate, 'scripted-local-key'),
+    tools: [],
+    broker: gate,
+    onEvent: event => observed.push(event as unknown as typeof observed[number]),
+    bundleDigest: 'b'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+  });
+  const inspect = await agent.prompt('Stream a long answer');
+  expect(inspect.messages.at(-1)).toMatchObject({
+    role: 'assistant',
+    stopReason: 'stop',
+    content: [{ type: 'text', text }],
+  });
+  const updates = observed.filter(event => event.type === 'message_update');
+  // Live text still arrives delta by delta...
+  expect(updates.map(event => event.assistantMessageEvent?.delta ?? '').join('')).toBe(text);
+  // ...without either side resending the whole in-progress message per token.
+  expect(updates.every(event => event.message === undefined)).toBe(true);
+  expect(updates.every(event => event.assistantMessageEvent?.partial === undefined)).toBe(true);
+  expect(observed.some(event => event.type === 'message_end' && event.message !== undefined)).toBe(true);
+  await agent.close();
+}, 120_000);
+
 test('a multibyte response near the stdout buffer boundary is not truncated on exit', async () => {
   const { root, project } = await workspace('pi-large-multibyte-response');
   // Keep the JavaScript string just under the stdout high-water mark while
