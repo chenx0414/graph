@@ -452,6 +452,7 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   expect(providerRequest).toContain('MAIN IDENTITY SENTINEL');
   expect(providerRequest).toContain('<tools>');
   expect(providerRequest).toContain('<rules>');
+  expect(providerRequest).toContain('<workflow>');
   expect(providerRequest).toContain('CONVERSATION SENTINEL');
   expect(providerRequest).toContain('<docs>');
   expect(providerRequest).toContain('<project_context>');

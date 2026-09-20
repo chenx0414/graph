@@ -54,7 +54,7 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 
 ## Agent 上下文与 Prompt
 
-聊天窗口顶部的「Agent 上下文」显示下一轮实际组装的 system prompt、可编辑来源以及工具与能力。组装顺序固定为 `identity → tools → rules → docs → project_context → capabilities → cwd`；预览同时标出「可编辑」「动态生成」和「Pi 自动追加」，所以看到的是最终拼接结果，而不是分散片段的猜测。
+聊天窗口顶部的「Agent 上下文」显示下一轮实际组装的 system prompt、可编辑来源以及工具与能力。组装顺序固定为 `identity → tools → rules → workflow → docs → project_context → capabilities → cwd`；`rules` 只保留稳定的证据与方案命名规则，具体运行流程放在 `workflow`。预览同时标出「可编辑」「动态生成」和「Pi 自动追加」，所以看到的是最终拼接结果，而不是分散片段的猜测。
 
 可编辑内容集中存放在 `~/.graph/prompts`，首次启动只播种缺失文件，不覆盖已有修改：
 

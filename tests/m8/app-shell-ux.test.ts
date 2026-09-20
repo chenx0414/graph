@@ -1513,6 +1513,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(preview).toContain('<identity>');
   expect(preview).toContain('<tools>');
   expect(preview).toContain('<rules>');
+  expect(preview).toContain('<workflow>');
   expect(preview).toContain('<docs>');
   expect(preview).toContain('<project_context>');
   expect(preview).toContain('<capabilities>');
@@ -1522,6 +1523,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(markdown).toContain('<identity>\n');
   expect(markdown).toContain('<tools>\n');
   expect(markdown).toContain('<rules>\n');
+  expect(markdown).toContain('<workflow>\n');
   expect(markdown).toContain('<docs>\n');
   expect(markdown).toContain('<project_context>\n');
   expect(markdown).toContain('<capabilities>\n');

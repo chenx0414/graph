@@ -59,6 +59,7 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
     'identity',
     'tools',
     'rules',
+    'workflow',
     'docs',
     'project_context',
     'capabilities',
@@ -73,6 +74,9 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.text).toContain('<rules>');
   expect(result.text).toContain('Common rule.');
   expect(result.text).toContain('Submit a graph draft before dispatching work.');
+  expect(result.text.match(/<rules>\n([\s\S]*?)\n<\/rules>/)?.[1]).not.toContain('Current requirement version: 3.');
+  expect(result.text).toContain('<workflow>');
+  expect(result.text).toContain('Current requirement version: 3.');
   expect(result.text).toContain('<docs>');
   expect(result.text).toContain('/home/me/.graph/prompts/docs');
   expect(result.text).toContain('<project_context>');
