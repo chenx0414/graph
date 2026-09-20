@@ -370,7 +370,7 @@ export function agentTools(input: {
   if (input.role === 'master' && input.supervisor) {
     tools.push(
       {
-        name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson must use the schema shown in the briefing. Keep the optional decisions list current: it is frozen with this draft version and passed to workers after confirmation.',
+        name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson is a JSON object with requirementVersion, summary, acceptance[{id,description,checkNode}], nodes[NodeSpec], optional containers, loops and decisions. Agent nodes require definitionVersion and model; every acceptance checkNode must reference a mandatory program node. Keep decisions current: they are frozen with this draft version and passed to workers after confirmation.',
         parameters: Type.Object({ proposalJson: Type.String(), requestId: Type.String() }),
         execute: async (_id: string, params: unknown) => {
           const body = fields(params);
@@ -380,7 +380,7 @@ export function agentTools(input: {
         },
       },
       {
-        name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson uses the same node schema shown in the briefing.',
+        name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson is a JSON array of NodeSpec objects using id, kind, action, dependsOn, input, definitionVersion, model, context and verifier fields as applicable.',
         parameters: Type.Object({ baseVersion: Type.Number(), reason: Type.String(), nodesJson: Type.String(), requestId: Type.String() }),
         execute: async (_id, params) => {
           const body = fields(params);
