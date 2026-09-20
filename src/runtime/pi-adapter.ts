@@ -36,12 +36,8 @@ import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import {
-  DEFAULT_MAIN_APPROVAL_PROMPT,
   DEFAULT_COMMON_RULES,
   DEFAULT_DOC_INDEX,
-  DEFAULT_MAIN_FULL_ACCESS_PROMPT,
-  DEFAULT_MAIN_GRAPH_PROMPT,
-  DEFAULT_MAIN_CONVERSATION_PROMPT,
   DEFAULT_MAIN_RULES,
   DEFAULT_MAIN_TOOL_GUIDANCE,
   DEFAULT_PROMPT_SUGGESTION_PROMPT,
@@ -677,20 +673,6 @@ export function createPiAdapter(options: {
         const toolPolicyDigest = capabilityOperation.toolPolicyDigest;
         const promptRole = promptRoleFor(spec);
         const definitionVersion = instance.definition_version ?? 'unknown@1';
-        const models = options.directory().map((model, index) => `${index === 0 ? 'implementation' : 'review'}=${model.id} (${model.grade})`).join(', ');
-        const fullAccessInstruction = accessPolicy?.mode === 'full'
-          ? DEFAULT_MAIN_FULL_ACCESS_PROMPT
-          : DEFAULT_MAIN_APPROVAL_PROMPT;
-        const conversationRules = agentPromptLibrary
-          ? await agentPromptLibrary.prompt('runtime/main-conversation.md', { fullAccessInstruction })
-          : renderAgentPrompt(DEFAULT_MAIN_CONVERSATION_PROMPT, { fullAccessInstruction });
-        const graphVariables = {
-          models: models || '(none)',
-          requirementVersion: String(operation.requirementVersion),
-        };
-        const graphRules = agentPromptLibrary
-          ? await agentPromptLibrary.prompt('runtime/main-graph.md', graphVariables)
-          : renderAgentPrompt(DEFAULT_MAIN_GRAPH_PROMPT, graphVariables);
         const workerRules = agentPromptLibrary
           ? await agentPromptLibrary.prompt('runtime/worker.md', {
             retrievalNote: retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : '',
@@ -719,9 +701,7 @@ export function createPiAdapter(options: {
           rules: {
             common: commonRules,
             role: roleRules,
-            runtime: promptRole === 'main'
-              ? [discussion ? conversationRules : '', graphRules].filter(Boolean).join('\n\n')
-              : workerRules,
+            ...(promptRole === 'main' ? {} : { runtime: workerRules }),
           },
           docs: {
             root: agentPromptLibrary?.docsRoot ?? join(graphApplicationRoot(), 'docs'),

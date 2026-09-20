@@ -12,7 +12,6 @@ export type AgentPromptSectionId =
   | 'identity'
   | 'tools'
   | 'rules'
-  | 'workflow'
   | 'docs'
   | 'project_context'
   | 'capabilities'
@@ -152,15 +151,14 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
       content: input.rules.role,
       source: 'rules/<role>.md',
     },
+    ...(input.rules.runtime ? [{
+      id: 'rules.runtime',
+      title: 'Runtime rules',
+      origin: 'editable' as const,
+      content: input.rules.runtime,
+      source: 'runtime/*.md',
+    }] : []),
   ]);
-
-  const workflow = section('workflow', 'Workflow', input.rules.runtime ? [{
-    id: 'workflow.runtime',
-    title: 'Runtime workflow',
-    origin: 'editable',
-    content: input.rules.runtime,
-    source: 'runtime/*.md',
-  }] : []);
 
   const docs = section('docs', 'Documentation', [
     {
@@ -230,7 +228,6 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     }]),
     tools,
     rules,
-    ...(workflow.parts.length ? [workflow] : []),
     docs,
     projectContext,
     capabilities,

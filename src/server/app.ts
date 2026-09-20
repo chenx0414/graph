@@ -16,8 +16,6 @@ import { capabilityConfigViews } from '../catalog/capability-config.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import {
   DEFAULT_COMMON_RULES,
-  DEFAULT_MAIN_APPROVAL_PROMPT,
-  DEFAULT_MAIN_FULL_ACCESS_PROMPT,
   DEFAULT_DOC_INDEX,
   DEFAULT_MAIN_RULES,
   DEFAULT_MAIN_TOOL_GUIDANCE,
@@ -368,28 +366,16 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
           } catch { return undefined; }
         }))).find(Boolean)
       : undefined;
-    const access = runtime.currentAccessPolicy();
-    const models = runtime.models().map((model, index) => `${index === 0 ? 'implementation' : 'review'}=${model.id} (${model.grade})`).join(', ');
-    const promptVariables = {
-      fullAccessInstruction: access?.mode === 'full' ? DEFAULT_MAIN_FULL_ACCESS_PROMPT : DEFAULT_MAIN_APPROVAL_PROMPT,
-      models: models || '(none)',
-      requirementVersion: String(view?.requirementVersion ?? 1),
-      retrievalNote: '',
-    };
     const identity = await options.agentContext.agentPrompt('main', null);
     const commonRules = await options.agentContext.prompt('rules/common.md');
     const roleRules = await options.agentContext.prompt('rules/main.md');
-    const runtimeRules = [
-      await options.agentContext.prompt('runtime/main-conversation.md', promptVariables),
-      await options.agentContext.prompt('runtime/main-graph.md', promptVariables),
-    ].filter(Boolean).join('\n\n');
     const toolGuidance = await options.agentContext.prompt('tools/main.md');
     const docsIndex = await options.agentContext.prompt('docs/INDEX.md');
     const composed = composeAgentSystemPrompt({
       identity,
       definitionVersion: resolvedDefinitionVersion ?? 'main@unknown',
       toolGuidance,
-      rules: { common: commonRules, role: roleRules, runtime: runtimeRules },
+      rules: { common: commonRules, role: roleRules },
       docs: { root: options.agentContext.docsRoot, index: docsIndex },
       ...(projectFile ? { projectContext: projectFile } : {}),
       tools: tools.filter(tool => tool.enabled && tool.available).map(tool => ({

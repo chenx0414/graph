@@ -204,7 +204,8 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
     expect(request.tools).toContain('read');
     expect(request.tools).not.toContain('suggest_prompt');
   }
-  expect(JSON.stringify(masterRequests[0]!.messages)).toContain('ongoing conversation');
+  expect(JSON.stringify(masterRequests[0]!.messages)).not.toContain('ongoing conversation');
+  expect(JSON.stringify(masterRequests[0]!.messages)).not.toContain('<workflow>');
   // The post-confirmation briefing carries recorded execution facts.
   const statusRequest = provider.requests.find(request => JSON.stringify(request.messages).includes('现在卡在哪里？'));
   expect(statusRequest).toBeTruthy();
@@ -452,8 +453,8 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   expect(providerRequest).toContain('MAIN IDENTITY SENTINEL');
   expect(providerRequest).toContain('<tools>');
   expect(providerRequest).toContain('<rules>');
-  expect(providerRequest).toContain('<workflow>');
-  expect(providerRequest).toContain('CONVERSATION SENTINEL');
+  expect(providerRequest).not.toContain('<workflow>');
+  expect(providerRequest).not.toContain('CONVERSATION SENTINEL');
   expect(providerRequest).toContain('<docs>');
   expect(providerRequest).toContain('<project_context>');
   expect(providerRequest).toContain('<capabilities>');

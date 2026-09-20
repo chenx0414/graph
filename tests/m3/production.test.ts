@@ -56,7 +56,7 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   expect(provider.requests.length).toBeGreaterThanOrEqual(3);
 });
 
-test('a production master receives the proposal schema, requirement version and configured models', async () => {
+test('a production master receives compact rules without the removed workflow prompt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-schema-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer([{ text: 'Proposed later.' }]);
@@ -73,9 +73,10 @@ test('a production master receives the proposal schema, requirement version and 
   await runtime.host.runReady();
   const prompt = JSON.stringify(provider.requests[0]);
   expect(prompt).toContain('Requirement version: 1');
-  expect(prompt).toContain('proposalJson schema');
-  expect(prompt).toContain('implementation=local (high)');
-  expect(prompt).toContain('checkNode');
+  expect(prompt).toContain('<rules>\\n- Use tool results as evidence.');
+  expect(prompt).toContain('Bob_coder');
+  expect(prompt).not.toContain('<workflow>');
+  expect(prompt).not.toContain('proposalJson schema');
 });
 
 test('a later user message is delivered to the production master provider', async () => {
