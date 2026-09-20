@@ -1518,6 +1518,16 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(preview).toContain('<capabilities>');
   expect(preview).toContain('<cwd>');
   expect(preview).toContain('Pi 自动追加');
+  const markdown = await page.getByTestId('agent-context-preview-markdown').innerText();
+  expect(markdown).toContain('<identity>\n');
+  expect(markdown).toContain('<tools>\n');
+  expect(markdown).toContain('<rules>\n');
+  expect(markdown).toContain('<docs>\n');
+  expect(markdown).toContain('<project_context>\n');
+  expect(markdown).toContain('<capabilities>\n');
+  expect(markdown).toContain('<cwd>\n');
+  expect(markdown).toContain('<pi_cwd>\nCurrent working directory:');
+  expect(await page.locator('.agent-preview-section').count()).toBe(0);
   await page.getByTestId('agent-context-tab-prompts').click();
   await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();
   await page.getByTestId('agent-prompt-editor').fill('CUSTOM CONVERSATION {{fullAccessInstruction}}');

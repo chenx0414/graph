@@ -81,10 +81,6 @@ const ORIGIN_LABELS: Record<PromptOrigin, string> = {
   pi: 'Pi 自动追加',
 };
 
-function originTone(origin: PromptOrigin) {
-  return origin === 'editable' ? 'accent' : origin === 'generated' ? 'neutral' : 'warn';
-}
-
 function availabilityText(tool: AgentToolView) {
   if (!tool.enabled) return '已关闭';
   if (!tool.available) return '当前不可用';
@@ -218,6 +214,17 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     }
   }
 
+  async function copyPrompt() {
+    const text = data?.preview.text;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('完整 Agent Prompt 已复制', 'success');
+    } catch (reason) {
+      toast(`复制失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    }
+  }
+
   const openPromptsFolder = async () => {
     const bridge = window.graph;
     if (!bridge?.openResource) {
@@ -277,27 +284,25 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                   <div className="agent-preview-meta">
                     <span>Definition <code>{data?.definitionVersion ?? '未配置'}</code></span>
                     <span>Docs <code>{data?.docsRoot}</code></span>
+                    <span>{data?.preview.text.length.toLocaleString() ?? 0} 字符</span>
+                    <Button size="sm" icon="file" disabled={!data?.preview.text} onClick={() => void copyPrompt()}>
+                      复制完整 Prompt
+                    </Button>
                   </div>
-                  <div className="agent-preview-sections">
+                  <div className="agent-preview-section-map" aria-label="Prompt section sources" data-testid="agent-preview-section-map">
+                    <span className="agent-preview-origin-legend">
+                      <i data-origin="editable" />可编辑
+                      <i data-origin="generated" />动态生成
+                      <i data-origin="pi" />Pi 自动追加
+                    </span>
                     {data?.preview.sections.map(section => (
-                      <section key={section.id} className="agent-preview-section" data-section={section.id}>
-                        <header>
-                          <strong>{section.title}</strong>
-                          <code>&lt;{section.id}&gt;</code>
-                        </header>
-                        {section.parts.map(part => (
-                          <article key={part.id} className="agent-preview-part">
-                            <div>
-                              <strong>{part.title}</strong>
-                              <Pill tone={originTone(part.origin)}>{ORIGIN_LABELS[part.origin]}</Pill>
-                              {part.source && <code>{part.source}</code>}
-                            </div>
-                            <pre>{part.content}</pre>
-                          </article>
-                        ))}
-                      </section>
+                      <span className="agent-preview-section-source" key={section.id}>
+                        <code>&lt;{section.id}&gt;</code>
+                        <small>{[...new Set(section.parts.map(part => ORIGIN_LABELS[part.origin]))].join(' + ')}</small>
+                      </span>
                     ))}
                   </div>
+                  <pre className="agent-preview-markdown" data-testid="agent-context-preview-markdown">{data?.preview.text ?? ''}</pre>
                 </div>
               ) : tab === 'prompts' ? (
                 <div className="agent-prompt-layout">
