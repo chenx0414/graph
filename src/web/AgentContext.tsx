@@ -57,6 +57,7 @@ export interface AgentContextView {
   root: string;
   docsRoot: string;
   definitionVersion: string | null;
+  latestDefinitionVersion: string | null;
   prompts: AgentPromptView[];
   disabledTools: string[];
   tools: AgentToolView[];
@@ -143,6 +144,11 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
   const selected = data?.prompts.find(prompt => prompt.key === selectedPrompt) ?? null;
   const enabledTools = useMemo(() => data?.tools.filter(tool => tool.enabled && tool.available).length ?? 0, [data]);
   const customized = data?.prompts.filter(prompt => prompt.customized).length ?? 0;
+  const definitionChanged = Boolean(
+    data?.definitionVersion
+    && data.latestDefinitionVersion
+    && data.definitionVersion !== data.latestDefinitionVersion,
+  );
 
   function selectPrompt(prompt: AgentPromptView) {
     setSelectedPrompt(prompt.key);
@@ -242,7 +248,10 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
           type="button"
           className="agent-context-summary"
           data-testid="agent-context-open"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            setOpen(true);
+            void load().catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
+          }}
         >
           <span className="agent-context-summary-icon"><Icon name="spark" size={14} /></span>
           <span>
@@ -282,13 +291,19 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
               {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'preview' ? (
                 <div className="agent-preview-panel" data-testid="agent-context-preview">
                   <div className="agent-preview-meta">
-                    <span>Definition <code>{data?.definitionVersion ?? '未配置'}</code></span>
+                    <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
+                    {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
                     <span>Docs <code>{data?.docsRoot}</code></span>
                     <span>{data?.preview.text.length.toLocaleString() ?? 0} 字符</span>
                     <Button size="sm" icon="file" disabled={!data?.preview.text} onClick={() => void copyPrompt()}>
                       复制完整 Prompt
                     </Button>
                   </div>
+                  {definitionChanged && (
+                    <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
+                      当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。
+                    </div>
+                  )}
                   <div className="agent-preview-section-map" aria-label="Prompt section sources" data-testid="agent-preview-section-map">
                     <span className="agent-preview-origin-legend">
                       <i data-origin="editable" />可编辑

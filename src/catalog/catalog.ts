@@ -54,13 +54,19 @@ export class Catalog {
     return { id, version, key: `${id}@${version}` };
   }
 
-  /** Publish a recipe compilation only when the exact definition is not already present. */
+  /** Publish a recipe compilation unless it is already the latest version.
+   *
+   * Reusing an older matching definition would make the compile result point at
+   * a lower version than the current latest. Callers resolve the active main
+   * definition by maximum version, so a deliberate recipe rollback must create
+   * a new monotonic version instead of reactivating an old row that is now
+   * hidden behind newer definitions. */
   ensureDefinition(id: string, spec: DefinitionSpec) {
     if (!id.trim()) throw new RuntimeError('invalid_input', 'A definition id is required');
-    const rows = this.store.db.prepare('SELECT version,spec FROM definitions WHERE id=? ORDER BY version').all(id) as { version: number; spec: string }[];
+    const latest = this.store.db.prepare('SELECT version,spec FROM definitions WHERE id=? ORDER BY version DESC LIMIT 1').get(id) as { version: number; spec: string } | undefined;
     const desired = canonicalJson(spec);
-    for (const row of rows) {
-      if (canonicalJson(JSON.parse(row.spec) as Json) === desired) return { id, version: row.version, key: `${id}@${row.version}` };
+    if (latest && canonicalJson(JSON.parse(latest.spec) as Json) === desired) {
+      return { id, version: latest.version, key: `${id}@${latest.version}` };
     }
     return this.publishDefinition(id, spec);
   }

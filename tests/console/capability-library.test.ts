@@ -393,3 +393,24 @@ test('catalog composes the capability library and persists recipe compilation on
   expect(catalog.agentCombinations()).toEqual([]);
   expect(catalog.availableAgentDefinitions()).toEqual([]);
 });
+
+test('catalog publishes a new version when a recipe rolls back to a historical definition', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-catalog-rollback-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store);
+
+  const first = catalog.ensureDefinition('main', { recommendedGrade: 'high' });
+  const second = catalog.ensureDefinition('main', { recommendedGrade: 'medium' });
+  const rollback = catalog.ensureDefinition('main', { recommendedGrade: 'high' });
+
+  expect([first.key, second.key, rollback.key]).toEqual([
+    'main@1',
+    'main@2',
+    'main@3',
+  ]);
+  expect(catalog.listDefinitions()).toContainEqual({ id: 'main', version: 3 });
+  expect(catalog.definition('main@3')).toMatchObject({ id: 'main', version: 3, recommendedGrade: 'high' });
+  expect(catalog.ensureDefinition('main', { recommendedGrade: 'high' }).key).toBe('main@3');
+});

@@ -318,10 +318,12 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const view = conversationId
       ? await runtime.conversations.view(conversationId, { limit: 1 })
       : undefined;
-    const fallbackDefinition = runtime.catalog.definitions().find(item => item.id === 'main')
-      ?? runtime.catalog.definitions().find(item => item.id === 'master');
+    const definitions = runtime.catalog.definitions();
+    const fallbackDefinition = definitions.find(item => item.id === 'main')
+      ?? definitions.find(item => item.id === 'master');
+    const latestDefinitionVersion = fallbackDefinition ? `${fallbackDefinition.id}@${fallbackDefinition.version}` : null;
     const resolvedDefinitionVersion = view?.master?.definitionVersion
-      ?? (fallbackDefinition ? `${fallbackDefinition.id}@${fallbackDefinition.version}` : null);
+      ?? latestDefinitionVersion;
     const disabledTools = await options.agentContext.disabledTools();
     const context = await options.agentContext.view({
       models: '{{models}}',
@@ -412,6 +414,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return {
       ...context,
       definitionVersion: resolvedDefinitionVersion,
+      latestDefinitionVersion,
       tools,
       capabilities,
       preview: {
