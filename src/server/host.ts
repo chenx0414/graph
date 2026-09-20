@@ -1,10 +1,12 @@
 import { createApp } from './app.ts';
+import { join } from 'node:path';
 import { openTaskRuntime } from '../core/task-runtime.ts';
 import { RuntimeError } from '../core/types.ts';
 import type { ConfigStore } from './config-service.ts';
 import type { UsageService } from './usage.ts';
 import type { CapabilityCheckResult } from '../runtime/capabilities.ts';
 import type { CapabilityRecord } from '../catalog/catalog.ts';
+import { openAgentContextLibrary } from '../runtime/agent-context.ts';
 
 export interface StartupInfo {
   mode: 'view' | 'execute';
@@ -32,8 +34,10 @@ export interface AppServices {
 }
 
 export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService; systemContext?: Parameters<typeof openTaskRuntime>[0]['systemContext'] }) {
-  const runtime = await openTaskRuntime({ ...options, autoWake: Boolean(options.autoDrive) });
-  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}), ...(options.usage ? { usage: options.usage } : {}) });
+  const agentContext = options.agentContext ?? openAgentContextLibrary(join(options.stateDir, 'prompts'));
+  await agentContext.ensure();
+  const runtime = await openTaskRuntime({ ...options, agentContext, autoWake: Boolean(options.autoDrive) });
+  const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}), ...(options.usage ? { usage: options.usage } : {}), agentContext });
   let address: string;
   try {
     address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });

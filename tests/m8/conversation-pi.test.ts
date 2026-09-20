@@ -7,6 +7,7 @@ import { afterEach, expect, test } from 'vitest';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { git } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -415,4 +416,37 @@ test('a separate low-grade model creates the composer suggestion from isolated c
   expect(suggestionRequest).toContain('这是正常的最终回答。');
   expect(suggestionRequest).not.toContain('propose_graph creates a draft');
   expect(suggestionRequest).not.toContain('Feature tasks:');
+}, 120_000);
+
+test('editable prompt files and Main Agent tool selection apply to the next operation', async () => {
+  const root = await temp('context-overrides');
+  const provider = await openaiServer([{ text: 'ok' }]);
+  cleanup.push(() => provider.close());
+  const agentContext = openAgentContextLibrary(join(root, 'prompts'), { identity: 'Default identity' });
+  await agentContext.ensure();
+  await agentContext.savePrompt('agents/main.md', 'MAIN IDENTITY SENTINEL');
+  await agentContext.savePrompt('runtime/main-conversation.md', 'CONVERSATION SENTINEL {{fullAccessInstruction}}');
+  await agentContext.setDisabledTools(['list_dir', 'write_file']);
+
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      credentialFor: () => ({ credentialId: 'local', apiKey: 'scripted-local-key' }),
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+    agentContext,
+  });
+  cleanup.push(() => runtime.close());
+  await runtime.conversations.create({ text: '测试可编辑上下文', requestId: 'editable-context' });
+  await runtime.host.runReady();
+
+  const request = provider.requests[0] as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] };
+  const toolNames = (request.tools ?? []).map(tool => tool.function?.name ?? '');
+  expect(toolNames).not.toContain('list_dir');
+  expect(toolNames).not.toContain('write_file');
+  const chatter = JSON.stringify(request.messages);
+  expect(chatter).toContain('MAIN IDENTITY SENTINEL');
+  expect(chatter).toContain('CONVERSATION SENTINEL');
 }, 120_000);

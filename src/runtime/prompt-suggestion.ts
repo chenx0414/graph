@@ -1,6 +1,7 @@
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';
+import { DEFAULT_PROMPT_SUGGESTION_PROMPT } from './agent-context.ts';
 
 const GRADE_ORDER: ModelEntry['grade'][] = ['low', 'medium', 'high', 'highest'];
 
@@ -49,15 +50,11 @@ export async function generatePromptSuggestion(input: {
   model: Model<ModelApi>;
   userMessage: string;
   assistantReply: string;
+  systemPrompt?: string;
   signal?: AbortSignal;
 }) {
   const context: Context = {
-    systemPrompt: [
-      'Write exactly one concise next message the user may want to send.',
-      'Use the same language as the user message.',
-      'Return only that message. Do not explain, quote, label, or mention suggestions or the composer.',
-      'If there is no useful next message, return an empty string.',
-    ].join(' '),
+    systemPrompt: input.systemPrompt?.trim() || DEFAULT_PROMPT_SUGGESTION_PROMPT,
     messages: [{
       role: 'user',
       content: JSON.stringify({

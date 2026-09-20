@@ -2,6 +2,8 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { Type } from '@earendil-works/pi-ai';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Catalog } from '../../src/catalog/catalog.ts';
 import { TaskStore, canonicalJson } from '../../src/core/store.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
@@ -112,6 +114,58 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
   }
 });
 
+test('disabled tools are removed from the operation, allowlist and generated prompt', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-tools-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const capabilityRoot = join(root, 'capabilities');
+  await mkdir(workspace, { recursive: true });
+  await capability(capabilityRoot, 'extension', {
+    id: 'pi-probe',
+    kind: 'pi-extension',
+    version: '1.0.0',
+    name: 'Probe',
+    entry: './index.ts',
+    tools: [{ name: 'extension_probe', description: 'Probe.' }],
+  }, { 'index.ts': 'export default function () {}\n' });
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot });
+  await catalog.refresh();
+  catalog.publishDefinition('worker', {
+    recommendedGrade: 'medium',
+    capabilities: [{ id: 'pi-probe', version: '1.0.0' }],
+  });
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'worker');
+  cleanup.push(() => gate.close());
+  const hostTool: ToolDefinition = {
+    name: 'read',
+    label: 'Read',
+    description: 'Read a file.',
+    parameters: Type.Object({ path: Type.String() }),
+    execute: async () => ({ content: [{ type: 'text', text: 'ok' }], details: {} }),
+  };
+  const bundle = await openCapabilityBundle({ catalog, definitionVersion: 'worker@1' });
+  const operation = await bundle.openOperation({
+    workspace,
+    scratchDir: join(root, 'scratch'),
+    gate,
+    action: 'work',
+    disabledTools: ['read', 'extension_probe'],
+    hostTools: () => [hostTool],
+  });
+  try {
+    expect(operation.tools).toEqual([]);
+    expect(operation.piExtensionTools).toEqual([]);
+    expect(operation.allowedToolNames).toEqual([]);
+    expect(operation.prompts.appendSystem).not.toContain('read:');
+    expect(operation.prompts.appendSystem).not.toContain('extension_probe');
+    expect(operation.report.find(item => item.id === 'pi-probe')?.tools).toEqual([]);
+  } finally {
+    await operation.close();
+  }
+});
+
 test('bundle identity changes with injected content but not with operation grants or read-only overlay', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-capability-identity-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -149,4 +203,16 @@ test('bundle identity is based on content rather than the capability root path',
     bundles.push(await openCapabilityBundle({ catalog, definitionVersion: 'worker@1' }));
   }
   expect(bundles[1]!.digest).toBe(bundles[0]!.digest);
+});
+
+test('editable prompt overrides do not rotate the pinned capability identity', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-prompts-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot: join(root, 'capabilities') });
+  await catalog.refresh();
+  const first = await openCapabilityBundle({ catalog, bootstrap: { agent: 'Prompt version one' } });
+  const second = await openCapabilityBundle({ catalog, bootstrap: { agent: 'Prompt version two' } });
+  expect(second.digest).toBe(first.digest);
 });

@@ -8,6 +8,7 @@ import { appendNodeEntry } from '../../src/core/node-run.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openGraphServer } from '../../src/server/host.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
+import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -1483,3 +1484,37 @@ test('the compact shell keeps the new-chat composer inside the viewport', async 
   expect(composer!.x + composer!.width).toBeLessThanOrEqual(390);
   expect(await page.getByTestId('conversation-list').isHidden()).toBe(true);
 });
+
+test('the chat header exposes editable Agent prompts and Main Agent tools', async () => {
+  const root = await temp('agent-context');
+  const agentContext = openAgentContextLibrary(join(root, 'graph', 'prompts'), { identity: 'Default Main' });
+  await agentContext.ensure();
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+    agentContext,
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ text: '检查 Agent 上下文', requestId: 'agent-context-ui' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('agent-context-bar').waitFor();
+  expect(await page.getByTestId('agent-context-bar').innerText()).toContain('Agent 上下文');
+
+  await page.getByTestId('agent-context-open').click();
+  await page.getByTestId('agent-context-drawer').waitFor();
+  await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();
+  await page.getByTestId('agent-prompt-editor').fill('CUSTOM CONVERSATION {{fullAccessInstruction}}');
+  await page.getByRole('button', { name: '保存 Prompt' }).click();
+  await expect.poll(() => agentContext.override('runtime/main-conversation.md')).toContain('CUSTOM CONVERSATION');
+
+  await page.getByTestId('agent-context-tab-tools').click();
+  await page.getByTestId('agent-tool-write_file').uncheck();
+  await page.getByRole('button', { name: '保存工具选择' }).click();
+  await expect.poll(() => agentContext.disabledTools()).toContain('write_file');
+}, 60_000);

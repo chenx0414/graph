@@ -11,10 +11,11 @@ export interface AppPaths {
   webDir: string;
 }
 
-export type ResourceLibraryKind = 'skills' | 'mcp' | 'pi-extensions' | 'agent-md';
+export type ResourceLibraryKind = 'skills' | 'mcp' | 'pi-extensions' | 'agent-md' | 'prompts';
 
 /** Allowlisted local storage roots for resource-library folder actions. */
 export function resourceDirectory(graphHome: string, kind: ResourceLibraryKind): string {
+  if (kind === 'prompts') return join(graphHome, 'prompts');
   return join(graphHome, 'capabilities', kind);
 }
 

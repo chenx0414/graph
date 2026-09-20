@@ -49,6 +49,7 @@ describe('desktop app paths', () => {
     expect(resourceDirectory('/home/me/.graph', 'mcp')).toBe('/home/me/.graph/capabilities/mcp');
     expect(resourceDirectory('/home/me/.graph', 'pi-extensions')).toBe('/home/me/.graph/capabilities/pi-extensions');
     expect(resourceDirectory('/home/me/.graph', 'agent-md')).toBe('/home/me/.graph/capabilities/agent-md');
+    expect(resourceDirectory('/home/me/.graph', 'prompts')).toBe('/home/me/.graph/prompts');
   });
 });
 

@@ -214,7 +214,7 @@ if (!app.requestSingleInstanceLock()) {
       return result.canceled ? null : result.filePaths[0] ?? null;
     });
     ipcMain.handle('graph:open-resource', async (_event, kind) => {
-      if (kind !== 'skills' && kind !== 'mcp' && kind !== 'pi-extensions' && kind !== 'agent-md') {
+      if (kind !== 'skills' && kind !== 'mcp' && kind !== 'pi-extensions' && kind !== 'agent-md' && kind !== 'prompts') {
         return { opened: false, message: 'unknown resource library' };
       }
       const path = resourceDirectory(currentPaths().graphHome, kind);

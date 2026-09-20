@@ -33,6 +33,7 @@ import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.t
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
+import type { AgentContextLibrary } from '../runtime/agent-context.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
@@ -160,6 +161,8 @@ export async function openTaskRuntime(options: {
     bootstrapPrompts?: Record<string, string>;
     bootstrapToolPrompt?: string;
   };
+  /** User-editable prompt overrides and Main Agent tool selection. */
+  agentContext?: AgentContextLibrary;
   /** UI-hosted daemons wake dispatch as soon as a conversation message is queued. */
   autoWake?: boolean;
 }) {
@@ -325,6 +328,7 @@ export async function openTaskRuntime(options: {
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
+        ...(options.agentContext ? { agentContext: options.agentContext } : {}),
         ...(options.catalog?.bootstrapPrompts ? { bootstrapPrompts: options.catalog.bootstrapPrompts } : {}),
         ...(options.catalog?.bootstrapToolPrompt ? { bootstrapToolPrompt: options.catalog.bootstrapToolPrompt } : {}),
         ...(options.systemContext ? { systemContext: options.systemContext } : {}),

@@ -413,6 +413,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
     { id: 'mcp', title: 'MCP 库', icon: 'link' as const, description: '扫描自能力目录的 MCP servers。', items: capabilities.filter(item => item.kind === 'mcp') },
     { id: 'pi-extensions', title: 'Pi 扩展库', icon: 'box' as const, description: '扫描到的 Pi extensions 与 Graph extensions。', items: capabilities.filter(item => item.kind === 'pi-extension' || item.kind === 'extension') },
     { id: 'agent-md', title: 'Agent.md 库', icon: 'message' as const, description: '可作为 Agent 身份模板的 prompt 能力。', items: capabilities.filter(item => item.kind === 'prompt' && item.role === 'agent') },
+    { id: 'prompts', title: 'Prompt 库', icon: 'message' as const, description: '集中管理注入给 Agent 与 Pi 的系统提示词和运行时提示词。', items: [] as CapabilityRecord[] },
     { id: 'config', title: '配置', icon: 'settings' as const, description: '需要凭据、环境变量或服务地址才能加载的能力。', items: [] as CapabilityRecord[] },
     { id: 'agents', title: 'Agent 组合库', icon: 'catalog' as const, description: '引用已有能力的配方；编译后直接成为可派发定义。', items: [] as CapabilityRecord[] },
     { id: 'architectures', title: '架构库', icon: 'graph' as const, description: 'Graph 支持并可组合使用的经典任务图架构。', items: [] as CapabilityRecord[] },
@@ -428,6 +429,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
   const visible = filtered.slice(0, resourceLimits[active.id] ?? 40);
   const countFor = (id: string) => id === 'config' ? settings?.capabilityConfig?.length ?? 0
     : id === 'architectures' ? GRAPH_ARCHITECTURES.length
+    : id === 'prompts' ? 6
     : id === 'agents' ? agentCombinations.length
       : sections.find(item => item.id === id)?.items.length ?? 0;
   const refresh = () => {
@@ -461,7 +463,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
       toast(cause instanceof Error ? cause.message : String(cause), 'danger');
     }
   };
-  async function openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md') {
+  async function openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md' | 'prompts') {
     if (!bridge?.openResource) {
       toast('请在桌面 APP 中使用访达打开能力目录', 'info');
       return;
@@ -485,7 +487,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
               <div className="row" style={{ gap: 4 }}>
                 {active.id === 'agents' && <button type="button" className="icon-button" onClick={() => setEditing(null)} title="新建 Agent 配方" aria-label="新建 Agent 配方"><Icon name="plus" size={16} /></button>}
                 <button type="button" className="icon-button" onClick={refresh} title="重新扫描能力目录" aria-label="重新扫描能力目录"><Icon name="refresh" size={16} /></button>
-                {active.id !== 'agents' && active.id !== 'architectures' && active.id !== 'config' && <button type="button" className="icon-button" data-testid={`resource-open-${active.id}`} onClick={() => void openResource(active.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md')} title="在访达中打开能力目录" aria-label="在访达中打开能力目录"><Icon name="folder" size={16} /></button>}
+                {active.id !== 'agents' && active.id !== 'architectures' && active.id !== 'config' && <button type="button" className="icon-button" data-testid={`resource-open-${active.id}`} onClick={() => void openResource(active.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md' | 'prompts')} title="在访达中打开目录" aria-label="在访达中打开目录"><Icon name="folder" size={16} /></button>}
               </div>
             )}
           >
@@ -544,6 +546,11 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                   </div>
                 </>
               ) : <Empty icon="catalog" title="暂无 Agent 配方" hint="点击右上角 + 创建配方。" />
+            ) : active.id === 'prompts' ? (
+              <div className="prompt-library-summary" data-testid="prompt-library-summary">
+                <p>{active.description} 对话顶部的“Agent 上下文”可以直接查看和编辑；这里可以打开固定文件夹做批量维护。</p>
+                <Button size="sm" icon="folder" onClick={() => void openResource('prompts')}>打开 Prompt 文件夹</Button>
+              </div>
             ) : active.id === 'config' ? (
               <CapabilityConfigPanel items={settings?.capabilityConfig ?? []} />
             ) : active.id === 'architectures' ? (

@@ -18,6 +18,7 @@ import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import { graphApplicationRoot } from '../runtime/graph-root.ts';
 import { openGraphServer } from './host.ts';
+import { openAgentContextLibrary } from '../runtime/agent-context.ts';
 import { createUsageService } from './usage.ts';
 
 export interface DaemonOptions {
@@ -278,6 +279,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   const capabilityPath = join(userGraphHome, 'capabilities');
   const recipesPath = join(userGraphHome, 'agent-combinations.json');
   const bootstrap = await loadPresetBootstrap(presetsRoot, log);
+  const agentContext = openAgentContextLibrary(join(userGraphHome, 'prompts'), {
+    ...(bootstrap.prompts.main ? { identity: bootstrap.prompts.main } : {}),
+    ...(bootstrap.toolPrompt ? { toolAwareness: bootstrap.toolPrompt } : {}),
+  });
+  await agentContext.ensure();
   let catalogCapabilities: import('../catalog/catalog.ts').CapabilityRecord[] = [];
   let catalogCombinations: import('../catalog/agent-combinations.ts').AgentCombinationView[] = [];
   const systemSummary = async () => {
@@ -400,6 +406,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     systemContext: {
       systemSummary,
     },
+    agentContext,
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
       pushSecret: (ref, value) => pushSecret(ref, value),

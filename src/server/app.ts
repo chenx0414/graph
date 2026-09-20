@@ -14,8 +14,84 @@ import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { DefinitionSpec } from '../catalog/catalog.ts';
 import { capabilityConfigViews } from '../catalog/capability-config.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
+import type { AgentContextLibrary, AgentPromptKey } from '../runtime/agent-context.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
+
+const HOST_MAIN_TOOLS = [
+  { name: 'read', description: 'Read a UTF-8 file or supported image from the workspace or a bound capability.', source: 'Graph' },
+  { name: 'write_file', description: 'Write a UTF-8 file inside the instance workspace.', source: 'Graph' },
+  { name: 'list_dir', description: 'List files in the workspace or a permitted read-only capability directory.', source: 'Graph' },
+  { name: 'artifact_list', description: 'List published task artifacts and their immutable versions.', source: 'Graph' },
+  { name: 'artifact_get', description: 'Read one shared artifact’s metadata.', source: 'Graph' },
+  { name: 'artifact_read', description: 'Read bounded content from an exact shared artifact version.', source: 'Graph' },
+  { name: 'artifact_publish', description: 'Publish an immutable shared artifact version.', source: 'Graph' },
+  { name: 'artifact_retire', description: 'Retire a shared artifact version without deleting its bytes.', source: 'Graph' },
+  { name: 'artifact_promote', description: 'Promote a task artifact into project-scoped knowledge.', source: 'Graph' },
+  { name: 'submit_result', description: 'Submit structured JSON output for the operation.', source: 'Graph' },
+  { name: 'run_command', description: 'Run an allowed build/test or read-only Git command.', source: 'Graph' },
+  { name: 'fetch', description: 'Fetch a text document from a granted domain.', source: 'Graph' },
+  { name: 'propose_graph', description: 'Submit a task graph proposal for user confirmation.', source: 'Main Agent' },
+  { name: 'revise_graph', description: 'Revise a confirmed task graph without changing acceptance criteria.', source: 'Main Agent' },
+  { name: 'list_problems', description: 'List internal problems owned by the Main Agent.', source: 'Main Agent' },
+  { name: 'resolve_problem', description: 'Diagnose and resolve an internal execution problem.', source: 'Main Agent' },
+  { name: 'search_resources', description: 'Search the capability directory.', source: 'Main Agent' },
+  { name: 'get_resource', description: 'Read one capability’s metadata.', source: 'Main Agent' },
+  { name: 'read_system_capabilities', description: 'Read the current models, subscriptions, recipes and compiled definitions.', source: 'Main Agent' },
+  { name: 'inspect_graph_system', description: 'Inspect Graph failures, open problems and pending system changes.', source: 'Main Agent' },
+  { name: 'propose_system_change', description: 'Propose a Graph system change for user approval.', source: 'Main Agent' },
+  { name: 'apply_system_change', description: 'Apply an already approved system change.', source: 'Main Agent' },
+  { name: 'list_agent_combinations', description: 'List reusable Agent recipes.', source: 'Main Agent' },
+  { name: 'get_agent_combination', description: 'Read one reusable Agent recipe.', source: 'Main Agent' },
+  { name: 'save_agent_combination', description: 'Create or edit an Agent recipe.', source: 'Main Agent' },
+  { name: 'delete_agent_combination', description: 'Delete one user-editable Agent recipe.', source: 'Main Agent' },
+  { name: 'compile_agent_combination', description: 'Compile a recipe into a versioned Agent definition.', source: 'Main Agent' },
+  { name: 'request_model_access', description: 'Ask the user to configure a missing model or subscription.', source: 'Main Agent' },
+] as const;
+
+function capabilityToolNames(runtime: Runtime, definitionVersion: string | null) {
+  if (!definitionVersion) return [];
+  const match = /^(.*)@(\d+)$/.exec(definitionVersion);
+  if (!match) return [];
+  try {
+    const definition = runtime.catalog.definitionSpec(match[1]!, Number(match[2])) as DefinitionSpec;
+    return (definition.capabilities ?? []).flatMap(bound => {
+      const record = runtime.catalog.capability(bound.id, bound.version);
+      const tools = record?.snapshot && typeof record.snapshot === 'object' && !Array.isArray(record.snapshot)
+        ? (record.snapshot as { manifest?: { tools?: { name?: unknown; description?: unknown }[] } }).manifest?.tools ?? []
+        : [];
+      return tools
+        .filter(tool => typeof tool.name === 'string' && tool.name)
+        .map(tool => ({
+          name: String(tool.name),
+          description: typeof tool.description === 'string' ? tool.description : '',
+          source: record?.name ?? bound.id,
+        }));
+    });
+  } catch {
+    return [];
+  }
+}
+
+function mainAgentToolView(runtime: Runtime, taskId: string | null, definitionVersion: string | null, disabledTools: readonly string[]) {
+  const disabled = new Set(disabledTools);
+  const tools = new Map<string, { name: string; description: string; source: string }>();
+  for (const tool of HOST_MAIN_TOOLS) tools.set(tool.name, tool);
+  for (const tool of capabilityToolNames(runtime, definitionVersion)) tools.set(tool.name, tool);
+  if (taskId) {
+    try {
+      const run = runtime.nodeRun(taskId, 'master', { limit: 1 });
+      for (const capability of run.capabilities) {
+        for (const name of capability.tools ?? []) {
+          if (!tools.has(name)) tools.set(name, { name, description: capability.reason ?? '', source: capability.name });
+        }
+      }
+    } catch { /* no master instance yet */ }
+  }
+  return [...tools.values()]
+    .map(tool => ({ ...tool, enabled: !disabled.has(tool.name) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
 
 function graphAgentDetail(runtime: Runtime, definitionVersion: string | null | undefined) {
   if (!definitionVersion) return null;
@@ -63,7 +139,7 @@ function graphAgentDetail(runtime: Runtime, definitionVersion: string | null | u
   }
 }
 
-export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService }) {
+export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService; agentContext?: AgentContextLibrary }) {
   const app = Fastify({ logger: false });
   const session = createSession();
   const capabilitySecretValues = () => options.appServices?.capabilityConfig?.secretValues() ?? Object.fromEntries(
@@ -102,6 +178,47 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/startup', async () => options.startupInfo?.() ?? options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
+  app.get('/api/agent-context', async request => {
+    if (!options.agentContext) throw new RuntimeError('invalid_config', 'Agent context library is unavailable');
+    const conversationId = (request.query as { conversationId?: string }).conversationId;
+    const view = conversationId
+      ? await runtime.conversations.view(conversationId, { limit: 1 })
+      : undefined;
+    const fallbackDefinition = runtime.catalog.definitions().find(item => item.id === 'main')
+      ?? runtime.catalog.definitions().find(item => item.id === 'master');
+    const resolvedDefinitionVersion = view?.master?.definitionVersion
+      ?? (fallbackDefinition ? `${fallbackDefinition.id}@${fallbackDefinition.version}` : null);
+    const disabledTools = await options.agentContext.disabledTools();
+    const context = await options.agentContext.view({
+      models: '{{models}}',
+      requirementVersion: '{{requirementVersion}}',
+      selfModelSection: '{{selfModelSection}}',
+      fullAccessInstruction: '{{fullAccessInstruction}}',
+      retrievalNote: '{{retrievalNote}}',
+    });
+    return {
+      ...context,
+      definitionVersion: resolvedDefinitionVersion,
+      tools: mainAgentToolView(runtime, view?.anchorTaskId ?? null, resolvedDefinitionVersion, disabledTools),
+    };
+  });
+  app.put('/api/agent-context/prompts', async request => {
+    if (!options.agentContext) throw new RuntimeError('invalid_config', 'Agent context library is unavailable');
+    const body = request.body as { key?: unknown; content?: unknown };
+    if (typeof body?.key !== 'string' || typeof body.content !== 'string') {
+      throw new RuntimeError('invalid_input', 'key and content are required');
+    }
+    await options.agentContext.savePrompt(body.key as AgentPromptKey, body.content);
+    return options.agentContext.view();
+  });
+  app.put('/api/agent-context/tools', async request => {
+    if (!options.agentContext) throw new RuntimeError('invalid_config', 'Agent context library is unavailable');
+    const body = request.body as { disabled?: unknown };
+    if (!Array.isArray(body?.disabled) || body.disabled.some(name => typeof name !== 'string')) {
+      throw new RuntimeError('invalid_input', 'disabled must be a string array');
+    }
+    return { disabledTools: await options.agentContext.setDisabledTools(body.disabled as string[]) };
+  });
   if (options.usage) {
     app.get('/api/usage', async () => options.usage!.get(false));
     app.post('/api/usage/refresh', async () => options.usage!.get(true));

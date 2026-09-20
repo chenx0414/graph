@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
+import { AgentContextBar } from './AgentContext.tsx';
 import { api } from './api.ts';
 import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
@@ -819,6 +820,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
           共享产物
         </button>
       </nav>
+
+      <AgentContextBar conversationId={id} />
 
       {paused && (
         <section className="conversation-alert" data-testid="conversation-paused-notice">

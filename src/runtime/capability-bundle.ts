@@ -37,6 +37,8 @@ export interface CapabilityOperationOptions {
   additionalReadRoots?: string[];
   /** Effective access policy frozen for this operation. */
   access?: ResolvedAccessPolicy;
+  /** User-selected main-Agent tools that must not be offered to this operation. */
+  disabledTools?: readonly string[];
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
   hostTools(input: { readRoots: readonly string[] }): ToolDefinition[];
 }
@@ -106,7 +108,6 @@ export class CapabilityBundleVersion {
     this.runtimePolicyDigest = digest(runtimePolicy);
     this.digest = digest({
       definitionVersion: this.definitionVersion,
-      bootstrap: input.bootstrap ?? {},
       toolPolicyDigest: this.toolPolicyDigest,
       runtimePolicyDigest: this.runtimePolicyDigest,
     });
@@ -135,15 +136,21 @@ export class CapabilityBundleVersion {
         ...(options.access ? { access: options.access } : {}),
       });
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
-      const hostTools = options.hostTools({ readRoots });
-      const tools = Object.freeze([...hostTools, ...loaded.tools]);
+      const disabledTools = new Set((options.disabledTools ?? []).map(name => name.trim()).filter(Boolean));
+      const hostTools = options.hostTools({ readRoots }).filter(tool => !disabledTools.has(tool.name));
+      const loadedTools = loaded.tools.filter(tool => !disabledTools.has(tool.name));
+      const tools = Object.freeze([...hostTools, ...loadedTools]);
+      const piExtensionTools = loaded.piExtensionTools.filter(name => !disabledTools.has(name));
+      const report = loaded.report.map(fact => fact.tools
+        ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) }
+        : fact);
       const prompts = capabilityPrompts({
         definitionVersion: this.definitionVersion ?? 'unknown@1',
         action: options.action,
         ...(options.role ? { role: options.role } : {}),
         agentPrompt: loaded.prompts.agent,
         toolPrompt: loaded.prompts.tool,
-        report: loaded.report,
+        report,
         tools,
       });
       const effectiveToolPolicy = {
@@ -155,7 +162,7 @@ export class CapabilityBundleVersion {
           description: tool.description,
           parameters: tool.parameters as unknown,
         })),
-        piExtensionTools: [...loaded.piExtensionTools].sort(),
+        piExtensionTools: [...piExtensionTools].sort(),
       };
       const toolPolicyDigest = digest(effectiveToolPolicy);
       const runtimePolicyDigest = digest({
@@ -174,7 +181,7 @@ export class CapabilityBundleVersion {
       });
       const allowedToolNames = Object.freeze([...new Set([
         ...tools.map(tool => tool.name),
-        ...loaded.piExtensionTools,
+        ...piExtensionTools,
       ])].sort());
       const operation: CapabilityOperation = {
         bundleDigest: this.digest,
@@ -187,7 +194,7 @@ export class CapabilityBundleVersion {
           system: prompts.systemPrompt,
           appendSystem: prompts.appendSystemPrompt,
         },
-        report: loaded.report,
+        report,
         skillPaths: Object.freeze([...loaded.skillPaths]),
         readRoots,
         writeRoots: Object.freeze([...loaded.writeRoots]),
@@ -197,7 +204,7 @@ export class CapabilityBundleVersion {
         allowLocalBinding: loaded.allowLocalBinding,
         unixSockets: Object.freeze([...loaded.unixSockets]),
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
-        piExtensionTools: Object.freeze([...loaded.piExtensionTools]),
+        piExtensionTools: Object.freeze([...piExtensionTools]),
         close: () => loaded!.close(),
       };
       return Object.freeze(operation);
