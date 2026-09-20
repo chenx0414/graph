@@ -150,6 +150,7 @@ async function main() {
     stream,
     thinkingLevel: config.thinkingLevel,
     tools,
+    nativeTools: config.nativeTools,
     ...(config.skillPaths.length ? { skillPaths: config.skillPaths } : {}),
     ...(config.piExtensionPaths.length ? { piExtensionPaths: config.piExtensionPaths } : {}),
     piExtensionTools: config.piExtensionTools,

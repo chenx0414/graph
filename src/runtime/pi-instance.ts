@@ -52,6 +52,7 @@ export interface PiInstanceOptions {
   stream: StreamFn;
   thinkingLevel?: ThinkingLevel;
   tools?: ToolDefinition[];
+  nativeTools?: string[];
   skillPaths?: string[];
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
@@ -218,6 +219,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   }
   const settings = SettingsManager.inMemory({
     compaction: options.compaction ?? { enabled: false }, retry: { enabled: false, provider: { maxRetries: 0 } },
+    images: { autoResize: false },
     enableAnalytics: false, enableInstallTelemetry: false,
   });
   const loader = new DefaultResourceLoader({
@@ -238,7 +240,9 @@ export async function openPiInstance(options: PiInstanceOptions) {
   });
   await loader.reload();
   if (options.tools?.some(tool => !isExternallyGated(tool)) && !options.broker) throw new Error('Tools require a call broker');
-  const customTools = options.tools?.map(tool => isExternallyGated(tool) ? tool : {
+  const nativeTools = [...new Set((options.nativeTools ?? []).map(name => name.trim()).filter(Boolean))];
+  const nativeToolNames = new Set(nativeTools);
+  const customTools = options.tools?.filter(tool => !nativeToolNames.has(tool.name)).map(tool => isExternallyGated(tool) ? tool : {
     ...tool,
     execute: async (...args: Parameters<ToolDefinition['execute']>) => {
       const id = randomUUID();
@@ -247,8 +251,15 @@ export async function openPiInstance(options: PiInstanceOptions) {
       finally { options.broker!.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }); }
     },
   }) ?? [];
-  const allowedToolNames = new Set(options.allowedToolNames ?? [...customTools.map(tool => tool.name), ...options.piExtensionTools ?? []]);
-  const registeredToolNames = [...customTools.map(tool => tool.name), ...loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])];
+  const allowedToolNames = new Set([
+    ...(options.allowedToolNames ?? [...customTools.map(tool => tool.name), ...options.piExtensionTools ?? []]),
+    ...nativeTools,
+  ]);
+  const registeredToolNames = [
+    ...customTools.map(tool => tool.name),
+    ...nativeTools,
+    ...loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()]),
+  ];
   const { session } = await createAgentSession({
     cwd: workspace, agentDir: stateDir, model: options.model,
     modelRuntime: options.modelRuntime, resourceLoader: loader,
@@ -263,7 +274,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
     ? loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])
       .filter(name => !customNames.has(name) && !BUILTIN_TOOL_NAMES.has(name) && allowedExtensionTools.has(name))
     : [];
-  const activeToolNames = [...customNames, ...extensionNames];
+  const activeToolNames = session.getActiveToolNames().filter(name => customNames.has(name) || nativeToolNames.has(name) || extensionNames.includes(name));
   session.agent.streamFunction = options.stream;
   if (options.onEvent) session.subscribe(options.onEvent);
   const loadedExtensions = loader.getExtensions().extensions.map(extension => extension.path);

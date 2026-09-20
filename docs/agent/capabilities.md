@@ -28,12 +28,15 @@ Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版�
 
 一个 Agent 的实际 tool surface 由以下来源合并：
 
-1. role 对应的 host tools；
-2. definition 绑定的 capability tools；
-3. Pi extension 注册且允许的 tools；
-4. 当前 operation 的 read-only、pause、access policy 和 disabled-tool policy。
+1. Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`、`powershell`；
+2. role 对应的 Graph host tools；
+3. definition 绑定的 capability tools；
+4. Pi extension 注册且允许的 tools；
+5. 当前 operation 的 pause、access policy 和 disabled-tool policy。
 
 模型可见的 `<tools>` 文本和 provider 的可执行 tool schema 必须来自同一个实际启用集合。关闭工具时，两者都应移除。
+
+Pi 原生工具在受限 Pi 子进程内执行，调用前仍经过 Graph send gate 和 OS sandbox。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
 
 ## Capability binding
 
@@ -45,6 +48,7 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 - Runtime 网络由 capability manifest 声明，默认拒绝未声明域名。
 - Extension 没有自动网络权限。
 - 命令、MCP 和工具仍在 OS sandbox 内运行。
+- Native bash/powershell 可以使用 shell 语法，但不能越过 workspace、受保护路径和宿主访问策略。
 - `networkDomains`、工具自报 annotation 或 MCP 描述都不是权限本身。
 
 ## 发现与诊断

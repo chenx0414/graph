@@ -30,6 +30,7 @@ export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'on
   binding: AgentSessionBinding;
   thinkingLevel: ThinkingLevel;
   tools: PiWorkerTool[];
+  nativeTools: string[];
   skillPaths: string[];
   piExtensionPaths: string[];
   piExtensionTools: string[];
@@ -130,6 +131,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     model: options.model,
     thinkingLevel: options.thinkingLevel ?? 'off',
     tools: serializedTools(tools),
+    nativeTools: options.nativeTools ?? [],
     skillPaths,
     piExtensionPaths,
     piExtensionTools: options.piExtensionTools ?? [],
@@ -160,6 +162,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     stream: options.stream,
     resources: {},
     tools: hostedTools,
+    allowedNativeTools: config.nativeTools,
     allowedExtensionTools: options.piExtensionTools ?? [],
     onEvent: event => options.onEvent?.(event as AgentSessionEvent),
   });

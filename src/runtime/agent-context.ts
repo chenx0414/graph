@@ -43,7 +43,7 @@ export const DEFAULT_MAIN_GRAPH_PROMPT = [
   ' "decisions": ["<binding constraint the user confirmed>"]}',
 ].join('\n');
 
-export const DEFAULT_WORKER_PROMPT = 'Use workspace tools to read and edit files. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.{{retrievalNote}}';
+export const DEFAULT_WORKER_PROMPT = 'Use the native Pi tools to read, search, edit and run commands in the assigned worktree. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. Native bash is sandboxed by the workspace and host access policy.{{retrievalNote}}';
 
 export const DEFAULT_PROMPT_SUGGESTION_PROMPT = [
   'Write exactly one concise next message the user may want to send.',
@@ -74,7 +74,7 @@ export const DEFAULT_REVIEWER_RULES = [
   'Do not modify implementation files. Return an independent verdict that the verifier can evaluate.',
 ].join('\n');
 
-export const DEFAULT_MAIN_TOOL_GUIDANCE = 'Use only the callable tools listed below. Prefer read-only investigation before proposing or revising work. Graph enforces every model, command, MCP and extension call at the host boundary.';
+export const DEFAULT_MAIN_TOOL_GUIDANCE = 'Use only the callable tools listed below. Pi native tools are the basic workspace surface; use them directly when the task requires investigation or changes. Graph enforces every model, command, MCP and extension call at the host boundary.';
 export const DEFAULT_WORKER_TOOL_GUIDANCE = 'Use the smallest set of workspace and capability tools needed for the assigned node. Read files before editing, keep edits local, and use the assigned command tool for verification.';
 export const DEFAULT_REVIEWER_TOOL_GUIDANCE = 'Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing.';
 
@@ -166,6 +166,13 @@ const LEGACY_PROMPT_PATHS: Partial<Record<AgentPromptKey, string>> = {
   'tools/main.md': 'tool-awareness.md',
 };
 const LEGACY_PROMPT_DEFAULTS: Partial<Record<AgentPromptKey, readonly string[]>> = {
+  'agents/main.md': [[
+    '# Master Agent identity',
+    '',
+    'You are the Master Agent for one Graph feature task. You talk directly with the user, investigate the project, expose uncertainty, and turn the confirmed goal into a reviewable task graph.',
+    '',
+    'Keep your identity stable across models. You may propose work and maintain an already confirmed graph, but you do not implement business changes yourself. Ask only questions whose answers change the plan, preserve confirmed decisions, and submit a new draft when the user changes direction.',
+  ].join('\n')],
   'rules/common.md': [
     [
       'Use tool results as evidence. Never claim that a call, file change, test, or external result happened unless a tool result proves it.',
@@ -183,6 +190,9 @@ const LEGACY_PROMPT_DEFAULTS: Partial<Record<AgentPromptKey, readonly string[]>>
       'Keep execution problems internal until diagnosed. Report verified progress, blockers, and next actions without dumping raw internals.',
     ].join('\n'),
     'Recipe names use a readable identity plus role, such as `Bob_coder` or `Alice_reviewer`; preserve that name when presenting an Agent and pair it with the stable recipe id.',
+  ],
+  'runtime/worker.md': [
+    'Use workspace tools to read and edit files. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.{{retrievalNote}}',
   ],
 };
 const LEGACY_PROMPT_REPLACEMENTS: Partial<Record<AgentPromptKey, readonly (readonly [string, string])[]>> = {
@@ -222,7 +232,7 @@ export class AgentContextLibrary {
     this.root = root;
     this.contextRoot = root;
     this.defaults = {
-      identity: defaults.identity?.trim() || 'You are the Main Agent in Graph. Work with the user to investigate, plan and coordinate work without directly editing business code.',
+      identity: defaults.identity?.trim() || 'You are the Main Agent in Graph. Work with the user to investigate, plan, coordinate and directly carry out scoped workspace work when needed.',
       commonRules: defaults.commonRules?.trim() || DEFAULT_COMMON_RULES,
       mainRules: defaults.mainRules?.trim() || DEFAULT_MAIN_RULES,
       workerRules: defaults.workerRules?.trim() || DEFAULT_WORKER_RULES,

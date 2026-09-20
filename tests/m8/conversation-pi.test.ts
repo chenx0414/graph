@@ -8,6 +8,7 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
+import { PI_NATIVE_TOOL_NAMES } from '../../src/runtime/pi-native-tools.ts';
 import { git } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -71,7 +72,7 @@ async function conversationProvider() {
     }
     if (!listed) {
       listed = true;
-      chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'call-ls', type: 'function', function: { name: 'list_dir', arguments: JSON.stringify({ path: '.' }) } }] }, null);
+      chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'call-ls', type: 'function', function: { name: 'ls', arguments: JSON.stringify({ path: '.' }) } }] }, null);
       end('tool_calls');
       return;
     }
@@ -199,9 +200,9 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   const masterRequests = provider.requests.filter(request => request.tools.includes('propose_graph'));
   expect(masterRequests.length).toBeGreaterThanOrEqual(3);
   for (const request of masterRequests) {
+    expect(request.tools).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES]));
     expect(request.tools).not.toContain('write_file');
     expect(request.tools).not.toContain('run_command');
-    expect(request.tools).toContain('read');
     expect(request.tools).not.toContain('suggest_prompt');
   }
   expect(JSON.stringify(masterRequests[0]!.messages)).not.toContain('ongoing conversation');
@@ -214,7 +215,11 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   expect(statusPrompt).toContain(confirmed.taskId.slice(0, 8));
   expect(statusPrompt).toContain('work:pending');
   // Workers keep their write tools.
-  expect(provider.requests.some(request => request.tools.includes('write_file'))).toBe(true);
+  const workerRequests = provider.requests.filter(request => request.tools.includes('submit_result') && !request.tools.includes('propose_graph'));
+  expect(workerRequests.length).toBeGreaterThan(0);
+  for (const request of workerRequests) {
+    expect(request.tools).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES]));
+  }
 
   // Streaming and tool activity are on the conversation stream; the durable
   // messages stay the authoritative record.
@@ -228,7 +233,7 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
     reset: true,
   });
   expect(events.some(event => event.type === 'message.tool' && (event.data as { phase?: string }).phase === 'start')).toBe(true);
-  expect(view.messages.some(message => message.role === 'tool' && message.text.includes('list_dir'))).toBe(true);
+  expect(view.messages.some(message => message.role === 'tool' && message.text.includes('ls'))).toBe(true);
   expect(view.streams).toEqual([]);
 }, 120_000);
 
@@ -427,7 +432,7 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   await agentContext.ensure();
   await agentContext.savePrompt('agents/main.md', 'MAIN IDENTITY SENTINEL');
   await agentContext.savePrompt('runtime/main-conversation.md', 'CONVERSATION SENTINEL {{fullAccessInstruction}}');
-  await agentContext.setDisabledTools(['list_dir', 'write_file']);
+  await agentContext.setDisabledTools(['ls', 'write']);
 
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
@@ -445,8 +450,8 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
 
   const request = provider.requests[0] as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] };
   const toolNames = (request.tools ?? []).map(tool => tool.function?.name ?? '');
-  expect(toolNames).not.toContain('list_dir');
-  expect(toolNames).not.toContain('write_file');
+  expect(toolNames).not.toContain('ls');
+  expect(toolNames).not.toContain('write');
   const providerRequest = JSON.stringify(request);
   const user = JSON.stringify((request.messages ?? []).filter(message => message.role === 'user'));
   expect(providerRequest).toContain('<identity>');

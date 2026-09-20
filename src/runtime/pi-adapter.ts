@@ -20,6 +20,7 @@ import type { CapabilityLoadFact, CapabilityPermissionRequest } from './capabili
 import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { graphDocumentationPaths } from './agent-docs.ts';
+import { PI_NATIVE_TOOL_NAMES, piNativeToolPromptEntries } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
@@ -361,10 +362,6 @@ export function createPiAdapter(options: {
         };
         const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
         const accessPolicy = operation.accessPolicy;
-        // Discussion turns must investigate without modifying the project; the
-        // same read-only boundary applies to conversation masters after the
-        // draft is confirmed.
-        const discussion = spec.role === 'master' && (task.phase === 'chatting' || task.phase === 'discussing');
         const conversation = task.phase === 'chatting' ? conversationForTask(options.store, operation.taskId) : undefined;
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
@@ -446,7 +443,7 @@ export function createPiAdapter(options: {
             gate,
             action: spec.action,
             ...(spec.role ? { role: spec.role } : {}),
-            ...(discussion ? { readOnly: true } : {}),
+            nativeTools: PI_NATIVE_TOOL_NAMES,
             ...(accessPolicy ? { access: accessPolicy } : {}),
             ...(masterReadRoots.length ? { additionalReadRoots: masterReadRoots } : {}),
             grants: operation.grants,
@@ -457,7 +454,6 @@ export function createPiAdapter(options: {
             hostTools: ({ readRoots }) => agentTools({
               workspace, ...(spec.role ? { role: spec.role } : {}),
               ...(accessPolicy ? { access: accessPolicy } : {}),
-              ...(discussion ? { readOnly: true } : {}),
               ...(readRoots.length ? { readRoots: [...readRoots] } : {}),
               run: (command, args) => commands!.run(command, args),
               ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
@@ -691,6 +687,10 @@ export function createPiAdapter(options: {
           : options.channels?.bootstrapToolPrompt
             ?? (promptRole === 'main' ? DEFAULT_MAIN_TOOL_GUIDANCE : promptRole === 'reviewer' ? DEFAULT_REVIEWER_TOOL_GUIDANCE : DEFAULT_WORKER_TOOL_GUIDANCE);
         const projectContext = await projectContextForWorkspace(workspace);
+        const promptTools = [
+          ...toolPromptEntries(tools, capabilityOperation.report),
+          ...piNativeToolPromptEntries(),
+        ];
         const composedPrompt = composeAgentSystemPrompt({
           identity: capabilityOperation.prompts.system,
           definitionVersion,
@@ -702,7 +702,7 @@ export function createPiAdapter(options: {
           },
           docs: graphDocumentationPaths(),
           ...(projectContext ? { projectContext } : {}),
-          tools: toolPromptEntries(tools, capabilityOperation.report),
+          tools: promptTools,
           capabilities: capabilityPromptEntries(capabilityOperation.report),
           cwd: workspace,
           piCwd: workspace,
@@ -735,7 +735,7 @@ export function createPiAdapter(options: {
         // projection cannot later guess from catalog status.
         recordCapabilityLoad(options.store, {
           taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
-          operationId: operation.id, readOnly: Boolean(discussion), report: capabilityOperation.report,
+          operationId: operation.id, readOnly: false, report: capabilityOperation.report,
           digest: capabilityOperation.bundleDigest,
           toolPolicyDigest: capabilityOperation.toolPolicyDigest,
           runtimePolicyDigest: capabilityOperation.runtimePolicyDigest,
@@ -881,7 +881,7 @@ export function createPiAdapter(options: {
               ? { forkFrom: { sessionFile: agentContext.sourceSessionFile, ...(agentContext.sourceLeafId ? { leafId: agentContext.sourceLeafId } : {}) } }
               : {}),
             broker: gate,
-            ...(discussion ? { readOnly: true } : {}),
+            nativeTools: [...capabilityOperation.nativeTools],
             ...(conversation ? { allowWorkspaceChange: true } : {}),
             // Auto-compaction stays on for workers, reviewers and the master;
             // thresholds follow the model that will receive the summary.

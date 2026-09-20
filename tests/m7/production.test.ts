@@ -32,9 +32,9 @@ test('production Pi writes the Bilibili web on a clone through workspace tools a
   const testFile = await readFile(join(payloadDir, 'web-server.test.js'), 'utf8');
   const provider = await openaiServer([
     { tools: [
-      { id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'src/web-server.js', content: server }) },
-      { id: 'w2', name: 'write_file', arguments: JSON.stringify({ path: 'src/web/index.html', content: page }) },
-      { id: 'w3', name: 'write_file', arguments: JSON.stringify({ path: 'test/web-server.test.js', content: testFile }) },
+      { id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'src/web-server.js', content: server }) },
+      { id: 'w2', name: 'write', arguments: JSON.stringify({ path: 'src/web/index.html', content: page }) },
+      { id: 'w3', name: 'write', arguments: JSON.stringify({ path: 'test/web-server.test.js', content: testFile }) },
     ] },
     { text: 'Wrote the Bilibili web files.' },
   ]);

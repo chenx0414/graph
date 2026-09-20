@@ -12,6 +12,7 @@ export function createWorkerRequests(options: {
   stream: StreamFn;
   resources: Record<string, { url: string; headers?: Record<string, string> }>;
   tools?: Record<string, ToolDefinition>;
+  allowedNativeTools?: readonly string[];
   allowedExtensionTools?: readonly string[];
   onEvent?: (event: unknown) => void;
 }) {
@@ -53,9 +54,10 @@ export function createWorkerRequests(options: {
       return tool.execute(String(request.id ?? ''), params as never, undefined, undefined, undefined as never);
     }
     if (request.operation === 'tool_gate') {
-      if (typeof request.name !== 'string' || !request.name) throw new Error('Invalid extension tool name');
-      if (!(options.allowedExtensionTools ?? []).includes(request.name)) {
-        return { allowed: false, reason: `Pi extension tool ${request.name} is not declared by the bound capability` };
+      if (typeof request.name !== 'string' || !request.name) throw new Error('Invalid tool name');
+      const native = (options.allowedNativeTools ?? []).includes(request.name);
+      if (!native && !(options.allowedExtensionTools ?? []).includes(request.name)) {
+        return { allowed: false, reason: `Tool ${request.name} is not enabled for this Agent operation` };
       }
       const id = randomUUID();
       try {

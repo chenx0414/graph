@@ -44,7 +44,7 @@ export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attem
       ? [
           'Your result feeds a graph.verify independent gate. Submit it with submit_result; outputJson must be:',
           '{"schemaVersion":1,"body":{"kind":"independent","verdict":"pass|fail|unresolved","reason":"<nonempty>","evidence":[{"path":"<absolute path of your written review file>","digest":"<sha256 hex of that file>"}]}}',
-          'Write the review to a file first and compute its sha256 with a small node script run through run_command; do not fabricate the digest.',
+          'Write the review to a file first and compute its sha256 with a small node command run through bash; do not fabricate the digest.',
         ].join('\n')
       : extra.review?.length
         ? `Your result feeds a graph.verify ${extra.review[0]!.kind} gate; submit the report schema that gate expects, including exact artifact versions from the dependency inputs.`

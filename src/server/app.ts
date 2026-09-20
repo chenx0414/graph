@@ -22,6 +22,7 @@ import {
   type AgentPromptKey,
 } from '../runtime/agent-context.ts';
 import { graphDocumentationPaths } from '../runtime/agent-docs.ts';
+import { piNativeToolPromptEntries } from '../runtime/pi-native-tools.ts';
 import {
   composeAgentSystemPrompt,
   type AgentCapabilityPromptEntry,
@@ -32,9 +33,6 @@ type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 const DOCUMENTATION = graphDocumentationPaths();
 
 const HOST_MAIN_TOOLS = [
-  { name: 'read', description: 'Read a UTF-8 file or supported image from the workspace or a bound capability.', source: 'Graph' },
-  { name: 'write_file', description: 'Write a UTF-8 file inside the instance workspace.', source: 'Graph' },
-  { name: 'list_dir', description: 'List files in the workspace or a permitted read-only capability directory.', source: 'Graph' },
   { name: 'artifact_list', description: 'List published task artifacts and their immutable versions.', source: 'Graph' },
   { name: 'artifact_get', description: 'Read one shared artifact’s metadata.', source: 'Graph' },
   { name: 'artifact_read', description: 'Read bounded content from an exact shared artifact version.', source: 'Graph' },
@@ -42,7 +40,6 @@ const HOST_MAIN_TOOLS = [
   { name: 'artifact_retire', description: 'Retire a shared artifact version without deleting its bytes.', source: 'Graph' },
   { name: 'artifact_promote', description: 'Promote a task artifact into project-scoped knowledge.', source: 'Graph' },
   { name: 'submit_result', description: 'Submit structured JSON output for the operation.', source: 'Graph' },
-  { name: 'run_command', description: 'Run an allowed build/test or read-only Git command.', source: 'Graph' },
   { name: 'fetch', description: 'Fetch a text document from a granted domain.', source: 'Graph' },
   { name: 'propose_graph', description: 'Submit a task graph proposal for user confirmation.', source: 'Main Agent' },
   { name: 'revise_graph', description: 'Revise a confirmed task graph without changing acceptance criteria.', source: 'Main Agent' },
@@ -123,7 +120,6 @@ function hostToolParameters(name: string) {
   return [];
 }
 
-const READ_ONLY_UNAVAILABLE_TOOLS = new Set(['write_file', 'run_command']);
 const SYSTEM_TOOLS = new Set([
   'read_system_capabilities',
   'inspect_graph_system',
@@ -169,7 +165,7 @@ function mainAgentToolView(
   taskId: string | null,
   definitionVersion: string | null,
   disabledTools: readonly string[],
-  options: { discussion: boolean; includeSystemTools: boolean },
+  options: { includeSystemTools: boolean },
 ) {
   const disabled = new Set(disabledTools);
   const tools = new Map<string, {
@@ -183,6 +179,17 @@ function mainAgentToolView(
     available: boolean;
     runtimeAvailable: boolean | null;
   }>();
+  for (const tool of piNativeToolPromptEntries()) {
+    tools.set(tool.name, {
+      ...tool,
+      version: null,
+      capabilityId: null,
+      parameters: tool.parameters,
+      permission: tool.permission,
+      available: true,
+      runtimeAvailable: true,
+    });
+  }
   for (const tool of HOST_MAIN_TOOLS) {
     if (SYSTEM_TOOLS.has(tool.name) && !options.includeSystemTools) continue;
     tools.set(tool.name, {
@@ -191,7 +198,7 @@ function mainAgentToolView(
     capabilityId: null,
     parameters: hostToolParameters(tool.name),
     permission: hostToolPermission(tool.name),
-    available: !(options.discussion && READ_ONLY_UNAVAILABLE_TOOLS.has(tool.name)),
+    available: true,
     runtimeAvailable: true,
     });
   }
@@ -331,7 +338,6 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       retrievalNote: '{{retrievalNote}}',
     });
     const tools = mainAgentToolView(runtime, view?.anchorTaskId ?? null, resolvedDefinitionVersion, disabledTools, {
-      discussion: !view?.accepted.length,
       includeSystemTools: Boolean(options.systemContext?.systemSummary),
     });
     const capabilities = definitionCapabilities(runtime, resolvedDefinitionVersion);

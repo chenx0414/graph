@@ -47,12 +47,12 @@ async function fixture(plans: Parameters<typeof openaiServer>[0]) {
     ],
   }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  return { runtime, provider, workspace, task: runtime.user.task(taskId) };
+  return { runtime, provider, root, workspace, task: runtime.user.task(taskId) };
 }
 
 test('a worker can run an allowed build/test command inside the sandbox', async () => {
   const { runtime, provider, workspace, task } = await fixture([
-    { tools: [{ id: 'c1', name: 'run_command', arguments: JSON.stringify({ command: 'node', args: ['--test', 'test/sample.test.js'] }) }] },
+    { tools: [{ id: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'node --test test/sample.test.js' }) }] },
     { text: 'Ran the test suite.' },
   ]);
   await runtime.host.drive();
@@ -61,23 +61,24 @@ test('a worker can run an allowed build/test command inside the sandbox', async 
   // reviewed delivery merges it into the target checkout.
   const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
   expect(await readFile(join(workerTree, 'ran.txt'), 'utf8')).toBe('ran');
-  expect(JSON.stringify(provider.requests[1])).toContain('exit 0');
+  expect(JSON.stringify(provider.requests[1])).toContain('pass 1');
   expect(view.invocations.some(row => row.usage && row.usage.input === 0 && row.usage.output === 0)).toBe(true);
 });
 
-test('a worker cannot run commands outside the allowlist or inline evaluation', async () => {
-  const { runtime, provider, workspace } = await fixture([
+test('native bash supports shell syntax but cannot escape the workspace sandbox', async () => {
+  const { runtime, provider, workspace, task } = await fixture([
     { tools: [
-      { id: 'c1', name: 'run_command', arguments: JSON.stringify({ command: 'sh', args: ['-c', 'echo bad'] }) },
-      { id: 'c2', name: 'run_command', arguments: JSON.stringify({ command: 'node', args: ['-e', 'require("fs").writeFileSync("inline.txt","bad")'] }) },
+      { id: 'c1', name: 'bash', arguments: JSON.stringify({ command: "printf 'shell-ok' > shell.txt" }) },
+      { id: 'c2', name: 'bash', arguments: JSON.stringify({ command: "printf 'bad' > ../outside.txt" }) },
     ] },
-    { text: 'Both commands were refused.' },
+    { text: 'Shell checks completed.' },
   ]);
   await runtime.host.drive();
-  const second = JSON.stringify(provider.requests[1]);
-  expect(second).toContain('not allowed');
-  expect(second).toContain('Inline node evaluation');
-  await expect(readFile(join(workspace, 'inline.txt'), 'utf8')).rejects.toThrow();
+  const view = await task.view();
+  const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(await readFile(join(workerTree, 'shell.txt'), 'utf8')).toBe('shell-ok');
+  await expect(readFile(join(workerTree, '..', 'outside.txt'), 'utf8')).rejects.toThrow();
+  expect(JSON.stringify(provider.requests[1])).toContain('Operation not permitted');
 });
 
 function git(cwd: string, args: string[]) {

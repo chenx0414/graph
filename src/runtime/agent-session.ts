@@ -55,6 +55,7 @@ export interface AgentSessionRequest {
   stream: StreamFn;
   thinkingLevel?: ThinkingLevel;
   tools?: ToolDefinition[];
+  nativeTools?: string[];
   skillPaths?: string[];
   readRoots?: string[];
   writeRoots?: string[];
@@ -158,6 +159,7 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
         stream: request.stream,
         ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
         ...(request.tools ? { tools: request.tools } : {}),
+        ...(request.nativeTools?.length ? { nativeTools: request.nativeTools } : {}),
         ...(request.skillPaths?.length ? { skillPaths: request.skillPaths } : {}),
         ...(request.piExtensionPaths?.length ? { piExtensionPaths: request.piExtensionPaths } : {}),
         ...(request.piExtensionTools?.length ? { piExtensionTools: request.piExtensionTools } : {}),

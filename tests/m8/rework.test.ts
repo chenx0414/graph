@@ -443,7 +443,7 @@ test('a pause after partial work keeps the operation interrupted and resumable',
   const root = await temp('partial-pause');
   let task: { pause(requestId: string): Promise<unknown> } | undefined;
   const provider = await openaiServer([
-    { tools: [{ id: 'write-1', name: 'write_file', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
+    { tools: [{ id: 'write-1', name: 'write', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
     { text: 'Work complete after resume' },
   ]);
   cleanup.push(() => provider.close());
@@ -513,7 +513,7 @@ test('a pause after partial work keeps the operation interrupted and resumable',
 async function interruptedUnknown(check: 'usage' | 'reconcile') {
   const root = await temp(`unknown-${check}`);
   const provider = await openaiServer([
-    { usage: null, tools: [{ id: 'write-1', name: 'write_file', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
+    { usage: null, tools: [{ id: 'write-1', name: 'write', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
     { text: 'Work complete after release' },
   ]);
   cleanup.push(() => provider.close());
@@ -591,8 +591,8 @@ test('interrupted unknown usage can be recorded or released and then resumes', a
 async function interruptedMixed(check: 'usage' | 'reconcile') {
   const root = await temp(`mixed-${check}`);
   const provider = await openaiServer([
-    { tools: [{ id: 'write-1', name: 'write_file', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
-    { usage: null, tools: [{ id: 'write-2', name: 'write_file', arguments: JSON.stringify({ path: 'second.txt', content: 'second turn' }) }] },
+    { tools: [{ id: 'write-1', name: 'write', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
+    { usage: null, tools: [{ id: 'write-2', name: 'write', arguments: JSON.stringify({ path: 'second.txt', content: 'second turn' }) }] },
     { text: 'Work complete after release' },
   ]);
   cleanup.push(() => provider.close());
@@ -663,7 +663,7 @@ async function interruptedRework(check: 'usage' | 'reconcile') {
   const root = await temp(`rework-${check}`);
   const provider = await openaiServer([
     { text: 'first incomplete implementation' },
-    { usage: null, tools: [{ id: 'fix-1', name: 'write_file', arguments: JSON.stringify({ path: 'fix.txt', content: 'fix' }) }] },
+    { usage: null, tools: [{ id: 'fix-1', name: 'write', arguments: JSON.stringify({ path: 'fix.txt', content: 'fix' }) }] },
     { text: 'real second round completion' },
   ]);
   cleanup.push(() => provider.close());

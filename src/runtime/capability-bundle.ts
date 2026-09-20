@@ -3,6 +3,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
+import { graphToolsSupersededByNative } from './pi-native-tools.ts';
 import {
   capabilityPrompts,
   loadCapabilities,
@@ -39,6 +40,8 @@ export interface CapabilityOperationOptions {
   access?: ResolvedAccessPolicy;
   /** User-selected main-Agent tools that must not be offered to this operation. */
   disabledTools?: readonly string[];
+  /** Pi-native tools enabled for this operation. Host tools with the same name are not registered. */
+  nativeTools?: readonly string[];
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
   hostTools(input: { readRoots: readonly string[] }): ToolDefinition[];
 }
@@ -49,6 +52,7 @@ export interface CapabilityOperation {
   readonly runtimePolicyDigest: string;
   readonly legacyPromptDigest: string;
   readonly tools: readonly ToolDefinition[];
+  readonly nativeTools: readonly string[];
   readonly allowedToolNames: readonly string[];
   readonly prompts: { system: string; appendSystem: string };
   readonly report: LoadedCapabilities['report'];
@@ -137,10 +141,17 @@ export class CapabilityBundleVersion {
       });
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
       const disabledTools = new Set((options.disabledTools ?? []).map(name => name.trim()).filter(Boolean));
-      const hostTools = options.hostTools({ readRoots }).filter(tool => !disabledTools.has(tool.name));
-      const loadedTools = loaded.tools.filter(tool => !disabledTools.has(tool.name));
+      const nativeTools = Object.freeze([...new Set(
+        (options.nativeTools ?? []).map(name => name.trim()).filter(name => name && !disabledTools.has(name)),
+      )].sort());
+      const nativeToolNames = graphToolsSupersededByNative(nativeTools);
+      const hostTools = options.hostTools({ readRoots })
+        .filter(tool => !disabledTools.has(tool.name) && !nativeToolNames.has(tool.name));
+      const loadedTools = loaded.tools
+        .filter(tool => !disabledTools.has(tool.name) && !nativeToolNames.has(tool.name));
       const tools = Object.freeze([...hostTools, ...loadedTools]);
-      const piExtensionTools = loaded.piExtensionTools.filter(name => !disabledTools.has(name));
+      const piExtensionTools = loaded.piExtensionTools
+        .filter(name => !disabledTools.has(name) && !nativeToolNames.has(name));
       const report = loaded.report.map(fact => fact.tools
         ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) }
         : fact);
@@ -162,6 +173,7 @@ export class CapabilityBundleVersion {
           description: tool.description,
           parameters: tool.parameters as unknown,
         })),
+        nativeTools,
         piExtensionTools: [...piExtensionTools].sort(),
       };
       const toolPolicyDigest = digest(effectiveToolPolicy);
@@ -181,6 +193,7 @@ export class CapabilityBundleVersion {
       });
       const allowedToolNames = Object.freeze([...new Set([
         ...tools.map(tool => tool.name),
+        ...nativeTools,
         ...piExtensionTools,
       ])].sort());
       const operation: CapabilityOperation = {
@@ -189,6 +202,7 @@ export class CapabilityBundleVersion {
         runtimePolicyDigest,
         legacyPromptDigest: prompts.digest,
         tools,
+        nativeTools,
         allowedToolNames,
         prompts: {
           system: prompts.systemPrompt,

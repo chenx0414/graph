@@ -21,9 +21,10 @@ async function temp(name: string) {
   return dir;
 }
 
-/** A bound extension tries to write a business file. Discussion must refuse;
- * the confirmed worker with the same capability proves the write path works. */
-test('a bound extension cannot write business files during discussion but a worker can', async () => {
+/** Graph now gives every Agent the native and bound write surface. The
+ * restricted executor still proves that traversal outside the workspace is
+ * denied for both the discussion master and the confirmed worker. */
+test('a bound extension can write inside the workspace during discussion and a worker can', async () => {
   const root = await temp('extension');
   const workspace = join(root, 'project');
   await mkdir(workspace, { recursive: true });
@@ -54,15 +55,13 @@ test('a bound extension cannot write business files during discussion but a work
   runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [{ id: 'ext', version: '1.0.0' }] }, 'master');
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium', capabilities: [{ id: 'ext', version: '1.0.0' }] }, 'coder');
 
-  // Discussion: the model calls the same capability tool, but the worker runs
-  // with the business directory read-only.
   const created = await runtime.conversations.create({ projectId: 'p', text: '只讨论，先看看项目。不要修改业务文件。', requestId: 'create' });
   await runtime.host.runReady();
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.tasks).toHaveLength(0);
-  await expect(readFile(join(workspace, 'extension-capability.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-  const refusal = view.messages.filter(message => message.role === 'tool').map(message => message.text).join('\n');
-  expect(refusal).toContain('mcp_ext_write_proof');
+  expect(await readFile(join(workspace, 'extension-capability.txt'), 'utf8')).toBe('extension capability write');
+  const toolResult = view.messages.filter(message => message.role === 'tool').map(message => message.text).join('\n');
+  expect(toolResult).toContain('mcp_ext_write_proof');
 
   // Positive control: the same capability bound to a confirmed worker writes.
   await runtime.supervisor(created.taskId).propose({

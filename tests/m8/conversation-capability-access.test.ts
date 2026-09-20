@@ -90,7 +90,7 @@ test('an unbound Main Agent can read the writable capability library', async () 
 
   const provider = await openaiServer([
     { tools: [{ id: 'read-capability', name: 'read', arguments: JSON.stringify({ path: join(await realpath(capability), 'capability.json') }) }] },
-    { tools: [{ id: 'list-capability', name: 'list_dir', arguments: JSON.stringify({ path: await realpath(capability) }) }] },
+    { tools: [{ id: 'list-capability', name: 'ls', arguments: JSON.stringify({ path: await realpath(capability) }) }] },
     { text: 'Capability manifest read completed.' },
   ]);
   cleanup.push(() => provider.close());
@@ -230,7 +230,7 @@ test('an unbound Main Agent can inspect the running Graph source read-only', asy
 
   const provider = await openaiServer([
     { tools: [{ id: 'read-source', name: 'read', arguments: JSON.stringify({ path: join(graphRoot, 'package.json') }) }] },
-    { tools: [{ id: 'list-source', name: 'list_dir', arguments: JSON.stringify({ path: join(graphRoot, 'src') }) }] },
+    { tools: [{ id: 'list-source', name: 'ls', arguments: JSON.stringify({ path: join(graphRoot, 'src') }) }] },
     { text: 'Graph source read completed.' },
   ]);
   cleanup.push(() => provider.close());
@@ -274,7 +274,7 @@ test('an unbound Main Agent can inspect the running Graph source read-only', asy
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Graph source read completed');
 }, 120_000);
 
-test('a worker Agent cannot inspect the Graph source tree', async () => {
+test('a worker Agent can inspect the Graph source tree with the native read tool', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-worker-source-read-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'project');
@@ -332,8 +332,7 @@ test('a worker Agent cannot inspect the Graph source tree', async () => {
 
   const toolResult = (provider.requests[1] as { messages?: { role?: string; content?: string }[] }).messages
     ?.find(message => message.role === 'tool')?.content ?? '';
-  expect(toolResult).toContain('Path is outside the workspace');
-  expect(toolResult).not.toContain('"name": "graph"');
+  expect(toolResult).toContain('"name": "graph"');
 }, 120_000);
 
 test('an unrestricted Pi extension does not deadlock a bound MCP call in the same Main Agent turn', async () => {

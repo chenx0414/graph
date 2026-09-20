@@ -1542,7 +1542,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await expect.poll(() => agentContext.override('runtime/main-conversation.md')).not.toContain('CUSTOM CONVERSATION');
 
   await page.getByTestId('agent-context-tab-tools').click();
-  await page.getByTestId('agent-tool-write_file').uncheck();
+  await page.getByTestId('agent-tool-write').uncheck();
   await page.getByRole('button', { name: '保存工具选择' }).click();
-  await expect.poll(() => agentContext.disabledTools()).toContain('write_file');
+  await expect.poll(() => agentContext.disabledTools()).toContain('write');
 }, 60_000);

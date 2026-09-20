@@ -107,7 +107,7 @@ test('a production Pi session may exceed a single-call reservation without block
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-reserve-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer([
-    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }], usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
+    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }], usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
     { text: 'Wrote the feature.', usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
   ]);
   cleanup.push(() => provider.close());
@@ -279,7 +279,7 @@ test('a production reviewer receives the independent review report schema', asyn
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'package.json'), '{}\n');
   const provider = await openaiServer([
-    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'x' }) }] },
+    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'feature.txt', content: 'x' }) }] },
     { text: 'Wrote the feature.' },
     { text: 'Review submitted.' },
   ]);
@@ -320,7 +320,7 @@ test('a production worker writes the workspace through tools', async () => {
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'README.md'), 'project\n');
   const provider = await openaiServer([
-    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }] },
+    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }] },
     { text: 'Wrote feature.txt' },
   ]);
   cleanup.push(() => provider.close());

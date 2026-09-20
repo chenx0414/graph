@@ -68,17 +68,17 @@ function plans() {
     body: { kind: 'independent', verdict: 'pass', reason: 'Independent review of the Bilibili web', evidence: [{ path: '/tmp/graph-m7-review.md', digest: reviewDigest }] },
   });
   const reviewTools = { tools: [
-    { id: 'r1', name: 'write_file', arguments: JSON.stringify({ path: 'docs/review.md', content: reviewBody }) },
+    { id: 'r1', name: 'write', arguments: JSON.stringify({ path: 'docs/review.md', content: reviewBody }) },
     { id: 'r2', name: 'submit_result', arguments: JSON.stringify({ outputJson: reviewDecision }) },
   ] };
   return [
     { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'm7-plan' }) }] },
     { text: 'Proposed the Bilibili web graph.' },
-    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'test/web.test.js', content: webTest }) }] },
+    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'test/web.test.js', content: webTest }) }] },
     { text: 'Wrote the web tests.' },
     reviewTools,
     { text: 'Review submitted.' },
-    { tools: [{ id: 'w2', name: 'write_file', arguments: JSON.stringify({ path: 'revision-marker.txt', content: 'moved\n' }) }] },
+    { tools: [{ id: 'w2', name: 'write', arguments: JSON.stringify({ path: 'revision-marker.txt', content: 'moved\n' }) }] },
     { text: 'Moved the target after the login check.' },
     reviewTools,
     { text: 'Review submitted again.' },
