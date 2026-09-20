@@ -92,5 +92,6 @@ test('unknown prompt keys and invalid tool names are refused', async () => {
   await library.ensure();
 
   await expect(library.savePrompt('../outside.md' as never, 'x')).rejects.toThrow('Unknown Agent prompt');
+  await expect(library.savePrompt('docs/INDEX.md' as never, 'x')).rejects.toThrow('Unknown Agent prompt');
   await expect(library.setDisabledTools(['bad\nname'])).rejects.toThrow('Invalid tool name');
 });

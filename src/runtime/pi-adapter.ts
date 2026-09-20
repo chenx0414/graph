@@ -19,6 +19,7 @@ import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityLoadFact, CapabilityPermissionRequest } from './capabilities.ts';
 import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
 import { graphApplicationRoot } from './graph-root.ts';
+import { graphDocumentationPaths } from './agent-docs.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
@@ -37,7 +38,6 @@ import { openWorkspaceCommandRunner } from './workspace-command.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import {
   DEFAULT_COMMON_RULES,
-  DEFAULT_DOC_INDEX,
   DEFAULT_MAIN_RULES,
   DEFAULT_MAIN_TOOL_GUIDANCE,
   DEFAULT_PROMPT_SUGGESTION_PROMPT,
@@ -690,9 +690,6 @@ export function createPiAdapter(options: {
           ? await agentPromptLibrary.prompt(`tools/${promptRole}.md`)
           : options.channels?.bootstrapToolPrompt
             ?? (promptRole === 'main' ? DEFAULT_MAIN_TOOL_GUIDANCE : promptRole === 'reviewer' ? DEFAULT_REVIEWER_TOOL_GUIDANCE : DEFAULT_WORKER_TOOL_GUIDANCE);
-        const docsIndex = agentPromptLibrary
-          ? await agentPromptLibrary.prompt('docs/INDEX.md')
-          : DEFAULT_DOC_INDEX;
         const projectContext = await projectContextForWorkspace(workspace);
         const composedPrompt = composeAgentSystemPrompt({
           identity: capabilityOperation.prompts.system,
@@ -703,10 +700,7 @@ export function createPiAdapter(options: {
             role: roleRules,
             ...(promptRole === 'main' ? {} : { runtime: workerRules }),
           },
-          docs: {
-            root: agentPromptLibrary?.docsRoot ?? join(graphApplicationRoot(), 'docs'),
-            index: docsIndex,
-          },
+          docs: graphDocumentationPaths(),
           ...(projectContext ? { projectContext } : {}),
           tools: toolPromptEntries(tools, capabilityOperation.report),
           capabilities: capabilityPromptEntries(capabilityOperation.report),

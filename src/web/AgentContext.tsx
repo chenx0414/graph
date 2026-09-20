@@ -23,7 +23,7 @@ export interface AgentPromptView {
   key: string;
   title: string;
   description: string;
-  group: 'identity' | 'tools' | 'rules' | 'runtime' | 'docs';
+  group: 'identity' | 'tools' | 'rules' | 'runtime';
   file: string;
   content: string;
   customized: boolean;
@@ -73,7 +73,6 @@ const GROUP_LABELS: Record<AgentPromptView['group'], string> = {
   tools: '工具指导',
   rules: '规则',
   runtime: '运行时',
-  docs: 'Graph Docs',
 };
 
 const ORIGIN_LABELS: Record<PromptOrigin, string> = {
@@ -293,7 +292,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                   <div className="agent-preview-meta">
                     <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
                     {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
-                    <span>Docs <code>{data?.docsRoot}</code></span>
+                    <span>源码 Docs <code>{data?.docsRoot}</code></span>
                     <span>{data?.preview.text.length.toLocaleString() ?? 0} 字符</span>
                     <Button size="sm" icon="file" disabled={!data?.preview.text} onClick={() => void copyPrompt()}>
                       复制完整 Prompt

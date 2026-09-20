@@ -1,3 +1,5 @@
+import { graphDocumentationPrompt, type GraphDocumentationPaths } from './agent-docs.ts';
+
 export type AgentPromptOrigin = 'editable' | 'generated' | 'pi';
 
 export interface AgentPromptPart {
@@ -55,10 +57,7 @@ export interface ComposeAgentSystemPromptInput {
     role: string;
     runtime?: string;
   };
-  docs: {
-    root: string;
-    index: string;
-  };
+  docs: GraphDocumentationPaths;
   projectContext?: {
     path: string;
     content: string;
@@ -160,26 +159,13 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     }] : []),
   ]);
 
-  const docs = section('docs', 'Documentation', [
-    {
-      id: 'docs.root',
-      title: 'Documentation root',
-      origin: 'generated',
-      content: [
-        'Graph documentation is read on demand; do not treat every topic as current context.',
-        `- Documentation root: ${input.docs.root}`,
-        `- Index: ${joinDisplayPath(input.docs.root, 'INDEX.md')}`,
-        '- Resolve docs/... paths relative to the documentation root, not the business workspace.',
-      ].join('\n'),
-    },
-    {
-      id: 'docs.index',
-      title: 'Documentation index and reading protocol',
-      origin: 'editable',
-      content: input.docs.index,
-      source: 'docs/INDEX.md',
-    },
-  ]);
+  const docs = section('docs', 'Documentation', [{
+    id: 'docs.guide',
+    title: 'Graph documentation and reading protocol',
+    origin: 'generated',
+    content: graphDocumentationPrompt(input.docs),
+    source: 'docs/agent/README.md',
+  }]);
 
   const projectContext = section('project_context', 'Project context', [{
     id: 'project_context.instructions',
@@ -249,8 +235,4 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     previewSections,
     previewText: previewSections.map(renderedSection).join('\n\n'),
   };
-}
-
-function joinDisplayPath(root: string, name: string) {
-  return `${root.replace(/[\\/]+$/, '')}/${name}`;
 }

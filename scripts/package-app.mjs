@@ -35,6 +35,8 @@ await writeFile(join(stage, 'package.json'), `${JSON.stringify({
 }, null, 2)}\n`);
 
 for (const [from, to] of [
+  ['docs/agent', 'docs/agent'],
+  ['examples', 'examples'],
   ['desktop', 'desktop'],
   ['src', 'src'],
   ['build', 'build'],
@@ -57,7 +59,7 @@ await writeFile(join(stage, 'electron-builder.json'), `${JSON.stringify({
   appId: 'dev.graph.console',
   productName: 'Graph',
   directories: { output: join(root, 'dist/app'), buildResources: 'build' },
-  files: ['desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'runtime/**/*', 'node_modules/**/*', 'package.json'],
+  files: ['docs/agent/**/*', 'examples/**/*', 'desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'runtime/**/*', 'node_modules/**/*', 'package.json'],
   asar: false,
   npmRebuild: false,
   electronVersion: repo.devDependencies.electron,

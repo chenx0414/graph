@@ -8,6 +8,7 @@ import { appendNodeEntry } from '../../src/core/node-run.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openGraphServer } from '../../src/server/host.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
+import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
 import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -1519,6 +1520,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(preview).toContain('<capabilities>');
   expect(preview).toContain('<cwd>');
   expect(preview).toContain('Pi 自动追加');
+  expect(preview).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
   const markdown = await page.getByTestId('agent-context-preview-markdown').innerText();
   expect(markdown).toContain('<identity>\n');
   expect(markdown).toContain('<tools>\n');
@@ -1531,6 +1533,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(markdown).toContain('<pi_cwd>\nCurrent working directory:');
   expect(await page.locator('.agent-preview-section').count()).toBe(0);
   await page.getByTestId('agent-context-tab-prompts').click();
+  expect(await page.getByTestId('agent-prompt-docs/INDEX.md').count()).toBe(0);
   await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();
   await page.getByTestId('agent-prompt-editor').fill('CUSTOM CONVERSATION {{fullAccessInstruction}}');
   await page.getByRole('button', { name: '保存 Prompt' }).click();

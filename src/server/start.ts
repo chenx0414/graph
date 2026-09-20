@@ -17,6 +17,7 @@ import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefr
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import { graphApplicationRoot } from '../runtime/graph-root.ts';
+import { graphDocumentationPaths } from '../runtime/agent-docs.ts';
 import { openGraphServer } from './host.ts';
 import { openAgentContextLibrary } from '../runtime/agent-context.ts';
 import { createUsageService } from './usage.ts';
@@ -282,9 +283,9 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   const agentContext = openAgentContextLibrary(join(userGraphHome, 'prompts'), {
     ...(bootstrap.prompts.main ? { identity: bootstrap.prompts.main } : {}),
     ...(bootstrap.toolPrompt ? { mainTools: bootstrap.toolPrompt } : {}),
-    ...(Object.keys(bootstrap.agentDocs).length ? { docs: bootstrap.agentDocs } : {}),
   });
   await agentContext.ensure();
+  const documentation = graphDocumentationPaths();
   let catalogCapabilities: import('../catalog/catalog.ts').CapabilityRecord[] = [];
   let catalogCombinations: import('../catalog/agent-combinations.ts').AgentCombinationView[] = [];
   const systemSummary = async () => {
@@ -342,7 +343,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       },
       agentContext: {
         root: agentContext.root,
-        docsRoot: agentContext.docsRoot,
+        docsRoot: documentation.root,
       },
       application: {
         root: graphApplicationRoot(),

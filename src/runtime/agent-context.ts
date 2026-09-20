@@ -78,50 +78,6 @@ export const DEFAULT_MAIN_TOOL_GUIDANCE = 'Use only the callable tools listed be
 export const DEFAULT_WORKER_TOOL_GUIDANCE = 'Use the smallest set of workspace and capability tools needed for the assigned node. Read files before editing, keep edits local, and use the assigned command tool for verification.';
 export const DEFAULT_REVIEWER_TOOL_GUIDANCE = 'Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing.';
 
-export const DEFAULT_DOC_INDEX = [
-  '# Graph Agent Documentation',
-  '',
-  'Read this index when the user asks about Graph itself or when you need to diagnose Graph behavior. Read the relevant topic file completely before giving a conclusion.',
-  '',
-  '- `graph-overview.md`: Graph roles, task lifecycle and vocabulary.',
-  '- `execution-model.md`: graph execution, activation, loops, operations and recovery.',
-  '- `capabilities.md`: Skills, MCP, Pi extensions, Graph extensions and tool binding.',
-  '- `permissions-and-recovery.md`: access policy, budgets, pauses and problem routing.',
-  '- `artifacts-and-git.md`: workspaces, handoffs, artifacts, evidence and integration.',
-  '- `self-configuration.md`: editable prompts, tools and approved system changes.',
-  '- `troubleshooting.md`: how to inspect and diagnose Graph when behavior is unexpected.',
-  '',
-  'The documentation root is injected by the host. Resolve `docs/...` paths relative to that root, not the business worktree.',
-].join('\n');
-
-const DEFAULT_GRAPH_OVERVIEW = [
-  '# Graph Overview',
-  '',
-  'Graph coordinates coding Agents around a confirmed feature task. The Main Agent talks to the user and plans; worker Agents implement, inspect, review, or verify in separate worktrees; program nodes execute deterministic checks and gates.',
-  '',
-  'Read `execution-model.md` for the execution rules and `CONTEXT.md` in the Graph source tree for exact domain terminology.',
-].join('\n');
-
-const DEFAULT_GRAPH_DOCS = {
-  'docs/graph-overview.md': DEFAULT_GRAPH_OVERVIEW,
-  'docs/execution-model.md': '# Graph Execution Model\n\nRead the live system through `inspect_graph_system`, `list_problems`, and node views before explaining execution state.',
-  'docs/capabilities.md': '# Graph Capabilities\n\nSkills provide on-demand instructions. MCP, Graph extensions, and Pi extensions expose tools through definition-bound capability bundles.',
-  'docs/permissions-and-recovery.md': '# Permissions and Recovery\n\nAccess, budget, pause, usage, and recovery rules are enforced by the host. Unknown external results are never blindly replayed.',
-  'docs/artifacts-and-git.md': '# Artifacts and Git\n\nCode changes live in Agent worktrees. Shared artifacts are immutable versions; evidence and review bind to exact versions and commits.',
-  'docs/self-configuration.md': '# Self Configuration\n\nEditable prompt files live under the Graph Agent prompt root. The original defaults remain available for reset. Host invariants cannot be changed by prompt text.',
-  'docs/troubleshooting.md': '# Troubleshooting\n\nStart with `read_system_capabilities`, `inspect_graph_system`, `list_problems`, and the relevant node run. Read this docs index and the matching topic before proposing a system change.',
-} as const;
-
-export type AgentDocKey =
-  | 'docs/INDEX.md'
-  | 'docs/graph-overview.md'
-  | 'docs/execution-model.md'
-  | 'docs/capabilities.md'
-  | 'docs/permissions-and-recovery.md'
-  | 'docs/artifacts-and-git.md'
-  | 'docs/self-configuration.md'
-  | 'docs/troubleshooting.md';
-
 export type AgentStaticPromptKey =
   | 'agents/main.md'
   | 'tools/main.md'
@@ -136,7 +92,7 @@ export type AgentStaticPromptKey =
   | 'runtime/worker.md'
   | 'runtime/prompt-suggestion.md';
 
-export type AgentPromptKey = AgentStaticPromptKey | AgentDocKey;
+export type AgentPromptKey = AgentStaticPromptKey;
 
 export interface AgentContextDefaults {
   identity?: string;
@@ -151,14 +107,13 @@ export interface AgentContextDefaults {
   mainGraph?: string;
   worker?: string;
   promptSuggestion?: string;
-  docs?: Partial<Record<AgentDocKey, string>>;
 }
 
 export interface AgentPromptDescriptor {
   key: AgentPromptKey;
   title: string;
   description: string;
-  group: 'identity' | 'tools' | 'rules' | 'runtime' | 'docs';
+  group: 'identity' | 'tools' | 'rules' | 'runtime';
   file: string;
   content: string;
   customized: boolean;
@@ -166,7 +121,6 @@ export interface AgentPromptDescriptor {
 
 export interface AgentContextView {
   root: string;
-  docsRoot: string;
   prompts: AgentPromptDescriptor[];
   disabledTools: string[];
 }
@@ -184,7 +138,6 @@ interface ResolvedAgentContextDefaults {
   mainGraph: string;
   worker: string;
   promptSuggestion: string;
-  docs: Record<AgentDocKey, string>;
 }
 
 const STATIC_PROMPTS: readonly {
@@ -192,7 +145,7 @@ const STATIC_PROMPTS: readonly {
   title: string;
   description: string;
   group: AgentPromptDescriptor['group'];
-  fallback: keyof Omit<ResolvedAgentContextDefaults, 'docs'>;
+  fallback: keyof ResolvedAgentContextDefaults;
 }[] = [
   { key: 'agents/main.md', title: 'Main Agent 身份', description: '作为 system prompt 注入的身份与职责。', group: 'identity', fallback: 'identity' },
   { key: 'tools/main.md', title: 'Main 工具指导', description: 'Main Agent 的人类可编辑工具使用规则。', group: 'tools', fallback: 'mainTools' },
@@ -206,21 +159,6 @@ const STATIC_PROMPTS: readonly {
   { key: 'runtime/main-graph.md', title: '任务图工作流', description: 'Main Agent 的 proposal schema 和任务图操作说明。', group: 'runtime', fallback: 'mainGraph' },
   { key: 'runtime/worker.md', title: 'Worker 运行规则', description: '普通实现、审查和验证 Agent 的动态运行规则。', group: 'runtime', fallback: 'worker' },
   { key: 'runtime/prompt-suggestion.md', title: '输入建议生成', description: '生成下一条输入建议时使用的独立 system prompt。', group: 'runtime', fallback: 'promptSuggestion' },
-];
-
-const DOC_PROMPTS: readonly {
-  key: AgentDocKey;
-  title: string;
-  description: string;
-}[] = [
-  { key: 'docs/INDEX.md', title: 'Agent Docs 索引', description: 'Graph 自身文档的主题索引和阅读协议。' },
-  { key: 'docs/graph-overview.md', title: 'Graph 总览', description: '角色、任务生命周期和领域词汇。' },
-  { key: 'docs/execution-model.md', title: '执行模型', description: '任务图、operation、激活、回环和恢复。' },
-  { key: 'docs/capabilities.md', title: '能力模型', description: 'Skills、MCP、扩展、工具和能力绑定。' },
-  { key: 'docs/permissions-and-recovery.md', title: '权限与恢复', description: '访问策略、预算、暂停、未知结果和问题路由。' },
-  { key: 'docs/artifacts-and-git.md', title: 'Artifacts 与 Git', description: 'worktree、handoff、artifact、证据与合并。' },
-  { key: 'docs/self-configuration.md', title: '系统自配置', description: '可编辑 Prompt、工具和受批准的系统变更。' },
-  { key: 'docs/troubleshooting.md', title: '故障排查', description: '如何检查失败的 Agent、问题和能力。' },
 ];
 
 const TOOL_STATE_FILE = 'tools.json';
@@ -278,13 +216,11 @@ function agentPath(root: string, definitionId: string) {
 export class AgentContextLibrary {
   readonly root: string;
   readonly contextRoot: string;
-  readonly docsRoot: string;
   private readonly defaults: ResolvedAgentContextDefaults;
 
   constructor(root: string, defaults: AgentContextDefaults = {}) {
     this.root = root;
     this.contextRoot = root;
-    this.docsRoot = join(root, 'docs');
     this.defaults = {
       identity: defaults.identity?.trim() || 'You are the Main Agent in Graph. Work with the user to investigate, plan and coordinate work without directly editing business code.',
       commonRules: defaults.commonRules?.trim() || DEFAULT_COMMON_RULES,
@@ -298,10 +234,6 @@ export class AgentContextLibrary {
       mainGraph: defaults.mainGraph?.trim() || DEFAULT_MAIN_GRAPH_PROMPT,
       worker: defaults.worker?.trim() || DEFAULT_WORKER_PROMPT,
       promptSuggestion: defaults.promptSuggestion?.trim() || DEFAULT_PROMPT_SUGGESTION_PROMPT,
-      docs: Object.fromEntries(DOC_PROMPTS.map(({ key }) => [
-        key,
-        defaults.docs?.[key]?.trim() || (key === 'docs/INDEX.md' ? DEFAULT_DOC_INDEX : DEFAULT_GRAPH_DOCS[key]),
-      ])) as Record<AgentDocKey, string>,
     };
   }
 
@@ -313,37 +245,24 @@ export class AgentContextLibrary {
   private descriptor(key: AgentPromptKey): Omit<AgentPromptDescriptor, 'file' | 'content' | 'customized'> {
     const staticPrompt = STATIC_PROMPTS.find(prompt => prompt.key === key);
     if (staticPrompt) return staticPrompt;
-    const doc = DOC_PROMPTS.find(prompt => prompt.key === key);
-    if (!doc) throw new RuntimeError('invalid_input', `Unknown Agent prompt ${key}`);
-    return { ...doc, group: 'docs' };
+    throw new RuntimeError('invalid_input', `Unknown Agent prompt ${key}`);
   }
 
   private descriptors(): AgentPromptDescriptor[] {
-    return [
-      ...STATIC_PROMPTS.map(prompt => ({
-        ...prompt,
-        file: this.promptPath(prompt.key),
-        content: this.defaults[prompt.fallback],
-        customized: false,
-      })),
-      ...DOC_PROMPTS.map(prompt => ({
-        ...prompt,
-        group: 'docs' as const,
-        file: this.promptPath(prompt.key),
-        content: this.defaults.docs[prompt.key],
-        customized: false,
-      })),
-    ];
+    return STATIC_PROMPTS.map(prompt => ({
+      ...prompt,
+      file: this.promptPath(prompt.key),
+      content: this.defaults[prompt.fallback],
+      customized: false,
+    }));
   }
 
   private defaultContent(key: AgentPromptKey) {
-    const descriptor = this.descriptor(key);
-    if (descriptor.group === 'docs') return this.defaults.docs[key as AgentDocKey];
     return this.defaults[STATIC_PROMPTS.find(prompt => prompt.key === key)!.fallback];
   }
 
   async ensure() {
-    await mkdir(this.docsRoot, { recursive: true, mode: 0o700 });
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
     const readme = [
       '# Graph Agent Context Library',
       '',
@@ -354,8 +273,8 @@ export class AgentContextLibrary {
       'identity: agents/',
       'tool guidance: tools/',
       'rules: rules/',
-      'Graph documentation: docs/',
       'runtime-only prompts: runtime/',
+      'read-only Agent docs: <application>/docs/agent/',
     ].join('\n');
     await writeFile(join(this.root, 'README.md'), `${readme}\n`, { mode: 0o600, flag: 'wx' }).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -460,7 +379,7 @@ export class AgentContextLibrary {
         customized: custom !== undefined && custom.trimEnd() !== this.defaultContent(prompt.key).trimEnd(),
       };
     }));
-    return { root: this.root, docsRoot: this.docsRoot, prompts, disabledTools: await this.disabledTools() };
+    return { root: this.root, prompts, disabledTools: await this.disabledTools() };
   }
 }
 

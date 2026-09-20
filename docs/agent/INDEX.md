@@ -1,19 +1,21 @@
 # Graph Agent Documentation
 
-这是 Graph 运行时注入给 Agent 的文档索引。system prompt 只注入本索引、文档根路径和阅读协议；主题正文必须在需要时通过 `read` 按需读取。
+这是 Graph 源码内的只读 Agent 文档索引。system prompt 只注入入口路径、本文档目录、示例目录和阅读协议；主题正文必须在需要时通过 `read` 按需读取。
 
 ## 阅读规则
 
 - 只在用户询问 Graph 自身、Agent 上下文、工具为何不可用、任务为何阻塞、执行恢复或系统配置时读取这些文档。
-- `docs/...` 始终相对 host 在 `<docs>` section 中给出的文档根路径解析，不相对业务仓库或 worktree 解析。
+- 主题路径始终相对本文件所在目录解析，不相对业务仓库或 Agent worktree 解析。
 - 先读本索引，再读与问题直接相关的主题文件；跨文件引用必须继续跟随。
 - 完成相关 Markdown 文件后再下结论，不要只根据文件名或本索引猜测。
 - 本文档描述行为契约。实时状态必须通过 `read_system_capabilities`、`inspect_graph_system`、`list_problems` 和节点记录确认。
+- 不要从 `~/.graph/prompts/docs` 读取旧副本；源码内的 `docs/agent` 是唯一 Agent 文档来源。
 
 ## 主题
 
 | 文档 | 何时读取 |
 | --- | --- |
+| `README.md` | 需要了解文档范围、源码布局和推荐阅读顺序 |
 | `graph-overview.md` | 需要理解 Graph 是什么、有哪些角色和核心术语 |
 | `execution-model.md` | 需要理解任务图、operation、激活、回环、并发和恢复 |
 | `capabilities.md` | 需要判断 Skill、MCP、extension、工具如何发现、绑定和注入 |

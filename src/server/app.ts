@@ -16,12 +16,12 @@ import { capabilityConfigViews } from '../catalog/capability-config.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import {
   DEFAULT_COMMON_RULES,
-  DEFAULT_DOC_INDEX,
   DEFAULT_MAIN_RULES,
   DEFAULT_MAIN_TOOL_GUIDANCE,
   type AgentContextLibrary,
   type AgentPromptKey,
 } from '../runtime/agent-context.ts';
+import { graphDocumentationPaths } from '../runtime/agent-docs.ts';
 import {
   composeAgentSystemPrompt,
   type AgentCapabilityPromptEntry,
@@ -29,6 +29,7 @@ import {
 } from '../runtime/agent-system-prompt.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
+const DOCUMENTATION = graphDocumentationPaths();
 
 const HOST_MAIN_TOOLS = [
   { name: 'read', description: 'Read a UTF-8 file or supported image from the workspace or a bound capability.', source: 'Graph' },
@@ -370,13 +371,12 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const commonRules = await options.agentContext.prompt('rules/common.md');
     const roleRules = await options.agentContext.prompt('rules/main.md');
     const toolGuidance = await options.agentContext.prompt('tools/main.md');
-    const docsIndex = await options.agentContext.prompt('docs/INDEX.md');
     const composed = composeAgentSystemPrompt({
       identity,
       definitionVersion: resolvedDefinitionVersion ?? 'main@unknown',
       toolGuidance,
       rules: { common: commonRules, role: roleRules },
-      docs: { root: options.agentContext.docsRoot, index: docsIndex },
+      docs: DOCUMENTATION,
       ...(projectFile ? { projectContext: projectFile } : {}),
       tools: tools.filter(tool => tool.enabled && tool.available).map(tool => ({
         name: tool.name,
@@ -393,6 +393,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     });
     return {
       ...context,
+      docsRoot: DOCUMENTATION.root,
       definitionVersion: resolvedDefinitionVersion,
       latestDefinitionVersion,
       tools,

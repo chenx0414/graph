@@ -9,12 +9,11 @@ Graph 把 Agent 可编辑上下文集中到固定目录：
   agents/
   tools/
   rules/
-  docs/
   runtime/
   tools.json
 ```
 
-首次启动播种默认文件，之后不覆盖用户修改。用户可以通过聊天头部查看最终拼装结果、编辑来源文件、开关工具，或恢复某个文件的原始默认版本。
+首次启动播种默认文件，之后不覆盖用户修改。用户可以通过聊天头部查看最终拼装结果、编辑来源文件、开关工具，或恢复某个文件的原始默认版本。Graph 自身文档不在这里，而是作为只读源码保存在仓库的 `docs/agent/`，并随应用一起打包。
 
 ## 结构化 Composer
 
@@ -28,11 +27,12 @@ Pi 在 0.85.1 中还会自动追加 `Current working directory`。UI 必须把�
 
 ## 可编辑、生成和 Pi 内容
 
-- **editable**：用户维护的 identity、tool guidance、rules、docs index 和 runtime prompt 文件。
-- **generated**：从当前 definition、实际工具、capability load facts、项目 instructions 和 worktree 拼出的内容。
+- **editable**：用户维护的 identity、tool guidance、rules 和 runtime prompt 文件。
+- **generated**：从当前 definition、实际工具、capability load facts、项目 instructions、worktree 和源码 docs 路径拼出的内容。
 - **pi**：Pi 自身自动追加的 system prompt 内容，例如 cwd。
 
 用户编辑 editable 文本不能改变 generated 事实，也不能改变 host-enforced authority。
+Docs section 由源码 `docs/agent/README.md`、topic 索引和阅读协议动态生成；docs 正文不进入可编辑来源列表。
 
 ## 工具选择
 
@@ -57,7 +57,7 @@ Main Agent 的工具选择保存为 disabled list。关闭工具时：
 
 ## 原版恢复
 
-Graph 在代码/preset 中保留每个默认 prompt 和 docs 文件的原始版本。恢复默认只覆盖对应可编辑文件，不修改能力缓存、用户工具清单或项目文件。
+Graph 在代码/preset 中保留每个可编辑 prompt 文件的原始版本。恢复默认只覆盖对应可编辑文件，不修改能力缓存、用户工具清单或项目文件。只读 Agent docs 直接来自源码，不存在需要恢复的用户覆盖版本。
 
 ## 不应宣称
 

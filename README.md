@@ -6,6 +6,7 @@
 
 ## 从这里开始
 
+- [Agent 文档入口](docs/agent/README.md)：源码内只读文档，覆盖 Graph 角色、执行模型、能力、恢复、Git 与自配置；运行时 Prompt 只注入入口、索引和阅读协议。
 - [使用文档](docs/usage.md)：启动、配置、数据目录、停止与排障。
 - [产品化交付报告](docs/planning/productization-reports.md)：T01–T06 的逐项验收与证据。
 - [主 Agent 入口方案](docs/planning/master-agent-entry-plan-2026-09-14.md)与[第四轮返工报告](docs/planning/master-agent-entry-rework4-report-2026-09-14.md)：对话式讨论、草稿确认与执行。
@@ -24,6 +25,7 @@
 - [接手说明](docs/planning/handoff.md)：M0–M7 完成后的工作区状态、边界与后续入口。
 - [领域术语](CONTEXT.md)：Agent 定义、实例、节点、任务与额度的准确含义。
 - [决策记录](docs/adr/)：已作选择的理由与权衡。
+- [运行示例](examples/README.md)：持久任务、验收 fixture 与 runtime contract 示例。
 
 首版采用 Pi Agent、TypeScript、本机 Web 和独立后台，支持全部已确认图模式与验证器。完成标准包括执行机制测试，以及由 Graph 交付 MediaBookmarks 的 B站 Web 应用任务。
 

@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ModelGrade } from './models.ts';
 
@@ -12,7 +12,6 @@ export interface PresetBootstrap {
   available: boolean;
   prompts: Record<string, string>;
   toolPrompt?: string;
-  agentDocs: Record<string, string>;
   definitions: BootstrapDefinition[];
   installed: string[];
   failed: { id: string; reason: string }[];
@@ -23,7 +22,6 @@ interface PresetManifest {
   bootstrap?: {
     prompts?: Record<string, string>;
     toolPrompt?: string;
-    agentDocs?: string;
     definitions?: BootstrapDefinition[];
   };
 }
@@ -36,7 +34,7 @@ export interface PresetCatalog {
 /** Load immutable Graph bootstrap content. Third-party capabilities never live
  * in presets; they are scanned from the user's ~/.graph/capabilities root. */
 export async function loadPresetBootstrap(presetsRoot: string, log: (line: string) => void = () => {}): Promise<PresetBootstrap> {
-  const result: PresetBootstrap = { available: false, prompts: {}, agentDocs: {}, definitions: [], installed: [], failed: [] };
+  const result: PresetBootstrap = { available: false, prompts: {}, definitions: [], installed: [], failed: [] };
   let manifest: PresetManifest;
   try {
     manifest = JSON.parse(await readFile(join(presetsRoot, 'manifest.json'), 'utf8')) as PresetManifest;
@@ -65,28 +63,6 @@ export async function loadPresetBootstrap(presetsRoot: string, log: (line: strin
     } catch (error) {
       result.failed.push({ id: 'prompt:tool-awareness', reason: error instanceof Error ? error.message : String(error) });
     }
-  }
-  if (manifest.bootstrap.agentDocs) {
-    try {
-      const docs = await loadMarkdownTree(join(presetsRoot, manifest.bootstrap.agentDocs));
-      if (!docs['INDEX.md']) throw new Error('agent docs must include INDEX.md');
-      result.agentDocs = Object.fromEntries(
-        Object.entries(docs).map(([path, content]) => [`docs/${path}`, content]),
-      );
-    } catch (error) {
-      result.failed.push({ id: 'docs:agent', reason: error instanceof Error ? error.message : String(error) });
-    }
-  }
-  return result;
-}
-
-async function loadMarkdownTree(root: string, prefix = ''): Promise<Record<string, string>> {
-  const entries = await readdir(join(root, prefix), { withFileTypes: true });
-  const result: Record<string, string> = {};
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) Object.assign(result, await loadMarkdownTree(root, relative));
-    else if (entry.isFile() && entry.name.endsWith('.md')) result[relative] = await readFile(join(root, relative), 'utf8');
   }
   return result;
 }
