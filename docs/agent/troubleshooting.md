@@ -50,6 +50,18 @@
 
 不要在 checkout 有未提交改动时强行改同一文件；RSI 会拒绝并要求先处理脏文件。上一次失败尝试留下的文件属于例外：它们在 `<stateDir>/rsi/working.json` 中登记，仍可继续修改。
 
+## 上下文压缩失败
+
+压缩摘要本身是一次模型调用，预算为 `min(0.8 × reserveTokens, model.maxTokens)`。如果这次生成被输出上限截断，Pi 会拒绝不完整的摘要并报 `Summarization failed: generation hit the token cap`。
+
+检查：
+
+- `session.compaction_failed` 事件（`reason` 是 `manual`、`threshold` 或 `overflow`）与其中的 `error`；
+- 模型的 `maxTokens`：摘要预算永远不会超过它，配置过小会让长会话的摘要永远放不下；
+- 会话是否已经超过窗口（UI 的“上下文”指标）。超过后每一轮都会失败，直到一次压缩成功。
+
+Graph 会在每次回合开始前，按上一次已计量的上下文判断是否需要压缩，并用 `COMPACTION_INSTRUCTIONS` 主动调用一次压缩：这套指令要求摘要控制在约 1500 tokens、允许丢弃已解决的细节，从而避免 Pi 默认“保留全部历史”的更新提示让摘要逐次膨胀直到超出输出上限。Pi 自己的阈值/溢出压缩仍作为兜底保留。手动压缩失败会作为一次普通执行失败上报，而不是变成无法解释的用量未知停驻。
+
 ## 模型不可用
 
 检查：

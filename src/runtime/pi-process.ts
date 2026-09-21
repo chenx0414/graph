@@ -277,10 +277,12 @@ export async function openPiProcess(options: PiProcessOptions) {
       finalInspect = inspect;
       return inspect;
     },
-    async compact() {
+    async compact(customInstructions?: string) {
       if (promptStarted) throw new Error('Pi process already received a prompt');
       promptStarted = true;
-      if (!control?.write({ operation: 'compact' })) throw new Error('Pi process input is closed');
+      if (!control?.write({ operation: 'compact', ...(customInstructions ? { text: customInstructions } : {}) })) {
+        throw new Error('Pi process input is closed');
+      }
       const inspect = await runPromise;
       finalInspect = inspect;
       return inspect;

@@ -24,7 +24,7 @@ import { agentArtifactAccess } from './agent-tool-definitions.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
-import { compactionSettings } from './compaction.ts';
+import { COMPACTION_INSTRUCTIONS, compactionSettings, shouldCompactContext } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
@@ -715,6 +715,14 @@ export function createPiAdapter(options: {
               // A conversation keeps its messages untouched; the compaction is
               // reported as a session event instead of overwriting history.
               options.store.event(operation.taskId, 'session.compacted', { nodeId: operation.nodeId, ...data });
+            } else {
+              // Pi's own threshold/overflow compaction can fail without throwing
+              // (a summarizer that hits its output cap). Record it so the failure
+              // is visible instead of silently leaving the context oversized.
+              options.store.event(operation.taskId, 'session.compaction_failed', {
+                nodeId: operation.nodeId, operationId: operation.id, reason: event.reason,
+                error: event.errorMessage ?? 'compaction aborted',
+              });
             }
             return;
           }
@@ -730,6 +738,17 @@ export function createPiAdapter(options: {
           }
         };
         try {
+          // Context size comes from the last billed completion for this
+          // instance, so Graph can compact before the window is exceeded
+          // instead of waiting for a provider overflow.
+          const lastContextTokens = (() => {
+            const row = options.store.db.prepare(
+              "SELECT usage FROM invocations WHERE instance_id=? AND purpose='completion' AND usage IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+            ).get(operation.instanceId!) as { usage: string } | undefined;
+            if (!row) return null;
+            const usage = JSON.parse(row.usage) as { input?: number; cacheRead?: number; cacheWrite?: number };
+            return (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+          })();
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
@@ -804,19 +823,34 @@ export function createPiAdapter(options: {
           }
           try {
             const compactRequested = operation.context.messages?.some(message => message.command === 'compact') ?? false;
-            if (compactRequested) {
-              await session.compact();
-              flushDeltas(true);
-              if (gateRefusal) throw gateRefusal;
-              const text = '上下文已压缩。';
-              if (persistEntries) {
-                appendNodeEntry(options.store, {
-                  taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
-                  activationId: operation.activationId, operationId: operation.id, role: 'system', kind: 'compaction',
-                  text,
-                });
+            // Graph triggers compaction itself so the bounded instructions below
+            // apply. Pi's own threshold/overflow compaction stays enabled as a
+            // backstop for a context Graph mis-estimated.
+            const autoCompact = !compactRequested && shouldCompactContext(entry, lastContextTokens);
+            if (compactRequested || autoCompact) {
+              try {
+                await session.compact(COMPACTION_INSTRUCTIONS);
+                flushDeltas(true);
+                if (gateRefusal) throw gateRefusal;
+                const text = '上下文已压缩。';
+                if (persistEntries) {
+                  appendNodeEntry(options.store, {
+                    taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                    activationId: operation.activationId, operationId: operation.id, role: 'system', kind: 'compaction',
+                    text,
+                  });
+                }
+                if (compactRequested) return { outcome: 'completed', output: { text }, usage: gate.total() };
+              } catch (error) {
+                // A summarizer that hits its output cap must not poison the
+                // turn: the `compaction_end` event already recorded why, so
+                // keep going (or report it for a manual request) instead of
+                // failing the operation as an unknown dispatch.
+                const message = error instanceof Error ? error.message : String(error);
+                if (compactRequested) {
+                  return { outcome: 'failed', output: { error: `上下文压缩失败：${message}` }, usage: gate.total() };
+                }
               }
-              return { outcome: 'completed', output: { text }, usage: gate.total() };
             }
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
             if (persistEntries) {

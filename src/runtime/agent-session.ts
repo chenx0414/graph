@@ -90,7 +90,7 @@ export interface AgentSessionRequest {
 
 export interface AgentSession {
   prompt(text: string): Promise<AgentSessionTurn>;
-  compact(): Promise<void>;
+  compact(customInstructions?: string): Promise<void>;
   steer(text: string): Promise<void>;
   inspect(): AgentSessionInspect;
   close(): Promise<void>;
@@ -193,8 +193,8 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
             state.endPrompt();
           }
         },
-        async compact() {
-          await instance.compact();
+        async compact(customInstructions?: string) {
+          await instance.compact(customInstructions);
         },
         async steer(text) {
           state.beginSteer();
@@ -227,8 +227,8 @@ export function createRestrictedProcessAgentSessionTransport(): AgentSessionTran
             state.endPrompt();
           }
         },
-        async compact() {
-          await process.compact();
+        async compact(customInstructions?: string) {
+          await process.compact(customInstructions);
         },
         async steer(text) {
           state.beginSteer();

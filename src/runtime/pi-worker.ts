@@ -189,10 +189,10 @@ async function main() {
     await session.close();
     process.exit(0);
   };
-  const runCompact = async () => {
+  const runCompact = async (customInstructions?: string) => {
     if (promptRunning) throw new Error('Pi worker already has a running operation');
     promptRunning = true;
-    await session.compact();
+    await session.compact(customInstructions);
     await Promise.all(pendingEvents);
     await writeFully(process.stdout, `${JSON.stringify({ ok: true, inspect: inspect() })}\n`);
     await session.close();
@@ -209,7 +209,7 @@ async function main() {
         process.exit(1);
       });
     } else if (command.operation === 'compact') {
-      void runCompact().catch(async error => {
+      void runCompact(typeof command.text === 'string' ? command.text : undefined).catch(async error => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         await writeFully(process.stderr, `${message}\n`).catch(() => undefined);
         process.exit(1);

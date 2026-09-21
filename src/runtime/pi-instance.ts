@@ -317,7 +317,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
       await session.prompt(text, { streamingBehavior: 'steer', expandPromptTemplates: false });
     },
     async setModel(model: Model<Api>) { await session.setModel(model); },
-    async compact() { return session.compact(); },
+    async compact(customInstructions?: string) { return session.compact(customInstructions); },
     async navigate(entryId: string, summarize: boolean) { return session.navigateTree(entryId, { summarize }); },
     inspect() {
       return {
