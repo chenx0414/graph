@@ -37,3 +37,52 @@ export function shouldCompactContext(
   const { reserveTokens } = compactionSettings(entry);
   return contextTokens > Math.max(1, Math.floor(entry.contextWindow) - reserveTokens);
 }
+
+export interface RecordedContextUsage {
+  usage: string;
+  settledAt: number;
+}
+
+export interface RecordedCompaction {
+  timestamp: number;
+  data: string;
+}
+
+/**
+ * Resolve the context size that the next turn will send.
+ *
+ * Pi records zero-usage completion placeholders around aborted and overflowed
+ * calls. Treating the newest placeholder as authoritative hides the real
+ * context and disables preemptive compaction. Ignore those rows, and prefer a
+ * successful compaction's post-summary estimate when it is newer than the last
+ * billed completion.
+ */
+export function latestContextTokens(
+  completions: RecordedContextUsage[],
+  lastCompaction?: RecordedCompaction,
+): number | null {
+  const completion = completions.find(({ usage }) => {
+    try {
+      const parsed = JSON.parse(usage) as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+      return (parsed.input ?? 0) + (parsed.output ?? 0) + (parsed.cacheRead ?? 0) + (parsed.cacheWrite ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  });
+  const completionTokens = completion
+    ? (() => {
+      const parsed = JSON.parse(completion.usage) as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+      return (parsed.input ?? 0) + (parsed.output ?? 0) + (parsed.cacheRead ?? 0) + (parsed.cacheWrite ?? 0);
+    })()
+    : null;
+
+  if (lastCompaction && (!completion || lastCompaction.timestamp >= completion.settledAt)) {
+    try {
+      const data = JSON.parse(lastCompaction.data) as { tokensAfter?: number };
+      if (typeof data.tokensAfter === 'number' && Number.isFinite(data.tokensAfter)) return data.tokensAfter;
+    } catch {
+      // Fall through to the last billed completion when the event is malformed.
+    }
+  }
+  return completionTokens;
+}

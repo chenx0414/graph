@@ -24,7 +24,7 @@ import { agentArtifactAccess } from './agent-tool-definitions.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
-import { COMPACTION_INSTRUCTIONS, compactionSettings, shouldCompactContext } from './compaction.ts';
+import { COMPACTION_INSTRUCTIONS, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
@@ -740,14 +740,28 @@ export function createPiAdapter(options: {
         try {
           // Context size comes from the last billed completion for this
           // instance, so Graph can compact before the window is exceeded
-          // instead of waiting for a provider overflow.
+          // instead of waiting for a provider overflow. Ignore Pi's zero-usage
+          // placeholders, and use a newer successful compaction estimate when
+          // the previous turn ended in a manual compaction.
           const lastContextTokens = (() => {
-            const row = options.store.db.prepare(
-              "SELECT usage FROM invocations WHERE instance_id=? AND purpose='completion' AND usage IS NOT NULL ORDER BY rowid DESC LIMIT 1",
-            ).get(operation.instanceId!) as { usage: string } | undefined;
-            if (!row) return null;
-            const usage = JSON.parse(row.usage) as { input?: number; cacheRead?: number; cacheWrite?: number };
-            return (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+            const completions = options.store.db.prepare(
+              `SELECT i.usage, COALESCE(o.settled_at, o.dispatched_at, 0) AS settled_at
+               FROM invocations i
+               JOIN operations o ON o.id = i.operation_id
+               WHERE i.instance_id = ? AND i.purpose = 'completion' AND i.usage IS NOT NULL
+               ORDER BY i.rowid DESC LIMIT 20`,
+            ).all(operation.instanceId!) as { usage: string; settled_at: number }[];
+            const lastCompaction = options.store.db.prepare(
+              `SELECT e.timestamp, e.data
+               FROM events e
+               JOIN operations o ON o.id = json_extract(e.data, '$.operationId')
+               WHERE e.task_id = ? AND e.type = 'session.compacted' AND o.instance_id = ?
+               ORDER BY e.cursor DESC LIMIT 1`,
+            ).get(operation.taskId, operation.instanceId!) as { timestamp: number; data: string } | undefined;
+            return latestContextTokens(
+              completions.map(row => ({ usage: row.usage, settledAt: row.settled_at })),
+              lastCompaction,
+            );
           })();
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },

@@ -196,7 +196,7 @@ test('a summarizer that hits its output cap fails cleanly instead of poisoning t
 }, 60_000);
 
 test('Graph compacts before the window is exceeded and asks for a bounded summary', async () => {
-  const { COMPACTION_INSTRUCTIONS, shouldCompactContext } = await import('../../src/runtime/compaction.ts');
+  const { COMPACTION_INSTRUCTIONS, latestContextTokens, shouldCompactContext } = await import('../../src/runtime/compaction.ts');
   const entry = { contextWindow: 131_072, maxTokens: 8_192 };
   // Threshold is window - reserve; 122880 for this model.
   expect(shouldCompactContext(entry, null)).toBe(false);
@@ -208,6 +208,26 @@ test('Graph compacts before the window is exceeded and asks for a bounded summar
   // prompt, which is what makes the summary grow past the output cap.
   expect(COMPACTION_INSTRUCTIONS).toMatch(/under roughly 1500 tokens/);
   expect(COMPACTION_INSTRUCTIONS).toMatch(/[Dd]rop resolved detail/);
+
+  const zero = JSON.stringify({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  const full = JSON.stringify({ input: 1_530, output: 1, cacheRead: 133_760, cacheWrite: 0 });
+  // Pi writes zero-usage placeholders after an overflowed call. They must not
+  // hide the last real context size.
+  expect(latestContextTokens([
+    { usage: zero, settledAt: 200 },
+    { usage: full, settledAt: 100 },
+  ])).toBe(135_291);
+  // A successful manual compaction is newer than the completion it summarized,
+  // so the next turn uses the smaller post-compaction estimate.
+  expect(latestContextTokens(
+    [{ usage: full, settledAt: 100 }],
+    { timestamp: 200, data: JSON.stringify({ tokensAfter: 18_000 }) },
+  )).toBe(18_000);
+  // A completion produced after a successful compaction is newer and wins.
+  expect(latestContextTokens(
+    [{ usage: JSON.stringify({ input: 4_000, output: 20, cacheRead: 2_000 }), settledAt: 300 }],
+    { timestamp: 200, data: JSON.stringify({ tokensAfter: 18_000 }) },
+  )).toBe(6_020);
 });
 
 test('the current schema tags every invocation with a purpose and keeps completion as the default', async () => {
