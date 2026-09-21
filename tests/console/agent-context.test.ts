@@ -65,7 +65,29 @@ test('legacy tool awareness is migrated into the structured tools directory', as
   expect(await library.prompt('tools/main.md')).toBe('Legacy custom tool guidance.');
 
   await library.resetPrompt('tools/main.md');
-  expect(await library.prompt('tools/main.md')).toContain('Use only the callable tools listed below.');
+  expect(await library.prompt('tools/main.md')).toBe('');
+});
+
+test('the unchanged capability-awareness tool prompt migrates to empty without touching custom guidance', async () => {
+  const root = await temp();
+  await mkdir(join(root, 'tools'), { recursive: true, mode: 0o700 });
+  const capabilityAwareness = [
+    '# Capability awareness',
+    '',
+    'The capability bundle is scoped to this Agent instance and the exact definition version in the briefing.',
+    '',
+    'Use Skills as on-demand instructions: read the declared `SKILL.md` before applying one. Use MCP and extension tools through their declared names. Resolve file references inside the assigned workspace unless the tool explicitly says otherwise.',
+    '',
+    'Every model, command, MCP, and extension call is governed by Graph. If a call is blocked by pause, budget, permission, or recovery rules, stop and report the blocking reason instead of inventing another route.',
+    '',
+  ].join('\n');
+  await writeFile(join(root, 'tools/main.md'), capabilityAwareness);
+
+  const library = openAgentContextLibrary(root);
+  await library.ensure();
+
+  expect(await library.prompt('tools/main.md')).toBe('');
+  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe('\n');
 });
 
 test('unchanged legacy rule defaults migrate to the compact rule set', async () => {

@@ -36,6 +36,8 @@ Docs section 由源码 `docs/agent/README.md`、topic 索引和阅读协议动�
 
 `<tools>` section 先列 Pi 原生 coding tools，再以过渡段引出 Graph tools。工具清单只保留名称与简短说明；参数、版本、权限摘要和运行时可用性保留在 UI 工具详情中。
 
+`tools/main.md` 默认留空，不再附加内置的 capability-awareness 长说明；用户添加内容后才会出现在工具清单之后。
+
 ## 工具选择
 
 Main Agent 的工具选择保存为 disabled list。关闭工具时：

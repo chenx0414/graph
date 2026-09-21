@@ -55,7 +55,7 @@ test('presets publish only immutable Graph bootstrap definitions and prompts', a
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const { runtime, bootstrap } = await runtimeAt(root);
   expect(bootstrap.prompts.master).toContain('Master Agent identity');
-  expect(bootstrap.toolPrompt).toContain('Capability awareness');
+  expect(bootstrap).not.toHaveProperty('toolPrompt');
   expect(bootstrap).not.toHaveProperty('agentDocs');
   const first = await installPresets(runtime.catalog, presetsRoot);
   expect(first).toMatchObject({ available: true, failed: [] });
@@ -82,7 +82,7 @@ test('the bootstrap prompts are injected without creating user capabilities', as
   await runtime.host.drive();
   const request = JSON.stringify(provider.requests[0]);
   expect(request).toContain('You are the work Agent in Graph.');
-  expect(request).toContain('Capability awareness');
+  expect(request).not.toContain('Capability awareness');
   expect(request).not.toContain('skill-implement-and-verify');
   expect((await task.view()).nodes.find(node => node.id === 'work')).toMatchObject({ status: 'succeeded' });
 });

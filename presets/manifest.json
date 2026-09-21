@@ -5,7 +5,6 @@
       "master": "bootstrap/master/agent.md",
       "main": "bootstrap/master/agent.md"
     },
-    "toolPrompt": "bootstrap/tool-awareness/tool.md",
     "definitions": [
       { "id": "master", "recommendedGrade": "high" },
       { "id": "coder", "recommendedGrade": "medium" },

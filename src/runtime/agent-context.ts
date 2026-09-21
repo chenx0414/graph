@@ -74,7 +74,7 @@ export const DEFAULT_REVIEWER_RULES = [
   'Do not modify implementation files. Return an independent verdict that the verifier can evaluate.',
 ].join('\n');
 
-export const DEFAULT_MAIN_TOOL_GUIDANCE = 'Use only the callable tools listed below. Pi native tools are the basic workspace surface; use them directly when the task requires investigation or changes. Graph enforces every model, command, MCP and extension call at the host boundary.';
+export const DEFAULT_MAIN_TOOL_GUIDANCE = '';
 export const DEFAULT_WORKER_TOOL_GUIDANCE = 'Use the smallest set of workspace and capability tools needed for the assigned node. Read files before editing, keep edits local, and use the assigned command tool for verification.';
 export const DEFAULT_REVIEWER_TOOL_GUIDANCE = 'Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing.';
 
@@ -166,6 +166,18 @@ const LEGACY_PROMPT_PATHS: Partial<Record<AgentPromptKey, string>> = {
   'tools/main.md': 'tool-awareness.md',
 };
 const LEGACY_PROMPT_DEFAULTS: Partial<Record<AgentPromptKey, readonly string[]>> = {
+  'tools/main.md': [
+    [
+      '# Capability awareness',
+      '',
+      'The capability bundle is scoped to this Agent instance and the exact definition version in the briefing.',
+      '',
+      'Use Skills as on-demand instructions: read the declared `SKILL.md` before applying one. Use MCP and extension tools through their declared names. Resolve file references inside the assigned workspace unless the tool explicitly says otherwise.',
+      '',
+      'Every model, command, MCP, and extension call is governed by Graph. If a call is blocked by pause, budget, permission, or recovery rules, stop and report the blocking reason instead of inventing another route.',
+    ].join('\n'),
+    'Use only the callable tools listed below. Pi native tools are the basic workspace surface; use them directly when the task requires investigation or changes. Graph enforces every model, command, MCP and extension call at the host boundary.',
+  ],
   'agents/main.md': [[
     '# Master Agent identity',
     '',

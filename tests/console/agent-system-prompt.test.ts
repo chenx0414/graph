@@ -122,7 +122,7 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.previewText).toContain('<pi_cwd>');
 });
 
-test('the Agent context library seeds editable rules and tool guidance and can restore defaults', async () => {
+test('the Agent context library seeds editable rules and an empty main tool guidance default', async () => {
   const root = await temp();
   const library = openAgentContextLibrary(root, {
     identity: 'Original identity',
@@ -130,7 +130,7 @@ test('the Agent context library seeds editable rules and tool guidance and can r
   await library.ensure();
 
   expect(await readFile(join(root, 'rules/common.md'), 'utf8')).toContain('tool results');
-  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toContain('tools');
+  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe('\n');
   await expect(readFile(join(root, 'docs/INDEX.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
 
   await library.savePrompt('rules/common.md', 'Changed common rule.');
