@@ -247,7 +247,10 @@ export class Execution {
       // may run; each turn consumes exactly one pending or queued user message.
       const conversation = conversationForTask(this.store, taskId);
       if (!conversation || conversation.archived_at !== null) return [];
-      if (!pendingMessages(this.store, conversation.id, 1).length) return [];
+      // Full access is the only policy that retries an already consumed turn;
+      // every other policy parks the master until an explicit change releases
+      // it, so requiring a pending message there would suppress that revival.
+      if (isFullAccess(this.access?.()) && !pendingMessages(this.store, conversation.id, 1).length) return [];
       const masters = this.store.db.prepare(`SELECT * FROM nodes n
         WHERE n.task_id=? AND n.status='pending' AND json_extract(n.spec,'$.role')='master'
         ORDER BY n.rowid`).all(taskId) as ExecutionNodeRow[];
@@ -289,7 +292,7 @@ export class Execution {
     if (this.store.task(node.task_id).phase === 'chatting') {
       const conversation = conversationForTask(this.store, node.task_id);
       if (!conversation || conversation.archived_at !== null) return false;
-      if (!pendingMessages(this.store, conversation.id, 1).length) return false;
+      if (fullAccess && !pendingMessages(this.store, conversation.id, 1).length) return false;
     }
     const spec = JSON.parse(node.spec) as NodeSpec;
     const adapter = spec.action === 'graph.verify'
