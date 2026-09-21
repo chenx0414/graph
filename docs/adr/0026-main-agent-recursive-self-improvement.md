@@ -37,7 +37,7 @@ RSI 操作必须对使用者可见、可审计。这一闭环建立在“完全�
   但主动丢弃 `DYLD_*`：第三方安装器可能用这些变量指向自己的同名系统库，让刚启动的 node 在加载自身库时就崩溃；
   同时保留继承的 `PATH` 顺序，并补上本机存在的标准开发位置（`/opt/homebrew/bin`、`/usr/local/bin` 等）：
   从桌面启动的应用只拿到 launchd 的最小 `PATH`，否则任何需要开发者工具链（`npm`、包运行器、浏览器）的检查会在验证对象开始之前就失败；
-  命令本身走宿主的 node（打包应用用 `GRAPH_APP_NODE` 指向自带运行时，否则用 `PATH` 上的 node）。自定义检查给出快速内循环；只有 `activate`
+  命令本身走宿主的 node（打包应用用 `GRAPH_APP_NODE` 指向自带运行时，否则用 `PATH` 上的 node）。自定义检查给出快速内循环；改动 TypeScript 时至少带一条 `node --run typecheck`，让类型错误不必等到最后一刻的完整闸门才暴露；只有 `activate`
   为真、或没有提供自定义检查时，才追加 `node --run check`，并在 `activate` 为真时再跑
   `node --run app:build` 作为上线前的完整闸门。**检查失败不会丢弃改动**：文件保留在工作区、不提交、
   不重载，receipt 状态为 `checks_failed`，并把路径记入 `<stateDir>/rsi/working.json`。

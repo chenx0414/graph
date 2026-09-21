@@ -12,7 +12,7 @@ test('an RSI check drops a foreign DYLD search path and keeps the rest', async (
   expect(resolved.executable).toBe('node');
   expect(resolved.args).toEqual(['--run', 'check']);
   expect(resolved.env.DYLD_FALLBACK_LIBRARY_PATH).toBeUndefined();
-  expect(resolved.env.PATH.split(':').slice(0, 2)).toEqual(['/opt/homebrew/bin', '/usr/bin']);
+  expect(String(resolved.env.PATH).split(':').slice(0, 2)).toEqual(['/opt/homebrew/bin', '/usr/bin']);
   expect(resolved.env.HOME).toBe('/Users/someone');
   expect(resolved.env.GIT_TERMINAL_PROMPT).toBe('0');
 });
