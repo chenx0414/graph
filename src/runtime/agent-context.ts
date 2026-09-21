@@ -425,3 +425,5 @@ export function openAgentContextLibrary(root: string, defaults: AgentContextDefa
 export function renderAgentPrompt(content: string, variables: Record<string, string>) {
   return render(content, variables);
 }
+
+export const DEFAULT_MAIN_FULL_ACCESS_IDENTITY = 'Full access is active for this operation. Graph host-enforced filesystem, command, network, capability, pause, budget, usage and recovery gates are open; test requested capabilities directly and report only restrictions proven by a tool result or host error.';

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
+import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY } from '../../src/runtime/agent-context.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -161,6 +162,7 @@ test('full access lets the discussion master use native tools outside the worksp
 
   const created = await runtime.conversations.create({ projectId: 'p', text: '检查项目，并写入工作区外的证据文件。', requestId: 'full-access-native-write' });
   await runtime.host.runReady();
+  expect(JSON.stringify(provider.requests[0])).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
   expect(await readFile(outside, 'utf8')).toBe('written during discussion');
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.questions).toEqual([]);

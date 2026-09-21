@@ -40,6 +40,7 @@ import { openWorkspaceCommandRunner } from './workspace-command.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import {
   DEFAULT_COMMON_RULES,
+  DEFAULT_MAIN_FULL_ACCESS_IDENTITY,
   DEFAULT_MAIN_RULES,
   DEFAULT_MAIN_TOOL_GUIDANCE,
   DEFAULT_PROMPT_SUGGESTION_PROMPT,
@@ -716,6 +717,7 @@ export function createPiAdapter(options: {
         ];
         const composedPrompt = composeAgentSystemPrompt({
           identity: capabilityOperation.prompts.system,
+          ...(fullAccess && promptRole === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
           definitionVersion,
           toolGuidance,
           rules: {

@@ -22,6 +22,7 @@ async function temp() {
 test('the shared composer renders Graph sections in order and keeps Pi-generated cwd separate', () => {
   const result = composeAgentSystemPrompt({
     identity: 'You are the Main Agent.',
+    identityContext: 'Full access is active for this operation.',
     definitionVersion: 'main@7',
     toolGuidance: 'Use the smallest tool that can prove the claim.',
     rules: {
@@ -81,7 +82,11 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   ]);
   expect(result.sections.find(section => section.id === 'tools')?.parts.map(part => part.origin))
     .toEqual(['generated', 'editable']);
-  expect(result.text).toContain('<identity>\nYou are the Main Agent.\n</identity>');
+  expect(result.text).toContain('<identity>\nYou are the Main Agent.\n\nFull access is active for this operation.\n</identity>');
+  expect(result.sections.find(section => section.id === 'identity')?.parts).toEqual([
+    expect.objectContaining({ id: 'identity.agent', origin: 'editable' }),
+    expect.objectContaining({ id: 'identity.access', origin: 'generated', content: 'Full access is active for this operation.' }),
+  ]);
   expect(result.text).toContain('<tools>');
   expect(result.text).toContain([
     '- read: Read file contents',

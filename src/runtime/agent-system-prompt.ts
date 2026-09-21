@@ -52,6 +52,8 @@ export interface AgentCapabilityPromptEntry {
 
 export interface ComposeAgentSystemPromptInput {
   identity: string;
+  /** Host-generated identity context such as the active access policy. */
+  identityContext?: string;
   definitionVersion: string;
   toolGuidance: string;
   rules: {
@@ -223,13 +225,21 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
   }]);
 
   const sections = [
-    section('identity', 'Identity', [{
-      id: 'identity.agent',
-      title: 'Agent identity',
-      origin: 'editable',
-      content: input.identity,
-      source: 'agents/<definition-id>.md',
-    }]),
+    section('identity', 'Identity', [
+      {
+        id: 'identity.agent',
+        title: 'Agent identity',
+        origin: 'editable',
+        content: input.identity,
+        source: 'agents/<definition-id>.md',
+      },
+      ...(input.identityContext?.trim() ? [{
+        id: 'identity.access',
+        title: 'Access policy',
+        origin: 'generated' as const,
+        content: input.identityContext.trim(),
+      }] : []),
+    ]),
     tools,
     rules,
     docs,

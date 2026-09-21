@@ -58,6 +58,8 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 
 聊天窗口顶部的「Agent 上下文」显示下一轮实际组装的 system prompt、可编辑来源以及工具与能力。组装顺序固定为 `identity → tools → rules → docs → project_context → capabilities → cwd`；Main Agent 的 `rules` 只保留证据与方案命名两条规则，不再注入臃肿的 runtime workflow。预览同时标出「可编辑」「动态生成」和「Pi 自动追加」，所以看到的是最终拼接结果，而不是分散片段的猜测。
 
+完全访问开启时，Main Agent 的 `identity` section 会动态追加一条宿主生成的访问策略说明，明确当前文件系统、命令、网络、能力、暂停、预算、用量和恢复门均已放开；该说明不会覆盖或改写用户的 `agents/main.md`。
+
 可编辑内容集中存放在 `~/.graph/prompts`，首次启动只播种缺失文件，不覆盖已有修改：
 
 ```text
