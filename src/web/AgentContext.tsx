@@ -114,6 +114,8 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
 
   useEffect(() => {
     let active = true;
+    const onSettingsChanged = () => { void load(); };
+    window.addEventListener('graph:settings-changed', onSettingsChanged);
     setLoading(true);
     api<AgentContextView>(`/api/agent-context?conversationId=${encodeURIComponent(conversationId)}`)
       .then(next => {
@@ -128,7 +130,10 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
       })
       .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      window.removeEventListener('graph:settings-changed', onSettingsChanged);
+    };
   }, [conversationId]);
 
   const groupedPrompts = useMemo(() => {

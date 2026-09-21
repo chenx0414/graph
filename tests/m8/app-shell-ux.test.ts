@@ -8,8 +8,9 @@ import { appendNodeEntry } from '../../src/core/node-run.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openGraphServer } from '../../src/server/host.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
-import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
+import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -1616,6 +1617,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
     projects: [{ id: 'alpha', root }],
+    access: () => fullAccessPolicy(),
     webDir,
     startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
     agentContext,
@@ -1635,6 +1637,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await page.getByTestId('agent-context-preview').waitFor();
   const preview = await page.getByTestId('agent-context-preview').innerText();
   expect(preview).toContain('<identity>');
+  expect(preview).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
   expect(preview).toContain('<tools>');
   expect(preview).toContain('<rules>');
   expect(preview).not.toContain('<workflow>');
@@ -1658,6 +1661,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(preview).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
   const markdown = await page.getByTestId('agent-context-preview-markdown').innerText();
   expect(markdown).toContain('<identity>\n');
+  expect(markdown).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
   expect(markdown).toContain('<tools>\n');
   expect(markdown).toContain('<rules>\n');
   expect(markdown).not.toContain('<workflow>\n');

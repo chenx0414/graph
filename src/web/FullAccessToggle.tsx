@@ -66,6 +66,7 @@ export function FullAccessToggle() {
       });
       if (saved.applied === false) throw new Error(saved.reason ?? '配置未生效');
       setFull(next);
+      window.dispatchEvent(new Event('graph:settings-changed'));
       toast(next ? '已开启完全访问' : '已关闭完全访问', next ? 'info' : 'success');
     } catch (reason) {
       toast(`切换完全访问失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');

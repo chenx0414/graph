@@ -16,6 +16,7 @@ import { capabilityConfigViews } from '../catalog/capability-config.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import {
   DEFAULT_COMMON_RULES,
+  DEFAULT_MAIN_FULL_ACCESS_IDENTITY,
   DEFAULT_MAIN_RULES,
   DEFAULT_MAIN_TOOL_GUIDANCE,
   type AgentContextLibrary,
@@ -23,6 +24,7 @@ import {
 } from '../runtime/agent-context.ts';
 import { graphDocumentationPaths } from '../runtime/agent-docs.ts';
 import { piNativeToolPromptEntries } from '../runtime/pi-native-tools.ts';
+import { isFullAccess } from '../core/access-policy.ts';
 import {
   composeAgentSystemPrompt,
   type AgentCapabilityPromptEntry,
@@ -399,6 +401,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const toolGuidance = await options.agentContext.prompt('tools/main.md');
     const composed = composeAgentSystemPrompt({
       identity,
+      ...(isFullAccess(runtime.currentAccessPolicy()) ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
       definitionVersion: resolvedDefinitionVersion ?? 'main@unknown',
       toolGuidance,
       rules: { common: commonRules, role: roleRules },
