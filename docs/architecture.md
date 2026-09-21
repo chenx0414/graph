@@ -65,6 +65,7 @@ flowchart TB
 - [budget-ledger.ts](../src/core/budget-ledger.ts)：预算作用域与实例镜像、reservation、in-flight、usage commit、cap 改写与模型使用记录。
 - [model-selection.ts](../src/core/model-selection.ts)：模型等级选择、审查模型排除与独立审查就绪判断。
 - [operation-lifecycle.ts](../src/core/operation-lifecycle.ts)：operation 的 intent、dispatch、reconcile、settle、阻塞、未知用量与返工状态机。
+- [question-routing.ts](../src/core/question-routing.ts)：问题所有权、可用解决动作与答案类型的共同策略，以及主管停驻判断、消息重试和配置恢复的状态转换。
 - [program-adapters.ts](../src/core/program-adapters.ts)：`graph.verify`、`graph.command` 与人工检查程序节点。
 - [conversation.ts](../src/core/conversation.ts)：会话消息、队列投递、回复摘要与消息事件。
 - [conversation-projection.ts](../src/core/conversation-projection.ts)：会话历史分页覆盖、稳定 ID 归并、可恢复实时 delta/tool 合并、队列状态与消息排序；live snapshot 与 append/reset 协议见 [ADR 0019](adr/0019-recoverable-realtime-transcript.md)。
@@ -148,6 +149,8 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 模型用量来源按证据强度分为 `authoritative`（供应商逐请求返回值）、`account_delta`（可归属于本次发送的订阅/账户计量差额）、`estimated`（本地对请求上下文和响应文本的估算）与 `unknown`（无可用计数）。有限预算实例仅在 `authoritative` 或 `account_delta` 下继续；仅有 `estimated` 或 `unknown` 时仍执行“待核对并暂停该 Agent”的规则，核对后再重新发起并累计，不能将缺失用量记零。核对结论是供应商不提供该次失败调用的用量时，使用者/宿主可以用带说明的 `reconcile_usage` 显式放行：未记账调用保持 `unknown` 与费用 unknown，不折算为零；放行时必须按 invocation 去重累计同一 operation 内全部已知用量，并让已确认结果走与正常结算相同的 output、route、等待问题与版本路径，重复答复不得重复计费。`instances.unlimited=1` 的 Agent 没有有限上限可保护，缺失逐请求 usage 时先尝试账户差额，再使用明确标记的本地估算继续；两端都不可得时才记录 `operation.usage_unknown`、保持未知成本并继续，不创建阻塞问题，缺口留在报告中。重放会话和主管汇总子 Agent 统计不能重复扣除同一调用。见 [ADR 0017](adr/0017-unlimited-unknown-usage.md)。
 
 问题按 `owner` 分流：只有权限、预算、人工验收和明确需要用户决定的事项直接进入用户收件箱；恢复不明确、适配器错误、上下文拒绝、Git 冲突、用量异常、返工和停滞先路由给 main Agent。main Agent 读取结构化问题后，可以重试、调整图、回答 worker 或显式保留未知用量；用户界面只展示已经过这层处理的 `owner=user` 问题，避免把内部异常和原始 JSON 当作人工待办。见 [ADR 0018](adr/0018-main-agent-problem-routing.md)。
+
+`question-routing.ts` 集中上述分类、可答动作和主管恢复规则。主管停驻由自身未解决的内部问题判定，不单看节点的 `pending` 状态；节点身份同时包含任务与节点 ID。新消息只释放既有的执行错误类别（adapter、execution、context、recovery、Git conflict）；配置恢复可释放主管自身的其他内部问题，但所属任务仍有用户问题时不恢复。普通启动只补建缺失主管，不释放停驻问题。恢复写入加入外层命令事务；问题答复的预算、用量、授权和返工结算仍由 `operation-lifecycle.ts` 完成，主管通道的会话范围与幂等校验仍由 Task Runtime 负责。未知问题类型不宣称尚未支持的解决动作。
 
 暂停先关门，已发调用可结束，所有在途调用停稳后才报告 paused；长工具持续运行时保留 pausing 和对应记录，时长不限不意味着能虚报暂停成功。resume 不能解除未解决的预算或权限问题。
 

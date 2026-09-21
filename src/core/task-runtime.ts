@@ -25,7 +25,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
-import { questionSummary } from './question-routing.ts';
+import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
@@ -245,29 +245,8 @@ export async function openTaskRuntime(options: {
         store.event(task.id, 'task.master_recovered', { reason: 'dispatch was disabled when the task was created' });
         created += 1;
       }
-      // A master that parked on its own internal problem (missing credential,
-      // unavailable model) stays out of the scheduler until the environment
-      // changes. Only a real configuration apply revives it; a plain restart
-      // must not replay a deterministic failure forever. A genuine user
-      // decision keeps the master parked even then.
       for (const task of recoverOptions.reviveParked ? pending : []) {
-        const master = store.db.prepare(
-          "SELECT id,status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master' LIMIT 1",
-        ).get(task.id) as { id: string; status: string } | undefined;
-        if (!master) continue;
-        const parked = store.db.prepare(
-          "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND owner='main' LIMIT 1",
-        ).get(task.id, master.id);
-        if (!parked) continue;
-        const userQuestion = store.db.prepare(
-          "SELECT id FROM questions WHERE task_id=? AND status='open' AND owner='user' LIMIT 1",
-        ).get(task.id);
-        if (userQuestion) continue;
-        store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND status='open' AND owner='main'")
-          .run(canonicalJson({ type: 'retry' }), task.id, master.id);
-        store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(task.id, master.id);
-        store.event(task.id, 'task.master_recovered', { reason: 'internal problem parked while the environment was unavailable' });
-        created += 1;
+        if (recoverMaster(store, task.id, 'configuration')) created += 1;
       }
       const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
       const firstDiscussing = pending.find(task => task.phase === 'discussing');
@@ -660,17 +639,6 @@ export async function openTaskRuntime(options: {
     return [...new Set([anchor, ...linked])];
   };
 
-  const problemActions = (kind: string) => {
-    if (kind === 'unknown_usage') return ['reconcile_usage'] as const;
-    if (kind === 'waiting') return ['respond'] as const;
-    if (kind === 'rework' || kind === 'stalled') return ['respond', 'retry'] as const;
-    if (kind === 'git_dirty') return ['acknowledge'] as const;
-    // A result the harness could not use is repairable by re-asking the worker,
-    // and escalatable when the main Agent cannot judge the gap itself.
-    if (kind === 'result_noncompliant' || kind === 'context_rejected') return ['retry', 'escalate'] as const;
-    return ['retry'] as const;
-  };
-
   // Conversation entry: chat messages are durable and queue behind the master
   // turn, while every formal change (bind, confirm) is a validated command.
   const conversations = {
@@ -924,15 +892,7 @@ export async function openTaskRuntime(options: {
         type: 'chat', text: input.text, attachments, command: input.command ?? null,
       }, () => {
         if (!input.text.trim() && !attachments.length && !input.command) throw new RuntimeError('invalid_input', 'A nonempty message, attachment or command is required');
-        // A new user message is an explicit retry for a master parked on its own
-        // transient internal problem; otherwise that turn would never run again.
-        const parked = store.db.prepare(
-          "SELECT id,kind FROM questions WHERE task_id=? AND node_id='master' AND status='open' AND owner='main'",
-        ).all(conversation.anchor_task_id) as { id: string; kind: string }[];
-        for (const question of parked) {
-          if (!['adapter_error', 'execution_failed', 'context_rejected', 'recovery', 'git_conflict'].includes(question.kind)) continue;
-          store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson({ type: 'retry' }), question.id);
-        }
+        recoverMaster(store, conversation.anchor_task_id, 'message');
         const node = store.db.prepare("SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string } | undefined;
         const anchor = store.task(conversation.anchor_task_id);
         const state = anchor.paused || (node && ['preparing', 'running', 'blocked'].includes(node.status)) ? 'queued' : 'pending';
@@ -945,11 +905,6 @@ export async function openTaskRuntime(options: {
             } as unknown as Json,
           } : {}),
         });
-        // A running turn picks the message up when it settles; a blocked one
-        // waits for its open question; everything else queues a next turn now.
-        if (node && !['preparing', 'running', 'blocked'].includes(node.status)) {
-          store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id='master'").run(conversation.anchor_task_id);
-        }
         return { conversationId, messageId: message.id, state, cursor: message.cursor, pending: state === 'queued' };
       });
       if (options.autoWake) execution.kick();
