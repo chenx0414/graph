@@ -63,6 +63,68 @@ test('a conversation starts and chats without a project or feature task', async 
   expect(await runtime.user.list()).toEqual([]);
 });
 
+test('Main Agent can validate a graph, inspect its state, list projects and bind a project', async () => {
+  const root = await temp('graph-state');
+  const projectOne = join(root, 'project-one');
+  const projectTwo = join(root, 'project-two');
+  await mkdir(projectOne);
+  await mkdir(projectTwo);
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [
+      { id: 'one', root: projectOne },
+      { id: 'two', root: projectTwo },
+    ],
+    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '调查项目。', requestId: 'graph-state-create' });
+  const conversation = await runtime.conversations.view(created.conversationId);
+  const supervisor = runtime.supervisor(conversation.anchorTaskId);
+
+  const state = await supervisor.graphState() as {
+    phase: string;
+    proposalVersion: number;
+    graph: unknown;
+    relatedTasks: unknown[];
+    nodes: unknown[];
+    evidence: unknown[];
+  };
+  expect(state).toMatchObject({
+    phase: 'chatting',
+    proposalVersion: 0,
+    graph: null,
+    relatedTasks: [],
+    nodes: [expect.objectContaining({ id: 'master', role: 'master', status: 'pending' })],
+    evidence: [],
+  });
+
+  const projects = await supervisor.listProjects() as { id: string; preparation: unknown }[];
+  expect(projects.map(project => project.id)).toEqual(['one', 'two']);
+  expect(projects.every(project => 'preparation' in project)).toBe(true);
+
+  const validProposal = {
+    requirementVersion: conversation.requirementVersion,
+    summary: 'Validate only.',
+    acceptance: [{ id: 'a1', description: 'Passes.', checkNode: 'check' }],
+    nodes: [{ id: 'check', kind: 'program' as const, action: 'check' }],
+  };
+  await expect(supervisor.validateProposal({
+    ...validProposal,
+    acceptance: [{ id: 'a1', description: 'Passes.', checkNode: 'missing' }],
+  })).rejects.toMatchObject({ code: 'invalid_proposal' });
+  await expect(supervisor.validateProposal(validProposal)).resolves.toEqual({
+    valid: true,
+    requirementVersion: conversation.requirementVersion,
+  });
+
+  await runtime.projects.prepare({ projectId: 'one', requestId: 'prepare-one' });
+  const bound = await supervisor.bindProject({ projectId: 'one', requestId: 'bind-one' });
+  expect(bound).toMatchObject({ changed: true });
+  expect((await runtime.conversations.view(created.conversationId)).projectId).toBe('one');
+});
+
 test('conversations can be archived and restored without deleting their history', async () => {
   const root = await temp('archive');
   const runtime = await withRuntime(root, () => ({ outcome: 'completed', output: { text: 'ok' }, usage }));
@@ -460,6 +522,16 @@ test('drafts version on the same requirement and only the latest can be confirme
   expect((await runtime.conversations.proposal(created.conversationId, 2)).stale).toBe(true);
   // The old draft is stale after the requirement advanced.
   expect((await runtime.conversations.view(created.conversationId)).proposal?.stale).toBe(true);
+  const graphState = await runtime.supervisor(anchorTaskId).graphState() as {
+    relatedTasks: { taskId: string; graphVersion: number; nodes: { id: string }[] }[];
+  };
+  expect(graphState.relatedTasks).toEqual([
+    expect.objectContaining({
+      taskId: confirmed.taskId,
+      graphVersion: 1,
+      nodes: [expect.objectContaining({ id: 'work' }), expect.objectContaining({ id: 'check' })],
+    }),
+  ]);
   await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-again' }))
     .rejects.toMatchObject({ code: 'stale_proposal' });
   // The feature task is visible as a normal task; the anchor is not.

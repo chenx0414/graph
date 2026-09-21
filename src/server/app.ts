@@ -34,29 +34,34 @@ const DOCUMENTATION = graphDocumentationPaths();
 
 const HOST_MAIN_TOOLS = [
   { name: 'artifact_list', description: 'List published task artifacts and their immutable versions.', source: 'Graph' },
-  { name: 'artifact_get', description: 'Read one shared artifact’s metadata.', source: 'Graph' },
-  { name: 'artifact_read', description: 'Read bounded content from an exact shared artifact version.', source: 'Graph' },
+  { name: 'artifact_read', description: 'Read one artifact’s metadata and bounded content by exact or latest version.', source: 'Graph' },
   { name: 'artifact_publish', description: 'Publish an immutable shared artifact version.', source: 'Graph' },
   { name: 'artifact_retire', description: 'Retire a shared artifact version without deleting its bytes.', source: 'Graph' },
   { name: 'artifact_promote', description: 'Promote a task artifact into project-scoped knowledge.', source: 'Graph' },
-  { name: 'submit_result', description: 'Submit structured JSON output for the operation.', source: 'Graph' },
   { name: 'fetch', description: 'Fetch a text document from a granted domain.', source: 'Graph' },
   { name: 'propose_graph', description: 'Submit a task graph proposal for user confirmation.', source: 'Main Agent' },
   { name: 'revise_graph', description: 'Revise a confirmed task graph without changing acceptance criteria.', source: 'Main Agent' },
+  { name: 'validate_proposal', description: 'Validate a task graph proposal without submitting it.', source: 'Main Agent' },
+  { name: 'get_graph_state', description: 'Read the current phase, graph, nodes, evidence and internal problems.', source: 'Main Agent' },
+  { name: 'list_projects', description: 'List configured projects and preparation state.', source: 'Main Agent' },
+  { name: 'bind_project', description: 'Bind the current conversation to a configured project.', source: 'Main Agent' },
   { name: 'list_problems', description: 'List internal problems owned by the Main Agent.', source: 'Main Agent' },
   { name: 'resolve_problem', description: 'Diagnose and resolve an internal execution problem.', source: 'Main Agent' },
   { name: 'search_resources', description: 'Search the capability directory.', source: 'Main Agent' },
   { name: 'get_resource', description: 'Read one capability’s metadata.', source: 'Main Agent' },
-  { name: 'read_system_capabilities', description: 'Read the current models, subscriptions, recipes and compiled definitions.', source: 'Main Agent' },
-  { name: 'inspect_graph_system', description: 'Inspect Graph failures, open problems and pending system changes.', source: 'Main Agent' },
+  { name: 'read_system_capabilities', description: 'Read the current configuration inventory and compiled definitions.', source: 'Main Agent' },
+  { name: 'inspect_graph_system', description: 'Inspect runtime health scoped to this conversation.', source: 'Main Agent' },
   { name: 'propose_system_change', description: 'Propose a Graph system change for user approval.', source: 'Main Agent' },
   { name: 'apply_system_change', description: 'Apply an already approved system change.', source: 'Main Agent' },
   { name: 'list_agent_combinations', description: 'List reusable Agent recipes.', source: 'Main Agent' },
   { name: 'get_agent_combination', description: 'Read one reusable Agent recipe.', source: 'Main Agent' },
-  { name: 'save_agent_combination', description: 'Create or edit an Agent recipe.', source: 'Main Agent' },
+  { name: 'save_agent_combination', description: 'Create or edit an Agent recipe and compile it immediately.', source: 'Main Agent' },
   { name: 'delete_agent_combination', description: 'Delete one user-editable Agent recipe.', source: 'Main Agent' },
-  { name: 'compile_agent_combination', description: 'Compile a recipe into a versioned Agent definition.', source: 'Main Agent' },
   { name: 'request_model_access', description: 'Ask the user to configure a missing model or subscription.', source: 'Main Agent' },
+  { name: 'git_status', description: 'Read the current work copy status.', source: 'Graph Git' },
+  { name: 'git_diff', description: 'Read the current work copy diff.', source: 'Graph Git' },
+  { name: 'git_log', description: 'Read recent commits in the current work copy.', source: 'Graph Git' },
+  { name: 'git_show', description: 'Read one commit or object in the current work copy.', source: 'Graph Git' },
 ] as const;
 
 function capabilityToolNames(runtime: Runtime, definitionVersion: string | null) {
@@ -93,6 +98,9 @@ function hostToolPermission(name: string) {
   if (name === 'fetch') return 'declared network domains';
   if (name.startsWith('artifact_')) return 'task artifact workspace';
   if (name === 'propose_graph' || name === 'revise_graph') return 'task graph control';
+  if (name === 'validate_proposal' || name === 'get_graph_state') return 'current conversation graph';
+  if (name === 'list_projects' || name === 'bind_project') return 'configured project binding';
+  if (name.startsWith('git_')) return 'read-only work copy Git';
   if (name.includes('system_change')) return 'user-approved system change';
   return 'Graph call gate and current access policy';
 }
@@ -101,22 +109,27 @@ function hostToolParameters(name: string) {
   if (name === 'read' || name === 'write_file' || name === 'list_dir') return name === 'write_file' ? ['path', 'content'] : ['path'];
   if (name === 'run_command') return ['command', 'args'];
   if (name === 'fetch') return ['url'];
-  if (name === 'artifact_get') return ['artifactId', 'version'];
-  if (name === 'artifact_read') return ['artifactId', 'version', 'maxBytes'];
+  if (name === 'artifact_read') return ['artifactId', 'version?', 'maxBytes?'];
   if (name === 'artifact_publish') return ['namespace', 'name', 'sourcePath', 'content'];
   if (name === 'artifact_retire') return ['artifactId', 'version', 'reason', 'requestId'];
   if (name === 'artifact_promote') return ['artifactId', 'version', 'requestId'];
   if (name === 'propose_graph') return ['proposalJson', 'requestId'];
   if (name === 'revise_graph') return ['baseVersion', 'reason', 'nodesJson', 'requestId'];
+  if (name === 'validate_proposal') return ['proposalJson'];
+  if (name === 'get_graph_state' || name === 'list_projects') return [];
+  if (name === 'bind_project') return ['projectId', 'requestId'];
   if (name === 'resolve_problem') return ['questionId', 'action', 'response', 'proof', 'requestId'];
   if (name === 'search_resources') return ['query', 'kind', 'role', 'limit', 'offset'];
   if (name === 'get_resource') return ['id', 'version'];
   if (name === 'propose_system_change') return ['title', 'problem', 'changeJson', 'impact', 'risk'];
   if (name === 'apply_system_change') return ['proposalId'];
-  if (name === 'get_agent_combination' || name === 'delete_agent_combination' || name === 'compile_agent_combination') return ['id'];
+  if (name === 'get_agent_combination' || name === 'delete_agent_combination') return ['id'];
   if (name === 'save_agent_combination') return ['combinationJson'];
   if (name === 'request_model_access') return ['modelId', 'reason', 'planId'];
-  if (name === 'submit_result') return ['outputJson'];
+  if (name === 'git_status') return [];
+  if (name === 'git_diff') return ['staged?', 'base?', 'path?', 'stat?'];
+  if (name === 'git_log') return ['limit?', 'path?'];
+  if (name === 'git_show') return ['ref?', 'stat?', 'path?'];
   return [];
 }
 

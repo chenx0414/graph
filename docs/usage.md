@@ -67,7 +67,7 @@ runtime/     仅特定运行阶段使用的动态 Prompt
 
 Graph 自身的 Agent docs 不再复制到 `~/.graph/prompts/docs`。源码内的 `docs/agent/README.md` 是主入口，`docs/agent/` 保存只读主题文档，`examples/` 保存示例；system prompt 只注入这三个绝对路径、主题索引和阅读协议，正文由 Agent 在需要时读取。模型目录、订阅计划、配额、配方和系统健康等动态事实不常驻 system prompt；Agent 在需要时调用 `read_system_capabilities` 或 `inspect_graph_system`。每个 Agent operation 的 `<cwd>` 使用该实例实际 Git worktree，而不是项目根目录或其它 Agent 的目录。
 
-所有 Agent 的 session 都开放 Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`、`powershell`。它们在受限 Pi 子进程内执行，并通过 Graph gate、workspace sandbox 和 access policy；旧的 `read`/`write_file`/`list_dir`/`run_command` 不再作为这些原生能力的替代出现在实际 session。
+所有 Agent 的 session 都开放适用的 Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`，以及 Windows 上的 `powershell`。它们在受限 Pi 子进程内执行，并通过 Graph gate、workspace sandbox 和 access policy；旧的 `read`/`write_file`/`list_dir`/`run_command` 不再作为这些原生能力的替代出现在实际 session。
 
 在「最终 Prompt」页可直接查看完整预览；在「可编辑来源」页修改并保存，改动从下一轮开始生效；「恢复默认」只覆盖选中的可编辑文件，Graph 始终保留代码内置原版。工具页关闭某个工具后，它同时从 provider tool schema、session allowlist 和最终 Prompt 的工具清单中移除，但不会改变宿主权限、预算、审计或恢复规则。旧版 `tool-awareness.md` 会在首次升级时迁移为 `tools/main.md`，原文件仍保留作人工备份。
 

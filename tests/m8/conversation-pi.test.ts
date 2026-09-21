@@ -8,7 +8,7 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
-import { PI_NATIVE_TOOL_NAMES } from '../../src/runtime/pi-native-tools.ts';
+import { piNativeToolNamesForPlatform } from '../../src/runtime/pi-native-tools.ts';
 import { git } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -200,7 +200,7 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   const masterRequests = provider.requests.filter(request => request.tools.includes('propose_graph'));
   expect(masterRequests.length).toBeGreaterThanOrEqual(3);
   for (const request of masterRequests) {
-    expect(request.tools).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES]));
+    expect(request.tools).toEqual(expect.arrayContaining([...piNativeToolNamesForPlatform()]));
     expect(request.tools).not.toContain('write_file');
     expect(request.tools).not.toContain('run_command');
     expect(request.tools).not.toContain('suggest_prompt');
@@ -218,7 +218,7 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   const workerRequests = provider.requests.filter(request => request.tools.includes('submit_result') && !request.tools.includes('propose_graph'));
   expect(workerRequests.length).toBeGreaterThan(0);
   for (const request of workerRequests) {
-    expect(request.tools).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES]));
+    expect(request.tools).toEqual(expect.arrayContaining([...piNativeToolNamesForPlatform()]));
   }
 
   // Streaming and tool activity are on the conversation stream; the durable
@@ -287,8 +287,12 @@ test('the real Pi master can search the resource library and open a model-access
 
   expect(provider.requests[0]!.tools).toEqual(expect.arrayContaining([
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
-    'save_agent_combination', 'compile_agent_combination', 'read_system_capabilities', 'inspect_graph_system',
+    'save_agent_combination', 'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
+    'read_system_capabilities', 'inspect_graph_system',
     'propose_system_change', 'apply_system_change', 'request_model_access',
+  ]));
+  expect(provider.requests[0]!.tools).not.toEqual(expect.arrayContaining([
+    'artifact_get', 'compile_agent_combination', 'submit_result',
   ]));
   expect(JSON.stringify(provider.requests[0]!.messages)).toContain('System context');
   expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('Graph system self-model');

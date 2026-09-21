@@ -4,10 +4,16 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git } from '../../src/git/git.ts';
-import { PI_NATIVE_TOOL_NAMES } from '../../src/runtime/pi-native-tools.ts';
+import { piNativeToolNamesForPlatform } from '../../src/runtime/pi-native-tools.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
+
+test('powershell is exposed only on Windows', () => {
+  expect(piNativeToolNamesForPlatform('darwin')).not.toContain('powershell');
+  expect(piNativeToolNamesForPlatform('linux')).not.toContain('powershell');
+  expect(piNativeToolNamesForPlatform('win32')).toContain('powershell');
+});
 
 afterEach(async () => {
   for (const action of cleanup.reverse()) {
@@ -59,7 +65,8 @@ test('all Agents expose Pi native tools and the master executes them in the rest
 
   const firstRequest = provider.requests[0] as { tools?: { function?: { name?: string } }[] } | undefined;
   const offered = (firstRequest?.tools ?? []).map(tool => tool.function?.name ?? '');
-  expect(offered).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES]));
+  expect(offered).toEqual(expect.arrayContaining([...piNativeToolNamesForPlatform()]));
+  if (process.platform !== 'win32') expect(offered).not.toContain('powershell');
 
   expect(await readFile(join(project, 'native.txt'), 'utf8')).toBe('beta');
   expect(await readFile(join(project, 'bash.txt'), 'utf8')).toBe('bash-ok');

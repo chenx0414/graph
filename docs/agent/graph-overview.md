@@ -14,8 +14,8 @@ Main Agent 直接与用户对话，调查项目、澄清需求、提出任务图
 
 Main Agent：
 
-- 不直接实现业务代码；
-- 不能绕过用户确认直接启动执行；
+- 可以使用原生工具进行限定范围内的调查和工作区修改；
+- 不能绕过用户确认直接启动未确认的执行图；
 - 不能通过 prompt 自行扩大权限或预算；
 - 对内部执行问题先诊断，再决定重试、答复、返工或升级给用户；
 - 可以读取 Graph 的实时自模型和 Agent 文档，以解释或优化系统。
@@ -31,7 +31,7 @@ Program node 由宿主执行确定性工作，例如运行测试、检查文件�
 ## 一次功能任务的典型流程
 
 1. 用户创建对话并描述目标。
-2. Main Agent 只读调查项目，必要时询问会改变方案的问题。
+2. Main Agent 调查项目，必要时进行限定范围的工作区修改，并询问会改变方案的问题。
 3. Main Agent 提交任务图草案和 decisions。
 4. 用户确认草案和目标分支。
 5. Graph 创建正式功能任务，准备 integration branch 和 Agent instance worktree。
@@ -56,11 +56,12 @@ Program node 由宿主执行确定性工作，例如运行测试、检查文件�
 
 ## 不需要猜测的事实
 
-- 任务状态：读取 conversation/task view。
-- 图结构：读取 task graph view 和 graph revision。
+- 任务状态：调用 `get_graph_state`。
+- 图结构：调用 `get_graph_state` 读取当前 graph revision。
+- 项目绑定：调用 `list_projects`，用户确认后调用 `bind_project`。
 - 工具能力：读取 `read_system_capabilities` 和 Agent definition。
 - 工具实际可用性：读取 capability load fact、session manifest 或 node run。
-- 执行问题：读取 `inspect_graph_system` 和 `list_problems`。
+- 执行问题：读取当前 conversation 范围内的 `inspect_graph_system` 和 `list_problems`。
 - 系统版本：读取 `application.root` 和 `application.mode`。
 
 如果这些接口没有给出答案，报告“未知”，不要从历史对话中补造事实。

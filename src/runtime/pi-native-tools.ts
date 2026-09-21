@@ -13,6 +13,12 @@ export const PI_NATIVE_TOOL_NAMES = [
 
 export type PiNativeToolName = typeof PI_NATIVE_TOOL_NAMES[number];
 
+export function piNativeToolNamesForPlatform(
+  platform: NodeJS.Platform | string = process.platform,
+): PiNativeToolName[] {
+  return PI_NATIVE_TOOL_NAMES.filter(name => name !== 'powershell' || platform === 'win32');
+}
+
 const LEGACY_GRAPH_ALIASES: Partial<Record<PiNativeToolName, string>> = {
   read: 'read',
   bash: 'run_command',
@@ -112,7 +118,7 @@ const NATIVE_TOOL_METADATA: readonly AgentToolPromptEntry[] = [
 ];
 
 export function piNativeToolPromptEntries(
-  enabledNames: readonly string[] = PI_NATIVE_TOOL_NAMES,
+  enabledNames: readonly string[] = piNativeToolNamesForPlatform(),
 ): AgentToolPromptEntry[] {
   const enabled = new Set(enabledNames);
   return NATIVE_TOOL_METADATA

@@ -1370,6 +1370,141 @@ export async function openTaskRuntime(options: {
             return { taskId, graphVersion: revised.version, cursor: revised.cursor };
           });
         },
+        async validateProposal(proposal: Proposal) {
+          ensureOpen();
+          const task = store.task(taskId);
+          if (task.requirement_version !== proposal.requirementVersion) {
+            throw new RuntimeError('stale_requirement', 'Proposal uses an old requirement version');
+          }
+          validateProposal(proposal);
+          return { valid: true as const, requirementVersion: task.requirement_version };
+        },
+        async graphState() {
+          ensureOpen();
+          const task = store.task(taskId);
+          const conversation = conversationForTask(store, taskId);
+          const relatedTasks = conversation
+            ? await Promise.all(conversationTaskIds(store, conversation.id)
+              .filter(id => id !== taskId)
+              .map(async id => {
+                const view = await user.task(id).view();
+                return {
+                  taskId: view.id,
+                  request: view.request,
+                  phase: view.phase,
+                  status: view.status,
+                  paused: view.paused,
+                  requirementVersion: view.requirementVersion,
+                  proposalVersion: view.proposalVersion,
+                  acceptedProposalVersion: view.acceptedProposalVersion,
+                  graphVersion: view.graphVersion,
+                  targetBranch: view.targetBranch,
+                  integrationSha: view.integrationSha,
+                  proposal: view.proposal,
+                  containers: view.containers,
+                  loops: view.loops,
+                  nodes: view.nodes,
+                  evidence: view.evidence,
+                  questions: view.questions,
+                  worktrees: view.worktrees,
+                  cost: view.cost,
+                };
+              }))
+            : [];
+          const nodes = store.db.prepare(`SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,
+              i.used,i.budget,i.unlimited,i.model,i.definition_version
+            FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id
+            WHERE n.task_id=? ORDER BY n.rowid`).all(taskId) as {
+              id: string; spec: string; instance_id: string | null; status: string; activation_id: string;
+              output_version: number; stall_count: number; used: number | null; budget: number | null;
+              unlimited: number | null; model: string | null; definition_version: string | null;
+            }[];
+          const questions = store.db.prepare('SELECT id,node_id,kind,status,owner,data,answer FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as {
+            id: string; node_id: string; kind: string; status: string; owner: string; data: string; answer: string | null;
+          }[];
+          const openUserQuestions = questions.filter(question => question.owner === 'user' && question.status === 'open');
+          const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data,activation_id,valid,commit_sha FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as {
+            node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string;
+            activation_id: string; valid: number; commit_sha: string | null;
+          }[];
+          const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
+          const graphRevision = task.graph_version
+            ? store.db.prepare('SELECT spec FROM graph_revisions WHERE task_id=? AND version=?').get(taskId, task.graph_version) as { spec: string } | undefined
+            : undefined;
+          const graph = task.accepted_proposal ? loadGraph(store, taskId) : undefined;
+          return {
+            taskId,
+            conversationId: task.conversation_id,
+            projectId: task.project_id,
+            request: task.request,
+            phase: task.phase,
+            status: task.paused ? 'paused' : openUserQuestions.length ? 'blocked' : task.phase,
+            paused: Boolean(task.paused),
+            requirementVersion: task.requirement_version,
+            proposalVersion: task.latest_proposal,
+            acceptedProposalVersion: task.accepted_proposal,
+            graphVersion: task.graph_version,
+            targetBranch: task.target_branch,
+            integrationSha: task.integration_sha,
+            updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
+            cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events WHERE task_id=?').get(taskId) as { cursor: number }).cursor,
+            proposal: proposal ? JSON.parse(proposal.spec) as Proposal : null,
+            graph: graphRevision ? JSON.parse(graphRevision.spec) as Proposal : null,
+            containers: graph ? graph.containers() : [],
+            loops: graph ? graph.plan.loops : [],
+            revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as {
+              version: number; reason: string; base_version: number;
+            }[]).map(row => ({ version: row.version, reason: row.reason, baseVersion: row.base_version })),
+            nodes: nodes.map(row => ({
+              ...JSON.parse(row.spec) as NodeSpec,
+              instanceId: row.instance_id,
+              activationId: row.activation_id,
+              outputVersion: row.output_version,
+              stallCount: row.stall_count,
+              status: row.status,
+              used: row.used,
+              unlimited: Boolean(row.unlimited),
+              budget: row.unlimited ? null : row.budget,
+              ...(row.model ? { selectedModel: row.model } : {}),
+              ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
+            })),
+            evidence: evidence.map(row => ({
+              ...JSON.parse(row.data) as EvidenceInput,
+              nodeId: row.node_id,
+              operationId: row.operation_id,
+              proposalVersion: row.proposal_version,
+              requirementVersion: row.requirement_version,
+              activationId: row.activation_id,
+              valid: Boolean(row.valid),
+              ...(row.commit_sha ? { commitSha: row.commit_sha } : {}),
+            })),
+            questions: questions.map(row => ({
+              id: row.id,
+              nodeId: row.node_id,
+              kind: row.kind,
+              status: row.status,
+              owner: row.owner,
+              data: JSON.parse(row.data) as Json,
+              answer: row.answer ? JSON.parse(row.answer) as Json : null,
+            })),
+            internalProblemCount: questions.filter(question => question.owner === 'main' && question.status === 'open').length,
+            worktrees: (store.db.prepare('SELECT instance_id,node_id,path,branch FROM worktrees WHERE task_id=? ORDER BY rowid').all(taskId) as {
+              instance_id: string; node_id: string; path: string; branch: string;
+            }[]).map(row => ({ instanceId: row.instance_id, nodeId: row.node_id, path: row.path, branch: row.branch })),
+            cost: taskCost(taskId),
+            relatedTasks,
+          };
+        },
+        async listProjects() {
+          ensureOpen();
+          return user.projects();
+        },
+        async bindProject(input: { projectId: string; requestId: string }) {
+          ensureOpen();
+          const conversation = conversationForTask(store, taskId);
+          if (!conversation) throw new RuntimeError('not_found', 'This Main Agent is not attached to a conversation');
+          return conversations.bind(conversation.id, input);
+        },
         async listProblems() {
           ensureOpen();
           const conversation = conversationForTask(store, taskId);

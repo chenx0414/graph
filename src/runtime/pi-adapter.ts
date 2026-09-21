@@ -20,7 +20,7 @@ import type { CapabilityLoadFact, CapabilityPermissionRequest } from './capabili
 import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { graphDocumentationPaths } from './agent-docs.ts';
-import { PI_NATIVE_TOOL_NAMES, piNativeToolPromptEntries } from './pi-native-tools.ts';
+import { piNativeToolNamesForPlatform, piNativeToolPromptEntries } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
@@ -60,6 +60,10 @@ export interface PiAdapterChannels {
   supervisor: (taskId: string) => {
     propose(proposal: Proposal, requestId: string): Promise<unknown>;
     revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+    graphState?(): Promise<unknown>;
+    validateProposal?(proposal: Proposal): Promise<unknown>;
+    listProjects?(): Promise<unknown>;
+    bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
     listProblems(): Promise<unknown>;
     resolveProblem(input: {
       questionId: string;
@@ -189,13 +193,17 @@ function summarizeToolCall(name: string, args: unknown) {
   const target = (key: string) => typeof body[key] === 'string' ? body[key] as string : undefined;
   const summary = name === 'read' || name === 'write_file' || name === 'list_dir' ? target('path') ?? name
     : name === 'artifact_publish' ? [target('namespace'), target('name')].filter(Boolean).join('/') || name
-      : name === 'artifact_get' || name === 'artifact_read' || name === 'artifact_retire' ? `${target('artifactId') ?? name}${typeof body.version === 'number' ? `@${body.version}` : ''}`
+      : name === 'artifact_read' || name === 'artifact_retire' ? `${target('artifactId') ?? name}${typeof body.version === 'number' ? `@${body.version}` : ''}`
         : name === 'artifact_list' ? target('namespace') ?? target('prefix') ?? name
     : name === 'run_command' ? [target('command'), ...(Array.isArray(body.args) ? (body.args as unknown[]).map(String) : [])].filter(Boolean).join(' ')
       : name === 'fetch' ? target('url') ?? name
         : name === 'propose_graph' ? 'draft'
-          : name === 'submit_result' ? 'structured result'
-            : name;
+          : name === 'validate_proposal' ? 'validation'
+            : name === 'get_graph_state' ? 'current graph'
+              : name === 'bind_project' ? target('projectId') ?? name
+                : name.startsWith('git_') ? [name, target('path') ?? target('ref') ?? ''].filter(Boolean).join(' ')
+                  : name === 'submit_result' ? 'structured result'
+                    : name;
   return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
 }
 
@@ -443,7 +451,7 @@ export function createPiAdapter(options: {
             gate,
             action: spec.action,
             ...(spec.role ? { role: spec.role } : {}),
-            nativeTools: PI_NATIVE_TOOL_NAMES,
+            nativeTools: piNativeToolNamesForPlatform(),
             ...(accessPolicy ? { access: accessPolicy } : {}),
             ...(masterReadRoots.length ? { additionalReadRoots: masterReadRoots } : {}),
             grants: operation.grants,
@@ -464,20 +472,24 @@ export function createPiAdapter(options: {
                   ...(channels.systemContext.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
                   ...(conversation && spec.role === 'master' ? {
                     systemDiagnostics: async () => {
-                      const summary = channels.systemContext?.systemSummary
-                        ? await channels.systemContext.systemSummary()
-                        : {};
+                      const taskIds = [...new Set([
+                        conversation.anchor_task_id,
+                        ...(options.store.db.prepare('SELECT id FROM tasks WHERE conversation_id=?').all(conversation.id) as { id: string }[]).map(row => row.id),
+                      ])];
+                      const placeholders = taskIds.map(() => '?').join(',');
                       const questions = options.store.db.prepare(`SELECT id,task_id AS taskId,node_id AS nodeId,kind,owner,status,data,
                         (SELECT timestamp FROM events
                           WHERE type='question.opened'
                             AND json_extract(data,'$.questionId')=questions.id
                           ORDER BY cursor DESC LIMIT 1) AS created_at
-                        FROM questions WHERE status='open' ORDER BY rowid DESC LIMIT 100`).all() as {
+                        FROM questions WHERE status='open' AND task_id IN (${placeholders})
+                        ORDER BY rowid DESC LIMIT 100`).all(...taskIds) as {
                           id: string; taskId: string; nodeId: string; kind: string; owner: string; status: string; data: string; created_at: number | null;
                         }[];
                       const failedNodes = options.store.db.prepare(`SELECT n.task_id AS taskId,n.id AS nodeId,n.status,t.request
                         FROM nodes n JOIN tasks t ON t.id=n.task_id
-                        WHERE n.status IN ('failed','blocked') ORDER BY n.rowid DESC LIMIT 50`).all() as {
+                        WHERE n.status IN ('failed','blocked') AND n.task_id IN (${placeholders})
+                        ORDER BY n.rowid DESC LIMIT 50`).all(...taskIds) as {
                           taskId: string; nodeId: string; status: string; request: string;
                         }[];
                       const unknownUsage = options.store.db.prepare(`SELECT task_id AS taskId,node_id AS nodeId,operation_id AS operationId,
@@ -485,21 +497,25 @@ export function createPiAdapter(options: {
                           WHERE type='question.opened'
                             AND json_extract(data,'$.questionId')=questions.id
                           ORDER BY cursor DESC LIMIT 1) AS createdAt
-                        FROM questions WHERE kind='unknown_usage' AND status='open' ORDER BY rowid DESC LIMIT 50`).all();
+                        FROM questions WHERE kind='unknown_usage' AND status='open' AND task_id IN (${placeholders})
+                        ORDER BY rowid DESC LIMIT 50`).all(...taskIds);
                       const capabilities = options.catalog?.capabilities() ?? [];
                       const artifactStats = options.store.db.prepare(`SELECT
                         COUNT(*) AS versions,
                         COUNT(DISTINCT artifact_id) AS artifacts,
                         COALESCE(SUM(size),0) AS bytes
-                        FROM artifacts`).get() as { versions: number; artifacts: number; bytes: number };
+                        FROM artifacts WHERE task_id IN (${placeholders})`).get(...taskIds) as { versions: number; artifacts: number; bytes: number };
                       return {
-                        summary,
+                        scope: {
+                          conversationId: conversation.id,
+                          taskIds,
+                        },
                         artifactWorkspace: {
                           scope: 'task',
                           artifacts: Number(artifactStats.artifacts),
                           versions: Number(artifactStats.versions),
                           bytes: Number(artifactStats.bytes),
-                          published: (options.store.db.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE state='published'").get() as { count: number }).count,
+                          published: (options.store.db.prepare(`SELECT COUNT(*) AS count FROM artifacts WHERE state='published' AND task_id IN (${placeholders})`).get(...taskIds) as { count: number }).count,
                         },
                         pendingSystemChanges: questions.filter(question => question.kind === 'system_change').map(question => {
                           const data = JSON.parse(question.data) as Record<string, Json>;

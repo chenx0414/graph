@@ -6,9 +6,10 @@
 
 1. `read_system_capabilities`
 2. `inspect_graph_system`
-3. `list_problems`
-4. 相关 task、node run、operation 和 session
-5. 本 docs 索引和相关主题页
+3. `get_graph_state`
+4. `list_problems`
+5. 相关 task、node run、operation 和 session
+6. 本 docs 索引和相关主题页
 
 ## 任务没有推进
 

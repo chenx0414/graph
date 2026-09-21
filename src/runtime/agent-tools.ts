@@ -15,6 +15,10 @@ import { externallyGated } from './pi-instance.ts';
 type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
   revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+  graphState?(): Promise<unknown>;
+  validateProposal?(proposal: Proposal): Promise<unknown>;
+  listProjects?(): Promise<unknown>;
+  bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
   listProblems?(): Promise<unknown>;
   resolveProblem?(input: {
     questionId: string;
@@ -231,33 +235,23 @@ export function agentTools(input: {
         })));
       },
     }, {
-      name: 'artifact_get',
-      label: 'Get shared artifact metadata',
-      description: 'Read one immutable artifact version by artifactId and optional version. Omit version to inspect the latest published version; formal work must freeze the returned version explicitly.',
-      parameters: Type.Object({ artifactId: Type.String(), version: Type.Optional(Type.Number()) }),
-      execute: async (_id: string, params: unknown) => {
-        const body = fields(params);
-        const artifactId = String(body.artifactId).trim();
-        if (!artifactId || artifactId.length > 200) throw new Error('A bounded artifactId is required');
-        return text(JSON.stringify(input.artifacts!.get(
-          artifactId,
-          typeof body.version === 'number' ? body.version : undefined,
-        )));
-      },
-    }, {
       name: 'artifact_read',
       label: 'Read shared artifact',
-      description: 'Read bounded content from one exact artifact version. Text content is returned directly within maxBytes; binary content returns its immutable read-only path and metadata instead of base64.',
+      description: 'Read one immutable artifact by artifactId. Omit version to read the latest published version, which is useful for discovery but must not be treated as a frozen reference; text is returned within maxBytes, while binary content returns its immutable read-only path and metadata.',
       parameters: Type.Object({
         artifactId: Type.String(),
-        version: Type.Number(),
+        version: Type.Optional(Type.Number()),
         maxBytes: Type.Optional(Type.Number()),
       }),
       execute: async (_id: string, params: unknown) => {
         const body = fields(params);
         const artifactId = String(body.artifactId).trim();
-        const version = Number(body.version);
-        if (!artifactId || !Number.isSafeInteger(version) || version < 1) throw new Error('artifactId and a positive exact version are required');
+        if (!artifactId || artifactId.length > 200) throw new Error('A bounded artifactId is required');
+        const requestedVersion = body.version === undefined ? undefined : Number(body.version);
+        if (requestedVersion !== undefined && (!Number.isSafeInteger(requestedVersion) || requestedVersion < 1)) {
+          throw new Error('version must be a positive integer when provided');
+        }
+        const version = requestedVersion ?? input.artifacts!.get(artifactId).version;
         return text(JSON.stringify(await input.artifacts!.read(
           artifactId,
           version,
@@ -329,7 +323,8 @@ export function agentTools(input: {
         })));
       },
     }] : [])] : []),
-    {
+  ];
+  if (input.role !== 'master') tools.push({
       name: 'submit_result', label: 'Submit result', description: 'Submit structured JSON output for this operation.',
       parameters: Type.Object({ outputJson: Type.String() }),
       execute: async (_id, params) => {
@@ -345,10 +340,13 @@ export function agentTools(input: {
         input.onSubmit?.(output);
         return text('Recorded structured result');
       },
-    },
-  ];
+    });
   if (input.run && !input.readOnly) {
     const run = input.run;
+    const runGit = async (args: string[]) => {
+      const result = await run('git', args);
+      return text(`exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`);
+    };
     tools.push(externallyGated({
       name: 'run_command', label: 'Run command', description: 'Run an allowed command inside the work copy: command is a bare executable name (node or git) and args is a string array, for example {command:"node",args:["--test","test/x.test.js"]}. It is not a shell; git only supports read-only status/diff/log/show.',
       parameters: Type.Object({ command: Type.String(), args: Type.Optional(Type.Array(Type.String())) }),
@@ -358,6 +356,71 @@ export function agentTools(input: {
         return text(`exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`);
       },
     }));
+    tools.push(
+      externallyGated({
+        name: 'git_status', label: 'Git status', description: 'Read the current work copy branch and working-tree status. This is read-only.',
+        parameters: Type.Object({}),
+        execute: async () => runGit(['status', '--short', '--branch']),
+      }),
+      externallyGated({
+        name: 'git_diff', label: 'Git diff', description: 'Read the current work copy diff. Optionally select staged changes, a base revision, a path or summary/stat output. This is read-only.',
+        parameters: Type.Object({
+          staged: Type.Optional(Type.Boolean()),
+          base: Type.Optional(Type.String()),
+          path: Type.Optional(Type.String()),
+          stat: Type.Optional(Type.Boolean()),
+        }),
+        execute: async (_id: string, params: unknown) => {
+          const body = fields(params);
+          const args = ['diff'];
+          if (body.staged === true) args.push('--staged');
+          if (body.stat === true) args.push('--stat');
+          const base = typeof body.base === 'string' ? body.base.trim() : '';
+          if (base) {
+            if (base.startsWith('-') || base.length > 200 || /[\0\r\n]/.test(base)) throw new Error('Invalid Git base revision');
+            args.push(base);
+          }
+          const path = typeof body.path === 'string' ? body.path.trim() : '';
+          if (path) args.push('--', path);
+          return runGit(args);
+        },
+      }),
+      externallyGated({
+        name: 'git_log', label: 'Git log', description: 'Read recent commits from the current work copy. This is read-only.',
+        parameters: Type.Object({
+          limit: Type.Optional(Type.Number()),
+          path: Type.Optional(Type.String()),
+        }),
+        execute: async (_id: string, params: unknown) => {
+          const body = fields(params);
+          const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0
+            ? Math.min(Math.floor(body.limit), 100)
+            : 20;
+          const args = ['log', '-n', String(limit), '--oneline'];
+          const path = typeof body.path === 'string' ? body.path.trim() : '';
+          if (path) args.push('--', path);
+          return runGit(args);
+        },
+      }),
+      externallyGated({
+        name: 'git_show', label: 'Git show', description: 'Read one commit or object from the current work copy. Optionally request summary/stat output or limit to one path. This is read-only.',
+        parameters: Type.Object({
+          ref: Type.Optional(Type.String()),
+          stat: Type.Optional(Type.Boolean()),
+          path: Type.Optional(Type.String()),
+        }),
+        execute: async (_id: string, params: unknown) => {
+          const body = fields(params);
+          const ref = typeof body.ref === 'string' && body.ref.trim() ? body.ref.trim() : 'HEAD';
+          if (ref.startsWith('-') || ref.length > 200 || /[\0\r\n]/.test(ref)) throw new Error('Invalid Git ref');
+          const args = ['show', ref];
+          if (body.stat === true) args.push('--stat');
+          const path = typeof body.path === 'string' ? body.path.trim() : '';
+          if (path) args.push('--', path);
+          return runGit(args);
+        },
+      }),
+    );
   }
   if (input.fetch) {
     const fetchUrl = input.fetch;
@@ -391,6 +454,46 @@ export function agentTools(input: {
           return text(JSON.stringify(receipt));
         },
       },
+      ...(input.supervisor.validateProposal ? [{
+        name: 'validate_proposal', label: 'Validate graph proposal', description: 'Validate one task graph proposal against the current requirement version and Graph structural rules without creating a draft or dispatching work. Returns valid:true or a concrete validation error.',
+        parameters: Type.Object({ proposalJson: Type.String() }),
+        execute: async (_id: string, params: unknown) => {
+          try {
+            const proposal = JSON.parse(String(fields(params).proposalJson)) as Proposal;
+            return text(JSON.stringify(await input.supervisor!.validateProposal!(proposal)));
+          } catch (error) {
+            const failure = error as Error & { code?: string };
+            return text(JSON.stringify({
+              valid: false,
+              error: {
+                code: failure.code ?? 'invalid_proposal',
+                message: failure.message,
+              },
+            }));
+          }
+        },
+      }] : []),
+      ...(input.supervisor.graphState ? [{
+        name: 'get_graph_state', label: 'Get graph state', description: 'Read the current proposal, graph revision, phase, node statuses, evidence, worktrees and internal problems for this conversation. Use this instead of guessing progress from chat history or the injected briefing.',
+        parameters: Type.Object({}),
+        execute: async () => text(JSON.stringify(await input.supervisor!.graphState!())),
+      }] : []),
+      ...(input.supervisor.listProjects ? [{
+        name: 'list_projects', label: 'List projects', description: 'List the projects currently configured in Graph, including their preparation state. Use this before asking the user to choose a project.',
+        parameters: Type.Object({}),
+        execute: async () => text(JSON.stringify(await input.supervisor!.listProjects!())),
+      }] : []),
+      ...(input.supervisor.bindProject ? [{
+        name: 'bind_project', label: 'Bind project', description: 'Bind this conversation to one configured and prepared project. Binding a different project invalidates the current graph draft and requires a fresh investigation.',
+        parameters: Type.Object({ projectId: Type.String(), requestId: Type.String() }),
+        execute: async (_id: string, params: unknown) => {
+          const body = fields(params);
+          return text(JSON.stringify(await input.supervisor!.bindProject!({
+            projectId: String(body.projectId).trim(),
+            requestId: String(body.requestId).trim(),
+          })));
+        },
+      }] : []),
       ...(input.supervisor.listProblems && input.supervisor.resolveProblem ? [{
         name: 'list_problems', label: 'List execution problems', description: 'List internal execution problems currently owned by the main Agent. These are not user questions; inspect them before retrying, revising the graph, or asking the user for a real decision.',
         parameters: Type.Object({}),
@@ -474,14 +577,14 @@ export function agentTools(input: {
   }
   if (input.role === 'master' && input.systemContext?.systemSummary) {
     tools.push({
-      name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read a redacted inventory of configured subscription plans, model connections, current Agent recipes, compiled Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.',
+      name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read configuration inventory: redacted subscription plans, model connections, current Agent recipes, compiled Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.',
       parameters: Type.Object({}),
       execute: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
     });
   }
   if (input.role === 'master' && input.systemContext?.systemDiagnostics) {
     tools.push({
-      name: 'inspect_graph_system', label: 'Inspect Graph system', description: 'Inspect Graph itself: installed models and capability counts, invalid or blocked capabilities, open internal problems, failed nodes, unknown-usage records and pending user-approved system changes. Treat this as system telemetry, not project content.',
+      name: 'inspect_graph_system', label: 'Inspect Graph health', description: 'Inspect runtime health for this conversation only: invalid capabilities, open internal problems, failed nodes, unknown-usage records, artifact counts and pending system changes. Configuration inventories are returned by read_system_capabilities, not duplicated here.',
       parameters: Type.Object({}),
       execute: async () => text(JSON.stringify(await input.systemContext!.systemDiagnostics!())),
     });
@@ -566,12 +669,13 @@ export function agentTools(input: {
         },
       },
       {
-        name: 'save_agent_combination', label: 'Save Agent combination', description: 'Create or edit an Agent recipe. A recipe may reference only capabilities that already exist in the user capability directory; it never creates capabilities or grants permission.',
+        name: 'save_agent_combination', label: 'Save and compile Agent combination', description: 'Create or edit an Agent recipe, then validate and compile it immediately into a versioned Agent definition. A recipe may reference only capabilities that already exist; saving never creates capabilities or grants permission. Use the returned definitionVersion directly in propose_graph.',
         parameters: Type.Object({ combinationJson: Type.String() }),
         execute: async (_id, params) => {
           const combination = JSON.parse(String(fields(params).combinationJson)) as AgentCombination;
           const saved = await input.catalog!.saveAgentCombination(combination);
-          return text(JSON.stringify(saved));
+          const compiled = input.catalog!.compileAgentCombination(combination.id);
+          return text(JSON.stringify({ combination: saved, definition: compiled }));
         },
       },
       {
@@ -581,15 +685,6 @@ export function agentTools(input: {
           const id = String(fields(params).id).trim();
           if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
           return text(JSON.stringify(await input.catalog!.deleteAgentCombination(id)));
-        },
-      },
-      {
-        name: 'compile_agent_combination', label: 'Compile Agent combination', description: 'Validate and compile a recipe into a versioned Agent definition. Put the returned definitionVersion directly into propose_graph; no manual definition authoring is required.',
-        parameters: Type.Object({ id: Type.String() }),
-        execute: async (_id, params) => {
-          const id = String(fields(params).id).trim();
-          if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
-          return text(JSON.stringify(input.catalog!.compileAgentCombination(id)));
         },
       },
     );

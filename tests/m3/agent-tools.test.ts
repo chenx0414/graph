@@ -122,10 +122,51 @@ test('Agent tools publish, discover and read immutable shared artifacts', async 
   expect(listed.artifacts).toMatchObject([{ artifactId: published.artifactId }]);
   const read = JSON.parse((await call('artifact_read', {
     artifactId: published.artifactId,
-    version: published.version,
-  })).content[0]!.text!) as { text: string; record: { digest: string } };
+  })).content[0]!.text!) as { text: string; record: { digest: string; version: number } };
   expect(read.text).toBe('{"papers":["one"]}');
   expect(read.record.digest).toMatch(/^[a-f0-9]{64}$/);
+  await writeFile(join(scope, 'papers.json'), '{"papers":["two"]}');
+  await call('artifact_publish', {
+    namespace: 'research',
+    name: 'papers',
+    sourcePath: 'papers.json',
+    schema: 'source-list@1',
+    expectedVersion: 1,
+    requestId: 'publish-tool-2',
+  });
+  const latest = JSON.parse((await call('artifact_read', {
+    artifactId: published.artifactId,
+  })).content[0]!.text!) as { text: string; record: { version: number } };
+  expect(latest).toMatchObject({ text: '{"papers":["two"]}', record: { version: 2 } });
+  expect(tools.map(tool => tool.name)).not.toContain('artifact_get');
+});
+
+test('read-only Git tools expose status, diff, log and show without a shell', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-git-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const calls: { command: string; args: string[] }[] = [];
+  const tools = agentTools({
+    workspace: root,
+    run: async (command, args) => {
+      calls.push({ command, args });
+      return { code: 0, stdout: `${command}:${args.join(' ')}`, stderr: '' };
+    },
+  });
+  const execute = (name: string, params: Record<string, unknown>) =>
+    (tools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>)('probe', params);
+
+  await execute('git_status', {});
+  await execute('git_diff', { staged: true, base: 'main', path: 'src/app.ts', stat: true });
+  await execute('git_log', { limit: 5, path: 'README.md' });
+  await execute('git_show', { ref: 'HEAD~1', stat: true, path: 'README.md' });
+
+  expect(calls).toEqual([
+    { command: 'git', args: ['status', '--short', '--branch'] },
+    { command: 'git', args: ['diff', '--staged', '--stat', 'main', '--', 'src/app.ts'] },
+    { command: 'git', args: ['log', '-n', '5', '--oneline', '--', 'README.md'] },
+    { command: 'git', args: ['show', 'HEAD~1', '--stat', '--', 'README.md'] },
+  ]);
+  expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['git_status', 'git_diff', 'git_log', 'git_show']));
 });
 
 test('full access reads and writes host paths while protected state stays unavailable', async () => {
@@ -213,7 +254,21 @@ test('only the master receives read-only resource and system inventory tools', a
   const masterTools = agentTools({
     workspace: root,
     role: 'master',
-    supervisor: { propose: async () => ({}), revise: async () => ({}) },
+    supervisor: {
+      propose: async () => ({}),
+      revise: async () => ({}),
+      graphState: async () => ({ phase: 'chatting' }),
+      validateProposal: async proposal => {
+        if (!proposal.summary.trim()) {
+          const error = new Error('A requirement version and summary are required') as Error & { code: string };
+          error.code = 'invalid_proposal';
+          throw error;
+        }
+        return { valid: true };
+      },
+      listProjects: async () => [],
+      bindProject: async () => ({ changed: true }),
+    },
     catalog,
     systemContext: {
       ...systemContext,
@@ -222,23 +277,44 @@ test('only the master receives read-only resource and system inventory tools', a
   });
   expect(masterTools.map(tool => tool.name)).toEqual(expect.arrayContaining([
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
-    'save_agent_combination', 'delete_agent_combination', 'compile_agent_combination',
+    'save_agent_combination', 'delete_agent_combination',
+    'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
     'read_system_capabilities', 'request_model_access',
+  ]));
+  expect(masterTools.map(tool => tool.name)).not.toEqual(expect.arrayContaining([
+    'artifact_get', 'compile_agent_combination', 'submit_result',
   ]));
   const execute = (name: string) => masterTools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>;
   const search = JSON.parse((await execute('search_resources')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
   expect(search.items).toEqual([expect.objectContaining({ id: 'reviewer' })]);
   const detail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer' })).content[0]!.text!) as { grantsNoPermission: boolean };
   expect(detail.grantsNoPermission).toBe(true);
+  const invalidProposal = JSON.parse((await execute('validate_proposal')('probe', {
+    proposalJson: JSON.stringify({ requirementVersion: 1, summary: '', acceptance: [], nodes: [] }),
+  })).content[0]!.text!) as { valid: boolean; error: { code: string } };
+  expect(invalidProposal).toMatchObject({ valid: false, error: { code: 'invalid_proposal' } });
   const versionedDetail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer@1.0.0' })).content[0]!.text!) as { id: string; version: string };
   expect(versionedDetail).toMatchObject({ id: 'reviewer', version: '1.0.0' });
   const combinations = JSON.parse((await execute('list_agent_combinations')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
   expect(combinations.items).toEqual([expect.objectContaining({ id: 'review' })]);
   const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'review' })).content[0]!.text!) as { resolved: { resourceId: string; version: string }[] };
   expect(combination.resolved[0]).toMatchObject({ resourceId: 'reviewer', version: '1.0.0' });
+  const saved = JSON.parse((await execute('save_agent_combination')('probe', {
+    combinationJson: JSON.stringify({
+      id: 'review',
+      name: '代码审查',
+      description: '组合代码审查资源',
+      recommendedGrade: 'high',
+      review: true,
+      tags: ['审查'],
+      resources: [{ resourceId: 'reviewer', version: '1.0.0', role: 'identity', required: true }],
+    }),
+  })).content[0]!.text!) as { definition: { definitionVersion: string } };
+  expect(saved.definition.definitionVersion).toBe('review@1');
 
   const workerTools = agentTools({ workspace: root, systemContext });
   expect(workerTools.map(tool => tool.name)).not.toContain('search_resources');
   expect(workerTools.map(tool => tool.name)).not.toContain('list_agent_combinations');
   expect(workerTools.map(tool => tool.name)).not.toContain('read_system_capabilities');
+  expect(workerTools.map(tool => tool.name)).toContain('submit_result');
 });

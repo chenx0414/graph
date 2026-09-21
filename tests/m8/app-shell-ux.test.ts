@@ -1522,6 +1522,12 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(preview).toContain('Pi 自动追加');
   expect(preview).toContain('- read: Read file contents');
   expect(preview).not.toContain('- powershell:');
+  expect(preview).toContain('- get_graph_state:');
+  expect(preview).toContain('- list_projects:');
+  expect(preview).toContain('- git_status:');
+  expect(preview).not.toContain('- artifact_get:');
+  expect(preview).not.toContain('- compile_agent_combination:');
+  expect(preview).not.toContain('- submit_result:');
   expect(preview.indexOf('- read: Read file contents'))
     .toBeLessThan(preview.indexOf('following Graph tools'));
   expect(preview.indexOf('following Graph tools'))

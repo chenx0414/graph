@@ -91,6 +91,17 @@ test('an unbound Main Agent can propose, receive approval, and install a capabil
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  const noiseStore = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  cleanup.push(() => noiseStore.close());
+  noiseStore.db.exec(`
+    INSERT INTO projects(id,root,grants) VALUES('noise','/tmp/noise','[]');
+    INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq)
+      VALUES('noise-task','noise','NOISE_PROJECT_SENTINEL',1,0,'running',0,999);
+    INSERT INTO nodes(task_id,id,spec,status)
+      VALUES('noise-task','noise-node','{"id":"noise-node","kind":"program","action":"noise"}','failed');
+    INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,status,owner)
+      VALUES('noise-question','noise-task','noise-node',NULL,'execution_failed','{"reason":"NOISE_PROBLEM_SENTINEL"}','open','main');
+  `);
 
   const created = await runtime.conversations.create({
     text: '把 Semantic Scholar MCP 加进资源库。',
@@ -98,6 +109,9 @@ test('an unbound Main Agent can propose, receive approval, and install a capabil
   });
   await runtime.host.runReady();
   expect(JSON.stringify(provider.requests[1])).toContain('capabilityHealth');
+  expect(JSON.stringify(provider.requests[1])).not.toContain('NOISE_PROJECT_SENTINEL');
+  expect(JSON.stringify(provider.requests[1])).not.toContain('NOISE_PROBLEM_SENTINEL');
+  expect(JSON.stringify(provider.requests[1])).not.toContain('configuredModels');
   let view = await runtime.conversations.view(created.conversationId);
   const proposal = view.questions.find(question => question.kind === 'system_change');
   expect(proposal).toMatchObject({

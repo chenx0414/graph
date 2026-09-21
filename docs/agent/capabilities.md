@@ -28,7 +28,7 @@ Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版�
 
 一个 Agent 的实际 tool surface 由以下来源合并：
 
-1. Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`、`powershell`；
+1. Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`，以及 Windows 上的 `powershell`；
 2. role 对应的 Graph host tools；
 3. definition 绑定的 capability tools；
 4. Pi extension 注册且允许的 tools；
@@ -57,8 +57,10 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 - `search_resources`：搜索能力库，只用于发现。
 - `get_resource`：读取一个能力 metadata；不等于绑定。
-- `read_system_capabilities`：读取当前定义、模型和配置事实。
-- `inspect_graph_system`：读取无效能力、失败节点和开放问题。
+- `read_system_capabilities`：读取模型、订阅、配方和 definition 等配置事实。
+- `inspect_graph_system`：只读取当前 conversation 的运行健康，包括无效能力、失败节点、开放问题和待处理系统变更。
+- `get_graph_state`：读取当前 graph revision、phase、nodes、evidence、worktrees 和内部问题。
+- `list_projects` / `bind_project`：列出配置项目并把当前 conversation 绑定到已准备项目。
 - Node run：查看某实例实际加载的 capability facts 和 tools。
 
 当用户问“为什么没有某个工具”时，先检查 definition 是否绑定、capability 是否有效、实际 session 是否加载，以及 host policy 是否禁用；不要根据历史对话推断。
