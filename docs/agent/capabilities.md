@@ -36,6 +36,8 @@ Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版�
 
 模型可见的 `<tools>` 文本和 provider 的可执行 tool schema 必须来自同一个实际启用集合。关闭工具时，两者都应移除。
 
+`<tools>` 先以简洁的 Pi 风格条目列出原生 coding tools，再以过渡段引出 Graph tools。参数、版本、权限摘要等详细元数据保留在 UI 工具详情和宿主运行时中，不重复注入 system prompt。
+
 Pi 原生工具在受限 Pi 子进程内执行，调用前仍经过 Graph send gate 和 OS sandbox。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
 
 ## Capability binding

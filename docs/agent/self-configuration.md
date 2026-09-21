@@ -34,6 +34,8 @@ Pi 在 0.85.1 中还会自动追加 `Current working directory`。UI 必须把�
 用户编辑 editable 文本不能改变 generated 事实，也不能改变 host-enforced authority。
 Docs section 由源码 `docs/agent/README.md`、topic 索引和阅读协议动态生成；docs 正文不进入可编辑来源列表。
 
+`<tools>` section 先列 Pi 原生 coding tools，再以过渡段引出 Graph tools。工具清单只保留名称与简短说明；参数、版本、权限摘要和运行时可用性保留在 UI 工具详情中。
+
 ## 工具选择
 
 Main Agent 的工具选择保存为 disabled list。关闭工具时：

@@ -30,6 +30,8 @@ export interface AgentToolPromptEntry {
   name: string;
   description: string;
   source: string;
+  group?: 'pi_native' | 'graph';
+  order?: number;
   version?: string;
   parameters: string[];
   permission: string;
@@ -91,14 +93,33 @@ function renderedSection(sectionValue: AgentPromptSection) {
   return `<${sectionValue.id}>\n${content}\n</${sectionValue.id}>`;
 }
 
-function toolLines(tools: readonly AgentToolPromptEntry[]) {
-  if (!tools.length) return '(none)';
-  return tools.map(tool => {
-    const source = tool.version ? `${tool.source}@${tool.version}` : tool.source;
-    const parameters = tool.parameters.length ? tool.parameters.join(', ') : 'none';
-    const availability = tool.available ? '' : 'unavailable; ';
-    return `- ${tool.name} (${source}; ${availability}${tool.permission}; parameters: ${parameters}): ${tool.description}`;
-  }).join('\n');
+function toolLine(tool: AgentToolPromptEntry) {
+  const description = tool.description.replace(/\s+/g, ' ').trim();
+  const availability = tool.available ? '' : ' (unavailable)';
+  return `- ${tool.name}${availability}: ${description}`;
+}
+
+function toolInventory(input: ComposeAgentSystemPromptInput) {
+  const native = input.tools
+    .filter(tool => tool.group === 'pi_native')
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+  const graph = input.tools
+    .filter(tool => tool.group !== 'pi_native')
+    .sort((left, right) => left.name.localeCompare(right.name));
+  if (!native.length && !graph.length) return '(none)';
+
+  const blocks: string[] = [];
+  if (native.length) blocks.push(native.map(toolLine).join('\n'));
+  if (graph.length) {
+    const transition = native.length
+      ? `In addition to the tools above, you may have access to the following Graph tools for ${input.definitionVersion}:`
+      : `The following Graph tools are available for ${input.definitionVersion}:`;
+    blocks.push([
+      transition,
+      graph.map(toolLine).join('\n'),
+    ].join('\n'));
+  }
+  return blocks.join('\n\n');
 }
 
 function capabilityLines(capabilities: readonly AgentCapabilityPromptEntry[]) {
@@ -118,20 +139,17 @@ function capabilityLines(capabilities: readonly AgentCapabilityPromptEntry[]) {
 export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): ComposedAgentSystemPrompt {
   const tools = section('tools', 'Tools', [
     {
+      id: 'tools.inventory',
+      title: 'Available tools',
+      origin: 'generated',
+      content: toolInventory(input),
+    },
+    {
       id: 'tools.guidance',
       title: 'Tool guidance',
       origin: 'editable',
       content: input.toolGuidance,
       source: 'tools/<role>.md',
-    },
-    {
-      id: 'tools.inventory',
-      title: 'Available tools',
-      origin: 'generated',
-      content: [
-        `Definition: ${input.definitionVersion}`,
-        toolLines(input.tools),
-      ].join('\n'),
     },
   ]);
 

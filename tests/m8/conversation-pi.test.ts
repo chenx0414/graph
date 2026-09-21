@@ -457,6 +457,10 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   expect(providerRequest).toContain('<identity>');
   expect(providerRequest).toContain('MAIN IDENTITY SENTINEL');
   expect(providerRequest).toContain('<tools>');
+  expect(providerRequest).toContain('- read: Read file contents');
+  expect(providerRequest).toContain('following Graph tools for');
+  expect(providerRequest).not.toContain('- ls:');
+  expect(providerRequest).not.toContain('- write:');
   expect(providerRequest).toContain('<rules>');
   expect(providerRequest).not.toContain('<workflow>');
   expect(providerRequest).not.toContain('CONVERSATION SENTINEL');

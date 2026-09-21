@@ -38,14 +38,26 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
       path: '/work/AGENTS.md',
       content: 'Keep project-specific conventions.',
     },
-    tools: [{
-      name: 'read',
-      description: 'Read a file.',
-      source: 'Graph',
-      parameters: ['path'],
-      permission: 'workspace read',
-      available: true,
-    }],
+    tools: [
+      {
+        name: 'read',
+        description: 'Read file contents',
+        source: 'Pi',
+        group: 'pi_native',
+        order: 0,
+        parameters: ['path'],
+        permission: 'workspace read',
+        available: true,
+      },
+      {
+        name: 'artifact_list',
+        description: 'List published artifacts.',
+        source: 'Graph',
+        parameters: [],
+        permission: 'task artifact workspace',
+        available: true,
+      },
+    ],
     capabilities: [{
       id: 'browser',
       version: '1.2.0',
@@ -68,11 +80,22 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
     'cwd',
   ]);
   expect(result.sections.find(section => section.id === 'tools')?.parts.map(part => part.origin))
-    .toEqual(['editable', 'generated']);
+    .toEqual(['generated', 'editable']);
   expect(result.text).toContain('<identity>\nYou are the Main Agent.\n</identity>');
   expect(result.text).toContain('<tools>');
+  expect(result.text).toContain([
+    '- read: Read file contents',
+    '',
+    'In addition to the tools above, you may have access to the following Graph tools for main@7:',
+    '- artifact_list: List published artifacts.',
+  ].join('\n'));
   expect(result.text).toContain('Use the smallest tool that can prove the claim.');
-  expect(result.text).toContain('- read (Graph; workspace read; parameters: path): Read a file.');
+  expect(result.text).not.toContain('parameters:');
+  expect(result.text).not.toContain('Definition: main@7');
+  expect(result.text.indexOf('- read: Read file contents'))
+    .toBeLessThan(result.text.indexOf('following Graph tools for main@7'));
+  expect(result.text.indexOf('following Graph tools for main@7'))
+    .toBeLessThan(result.text.indexOf('- artifact_list: List published artifacts.'));
   expect(result.text).toContain('<rules>');
   expect(result.text).toContain('Common rule.');
   expect(result.text).toContain('Submit a graph draft before dispatching work.');

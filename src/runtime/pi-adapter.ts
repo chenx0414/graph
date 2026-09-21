@@ -688,8 +688,8 @@ export function createPiAdapter(options: {
             ?? (promptRole === 'main' ? DEFAULT_MAIN_TOOL_GUIDANCE : promptRole === 'reviewer' ? DEFAULT_REVIEWER_TOOL_GUIDANCE : DEFAULT_WORKER_TOOL_GUIDANCE);
         const projectContext = await projectContextForWorkspace(workspace);
         const promptTools = [
+          ...piNativeToolPromptEntries(capabilityOperation.nativeTools),
           ...toolPromptEntries(tools, capabilityOperation.report),
-          ...piNativeToolPromptEntries(),
         ];
         const composedPrompt = composeAgentSystemPrompt({
           identity: capabilityOperation.prompts.system,

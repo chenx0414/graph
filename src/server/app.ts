@@ -176,6 +176,8 @@ function mainAgentToolView(
     capabilityId: string | null;
     parameters: string[];
     permission: string;
+    group?: 'pi_native' | 'graph';
+    order?: number;
     available: boolean;
     runtimeAvailable: boolean | null;
   }>();
@@ -186,6 +188,8 @@ function mainAgentToolView(
       capabilityId: null,
       parameters: tool.parameters,
       permission: tool.permission,
+      ...(tool.group ? { group: tool.group } : {}),
+      ...(tool.order !== undefined ? { order: tool.order } : {}),
       available: true,
       runtimeAvailable: true,
     });
@@ -391,6 +395,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
         ...(tool.version ? { version: tool.version } : {}),
         parameters: tool.parameters,
         permission: tool.permission,
+        ...(tool.group ? { group: tool.group } : {}),
+        ...(tool.order !== undefined ? { order: tool.order } : {}),
         available: tool.available,
       } satisfies AgentToolPromptEntry)),
       capabilities,

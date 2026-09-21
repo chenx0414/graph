@@ -31,16 +31,20 @@ export function graphToolsSupersededByNative(nativeTools: readonly string[]): Se
 const NATIVE_TOOL_METADATA: readonly AgentToolPromptEntry[] = [
   {
     name: 'read',
-    description: 'Read file contents, including supported images, with optional line offset and limit.',
+    description: 'Read file contents',
     source: 'Pi',
+    group: 'pi_native',
+    order: 0,
     parameters: ['path', 'offset', 'limit'],
     permission: 'workspace and granted read roots',
     available: true,
   },
   {
     name: 'bash',
-    description: 'Execute a bash command in the current working directory and return stdout and stderr.',
+    description: 'Execute bash commands (ls, grep, find, etc.)',
     source: 'Pi',
+    group: 'pi_native',
+    order: 1,
     parameters: ['command', 'timeout'],
     permission: 'sandboxed shell',
     available: true,
@@ -49,52 +53,69 @@ const NATIVE_TOOL_METADATA: readonly AgentToolPromptEntry[] = [
     name: 'edit',
     description: 'Make precise file edits with exact text replacement, including multiple disjoint edits in one call.',
     source: 'Pi',
+    group: 'pi_native',
+    order: 2,
     parameters: ['path', 'edits'],
     permission: 'workspace write',
     available: true,
   },
   {
     name: 'write',
-    description: 'Create or overwrite a file, creating parent directories when needed.',
+    description: 'Create or overwrite files',
     source: 'Pi',
+    group: 'pi_native',
+    order: 3,
     parameters: ['path', 'content'],
     permission: 'workspace write',
     available: true,
   },
   {
     name: 'ls',
-    description: 'List directory contents with directory suffixes and bounded output.',
+    description: 'List directory contents',
     source: 'Pi',
+    group: 'pi_native',
+    order: 4,
     parameters: ['path', 'limit'],
     permission: 'workspace and granted read roots',
     available: true,
   },
   {
     name: 'find',
-    description: 'Find files by glob pattern while respecting .gitignore.',
+    description: 'Find files by pattern',
     source: 'Pi',
+    group: 'pi_native',
+    order: 5,
     parameters: ['pattern', 'path', 'limit'],
     permission: 'workspace and granted read roots',
     available: true,
   },
   {
     name: 'grep',
-    description: 'Search file contents for a regex or literal pattern while respecting .gitignore.',
+    description: 'Search file contents',
     source: 'Pi',
+    group: 'pi_native',
+    order: 6,
     parameters: ['pattern', 'path', 'glob', 'ignoreCase', 'literal', 'context', 'limit'],
     permission: 'workspace and granted read roots',
     available: true,
   },
   {
     name: 'powershell',
-    description: 'Execute a PowerShell command in the current working directory and return stdout and stderr.',
+    description: 'Execute PowerShell commands',
     source: 'Pi',
+    group: 'pi_native',
+    order: 7,
     parameters: ['command', 'timeout'],
     permission: 'sandboxed shell',
     available: true,
   },
 ];
 
-export function piNativeToolPromptEntries(): AgentToolPromptEntry[] {
-  return NATIVE_TOOL_METADATA.map(tool => ({ ...tool, parameters: [...tool.parameters] }));
+export function piNativeToolPromptEntries(
+  enabledNames: readonly string[] = PI_NATIVE_TOOL_NAMES,
+): AgentToolPromptEntry[] {
+  const enabled = new Set(enabledNames);
+  return NATIVE_TOOL_METADATA
+    .filter(tool => enabled.has(tool.name))
+    .map(tool => ({ ...tool, parameters: [...tool.parameters] }));
 }

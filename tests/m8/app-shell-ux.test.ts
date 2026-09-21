@@ -1520,6 +1520,11 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(preview).toContain('<capabilities>');
   expect(preview).toContain('<cwd>');
   expect(preview).toContain('Pi 自动追加');
+  expect(preview).toContain('- read: Read file contents');
+  expect(preview.indexOf('- read: Read file contents'))
+    .toBeLessThan(preview.indexOf('following Graph tools'));
+  expect(preview.indexOf('following Graph tools'))
+    .toBeLessThan(preview.indexOf('- artifact_list:'));
   expect(preview).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
   const markdown = await page.getByTestId('agent-context-preview-markdown').innerText();
   expect(markdown).toContain('<identity>\n');
