@@ -54,6 +54,36 @@ test('an rsi report without receipt data still renders with a fallback title', (
   expect(row.rsi.report).toBe('plain report');
 });
 
+test('a failed-check rsi report keeps its pending files', () => {
+  const rows = buildTranscriptRows({
+    messages: [{
+      ...message({ id: 'rsi', seq: 1, role: 'system', text: '### RSI 检查未通过，改动已保留：修复超时' }),
+      kind: 'rsi',
+      data: {
+        id: 'rsi-1',
+        status: 'checks_failed',
+        title: '修复超时',
+        problem: '命令在含空格路径下失败',
+        branch: 'rsi/fix-timeout',
+        commit: null,
+        files: [],
+        pendingFiles: ['src/runtime/rsi.ts'],
+        validation: [{ command: 'node --run check', status: 'failed', output: 'boom' }],
+        restartRequired: false,
+        report: '### RSI 检查未通过，改动已保留：修复超时',
+      },
+    }],
+    liveTools: [],
+    streaming: [],
+    busy: false,
+  });
+  const row = rows[0];
+  if (row?.kind !== 'rsi') throw new Error('expected rsi row');
+  expect(row.rsi.status).toBe('checks_failed');
+  expect(row.rsi.pendingFiles).toEqual(['src/runtime/rsi.ts']);
+  expect(row.rsi.restartRequired).toBe(false);
+});
+
 function message(input: {
   id: string;
   seq: number;

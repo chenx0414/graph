@@ -1,6 +1,6 @@
 import { mkdtempSync } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -157,21 +157,57 @@ test('apply refuses a target file with uncommitted changes', async () => {
   }, { store, taskId, conversationId })).rejects.toThrow(/uncommitted changes/);
 });
 
-test('a failed check rolls the files and branch back', async () => {
+test('a failed check keeps the change so the Agent can keep fixing', async () => {
   const root = await repo();
   const { store, taskId, conversationId, dir } = ledger();
-  const failing = async (): Promise<RsiValidationResult[]> => [{ command: 'mock check', status: 'failed', output: 'boom' }];
-  const receipt = await service(root, dir, failing).apply({
+  let fails = true;
+  const flaky = async (): Promise<RsiValidationResult[]> => [
+    { command: 'mock check', status: fails ? 'failed' : 'passed', output: fails ? 'boom' : '' },
+  ];
+  const rsi = service(root, dir, flaky);
+  const failed = await rsi.apply({
     title: 'Broken change',
     problem: 'Introduce a regression.',
     changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 42;\n' }],
   }, { store, taskId, conversationId });
-  expect(receipt.status).toBe('rolled_back');
-  expect(receipt.error).toContain('mock check');
-  expect(await readFile(join(root, 'src', 'keep.ts'), 'utf8')).toContain('value = 1');
-  expect(shell(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main');
-  expect(shell(root, ['branch', '--list', 'rsi/*'])).toBe('');
+  expect(failed.status).toBe('checks_failed');
+  expect(failed.pendingFiles).toEqual(['src/keep.ts']);
+  // The change survives on disk and is not committed.
+  expect(await readFile(join(root, 'src', 'keep.ts'), 'utf8')).toContain('value = 42');
+  expect(shell(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).toMatch(/^rsi\//);
+  expect(shell(root, ['log', '-1', '--format=%s'])).toBe('init');
   expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
+  expect(existsSync(join(dir, 'rsi', 'working.json'))).toBe(true);
+
+  // The same file can be edited again because the failed attempt owns it.
+  fails = false;
+  const fixed = await rsi.apply({
+    title: 'Fix the regression',
+    problem: 'Correct the earlier attempt.',
+    changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'value = 42', newText: 'value = 7' }] }],
+  }, { store, taskId, conversationId });
+  expect(fixed.status).toBe('applied');
+  expect(await readFile(join(root, 'src', 'keep.ts'), 'utf8')).toContain('value = 7');
+  expect(shell(root, ['log', '-1', '--format=%s'])).toBe('rsi: Fix the regression');
+  expect(existsSync(join(dir, 'rsi', 'working.json'))).toBe(false);
+
+  // A flaky failure can be retried without changing files.
+  fails = true;
+  const retry = await rsi.apply({
+    title: 'Retry checks',
+    problem: 'Check was flaky.',
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 8;\n' }],
+  }, { store, taskId, conversationId });
+  expect(retry.status).toBe('checks_failed');
+  fails = false;
+  const rerun = await rsi.apply({
+    title: 'Retry checks',
+    problem: 'Check was flaky.',
+    changes: [],
+  }, { store, taskId, conversationId });
+  expect(rerun.status).toBe('applied');
+  expect(await readFile(join(root, 'src', 'keep.ts'), 'utf8')).toContain('value = 8');
+  expect(shell(root, ['log', '-1', '--format=%s'])).toBe('rsi: Retry checks');
 });
 
 test('activate=false commits without scheduling a reload', async () => {
@@ -235,4 +271,74 @@ test('status counts running operations so a reload can wait', async () => {
   const status = await service(root, dir).status();
   expect(status.activeOperations).toBe(1);
   expect(status.canRestart).toBe(false);
+});
+
+test('a forced change reloads even with operations still running', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  store.db.prepare('INSERT INTO nodes(task_id,id,spec,status) VALUES(?,?,?,?)').run(taskId, 'master', '{}', 'running');
+  store.db.prepare(`INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,worker_active)
+    VALUES(?,?,?,?,?,?,?,?)`).run('op1', taskId, 'master', 0, '{}', 'dispatched', 0, 0);
+  const rsi = service(root, dir);
+  const receipt = await rsi.apply({
+    title: 'Force the reload',
+    problem: 'Must go live now.',
+    force: true,
+    changes: [{ path: 'src/forced.ts', action: 'write', content: 'export const forced = true;\n' }],
+  }, { store, taskId, conversationId });
+  expect(receipt.status).toBe('applied');
+  expect(receipt.force).toBe(true);
+  const restart = JSON.parse(await readFile(join(dir, 'rsi', 'restart.json'), 'utf8')) as { force: boolean };
+  expect(restart.force).toBe(true);
+  const status = await rsi.status();
+  expect(status.activeOperations).toBe(1);
+  expect(status.canRestart).toBe(true);
+});
+
+test('a large file is accepted because only the report is bounded', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const content = `export const blob = '${'x'.repeat(3 * 1024 * 1024)}';\n`;
+  const receipt = await service(root, dir).apply({
+    title: 'Add a large file',
+    problem: 'The file is genuinely large.',
+    changes: [{ path: 'src/blob.ts', action: 'write', content }],
+  }, { store, taskId, conversationId });
+  expect(receipt.status).toBe('applied');
+  expect((await stat(join(root, 'src', 'blob.ts'))).size).toBeGreaterThan(3 * 1024 * 1024);
+  // The report diff is truncated, but the file itself is intact.
+  expect(receipt.diff?.length ?? 0).toBeLessThanOrEqual(40_000 + 200);
+});
+
+test('custom checks give a fast inner loop without running the full gate', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-rsi-checks-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  shell(root, ['init', '-b', 'main']);
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    name: 'graph', scripts: { check: 'node -e "process.exit(1)"', ok: 'node -e "process.exit(0)"' },
+  }, null, 2));
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'init']);
+  const { store, taskId, conversationId, dir } = ledger();
+  // No mock validate: this exercises the real default check ladder.
+  const rsi = new RsiService({ root, stateDir: dir });
+  const fast = await rsi.apply({
+    title: 'Fast inner loop',
+    problem: 'Iterate quickly.',
+    activate: false,
+    changes: [{ path: 'note.md', action: 'write', content: 'hello\n' }],
+    checks: [{ command: 'node', args: ['--run', 'ok'] }],
+  }, { store, taskId, conversationId });
+  expect(fast.status).toBe('applied');
+  expect(fast.validation.map(item => item.command)).toEqual(['node --run ok']);
+
+  // Without a custom check the full gate runs and fails.
+  const gated = await rsi.apply({
+    title: 'Full gate',
+    problem: 'The repo check is broken.',
+    activate: false,
+    changes: [{ path: 'note2.md', action: 'write', content: 'hello\n' }],
+  }, { store, taskId, conversationId });
+  expect(gated.status).toBe('checks_failed');
+  expect(gated.validation.map(item => item.command)).toEqual(['node --run check']);
 });

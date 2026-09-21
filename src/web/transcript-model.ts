@@ -15,7 +15,7 @@ export type TranscriptTool = {
 
 export type TranscriptRsi = {
   id: string;
-  status: 'applied' | 'rolled_back' | 'unavailable';
+  status: 'applied' | 'checks_failed' | 'rolled_back' | 'unavailable';
   title: string;
   problem: string;
   branch: string | null;
@@ -23,6 +23,8 @@ export type TranscriptRsi = {
   files: string[];
   validation: { command: string; status: string }[];
   restartRequired: boolean;
+  force: boolean;
+  pendingFiles: string[];
   error?: string;
   diff?: string;
   report: string;
@@ -68,7 +70,8 @@ function stringArray(value: unknown): string[] {
 
 function durableRsi(message: ConversationMessage): TranscriptRsi {
   const data = (message.data ?? {}) as Record<string, unknown>;
-  const status = data.status === 'applied' || data.status === 'rolled_back' || data.status === 'unavailable'
+  const status = data.status === 'applied' || data.status === 'checks_failed'
+    || data.status === 'rolled_back' || data.status === 'unavailable'
     ? data.status
     : 'unavailable';
   const validation = Array.isArray(data.validation)
@@ -90,6 +93,8 @@ function durableRsi(message: ConversationMessage): TranscriptRsi {
     files: stringArray(data.files),
     validation,
     restartRequired: data.restartRequired === true,
+    force: data.force === true,
+    pendingFiles: stringArray(data.pendingFiles),
     ...(typeof data.error === 'string' ? { error: data.error } : {}),
     ...(typeof data.diff === 'string' ? { diff: data.diff } : {}),
     report: message.text,

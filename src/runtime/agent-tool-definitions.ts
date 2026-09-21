@@ -282,7 +282,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     apply_rsi_change: {
-      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule an automatic reload. Use it only for verified harness problems in this Graph checkout. Every call is reported to the user with the diff, checks and commit. Prefer a small, focused change set; write each file with action "write", patch an existing file with action "replace" (each oldText must match exactly once), and remove a file with action "delete".',
+      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule a reload. Use it for any harness improvement you can justify — fixing a defect, refactoring, adding a feature, tightening commands or docs — not only bugs. Every call is reported to the user with the diff, checks and commit. Write each file with action "write", patch an existing file with action "replace" (each oldText must match exactly once), and remove a file with action "delete". Supply checks for a fast inner loop; the full `node --run check` and `app:build` gate runs before a change goes live. If checks fail the change is kept uncommitted so you can keep fixing and call again; pass changes: [] to just re-run checks. Set force to reload even while other operations are running (this can interrupt them).',
       parameters: Type.Object({
         title: Type.String(),
         problem: Type.String(),
@@ -290,14 +290,15 @@ function declarations(features: AgentToolFeatures) {
         diagnosis: Type.Optional(Type.String()),
         impact: Type.Optional(Type.String()),
         risk: Type.Optional(Type.String()),
-        changes: Type.Array(Type.Object({
+        changes: Type.Optional(Type.Array(Type.Object({
           path: Type.String(),
           action: Type.String(),
           content: Type.Optional(Type.String()),
           edits: Type.Optional(Type.Array(Type.Object({ oldText: Type.String(), newText: Type.String() }))),
-        })),
+        }))),
         checks: Type.Optional(Type.Array(Type.Object({ command: Type.String(), args: Type.Array(Type.String()) }))),
         activate: Type.Optional(Type.Boolean()),
+        force: Type.Optional(Type.Boolean()),
       }),
       available: main && Boolean(features.rsi?.apply),
       externallyGated: false,

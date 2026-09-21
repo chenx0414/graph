@@ -23,27 +23,36 @@ RSI 操作必须对使用者可见、可审计。这一闭环建立在“完全�
 - 新增 `rsi.ts`：一个宿主侧服务，解析 Graph 源码 checkout（`GRAPH_RSI_ROOT`、
   当前工作目录或打包应用根），要求它是 Git 仓库根且含 `package.json`。它不修改业务
   项目，只修改 Graph 自己。
+- RSI 不限于修 bug：只要 Main Agent 能给出理由，修缺陷、重构、新增功能、改进命令或
+  文档都属于 RSI。身份说明按“可改进即可改”表述，而不是“发现问题才改”。
 - Main Agent 新增两个工具。`inspect_rsi_status` 只读源码根、当前分支、待重载请求和
   仍在运行的 operation 数量；`apply_rsi_change` 提交一次结构化变更：`title`、
   `problem`、可选 `evidence` / `diagnosis` / `impact` / `risk`、文件变更列表、可选
-  `node` 检查，以及 `activate`。
+  `node` 检查、`activate` 和 `force`。文件变更列表可以省略，用于只重跑检查。
 - 文件变更支持 `write`、`replace`（每个 `oldText` 必须精确匹配一次）和 `delete`。
-  只允许 checkout 内路径，拒绝 `.git`，拒绝路径逃逸，单文件上限 2 MB、单次变更集上限
-  10 MB，并要求目标文件没有未提交改动。
-- 写入后运行检查：先跑自定义 `node` 检查，再跑 `node --run check`；`activate` 为真时
-  追加 `node --run app:build`。任一步失败即恢复文件快照；若本轮新建了 `rsi/*` 分支，
-  切回原分支并删除它。
+  只允许 checkout 内路径，拒绝 `.git`，拒绝路径逃逸，并要求目标文件没有未提交改动。
+  内容不设字节上限：变更集本身已经过一次模型工具调用，大文件也是合法改动；只有进入
+  conversation 的报告 diff 有上限，因为那是要持久化和展示的部分。
+- 写入后运行检查：先跑自定义 `node` 检查。自定义检查给出快速内循环；只有 `activate`
+  为真、或没有提供自定义检查时，才追加 `node --run check`，并在 `activate` 为真时再跑
+  `node --run app:build` 作为上线前的完整闸门。**检查失败不会丢弃改动**：文件保留在工作区、不提交、
+  不重载，receipt 状态为 `checks_failed`，并把路径记入 `<stateDir>/rsi/working.json`。
+  Main Agent 可以继续修复同一批文件，或传 `changes: []` 只重跑检查，直到通过。这样既
+  容忍抖动，又让 Agent 迭代到成功。只有真正的意外错误（写入中途失败等）才恢复快照，
+  避免留下不一致的半成品。
 - 通过后提交到专用 `rsi/<slug>-<id>` 分支（已在该分支上则复用），提交信息为
   `rsi: <title>`。`activate` 为真时写出 `<stateDir>/rsi/restart.json`，记录 id、root、
-  branch、commit 和请求时间。
+  branch、commit、请求时间，以及 `force`。
 - 桌面进程轮询 `/api/app/rsi/status`（app-token 保护）。当存在待重载请求且没有在途
   operation 时，它重启 daemon，成功后用 `/api/app/rsi/restart-ack` 清除该请求。只有
-  在重载真正成功后才 ack，崩溃不会静默丢弃重载意图。
+  在重载真正成功后才 ack，崩溃不会静默丢弃重载意图。`force` 为真时跳过“没有在途
+  operation”这一条件，立即重载——Main Agent 有权选择强制重载，代价是可能中断仍在
+  运行的 operation。
 - 每次 RSI 操作都写 `rsi.change` 事件，并向所属 conversation 追加 `role=system`、
   `kind=rsi` 的消息，携带完整 receipt。界面把它渲染为独立报告卡：标题、状态、问题、
   分支、提交、文件、验证结果、重载状态与可折叠 diff。
 - 完全访问模式下，Main Agent 的身份上下文新增一段 Harness 自我改进说明，要求它观察
-  轨迹、诊断、用最小改动修复、验证并上报；不再需要先走用户审批。旧的能力安装通道
+  轨迹、寻找改进点（不限于缺陷）、用最小改动实现、验证并上报；不再需要先走用户审批。旧的能力安装通道
   （`propose_system_change` / `apply_system_change`）继续存在，用于能力包等配置变更。
 
 ## 后果

@@ -123,7 +123,10 @@ function sameVeils(left: MarkdownVeil[], right: MarkdownVeil[]) {
 function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
   const [diffOpen, setDiffOpen] = useState(false);
   const { rsi } = row;
-  const statusLabel = rsi.status === 'applied' ? '已应用' : rsi.status === 'rolled_back' ? '已回滚' : '不可用';
+  const statusLabel = rsi.status === 'applied' ? '已应用'
+    : rsi.status === 'checks_failed' ? '检查未通过'
+      : rsi.status === 'rolled_back' ? '已回滚' : '不可用';
+  const files = rsi.files.length ? rsi.files : rsi.pendingFiles;
   return (
     <section className="rsi-report" data-testid="rsi-report" data-status={rsi.status}>
       <header className="rsi-report-header">
@@ -140,9 +143,9 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
           {rsi.commit && <div><dt>提交</dt><dd>{rsi.commit.slice(0, 12)}</dd></div>}
         </dl>
       )}
-      {rsi.files.length > 0 && (
+      {files.length > 0 && (
         <div className="rsi-report-files">
-          {rsi.files.map(file => <code key={file}>{file}</code>)}
+          {files.map(file => <code key={file}>{file}</code>)}
         </div>
       )}
       {rsi.validation.length > 0 && (
@@ -157,8 +160,16 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
         </ul>
       )}
       {rsi.error && <p className="rsi-report-error">{rsi.error}</p>}
+      {rsi.status === 'checks_failed' && (
+        <p className="rsi-report-pending">改动已保留在工作区、尚未提交，也不会触发重载。继续修复后再次调用即可。</p>
+      )}
       {rsi.restartRequired && (
-        <p className="rsi-report-restart"><Icon name="refresh" size={12} />已安排自动重载，新的 Graph 代码将在重启后生效。</p>
+        <p className="rsi-report-restart">
+          <Icon name="refresh" size={12} />
+          {rsi.force
+            ? '已安排强制重载，可能中断仍在运行的 operation。'
+            : '已安排自动重载，等待在途 operation 结束后生效。'}
+        </p>
       )}
       {rsi.diff && (
         <>

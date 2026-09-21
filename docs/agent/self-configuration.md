@@ -67,14 +67,14 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 ## Harness 自我改进（RSI）
 
-在完全访问模式下，Main Agent 同时是 Graph Harness 的改进者。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求和仍在运行的 operation，再用 `apply_rsi_change` 提交一次结构化改动：
+在完全访问模式下，Main Agent 同时是 Graph Harness 的改进者。RSI 不限于修 bug：只要它能给出理由，修缺陷、重构、新增功能、改进命令或文档都可以改。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求和仍在运行的 operation，再用 `apply_rsi_change` 提交一次结构化改动：
 
 - 修改 Graph 源码 checkout 内的文件（`write` / `replace` / `delete`），拒绝 `.git` 与路径逃逸，要求目标文件没有未提交改动；
 - 运行检查（自定义 `node` 检查、`node --run check`，`activate` 时再加 `node --run app:build`）；
 - 提交到专用 `rsi/*` 分支；
-- `activate` 为真时写出 `<stateDir>/rsi/restart.json`，由桌面进程在所有 operation 停稳后重启 daemon 让改动生效。
+- `activate` 为真时写出 `<stateDir>/rsi/restart.json`，由桌面进程在 operation 停稳后重启 daemon 让改动生效；`force` 为真时跳过等待、立即重载，可能中断在途 operation。
 
-验证失败会恢复文件快照并删除本轮新建的分支。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。源码 checkout 必须是干净的 Git 仓库；打包应用默认没有源码 checkout，需要用 `GRAPH_RSI_ROOT` 指向一个。
+检查失败不会丢弃改动：文件保留在工作区、不提交、不重载，receipt 状态为 `checks_failed`。Main Agent 继续修复同一批文件，或传 `changes: []` 只重跑检查，直到通过；只有意外错误才恢复快照。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。源码 checkout 必须是 Git 仓库；打包应用默认没有源码 checkout，需要用 `GRAPH_RSI_ROOT` 指向一个。
 
 ## 原版恢复
 

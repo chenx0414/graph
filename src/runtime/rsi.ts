@@ -11,8 +11,9 @@ import { checkedOutBranch, detectRepo, git, revParse } from '../git/git.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 
 const execFileAsync = promisify(execFile);
-const MAX_CHANGE_BYTES = 10 * 1024 * 1024;
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+// Only the report is bounded: it is what gets persisted in the conversation and
+// shown in the UI. File contents are not capped — the change set already travels
+// through a single model tool call, and a large file is a legitimate change.
 const MAX_REPORT_DIFF = 40_000;
 const CHECK_TIMEOUT_MS = 15 * 60_000;
 const BUILD_TIMEOUT_MS = 20 * 60_000;
@@ -37,6 +38,8 @@ export interface RsiChangeInput {
   changes: RsiFileChange[];
   checks?: RsiCommand[];
   activate?: boolean;
+  /** Reload even while other operations are still running; may interrupt them. */
+  force?: boolean;
 }
 
 export interface RsiValidationResult {
@@ -47,7 +50,7 @@ export interface RsiValidationResult {
 
 export interface RsiReceipt {
   id: string;
-  status: 'applied' | 'rolled_back' | 'unavailable';
+  status: 'applied' | 'checks_failed' | 'rolled_back' | 'unavailable';
   title: string;
   root: string | null;
   branch: string | null;
@@ -55,6 +58,9 @@ export interface RsiReceipt {
   files: string[];
   validation: RsiValidationResult[];
   restartRequired: boolean;
+  force?: boolean;
+  /** Files left uncommitted by this or an earlier failed attempt, still fixable. */
+  pendingFiles?: string[];
   error?: string;
   diff?: string;
   report: string;
@@ -70,6 +76,7 @@ export interface RsiStatus {
     branch: string | null;
     commit: string | null;
     requestedAt: number;
+    force?: boolean;
   } | null;
   activeOperations: number;
   /** False when the operation ledger could not be read, so a reload must wait. */
@@ -138,6 +145,9 @@ async function defaultValidate(input: { root: string; checks: RsiCommand[]; acti
     results.push(result);
     if (result.status === 'failed') return results;
   }
+  // Custom checks give a fast inner loop while iterating. The full gate runs
+  // before a change goes live, or whenever no custom check was supplied.
+  if (input.checks.length && !input.activate) return results;
   const check = await runCommand(input.root, { command: 'node', args: ['--run', 'check'] }, CHECK_TIMEOUT_MS);
   results.push(check);
   if (check.status === 'failed' || !input.activate) return results;
@@ -181,9 +191,6 @@ function normalizeChange(value: unknown, index: number): RsiFileChange {
   const path = assertText(body.path, `changes[${index}].path`, 1_000);
   if (body.action === 'write') {
     if (typeof body.content !== 'string') throw new RuntimeError('invalid_input', `changes[${index}].content must be a string`);
-    if (Buffer.byteLength(body.content, 'utf8') > MAX_FILE_BYTES) {
-      throw new RuntimeError('invalid_input', `changes[${index}].content exceeds ${MAX_FILE_BYTES} bytes`);
-    }
     return { path, action: 'write', content: body.content };
   }
   if (body.action === 'delete') return { path, action: 'delete' };
@@ -233,6 +240,21 @@ function failureReport(input: RsiChangeInput, root: string | null, error: string
   ].join('\n');
 }
 
+function checksFailedReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'>) {
+  return [
+    `### RSI 检查未通过，改动已保留：${input.title}`,
+    '',
+    `- 问题：${input.problem}`,
+    ...(input.diagnosis ? [`- 诊断：${input.diagnosis}`] : []),
+    `- 分支：${receipt.branch ?? 'unknown'}`,
+    `- 保留文件：${(receipt.pendingFiles ?? []).join(', ') || '（无文件改动）'}`,
+    '- 验证：',
+    ...receipt.validation.map(item => `  - ${item.command}: ${item.status}`),
+    '',
+    '改动仍在工作区、尚未提交，也不会触发重载。继续修复后再次调用 apply_rsi_change 即可（可用 changes: [] 只重跑检查）。',
+  ].join('\n');
+}
+
 function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'>) {
   return [
     `### RSI 已应用：${input.title}`,
@@ -247,7 +269,9 @@ function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'
     `- 文件：${receipt.files.join(', ')}`,
     '- 验证：',
     ...receipt.validation.map(item => `  - ${item.command}: ${item.status}`),
-    `- 激活：${receipt.restartRequired ? '已安排自动重启' : '仅保存，未重启'}`,
+    `- 激活：${receipt.restartRequired
+      ? receipt.force ? '已安排强制重载（可能中断在途 operation）' : '已安排自动重载（等待在途 operation 结束）'
+      : '仅保存，未重载'}`,
     ...(receipt.diff ? ['', '```diff', receipt.diff, '```'] : []),
   ].join('\n');
 }
@@ -281,6 +305,10 @@ export class RsiService {
     return join(this.stateDir, 'rsi', 'restart.json');
   }
 
+  private workingPath() {
+    return join(this.stateDir, 'rsi', 'working.json');
+  }
+
   async status(): Promise<RsiStatus> {
     const root = this.root && existsSync(this.root) ? this.root : null;
     const available = Boolean(root && existsSync(join(root, 'package.json')) && detectRepo(root) === root);
@@ -310,7 +338,10 @@ export class RsiService {
       pendingRestart,
       activeOperations,
       operationsKnown,
-      canRestart: Boolean(pendingRestart && operationsKnown && activeOperations === 0),
+      // A forced request reloads even with operations in flight; a normal one
+      // waits for the ledger to drain.
+      canRestart: Boolean(pendingRestart
+        && (pendingRestart.force === true || (operationsKnown && activeOperations === 0))),
     };
   }
 
@@ -335,6 +366,25 @@ export class RsiService {
     }
   }
 
+  /**
+   * Files a previous failed attempt left uncommitted. They stay editable so the
+   * Main Agent can keep fixing the same change instead of losing it to a flaky
+   * check, while unrelated user edits still block the change set.
+   */
+  private async readWorking(): Promise<{ branch: string; paths: string[] } | null> {
+    try {
+      const parsed = JSON.parse(await readFile(this.workingPath(), 'utf8')) as { branch?: unknown; paths?: unknown };
+      if (typeof parsed.branch !== 'string' || !Array.isArray(parsed.paths)) return null;
+      return { branch: parsed.branch, paths: parsed.paths.filter((path): path is string => typeof path === 'string') };
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeWorking(branch: string, paths: string[]) {
+    await writeAtomic(this.workingPath(), `${JSON.stringify({ branch, paths: [...new Set(paths)].sort() }, null, 2)}\n`);
+  }
+
   async apply(input: RsiChangeInput, context: RsiApplyContext): Promise<RsiReceipt> {
     const title = assertText(input.title, 'title', 200);
     const problem = assertText(input.problem, 'problem', 4_000);
@@ -352,11 +402,9 @@ export class RsiService {
       changes: Array.isArray(input.changes) ? input.changes.map(normalizeChange) : [],
       checks: normalizeChecks(input.checks),
       activate: input.activate !== false,
+      ...(input.force === true ? { force: true } : {}),
     };
-    if (!normalized.changes.length) throw new RuntimeError('invalid_input', 'At least one RSI file change is required');
-    const totalBytes = normalized.changes.reduce((sum, change) =>
-      sum + (change.action === 'write' ? Buffer.byteLength(change.content, 'utf8') : 0), 0);
-    if (totalBytes > MAX_CHANGE_BYTES) throw new RuntimeError('invalid_input', `RSI change set exceeds ${MAX_CHANGE_BYTES} bytes`);
+    const checks = normalized.checks ?? [];
 
     const id = randomUUID();
     const root = this.root;
@@ -378,15 +426,30 @@ export class RsiService {
     const uniquePaths = [...new Set(paths as string[])];
     if (uniquePaths.length !== paths.length) throw new RuntimeError('invalid_input', 'RSI changes must use unique file paths');
 
-    const dirty = git(root, ['status', '--porcelain=v1', '-uall', '--', ...uniquePaths]).stdout;
-    if (dirty) throw new RuntimeError('rsi_dirty', `RSI target files have uncommitted changes: ${dirty}`);
-
     const originalHead = revParse(root, 'HEAD');
     if (!originalHead) throw new RuntimeError('rsi_unavailable', 'Graph source checkout has no Git HEAD');
     const originalBranch = checkedOutBranch(root);
     const branch = originalBranch?.startsWith('rsi/')
       ? originalBranch
       : `rsi/${slug(title)}-${id.slice(0, 8)}`;
+
+    // A failed attempt keeps its files uncommitted so the Agent can keep fixing
+    // them. Those paths stay editable; unrelated user edits still block.
+    const working = await this.readWorking();
+    const owned = new Set(working && working.branch === branch ? working.paths : []);
+    // An empty change list is valid when there is pending work to re-check or a
+    // custom check to run; the default validation always runs anyway.
+    if (!normalized.changes.length && !checks.length && !owned.size) {
+      throw new RuntimeError('invalid_input', 'Provide at least one file change or one check to run');
+    }
+    if (uniquePaths.length) {
+      // Check each path on its own; `git()` trims stdout, which would corrupt a
+      // parsed porcelain line whose first column is a space.
+      const blocked = uniquePaths.filter(path => !owned.has(path)
+        && git(root, ['status', '--porcelain=v1', '-uall', '--', path]).stdout.length > 0);
+      if (blocked.length) throw new RuntimeError('rsi_dirty', `RSI target files have uncommitted changes: ${blocked.join(', ')}`);
+    }
+
     let createdBranch = false;
     if (branch !== originalBranch) {
       const switched = git(root, ['switch', '-c', branch]);
@@ -437,31 +500,51 @@ export class RsiService {
 
       const validation = await this.validate({
         root,
-        checks: normalized.checks ?? [],
+        checks,
         activate: normalized.activate === true,
       });
       const failed = validation.find(result => result.status === 'failed');
-      if (failed) throw new RuntimeError('rsi_validation', `${failed.command} failed:\n${failed.output}`);
+      if (failed) {
+        // Keep the working tree so the Agent can iterate; a flaky or genuinely
+        // failing check must not discard the change.
+        const pendingFiles = [...new Set([...owned, ...uniquePaths])].sort();
+        await this.writeWorking(branch, pendingFiles);
+        const base: Omit<RsiReceipt, 'report'> = {
+          id, status: 'checks_failed', title, root, branch, commit: null,
+          files: uniquePaths, validation, restartRequired: false, pendingFiles,
+        };
+        const receipt: RsiReceipt = { ...base, report: checksFailedReport(normalized, base) };
+        this.record(context, receipt);
+        return receipt;
+      }
 
-      // Stage only paths that exist now or were tracked before, so a delete of a
-      // never-tracked file does not fail the whole change set.
-      const tracked = new Set(git(root, ['ls-files', '--', ...uniquePaths]).stdout.split('\n').filter(Boolean));
-      const stagePaths = uniquePaths.filter(path => tracked.has(path) || existsSync(join(root, path)));
-      if (!stagePaths.length) throw new RuntimeError('rsi_no_change', 'RSI change set produced no file changes');
-      const staged = git(root, ['add', '-A', '--', ...stagePaths]);
-      if (staged.code !== 0) throw new RuntimeError('rsi_git', staged.stderr || 'Failed to stage RSI changes');
-      const committed = git(root, ['commit', '--no-verify', '-m', `rsi: ${title}`, '--', ...stagePaths]);
-      if (committed.code !== 0) throw new RuntimeError('rsi_git', committed.stderr || 'Failed to commit RSI changes');
-      const commit = revParse(root, 'HEAD');
-      if (!commit) throw new RuntimeError('rsi_git', 'RSI commit did not produce a HEAD');
+      // Commit every path this attempt or a prior attempt owns, so a checks-only
+      // re-run still lands the pending files. Stage only paths that exist now or
+      // were tracked before, so a delete of a never-tracked file cannot fail.
+      const commitPaths = [...new Set([...uniquePaths, ...owned])].sort();
+      const tracked = new Set(git(root, ['ls-files', '--', ...commitPaths]).stdout.split('\n').filter(Boolean));
+      const stagePaths = commitPaths.filter(path => tracked.has(path) || existsSync(join(root, path)));
+      let commit = revParse(root, 'HEAD') ?? null;
+      let committedNow = false;
+      if (stagePaths.length) {
+        const staged = git(root, ['add', '-A', '--', ...stagePaths]);
+        if (staged.code !== 0) throw new RuntimeError('rsi_git', staged.stderr || 'Failed to stage RSI changes');
+        const committed = git(root, ['commit', '--no-verify', '-m', `rsi: ${title}`, '--', ...stagePaths]);
+        if (committed.code !== 0) throw new RuntimeError('rsi_git', committed.stderr || 'Failed to commit RSI changes');
+        commit = revParse(root, 'HEAD') ?? null;
+        if (!commit) throw new RuntimeError('rsi_git', 'RSI commit did not produce a HEAD');
+        committedNow = true;
+      }
+      await rm(this.workingPath(), { force: true });
 
       const restartRequired = normalized.activate === true;
       if (restartRequired) {
         await writeAtomic(this.restartPath(), `${JSON.stringify({
           id, root, branch, commit, requestedAt: Date.now(),
+          ...(normalized.force ? { force: true } : {}),
         }, null, 2)}\n`);
       }
-      const diff = await diffFor(root, commit);
+      const diff = committedNow && commit ? await diffFor(root, commit) : undefined;
       const base: Omit<RsiReceipt, 'report'> = {
         id,
         status: 'applied',
@@ -472,6 +555,7 @@ export class RsiService {
         files: stagePaths,
         validation,
         restartRequired,
+        ...(normalized.force ? { force: true } : {}),
         ...(diff ? { diff } : {}),
       };
       const receipt: RsiReceipt = { ...base, report: successReport(normalized, base) };
@@ -486,7 +570,11 @@ export class RsiService {
           await writeFile(absolute, content, { mode: 0o644 });
         }
       }
-      if (createdBranch && originalBranch) {
+      // Restore only what this attempt wrote; keep files a prior failed attempt
+      // still owns so its fix is not lost either.
+      if (owned.size) await this.writeWorking(branch, [...owned]);
+      else await rm(this.workingPath(), { force: true });
+      if (createdBranch && originalBranch && !owned.size) {
         git(root, ['switch', originalBranch]);
         git(root, ['branch', '-D', branch]);
       }
