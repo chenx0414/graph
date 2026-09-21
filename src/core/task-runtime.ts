@@ -150,7 +150,9 @@ export async function openTaskRuntime(options: {
     defaultBudgetTokens(): number | null;
     projects?(): ProjectConfig[];
   };
-  /** Host-selected grants and environment for confirmed program checks only. */
+  /** Host-selected grants and environment for confirmed program checks only.
+   * Without `nodeModulesPath` a check links the project root's own installed
+   * dependencies, so the project toolchain resolves in an isolated work copy. */
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   /** Read-only host inventory exposed to the master Agent. It must never
    * contain secret values or write configuration on the Agent's behalf. */

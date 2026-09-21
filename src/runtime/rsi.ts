@@ -9,6 +9,7 @@ import type { TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { checkedOutBranch, detectRepo, git, revParse } from '../git/git.ts';
 import { graphApplicationRoot } from './graph-root.ts';
+import { RUNTIME_NODE_ENV } from './workspace-command.ts';
 
 const execFileAsync = promisify(execFile);
 // Only the report is bounded: it is what gets persisted in the conversation and
@@ -111,19 +112,38 @@ function commandOutput(stdout: string | Buffer, stderr: string | Buffer) {
   return [String(stdout), String(stderr)].filter(Boolean).join('\n').trim().slice(-40_000);
 }
 
+/** Command line and environment for one check. Checks run outside the sandbox in
+ * the user's own checkout, so they keep the inherited environment - except
+ * `DYLD_*`: an unrelated installer can point those at its own copies of system
+ * libraries, and a node binary started that way dies before its own code runs.
+ * A packaged app ships a real node runtime (`GRAPH_APP_NODE`) and validates the
+ * checkout with it; otherwise the developer's own `node` runs the gate, exactly
+ * as it would from their shell. */
+export function validationCommand(
+  command: RsiCommand,
+  env: NodeJS.ProcessEnv = process.env,
+): { executable: string; args: string[]; env: NodeJS.ProcessEnv } {
+  return {
+    executable: env[RUNTIME_NODE_ENV]?.trim() || 'node',
+    args: command.args,
+    env: {
+      ...Object.fromEntries(Object.entries(env).filter(([key, value]) => value !== undefined && !key.startsWith('DYLD_'))),
+      ELECTRON_RUN_AS_NODE: '1',
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_PAGER: 'cat',
+      PAGER: 'cat',
+    },
+  };
+}
+
 async function runCommand(root: string, command: RsiCommand, timeout: number): Promise<RsiValidationResult> {
+  const resolved = validationCommand(command);
   try {
-    const result = await execFileAsync(command.command, command.args, {
+    const result = await execFileAsync(resolved.executable, resolved.args, {
       cwd: root,
       timeout,
       maxBuffer: 20 * 1024 * 1024,
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_PAGER: 'cat',
-        PAGER: 'cat',
-      },
+      env: resolved.env,
     });
     return {
       command: [command.command, ...command.args].join(' '),
