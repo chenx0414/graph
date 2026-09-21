@@ -2012,7 +2012,33 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   font-size: 11px;
   font-weight: 650;
 }
+.slash-head-title { display: inline-flex; align-items: center; gap: 6px; }
+.slash-popover { max-height: min(480px, 68vh); display: flex; flex-direction: column; }
+.slash-back {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.slash-back:hover { background: var(--panel-soft); color: var(--text); }
+.slash-back svg { transform: rotate(180deg); }
 .mention-list { max-height: 296px; overflow-y: auto; padding: 5px; }
+.slash-list { flex: 1; min-height: 0; max-height: none; }
+.slash-group + .slash-group { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border); }
+.slash-group-label {
+  padding: 6px 8px 4px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
 .mention-item {
   display: flex;
   align-items: center;
@@ -2031,8 +2057,59 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 }
 .mention-item:hover,
 .mention-item[data-active="true"] { background: var(--panel-soft); color: var(--text); }
+.slash-item { align-items: flex-start; min-height: 44px; }
+.slash-item[data-disabled="true"] { opacity: 0.48; cursor: not-allowed; }
+.slash-item-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.slash-item-copy strong { color: var(--text); font-size: 12px; font-weight: 620; }
+.slash-item-copy small {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mention-item .grow { flex: 1; min-width: 0; }
 .mention-empty { padding: 14px 12px; color: var(--faint); font-size: 12px; }
+.composer-command-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.composer-command-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 280px;
+  min-height: 28px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  color: var(--text);
+  font-size: 11px;
+}
+.composer-command-chip[data-kind="capability"] {
+  border-color: color-mix(in srgb, #d97706 34%, var(--border));
+  background: color-mix(in srgb, #d97706 7%, var(--panel));
+}
+.composer-command-chip > .truncate { max-width: 150px; }
+.composer-command-chip button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.composer-command-chip button:hover { background: var(--border); color: var(--text); }
 .visually-hidden {
   position: absolute !important;
   width: 1px !important;

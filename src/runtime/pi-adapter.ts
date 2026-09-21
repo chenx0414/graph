@@ -932,6 +932,21 @@ export function createPiAdapter(options: {
             }
           }
           try {
+            const compactRequested = operation.context.messages?.some(message => message.command === 'compact') ?? false;
+            if (compactRequested) {
+              await session.compact();
+              flushDeltas(true);
+              if (gateRefusal) throw gateRefusal;
+              const text = '上下文已压缩。';
+              if (persistEntries) {
+                appendNodeEntry(options.store, {
+                  taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                  activationId: operation.activationId, operationId: operation.id, role: 'system', kind: 'compaction',
+                  text,
+                });
+              }
+              return { outcome: 'completed', output: { text }, usage: gate.total() };
+            }
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
             if (persistEntries) {
               appendNodeEntry(options.store, {

@@ -914,12 +914,14 @@ export async function openTaskRuntime(options: {
       if (!proposal) throw new RuntimeError('not_found', `Proposal v${version} was not found`);
       return proposal;
     },
-    async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[] }) {
+    async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[]; command?: 'compact' }) {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const attachments = cleanAttachments(input.attachments);
-      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'chat', text: input.text, attachments }, () => {
-        if (!input.text.trim() && !attachments.length) throw new RuntimeError('invalid_input', 'A nonempty message or attachment is required');
+      const receipt = store.command(`conversation:${conversationId}`, input.requestId, {
+        type: 'chat', text: input.text, attachments, command: input.command ?? null,
+      }, () => {
+        if (!input.text.trim() && !attachments.length && !input.command) throw new RuntimeError('invalid_input', 'A nonempty message, attachment or command is required');
         // A new user message is an explicit retry for a master parked on its own
         // transient internal problem; otherwise that turn would never run again.
         const parked = store.db.prepare(
@@ -934,7 +936,12 @@ export async function openTaskRuntime(options: {
         const state = anchor.paused || (node && ['preparing', 'running', 'blocked'].includes(node.status)) ? 'queued' : 'pending';
         const message = appendMessage(store, {
           conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state,
-          ...(attachments.length ? { data: { attachments } as unknown as Json } : {}),
+          ...(attachments.length || input.command ? {
+            data: {
+              ...(attachments.length ? { attachments } : {}),
+              ...(input.command ? { command: input.command } : {}),
+            } as unknown as Json,
+          } : {}),
         });
         // A running turn picks the message up when it settles; a blocked one
         // waits for its open question; everything else queues a next turn now.
@@ -945,6 +952,14 @@ export async function openTaskRuntime(options: {
       });
       if (options.autoWake) execution.kick();
       return receipt;
+    },
+    compact(conversationId: string, input: { requestId: string }) {
+      ensureOpen();
+      return conversations.chat(conversationId, {
+        text: '压缩当前会话上下文',
+        requestId: input.requestId,
+        command: 'compact',
+      });
     },
     async steer(conversationId: string, input: { requestId: string }) {
       ensureOpen();

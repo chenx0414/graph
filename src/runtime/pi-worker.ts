@@ -188,12 +188,27 @@ async function main() {
     await session.close();
     process.exit(0);
   };
+  const runCompact = async () => {
+    if (promptRunning) throw new Error('Pi worker already has a running operation');
+    promptRunning = true;
+    await session.compact();
+    await Promise.all(pendingEvents);
+    await writeFully(process.stdout, `${JSON.stringify({ ok: true, inspect: inspect() })}\n`);
+    await session.close();
+    process.exit(0);
+  };
 
   for await (const line of createInterface({ input: process.stdin })) {
     if (!line.trim()) continue;
     const command = JSON.parse(line) as { operation?: string; text?: string };
     if (command.operation === 'prompt' && typeof command.text === 'string') {
       void runPrompt(command.text).catch(async error => {
+        const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        await writeFully(process.stderr, `${message}\n`).catch(() => undefined);
+        process.exit(1);
+      });
+    } else if (command.operation === 'compact') {
+      void runCompact().catch(async error => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         await writeFully(process.stderr, `${message}\n`).catch(() => undefined);
         process.exit(1);

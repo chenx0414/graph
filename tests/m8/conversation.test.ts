@@ -63,6 +63,33 @@ test('a conversation starts and chats without a project or feature task', async 
   expect(await runtime.user.list()).toEqual([]);
 });
 
+test('compact is a durable conversation command carried into the next master operation', async () => {
+  const root = await temp('compact-command');
+  const seen: Operation[] = [];
+  const runtime = await withRuntime(root, operation => {
+    seen.push(operation);
+    return { outcome: 'completed', output: { text: 'ok' }, usage };
+  });
+  const created = await runtime.conversations.create({ text: '先讨论', requestId: 'compact-create' });
+  await runtime.host.runReady();
+  seen.length = 0;
+
+  const receipt = await runtime.conversations.compact(created.conversationId, { requestId: 'compact-command' });
+  expect(receipt).toMatchObject({ state: 'pending', pending: false });
+  await runtime.host.runReady();
+
+  expect(seen).toHaveLength(1);
+  expect(seen[0]!.context.messages).toEqual([
+    expect.objectContaining({ text: '压缩当前会话上下文', command: 'compact' }),
+  ]);
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.messages.at(-2)).toMatchObject({
+    role: 'user',
+    text: '压缩当前会话上下文',
+    data: { command: 'compact' },
+  });
+});
+
 test('Main Agent can validate a graph, inspect its state, list projects and bind a project', async () => {
   const root = await temp('graph-state');
   const projectOne = join(root, 'project-one');

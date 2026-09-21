@@ -1330,6 +1330,81 @@ test('the composer inserts project file mentions and carries text attachments in
   await expect.poll(() => page.getByTestId('message-user').last().innerText()).toContain('notes.md');
 });
 
+test('the composer slash menu selects tools, switches model and queues compaction', async () => {
+  const root = await temp('composer-slash');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 2, enabledModelCount: 2 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论', requestId: 'composer-slash' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const modelRequests: unknown[] = [];
+  let compactRequests = 0;
+  let sent: { text?: string } | null = null;
+  await page.route('**/api/settings', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      projects: [{ id: 'alpha', root }],
+      defaultModel: 'local',
+      models: [
+        { id: 'local', grade: 'high', credentialId: 'local', contextWindow: 32_000, reasoning: true, defaultThinkingLevel: 'low' },
+        { id: 'fast', grade: 'medium', credentialId: 'local', contextWindow: 16_000, reasoning: false },
+      ],
+      definitions: [],
+      capabilities: [],
+    }),
+  }));
+  await page.route(`**/api/conversations/${created.conversationId}/model`, async route => {
+    modelRequests.push(JSON.parse(route.request().postData() ?? '{}'));
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ changed: true }) });
+  });
+  await page.route(`**/api/conversations/${created.conversationId}/compact`, async route => {
+    compactRequests += 1;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'pending' }) });
+  });
+  await page.route(`**/api/conversations/${created.conversationId}/messages`, async route => {
+    sent = JSON.parse(route.request().postData() ?? '{}') as { text?: string };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ conversationId: created.conversationId, messageId: 'message', state: 'pending', cursor: 2, pending: false }),
+    });
+  });
+
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  const input = page.getByTestId('chat-input');
+  await input.waitFor();
+  await input.fill('/');
+  await page.getByTestId('slash-popover').waitFor();
+  await page.getByTestId('slash-tool-read').click();
+  await page.getByTestId('composer-command-chips').waitFor();
+  expect(await page.getByTestId('composer-command-chips').innerText()).toContain('read');
+
+  await input.fill('/model');
+  await page.getByTestId('slash-system-model').click();
+  await page.getByTestId('slash-model-fast').click();
+  await expect.poll(() => modelRequests.length).toBe(1);
+  expect(modelRequests[0]).toMatchObject({ model: 'fast', thinkingLevel: 'off' });
+
+  await input.fill('/compact');
+  await page.getByTestId('slash-system-compact').click();
+  await expect.poll(() => compactRequests).toBe(1);
+
+  await input.fill('请分析这个项目');
+  await page.getByTestId('chat-send').click();
+  await expect.poll(() => sent).not.toBeNull();
+  expect(sent!.text).toContain('请分析这个项目');
+  expect(sent!.text).toContain('The user explicitly requested the following tools and capabilities');
+  expect(sent!.text).toContain('`read`');
+});
+
 test('the new-chat composer supports project mentions and attachments before submitting', async () => {
   const root = await temp('new-chat-composer');
   await mkdir(join(root, 'src'), { recursive: true });

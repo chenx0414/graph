@@ -656,6 +656,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       requestId: body.requestId,
     });
   });
+  app.post('/api/conversations/:conversationId/compact', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.compact(params.conversationId, { requestId: body.requestId });
+  });
   app.post('/api/conversations/:conversationId/archive', async request => {
     const params = request.params as { conversationId: string };
     const body = request.body as { requestId: string };

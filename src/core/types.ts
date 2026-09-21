@@ -199,7 +199,13 @@ export interface Operation {
   context: {
     previousOutput: Json;
     answers: { questionId: string; value: Json }[];
-    messages?: { id?: string; text: string; requirementVersion: number; attachments?: AttachmentInput[] }[];
+    messages?: {
+      id?: string;
+      text: string;
+      requirementVersion: number;
+      attachments?: AttachmentInput[];
+      command?: 'compact';
+    }[];
     briefing?: string;
     agentContext?: ResolvedAgentContext;
     /** Structured result this operation must submit, so tools can validate in-turn. */

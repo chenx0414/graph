@@ -1,11 +1,22 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
 import { FullAccessToggle } from './FullAccessToggle.tsx';
+import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
+import type { ComposerModel, ComposerTelemetryView, ThinkingLevel } from './ComposerTelemetry.tsx';
+import {
+  filterSlashEntries,
+  slashEntries,
+  SlashMenu,
+  type SlashEntry,
+  type SlashScope,
+  type SlashTarget,
+} from './SlashCommands.tsx';
 import { Icon, toast } from './ui.tsx';
 
 export type ChatAttachment = { name: string; type: string; size: number; text: string };
 type MentionEntry = { path: string; kind: 'file' | 'directory' };
 type Mention = { start: number; end: number; query: string };
+type Slash = { start: number; end: number; query: string };
 
 const TEXT_ATTACHMENT_EXTENSIONS = new Set([
   'md', 'markdown', 'txt', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'csv', 'tsv',
@@ -15,6 +26,13 @@ const TEXT_ATTACHMENT_EXTENSIONS = new Set([
 
 function mentionAt(value: string, cursor: number): Mention | null {
   const match = /(?:^|\s)@([^\s@]*)$/.exec(value.slice(0, cursor));
+  if (!match) return null;
+  const query = match[1] ?? '';
+  return { start: cursor - query.length - 1, end: cursor, query };
+}
+
+function slashAt(value: string, cursor: number): Slash | null {
+  const match = /(?:^|\s)\/([^\s/]*)$/.exec(value.slice(0, cursor));
   if (!match) return null;
   const query = match[1] ?? '';
   return { start: cursor - query.length - 1, end: cursor, query };
@@ -40,6 +58,14 @@ export function ChatComposer({
   onSend,
   sendDisabled,
   suggestion,
+  slashTargets = [],
+  onSlashTargetsChange,
+  slashTools = [],
+  slashCapabilities = [],
+  slashModels = [],
+  slashTelemetry,
+  onSlashModelSelect,
+  onCompact,
   leftActions,
   className = '',
   autoFocus = false,
@@ -57,6 +83,14 @@ export function ChatComposer({
   onSend: () => void;
   sendDisabled: boolean;
   suggestion?: string | null;
+  slashTargets?: SlashTarget[];
+  onSlashTargetsChange?: (targets: SlashTarget[]) => void;
+  slashTools?: AgentToolView[];
+  slashCapabilities?: AgentCapabilityView[];
+  slashModels?: ComposerModel[];
+  slashTelemetry?: ComposerTelemetryView | undefined;
+  onSlashModelSelect?: (model: ComposerModel, thinkingLevel: ThinkingLevel) => Promise<void> | void;
+  onCompact?: () => Promise<void> | void;
   leftActions?: ReactNode;
   className?: string;
   autoFocus?: boolean;
@@ -70,11 +104,29 @@ export function ChatComposer({
   const [mentionEntries, setMentionEntries] = useState<MentionEntry[]>([]);
   const [mentionLoading, setMentionLoading] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashScope, setSlashScope] = useState<SlashScope>('root');
+  const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const activeMention = mentionAt(value, cursor);
+  const activeSlash = slashAt(value, cursor);
+  const allSlashEntries = useMemo(() => slashEntries({
+    scope: slashScope,
+    tools: slashTools,
+    capabilities: slashCapabilities,
+    models: slashModels,
+    telemetry: slashTelemetry,
+    canCompact: Boolean(onCompact),
+    compactDisabled: false,
+  }), [slashScope, slashTools, slashCapabilities, slashModels, slashTelemetry, onCompact]);
+  const visibleSlashEntries = useMemo(
+    () => filterSlashEntries(allSlashEntries, activeSlash?.query ?? ''),
+    [allSlashEntries, activeSlash?.query],
+  );
   const availableSuggestion = suggestion?.trim() ?? '';
-  const showingSuggestion = Boolean(availableSuggestion) && value.length === 0 && attachments.length === 0 && !mentionOpen;
+  const showingSuggestion = Boolean(availableSuggestion) && value.length === 0
+    && attachments.length === 0 && slashTargets.length === 0 && !mentionOpen && !slashOpen;
 
   useEffect(() => {
     const mention = mentionAt(value, cursor);
@@ -97,6 +149,16 @@ export function ChatComposer({
     }, 100);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [mentionOpen, value, cursor, projectId]);
+
+  useEffect(() => {
+    if (!slashOpen) return;
+    const active = visibleSlashEntries.find(entry => !entry.disabled);
+    setSlashIndex(current => {
+      if (!visibleSlashEntries.length) return 0;
+      if (visibleSlashEntries[current] && !visibleSlashEntries[current]!.disabled) return current;
+      return active ? visibleSlashEntries.indexOf(active) : 0;
+    });
+  }, [slashOpen, visibleSlashEntries]);
 
   async function addAttachments(files: File[]) {
     const next = [...attachments];
@@ -134,8 +196,73 @@ export function ChatComposer({
     });
   }
 
+  function clearSlashToken() {
+    const slash = slashAt(value, cursor);
+    if (!slash) return cursor;
+    const next = `${value.slice(0, slash.start)}${value.slice(slash.end)}`.replace(/[ \t]+$/, '');
+    const nextCursor = Math.min(slash.start, next.length);
+    onChange(next);
+    setCursor(nextCursor);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+    return nextCursor;
+  }
+
+  async function chooseSlash(entry: SlashEntry) {
+    if (entry.disabled) return;
+    try {
+      if (entry.action.type === 'open-model' || entry.action.type === 'open-thinking') {
+        clearSlashToken();
+        setSlashScope(entry.action.type === 'open-model' ? 'model' : 'thinking');
+        setSlashIndex(0);
+        setSlashOpen(true);
+        return;
+      }
+      clearSlashToken();
+      setSlashOpen(false);
+      setSlashScope('root');
+      if (entry.action.type === 'tool' || entry.action.type === 'capability') {
+        const next = [...new Map([...slashTargets, entry.action.target].map(target => [target.id, target])).values()];
+        onSlashTargetsChange?.(next);
+        return;
+      }
+      if (entry.action.type === 'compact') {
+        await onCompact?.();
+        return;
+      }
+      if (entry.action.type === 'model') {
+        const currentLevel = (slashTelemetry?.thinkingLevel ?? 'off') as ThinkingLevel;
+        await onSlashModelSelect?.(entry.action.model, entry.action.model.reasoning === false ? 'off' : currentLevel);
+        return;
+      }
+      if (entry.action.type === 'thinking') {
+        const model = slashModels.find(item => item.id === slashTelemetry?.model);
+        if (model) await onSlashModelSelect?.(model, entry.action.level);
+      }
+    } catch (reason) {
+      toast(`命令执行失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    }
+  }
+
   return (
     <div className={`chat-composer ${className}`}>
+      {slashOpen && (
+        <SlashMenu
+          scope={slashScope}
+          entries={visibleSlashEntries}
+          query={activeSlash?.query ?? ''}
+          activeIndex={slashIndex}
+          onChoose={entry => void chooseSlash(entry)}
+          onBack={() => {
+            clearSlashToken();
+            setSlashScope('root');
+            setSlashIndex(0);
+            setSlashOpen(true);
+          }}
+        />
+      )}
       {mentionOpen && activeMention && (
         <div className="mention-popover" data-testid="mention-popover">
           <div className="mention-popover-head">
@@ -171,6 +298,24 @@ export function ChatComposer({
           )}
         </div>
       )}
+      {slashTargets.length > 0 && (
+        <div className="composer-command-chips" data-testid="composer-command-chips">
+          {slashTargets.map(target => (
+            <span className="composer-command-chip" key={target.id} data-kind={target.kind} title={target.description}>
+              <Icon name={target.kind === 'capability' ? 'spark' : 'bolt'} size={12} />
+              <span className="truncate">{target.label}</span>
+              <span className="faint">{target.kind === 'capability' ? '能力' : '工具'}</span>
+              <button
+                type="button"
+                onClick={() => onSlashTargetsChange?.(slashTargets.filter(item => item.id !== target.id))}
+                aria-label={`移除 ${target.label}`}
+              >
+                <Icon name="close" size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       {attachments.length > 0 && (
         <div className="composer-attachments" data-testid="composer-attachments">
           {attachments.map(attachment => (
@@ -195,6 +340,11 @@ export function ChatComposer({
           onChange(next);
           setCursor(position);
           setMentionOpen(Boolean(mentionAt(next, position)));
+          setSlashOpen(Boolean(slashAt(next, position)));
+          if (slashAt(next, position)) {
+            setSlashScope('root');
+            setSlashIndex(0);
+          }
         }}
         onSelect={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
         onClick={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
@@ -202,6 +352,42 @@ export function ChatComposer({
         data-suggestion={showingSuggestion ? availableSuggestion : undefined}
         autoFocus={autoFocus}
         onKeyDown={event => {
+          if (slashOpen) {
+            if (event.key === 'ArrowDown' && visibleSlashEntries.length) {
+              event.preventDefault();
+              setSlashIndex(index => {
+                for (let step = 1; step <= visibleSlashEntries.length; step += 1) {
+                  const next = (index + step) % visibleSlashEntries.length;
+                  if (!visibleSlashEntries[next]?.disabled) return next;
+                }
+                return index;
+              });
+              return;
+            }
+            if (event.key === 'ArrowUp' && visibleSlashEntries.length) {
+              event.preventDefault();
+              setSlashIndex(index => {
+                for (let step = 1; step <= visibleSlashEntries.length; step += 1) {
+                  const next = (index - step + visibleSlashEntries.length) % visibleSlashEntries.length;
+                  if (!visibleSlashEntries[next]?.disabled) return next;
+                }
+                return index;
+              });
+              return;
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+              event.preventDefault();
+              const entry = visibleSlashEntries[slashIndex] ?? visibleSlashEntries.find(item => !item.disabled);
+              if (entry) void chooseSlash(entry);
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setSlashOpen(false);
+              setSlashScope('root');
+              return;
+            }
+          }
           if (mentionOpen && activeMention) {
             if (event.key === 'ArrowDown' && mentionEntries.length) {
               event.preventDefault();

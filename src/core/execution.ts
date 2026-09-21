@@ -410,12 +410,13 @@ export class Execution {
             .map(row => ({ questionId: row.id, value: (JSON.parse(row.answer) as { value: Json }).value }));
           const messages = task.phase === 'chatting'
             ? chatMessages.map(message => {
-                const data = message.data ? JSON.parse(message.data) as { attachments?: AttachmentInput[] } : null;
+                const data = message.data ? JSON.parse(message.data) as { attachments?: AttachmentInput[]; command?: 'compact' } : null;
                 return {
                   id: message.id,
                   text: message.text,
                   requirementVersion: task.requirement_version,
                   ...(data?.attachments?.length ? { attachments: data.attachments } : {}),
+                  ...(data?.command ? { command: data.command } : {}),
                 };
               })
             : (this.store.db.prepare("SELECT data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor")

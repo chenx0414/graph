@@ -75,3 +75,57 @@ test('all Agents expose Pi native tools and the master executes them in the rest
     expect(toolActivity).toContain(name);
   }
 }, 120_000);
+
+test('the compact command runs Pi session compaction without a follow-up completion request', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-pi-manual-compact-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, 'README.md'), '# Manual compact\n');
+  git(project, ['init', '-q', '-b', 'main']);
+  git(project, ['config', 'user.email', 'graph@example.invalid']);
+  git(project, ['config', 'user.name', 'Graph Test']);
+  git(project, ['add', '.']);
+  git(project, ['commit', '-q', '-m', 'init']);
+
+  const longText = 'Manual compaction context. '.repeat(500);
+  const provider = await openaiServer([
+    { text: longText },
+    { text: longText },
+    { text: '## Goal\nmanual compact summary' },
+    { text: '## Goal\nmanual compact summary split' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({ projectId: 'p', text: `Create a session to compact. ${longText}`, requestId: 'manual-compact-create' });
+  await runtime.host.runReady();
+  expect(provider.requests).toHaveLength(1);
+  await runtime.conversations.chat(created.conversationId, { text: `Add another completed turn. ${longText}`, requestId: 'manual-compact-history' });
+  await runtime.host.runReady();
+  expect(provider.requests).toHaveLength(2);
+
+  await runtime.conversations.compact(created.conversationId, { requestId: 'manual-compact' });
+  await runtime.host.runReady();
+  expect(provider.requests.length).toBeGreaterThan(2);
+  expect(provider.requests.slice(2).some(request => {
+    const tools = (request as { tools?: unknown[] }).tools ?? [];
+    return tools.length === 0;
+  })).toBe(true);
+
+  const conversation = await runtime.conversations.view(created.conversationId);
+  expect(conversation.messages.at(-1)).toMatchObject({ role: 'assistant', text: '上下文已压缩。' });
+  const anchor = conversation.anchorTaskId;
+  expect(runtime.nodeRun(anchor, 'master').invocations.some(invocation => invocation.purpose === 'compaction')).toBe(true);
+}, 120_000);

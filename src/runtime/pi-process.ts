@@ -276,6 +276,14 @@ export async function openPiProcess(options: PiProcessOptions) {
       finalInspect = inspect;
       return inspect;
     },
+    async compact() {
+      if (promptStarted) throw new Error('Pi process already received a prompt');
+      promptStarted = true;
+      if (!control?.write({ operation: 'compact' })) throw new Error('Pi process input is closed');
+      const inspect = await runPromise;
+      finalInspect = inspect;
+      return inspect;
+    },
     async steer(text: string) {
       if (!control?.write({ operation: 'steer', text })) throw new Error('Pi process input is closed');
     },
