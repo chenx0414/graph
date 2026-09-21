@@ -56,6 +56,7 @@ const HOST_MAIN_TOOLS = [
   { name: 'list_agent_combinations', description: 'List reusable Agent recipes.', source: 'Main Agent' },
   { name: 'get_agent_combination', description: 'Read one reusable Agent recipe.', source: 'Main Agent' },
   { name: 'save_agent_combination', description: 'Create or edit an Agent recipe and compile it immediately.', source: 'Main Agent' },
+  { name: 'update_agent_combination_description', description: 'Edit one Agent recipe description and recompile it immediately.', source: 'Main Agent' },
   { name: 'delete_agent_combination', description: 'Delete one user-editable Agent recipe.', source: 'Main Agent' },
   { name: 'request_model_access', description: 'Ask the user to configure a missing model or subscription.', source: 'Main Agent' },
   { name: 'git_status', description: 'Read the current work copy status.', source: 'Graph Git' },
@@ -101,6 +102,7 @@ function hostToolPermission(name: string) {
   if (name === 'validate_proposal' || name === 'get_graph_state') return 'current conversation graph';
   if (name === 'list_projects' || name === 'bind_project') return 'configured project binding';
   if (name.startsWith('git_')) return 'read-only work copy Git';
+  if (name === 'update_agent_combination_description') return 'user-editable Agent recipe';
   if (name.includes('system_change')) return 'user-approved system change';
   return 'Graph call gate and current access policy';
 }
@@ -125,6 +127,7 @@ function hostToolParameters(name: string) {
   if (name === 'apply_system_change') return ['proposalId'];
   if (name === 'get_agent_combination' || name === 'delete_agent_combination') return ['id'];
   if (name === 'save_agent_combination') return ['combinationJson'];
+  if (name === 'update_agent_combination_description') return ['id', 'description'];
   if (name === 'request_model_access') return ['modelId', 'reason', 'planId'];
   if (name === 'git_status') return [];
   if (name === 'git_diff') return ['staged?', 'base?', 'path?', 'stat?'];
@@ -873,6 +876,12 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const body = request.body as { combination?: AgentCombination } | undefined;
     if (!body?.combination) throw new RuntimeError('invalid_input', 'combination is required');
     return runtime.catalog.saveAgentCombination(body.combination);
+  });
+  app.post('/api/catalog/combinations/:id/description', async request => {
+    const params = request.params as { id: string };
+    const body = request.body as { description?: unknown } | undefined;
+    if (typeof body?.description !== 'string') throw new RuntimeError('invalid_input', 'description is required');
+    return runtime.catalog.updateAgentCombinationDescription(params.id, body.description);
   });
   app.delete('/api/catalog/combinations/:id', async request => {
     const params = request.params as { id: string };

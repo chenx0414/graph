@@ -1667,6 +1667,10 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         return catalog.saveAgentCombination(input);
       },
+      async updateAgentCombinationDescription(id: string, description: string) {
+        ensureOpen();
+        return catalog.updateAgentCombinationDescription(id, description);
+      },
       async deleteAgentCombination(id: string) {
         ensureOpen();
         return catalog.deleteAgentCombination(id);

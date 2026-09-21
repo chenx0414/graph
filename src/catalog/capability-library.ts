@@ -238,6 +238,16 @@ export class CapabilityLibrary {
     return validateAgentCombination(combination, this.capabilitiesCache);
   }
 
+  async updateAgentCombinationDescription(id: string, description: string) {
+    if (!this.recipesPath) throw new RuntimeError('unsupported', 'This runtime has no agent-combination file');
+    const current = this.recipes.find(item => item.id === id);
+    if (!current) throw new RuntimeError('not_found', `Unknown Agent combination ${id}`);
+    const normalized = description.trim();
+    if (!normalized) throw new RuntimeError('invalid_agent_combination', 'Agent combination description must be a nonempty string');
+    if (normalized.length > 2_000) throw new RuntimeError('invalid_agent_combination', 'Agent combination description must be at most 2000 characters');
+    return this.saveAgentCombination({ ...current, description: normalized });
+  }
+
   async deleteAgentCombination(id: string) {
     if (!this.recipesPath) throw new RuntimeError('unsupported', 'This runtime has no agent-combination file');
     if (this.recipes.find(item => item.id === id)?.mode === 'main') {

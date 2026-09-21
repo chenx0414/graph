@@ -1138,10 +1138,12 @@ test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name
   expect(await page.getByTestId('recipe-picker-extensions').innerText()).toContain('没有匹配的能力');
 
   await page.getByTestId('agent-recipe-description').fill('负责实现与维护代码，并在授权范围内补充基础测试。');
-  await page.getByRole('button', { name: '保存配方' }).click();
-  await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
   await expect.poll(() => server.runtime.catalog.agentCombinations().find(item => item.id === 'worker')?.description)
     .toBe('负责实现与维护代码，并在授权范围内补充基础测试。');
+  await expect.poll(() => page.getByTestId('agent-recipe-description-save-state').innerText())
+    .toContain('已自动保存');
+  await page.locator('.recipe-editor .resource-detail-head').getByRole('button', { name: '关闭' }).click();
+  await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
 });
 
 test('the resource config page saves capability credentials and verifies the selected MCP', async () => {

@@ -90,6 +90,46 @@ test('compact is a durable conversation command carried into the next master ope
   });
 });
 
+test('the master briefing includes Agent recipe descriptions for subagent selection', async () => {
+  const root = await temp('agent-recipe-description');
+  const capabilityRoot = join(root, 'capabilities');
+  const identity = join(capabilityRoot, 'agent-md', 'coder-identity');
+  await mkdir(identity, { recursive: true });
+  await writeFile(join(identity, 'capability.json'), JSON.stringify({
+    id: 'coder-identity',
+    kind: 'prompt',
+    role: 'agent',
+    version: '1.0.0',
+    name: 'Coder identity',
+  }));
+  await writeFile(join(identity, 'agent.md'), 'You are a coder.\n');
+  const seen: Operation[] = [];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: scripted(operation => {
+      seen.push(operation);
+      return { outcome: 'completed', output: { text: 'ok' }, usage };
+    }) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    catalog: { capabilityRoot, recipesPath: join(root, 'agent-combinations.json') },
+  });
+  cleanup.push(() => runtime.close());
+  await runtime.catalog.saveAgentCombination({
+    id: 'coder',
+    name: 'Bob_coder',
+    description: '默认主实现，承担功能开发、维护、修复和基础测试。',
+    recommendedGrade: 'medium',
+    review: false,
+    tags: ['编码'],
+    resources: [{ resourceId: 'coder-identity', version: '1.0.0', role: 'identity', required: true }],
+  });
+  const created = await runtime.conversations.create({ text: '选择实现 Agent。', requestId: 'recipe-description-create' });
+  await runtime.host.runReady();
+  expect(seen).toHaveLength(1);
+  expect(seen[0]!.context.briefing).toContain('Agent recipe coder (Bob_coder, medium, valid): 默认主实现，承担功能开发、维护、修复和基础测试。');
+  await runtime.conversations.view(created.conversationId);
+});
+
 test('Main Agent can validate a graph, inspect its state, list projects and bind a project', async () => {
   const root = await temp('graph-state');
   const projectOne = join(root, 'project-one');

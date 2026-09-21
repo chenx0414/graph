@@ -287,7 +287,7 @@ test('the real Pi master can search the resource library and open a model-access
 
   expect(provider.requests[0]!.tools).toEqual(expect.arrayContaining([
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
-    'save_agent_combination', 'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
+    'save_agent_combination', 'update_agent_combination_description', 'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
     'read_system_capabilities', 'inspect_graph_system',
     'propose_system_change', 'apply_system_change', 'request_model_access',
   ]));

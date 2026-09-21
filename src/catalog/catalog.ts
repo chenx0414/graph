@@ -106,6 +106,12 @@ export class Catalog {
     return saved;
   }
 
+  async updateAgentCombinationDescription(id: string, description: string) {
+    const combination = await this.capabilityLibrary.updateAgentCombinationDescription(id, description);
+    const definition = this.compileAgentCombination(id);
+    return { combination, definition };
+  }
+
   async deleteAgentCombination(id: string) {
     return this.capabilityLibrary.deleteAgentCombination(id);
   }

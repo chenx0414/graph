@@ -335,6 +335,19 @@ test('recipes validate against the current capability projection and compile to 
     prompts: { agent: { id: 'identity', version: '1.0.0' } },
     snapshot: { agentCombination: { id: 'review', name: 'Review', description: 'Review work.' } },
   });
+  const updated = await library.updateAgentCombinationDescription('review', 'Independently review implementation evidence and report actionable defects.');
+  expect(updated).toMatchObject({
+    id: 'review',
+    description: 'Independently review implementation evidence and report actionable defects.',
+  });
+  expect(library.compileAgentCombination('review').definition).toMatchObject({
+    snapshot: {
+      agentCombination: {
+        id: 'review',
+        description: 'Independently review implementation evidence and report actionable defects.',
+      },
+    },
+  });
 });
 
 test('the Main Agent recipe may start empty, compiles as main, and cannot be deleted', async () => {

@@ -485,6 +485,13 @@ export class Execution {
               ...(spec.role === 'master' ? {
                 catalog: {
                   definitions: this.catalog.availableAgentDefinitions().map(item => `${item.id}@${item.version}`),
+                  agentCombinations: this.catalog.agentCombinations().map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    description: item.description,
+                    recommendedGrade: item.recommendedGrade,
+                    status: item.status,
+                  })),
                 },
                 systemContext: {
                   ...this.systemContext,

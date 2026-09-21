@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { Button, Card, Empty, Icon, Pill, toast } from './ui.tsx';
@@ -226,6 +226,7 @@ function AgentCombinationEditor(input: {
   initial?: AgentCombinationView;
   onClose(): void;
   onSaved(): void;
+  onDescriptionSaved?(combination: AgentCombinationView): void;
 }) {
   const promptCapabilities = input.capabilities.filter(item => item.status === 'available' && item.kind === 'prompt' && item.role === 'agent');
   const skills = input.capabilities.filter(item => item.status === 'available' && item.kind === 'skill');
@@ -255,8 +256,30 @@ function AgentCombinationEditor(input: {
   const [capabilityQuery, setCapabilityQuery] = useState('');
   const [capabilitySort, setCapabilitySort] = useState<CapabilitySort>('alphabetical');
   const [saving, setSaving] = useState(false);
+  const [descriptionSaveState, setDescriptionSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [error, setError] = useState('');
+  const lastSavedDescription = useRef(input.initial?.description ?? '');
+  const descriptionRef = useRef(description);
   const usage = capabilityUsage(input.combinations);
+  descriptionRef.current = description;
+
+  useEffect(() => {
+    if (!input.initial || !description.trim() || description === lastSavedDescription.current) return;
+    setDescriptionSaveState('saving');
+    const timer = setTimeout(() => {
+      void api<{ combination: AgentCombinationView }>(`/api/catalog/combinations/${encodeURIComponent(input.initial!.id)}/description`, {
+        method: 'POST',
+        body: JSON.stringify({ description }),
+      }).then(result => {
+        lastSavedDescription.current = result.combination.description;
+        if (descriptionRef.current === result.combination.description) setDescriptionSaveState('saved');
+        input.onDescriptionSaved?.(result.combination);
+      }).catch(() => {
+        if (descriptionRef.current === description) setDescriptionSaveState('error');
+      });
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [description, input.initial?.id, input.onDescriptionSaved]);
 
   const toggle = (setter: (value: Set<string>) => void, current: Set<string>, key: string) => {
     const next = new Set(current);
@@ -294,6 +317,7 @@ function AgentCombinationEditor(input: {
           },
         }),
       });
+      lastSavedDescription.current = description;
       input.onSaved();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -351,6 +375,11 @@ function AgentCombinationEditor(input: {
               placeholder="简述这个 Agent 的用途、适合的任务范围与关键边界。"
             />
             <small>显示在 Agent 组合库中，帮助用户在派发前快速判断它适合做什么。</small>
+            {input.initial && (
+              <small data-testid="agent-recipe-description-save-state">
+                {descriptionSaveState === 'saving' ? '正在自动保存…' : descriptionSaveState === 'saved' ? '已自动保存' : descriptionSaveState === 'error' ? '自动保存失败，请手动保存或重试' : '修改后自动保存'}
+              </small>
+            )}
           </label>
           {main && (
             <div className="recipe-main-note" data-testid="main-agent-recipe-note">
@@ -593,7 +622,16 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
         </div>,
         document.body,
       )}
-      {editing !== undefined && <AgentCombinationEditor capabilities={capabilities} combinations={agentCombinations} {...(editing ? { initial: editing } : {})} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); window.dispatchEvent(new Event('graph:settings-changed')); toast('配方已保存', 'success'); }} />}
+      {editing !== undefined && (
+        <AgentCombinationEditor
+          capabilities={capabilities}
+          combinations={agentCombinations}
+          {...(editing ? { initial: editing } : {})}
+          onClose={() => setEditing(undefined)}
+          onDescriptionSaved={() => window.dispatchEvent(new Event('graph:settings-changed'))}
+          onSaved={() => { setEditing(undefined); window.dispatchEvent(new Event('graph:settings-changed')); toast('配方已保存', 'success'); }}
+        />
+      )}
     </div>
   );
 }

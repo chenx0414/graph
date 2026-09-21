@@ -277,7 +277,7 @@ test('only the master receives read-only resource and system inventory tools', a
   });
   expect(masterTools.map(tool => tool.name)).toEqual(expect.arrayContaining([
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
-    'save_agent_combination', 'delete_agent_combination',
+    'save_agent_combination', 'update_agent_combination_description', 'delete_agent_combination',
     'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
     'read_system_capabilities', 'request_model_access',
   ]));
@@ -311,6 +311,15 @@ test('only the master receives read-only resource and system inventory tools', a
     }),
   })).content[0]!.text!) as { definition: { definitionVersion: string } };
   expect(saved.definition.definitionVersion).toBe('review@1');
+  const updated = JSON.parse((await execute('update_agent_combination_description')('probe', {
+    id: 'review',
+    description: '独立审查实现证据并报告可执行缺陷。',
+  })).content[0]!.text!) as {
+    combination: { description: string };
+    definition: { definitionVersion: string };
+  };
+  expect(updated.combination.description).toBe('独立审查实现证据并报告可执行缺陷。');
+  expect(updated.definition.definitionVersion).toBe('review@2');
 
   const workerTools = agentTools({ workspace: root, systemContext });
   expect(workerTools.map(tool => tool.name)).not.toContain('search_resources');

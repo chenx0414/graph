@@ -679,6 +679,18 @@ export function agentTools(input: {
         },
       },
       {
+        name: 'update_agent_combination_description', label: 'Update Agent combination description', description: 'Edit only one Agent recipe description and immediately persist and recompile it. Use this when the user asks to improve how a subagent is described or when a clearer description would help future subagent selection; it does not change capabilities, permissions or resources.',
+        parameters: Type.Object({ id: Type.String(), description: Type.String() }),
+        execute: async (_id, params) => {
+          const body = fields(params);
+          const id = String(body.id).trim();
+          const description = String(body.description).trim();
+          if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
+          if (!description || description.length > 2_000) throw new Error('A nonempty description of at most 2000 characters is required');
+          return text(JSON.stringify(await input.catalog!.updateAgentCombinationDescription(id, description)));
+        },
+      },
+      {
         name: 'delete_agent_combination', label: 'Delete Agent combination', description: 'Delete one user-editable Agent recipe. This never removes referenced capabilities.',
         parameters: Type.Object({ id: Type.String() }),
         execute: async (_id, params) => {
