@@ -3,6 +3,8 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export interface AppPaths {
   root: string;
+  /** Checkout the daemon actually runs from; equals root unless GRAPH_RSI_ROOT redirects it. */
+  sourceRoot: string;
   stateDir: string;
   graphHome: string;
   configPath: string;
@@ -25,16 +27,22 @@ export function resolveAppPaths(input: {
   isPackaged: boolean;
   userData: string;
   graphHome?: string;
+  /** Run the daemon from this source checkout instead of the app bundle. */
+  sourceRoot?: string;
 }): AppPaths {
   const root = resolve(input.appPath);
+  const sourceRoot = input.sourceRoot ? resolve(input.sourceRoot) : root;
   return {
     root,
+    sourceRoot,
     stateDir: join(input.userData, 'state'),
     graphHome: resolve(input.graphHome ?? join(process.env.HOME ?? input.userData, '.graph')),
     configPath: join(input.userData, 'graph.config.json'),
     secretsPath: join(input.userData, 'secrets.json'),
-    serverEntry: join(root, 'src/server/cli.ts'),
-    webDir: input.isPackaged ? join(root, 'web') : join(root, 'dist/web'),
+    serverEntry: join(sourceRoot, 'src/server/cli.ts'),
+    webDir: input.sourceRoot
+      ? join(sourceRoot, 'dist/web')
+      : input.isPackaged ? join(root, 'web') : join(root, 'dist/web'),
   };
 }
 
@@ -269,6 +277,7 @@ export function absolutePaths(paths: AppPaths): AppPaths {
   return {
     ...paths,
     root: ensure(paths.root),
+    sourceRoot: ensure(paths.sourceRoot),
     stateDir: ensure(paths.stateDir),
     configPath: ensure(paths.configPath),
     secretsPath: ensure(paths.secretsPath),

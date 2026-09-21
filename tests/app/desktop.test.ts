@@ -22,7 +22,7 @@ const banner = [
 ].join('\n');
 
 const paths: AppPaths = {
-  root: '/repo', stateDir: '/repo/state', graphHome: '/repo/.graph', configPath: '/repo/graph.config.json',
+  root: '/repo', sourceRoot: '/repo', stateDir: '/repo/state', graphHome: '/repo/.graph', configPath: '/repo/graph.config.json',
   secretsPath: '/repo/secrets.json', serverEntry: '/repo/src/server/cli.ts', webDir: '/repo/dist/web',
 };
 
@@ -30,6 +30,7 @@ describe('desktop app paths', () => {
   test('dev layout serves the repository web build and keeps state in userData', () => {
     const resolved = resolveAppPaths({ appPath: '/repo', isPackaged: false, userData: '/home/me/Library/Application Support/Graph', graphHome: '/home/me/.graph' });
     expect(resolved.root).toBe('/repo');
+    expect(resolved.sourceRoot).toBe('/repo');
     expect(resolved.serverEntry).toBe('/repo/src/server/cli.ts');
     expect(resolved.webDir).toBe('/repo/dist/web');
     expect(resolved.stateDir).toBe('/home/me/Library/Application Support/Graph/state');
@@ -42,6 +43,20 @@ describe('desktop app paths', () => {
     expect(resolved.root).toBe('/Applications/Graph.app/Contents/Resources/app');
     expect(resolved.webDir).toBe('/Applications/Graph.app/Contents/Resources/app/web');
     expect(resolved.serverEntry).toBe('/Applications/Graph.app/Contents/Resources/app/src/server/cli.ts');
+    expect(resolved.sourceRoot).toBe('/Applications/Graph.app/Contents/Resources/app');
+  });
+
+  test('a GRAPH_RSI_ROOT source checkout runs the daemon from that checkout', () => {
+    const resolved = resolveAppPaths({
+      appPath: '/Applications/Graph.app/Contents/Resources/app',
+      isPackaged: true,
+      userData: '/home/me/Library/Application Support/Graph',
+      sourceRoot: '/work/graph',
+    });
+    expect(resolved.root).toBe('/Applications/Graph.app/Contents/Resources/app');
+    expect(resolved.sourceRoot).toBe('/work/graph');
+    expect(resolved.serverEntry).toBe('/work/graph/src/server/cli.ts');
+    expect(resolved.webDir).toBe('/work/graph/dist/web');
   });
 
   test('resource libraries resolve to allowlisted local storage roots', () => {

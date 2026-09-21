@@ -66,6 +66,7 @@ export interface PiAdapterChannels {
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
   };
   rsi?: {
+    readonly available: boolean;
     status(): Promise<unknown>;
     apply(input: unknown, context: { taskId: string; conversationId?: string }): Promise<unknown>;
   };
@@ -320,7 +321,7 @@ export function createPiAdapter(options: {
             workspace,
             fullAccess,
             retrieval: Boolean(retrieval),
-            rsi: Boolean(channels?.rsi && spec.role === 'master' && fullAccess),
+            rsi: Boolean(channels?.rsi?.available && spec.role === 'master' && fullAccess),
             ...(agentPromptLibrary ? { library: agentPromptLibrary } : {}),
             bootstrap: {
               ...(definitionId && channels?.bootstrapPrompts?.[definitionId]
@@ -551,6 +552,8 @@ export function createPiAdapter(options: {
                   } : {}),
                   ...(channels.rsi && spec.role === 'master' && fullAccess ? {
                     rsiStatus: async () => (await channels.rsi!.status()) as Record<string, unknown>,
+                  } : {}),
+                  ...(channels.rsi?.available && spec.role === 'master' && fullAccess ? {
                     rsiApply: async (input: unknown) => (await channels.rsi!.apply(input, {
                       taskId: operation.taskId,
                       ...(conversation ? { conversationId: conversation.id } : {}),

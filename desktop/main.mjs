@@ -110,10 +110,21 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function currentPaths() {
+    // Pointing GRAPH_RSI_ROOT at a checkout runs the daemon from that checkout,
+    // so a self-improvement change lands in the code the app actually executes.
+    const configured = process.env.GRAPH_RSI_ROOT?.trim();
+    // Only redirect to a checkout that can actually serve the console, so a
+    // half-prepared checkout cannot leave the app with a blank window.
+    const sourceRoot = configured
+      && existsSync(join(resolve(configured), 'src/server/cli.ts'))
+      && existsSync(join(resolve(configured), 'dist/web/index.html'))
+      ? resolve(configured)
+      : undefined;
     return absolutePaths(resolveAppPaths({
       appPath: app.isPackaged ? app.getAppPath() : devRoot,
       isPackaged: app.isPackaged,
       userData: app.getPath('userData'),
+      ...(sourceRoot ? { sourceRoot } : {}),
     }));
   }
 

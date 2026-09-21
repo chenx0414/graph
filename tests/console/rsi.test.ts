@@ -234,7 +234,8 @@ test('an unavailable root is reported to the user instead of thrown', async () =
     changes: [{ path: 'a.ts', action: 'write', content: 'x' }],
   }, { store, taskId, conversationId });
   expect(receipt.status).toBe('unavailable');
-  expect(receipt.report).toContain('RSI 变更失败');
+  expect(receipt.report).toContain('RSI 不可用');
+  expect((await new RsiService({ stateDir, validate: passing }).status()).reason).toContain('GRAPH_RSI_ROOT');
 });
 
 test('ackRestart clears only the matching request id', async () => {

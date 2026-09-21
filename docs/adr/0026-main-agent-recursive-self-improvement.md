@@ -62,6 +62,19 @@ Main Agent 可以在同一次会话中把观察到的 Harness 缺陷变成已验
 conversation 中看到发生了什么、改了什么、验证结果如何。
 
 代价是：源码改动的正确性依赖 RSI 自带的检查与提交门槛，而不是人工审批；checkout 需要
-是干净的 Git 仓库，打包应用默认没有源码 checkout，必须用 `GRAPH_RSI_ROOT` 指向一个
-checkout 才能启用。自动重载会重启 daemon 并重新加载页面，运行中的会话由持久化状态
-恢复。该闭环不承诺撤销已生效的外部副作用；这些仍走恢复与核对。
+是 Git 仓库。
+
+RSI 只对“正在运行的这份代码”有意义，所以启用条件很具体：
+
+- 源码/开发模式（在 checkout 里运行 `electron .` 或 CLI）：应用根就是 checkout，RSI
+  默认可用，改动会立刻生效。
+- 打包应用：`Graph.app/Contents/Resources/app` 是构建时复制出来的只读副本，不是 Git
+  仓库，所以默认不可用——改仓库不会影响这份副本。要让打包应用也能自我改进，把
+  `GRAPH_RSI_ROOT` 指向一个 checkout，桌面启动器会改从该 checkout 运行 daemon，
+  于是“改哪份代码”和“跑哪份代码”重新一致，重载才会真正生效。该重定向要求 checkout
+  里既有 `src/server/cli.ts` 也有构建好的 `dist/web/index.html`，否则回退到应用自带副本。
+- 既没有 checkout、又不可用时，`inspect_rsi_status` 仍会暴露并返回 `available: false`
+  与具体原因，`apply_rsi_change` 则不注册，避免 Agent 去改一份不生效的代码。
+
+自动重载会重启 daemon 并重新加载页面，运行中的会话由持久化状态恢复。该闭环不承诺撤销
+已生效的外部副作用；这些仍走恢复与核对。

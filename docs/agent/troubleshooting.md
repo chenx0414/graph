@@ -42,7 +42,7 @@
 
 检查：
 
-- `inspect_rsi_status` 的 `available` 与 `root`：打包应用默认没有源码 checkout，需要用 `GRAPH_RSI_ROOT` 指向一个干净的 Git 仓库根；
+- `inspect_rsi_status` 的 `available`、`root` 与 `reason`：打包应用运行的是 `Graph.app/Contents/Resources/app` 里的副本，不是 Git 仓库，所以默认不可用；把 `GRAPH_RSI_ROOT` 指向一个 checkout（含 `src/server/cli.ts` 与构建好的 `dist/web/index.html`）后，启动器会改从该 checkout 运行 daemon；
 - `pendingRestart` 与 `canRestart`：有在途 operation 时普通请求不会重载；`pendingRestart.force` 为真时会跳过该条件；
 - `apply_rsi_change` 返回的 `status`：`checks_failed` 表示检查未通过但改动仍保留在工作区（继续修复或传 `changes: []` 重跑检查），`rolled_back` 表示意外错误并已恢复文件，`unavailable` 表示没有可用 checkout；
 - 桌面进程是否在轮询 `/api/app/rsi/status`，以及 `/api/app/rsi/restart-ack` 是否成功；

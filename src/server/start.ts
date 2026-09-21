@@ -415,7 +415,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     systemContext: {
       systemSummary,
     },
-    ...(rsiService.root ? { rsi: rsiService } : {}),
+    rsi: rsiService,
     agentContext,
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),

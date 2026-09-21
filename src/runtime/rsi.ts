@@ -70,6 +70,8 @@ export interface RsiStatus {
   available: boolean;
   root: string | null;
   branch: string | null;
+  /** Why RSI is unavailable, when it is. */
+  reason?: string;
   pendingRestart: {
     id: string;
     root: string;
@@ -255,6 +257,16 @@ function checksFailedReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 're
   ].join('\n');
 }
 
+function unavailableReport(input: RsiChangeInput, root: string | null, reason: string) {
+  return [
+    `### RSI 不可用：${input.title}`,
+    '',
+    `- 问题：${input.problem}`,
+    `- 目标：${root ?? '未找到'}`,
+    `- 原因：${reason}`,
+  ].join('\n');
+}
+
 function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'>) {
   return [
     `### RSI 已应用：${input.title}`,
@@ -292,6 +304,8 @@ async function diffFor(root: string, commit: string) {
 
 export class RsiService {
   readonly root: string | undefined;
+  /** True when the root is a usable Graph Git checkout right now. */
+  readonly available: boolean;
   private readonly stateDir: string;
   private readonly validate: NonNullable<RsiServiceOptions['validate']>;
 
@@ -299,6 +313,9 @@ export class RsiService {
     this.root = options.root ? resolveRoot(options.root) : undefined;
     this.stateDir = resolve(options.stateDir);
     this.validate = options.validate ?? defaultValidate;
+    this.available = Boolean(
+      this.root && existsSync(join(this.root, 'package.json')) && detectRepo(this.root) === this.root,
+    );
   }
 
   private restartPath() {
@@ -310,8 +327,8 @@ export class RsiService {
   }
 
   async status(): Promise<RsiStatus> {
-    const root = this.root && existsSync(this.root) ? this.root : null;
-    const available = Boolean(root && existsSync(join(root, 'package.json')) && detectRepo(root) === root);
+    const root = this.available && this.root ? this.root : null;
+    const available = this.available;
     const branch = available ? checkedOutBranch(root!) ?? null : null;
     const pendingRestart = await this.readRestart();
     let activeOperations = 0;
@@ -335,6 +352,7 @@ export class RsiService {
       available,
       root,
       branch,
+      ...(available ? {} : { reason: this.unavailableReason() }),
       pendingRestart,
       activeOperations,
       operationsKnown,
@@ -343,6 +361,16 @@ export class RsiService {
       canRestart: Boolean(pendingRestart
         && (pendingRestart.force === true || (operationsKnown && activeOperations === 0))),
     };
+  }
+
+  private unavailableReason() {
+    if (!this.root) {
+      return 'No Graph source checkout was found. Set GRAPH_RSI_ROOT to the checkout the app runs from.';
+    }
+    if (!existsSync(join(this.root, 'package.json'))) {
+      return `${this.root} has no package.json, so it is not a Graph source checkout.`;
+    }
+    return `${this.root} is not a Git checkout root; run Graph from a source checkout to enable self-improvement.`;
   }
 
   /**
@@ -408,12 +436,12 @@ export class RsiService {
 
     const id = randomUUID();
     const root = this.root;
-    if (!root || !existsSync(join(root, 'package.json')) || detectRepo(root) !== root) {
-      const error = 'Graph source checkout is unavailable; set GRAPH_RSI_ROOT to a clean Graph Git checkout';
+    if (!this.available || !root) {
+      const error = this.unavailableReason();
       const receipt: RsiReceipt = {
         id, status: 'unavailable', title, root: root ?? null, branch: null, commit: null,
         files: [], validation: [], restartRequired: false, error,
-        report: failureReport(normalized, root ?? null, error),
+        report: unavailableReport(normalized, root ?? null, error),
       };
       this.record(context, receipt);
       return receipt;

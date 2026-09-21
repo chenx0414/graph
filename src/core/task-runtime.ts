@@ -318,6 +318,7 @@ export async function openTaskRuntime(options: {
         ...(options.catalog?.bootstrapToolPrompt ? { bootstrapToolPrompt: options.catalog.bootstrapToolPrompt } : {}),
         ...(options.systemContext ? { systemContext: options.systemContext } : {}),
         ...(options.rsi ? { rsi: {
+          available: options.rsi.available,
           status: () => options.rsi!.status(),
           apply: (input, context) => options.rsi!.apply(input as RsiChangeInput, {
             store,
@@ -1102,7 +1103,7 @@ export async function openTaskRuntime(options: {
         ? runtime.agentWorkspace(view.anchorTaskId, view.master.nodeId) : view?.projectRoot ?? null;
       const assembly = await openAgentContextAssembly({
         catalog, library, workspace, action, role: 'master', retrieval: true,
-        rsi: Boolean(options.rsi) && isFullAccess(runtime.currentAccessPolicy()),
+        rsi: Boolean(options.rsi?.available) && isFullAccess(runtime.currentAccessPolicy()),
         definitionVersion: definitionVersion ?? 'main@unknown',
         fullAccess: isFullAccess(runtime.currentAccessPolicy()),
         bootstrap: {
@@ -1123,7 +1124,10 @@ export async function openTaskRuntime(options: {
           systemDiagnostics: Boolean(view), proposeSystemChange: Boolean(view),
           applySystemChange: Boolean(view), requestModelAccess: Boolean(view),
         } } : {}),
-        ...(options.rsi ? { rsi: { status: true, apply: Boolean(view) } } : {}),
+        ...(options.rsi ? { rsi: {
+          status: isFullAccess(runtime.currentAccessPolicy()),
+          apply: Boolean(options.rsi.available) && isFullAccess(runtime.currentAccessPolicy()),
+        } } : {}),
       });
       return {
         ...await library.view({

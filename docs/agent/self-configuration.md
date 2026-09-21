@@ -74,7 +74,13 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 - 提交到专用 `rsi/*` 分支；
 - `activate` 为真时写出 `<stateDir>/rsi/restart.json`，由桌面进程在 operation 停稳后重启 daemon 让改动生效；`force` 为真时跳过等待、立即重载，可能中断在途 operation。
 
-检查失败不会丢弃改动：文件保留在工作区、不提交、不重载，receipt 状态为 `checks_failed`。Main Agent 继续修复同一批文件，或传 `changes: []` 只重跑检查，直到通过；只有意外错误才恢复快照。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。源码 checkout 必须是 Git 仓库；打包应用默认没有源码 checkout，需要用 `GRAPH_RSI_ROOT` 指向一个。
+检查失败不会丢弃改动：文件保留在工作区、不提交、不重载，receipt 状态为 `checks_failed`。Main Agent 继续修复同一批文件，或传 `changes: []` 只重跑检查，直到通过；只有意外错误才恢复快照。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。
+
+RSI 只改"正在运行的这份代码"，所以：
+
+- 在 checkout 里运行（`electron .` 或 CLI）：应用根就是 checkout，默认可用。
+- 打包应用：`Graph.app/Contents/Resources/app` 是构建时复制出来的副本，不是 Git 仓库，默认不可用。把 `GRAPH_RSI_ROOT` 指向一个 checkout，启动器会改从该 checkout 运行 daemon，RSI 才会真正生效。
+- 不可用时 `inspect_rsi_status` 仍返回 `available: false` 与原因，`apply_rsi_change` 不注册。
 
 ## 原版恢复
 
