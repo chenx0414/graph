@@ -67,13 +67,16 @@ agents/      身份，例如 main.md
 tools/       工具使用指导；tools.json 保存 Main Agent 的 disabled list
 rules/       通用规则与 main/worker/reviewer 角色规则
 runtime/     仅特定运行阶段使用的动态 Prompt
+defaults/    用户定义的“恢复默认”基线；允许空文件
 ```
 
 Graph 自身的 Agent docs 不再复制到 `~/.graph/prompts/docs`。源码内的 `docs/agent/README.md` 是主入口，`docs/agent/` 保存只读主题文档，`examples/` 保存示例；system prompt 只注入这三个绝对路径、主题索引和阅读协议，正文由 Agent 在需要时读取。模型目录、订阅计划、配额、配方和系统健康等动态事实不常驻 system prompt；Agent 在需要时调用 `read_system_capabilities` 或 `inspect_graph_system`。每个 Agent operation 的 `<cwd>` 使用该实例实际 Git worktree，而不是项目根目录或其它 Agent 的目录。
 
 所有 Agent 的 session 都开放适用的 Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`，以及 Windows 上的 `powershell`。它们在 Pi 子进程内执行；默认 full 模式放开宿主文件系统、命令、网络和能力运行时，standard 模式才启用 workspace sandbox、命令白名单和 access policy。旧的 `read`/`write_file`/`list_dir`/`run_command` 不再作为这些原生能力的替代出现在实际 session。
 
-在「最终 Prompt」页可直接查看完整预览；在「可编辑来源」页修改并保存，改动从下一轮开始生效；「恢复默认」只覆盖选中的可编辑文件，Graph 始终保留代码内置原版。工具页关闭某个工具后，它同时从 provider tool schema、session allowlist 和最终 Prompt 的工具清单中移除，但不会改变宿主权限、预算、审计或恢复规则。旧版 `tool-awareness.md` 会在首次升级时迁移为 `tools/main.md`，原文件仍保留作人工备份。
+在「最终 Prompt」页可直接查看完整预览；在「可编辑来源」页修改并保存，改动从下一轮开始生效。「设为默认」会把当前内容（包括空内容）写入 `defaults/` 并同时作为当前内容生效；之后「恢复默认」回到这个用户默认基线。未设置用户默认时，恢复默认仍回到代码内置原版；存在自定义默认时，额外的「恢复内置」会清除用户默认并回到代码原版。工具页关闭某个工具后，它同时从 provider tool schema、session allowlist 和最终 Prompt 的工具清单中移除，但不会改变宿主权限、预算、审计或恢复规则。旧版 `tool-awareness.md` 会在首次升级时迁移为 `tools/main.md`，原文件仍保留作人工备份。
+
+四个 runtime prompt 的注入时机不同：`runtime/worker.md` 会在每个非 Main Agent 的 system prompt `<rules>` 中作为 runtime rules 注入；`runtime/prompt-suggestion.md` 只在 Main Agent 完成回复后生成下一条输入建议的独立模型请求中作为 system prompt 使用；`runtime/main-conversation.md` 与 `runtime/main-graph.md` 是早期 Main Agent 工作流文本，当前版本不再注入任何 system prompt，只保留可编辑与迁移用途。
 
 ## 桌面 APP（开发预览）
 

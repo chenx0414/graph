@@ -10,10 +10,13 @@ Graph 把 Agent 可编辑上下文集中到固定目录：
   tools/
   rules/
   runtime/
+  defaults/
   tools.json
 ```
 
 首次启动播种默认文件，之后不覆盖用户修改。用户可以通过聊天头部查看最终拼装结果、编辑来源文件、开关工具，或恢复某个文件的原始默认版本。Graph 自身文档不在这里，而是作为只读源码保存在仓库的 `docs/agent/`，并随应用一起打包。
+
+`defaults/` 保存用户点击「设为默认」后的基线。该动作同时保存当前内容；空文件也是合法默认值。后续「恢复默认」优先回到用户默认，未设置用户默认时才回到代码内置原版；存在自定义默认时，「恢复内置」会清除该文件并回到代码原版。
 
 ## 结构化 Composer
 
@@ -64,7 +67,13 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 ## 原版恢复
 
-Graph 在代码/preset 中保留每个可编辑 prompt 文件的原始版本。恢复默认只覆盖对应可编辑文件，不修改能力缓存、用户工具清单或项目文件。只读 Agent docs 直接来自源码，不存在需要恢复的用户覆盖版本。
+Graph 在代码/preset 中保留每个可编辑 prompt 文件的原始版本。`defaults/` 只保存用户明确设为默认的内容；恢复默认只覆盖对应可编辑文件，不修改能力缓存、用户工具清单或项目文件。只读 Agent docs 直接来自源码，不存在需要恢复的用户覆盖版本。
+
+## Runtime Prompt 注入时机
+
+- `runtime/worker.md`：每次非 Main Agent operation 组装 system prompt 时，注入 `<rules>` 的 runtime 部分。
+- `runtime/prompt-suggestion.md`：Main Agent 完成回复后，为下一条输入建议启动独立模型请求时作为该请求的 system prompt。
+- `runtime/main-conversation.md`、`runtime/main-graph.md`：早期 Main Agent 工作流文本，当前版本不注入任何 system prompt，仅保留编辑和迁移用途。
 
 ## 不应宣称
 

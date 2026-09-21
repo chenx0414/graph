@@ -444,6 +444,22 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     await options.agentContext.savePrompt(body.key as AgentPromptKey, body.content);
     return options.agentContext.view();
   });
+  app.put('/api/agent-context/prompts/default', async request => {
+    if (!options.agentContext) throw new RuntimeError('invalid_config', 'Agent context library is unavailable');
+    const body = request.body as { key?: unknown; content?: unknown };
+    if (typeof body?.key !== 'string' || typeof body.content !== 'string') {
+      throw new RuntimeError('invalid_input', 'key and content are required');
+    }
+    await options.agentContext.setPromptDefault(body.key as AgentPromptKey, body.content);
+    return options.agentContext.view();
+  });
+  app.post('/api/agent-context/prompts/default/reset', async request => {
+    if (!options.agentContext) throw new RuntimeError('invalid_config', 'Agent context library is unavailable');
+    const body = request.body as { key?: unknown };
+    if (typeof body?.key !== 'string') throw new RuntimeError('invalid_input', 'key is required');
+    await options.agentContext.clearPromptDefault(body.key as AgentPromptKey);
+    return options.agentContext.view();
+  });
   app.post('/api/agent-context/prompts/reset', async request => {
     if (!options.agentContext) throw new RuntimeError('invalid_config', 'Agent context library is unavailable');
     const body = request.body as { key?: unknown };

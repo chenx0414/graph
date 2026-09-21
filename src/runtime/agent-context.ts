@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { RuntimeError } from '../core/types.ts';
 
@@ -119,7 +119,9 @@ export interface AgentPromptDescriptor {
   group: 'identity' | 'tools' | 'rules' | 'runtime';
   file: string;
   content: string;
+  defaultContent: string;
   customized: boolean;
+  defaultCustomized: boolean;
 }
 
 export interface AgentContextView {
@@ -158,13 +160,14 @@ const STATIC_PROMPTS: readonly {
   { key: 'rules/main.md', title: 'Main Agent 规则', description: 'Main Agent 的智能体方案命名规则。', group: 'rules', fallback: 'mainRules' },
   { key: 'rules/worker.md', title: 'Worker 规则', description: '实现 Agent 的任务范围与工作副本规则。', group: 'rules', fallback: 'workerRules' },
   { key: 'rules/reviewer.md', title: 'Reviewer 规则', description: '独立审查的证据隔离和只读规则。', group: 'rules', fallback: 'reviewerRules' },
-  { key: 'runtime/main-conversation.md', title: 'Main Agent 对话流程', description: '讨论、规划、问题分流等运行流程。', group: 'runtime', fallback: 'mainConversation' },
-  { key: 'runtime/main-graph.md', title: '任务图工作流', description: 'Main Agent 的 proposal schema 和任务图操作说明。', group: 'runtime', fallback: 'mainGraph' },
-  { key: 'runtime/worker.md', title: 'Worker 运行规则', description: '普通实现、审查和验证 Agent 的动态运行规则。', group: 'runtime', fallback: 'worker' },
-  { key: 'runtime/prompt-suggestion.md', title: '输入建议生成', description: '生成下一条输入建议时使用的独立 system prompt。', group: 'runtime', fallback: 'promptSuggestion' },
+  { key: 'runtime/main-conversation.md', title: 'Main Agent 对话流程', description: '历史流程文本；当前版本不再注入 system prompt。', group: 'runtime', fallback: 'mainConversation' },
+  { key: 'runtime/main-graph.md', title: '任务图工作流', description: '历史任务图流程；当前版本不再注入 system prompt。', group: 'runtime', fallback: 'mainGraph' },
+  { key: 'runtime/worker.md', title: 'Worker 运行规则', description: '普通实现、审查和验证 Agent 每次 operation 注入 system prompt 的 runtime rules。', group: 'runtime', fallback: 'worker' },
+  { key: 'runtime/prompt-suggestion.md', title: '输入建议生成', description: '仅主 Agent 回复后生成下一条输入建议的独立模型请求使用。', group: 'runtime', fallback: 'promptSuggestion' },
 ];
 
 const TOOL_STATE_FILE = 'tools.json';
+const USER_DEFAULT_ROOT = 'defaults';
 const DEFAULT_DISABLED_TOOLS = ['powershell'] as const;
 const LEGACY_PROMPT_PATHS: Partial<Record<AgentPromptKey, string>> = {
   'tools/main.md': 'tool-awareness.md',
@@ -277,7 +280,7 @@ export class AgentContextLibrary {
     return join(this.root, key);
   }
 
-  private descriptor(key: AgentPromptKey): Omit<AgentPromptDescriptor, 'file' | 'content' | 'customized'> {
+  private descriptor(key: AgentPromptKey): Omit<AgentPromptDescriptor, 'file' | 'content' | 'defaultContent' | 'customized' | 'defaultCustomized'> {
     const staticPrompt = STATIC_PROMPTS.find(prompt => prompt.key === key);
     if (staticPrompt) return staticPrompt;
     throw new RuntimeError('invalid_input', `Unknown Agent prompt ${key}`);
@@ -288,12 +291,30 @@ export class AgentContextLibrary {
       ...prompt,
       file: this.promptPath(prompt.key),
       content: this.defaults[prompt.fallback],
+      defaultContent: this.defaults[prompt.fallback],
       customized: false,
+      defaultCustomized: false,
     }));
   }
 
-  private defaultContent(key: AgentPromptKey) {
+  private builtInContent(key: AgentPromptKey) {
     return this.defaults[STATIC_PROMPTS.find(prompt => prompt.key === key)!.fallback];
+  }
+
+  private userDefaultPath(key: AgentPromptKey) {
+    this.descriptor(key);
+    return join(this.root, USER_DEFAULT_ROOT, key);
+  }
+
+  private async userDefault(key: AgentPromptKey) {
+    return readFile(this.userDefaultPath(key), 'utf8').catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    });
+  }
+
+  private async effectiveDefault(key: AgentPromptKey) {
+    return await this.userDefault(key) ?? this.builtInContent(key);
   }
 
   async ensure() {
@@ -309,6 +330,7 @@ export class AgentContextLibrary {
       'tool guidance: tools/',
       'rules: rules/',
       'runtime-only prompts: runtime/',
+      'user-defined reset defaults: defaults/ (may be empty)',
       'read-only Agent docs: <application>/docs/agent/',
     ].join('\n');
     await writeFile(join(this.root, 'README.md'), `${readme}\n`, { mode: 0o600, flag: 'wx' }).catch(error => {
@@ -316,6 +338,7 @@ export class AgentContextLibrary {
     });
     for (const descriptor of this.descriptors()) {
       await mkdir(dirname(descriptor.file), { recursive: true, mode: 0o700 });
+      const userDefault = await this.userDefault(descriptor.key);
       const legacyPath = LEGACY_PROMPT_PATHS[descriptor.key];
       const legacy = legacyPath
         ? await readFile(join(this.root, legacyPath), 'utf8').catch(error => {
@@ -323,9 +346,11 @@ export class AgentContextLibrary {
             throw error;
           })
         : undefined;
-      await writeFile(descriptor.file, `${(legacy?.trim() ? legacy : descriptor.content).trimEnd()}\n`, { mode: 0o600, flag: 'wx' }).catch(error => {
+      const seed = userDefault ?? (legacy?.trim() ? legacy : descriptor.content);
+      await writeFile(descriptor.file, `${seed.trimEnd()}\n`, { mode: 0o600, flag: 'wx' }).catch(error => {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       });
+      if (userDefault !== undefined) continue;
       const current = await readFile(descriptor.file, 'utf8');
       const legacyDefaults = LEGACY_PROMPT_DEFAULTS[descriptor.key] ?? [];
       let migrated = legacyDefaults.some(value => current.trimEnd() === value.trimEnd())
@@ -340,7 +365,8 @@ export class AgentContextLibrary {
 
   async prompt(key: AgentPromptKey, variables: Record<string, string> = {}) {
     const custom = await this.override(key);
-    return render(custom ?? this.defaultContent(key), variables).trimEnd();
+    const fallback = await this.effectiveDefault(key);
+    return render(custom ?? fallback, variables).trimEnd();
   }
 
   /** Identity override for any published Agent definition. Main is the
@@ -353,7 +379,7 @@ export class AgentContextLibrary {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
         throw error;
       });
-      if (custom?.trim()) return custom.trimEnd();
+      if (custom !== undefined) return custom.trimEnd();
     }
     if (definitionId === 'main' || definitionId === 'master') return fallback?.trim() || this.defaults.identity;
     return fallback?.trim() || '';
@@ -374,13 +400,26 @@ export class AgentContextLibrary {
   }
 
   async savePrompt(key: AgentPromptKey, content: string) {
-    if (!content.trim()) throw new RuntimeError('invalid_input', 'Prompt content must not be empty');
     if (content.length > 250_000) throw new RuntimeError('invalid_input', 'Prompt content must be at most 250000 characters');
     await writeAtomic(this.promptPath(key), content.trimEnd() + '\n');
   }
 
+  async setPromptDefault(key: AgentPromptKey, content: string) {
+    if (content.length > 250_000) throw new RuntimeError('invalid_input', 'Prompt content must be at most 250000 characters');
+    const normalized = content.trimEnd() + '\n';
+    await writeAtomic(this.userDefaultPath(key), normalized);
+    await writeAtomic(this.promptPath(key), normalized);
+  }
+
+  async clearPromptDefault(key: AgentPromptKey) {
+    await rm(this.userDefaultPath(key), { force: true });
+    const builtIn = this.builtInContent(key);
+    await writeAtomic(this.promptPath(key), `${builtIn.trimEnd()}\n`);
+  }
+
   async resetPrompt(key: AgentPromptKey) {
-    await writeAtomic(this.promptPath(key), `${this.defaultContent(key).trimEnd()}\n`);
+    const fallback = await this.effectiveDefault(key);
+    await writeAtomic(this.promptPath(key), `${fallback.trimEnd()}\n`);
   }
 
   async disabledTools() {
@@ -407,11 +446,19 @@ export class AgentContextLibrary {
 
   async view(variables: Record<string, string> = {}): Promise<AgentContextView> {
     const prompts = await Promise.all(this.descriptors().map(async prompt => {
-      const custom = await this.override(prompt.key);
+      const [custom, userDefault] = await Promise.all([
+        this.override(prompt.key),
+        this.userDefault(prompt.key),
+      ]);
+      const builtIn = this.builtInContent(prompt.key);
+      const effectiveDefault = userDefault ?? builtIn;
+      const current = custom ?? effectiveDefault;
       return {
         ...prompt,
-        content: render(custom ?? prompt.content, variables).trimEnd(),
-        customized: custom !== undefined && custom.trimEnd() !== this.defaultContent(prompt.key).trimEnd(),
+        content: render(current, variables).trimEnd(),
+        defaultContent: render(effectiveDefault, variables).trimEnd(),
+        customized: current.trimEnd() !== effectiveDefault.trimEnd(),
+        defaultCustomized: userDefault !== undefined && userDefault.trimEnd() !== builtIn.trimEnd(),
       };
     }));
     return { root: this.root, prompts, disabledTools: await this.disabledTools() };

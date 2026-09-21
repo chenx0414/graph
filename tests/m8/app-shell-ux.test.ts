@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
@@ -1678,7 +1678,25 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await page.getByRole('button', { name: '保存 Prompt' }).click();
   await expect.poll(() => agentContext.override('runtime/main-conversation.md')).toContain('CUSTOM CONVERSATION');
   await page.getByRole('button', { name: '恢复默认' }).click();
+  await page.getByTestId('toasts').getByText(/已恢复 Main Agent 对话流程/).waitFor();
   await expect.poll(() => agentContext.override('runtime/main-conversation.md')).not.toContain('CUSTOM CONVERSATION');
+  await page.getByTestId('agent-prompt-editor').fill('');
+  await expect.poll(() => page.getByTestId('agent-prompt-editor').inputValue()).toBe('');
+  await page.getByRole('button', { name: '设为默认' }).click();
+  await page.getByTestId('toasts').getByText(/已将 Main Agent 对话流程 设为默认/).waitFor();
+  await expect.poll(() => agentContext.prompt('runtime/main-conversation.md')).toBe('');
+  expect(await readFile(join(root, 'graph', 'prompts', 'defaults', 'runtime', 'main-conversation.md'), 'utf8')).toBe('\n');
+  await page.getByTestId('agent-prompt-editor').fill('Temporary after default');
+  await expect.poll(() => page.getByTestId('agent-prompt-editor').inputValue()).toBe('Temporary after default');
+  await page.getByRole('button', { name: '保存 Prompt' }).click();
+  await page.getByTestId('toasts').getByText(/已保存 Main Agent 对话流程/).waitFor();
+  await expect.poll(() => agentContext.override('runtime/main-conversation.md')).toContain('Temporary after default');
+  await page.getByRole('button', { name: '恢复默认' }).click();
+  await page.getByTestId('toasts').getByText(/已恢复 Main Agent 对话流程/).last().waitFor();
+  await expect.poll(() => agentContext.prompt('runtime/main-conversation.md')).toBe('');
+  await page.getByRole('button', { name: '恢复内置' }).click();
+  await page.getByTestId('toasts').getByText(/已恢复 Main Agent 对话流程 的内置默认/).waitFor();
+  await expect.poll(() => agentContext.prompt('runtime/main-conversation.md')).toContain('You are the master agent');
 
   await page.getByTestId('agent-context-tab-tools').click();
   await page.getByTestId('agent-tool-write').uncheck();

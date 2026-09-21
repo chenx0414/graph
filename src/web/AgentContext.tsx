@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { Button, Icon, Pill, Spinner, toast } from './ui.tsx';
@@ -26,7 +26,9 @@ export interface AgentPromptView {
   group: 'identity' | 'tools' | 'rules' | 'runtime';
   file: string;
   content: string;
+  defaultContent: string;
   customized: boolean;
+  defaultCustomized: boolean;
 }
 
 export interface AgentToolView {
@@ -95,6 +97,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
   const [loading, setLoading] = useState(true);
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const draftRef = useRef('');
   const [disabled, setDisabled] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -108,6 +111,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     if (current) {
       setSelectedPrompt(current.key);
       setDraft(current.content);
+      draftRef.current = current.content;
     }
     setLoading(false);
   }
@@ -126,6 +130,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
         if (first) {
           setSelectedPrompt(first.key);
           setDraft(first.content);
+          draftRef.current = first.content;
         }
       })
       .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : String(reason)); })
@@ -157,6 +162,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
   function selectPrompt(prompt: AgentPromptView) {
     setSelectedPrompt(prompt.key);
     setDraft(prompt.content);
+    draftRef.current = prompt.content;
     setError('');
   }
 
@@ -165,9 +171,10 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     setSaving(true);
     setError('');
     try {
+      const content = draftRef.current;
       await api('/api/agent-context/prompts', {
         method: 'PUT',
-        body: JSON.stringify({ key: selected.key, content: draft }),
+        body: JSON.stringify({ key: selected.key, content }),
       });
       await load();
       toast(`已保存 ${selected.title}；下一轮生效`, 'success');
@@ -189,6 +196,43 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
       });
       await load();
       toast(`已恢复 ${selected.title} 的原始版本`, 'success');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function setPromptDefault() {
+    if (!selected || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const content = draftRef.current;
+      await api('/api/agent-context/prompts/default', {
+        method: 'PUT',
+        body: JSON.stringify({ key: selected.key, content }),
+      });
+      await load();
+      toast(`已将 ${selected.title} 设为默认；下一轮生效`, 'success');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function clearPromptDefault() {
+    if (!selected || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await api('/api/agent-context/prompts/default/reset', {
+        method: 'POST',
+        body: JSON.stringify({ key: selected.key }),
+      });
+      await load();
+      toast(`已恢复 ${selected.title} 的内置默认`, 'success');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -341,7 +385,11 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                               <strong>{prompt.title}</strong>
                               <small>{prompt.description}</small>
                             </span>
-                            {prompt.customized && <Pill tone="accent">自定义</Pill>}
+                            {prompt.customized
+                              ? <Pill tone="accent">自定义</Pill>
+                              : prompt.defaultCustomized
+                                ? <Pill tone="success">自定义默认</Pill>
+                                : null}
                           </button>
                         ))}
                       </div>
@@ -361,15 +409,22 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                         <textarea
                           data-testid="agent-prompt-editor"
                           value={draft}
-                          onChange={event => setDraft(event.target.value)}
+                          onChange={event => {
+                            setDraft(event.target.value);
+                            draftRef.current = event.target.value;
+                          }}
                           rows={20}
                           spellCheck={false}
                         />
                         <div className="agent-context-actions">
                           <span className="muted">支持 `{'{{models}}'}`、`{'{{requirementVersion}}'}` 等运行时变量；实时系统状态通过 `read_system_capabilities` 按需读取。</span>
                           <span className="agent-context-action-buttons">
+                            {selected.defaultCustomized && (
+                              <Button size="sm" icon="refresh" disabled={saving} onClick={() => void clearPromptDefault()}>恢复内置</Button>
+                            )}
                             <Button size="sm" icon="refresh" disabled={saving} onClick={() => void resetPrompt()}>恢复默认</Button>
-                            <Button variant="primary" size="sm" icon="check" disabled={saving || !draft.trim()} onClick={() => void savePrompt()}>
+                            <Button size="sm" icon="spark" disabled={saving} onClick={() => void setPromptDefault()}>设为默认</Button>
+                            <Button variant="primary" size="sm" icon="check" disabled={saving} onClick={() => void savePrompt()}>
                               {saving ? '保存中…' : '保存 Prompt'}
                             </Button>
                           </span>

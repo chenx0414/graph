@@ -39,6 +39,33 @@ test('the Agent context library exposes defaults, saves overrides, and renders b
     .toMatchObject({ customized: true });
 });
 
+test('a user default can be empty and is restored after later edits', async () => {
+  const root = await temp();
+  const library = openAgentContextLibrary(root, {
+    mainTools: 'Built-in Main tool guidance',
+  });
+  await library.ensure();
+
+  await library.savePrompt('tools/main.md', 'Temporary override');
+  await library.setPromptDefault('tools/main.md', '');
+  expect(await library.prompt('tools/main.md')).toBe('');
+  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe('\n');
+  expect(await readFile(join(root, 'defaults/tools/main.md'), 'utf8')).toBe('\n');
+
+  await library.savePrompt('tools/main.md', 'A later override');
+  await library.resetPrompt('tools/main.md');
+  expect(await library.prompt('tools/main.md')).toBe('');
+  expect((await library.view()).prompts.find(prompt => prompt.key === 'tools/main.md')).toMatchObject({
+    content: '',
+    defaultContent: '',
+    customized: false,
+    defaultCustomized: true,
+  });
+  await library.clearPromptDefault('tools/main.md');
+  expect(await library.prompt('tools/main.md')).toBe('Built-in Main tool guidance');
+  await expect(readFile(join(root, 'defaults/tools/main.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
 test('tool enablement is persisted as a normalized list', async () => {
   const root = await temp();
   const library = openAgentContextLibrary(root);
