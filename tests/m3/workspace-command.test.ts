@@ -243,7 +243,7 @@ test('full access commands may execute outside the workspace allowlist', async (
   expect(await readFile(output, 'utf8')).toBe('outside');
 });
 
-test('full access commands can work inside a Graph worktree nested under protected state', async () => {
+test('full access commands can work inside Graph state and read the formal database', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-command-full-state-')));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const stateDir = join(root, 'state');
@@ -277,6 +277,6 @@ test('full access commands can work inside a Graph worktree nested under protect
   `;
   const result = await runner.run('node', ['-e', script]);
   expect(result.code, result.stderr).toBe(0);
-  expect(JSON.parse(result.stdout)).toEqual({ read: 'allowed', write: 'allowed', formal: 'EPERM' });
+  expect(JSON.parse(result.stdout)).toEqual({ read: 'allowed', write: 'allowed', formal: 'allowed' });
   expect(await readFile(join(workspace, 'output.txt'), 'utf8')).toBe('output');
 });

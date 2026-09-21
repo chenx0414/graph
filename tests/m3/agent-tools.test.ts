@@ -169,7 +169,7 @@ test('read-only Git tools expose status, diff, log and show without a shell', as
   expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['git_status', 'git_diff', 'git_log', 'git_show']));
 });
 
-test('full access reads and writes host paths while protected state stays unavailable', async () => {
+test('full access reads and writes host paths including Graph state', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-tools-full-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const scope = join(root, 'workspace');
@@ -189,11 +189,13 @@ test('full access reads and writes host paths while protected state stays unavai
   await expect(call('write_file', { path: join(root, 'created.txt'), content: 'created' }))
     .resolves.toMatchObject({ details: {} });
   expect(await readFile(join(root, 'created.txt'), 'utf8')).toBe('created');
-  await expect(call('read', { path: join(stateDir, 'tasks.sqlite') })).rejects.toThrow(/protected/i);
-  await expect(call('write_file', { path: join(stateDir, 'new.sqlite'), content: 'bad' })).rejects.toThrow(/protected/i);
+  expect((await call('read', { path: join(stateDir, 'tasks.sqlite') })).content[0]).toMatchObject({ text: 'formal' });
+  await expect(call('write_file', { path: join(stateDir, 'new.sqlite'), content: 'state' }))
+    .resolves.toMatchObject({ details: {} });
+  expect(await readFile(join(stateDir, 'new.sqlite'), 'utf8')).toBe('state');
 });
 
-test('full access keeps the work copy and bound capability readable inside protected roots', async () => {
+test('full access keeps the work copy and bound capability readable inside Graph state', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-tools-full-grants-')));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const stateDir = join(root, 'state');
@@ -202,6 +204,7 @@ test('full access keeps the work copy and bound capability readable inside prote
   const skill = join(graphHome, 'capabilities', 'skills', 'implement');
   await mkdir(scope, { recursive: true });
   await mkdir(skill, { recursive: true });
+  await writeFile(join(stateDir, 'tasks.sqlite'), 'formal');
   await writeFile(join(scope, 'README.md'), 'work copy\n');
   await writeFile(join(skill, 'SKILL.md'), 'implement carefully\n');
   const access = resolveAccessPolicy(fullAccessPolicy(), { home: root, stateDir, graphHome });
@@ -215,7 +218,7 @@ test('full access keeps the work copy and bound capability readable inside prote
   await expect(call('write_file', { path: join(scope, 'created.txt'), content: 'created' }))
     .resolves.toMatchObject({ details: {} });
   expect(await readFile(join(scope, 'created.txt'), 'utf8')).toBe('created');
-  await expect(call('read', { path: join(stateDir, 'tasks.sqlite') })).rejects.toThrow(/protected/i);
+  expect((await call('read', { path: join(stateDir, 'tasks.sqlite') })).content[0]).toMatchObject({ text: 'formal' });
 });
 
 test('the main Agent cannot author composer suggestions as part of its reply', async () => {

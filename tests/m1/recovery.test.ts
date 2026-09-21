@@ -1,12 +1,13 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
@@ -103,4 +104,50 @@ test('recovery with a known output but missing usage turns into an answerable us
   expect(known.questions).toMatchObject([{ kind: 'recovery', status: 'resolved' }, { kind: 'unknown_usage', status: 'open' }]);
   await task.answer(known.questions[1]!.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'Authoritative billing receipt' }, 'usage');
   expect((await task.view()).nodes[0]).toMatchObject({ used: 80, reserved: 0, status: 'succeeded' });
+});
+
+test('full access releases an uncertain dispatch for retry instead of opening a recovery problem', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-crash-full-access-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const worker = child('crash.ts', [root, 'dispatched', 'full']);
+  const { taskId } = await worker.message as { taskId: string };
+  await kill(worker.process);
+  let sends = 0;
+  const artifact = join(root, 'artifact.txt');
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    access: () => fullAccessPolicy(),
+    actions: {
+      work: {
+        kind: 'agent',
+        reserveTokens: 100,
+        prepare: async () => async () => {
+          sends += 1;
+          await writeFile(artifact, 'Verified implementation');
+          return { outcome: 'completed', output: { artifact }, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
+        },
+      },
+      check: {
+        kind: 'program',
+        prepare: async () => async () => ({
+          outcome: 'completed',
+          output: { passed: true },
+          evidence: [{
+            acceptanceId: 'works',
+            summary: 'Recovered full-access retry produced the artifact',
+            artifact: { path: artifact, digest: createHash('sha256').update('Verified implementation').digest('hex') },
+          }],
+        }),
+      },
+    },
+  });
+  cleanup.push(() => runtime.close());
+  const task = runtime.user.task(taskId);
+  const restored = await task.view();
+  expect(restored.questions).toEqual([]);
+  expect(restored.operations.at(-1)).toMatchObject({ state: 'not_sent', workerActive: false });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect((await task.view()).phase).toBe('completed');
+  expect(sends).toBe(1);
 });

@@ -242,8 +242,9 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.getByTestId('catalog').waitFor();
   expect(pageErrors).toEqual([]);
   const masterRequests = provider.requests.filter(entry => entry.master).length;
-  // Proposal + list_problems + resolve_problem turns.
-  expect(masterRequests).toBeGreaterThanOrEqual(3);
+  // Proposal plus the normal final turn. Full access no longer needs the
+  // list_problems/resolve_problem recovery round trip.
+  expect(masterRequests).toBeGreaterThanOrEqual(2);
 
   // Stop through the formal signal path and assert the exit outside cleanup.
   child.kill('SIGTERM');

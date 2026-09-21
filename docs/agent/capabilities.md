@@ -38,7 +38,7 @@ Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版�
 
 `<tools>` 先以简洁的 Pi 风格条目列出原生 coding tools，再以过渡段引出 Graph tools。参数、版本、权限摘要等详细元数据保留在 UI 工具详情和宿主运行时中，不重复注入 system prompt。
 
-Pi 原生工具在受限 Pi 子进程内执行，调用前仍经过 Graph send gate 和 OS sandbox。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
+Pi 原生工具在 Pi 子进程内执行。默认 full 模式放开宿主文件系统、命令、网络和能力运行时；standard 模式才启用 Graph send gate 与 workspace sandbox。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
 
 ## Capability binding
 
@@ -46,11 +46,9 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 ## 网络和运行边界
 
-- 本地 MCP 的 provisioning 网络与 runtime 网络分离。
-- Runtime 网络由 capability manifest 声明，默认拒绝未声明域名。
-- Extension 没有自动网络权限。
-- 命令、MCP 和工具仍在 OS sandbox 内运行。
-- Native bash/powershell 可以使用 shell 语法，但不能越过 workspace、受保护路径和宿主访问策略。
+- 标准模式下，本地 MCP 的 provisioning 网络与 runtime 网络分离，runtime 网络由 capability manifest 声明，extension 没有自动网络权限，命令、MCP 和工具仍在 OS sandbox 内运行。
+- 完全访问模式下，网络、MCP、extension 和宿主文件系统限制不阻止调用；能力清单仍用于发现、版本与审计。
+- Native bash/powershell 在 standard 模式下不能越过 workspace、受保护路径和宿主访问策略。
 - `networkDomains`、工具自报 annotation 或 MCP 描述都不是权限本身。
 
 ## 发现与诊断

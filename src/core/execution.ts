@@ -1,6 +1,6 @@
 import { isAbsolute } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
-import { resolveAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
+import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { assertWithinBudget, recordModelUse } from './budget-ledger.ts';
 import { conversationDigest, conversationForTask, deliverMessages, pendingMessages } from './conversation.ts';
 import { digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
@@ -229,8 +229,9 @@ export class Execution {
   private readyNodes(): ExecutionNodeRow[] {
     if (this.stopping) return [];
     const nodes: ExecutionNodeRow[] = [];
+    const fullAccess = isFullAccess(this.access?.());
     for (const taskId of this.laneTasks()) {
-      if (this.store.task(taskId).paused) continue;
+      if (!fullAccess && this.store.task(taskId).paused) continue;
       nodes.push(...this.readyNodesFor(taskId));
     }
     return nodes;
@@ -279,7 +280,9 @@ export class Execution {
   }
 
   private async execute(node: ExecutionNodeRow): Promise<boolean> {
-    if (this.stopping || this.store.task(node.task_id).paused) return false;
+    const accessPolicy = this.access?.() ?? resolveAccessPolicy(standardAccessPolicy());
+    const fullAccess = isFullAccess(accessPolicy);
+    if (this.stopping || (!fullAccess && this.store.task(node.task_id).paused)) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
     const spec = JSON.parse(node.spec) as NodeSpec;
     const adapter = spec.action === 'graph.verify'
@@ -339,7 +342,6 @@ export class Execution {
       recordModelUse(this.store, node.instance_id, identity);
       if (spec.model && spec.model !== selected.id) this.store.event(node.task_id, 'model.switched', { nodeId: node.id, from: spec.model, to: selected.id, instanceId: node.instance_id });
     }
-    const accessPolicy = this.access?.() ?? resolveAccessPolicy(undefined);
     const baseGrants = JSON.parse((this.store.db.prepare('SELECT grants FROM projects WHERE id=?').get(this.store.task(node.task_id).project_id) as { grants: string }).grants) as string[];
     const grants = [...new Set([...baseGrants, ...(this.store.db.prepare('SELECT grant FROM task_grants WHERE task_id=?').all(node.task_id) as { grant: string }[]).map(row => row.grant)])];
     const requiredGrant = adapter.grant;
@@ -366,7 +368,7 @@ export class Execution {
     if (occupiedSlots(this.store, spec.kind === 'agent' ? 'agent' : 'program') >= executionLimit(spec.kind === 'agent' ? 'agent' : 'program')) return false;
     const reservation = spec.kind === 'agent' ? adapter.reserveTokens : 0;
     if (reservation === undefined || !Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_adapter', 'A bounded token reservation is required');
-    if (node.instance_id) {
+    if (node.instance_id && !fullAccess) {
       try {
         assertWithinBudget(this.store, node.instance_id, reservation);
       } catch (error) {
@@ -666,7 +668,7 @@ export class Execution {
       this.lifecycle.markPreparationFailed(operation.id, String(error));
       return false;
     }
-    if (this.stopping || this.store.task(node.task_id).paused) {
+    if (this.stopping || (!fullAccess && this.store.task(node.task_id).paused)) {
       this.lifecycle.cancelBeforeDispatch(operation.id);
       return false;
     }

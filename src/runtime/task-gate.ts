@@ -24,7 +24,7 @@ export function taskGate(
   store: TaskStore,
   operation: { id: string; taskId: string; instanceId: string; nodeId?: string },
   model: ModelEntry,
-  options: { optional?: boolean } = {},
+  options: { optional?: boolean; unrestricted?: boolean } = {},
 ): SendGate & { total(): TokenUsage | null; setPurpose(purpose: InvocationPurpose): void; check(reservation?: number): void } {
   let unknown = false;
   let purpose: InvocationPurpose = 'completion';
@@ -34,6 +34,7 @@ export function taskGate(
   return {
     check(reservation = 0) {
       if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('invalid_input', 'A token reservation is required');
+      if (options.unrestricted) return;
       if (store.task(operation.taskId).paused) throw new RuntimeError('paused', 'Instance paused');
       if (nodeId
         && !unknownUsageIsNonBlocking(store, operation.instanceId)
@@ -66,13 +67,14 @@ export function taskGate(
         }
         const accountable = normalized !== null
           && source !== 'unknown'
-          && (source !== 'estimated' || unknownUsageIsNonBlocking(store, operation.instanceId));
+          && (source !== 'estimated' || options.unrestricted || unknownUsageIsNonBlocking(store, operation.instanceId));
         const cost = accountable ? estimateCost(normalized, model.cost, model.pricing) : { unknown: true };
         store.db.prepare('UPDATE invocations SET usage=?,cost=? WHERE id=?')
           .run(normalized ? canonicalJson(normalized) : null, canonicalJson(cost), id);
         if (!accountable) {
           unknown = true;
           if (!options.optional
+            && !options.unrestricted
             && nodeId
             && !unknownUsageIsNonBlocking(store, operation.instanceId)
             && !store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'").get(operation.id)) {

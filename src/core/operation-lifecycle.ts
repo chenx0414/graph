@@ -23,6 +23,7 @@ import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
 import { insertQuestion } from './question-routing.ts';
+import { isFullAccess } from './access-policy.ts';
 import {
   mergeUsageSource,
   normalizeTokenUsage,
@@ -191,6 +192,18 @@ export class OperationLifecycle {
             eventReason: 'Recovered before dispatch',
           });
         } else {
+          const operation = operationFrom(row);
+          if (isFullAccess(operation.accessPolicy)) {
+            this.markNotSent(row, {
+              resetNode: true,
+              eventReason: 'Full access recovery released the uncertain dispatch for retry',
+            });
+            this.store.event(row.task_id, 'operation.recovery_bypassed', {
+              operationId: row.id,
+              policy: 'full_access',
+            });
+            continue;
+          }
           // A new process owns no live worker, so a recorded dispatch is
           // uncertain and must stop holding an execution slot. Leaving
           // worker_active=1 would starve every later agent and block usage
@@ -379,6 +392,18 @@ export class OperationLifecycle {
   handleDispatchRefusal(operation: Operation, error: RuntimeError, reservation: number) {
     const refusalCodes = ['paused', 'budget', 'unknown_usage', 'context_rejected'];
     if (!refusalCodes.includes(error.code)) return false;
+    if (isFullAccess(operation.accessPolicy)) {
+      return this.transaction(() => {
+        const row = this.operationRow(operation.id);
+        if (!['dispatched', 'unknown'].includes(row.state)) return false;
+        this.markNotSent(row, {
+          resetNode: true,
+          eventReason: `Full access bypassed ${error.code}: ${error.message}`,
+        });
+        releaseMessages(this.store, operation.id);
+        return true;
+      });
+    }
     return this.transaction(() => {
       const row = this.operationRow(operation.id);
       if (!['dispatched', 'unknown'].includes(row.state)) return false;
@@ -455,6 +480,19 @@ export class OperationLifecycle {
           reason: String(error),
         });
         return false;
+      }
+      if (isFullAccess(operation.accessPolicy)) {
+        this.markNotSent(this.operationRow(operation.id), {
+          resetNode: true,
+          eventReason: `Full access released an uncertain dispatch for retry: ${String(error)}`,
+        });
+        this.store.event(operation.taskId, 'operation.recovery_bypassed', {
+          operationId: operation.id,
+          reason: String(error),
+          quiescent,
+        });
+        recordConversationInterruption(this.store, operation, String(error));
+        return true;
       }
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=? WHERE id=?")
         .run(Number(!quiescent), operation.id);
@@ -791,10 +829,11 @@ export class OperationLifecycle {
     const normalizedUsage = rawUsage ? normalizeTokenUsage(rawUsage) : null;
     const source = usageSourceOf(normalizedUsage);
     const estimatedRequiresReconciliation = source === 'estimated' && !options.reconciled;
-    const missingUsage = !normalizedUsage
+    const fullAccess = isFullAccess(operation.accessPolicy);
+    const missingUsage = !fullAccess && (!normalizedUsage
       || (source === 'unknown' && !options.reconciled)
-      || (estimatedRequiresReconciliation && !unknownUsageIsNonBlocking(this.store, operation.instanceId));
-    const unknownUsageAllowed = missingUsage && unknownUsageIsNonBlocking(this.store, operation.instanceId);
+      || (estimatedRequiresReconciliation && !unknownUsageIsNonBlocking(this.store, operation.instanceId)));
+    const unknownUsageAllowed = fullAccess || (missingUsage && unknownUsageIsNonBlocking(this.store, operation.instanceId));
     if (missingUsage && !unknownUsageAllowed) {
       recordConversationOutput(this.store, operation, result);
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?")
@@ -819,11 +858,19 @@ export class OperationLifecycle {
       }
       return;
     }
+    if (fullAccess && (!normalizedUsage || source === 'unknown')) {
+      this.store.event(operation.taskId, 'operation.usage_unknown', {
+        operationId: operation.id,
+        nodeId: operation.nodeId,
+        policy: 'non_blocking_full_access',
+        usageSource: source,
+      });
+    }
     if (missingUsage) {
       this.store.event(operation.taskId, 'operation.usage_unknown', {
         operationId: operation.id,
         nodeId: operation.nodeId,
-        policy: 'non_blocking_unlimited',
+        policy: fullAccess ? 'non_blocking_full_access' : 'non_blocking_unlimited',
         usageSource: source,
       });
     }
@@ -970,7 +1017,7 @@ export class OperationLifecycle {
     } else if (result.outcome === 'failed' && !nodeSpec.optional) {
       this.block(operation.taskId, operation.nodeId, 'execution_failed', { output: result.output }, operation.id);
     }
-    if (total > row.reserved) {
+    if (!fullAccess && total > row.reserved) {
       this.block(operation.taskId, operation.nodeId, 'reservation_exceeded', {
         reserved: row.reserved,
         actual: total,

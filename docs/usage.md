@@ -46,12 +46,13 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 - 点「确认草稿并开始执行」后才会创建功能任务并派发工人；确认绑定当时的草稿版本、目标分支与验收项，旧草稿立即失效。
 - 执行期间继续在同一对话里问进度、解释与偏差；主 Agent 忙时输入会进入输入框上方的右侧队列，当前回复结束后按顺序每次发送一条，形成一问一答，不会丢消息。
 - 输入 `@` 可引用项目文件与文件夹；输入 `/` 可浏览当前主 Agent 实际可用的工具、已绑定能力，以及模型、思考强度和上下文压缩等系统命令。工具或能力选中后会作为 `/tool` 或 `/capability:id@version` 直接插入正文，并随消息形成明确的使用指令；模型与思考强度直接作用于下一轮，`/compact` 由同一 Pi session 执行真实上下文压缩。
+- 完全访问默认开启；聊天输入区的开关可切回 standard。full 模式下 Agent 可使用宿主文件系统、任意命令与网络、已绑定 MCP/扩展，并可修改工作区；暂停、预算、未知用量和恢复问题不会阻止调用，但操作、用量和事件仍会记录。
 - 主 Agent 完成回答时可留下灰色候选 prompt：`Tab` 填入输入框，`Enter` 直接发送；忙时输入 `Enter` 会入队，输入框为空且已有队列消息时再按 `Enter` 会把队列作为打断引导送入当前回复。
 - 暂停只作用于对话主 Agent；功能任务的暂停/继续仍在对应任务页。重启守护进程后，对话、未处理消息与执行状态都会恢复。
 - 工人默认使用 Fresh 上下文；只有主 Agent 明确要求精确 transcript/tool-call 状态时，Graph 才会从已成功源节点创建 Fork 新会话。返工和主 Agent 连续对话使用 Continue。Fork 不会共享可变 session，也不会重置预算。
 - 节点详情会显示实际上下文模式、来源节点、source/child digest、handoff 与共享预算作用域；独立审查始终使用 Fresh，且不能读取实现 Agent 的 transcript。
 
-确认后若要新增功能，主 Agent 会把它作为新的功能任务讨论与确认，原任务的验收范围不被静默修改。讨论阶段的主 Agent 只有读取类工具，不会修改项目文件或派发实现工作。
+确认后若要新增功能，主 Agent 会把它作为新的功能任务讨论与确认，原任务的验收范围不被静默修改。讨论阶段默认运行在完全访问模式，因此主 Agent 可以按用户要求直接读写工作区和调用能力；standard 模式才恢复讨论期只读边界。
 
 ## Agent 上下文与 Prompt
 
@@ -68,7 +69,7 @@ runtime/     仅特定运行阶段使用的动态 Prompt
 
 Graph 自身的 Agent docs 不再复制到 `~/.graph/prompts/docs`。源码内的 `docs/agent/README.md` 是主入口，`docs/agent/` 保存只读主题文档，`examples/` 保存示例；system prompt 只注入这三个绝对路径、主题索引和阅读协议，正文由 Agent 在需要时读取。模型目录、订阅计划、配额、配方和系统健康等动态事实不常驻 system prompt；Agent 在需要时调用 `read_system_capabilities` 或 `inspect_graph_system`。每个 Agent operation 的 `<cwd>` 使用该实例实际 Git worktree，而不是项目根目录或其它 Agent 的目录。
 
-所有 Agent 的 session 都开放适用的 Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`，以及 Windows 上的 `powershell`。它们在受限 Pi 子进程内执行，并通过 Graph gate、workspace sandbox 和 access policy；旧的 `read`/`write_file`/`list_dir`/`run_command` 不再作为这些原生能力的替代出现在实际 session。
+所有 Agent 的 session 都开放适用的 Pi 原生 coding tools：`read`、`bash`、`edit`、`write`、`ls`、`find`、`grep`，以及 Windows 上的 `powershell`。它们在 Pi 子进程内执行；默认 full 模式放开宿主文件系统、命令、网络和能力运行时，standard 模式才启用 workspace sandbox、命令白名单和 access policy。旧的 `read`/`write_file`/`list_dir`/`run_command` 不再作为这些原生能力的替代出现在实际 session。
 
 在「最终 Prompt」页可直接查看完整预览；在「可编辑来源」页修改并保存，改动从下一轮开始生效；「恢复默认」只覆盖选中的可编辑文件，Graph 始终保留代码内置原版。工具页关闭某个工具后，它同时从 provider tool schema、session allowlist 和最终 Prompt 的工具清单中移除，但不会改变宿主权限、预算、审计或恢复规则。旧版 `tool-awareness.md` 会在首次升级时迁移为 `tools/main.md`，原文件仍保留作人工备份。
 

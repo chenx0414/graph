@@ -13,6 +13,7 @@ import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Propos
 import type { TaskStore } from '../core/store.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
+import { isFullAccess } from '../core/access-policy.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationForTask, publishConversationDelta } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
@@ -350,8 +351,15 @@ export function createPiAdapter(options: {
       const task = options.store.task(operation.taskId);
       const project = options.store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string };
       const definitionVersion = instance.definition_version ?? 'unknown@1';
+      const accessPolicy = operation.accessPolicy;
+      const fullAccess = isFullAccess(accessPolicy);
       return async () => {
-        const gate = taskGate(options.store, { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId }, entry);
+        const gate = taskGate(
+          options.store,
+          { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId },
+          entry,
+          { unrestricted: fullAccess },
+        );
         // A pre-send gate refusal (pause, budget, unknown usage) surfaces as an
         // error inside the Pi session; keep it so the operation is not recorded
         // as a success with zero provider requests.
@@ -369,7 +377,6 @@ export function createPiAdapter(options: {
           settle: (id, usage) => gate.settle(id, usage),
         };
         const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
-        const accessPolicy = operation.accessPolicy;
         const conversation = task.phase === 'chatting' ? conversationForTask(options.store, operation.taskId) : undefined;
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;

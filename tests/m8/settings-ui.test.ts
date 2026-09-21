@@ -202,22 +202,22 @@ test('chat composer toggles full access with one click and settings no longer ho
   const toggle = page.getByTestId('full-access-toggle');
   await toggle.waitFor();
   expect(await toggle.evaluate(element => element.parentElement?.classList.contains('chat-composer-controls'))).toBe(true);
-  expect(await toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(await toggle.getAttribute('aria-pressed')).toBe('true');
   expect(await toggle.innerText()).toContain('完全访问');
   await page.setViewportSize({ width: 390, height: 800 });
   expect(await page.locator('.new-chat-composer .chat-composer-controls').evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
 
   await toggle.click();
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(1);
-  await expect.poll(async () => toggle.getAttribute('aria-pressed')).toBe('true');
-  const full = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
-  expect(full.config.access).toMatchObject({ mode: 'full', filesystem: { read: 'host' } });
-
-  await toggle.click();
-  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(2);
   await expect.poll(async () => toggle.getAttribute('aria-pressed')).toBe('false');
   const standard = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
   expect(standard.config.access).toMatchObject({ mode: 'standard', filesystem: { read: 'workspace-and-bound' } });
+
+  await toggle.click();
+  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(2);
+  await expect.poll(async () => toggle.getAttribute('aria-pressed')).toBe('true');
+  const full = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
+  expect(full.config.access).toMatchObject({ mode: 'full', filesystem: { read: 'host' } });
 
   await page.goto(`${daemon.url}/#/settings`);
   await page.getByTestId('settings-page').waitFor();

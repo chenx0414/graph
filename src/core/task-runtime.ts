@@ -16,7 +16,7 @@ import {
   type MessageRow,
 } from './conversation.ts';
 import { Execution } from './execution.ts';
-import { resolveAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
+import { resolveAccessPolicy, standardAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
 import { acquireOwner } from './owner.ts';
@@ -347,7 +347,7 @@ export async function openTaskRuntime(options: {
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
       ...(options.program ? { program: options.program } : {}),
-      access: () => resolveAccessPolicy(options.access?.(), {
+      access: () => resolveAccessPolicy(options.access?.() ?? standardAccessPolicy(), {
         home: homedir(),
         stateDir,
         graphHome: options.catalog?.capabilityRoot ? resolve(options.catalog.capabilityRoot, '..') : resolve(homedir(), '.graph'),
@@ -1119,7 +1119,7 @@ export async function openTaskRuntime(options: {
   const runtime = {
     currentAccessPolicy(): ResolvedAccessPolicy {
       ensureOpen();
-      return resolveAccessPolicy(options.access?.(), {
+      return resolveAccessPolicy(options.access?.() ?? standardAccessPolicy(), {
         home: homedir(),
         stateDir,
         graphHome: options.agentContext ? dirname(options.agentContext.root) : join(homedir(), '.graph'),

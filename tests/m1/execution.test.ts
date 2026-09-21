@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { defaultAccessPolicy, fullAccessPolicy, type AccessPolicy } from '../../src/core/access-policy.ts';
+import { fullAccessPolicy, standardAccessPolicy, type AccessPolicy } from '../../src/core/access-policy.ts';
 import type { ActionAdapter } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -298,7 +298,7 @@ test('full access auto-approves a required grant and freezes its policy on the o
     digest: expect.stringMatching(/^[a-f0-9]{64}$/),
   });
 
-  policy = defaultAccessPolicy();
+  policy = standardAccessPolicy();
   grant = 'publish';
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
   expect((await task.view()).questions).toEqual(expect.arrayContaining([
@@ -335,6 +335,46 @@ test('full access auto-approves a grant requested by an operation result and ret
   expect(afterGrant.nodes[0]).toMatchObject({ status: 'pending' });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
   expect(sends).toBe(2);
+});
+
+test('full access bypasses pause, budget and unknown usage while retaining the operation journal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-execution-full-bypass-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const artifact = join(root, 'artifact.txt');
+  let sends = 0;
+  const { runtime, task } = await singleAgent({
+    work: {
+      kind: 'agent',
+      reserveTokens: 20_000_001,
+      prepare: async () => async () => {
+        sends += 1;
+        await writeFile(artifact, 'full access result');
+        return { outcome: 'completed', output: { artifact } };
+      },
+    },
+    check: {
+      kind: 'program',
+      prepare: async () => async () => ({
+        outcome: 'completed',
+        output: { passed: true },
+        evidence: [{
+          acceptanceId: 'works',
+          summary: 'Full access bypassed the budget and usage gates',
+          artifact: { path: artifact, digest: createHash('sha256').update('full access result').digest('hex') },
+        }],
+      }),
+    },
+  }, () => fullAccessPolicy());
+
+  await task.pause('pause-full-access');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  const view = await task.view();
+  expect(view.phase).toBe('completed');
+  expect(view.questions).toEqual([]);
+  expect(view.operations).toHaveLength(2);
+  expect(view.nodes[0]).toMatchObject({ used: 0, reserved: 0, status: 'succeeded' });
+  expect(sends).toBe(1);
 });
 
 test('usage above the reservation is counted once but requires acknowledgement before further dispatch', async () => {

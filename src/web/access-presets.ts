@@ -12,8 +12,8 @@ export const STANDARD_ACCESS: AccessPolicy = {
 export const FULL_ACCESS: AccessPolicy = {
   mode: 'full',
   autoApprove: { permission: true, systemChange: true },
-  filesystem: { read: 'host', write: 'host', gitMetadata: 'protected', credentialStores: 'protected' },
+  filesystem: { read: 'host', write: 'host', gitMetadata: 'writable', credentialStores: 'readable' },
   network: 'unrestricted',
   commands: 'host',
-  piExtensions: { runtime: 'host', localBinding: true, unixSockets: 'all', appleEvents: false },
+  piExtensions: { runtime: 'host', localBinding: true, unixSockets: 'all', appleEvents: true },
 };

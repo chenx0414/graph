@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -133,4 +134,35 @@ test('a bound remote HTTP MCP tool is offered and callable during discussion in 
   expect(view.questions).toEqual([]);
   const offered = (provider.requests[0] as { tools?: { function?: { name?: string } }[] } | undefined)?.tools?.map(tool => tool.function?.name) ?? [];
   expect(offered).toContain('mcp_remote_write_business');
+}, 60_000);
+
+test('full access lets the discussion master use native tools outside the workspace', async () => {
+  const root = await temp('full-access-native-write');
+  const workspace = join(root, 'project');
+  const outside = join(root, 'outside.txt');
+  await mkdir(workspace, { recursive: true });
+  const provider = await openaiServer([
+    { tools: [{ id: 'outside-write', name: 'write', arguments: JSON.stringify({ path: outside, content: 'written during discussion' }) }] },
+    { text: 'Discussion finished.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: workspace }],
+    access: () => fullAccessPolicy(),
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key',
+      modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+
+  const created = await runtime.conversations.create({ projectId: 'p', text: '检查项目，并写入工作区外的证据文件。', requestId: 'full-access-native-write' });
+  await runtime.host.runReady();
+  expect(await readFile(outside, 'utf8')).toBe('written during discussion');
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.questions).toEqual([]);
+  expect(view.messages.filter(message => message.role === 'tool').map(message => message.text).join('\n')).toContain('write');
 }, 60_000);

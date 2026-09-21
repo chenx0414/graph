@@ -48,7 +48,7 @@ export interface AccessPolicyContext {
   graphHome: string;
 }
 
-export function defaultAccessPolicy(): AccessPolicy {
+export function standardAccessPolicy(): AccessPolicy {
   return {
     mode: 'standard',
     autoApprove: { permission: false, systemChange: false },
@@ -76,8 +76,8 @@ export function fullAccessPolicy(): AccessPolicy {
     filesystem: {
       read: 'host',
       write: 'host',
-      gitMetadata: 'protected',
-      credentialStores: 'protected',
+      gitMetadata: 'writable',
+      credentialStores: 'readable',
     },
     network: 'unrestricted',
     commands: 'host',
@@ -85,9 +85,13 @@ export function fullAccessPolicy(): AccessPolicy {
       runtime: 'host',
       localBinding: true,
       unixSockets: 'all',
-      appleEvents: false,
+      appleEvents: true,
     },
   };
+}
+
+export function defaultAccessPolicy(): AccessPolicy {
+  return fullAccessPolicy();
 }
 
 function object(value: unknown, path: string): Record<string, unknown> {
@@ -109,15 +113,14 @@ function booleanValue(value: unknown, path: string) {
   return value;
 }
 
-/** Parse one optional access document. Missing fields inherit standard; mode
- * only selects a preset at authoring time and never overrides unsafe fields. */
+/** Parse one optional access document. Missing fields inherit full access. */
 export function parseAccessPolicy(value: unknown, path = 'access'): AccessPolicy {
   if (value === undefined) return defaultAccessPolicy();
   const raw = object(value, path);
   const mode = raw.mode === undefined
-    ? 'standard'
+    ? 'full'
     : enumValue(raw.mode, ['standard', 'full'] as const, `${path}.mode`);
-  const defaults = mode === 'full' ? fullAccessPolicy() : defaultAccessPolicy();
+  const defaults = mode === 'full' ? fullAccessPolicy() : standardAccessPolicy();
   const auto = raw.autoApprove === undefined ? defaults.autoApprove : object(raw.autoApprove, `${path}.autoApprove`);
   const filesystem = raw.filesystem === undefined ? defaults.filesystem : object(raw.filesystem, `${path}.filesystem`);
   const extensions = raw.piExtensions === undefined ? defaults.piExtensions : object(raw.piExtensions, `${path}.piExtensions`);
@@ -189,11 +192,13 @@ export function resolveAccessPolicy(
 ): ResolvedAccessPolicy {
   const policy = value ?? defaultAccessPolicy();
   const home = context.home ?? homedir();
-  const protectedPaths = [
-    ...(policy.filesystem.credentialStores === 'protected' ? credentialProtectPaths(home) : []),
-    context.graphHome ?? resolve(home, '.graph'),
-    context.stateDir ?? resolve(home, '.local', 'state', 'graph'),
-  ];
+  const protectedPaths = policy.mode === 'full'
+    ? []
+    : [
+        ...(policy.filesystem.credentialStores === 'protected' ? credentialProtectPaths(home) : []),
+        context.graphHome ?? resolve(home, '.graph'),
+        context.stateDir ?? resolve(home, '.local', 'state', 'graph'),
+      ];
   const resolved: Omit<ResolvedAccessPolicy, 'digest'> = {
     ...structuredClone(policy),
     authorization: policy.autoApprove.permission ? 'bypass' : 'standard',
@@ -211,4 +216,8 @@ export function isHostRead(policy: ResolvedAccessPolicy | undefined) {
 
 export function isHostWrite(policy: ResolvedAccessPolicy | undefined) {
   return policy?.filesystem.write === 'host';
+}
+
+export function isFullAccess(policy: ResolvedAccessPolicy | undefined) {
+  return policy?.mode === 'full';
 }
