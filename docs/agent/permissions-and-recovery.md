@@ -67,7 +67,7 @@ Main Agent 处理后再决定是否升级为用户问题。用户不应看到未
 2. 若可证明未发生且动作可重做，按 retry；
 3. 若可证明已发生，补记并继续；
 4. 标准模式下若仍不确定，保持阻塞并创建 recovery problem；
-5. 完全访问模式下释放为可重试，并记录 `operation.recovery_bypassed`，不保留 recovery 阻塞问题。
+5. 完全访问模式下释放为可重试，并记录 `operation.recovery_bypassed`，不保留 recovery 阻塞问题。对话主管在消息已消费且队列为空时不会因此重新入队；新的用户消息才是下一轮。
 
 ## 安全表达
 

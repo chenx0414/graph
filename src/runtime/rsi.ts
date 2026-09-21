@@ -82,6 +82,16 @@ export interface RsiStatus {
     force?: boolean;
   } | null;
   activeOperations: number;
+  /** In-flight operations that keep a normal reload waiting. */
+  operations: {
+    id: string;
+    taskId: string;
+    nodeId: string;
+    state: string;
+    request: string;
+    conversationId: string | null;
+    archived: boolean;
+  }[];
   /** False when the operation ledger could not be read, so a reload must wait. */
   operationsKnown: boolean;
   canRestart: boolean;
@@ -371,18 +381,39 @@ export class RsiService {
     const branch = available ? checkedOutBranch(root!) ?? null : null;
     const pendingRestart = await this.readRestart();
     let activeOperations = 0;
+    let operations: RsiStatus['operations'] = [];
     let operationsKnown = true;
     const dbPath = join(this.stateDir, 'tasks.sqlite');
     if (existsSync(dbPath)) {
       try {
         const { DatabaseSync } = await import('node:sqlite');
         const db = new DatabaseSync(dbPath, { readOnly: true });
-        activeOperations = Number((db.prepare(
-          "SELECT COUNT(*) AS count FROM operations WHERE state IN ('intent','dispatched')",
-        ).get() as { count: number }).count);
+        operations = (db.prepare(`
+          SELECT o.id, o.task_id AS taskId, o.node_id AS nodeId, o.state,
+                 t.request AS request, t.conversation_id AS conversationId,
+                 CASE WHEN c.archived_at IS NULL THEN 0 ELSE 1 END AS archived
+          FROM operations o
+          JOIN tasks t ON t.id=o.task_id
+          LEFT JOIN conversations c ON c.id=t.conversation_id
+          WHERE o.state IN ('intent','dispatched')
+          ORDER BY o.rowid
+        `).all() as {
+          id: string; taskId: string; nodeId: string; state: string;
+          request: string; conversationId: string | null; archived: number;
+        }[]).map(row => ({
+          id: row.id,
+          taskId: row.taskId,
+          nodeId: row.nodeId,
+          state: row.state,
+          request: row.request,
+          conversationId: row.conversationId,
+          archived: Boolean(row.archived),
+        }));
+        activeOperations = operations.length;
         db.close();
       } catch {
         activeOperations = 0;
+        operations = [];
         // The ledger exists but could not be read; never reload on an unknown count.
         operationsKnown = false;
       }
@@ -394,6 +425,7 @@ export class RsiService {
       ...(available ? {} : { reason: this.unavailableReason() }),
       pendingRestart,
       activeOperations,
+      operations,
       operationsKnown,
       // A forced request reloads even with operations in flight; a normal one
       // waits for the ledger to drain.

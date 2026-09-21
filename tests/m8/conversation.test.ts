@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -211,6 +212,42 @@ test('conversations can be archived and restored without deleting their history'
   expect(restored).toMatchObject({ archived: false, archivedAt: null });
   expect((await runtime.conversations.list()).map(item => item.id)).toContain(created.conversationId);
   expect((await runtime.conversations.view(created.conversationId)).messages).toHaveLength(1);
+});
+
+test('an archived conversation does not occupy a chatting lane', async () => {
+  const root = await temp('archive-lane');
+  const seen: Operation[] = [];
+  const runtime = await withRuntime(root, operation => {
+    seen.push(operation);
+    return { outcome: 'completed', output: { text: 'ok' }, usage };
+  });
+  const created = await runtime.conversations.create({ text: '先归档', requestId: 'archive-lane-create' });
+  await runtime.conversations.archive(created.conversationId, 'archive-lane');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect(seen).toHaveLength(0);
+  await runtime.conversations.unarchive(created.conversationId, 'archive-lane-restore');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(seen).toHaveLength(1);
+});
+
+test('full access does not retry a chatting master with an empty queue', async () => {
+  const root = await temp('full-access-empty-queue');
+  let attempts = 0;
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    access: () => fullAccessPolicy(),
+    actions: { master: scripted(async () => {
+      attempts += 1;
+      throw new Error('uncertain after dispatch');
+    }) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  await runtime.conversations.create({ text: '你好', requestId: 'create' });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(attempts).toBe(1);
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect(attempts).toBe(1);
 });
 
 test('conversation model and thinking selection applies to the next master turn', async () => {

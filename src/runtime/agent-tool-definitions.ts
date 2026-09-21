@@ -276,7 +276,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     inspect_rsi_status: {
-      name: 'inspect_rsi_status', label: 'Inspect self-improvement status', description: 'Read the Recursive Self-Improvement surface for Graph itself: the source checkout root, current branch, any pending restart, and how many operations are still running. Use it before changing the harness and to see whether a previous change is waiting to reload.',
+      name: 'inspect_rsi_status', label: 'Inspect self-improvement status', description: 'Read the Recursive Self-Improvement surface for Graph itself: the source checkout root, current branch, any pending restart, how many operations are still running, and the in-flight operation identities (id, task, node, request, archived). Use it before changing the harness and to see whether a previous change is waiting to reload.',
       parameters: Type.Object({}),
       available: main && Boolean(features.rsi?.status),
       externallyGated: false,

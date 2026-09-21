@@ -265,12 +265,21 @@ test('resolveRsiRoot prefers an explicit GRAPH_RSI_ROOT', async () => {
 
 test('status counts running operations so a reload can wait', async () => {
   const root = await repo();
-  const { store, taskId, dir } = ledger();
+  const { store, taskId, conversationId, dir } = ledger();
   store.db.prepare('INSERT INTO nodes(task_id,id,spec,status) VALUES(?,?,?,?)').run(taskId, 'master', '{}', 'running');
   store.db.prepare(`INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,worker_active)
     VALUES(?,?,?,?,?,?,?,?)`).run('op1', taskId, 'master', 0, '{}', 'dispatched', 0, 0);
   const status = await service(root, dir).status();
   expect(status.activeOperations).toBe(1);
+  expect(status.operations).toEqual([{
+    id: 'op1',
+    taskId,
+    nodeId: 'master',
+    state: 'dispatched',
+    request: 'improve graph',
+    conversationId,
+    archived: false,
+  }]);
   expect(status.canRestart).toBe(false);
 });
 
