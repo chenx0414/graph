@@ -16,7 +16,7 @@ import {
   type MessageRow,
 } from './conversation.ts';
 import { Execution } from './execution.ts';
-import { resolveAccessPolicy, standardAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
+import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
 import { acquireOwner } from './owner.ts';
@@ -34,6 +34,8 @@ import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
 import type { AgentContextLibrary } from '../runtime/agent-context.ts';
+import { openAgentContextAssembly } from '../runtime/agent-context-assembly.ts';
+import { agentArtifactAccess } from '../runtime/agent-tool-definitions.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
@@ -1117,6 +1119,53 @@ export async function openTaskRuntime(options: {
   };
 
   const runtime = {
+    /** Preview the next operation's configuration, without loading capability executors. */
+    async agentContextPreview(conversationId?: string) {
+      ensureOpen();
+      const library = options.agentContext;
+      if (!library) throw new RuntimeError('invalid_config', 'Agent context library is unavailable');
+      const view = conversationId ? await conversations.view(conversationId, { limit: 1 }) : undefined;
+      const definitions = catalog.listDefinitions();
+      const latest = definitions.find(item => item.id === 'main') ?? definitions.find(item => item.id === 'master');
+      const latestDefinitionVersion = masterDefinitionVersion() ?? (latest ? `${latest.id}@${latest.version}` : null);
+      const definitionVersion = view?.master?.definitionVersion ?? latestDefinitionVersion;
+      const definitionId = definitionVersion?.split('@')[0];
+      const action = options.master?.action ?? 'master';
+      const workspace = view?.master && view.anchorTaskId
+        ? runtime.agentWorkspace(view.anchorTaskId, view.master.nodeId) : view?.projectRoot ?? null;
+      const assembly = await openAgentContextAssembly({
+        catalog, library, workspace, action, role: 'master', retrieval: true,
+        definitionVersion: definitionVersion ?? 'main@unknown',
+        fullAccess: isFullAccess(runtime.currentAccessPolicy()),
+        bootstrap: {
+          ...(definitionId && options.catalog?.bootstrapPrompts?.[definitionId]
+            ? { agent: options.catalog.bootstrapPrompts[definitionId]! } : {}),
+          ...(options.catalog?.bootstrapToolPrompt !== undefined ? { tool: options.catalog.bootstrapToolPrompt } : {}),
+        },
+      });
+      const preview = await assembly.preview({
+        role: 'master', run: true, fetch: true, catalog: true,
+        artifacts: agentArtifactAccess({ role: 'master', action }),
+        supervisor: {
+          validateProposal: true, graphState: true, listProjects: true,
+          bindProject: true, listProblems: true, resolveProblem: true,
+        },
+        ...(options.systemContext ? { systemContext: {
+          systemSummary: Boolean(options.systemContext.systemSummary),
+          systemDiagnostics: Boolean(view), proposeSystemChange: Boolean(view),
+          applySystemChange: Boolean(view), requestModelAccess: Boolean(view),
+        } } : {}),
+      });
+      return {
+        ...await library.view({
+          models: '{{models}}', requirementVersion: '{{requirementVersion}}',
+          fullAccessInstruction: '{{fullAccessInstruction}}', retrievalNote: '{{retrievalNote}}',
+        }), disabledTools: assembly.disabledTools,
+        docsRoot: preview.docsRoot, definitionVersion, latestDefinitionVersion,
+        tools: preview.tools, capabilities: preview.capabilities,
+        preview: { sections: preview.composed.previewSections, text: preview.composed.previewText },
+      };
+    },
     currentAccessPolicy(): ResolvedAccessPolicy {
       ensureOpen();
       return resolveAccessPolicy(options.access?.() ?? standardAccessPolicy(), {

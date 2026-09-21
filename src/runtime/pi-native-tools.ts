@@ -34,6 +34,24 @@ export function graphToolsSupersededByNative(nativeTools: readonly string[]): Se
   return superseded;
 }
 
+/** The same disabled/native replacement policy applies to declared and loaded tools. */
+export function selectAgentToolSurface<T extends { name: string }>(input: {
+  tools: readonly T[];
+  nativeTools: readonly string[];
+  disabledTools?: readonly string[];
+  extensionTools?: readonly string[];
+}) {
+  const disabled = new Set((input.disabledTools ?? []).map(name => name.trim()).filter(Boolean));
+  const nativeTools = [...new Set(input.nativeTools.map(name => name.trim()).filter(name => name && !disabled.has(name)))].sort();
+  const superseded = graphToolsSupersededByNative(nativeTools);
+  const available = (name: string) => !disabled.has(name) && !superseded.has(name);
+  return {
+    nativeTools,
+    tools: input.tools.filter(tool => available(tool.name)),
+    extensionTools: (input.extensionTools ?? []).filter(available),
+  };
+}
+
 const NATIVE_TOOL_METADATA: readonly AgentToolPromptEntry[] = [
   {
     name: 'read',

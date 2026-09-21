@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { readFile, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import type { Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type { AgentSessionEvent, ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
@@ -17,11 +17,12 @@ import { isFullAccess } from '../core/access-policy.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationForTask, publishConversationDelta } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
-import type { CapabilityLoadFact, CapabilityPermissionRequest } from './capabilities.ts';
-import { openCapabilityBundle, type CapabilityOperation } from './capability-bundle.ts';
+import type { CapabilityPermissionRequest } from './capabilities.ts';
+import type { CapabilityOperation } from './capability-bundle.ts';
+import { openAgentContextAssembly } from './agent-context-assembly.ts';
+import { agentArtifactAccess } from './agent-tool-definitions.ts';
 import { graphApplicationRoot } from './graph-root.ts';
-import { graphDocumentationPaths } from './agent-docs.ts';
-import { piNativeToolNamesForPlatform, piNativeToolPromptEntries } from './pi-native-tools.ts';
+import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { compactionSettings } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
@@ -38,25 +39,7 @@ import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
-import {
-  DEFAULT_COMMON_RULES,
-  DEFAULT_MAIN_FULL_ACCESS_IDENTITY,
-  DEFAULT_MAIN_RULES,
-  DEFAULT_MAIN_TOOL_GUIDANCE,
-  DEFAULT_PROMPT_SUGGESTION_PROMPT,
-  DEFAULT_REVIEWER_RULES,
-  DEFAULT_REVIEWER_TOOL_GUIDANCE,
-  DEFAULT_WORKER_RULES,
-  DEFAULT_WORKER_TOOL_GUIDANCE,
-  DEFAULT_WORKER_PROMPT,
-  renderAgentPrompt,
-  type AgentContextLibrary,
-} from './agent-context.ts';
-import {
-  composeAgentSystemPrompt,
-  type AgentCapabilityPromptEntry,
-  type AgentToolPromptEntry,
-} from './agent-system-prompt.ts';
+import { DEFAULT_PROMPT_SUGGESTION_PROMPT, type AgentContextLibrary } from './agent-context.ts';
 
 export interface PiAdapterChannels {
   supervisor: (taskId: string) => {
@@ -97,98 +80,6 @@ function toPiModel(entry: ModelEntry): Model<ModelApi> {
   };
 }
 
-type AgentPromptRole = 'main' | 'worker' | 'reviewer';
-
-function promptRoleFor(spec: NodeSpec): AgentPromptRole {
-  if (spec.role === 'master') return 'main';
-  if (spec.action.toLowerCase().includes('review')) return 'reviewer';
-  return 'worker';
-}
-
-async function projectContextForWorkspace(workspace: string) {
-  const candidates = ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD'];
-  for (const name of candidates) {
-    const path = join(workspace, name);
-    try {
-      const content = await readFile(path, 'utf8');
-      if (content.trim()) return { path, content };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-  }
-  return undefined;
-}
-
-function parameterNames(parameters: unknown) {
-  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return [];
-  const properties = (parameters as { properties?: unknown }).properties;
-  return properties && typeof properties === 'object' && !Array.isArray(properties)
-    ? Object.keys(properties as Record<string, unknown>).sort()
-    : [];
-}
-
-function toolPermissionSummary(name: string) {
-  if (name === 'read' || name === 'list_dir') return 'workspace and granted read roots';
-  if (name === 'write_file') return 'workspace write';
-  if (name === 'run_command') return 'host-gated command policy';
-  if (name === 'fetch') return 'declared network domains';
-  if (name.startsWith('artifact_')) return 'task artifact workspace';
-  if (name === 'propose_graph' || name === 'revise_graph') return 'task graph control';
-  if (name === 'apply_system_change' || name === 'propose_system_change') return 'user-approved system change';
-  return 'Graph call gate and current access policy';
-}
-
-function toolPromptEntries(tools: readonly ToolDefinition[], report: readonly CapabilityLoadFact[]): AgentToolPromptEntry[] {
-  const owners = new Map<string, CapabilityLoadFact>();
-  for (const fact of report) {
-    for (const name of fact.tools ?? []) owners.set(name, fact);
-  }
-  const entries = tools.map(tool => {
-    const owner = owners.get(tool.name);
-    return {
-      name: tool.name,
-      description: tool.description,
-      source: owner?.name ?? owner?.id ?? 'Graph',
-      ...(owner ? { version: owner.version } : {}),
-      parameters: parameterNames(tool.parameters),
-      permission: toolPermissionSummary(tool.name),
-      available: true,
-    };
-  });
-  const present = new Set(entries.map(entry => entry.name));
-  for (const fact of report) {
-    if (fact.kind !== 'pi-extension') continue;
-    for (const name of fact.tools ?? []) {
-      if (present.has(name)) continue;
-      present.add(name);
-      entries.push({
-        name,
-        description: fact.reason ?? `Registered by Pi extension ${fact.name ?? fact.id}.`,
-        source: fact.name ?? fact.id,
-        version: fact.version,
-        parameters: [],
-        permission: 'bound Pi extension tool',
-        available: fact.loaded && fact.executable,
-      });
-    }
-  }
-  return entries.sort((left, right) => left.name.localeCompare(right.name));
-}
-
-function capabilityPromptEntries(report: readonly CapabilityLoadFact[]): AgentCapabilityPromptEntry[] {
-  return report.map(fact => ({
-    id: fact.id,
-    version: fact.version,
-    kind: fact.kind ?? 'capability',
-    name: fact.name ?? fact.id,
-    ...(fact.description ? { description: fact.description } : {}),
-    tools: [...(fact.tools ?? [])],
-    ...(fact.path ? { path: fact.path } : {}),
-    ...(fact.networkDomains?.length ? { networkDomains: [...fact.networkDomains] } : {}),
-    ...(fact.reason ? { reason: fact.reason } : {}),
-  }));
-}
-
 /** One-line summary of a tool call for the conversation activity stream. */
 function summarizeToolCall(name: string, args: unknown) {
   const body = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {};
@@ -207,12 +98,6 @@ function summarizeToolCall(name: string, args: unknown) {
                   : name === 'submit_result' ? 'structured result'
                     : name;
   return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
-}
-
-function artifactNamespaces(spec: NodeSpec) {
-  if (spec.role === 'master') return ['plans', 'research', 'reviews', 'deliverables', 'summaries'];
-  if (/review|verify|critic|jury/i.test(spec.action)) return ['reviews', 'summaries'];
-  return ['plans', 'research', 'deliverables', 'summaries'];
 }
 
 // One Pi operation is a whole session of provider calls, not a single request.
@@ -386,6 +271,7 @@ export function createPiAdapter(options: {
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
         let capabilityOperation: CapabilityOperation;
+        let contextAssembly: Awaited<ReturnType<typeof openAgentContextAssembly>>;
         let commands: Awaited<ReturnType<typeof openWorkspaceCommandRunner>> | undefined;
         const systemDomains = spec.role === 'master'
           ? ['github.com', 'raw.githubusercontent.com', 'api.github.com']
@@ -396,8 +282,7 @@ export function createPiAdapter(options: {
           ? createRetrievalBroker({ domains: retrievalDomains, gate, ...(unrestrictedRetrieval ? { unrestricted: true } : {}) })
           : undefined;
         const artifactService = options.artifacts ? {
-          allowedNamespaces: artifactNamespaces(spec),
-          canPromote: spec.role === 'master',
+          ...agentArtifactAccess(spec),
           list: (query: Parameters<ArtifactWorkspace['list']>[0]) => options.artifacts!.list({ ...query, taskId: operation.taskId }),
           get: (artifactId: string, version?: number) => options.artifacts!.get(operation.taskId, artifactId, version),
           read: (artifactId: string, version: number, maxBytes?: number) => options.artifacts!.read(operation.taskId, artifactId, version, maxBytes),
@@ -421,23 +306,24 @@ export function createPiAdapter(options: {
         } : undefined;
         try {
           const definitionId = instance.definition_version?.split('@')[0];
-          const identityOverride = agentPromptLibrary && definitionId
-            ? await agentPromptLibrary.agentPrompt(definitionId, options.channels?.bootstrapPrompts?.[definitionId] ?? null)
-            : undefined;
-          const bundle = await openCapabilityBundle({
+          contextAssembly = await openAgentContextAssembly({
             catalog: options.catalog,
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
+            action: spec.action,
+            ...(spec.role ? { role: spec.role } : {}),
+            workspace,
+            fullAccess,
+            retrieval: Boolean(retrieval),
+            ...(agentPromptLibrary ? { library: agentPromptLibrary } : {}),
             bootstrap: {
-              ...(identityOverride?.trim()
-                ? { agent: identityOverride }
-                : definitionId && options.channels?.bootstrapPrompts?.[definitionId]
-                  ? { agent: options.channels.bootstrapPrompts[definitionId]! }
-                  : {}),
-              ...(options.channels?.bootstrapToolPrompt ? { tool: options.channels.bootstrapToolPrompt } : {}),
+              ...(definitionId && channels?.bootstrapPrompts?.[definitionId]
+                ? { agent: channels.bootstrapPrompts[definitionId]! } : {}),
+              ...(channels?.bootstrapToolPrompt !== undefined ? { tool: channels.bootstrapToolPrompt } : {}),
             },
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
             ...(options.capabilitySecrets ? { secrets: options.capabilitySecrets } : {}),
           });
+          const bundle = contextAssembly.bundle;
           const capabilityRoot = spec.role === 'master' && options.catalog?.capabilityRootPath()
             ? await realpath(options.catalog.capabilityRootPath()!).catch(() => undefined)
             : undefined;
@@ -463,9 +349,7 @@ export function createPiAdapter(options: {
             ...(accessPolicy ? { access: accessPolicy } : {}),
             ...(masterReadRoots.length ? { additionalReadRoots: masterReadRoots } : {}),
             grants: operation.grants,
-            ...(spec.role === 'master' && agentPromptLibrary
-              ? { disabledTools: await agentPromptLibrary.disabledTools() }
-              : {}),
+            disabledTools: contextAssembly.disabledTools,
             onPermissionRequired: request => { permissionRequest ??= request; },
             hostTools: ({ readRoots }) => agentTools({
               workspace, ...(spec.role ? { role: spec.role } : {}),
@@ -691,47 +575,8 @@ export function createPiAdapter(options: {
           thinkingLevel,
         });
         const toolPolicyDigest = capabilityOperation.toolPolicyDigest;
-        const promptRole = promptRoleFor(spec);
         const definitionVersion = instance.definition_version ?? 'unknown@1';
-        const workerRules = agentPromptLibrary
-          ? await agentPromptLibrary.prompt('runtime/worker.md', {
-            retrievalNote: retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : '',
-          })
-          : renderAgentPrompt(DEFAULT_WORKER_PROMPT, {
-            retrievalNote: retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : '',
-          });
-        const commonRules = agentPromptLibrary
-          ? await agentPromptLibrary.prompt('rules/common.md')
-          : DEFAULT_COMMON_RULES;
-        const roleRules = agentPromptLibrary
-          ? await agentPromptLibrary.prompt(`rules/${promptRole}.md`)
-          : promptRole === 'main' ? DEFAULT_MAIN_RULES : promptRole === 'reviewer' ? DEFAULT_REVIEWER_RULES : DEFAULT_WORKER_RULES;
-        const toolGuidance = agentPromptLibrary
-          ? await agentPromptLibrary.prompt(`tools/${promptRole}.md`)
-          : options.channels?.bootstrapToolPrompt
-            ?? (promptRole === 'main' ? DEFAULT_MAIN_TOOL_GUIDANCE : promptRole === 'reviewer' ? DEFAULT_REVIEWER_TOOL_GUIDANCE : DEFAULT_WORKER_TOOL_GUIDANCE);
-        const projectContext = await projectContextForWorkspace(workspace);
-        const promptTools = [
-          ...piNativeToolPromptEntries(capabilityOperation.nativeTools),
-          ...toolPromptEntries(tools, capabilityOperation.report),
-        ];
-        const composedPrompt = composeAgentSystemPrompt({
-          identity: capabilityOperation.prompts.system,
-          ...(fullAccess && promptRole === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
-          definitionVersion,
-          toolGuidance,
-          rules: {
-            common: commonRules,
-            role: roleRules,
-            ...(promptRole === 'main' ? {} : { runtime: workerRules }),
-          },
-          docs: graphDocumentationPaths(),
-          ...(projectContext ? { projectContext } : {}),
-          tools: promptTools,
-          capabilities: capabilityPromptEntries(capabilityOperation.report),
-          cwd: workspace,
-          piCwd: workspace,
-        });
+        const composedPrompt = contextAssembly.forOperation(capabilityOperation).composed;
         const agentContext = operation.context.agentContext;
         if (agentContext?.mode === 'fork') {
           if (!agentContext.sourceSessionFile) throw new RuntimeError('context_rejected', 'Fork context is missing its source session file');

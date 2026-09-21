@@ -69,11 +69,15 @@ flowchart TB
 - [conversation.ts](../src/core/conversation.ts)：会话消息、队列投递、回复摘要与消息事件。
 - [conversation-projection.ts](../src/core/conversation-projection.ts)：会话历史分页覆盖、稳定 ID 归并、可恢复实时 delta/tool 合并、队列状态与消息排序；live snapshot 与 append/reset 协议见 [ADR 0019](adr/0019-recoverable-realtime-transcript.md)。
 - [agent-session.ts](../src/runtime/agent-session.ts)：Agent session transport contract、统一 inspect/turn 结果与 in-process/restricted-process adapter 选择。
+- [agent-context-assembly.ts](../src/runtime/agent-context-assembly.ts)：Agent 定义到运行上下文的同源装配；集中身份与规则选择、项目说明优先级、工具元数据和能力事实投影，供实际 operation 与下一次执行的预览使用。
+- [agent-tool-definitions.ts](../src/runtime/agent-tool-definitions.ts)：宿主工具唯一的描述、schema 与注册条件；预览只读取声明，`agent-tools.ts` 绑定实际执行。
 - [pi-instance.ts](../src/runtime/pi-instance.ts)：in-process Pi session 生命周期、能力包绑定和受控模型门。
 - [pi-process.ts](../src/runtime/pi-process.ts)：受操作系统限制的 Pi session adapter、宿主请求路由与 worker 协议。
 - [pi-adapter.ts](../src/runtime/pi-adapter.ts)：Agent operation 的能力包、凭据、gate、fork policy 与 Graph 事件语义到 session transport 的组合。
 
 纯图规则、预算算术、模板和数据库事务为 Task Runtime 的内部 implementation，不为每个计算拆一层 adapter。SQLite/Git 测试使用真实临时文件与仓库。Pi、供应商和远程 MCP 才使用可控替身与生产 adapter 两套实现。
+
+Agent 运行上下文的预览通过 Task Runtime 读取实例绑定的精确定义版本和下一次执行的配置；没有实例时采用当前主管定义。预览只解析本地能力快照和 Prompt，不连接 MCP、不导入扩展，也不混入历史 operation 的加载报告。声明工具标记为待运行确认；实际 operation 使用本次加载结果与准入时冻结的访问策略。两条路径共用 Prompt 装配和工具筛选规则，绑定的身份 Prompt 仍覆盖 bootstrap 身份；项目说明文件缺失或为空时采用下一候选文件，其他读取错误会显式报错。
 
 保持单一仓库与单一领域上下文，先按 `src/core/`、`src/runtime/`、`src/catalog/`、`src/git/`、`src/server/`、`src/web/` 组织内部代码；不因有前后端就引入多包工作区或多份 CONTEXT。
 

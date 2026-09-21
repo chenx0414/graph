@@ -3,7 +3,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
-import { graphToolsSupersededByNative } from './pi-native-tools.ts';
+import { selectAgentToolSurface } from './pi-native-tools.ts';
 import {
   capabilityPrompts,
   loadCapabilities,
@@ -141,17 +141,15 @@ export class CapabilityBundleVersion {
       });
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
       const disabledTools = new Set((options.disabledTools ?? []).map(name => name.trim()).filter(Boolean));
-      const nativeTools = Object.freeze([...new Set(
-        (options.nativeTools ?? []).map(name => name.trim()).filter(name => name && !disabledTools.has(name)),
-      )].sort());
-      const nativeToolNames = graphToolsSupersededByNative(nativeTools);
-      const hostTools = options.hostTools({ readRoots })
-        .filter(tool => !disabledTools.has(tool.name) && !nativeToolNames.has(tool.name));
-      const loadedTools = loaded.tools
-        .filter(tool => !disabledTools.has(tool.name) && !nativeToolNames.has(tool.name));
-      const tools = Object.freeze([...hostTools, ...loadedTools]);
-      const piExtensionTools = loaded.piExtensionTools
-        .filter(name => !disabledTools.has(name) && !nativeToolNames.has(name));
+      const selected = selectAgentToolSurface({
+        tools: [...options.hostTools({ readRoots }), ...loaded.tools],
+        nativeTools: options.nativeTools ?? [],
+        disabledTools: options.disabledTools ?? [],
+        extensionTools: loaded.piExtensionTools,
+      });
+      const nativeTools = Object.freeze(selected.nativeTools);
+      const tools = Object.freeze(selected.tools);
+      const piExtensionTools = selected.extensionTools;
       const report = loaded.report.map(fact => fact.tools
         ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) }
         : fact);

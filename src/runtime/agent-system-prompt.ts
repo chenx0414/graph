@@ -36,6 +36,8 @@ export interface AgentToolPromptEntry {
   parameters: string[];
   permission: string;
   available: boolean;
+  /** Null means declared for a future operation, not discovered at runtime. */
+  runtimeAvailable?: boolean | null;
 }
 
 export interface AgentCapabilityPromptEntry {
@@ -51,6 +53,7 @@ export interface AgentCapabilityPromptEntry {
 }
 
 export interface ComposeAgentSystemPromptInput {
+  mode?: 'preview' | 'operation';
   identity: string;
   /** Host-generated identity context such as the active access policy. */
   identityContext?: string;
@@ -97,7 +100,7 @@ function renderedSection(sectionValue: AgentPromptSection) {
 
 function toolLine(tool: AgentToolPromptEntry) {
   const description = tool.description.replace(/\s+/g, ' ').trim();
-  const availability = tool.available ? '' : ' (unavailable)';
+  const availability = tool.runtimeAvailable === null ? ' (not yet discovered)' : tool.available ? '' : ' (unavailable)';
   return `- ${tool.name}${availability}: ${description}`;
 }
 
@@ -205,10 +208,12 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
 
   const capabilities = section('capabilities', 'Capabilities', [{
     id: 'capabilities.inventory',
-    title: 'Loaded capabilities',
+    title: input.mode === 'preview' ? 'Declared capabilities' : 'Loaded capabilities',
     origin: 'generated',
     content: [
-      'Skills, MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
+      input.mode === 'preview'
+        ? 'Skills, MCP servers, Graph extensions and Pi extensions declared for the next Agent operation; runtime availability will be confirmed when they load:'
+        : 'Skills, MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
       capabilityLines(input.capabilities),
     ].join('\n'),
   }]);

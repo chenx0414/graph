@@ -88,7 +88,7 @@ test('Agent tools publish, discover and read immutable shared artifacts', async 
       VALUES('t','p','shared',1,0,'discussing',0,1);
   `);
   const artifacts = new ArtifactWorkspace(store, join(root, 'artifact-workspace'));
-  const tools = agentTools({
+  const toolInput: Parameters<typeof agentTools>[0] = {
     workspace: scope,
     artifacts: {
       allowedNamespaces: ['research'],
@@ -105,7 +105,13 @@ test('Agent tools publish, discover and read immutable shared artifacts', async 
       retire: (artifactId, version, reason, requestId) => artifacts.retire('t', artifactId, version, reason, requestId),
       promote: input => artifacts.promote({ ...input, taskId: 't', promotedBy: 'test' }),
     },
-  });
+  };
+  const tools = agentTools(toolInput);
+  expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['artifact_retire', 'artifact_promote']));
+  const workerTools = agentTools({ ...toolInput, artifacts: { ...toolInput.artifacts!, canPromote: false } });
+  expect(workerTools.map(tool => tool.name)).toEqual(expect.arrayContaining(['artifact_list', 'artifact_read', 'artifact_publish']));
+  expect(workerTools.map(tool => tool.name)).not.toContain('artifact_retire');
+  expect(workerTools.map(tool => tool.name)).not.toContain('artifact_promote');
   const call = (name: string, params: Record<string, unknown>) =>
     (tools.find(item => item.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>)('probe', params);
   await writeFile(join(scope, 'papers.json'), '{"papers":["one"]}');

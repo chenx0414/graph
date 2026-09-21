@@ -60,6 +60,10 @@ _Avoid_：主管（主管是负责规划与返工的 Agent）
 Agent 实例取得初始上下文的程序决策，取值为 `fresh`、`fork` 或 `continue`。默认 `fresh`；`fork` 从已成功源 Agent 的冻结 leaf 复制新会话；已有实例继续执行时为 `continue`。
 _Avoid_：让模型直接选择模式、多个 Agent 共享同一个可变 session
 
+**Agent 运行上下文**：
+一次执行提供给 Agent 的身份、工具与能力信息、工作规则、项目说明及工作位置的组合。运行上下文预览描述下一次执行准备采用的组合；能力声明不等同于已确认可用的工具，实际可用性以该次执行的发现结果为准。
+_Avoid_：Agent 上下文模式（它描述 Fresh、Fork、Continue 的上下文来源），最近一次运行记录（它描述已经发生的执行）
+
 **Fork 子 Agent**：
 从一个已成功 Agent 会话的冻结 leaf 复制 root-to-leaf 上下文，创建新 session file、新 session ID 与新 Agent 实例的子 Agent。Fork 不是独立验证，也不扩大工具权限或预算。
 
