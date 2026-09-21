@@ -257,6 +257,29 @@ test('full access does not retry a chatting master with an empty queue', async (
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
 });
 
+test('full access preserves an explicit continuation after the chat message was consumed', async () => {
+  const root = await temp('full-access-continuation');
+  const seen: Operation[] = [];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    access: () => fullAccessPolicy(),
+    actions: { master: scripted(operation => {
+      seen.push(operation);
+      return seen.length === 1
+        ? { outcome: 'continue', output: { text: '继续处理' }, usage }
+        : { outcome: 'completed', output: { text: '处理完成' }, usage };
+    }) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '请处理', requestId: 'create' });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(seen[1]!.context.messages ?? []).toEqual([]);
+  expect((await runtime.conversations.view(created.conversationId)).messages.at(-1)?.text).toBe('处理完成');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+});
+
 test('conversation model and thinking selection applies to the next master turn', async () => {
   const root = await temp('model-selection');
   const entries = [

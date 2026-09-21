@@ -38,6 +38,7 @@ import {
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
+import { linkProjectDependencies } from './project-dependencies.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT, type AgentContextLibrary } from './agent-context.ts';
 
@@ -341,11 +342,16 @@ export function createPiAdapter(options: {
           const masterReadRoots = spec.role === 'master'
             ? [...new Set([capabilityRoot, graphRoot, agentPromptLibrary?.contextRoot].filter((path): path is string => Boolean(path)))]
             : [];
+          // The work copy is dependency-free on disk; the project's own install
+          // is linked in and granted to the sandbox so a worker command resolves
+          // the project toolchain the way it would in the project root.
+          const dependencies = await linkProjectDependencies(workspace, join(project.root, 'node_modules'));
           commands = await openWorkspaceCommandRunner({
             workspace,
             scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'),
             gate,
             ...(accessPolicy ? { access: accessPolicy } : {}),
+            ...(dependencies ? { readPaths: [dependencies] } : {}),
           });
           capabilityOperation = await bundle.openOperation({
             workspace,
