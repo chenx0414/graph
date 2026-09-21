@@ -341,7 +341,17 @@ function AgentCombinationEditor(input: {
               <small>使用“名字_角色”，例如 Bob_coder、Alice_reviewer。</small>
             </label>
           </div>
-          <label><span>说明</span><textarea value={description} onChange={event => setDescription(event.target.value)} rows={3} /></label>
+          <label>
+            <span>Agent 简介</span>
+            <textarea
+              data-testid="agent-recipe-description"
+              value={description}
+              onChange={event => setDescription(event.target.value)}
+              rows={3}
+              placeholder="简述这个 Agent 的用途、适合的任务范围与关键边界。"
+            />
+            <small>显示在 Agent 组合库中，帮助用户在派发前快速判断它适合做什么。</small>
+          </label>
           {main && (
             <div className="recipe-main-note" data-testid="main-agent-recipe-note">
               Main Agent 的系统能力由 `master` 角色固定启用，不能从配方移除。下方配置的是它额外可用的 Skills、MCP、Pi extensions 和 Agent.md。
@@ -499,8 +509,17 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                   <div className="agent-combination-list" data-testid="agent-combination-list">
                     {visibleAgents.map(item => (
                       <article className="agent-combination-item" key={item.id} data-testid={`agent-combination-${item.id}`}>
-                        <header><strong>{item.name}</strong><code>{item.id}</code></header>
-                        <p>{item.description}</p>
+                        <header>
+                          <div className="agent-combination-title">
+                            <strong>{item.name}</strong>
+                            <span>Agent 配方 · {item.recommendedGrade}{item.tags.length ? ` · ${item.tags.join(' · ')}` : ''}</span>
+                          </div>
+                          <code>{item.id}</code>
+                        </header>
+                        <p className="agent-combination-description">
+                          <Icon name="message" size={13} />
+                          <span>{item.description}</span>
+                        </p>
                         <div className="chip-row">
                           <Pill tone={item.status === 'valid' ? 'success' : 'danger'}>{item.status === 'valid' ? '可编译' : '引用有误'}</Pill>
                           {item.mode === 'main' && <Pill tone="accent">Main Agent</Pill>}

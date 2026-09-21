@@ -333,6 +333,7 @@ test('recipes validate against the current capability projection and compile to 
     review: true,
     capabilities: [{ id: 'research', version: '1.0.0' }],
     prompts: { agent: { id: 'identity', version: '1.0.0' } },
+    snapshot: { agentCombination: { id: 'review', name: 'Review', description: 'Review work.' } },
   });
 });
 

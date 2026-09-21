@@ -1011,6 +1011,8 @@ test('the resource library groups reusable assets and includes graph architectur
   await page.getByTestId('resource-section-agents').waitFor();
   expect(await page.getByTestId('agent-combination-code').innerText()).toContain('Bob_coder');
   expect(await page.getByTestId('resource-section-agents').innerText()).toContain('Bob_coder');
+  expect(await page.getByTestId('agent-combination-code').innerText()).toContain('组合架构身份与研究 Skill。');
+  expect(await page.getByTestId('agent-combination-code').innerText()).toContain('Agent 配方 · medium · 编码');
   expect(await page.getByTestId('resource-section-agents').innerText()).toContain('可编译');
   expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
 
@@ -1106,6 +1108,7 @@ test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name
   await page.goto(`${server.url}/#/catalog/agents`);
   await page.getByTestId('agent-combination-worker').waitFor();
   await page.getByTestId('agent-combination-worker').getByRole('button', { name: '编辑' }).click();
+  expect(await page.getByTestId('agent-recipe-description').inputValue()).toBe('Current recipe.');
   const picker = page.getByTestId('recipe-picker-skills');
   const optionLabels = () => picker.locator('[data-testid^="recipe-option-skill-"]').allTextContents();
 
@@ -1133,6 +1136,12 @@ test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name
   expect(await page.getByTestId('recipe-picker-skills').innerText()).toContain('没有匹配的能力');
   expect(await page.getByTestId('recipe-picker-mcp').innerText()).toContain('Jira MCP');
   expect(await page.getByTestId('recipe-picker-extensions').innerText()).toContain('没有匹配的能力');
+
+  await page.getByTestId('agent-recipe-description').fill('负责实现与维护代码，并在授权范围内补充基础测试。');
+  await page.getByRole('button', { name: '保存配方' }).click();
+  await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
+  await expect.poll(() => server.runtime.catalog.agentCombinations().find(item => item.id === 'worker')?.description)
+    .toBe('负责实现与维护代码，并在授权范围内补充基础测试。');
 });
 
 test('the resource config page saves capability credentials and verifies the selected MCP', async () => {
