@@ -90,6 +90,23 @@ test('the unchanged capability-awareness tool prompt migrates to empty without t
   expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe('\n');
 });
 
+test('the unchanged Main Agent identity heading is removed during migration', async () => {
+  const root = await temp();
+  await mkdir(join(root, 'agents'), { recursive: true, mode: 0o700 });
+  const identity = [
+    'You are the Master Agent for one Graph feature task. You talk directly with the user, investigate the project, expose uncertainty, and turn the confirmed goal into a reviewable task graph.',
+    '',
+    'Keep your identity stable across models. Use the native Pi tools to investigate and make workspace changes when the user\'s request requires them, while keeping changes scoped to the request and confirmed graph. Ask only questions whose answers change the plan, preserve confirmed decisions, and submit a new draft when the user changes direction.',
+  ].join('\n');
+  await writeFile(join(root, 'agents/main.md'), `# Master Agent identity\n\n${identity}\n`);
+
+  const library = openAgentContextLibrary(root, { identity });
+  await library.ensure();
+
+  expect(await library.prompt('agents/main.md')).toBe(identity);
+  expect(await readFile(join(root, 'agents/main.md'), 'utf8')).toBe(`${identity}\n`);
+});
+
 test('unchanged legacy rule defaults migrate to the compact rule set', async () => {
   const root = await temp();
   await mkdir(join(root, 'rules'), { recursive: true, mode: 0o700 });

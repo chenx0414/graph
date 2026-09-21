@@ -54,7 +54,10 @@ test('presets publish only immutable Graph bootstrap definitions and prompts', a
   const root = await mkdtemp(join(tmpdir(), 'graph-presets-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const { runtime, bootstrap } = await runtimeAt(root);
-  expect(bootstrap.prompts.master).toContain('Master Agent identity');
+  const masterPrompt = bootstrap.prompts.master ?? '';
+  expect(masterPrompt).toContain('You are the Master Agent for one Graph feature task.');
+  expect(masterPrompt).not.toContain('# Master Agent identity');
+  expect(masterPrompt.trimStart().startsWith('You are the Master Agent for one Graph feature task.')).toBe(true);
   expect(bootstrap).not.toHaveProperty('toolPrompt');
   expect(bootstrap).not.toHaveProperty('agentDocs');
   const first = await installPresets(runtime.catalog, presetsRoot);
