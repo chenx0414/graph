@@ -43,7 +43,7 @@ test('tool enablement is persisted as a normalized list', async () => {
   const root = await temp();
   const library = openAgentContextLibrary(root);
   await library.ensure();
-  expect(await library.disabledTools()).toEqual([]);
+  expect(await library.disabledTools()).toEqual(['powershell']);
 
   await library.setDisabledTools(['write_file', 'run_command', 'write_file', ' ']);
   expect(await library.disabledTools()).toEqual(['run_command', 'write_file']);

@@ -47,6 +47,7 @@ Main Agent 的工具选择保存为 disabled list。关闭工具时：
 - system prompt 的 tools/capabilities section 同步更新。
 
 Pi 原生工具 `read/bash/edit/write/ls/find/grep/powershell` 同样可以被 disabled list 关闭，但不能通过 Prompt 绕过它们对应的 host/sandbox 权限。
+首次启动时 `powershell` 默认关闭；用户可以在工具选择中显式开启。
 
 工具详情应显示来源、版本、参数、权限摘要和当前可用性。UI 不伪造实际 tool surface；如果需要 operation 运行后才能确认的动态工具，应明确显示 unknown 或 unavailable。
 

@@ -162,6 +162,7 @@ const STATIC_PROMPTS: readonly {
 ];
 
 const TOOL_STATE_FILE = 'tools.json';
+const DEFAULT_DISABLED_TOOLS = ['powershell'] as const;
 const LEGACY_PROMPT_PATHS: Partial<Record<AgentPromptKey, string>> = {
   'tools/main.md': 'tool-awareness.md',
 };
@@ -387,7 +388,7 @@ export class AgentContextLibrary {
       }
       return [...new Set(value.disabled.map(name => name.trim()))].sort();
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [...DEFAULT_DISABLED_TOOLS];
       throw error;
     }
   }
