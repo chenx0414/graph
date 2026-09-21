@@ -2013,7 +2013,8 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   font-weight: 650;
 }
 .slash-head-title { display: inline-flex; align-items: center; gap: 6px; }
-.slash-popover { max-height: min(480px, 68vh); display: flex; flex-direction: column; }
+.slash-popover { min-height: 0; display: flex; flex-direction: column; }
+.slash-popover[data-placement="down"] { top: calc(100% + 8px); bottom: auto; }
 .slash-back {
   width: 22px;
   height: 22px;
@@ -2072,44 +2073,6 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 }
 .mention-item .grow { flex: 1; min-width: 0; }
 .mention-empty { padding: 14px 12px; color: var(--faint); font-size: 12px; }
-.composer-command-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 7px;
-}
-.composer-command-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 280px;
-  min-height: 28px;
-  padding: 3px 6px 3px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
-  color: var(--text);
-  font-size: 11px;
-}
-.composer-command-chip[data-kind="capability"] {
-  border-color: color-mix(in srgb, #d97706 34%, var(--border));
-  background: color-mix(in srgb, #d97706 7%, var(--panel));
-}
-.composer-command-chip > .truncate { max-width: 150px; }
-.composer-command-chip button {
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-}
-.composer-command-chip button:hover { background: var(--border); color: var(--text); }
 .visually-hidden {
   position: absolute !important;
   width: 1px !important;

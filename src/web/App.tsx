@@ -17,7 +17,7 @@ import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type Ev
 import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
 import type { CapabilityRecord } from '../catalog/catalog.ts';
 import type { AgentCombination, AgentCombinationView } from '../catalog/agent-combinations.ts';
-import { composeSlashDirective, type SlashTarget } from './SlashCommands.tsx';
+import { composeSlashDirective, extractSlashTargets } from './SlashCommands.tsx';
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
@@ -493,7 +493,6 @@ function SidebarConversation({ conversation, active, archiving, onArchive }: {
 function NewConversation({ settings, initialProjectId }: { settings: Settings_ | null; initialProjectId: string }) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [slashTargets, setSlashTargets] = useState<SlashTarget[]>([]);
   const [projectId, setProjectId] = useState(initialProjectId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -523,12 +522,15 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
   };
   async function start() {
     if (busy) return;
-    if (!text.trim() && !attachments.length && !slashTargets.length) { setError('先说说你想解决什么，或添加一个附件。'); return; }
-    const outgoing = composeSlashDirective(text, slashTargets);
+    if (!text.trim() && !attachments.length) { setError('先说说你想解决什么，或添加一个附件。'); return; }
+    const outgoing = composeSlashDirective(text, extractSlashTargets(
+      text,
+      agentContext?.tools ?? [],
+      agentContext?.capabilities ?? [],
+    ));
     setBusy(true);
     setError('');
     setText('');
-    setSlashTargets([]);
     try {
       const created = await api<{ conversationId: string }>('/api/conversations', {
         method: 'POST',
@@ -545,7 +547,6 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
       location.hash = `#/conversations/${created.conversationId}`;
     } catch (reason) {
       setText(current => current || text);
-      setSlashTargets(current => current.length ? current : slashTargets);
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setBusy(false);
@@ -566,8 +567,6 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
         onAttachmentsChange={setAttachments}
         projectId={projectId || null}
         placeholder="例如：这个项目很乱，先帮我看看能从哪里改进。"
-        slashTargets={slashTargets}
-        onSlashTargetsChange={setSlashTargets}
         slashTools={agentContext?.tools ?? []}
         slashCapabilities={agentContext?.capabilities ?? []}
         slashModels={settings?.models ?? []}
@@ -577,7 +576,7 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
           setThinkingLevel(level);
         }}
         onSend={() => void start()}
-        sendDisabled={busy || (!text.trim() && !attachments.length && !slashTargets.length)}
+        sendDisabled={busy || (!text.trim() && !attachments.length)}
         autoFocus
         inputTestId="new-conversation-input"
         sendTestId="new-conversation-start"

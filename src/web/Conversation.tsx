@@ -5,7 +5,7 @@ import { api } from './api.ts';
 import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { ComposerTelemetry, type ThinkingLevel } from './ComposerTelemetry.tsx';
-import { composeSlashDirective, type SlashTarget } from './SlashCommands.tsx';
+import { composeSlashDirective, extractSlashTargets } from './SlashCommands.tsx';
 import {
   applyConversationEvent,
   conversationProjectionSnapshot,
@@ -512,7 +512,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   );
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [slashTargets, setSlashTargets] = useState<SlashTarget[]>([]);
   const [sending, setSending] = useState(false);
   const [steering, setSteering] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -617,12 +616,15 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   }
   async function send(outgoingOverride?: string) {
     const rawOutgoing = (outgoingOverride ?? text).trim();
-    const outgoing = composeSlashDirective(rawOutgoing, outgoingOverride === undefined ? slashTargets : []);
+    const outgoing = composeSlashDirective(rawOutgoing, extractSlashTargets(
+      rawOutgoing,
+      agentContext?.tools ?? [],
+      agentContext?.capabilities ?? [],
+    ));
     const outgoingAttachments = outgoingOverride === undefined ? attachments : [];
     if (!outgoing && !outgoingAttachments.length) return;
     setText('');
     setAttachments([]);
-    if (outgoingOverride === undefined) setSlashTargets([]);
     setSending(true);
     setActionError('');
     try {
@@ -636,7 +638,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     } catch (reason) {
       setText(current => current || rawOutgoing);
       setAttachments(current => current.length ? current : outgoingAttachments);
-      if (outgoingOverride === undefined && slashTargets.length) setSlashTargets(current => current.length ? current : slashTargets);
       setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setSending(false);
@@ -665,7 +666,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   }
   async function submitComposer() {
     if (sending || steering) return;
-    if (text.trim() || attachments.length || slashTargets.length) return send();
+    if (text.trim() || attachments.length) return send();
     if (busy && queuedMessages.length) return steerQueued();
     if (!busy && promptSuggestion) return send(promptSuggestion);
   }
@@ -1047,8 +1048,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               projectId={view.projectId}
               placeholder={busy ? '主 Agent 正在处理；继续输入会排队，不会被丢掉。' : '继续交流，输入 @ 引用项目文件…'}
               suggestion={promptSuggestion}
-              slashTargets={slashTargets}
-              onSlashTargetsChange={setSlashTargets}
               slashTools={agentContext?.tools ?? []}
               slashCapabilities={agentContext?.capabilities ?? []}
               slashModels={settings?.models ?? []}
@@ -1056,7 +1055,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               onSlashModelSelect={selectMasterModel}
               onCompact={compactConversation}
               onSend={() => void submitComposer()}
-              sendDisabled={sending || steering || (!text.trim() && !attachments.length && !slashTargets.length && !(busy && queuedMessages.length) && !promptSuggestion)}
+              sendDisabled={sending || steering || (!text.trim() && !attachments.length && !(busy && queuedMessages.length) && !promptSuggestion)}
             />
             <div className="composer-footer">
               <span className="composer-note">

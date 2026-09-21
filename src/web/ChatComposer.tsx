@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
 import { FullAccessToggle } from './FullAccessToggle.tsx';
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
 import type { ComposerModel, ComposerTelemetryView, ThinkingLevel } from './ComposerTelemetry.tsx';
 import {
   filterSlashEntries,
+  slashTargetToken,
   slashEntries,
   SlashMenu,
   type SlashEntry,
   type SlashScope,
-  type SlashTarget,
 } from './SlashCommands.tsx';
 import { Icon, toast } from './ui.tsx';
 
@@ -35,7 +35,9 @@ function slashAt(value: string, cursor: number): Slash | null {
   const match = /(?:^|\s)\/([^\s/]*)$/.exec(value.slice(0, cursor));
   if (!match) return null;
   const query = match[1] ?? '';
-  return { start: cursor - query.length - 1, end: cursor, query };
+  const start = cursor - query.length - 1;
+  if (start < 0) return null;
+  return { start, end: cursor, query };
 }
 
 function isTextAttachment(file: File) {
@@ -58,8 +60,6 @@ export function ChatComposer({
   onSend,
   sendDisabled,
   suggestion,
-  slashTargets = [],
-  onSlashTargetsChange,
   slashTools = [],
   slashCapabilities = [],
   slashModels = [],
@@ -83,8 +83,6 @@ export function ChatComposer({
   onSend: () => void;
   sendDisabled: boolean;
   suggestion?: string | null;
-  slashTargets?: SlashTarget[];
-  onSlashTargetsChange?: (targets: SlashTarget[]) => void;
   slashTools?: AgentToolView[];
   slashCapabilities?: AgentCapabilityView[];
   slashModels?: ComposerModel[];
@@ -107,6 +105,11 @@ export function ChatComposer({
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashScope, setSlashScope] = useState<SlashScope>('root');
   const [slashIndex, setSlashIndex] = useState(0);
+  const [slashLayout, setSlashLayout] = useState<{ placement: 'up' | 'down'; maxHeight: number }>({
+    placement: 'up',
+    maxHeight: 340,
+  });
+  const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const activeMention = mentionAt(value, cursor);
@@ -126,7 +129,7 @@ export function ChatComposer({
   );
   const availableSuggestion = suggestion?.trim() ?? '';
   const showingSuggestion = Boolean(availableSuggestion) && value.length === 0
-    && attachments.length === 0 && slashTargets.length === 0 && !mentionOpen && !slashOpen;
+    && attachments.length === 0 && !mentionOpen && !slashOpen;
 
   useEffect(() => {
     const mention = mentionAt(value, cursor);
@@ -159,6 +162,25 @@ export function ChatComposer({
       return active ? visibleSlashEntries.indexOf(active) : 0;
     });
   }, [slashOpen, visibleSlashEntries]);
+
+  useLayoutEffect(() => {
+    if (!slashOpen) return;
+    const update = () => {
+      const rect = composerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const gap = 12;
+      const above = Math.max(0, rect.top - gap);
+      const below = Math.max(0, window.innerHeight - rect.bottom - gap);
+      const placement = below > above ? 'down' : 'up';
+      setSlashLayout({
+        placement,
+        maxHeight: Math.max(80, Math.min(480, Math.max(above, below))),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [slashOpen]);
 
   async function addAttachments(files: File[]) {
     const next = [...attachments];
@@ -220,14 +242,31 @@ export function ChatComposer({
         setSlashOpen(true);
         return;
       }
+      if (entry.action.type === 'tool' || entry.action.type === 'capability') {
+        const target = entry.action.target;
+        setSlashOpen(false);
+        setSlashScope('root');
+        requestAnimationFrame(() => {
+          const currentValue = textareaRef.current?.value ?? value;
+          const selection = textareaRef.current?.selectionStart ?? currentValue.length;
+          const slashAtSelection = slashAt(currentValue, selection);
+          const currentCursor = slashAtSelection ? selection : currentValue.length;
+          const slash = slashAtSelection ?? slashAt(currentValue, currentCursor);
+          const start = slash?.start ?? currentCursor;
+          const end = slash?.end ?? currentCursor;
+          const token = `${slashTargetToken(target)} `;
+          const next = `${currentValue.slice(0, start)}${token}${currentValue.slice(end)}`;
+          const nextCursor = start + token.length;
+          onChange(next);
+          setCursor(nextCursor);
+          textareaRef.current?.focus();
+          textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+        });
+        return;
+      }
       clearSlashToken();
       setSlashOpen(false);
       setSlashScope('root');
-      if (entry.action.type === 'tool' || entry.action.type === 'capability') {
-        const next = [...new Map([...slashTargets, entry.action.target].map(target => [target.id, target])).values()];
-        onSlashTargetsChange?.(next);
-        return;
-      }
       if (entry.action.type === 'compact') {
         await onCompact?.();
         return;
@@ -247,13 +286,15 @@ export function ChatComposer({
   }
 
   return (
-    <div className={`chat-composer ${className}`}>
+    <div className={`chat-composer ${className}`} ref={composerRef}>
       {slashOpen && (
         <SlashMenu
           scope={slashScope}
           entries={visibleSlashEntries}
           query={activeSlash?.query ?? ''}
           activeIndex={slashIndex}
+          placement={slashLayout.placement}
+          maxHeight={slashLayout.maxHeight}
           onChoose={entry => void chooseSlash(entry)}
           onBack={() => {
             clearSlashToken();
@@ -296,24 +337,6 @@ export function ChatComposer({
           ) : (
             <div className="mention-empty">没有匹配的项目路径</div>
           )}
-        </div>
-      )}
-      {slashTargets.length > 0 && (
-        <div className="composer-command-chips" data-testid="composer-command-chips">
-          {slashTargets.map(target => (
-            <span className="composer-command-chip" key={target.id} data-kind={target.kind} title={target.description}>
-              <Icon name={target.kind === 'capability' ? 'spark' : 'bolt'} size={12} />
-              <span className="truncate">{target.label}</span>
-              <span className="faint">{target.kind === 'capability' ? '能力' : '工具'}</span>
-              <button
-                type="button"
-                onClick={() => onSlashTargetsChange?.(slashTargets.filter(item => item.id !== target.id))}
-                aria-label={`移除 ${target.label}`}
-              >
-                <Icon name="close" size={11} />
-              </button>
-            </span>
-          ))}
         </div>
       )}
       {attachments.length > 0 && (

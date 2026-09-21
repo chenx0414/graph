@@ -160,6 +160,34 @@ export function filterSlashEntries(entries: readonly SlashEntry[], query: string
   ].some(value => value.toLowerCase().includes(needle)));
 }
 
+export function slashTargetToken(target: SlashTarget) {
+  return target.kind === 'capability' ? `/capability:${target.id}` : `/${target.id}`;
+}
+
+export function extractSlashTargets(
+  text: string,
+  tools: readonly AgentToolView[],
+  capabilities: readonly AgentCapabilityView[],
+) {
+  const byToken = new Map<string, SlashTarget>();
+  for (const tool of tools) {
+    if (!tool.enabled || !tool.available) continue;
+    const target = toolEntry(tool).action;
+    if (target.type === 'tool') byToken.set(slashTargetToken(target.target), target.target);
+  }
+  for (const capability of capabilities) {
+    const action = capabilityEntry(capability).action;
+    if (action.type === 'capability') byToken.set(slashTargetToken(action.target), action.target);
+  }
+  const matches = text.matchAll(/(?:^|\s)(\/[^\s/]+)(?=\s|$)/g);
+  return [...new Map(
+    [...matches]
+      .map(match => byToken.get(match[1]!))
+      .filter((target): target is SlashTarget => Boolean(target))
+      .map(target => [target.id, target]),
+  ).values()];
+}
+
 export function composeSlashDirective(text: string, targets: readonly SlashTarget[]) {
   const unique = [...new Map(targets.map(target => [target.id, target])).values()];
   if (!unique.length) return text.trim();
@@ -182,6 +210,8 @@ export function SlashMenu({
   entries,
   query,
   activeIndex,
+  placement,
+  maxHeight,
   onChoose,
   onBack,
 }: {
@@ -189,6 +219,8 @@ export function SlashMenu({
   entries: readonly SlashEntry[];
   query: string;
   activeIndex: number;
+  placement: 'up' | 'down';
+  maxHeight: number;
   onChoose: (entry: SlashEntry) => void;
   onBack: () => void;
 }) {
@@ -200,7 +232,12 @@ export function SlashMenu({
   });
   const title = scope === 'root' ? '工具、能力与系统命令' : scope === 'model' ? '选择模型' : '思考强度';
   return (
-    <div className="mention-popover slash-popover" data-testid="slash-popover">
+    <div
+      className="mention-popover slash-popover"
+      data-testid="slash-popover"
+      data-placement={placement}
+      style={{ maxHeight }}
+    >
       <div className="mention-popover-head">
         <span className="slash-head-title">
           {scope !== 'root' && (

@@ -1381,13 +1381,16 @@ test('the composer slash menu selects tools, switches model and queues compactio
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   const input = page.getByTestId('chat-input');
   await input.waitFor();
-  await input.fill('/');
-  await page.getByTestId('slash-popover').waitFor();
-  await page.getByTestId('slash-tool-read').click();
-  await page.getByTestId('composer-command-chips').waitFor();
-  expect(await page.getByTestId('composer-command-chips').innerText()).toContain('read');
 
   await input.fill('/model');
+  const slashPopover = page.getByTestId('slash-popover');
+  await slashPopover.waitFor();
+  const popoverBox = await slashPopover.boundingBox();
+  const viewport = page.viewportSize();
+  expect(popoverBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(popoverBox!.y).toBeGreaterThanOrEqual(0);
+  expect(popoverBox!.y + popoverBox!.height).toBeLessThanOrEqual(viewport!.height);
   await page.getByTestId('slash-system-model').click();
   await page.getByTestId('slash-model-fast').click();
   await expect.poll(() => modelRequests.length).toBe(1);
@@ -1397,12 +1400,46 @@ test('the composer slash menu selects tools, switches model and queues compactio
   await page.getByTestId('slash-system-compact').click();
   await expect.poll(() => compactRequests).toBe(1);
 
-  await input.fill('请分析这个项目');
+  await input.fill('/');
+  await page.getByTestId('slash-tool-read').click();
+  await expect.poll(() => input.inputValue()).toBe('/read ');
+  expect(await page.getByTestId('composer-command-chips').count()).toBe(0);
+  await input.fill(`${await input.inputValue()}请分析这个项目`);
   await page.getByTestId('chat-send').click();
   await expect.poll(() => sent).not.toBeNull();
+  expect(sent!.text).toContain('/read ');
   expect(sent!.text).toContain('请分析这个项目');
   expect(sent!.text).toContain('The user explicitly requested the following tools and capabilities');
   expect(sent!.text).toContain('`read`');
+});
+
+test('the new-chat slash menu stays inside the viewport and inserts an inline tool token', async () => {
+  const root = await temp('new-chat-slash');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 0, enabledModelCount: 0 },
+  });
+  cleanup.push(() => server.close());
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(server.url);
+  const input = page.getByTestId('new-conversation-input');
+  await input.waitFor();
+  await input.fill('/');
+  await page.getByTestId('slash-tool-read').waitFor();
+  const popover = page.getByTestId('slash-popover');
+  const box = await popover.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+  await page.getByTestId('slash-tool-read').click();
+  await expect.poll(() => input.inputValue()).toBe('/read ');
 });
 
 test('the new-chat composer supports project mentions and attachments before submitting', async () => {
