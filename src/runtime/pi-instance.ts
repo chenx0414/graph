@@ -9,7 +9,7 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
   buildSessionContext,
-  type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension,
+  type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension, type RetrySettings,
 } from '@earendil-works/pi-coding-agent';
 import { canonicalJson } from '../core/store.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -33,6 +33,14 @@ const PI_PACKAGE_VERSION = (() => {
   }
 })();
 const SESSION_CLOSE_TIMEOUT_MS = 5_000;
+const DEFAULT_RETRY_SETTINGS: RetrySettings = {
+  enabled: true,
+  maxRetries: 3,
+  baseDelayMs: 500,
+  // The Graph broker owns provider-send retries. Pi retries the assistant
+  // turn here after a transient stream error without bypassing the gate.
+  provider: { maxRetries: 0 },
+};
 
 /** Mark a tool whose execute already passes the send gate at its own effect boundary. */
 export function externallyGated<T extends ToolDefinition>(tool: T): T {
@@ -68,6 +76,7 @@ export interface PiInstanceOptions {
   runtimePolicyDigest?: string;
   broker?: SendGate;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
+  retry?: RetrySettings;
   /** A conversation master may bind a project after its first turn; the
    * session keeps its identity while the workspace moves to the project. */
   allowWorkspaceChange?: boolean;
@@ -217,8 +226,13 @@ export async function openPiInstance(options: PiInstanceOptions) {
   if (!contextInfo) {
     contextInfo = { mode: 'fresh', childContextDigest: contextDigest(manager.buildSessionContext()) };
   }
+  const retry = {
+    ...DEFAULT_RETRY_SETTINGS,
+    ...options.retry,
+    provider: { ...DEFAULT_RETRY_SETTINGS.provider, ...options.retry?.provider },
+  };
   const settings = SettingsManager.inMemory({
-    compaction: options.compaction ?? { enabled: false }, retry: { enabled: false, provider: { maxRetries: 0 } },
+    compaction: options.compaction ?? { enabled: false }, retry,
     images: { autoResize: false },
     enableAnalytics: false, enableInstallTelemetry: false,
   });

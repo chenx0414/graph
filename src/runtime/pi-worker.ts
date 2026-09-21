@@ -168,6 +168,7 @@ async function main() {
     ...(config.freshSession ? { freshSession: true } : {}),
     ...(config.forkFrom ? { forkFrom: config.forkFrom } : {}),
     ...(config.compaction ? { compaction: config.compaction } : {}),
+    ...(config.retry ? { retry: config.retry } : {}),
     onEvent: event => {
       pendingEvents.push(request({ operation: 'event', event: compactAgentEvent(event) }).catch(error => {
         process.stderr.write(`Pi event delivery failed: ${String(error)}\n`);

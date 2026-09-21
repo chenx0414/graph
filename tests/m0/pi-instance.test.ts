@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterEach, expect, test } from 'vitest';
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { externallyGated, openPiInstance } from '../../src/runtime/pi-instance.ts';
-import { modelA, modelB, respond, testModelRuntime } from '../fixtures/models.ts';
+import { modelA, modelB, reply, respond, testModelRuntime } from '../fixtures/models.ts';
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -95,6 +96,46 @@ test('reopening an Agent instance restores its exact session and transcript', as
     expect(restored.inspect().messages).toHaveLength(2);
   } finally {
     await restored.close();
+  }
+});
+
+test('a transient provider connection error is retried in the same Agent turn', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-retry-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  let requests = 0;
+  const instance = await openPiInstance({
+    binding: { instanceId: 'agent-retry', nodeId: 'node-retry', definitionVersion: 'coder@1' },
+    workspace,
+    stateDir: join(root, 'state'),
+    model: modelA,
+    modelRuntime: await testModelRuntime(),
+    stream: (model) => {
+      requests += 1;
+      const stream = createAssistantMessageEventStream();
+      if (requests === 1) {
+        const error = reply(model, '');
+        error.content = [];
+        error.stopReason = 'error';
+        error.errorMessage = 'Connection error.';
+        stream.push({ type: 'error', reason: 'error', error });
+      } else {
+        stream.push({ type: 'done', reason: 'stop', message: reply(model, 'Recovered response') });
+      }
+      return stream;
+    },
+  });
+  try {
+    await instance.prompt('Hello');
+    expect(requests).toBe(2);
+    expect(instance.inspect().messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      stopReason: 'stop',
+      content: [{ type: 'text', text: 'Recovered response' }],
+    });
+  } finally {
+    await instance.close();
   }
 });
 

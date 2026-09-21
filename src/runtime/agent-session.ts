@@ -1,6 +1,6 @@
 import type { StreamFn, ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import type { AgentSessionEvent, ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { AgentSessionEvent, ModelRuntime, RetrySettings, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { SendGate } from './controlled-openai.ts';
 import { openPiInstance } from './pi-instance.ts';
 import { openPiProcess } from './pi-process.ts';
@@ -83,6 +83,7 @@ export interface AgentSessionRequest {
   forkFrom?: { sessionFile: string; leafId?: string };
   readOnly?: boolean;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
+  retry?: RetrySettings;
   broker: SendGate;
   onEvent?: (event: AgentSessionEvent) => void;
 }
@@ -177,6 +178,7 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
         ...(request.freshSession ? { freshSession: true } : {}),
         ...(request.forkFrom ? { forkFrom: request.forkFrom } : {}),
         ...(request.compaction ? { compaction: request.compaction } : {}),
+        ...(request.retry ? { retry: request.retry } : {}),
         broker: request.broker,
         ...(request.onEvent ? { onEvent: request.onEvent } : {}),
       });

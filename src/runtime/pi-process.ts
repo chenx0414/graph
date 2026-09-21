@@ -152,6 +152,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     ...(options.freshSession ? { freshSession: true } : {}),
     ...(forkFrom ? { forkFrom } : {}),
     ...(options.compaction ? { compaction: options.compaction } : {}),
+    ...(options.retry ? { retry: options.retry } : {}),
   };
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
 
