@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { realpath, symlink } from 'node:fs/promises';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GitIntegration } from '../git/integration.ts';
 import type { RestrictedGate } from '../runtime/restricted-process.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
+import { linkProjectDependencies } from '../runtime/project-dependencies.ts';
 import { evaluateVerifier } from './verification.ts';
 import type { TaskStore } from './store.ts';
 import { RuntimeError, type ActionAdapter, type NodeSpec, type Proposal } from './types.ts';
@@ -80,14 +81,7 @@ export function workspaceCommandNode(input: {
       // root - host configuration, never worker or proposal input - provides it.
       const modulesPath = input.program?.nodeModulesPath ?? (root ? join(root, 'node_modules') : undefined);
       return async () => {
-        const modules = modulesPath ? await realpath(modulesPath).catch(() => undefined) : undefined;
-        if (modules) {
-          const link = join(workspace, 'node_modules');
-          if (!existsSync(link)) {
-            try { await symlink(modules, link, 'dir'); }
-            catch { /* The check reports its own resolution failure. */ }
-          }
-        }
+        const modules = await linkProjectDependencies(workspace, modulesPath);
         const gate: RestrictedGate = {
           dispatch: (_id, _reservation, send) => {
             if (input.stopped() || store.task(operation.taskId).paused) {
@@ -97,8 +91,8 @@ export function workspaceCommandNode(input: {
           },
           settle: () => {},
         };
-        // Linked dependencies live outside the work copy, so the sandbox needs
-        // a read grant for them as well.
+        // The linked dependencies live outside the work copy, so the sandbox
+        // needs a read grant for them as well.
         const extraReads = (await Promise.all([...(input.program?.readPaths ?? []), ...(modules ? [modules] : [])]
           .map(path => realpath(path).catch(() => undefined))))
           .filter((path): path is string => path !== undefined);

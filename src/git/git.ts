@@ -60,7 +60,9 @@ export function headSha(cwd: string) {
 const HOST_EXCLUDES = [
   '# Graph host-managed excludes (local only)',
   '.env', '.env.*', 'secrets.json', '.DS_Store',
-  'node_modules/', 'state/', 'dist/', 'coverage/',
+  // No trailing slash: the host links the project's dependencies into a work
+  // copy as a symlink, which a directory-only pattern does not match.
+  'node_modules', 'state/', 'dist/', 'coverage/',
   '.stage/', 'graph.config.json',
   // Documentation examples stay visible even though every other env variant
   // is ignored; order matters, negations must follow the exclude.
@@ -411,12 +413,16 @@ export function ensureBranch(repo: string, name: string, startPoint: string) {
 export function ensureWorktree(repo: string, path: string, branch: string, startPoint: string) {
   const resolved = resolve(path);
   const existing = worktreeList(repo).find(tree => tree.path === resolved);
-  if (existing) return;
+  // A fresh copy inherits no ignore rules of its own, so the host states them
+  // once per repository: linked dependencies and host-managed files stay out of
+  // every commit made there.
+  if (existing) { ensureHostExcludes(resolved); return; }
   if (existsSync(resolved)) throw new Error(`Worktree path already exists: ${resolved}`);
   mkdirSync(dirname(resolved), { recursive: true });
   ensureBranch(repo, branch, startPoint);
   const added = git(repo, ['worktree', 'add', resolved, branch]);
   if (added.code !== 0) throw new Error(added.stderr || `Failed to add worktree ${resolved}`);
+  ensureHostExcludes(resolved);
 }
 
 export function commitAll(cwd: string, message: string, identity?: GitIdentity) {
