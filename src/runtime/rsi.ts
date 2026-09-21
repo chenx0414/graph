@@ -112,13 +112,31 @@ function commandOutput(stdout: string | Buffer, stderr: string | Buffer) {
   return [String(stdout), String(stderr)].filter(Boolean).join('\n').trim().slice(-40_000);
 }
 
+/** Locations a developer's shell puts on `PATH` but a desktop launch does not. */
+const DEVELOPER_PATH_DIRECTORIES = ['/opt/homebrew/bin', '/usr/local/bin', '/opt/homebrew/sbin', '/usr/local/sbin'];
+
+/** Keep the inherited order, then append the standard developer locations that
+ * exist on this host. An app started from the desktop inherits launchd's minimal
+ * `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), where a check needing the developer's
+ * own toolchain - `npm`, a package runner, a browser - fails before the work it
+ * validates even starts. */
+export function developerPath(inherited: string | undefined, exists: (path: string) => boolean = existsSync): string {
+  const directories = (inherited ?? '').split(':').filter(Boolean);
+  for (const directory of DEVELOPER_PATH_DIRECTORIES) {
+    if (!directories.includes(directory) && exists(directory)) directories.push(directory);
+  }
+  return directories.join(':');
+}
+
 /** Command line and environment for one check. Checks run outside the sandbox in
  * the user's own checkout, so they keep the inherited environment - except
  * `DYLD_*`: an unrelated installer can point those at its own copies of system
  * libraries, and a node binary started that way dies before its own code runs.
  * A packaged app ships a real node runtime (`GRAPH_APP_NODE`) and validates the
  * checkout with it; otherwise the developer's own `node` runs the gate, exactly
- * as it would from their shell. */
+ * as it would from their shell. The inherited `PATH` keeps its order and gains
+ * the developer's own toolchain locations, so the gate is the same one the
+ * developer would run from a terminal. */
 export function validationCommand(
   command: RsiCommand,
   env: NodeJS.ProcessEnv = process.env,
@@ -128,6 +146,7 @@ export function validationCommand(
     args: command.args,
     env: {
       ...Object.fromEntries(Object.entries(env).filter(([key, value]) => value !== undefined && !key.startsWith('DYLD_'))),
+      PATH: developerPath(env.PATH),
       ELECTRON_RUN_AS_NODE: '1',
       GIT_TERMINAL_PROMPT: '0',
       GIT_PAGER: 'cat',

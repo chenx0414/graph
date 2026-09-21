@@ -12,7 +12,7 @@ test('an RSI check drops a foreign DYLD search path and keeps the rest', async (
   expect(resolved.executable).toBe('node');
   expect(resolved.args).toEqual(['--run', 'check']);
   expect(resolved.env.DYLD_FALLBACK_LIBRARY_PATH).toBeUndefined();
-  expect(resolved.env.PATH).toBe('/opt/homebrew/bin:/usr/bin');
+  expect(resolved.env.PATH.split(':').slice(0, 2)).toEqual(['/opt/homebrew/bin', '/usr/bin']);
   expect(resolved.env.HOME).toBe('/Users/someone');
   expect(resolved.env.GIT_TERMINAL_PROMPT).toBe('0');
 });
@@ -30,4 +30,24 @@ test('the resolved check command starts', async () => {
   const { validationCommand } = await import('../../src/runtime/rsi.ts');
   const resolved = validationCommand({ command: 'node', args: ['--version'] });
   expect(execFileSync(resolved.executable, resolved.args, { encoding: 'utf8', env: resolved.env })).toMatch(/^v\d+/);
+});
+
+test('a minimal desktop PATH gains the standard developer toolchain locations', async () => {
+  const { developerPath } = await import('../../src/runtime/rsi.ts');
+  const existing = new Set(['/opt/homebrew/bin', '/usr/local/bin']);
+  const exists = (path: string) => existing.has(path);
+  expect(developerPath('/usr/bin:/bin:/usr/sbin:/sbin', exists))
+    .toBe('/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin');
+  // An inherited directory keeps its position and is never added twice.
+  expect(developerPath('/opt/homebrew/bin:/usr/bin', exists)).toBe('/opt/homebrew/bin:/usr/bin:/usr/local/bin');
+  expect(developerPath(undefined, () => false)).toBe('');
+});
+
+test('a check reaches the host toolchain an app started from the desktop would miss', async () => {
+  const { validationCommand } = await import('../../src/runtime/rsi.ts');
+  const { existsSync } = await import('node:fs');
+  const npm = '/opt/homebrew/bin/npm';
+  if (!existsSync(npm)) return;
+  const resolved = validationCommand({ command: 'node', args: ['--version'] }, { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' });
+  expect(execFileSync('/usr/bin/which', ['npm'], { encoding: 'utf8', env: { PATH: resolved.env.PATH } }).trim()).toBe(npm);
 });
