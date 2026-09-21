@@ -67,7 +67,7 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 ## Harness 自我改进（RSI）
 
-在完全访问模式下，Main Agent 同时是 Graph Harness 的改进者。RSI 不限于修 bug：只要它能给出理由，修缺陷、重构、新增功能、改进命令或文档都可以改。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求和仍在运行的 operation，再用 `apply_rsi_change` 提交一次结构化改动：
+在完全访问模式下，Main Agent 同时是 Graph Harness 的改进者。RSI 不限于修 bug：只要它能给出理由，修缺陷、重构、新增功能、改进命令或文档都可以改。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求、仍在运行的 operation 及其身份（task/node/request/archived），再用 `apply_rsi_change` 提交一次结构化改动：
 
 - 修改 Graph 源码 checkout 内的文件（`write` / `replace` / `delete`），拒绝 `.git` 与路径逃逸，要求目标文件没有未提交改动；
 - 运行检查（自定义 `node` 检查、`node --run check`，`activate` 时再加 `node --run app:build`）；

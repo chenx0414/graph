@@ -194,10 +194,7 @@ export class OperationLifecycle {
         } else {
           const operation = operationFrom(row);
           if (isFullAccess(operation.accessPolicy)) {
-            this.markNotSent(row, {
-              resetNode: true,
-              eventReason: 'Full access recovery released the uncertain dispatch for retry',
-            });
+            this.releaseFullAccessRecovery(row, 'Full access recovery released the uncertain dispatch for retry');
             this.store.event(row.task_id, 'operation.recovery_bypassed', {
               operationId: row.id,
               policy: 'full_access',
@@ -285,6 +282,20 @@ export class OperationLifecycle {
     }
     if (options.eventReason !== undefined) {
       this.store.event(row.task_id, 'operation.not_sent', { operationId: row.id, reason: options.eventReason });
+    }
+  }
+
+  private releaseFullAccessRecovery(row: OperationDbRow, reason: string) {
+    this.markNotSent(row, { resetNode: true, eventReason: reason });
+    const node = this.nodeRow(row.task_id, row.node_id);
+    const spec = JSON.parse(node.spec) as NodeSpec;
+    const conversation = spec.role === 'master' && this.store.task(row.task_id).phase === 'chatting'
+      ? conversationForTask(this.store, row.task_id) : undefined;
+    // An uncertain turn already consumed its message. Do not turn it into a
+    // fresh request; explicit recovery can still set the master pending later.
+    if (conversation && !pendingMessages(this.store, conversation.id, 1).length) {
+      this.store.db.prepare("UPDATE nodes SET status='failed' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
+      this.store.db.prepare("UPDATE activations SET state='failed' WHERE id=?").run(node.activation_id);
     }
   }
 
@@ -482,10 +493,8 @@ export class OperationLifecycle {
         return false;
       }
       if (isFullAccess(operation.accessPolicy)) {
-        this.markNotSent(this.operationRow(operation.id), {
-          resetNode: true,
-          eventReason: `Full access released an uncertain dispatch for retry: ${String(error)}`,
-        });
+        this.releaseFullAccessRecovery(this.operationRow(operation.id),
+          `Full access released an uncertain dispatch for retry: ${String(error)}`);
         this.store.event(operation.taskId, 'operation.recovery_bypassed', {
           operationId: operation.id,
           reason: String(error),

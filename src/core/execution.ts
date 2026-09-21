@@ -220,7 +220,10 @@ export class Execution {
 
   /** Conversation masters are their own interactive lane, ahead of the single active task. */
   private laneTasks(): string[] {
-    const chatting = (this.store.db.prepare("SELECT id FROM tasks WHERE phase='chatting' ORDER BY created_seq").all() as { id: string }[]).map(row => row.id);
+    const chatting = (this.store.db.prepare(`SELECT t.id FROM tasks t
+      LEFT JOIN conversations c ON c.id=t.conversation_id
+      WHERE t.phase='chatting' AND c.archived_at IS NULL
+      ORDER BY t.created_seq`).all() as { id: string }[]).map(row => row.id);
     const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
     if (active_task && !chatting.includes(active_task) && this.store.task(active_task).phase !== 'chatting') chatting.push(active_task);
     return chatting;
@@ -240,8 +243,10 @@ export class Execution {
   private readyNodesFor(taskId: string): ExecutionNodeRow[] {
     const task = this.store.task(taskId);
     if (task.phase === 'chatting') {
-      // Without a confirmed graph the conversation master is the only node that
-      // may run; each turn consumes exactly one pending or queued user message.
+      // A chatting master may run for a queued message, an explicit recovery,
+      // or a continuation after an answer. Archived conversations never run.
+      const conversation = conversationForTask(this.store, taskId);
+      if (!conversation || conversation.archived_at !== null) return [];
       const masters = this.store.db.prepare(`SELECT * FROM nodes n
         WHERE n.task_id=? AND n.status='pending' AND json_extract(n.spec,'$.role')='master'
         ORDER BY n.rowid`).all(taskId) as ExecutionNodeRow[];
@@ -280,6 +285,10 @@ export class Execution {
     const fullAccess = isFullAccess(accessPolicy);
     if (this.stopping || (!fullAccess && this.store.task(node.task_id).paused)) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
+    if (this.store.task(node.task_id).phase === 'chatting') {
+      const conversation = conversationForTask(this.store, node.task_id);
+      if (!conversation || conversation.archived_at !== null) return false;
+    }
     const spec = JSON.parse(node.spec) as NodeSpec;
     const adapter = spec.action === 'graph.verify'
       ? graphVerifier(this.store, spec)

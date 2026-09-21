@@ -16,6 +16,7 @@
 检查：
 
 - task phase、node status 和依赖；
+- 会话是否已归档，或 chatting 主管是否在空队列上热重试；
 - 是否有 open internal problem；
 - 是否达到并发或预算边界；
 - operation 是否处于 dispatched/running；
