@@ -22,7 +22,7 @@ import { requiresResultHandoff, resultHandoffDependents, settleResultHandoff, su
 import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation } from './time-ledger.ts';
 import { isReworkDecision, type VerificationDecision } from './verification.ts';
-import { insertQuestion } from './question-routing.ts';
+import { assertQuestionAnswer, insertQuestion } from './question-routing.ts';
 import { isFullAccess } from './access-policy.ts';
 import {
   mergeUsageSource,
@@ -554,6 +554,7 @@ export class OperationLifecycle {
           data: string;
         } | undefined;
       if (!question || question.status !== 'open') throw new RuntimeError('invalid_question', 'No open question in this task');
+      assertQuestionAnswer(question.kind, answer);
       if (question.kind === 'budget' && answer.type === 'add_budget') {
         if (!Number.isSafeInteger(answer.tokens) || answer.tokens <= 0) {
           throw new RuntimeError('invalid_answer', 'A positive token increment is required');
@@ -576,11 +577,6 @@ export class OperationLifecycle {
         if (decision !== 'approved' && decision !== 'rejected') {
           throw new RuntimeError('invalid_answer', 'A system change must be approved or rejected');
         }
-      } else if (!(question.kind === 'waiting' && answer.type === 'respond')
-        && !(['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected', 'recovery', 'result_noncompliant'].includes(question.kind) && answer.type === 'retry')
-        && !(['reservation_exceeded', 'human_check', 'git_dirty'].includes(question.kind) && answer.type === 'acknowledge')
-        && !(['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond'))) {
-        throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
       }
       this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
       closeUserWait(this.store, taskId, question.node_id);

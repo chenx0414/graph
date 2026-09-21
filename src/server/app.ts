@@ -158,6 +158,16 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     if (body.value !== null && typeof body.value !== 'string') throw new RuntimeError('invalid_input', 'The secret value must be a string or null');
     return options.appServices.pushSecret(body.ref, body.value as string | null);
   });
+  app.get('/api/app/rsi/status', async () => {
+    if (!options.appServices?.rsi) return { available: false, pendingRestart: null, canRestart: false };
+    return options.appServices.rsi.status();
+  });
+  app.post('/api/app/rsi/restart-ack', async request => {
+    if (!options.appServices?.rsi) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');
+    const body = request.body as { id?: unknown };
+    if (typeof body.id !== 'string' || !body.id.trim()) throw new RuntimeError('invalid_input', 'A restart request id is required');
+    return options.appServices.rsi.ack(body.id.trim());
+  });
   app.get('/api/limits', async () => runtime.modelLimits());
   if (options.config) {
     app.get('/api/config', async () => {

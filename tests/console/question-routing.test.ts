@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
-import { insertQuestion, questionOwner } from '../../src/core/question-routing.ts';
+import { insertQuestion, isMasterParked, questionOwner, recoverMaster } from '../../src/core/question-routing.ts';
+import { OperationLifecycle } from '../../src/core/operation-lifecycle.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -76,6 +77,7 @@ test('a problem on the master node itself parks instead of re-waking the same ma
     data: { reason: 'No credential bound for model local' },
   });
   expect(parked.owner).toBe('main');
+  expect(isMasterParked(store, 'anchor', 'master')).toBe(true);
   // The master cannot resolve a problem on itself; auto-waking it would repeat
   // the identical failure forever. It is parked for an explicit retry or
   // configuration recovery and never becomes a user-facing question.
@@ -85,6 +87,73 @@ test('a problem on the master node itself parks instead of re-waking the same ma
     .toEqual({ count: 0 });
   expect(store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='problem.parked'").get())
     .toEqual({ count: 1 });
+});
+
+test('a same-named node in another task routes to the conversation master instead of parking it', async () => {
+  const store = await fixture();
+  store.db.prepare("INSERT INTO nodes(task_id,id,spec,status) VALUES('work-task','master','{}','blocked')").run();
+  const problem = insertQuestion(store, { taskId: 'work-task', nodeId: 'master', kind: 'recovery', data: {} });
+  expect(problem.owner).toBe('main');
+  expect(isMasterParked(store, 'anchor', 'master')).toBe(false);
+  expect(store.db.prepare("SELECT type FROM events WHERE type IN ('problem.routed','problem.parked')").all())
+    .toEqual([{ type: 'problem.routed' }]);
+});
+
+test('messages retry transient master problems while configuration recovery also releases other internal problems', async () => {
+  const store = await fixture();
+  const transient = insertQuestion(store, { taskId: 'anchor', nodeId: 'master', kind: 'adapter_error', data: {} });
+  const model = insertQuestion(store, { taskId: 'anchor', nodeId: 'master', kind: 'model_unavailable', data: {} });
+  const usage = insertQuestion(store, { taskId: 'anchor', nodeId: 'master', kind: 'unknown_usage', data: {} });
+  const worker = insertQuestion(store, { taskId: 'work-task', nodeId: 'work', kind: 'adapter_error', data: {} });
+  const status = (id: string) => store.db.prepare('SELECT status,answer FROM questions WHERE id=?').get(id);
+
+  expect(recoverMaster(store, 'anchor', 'message')).toBe(true);
+  expect(status(transient.id)).toEqual({ status: 'resolved', answer: '{"type":"retry"}' });
+  for (const question of [model, usage, worker]) expect(status(question.id)).toEqual({ status: 'open', answer: null });
+  expect(isMasterParked(store, 'anchor', 'master')).toBe(true);
+  expect(recoverMaster(store, 'anchor', 'message')).toBe(false);
+
+  expect(recoverMaster(store, 'anchor', 'configuration')).toBe(true);
+  expect(isMasterParked(store, 'anchor', 'master')).toBe(false);
+  expect(status(worker.id)).toEqual({ status: 'open', answer: null });
+  expect(recoverMaster(store, 'anchor', 'configuration')).toBe(false);
+  expect(store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='task.master_recovered'").get())
+    .toEqual({ count: 1 });
+});
+
+test('configuration recovery preserves user decisions and joins the surrounding transaction', async () => {
+  const store = await fixture();
+  const problem = insertQuestion(store, { taskId: 'anchor', nodeId: 'master', kind: 'recovery', data: {} });
+  store.db.prepare("INSERT INTO nodes(task_id,id,spec,status) VALUES('anchor','other','{}','blocked')").run();
+  const permission = insertQuestion(store, {
+    taskId: 'anchor', nodeId: 'other', kind: 'permission', data: { grant: 'extra' },
+  });
+  expect(recoverMaster(store, 'anchor', 'configuration')).toBe(false);
+  expect(isMasterParked(store, 'anchor', 'master')).toBe(true);
+  expect(store.db.prepare('SELECT status FROM questions WHERE id=?').get(permission.id)).toEqual({ status: 'open' });
+
+  const lifecycle = new OperationLifecycle(store, { advance: () => undefined });
+  lifecycle.answer('anchor', permission.id, { type: 'grant', grant: 'extra' });
+  expect(() => store.transaction(() => {
+    expect(recoverMaster(store, 'anchor', 'configuration')).toBe(true);
+    throw new Error('abort enclosing command');
+  })).toThrow('abort enclosing command');
+  expect(store.db.prepare('SELECT status,answer FROM questions WHERE id=?').get(problem.id)).toEqual({ status: 'open', answer: null });
+  expect(isMasterParked(store, 'anchor', 'master')).toBe(true);
+  expect(store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='task.master_recovered'").get())
+    .toEqual({ count: 0 });
+  expect(recoverMaster(store, 'anchor', 'configuration')).toBe(true);
+  expect(isMasterParked(store, 'anchor', 'master')).toBe(false);
+});
+
+test('without a conversation master, execution problems fall back to the user', async () => {
+  const store = await fixture();
+  store.db.prepare("DELETE FROM nodes WHERE task_id='anchor' AND id='master'").run();
+  const problem = insertQuestion(store, { taskId: 'work-task', nodeId: 'work', kind: 'recovery', data: {} });
+  expect(problem.owner).toBe('user');
+  expect(store.db.prepare("SELECT user_wait_since FROM nodes WHERE task_id='work-task' AND id='work'").get())
+    .toMatchObject({ user_wait_since: expect.any(Number) });
+  expect(recoverMaster(store, 'anchor', 'configuration')).toBe(false);
 });
 
 test('upgrading reclassifies legacy internal questions so they leave the user inbox', async () => {

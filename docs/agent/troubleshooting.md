@@ -38,6 +38,18 @@
 
 区分“未发现”“已注册”“已启用”“本次已加载”和“可执行”。这些状态不是同义词。
 
+## RSI 不可用或重载未生效
+
+检查：
+
+- `inspect_rsi_status` 的 `available` 与 `root`：打包应用默认没有源码 checkout，需要用 `GRAPH_RSI_ROOT` 指向一个干净的 Git 仓库根；
+- `pendingRestart` 与 `canRestart`：有在途 operation 时不会重载；
+- `apply_rsi_change` 返回的 `status`：`rolled_back` 表示验证失败并已恢复文件，`unavailable` 表示没有可用 checkout；
+- 桌面进程是否在轮询 `/api/app/rsi/status`，以及 `/api/app/rsi/restart-ack` 是否成功；
+- conversation 中的 `kind=rsi` 报告：它记录了分支、提交、验证结果与重载状态。
+
+不要在 checkout 有未提交改动时强行改同一文件；RSI 会拒绝并要求先处理脏文件。
+
 ## 模型不可用
 
 检查：

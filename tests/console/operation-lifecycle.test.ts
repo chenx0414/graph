@@ -8,6 +8,7 @@ import {
   type OperationIntent,
 } from '../../src/core/operation-lifecycle.ts';
 import { TaskStore, canonicalJson } from '../../src/core/store.ts';
+import { problemActions } from '../../src/core/question-routing.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -87,11 +88,15 @@ test('system-change questions accept only an explicit user decision', async () =
     .toThrow(/approved or rejected/);
 });
 
-test('a recovery problem accepts retry and reactivates its blocked node', async () => {
+test.each([
+  'adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict',
+  'context_rejected', 'recovery', 'result_noncompliant',
+])('the offered retry for %s is accepted and reactivates its blocked node', async kind => {
   const { store, lifecycle } = await fixture();
   store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id='t' AND id='work'").run();
-  store.db.prepare("INSERT INTO questions(id,task_id,node_id,kind,data,owner,status) VALUES('r','t','work','recovery',?,'main','open')")
-    .run(canonicalJson({ reason: 'Worker liveness requires reconciliation' }));
+  store.db.prepare("INSERT INTO questions(id,task_id,node_id,kind,data,owner,status) VALUES('r','t','work',?,?,'main','open')")
+    .run(kind, canonicalJson({ reason: 'Worker requires recovery' }));
+  expect(problemActions(kind)).toContain('retry');
 
   store.transaction(() => lifecycle.answer('t', 'r', { type: 'retry' }));
 
@@ -100,6 +105,16 @@ test('a recovery problem accepts retry and reactivates its blocked node', async 
     answer: '{"type":"retry"}',
   });
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get()).toEqual({ status: 'pending' });
+});
+
+test('unrecognized problem kinds do not advertise a retry that settlement rejects', async () => {
+  const { store, lifecycle } = await fixture();
+  store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id='t' AND id='work'").run();
+  store.db.prepare("INSERT INTO questions(id,task_id,node_id,kind,data,owner,status) VALUES('future','t','work','future_problem','{}','main','open')").run();
+  expect(problemActions('future_problem')).toEqual([]);
+  expect(() => lifecycle.answer('t', 'future', { type: 'retry' })).toThrow('Answer type does not match');
+  expect(store.db.prepare("SELECT status FROM questions WHERE id='future'").get()).toEqual({ status: 'open' });
+  expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get()).toEqual({ status: 'blocked' });
 });
 
 test('dispatch, unknown usage, and a human answer compose in one lifecycle transaction', async () => {

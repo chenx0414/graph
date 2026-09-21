@@ -700,6 +700,8 @@ test('an uncertain master turn leaves a plain-language notice and a new message 
   expect(interrupted.master?.status).toBe('pending');
   const problems = await runtime.supervisor(interrupted.anchorTaskId).listProblems() as { id: string; kind: string }[];
   expect(problems.map(problem => problem.kind)).toEqual(['recovery']);
+  expect((await runtime.host.runReady()).dispatched).toBe(0);
+  expect(attempts).toBe(1);
   // A new user message is an explicit retry and releases the parked master.
   await runtime.conversations.chat(created.conversationId, { text: '再试一次', requestId: 'retry' });
   await runtime.host.runReady();
@@ -729,6 +731,7 @@ test('a restart keeps a parked master parked until a configuration change revive
   const reopened = await second.conversations.view(created.conversationId);
   expect(reopened.master?.status).toBe('pending');
   expect(await second.supervisor(reopened.anchorTaskId).listProblems()).toHaveLength(1);
+  expect((await second.host.runReady()).dispatched).toBe(0);
   expect(secondRuns).toBe(0);
 
   // A real configuration apply clears the parked problem and retries.

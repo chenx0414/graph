@@ -2,17 +2,60 @@ import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { conversationForTask } from './conversation.ts';
 import { openUserWait } from './time-ledger.ts';
-import type { Answer, Json } from './types.ts';
+import { RuntimeError, type Answer, type Json } from './types.ts';
 
 export type QuestionOwner = 'user' | 'main';
 
-const DIRECT_USER_KINDS = new Set([
-  'permission',
-  'budget',
-  'reservation_exceeded',
-  'human_check',
-  'system_change',
-]);
+type ProblemAction = 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage' | 'escalate';
+type QuestionPolicy = {
+  owner: QuestionOwner;
+  answers: readonly Answer['type'][];
+  retryOnMessage?: boolean;
+  escalate?: boolean;
+};
+
+// Ownership, offered actions and answer acceptance share the same policy.
+// Message retries are deliberately narrower than configuration recovery.
+const POLICIES: Readonly<Record<string, QuestionPolicy>> = {
+  permission: { owner: 'user', answers: ['grant'] },
+  budget: { owner: 'user', answers: ['add_budget'] },
+  reservation_exceeded: { owner: 'user', answers: ['acknowledge'] },
+  human_check: { owner: 'user', answers: ['acknowledge'] },
+  system_change: { owner: 'user', answers: ['respond'] },
+  unknown_usage: { owner: 'main', answers: ['usage', 'reconcile_usage'] },
+  waiting: { owner: 'main', answers: ['respond'] },
+  adapter_error: { owner: 'main', answers: ['retry'], retryOnMessage: true },
+  execution_failed: { owner: 'main', answers: ['retry'], retryOnMessage: true },
+  model_unavailable: { owner: 'main', answers: ['retry'] },
+  git_conflict: { owner: 'main', answers: ['retry'], retryOnMessage: true },
+  context_rejected: { owner: 'main', answers: ['retry'], retryOnMessage: true, escalate: true },
+  recovery: { owner: 'main', answers: ['retry'], retryOnMessage: true },
+  result_noncompliant: { owner: 'main', answers: ['retry'], escalate: true },
+  git_dirty: { owner: 'main', answers: ['acknowledge'] },
+  rework: { owner: 'main', answers: ['respond', 'retry'] },
+  stalled: { owner: 'main', answers: ['respond', 'retry'] },
+};
+const UNKNOWN_POLICY: QuestionPolicy = { owner: 'main', answers: [] };
+
+function policy(kind: string): QuestionPolicy {
+  return Object.hasOwn(POLICIES, kind) ? POLICIES[kind]! : UNKNOWN_POLICY;
+}
+
+/** Only expose actions that the settlement path can actually accept. */
+export function problemActions(kind: string): ProblemAction[] {
+  const rule = policy(kind);
+  if (rule.owner !== 'main') return [];
+  const actions = rule.answers.filter((answer): answer is Exclude<ProblemAction, 'escalate'> =>
+    answer === 'retry' || answer === 'respond' || answer === 'acknowledge' || answer === 'reconcile_usage');
+  return rule.escalate ? [...actions, 'escalate'] : actions;
+}
+
+/** Value validation and settlement effects remain with OperationLifecycle. */
+export function assertQuestionAnswer(kind: string, answer: Answer) {
+  if (!policy(kind).answers.includes(answer.type)) {
+    throw new RuntimeError('invalid_answer', 'Answer type does not match the open question');
+  }
+}
 
 function record(value: Json): Record<string, Json> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
@@ -21,12 +64,11 @@ function record(value: Json): Record<string, Json> | null {
 /** Only decisions the user alone can make bypass the main Agent. Everything
  * else is first routed to the main Agent for diagnosis and resolution. */
 export function questionOwner(kind: string, data: Json): QuestionOwner {
-  if (DIRECT_USER_KINDS.has(kind)) return 'user';
   const body = record(data);
   // A worker or the main Agent may hand a decision back to the user through a
   // waiting question; those request types are the user's to answer.
   if (kind === 'waiting' && (body?.requestType === 'model_access' || body?.requestType === 'noncompliance_decision')) return 'user';
-  return 'main';
+  return policy(kind).owner;
 }
 
 export function questionSummary(kind: string, data: Json): string {
@@ -42,6 +84,47 @@ function masterNode(store: TaskStore, anchorTaskId: string) {
   return store.db.prepare(
     "SELECT id,status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master' LIMIT 1",
   ).get(anchorTaskId) as { id: string; status: string } | undefined;
+}
+
+/** A pending master can still be parked; callers must not infer readiness from status alone. */
+export function isMasterParked(store: TaskStore, taskId: string, nodeId: string): boolean {
+  return Boolean(store.db.prepare(
+    "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND owner='main' LIMIT 1",
+  ).get(taskId, nodeId));
+}
+
+/**
+ * Release a master for an explicit message or configuration change. Startup
+ * does not call this: simply reopening the runtime must leave problems parked.
+ * Returns whether a parked problem was resolved. Writes join the caller's
+ * command transaction, including its message or configuration receipt.
+ */
+export function recoverMaster(store: TaskStore, taskId: string, reason: 'message' | 'configuration'): boolean {
+  const apply = () => {
+    const master = masterNode(store, taskId);
+    if (!master) return false;
+    const parked = store.db.prepare(
+      "SELECT id,kind FROM questions WHERE task_id=? AND node_id=? AND status='open' AND owner='main'",
+    ).all(taskId, master.id) as { id: string; kind: string }[];
+    if (reason === 'configuration') {
+      if (!parked.length || store.db.prepare(
+        "SELECT id FROM questions WHERE task_id=? AND status='open' AND owner='user' LIMIT 1",
+      ).get(taskId)) return false;
+    }
+    const released = reason === 'configuration' ? parked : parked.filter(question => policy(question.kind).retryOnMessage);
+    for (const question of released) {
+      store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?")
+        .run(canonicalJson({ type: 'retry' }), question.id);
+    }
+    if (reason === 'configuration' || !['preparing', 'running', 'blocked'].includes(master.status)) {
+      store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(taskId, master.id);
+    }
+    if (reason === 'configuration') {
+      store.event(taskId, 'task.master_recovered', { reason: 'internal problem parked while the environment was unavailable' });
+    }
+    return released.length > 0;
+  };
+  return store.db.isTransaction ? apply() : store.transaction(apply);
 }
 
 /** Insert one durable question and route it to the correct owner. Main-owned
@@ -68,7 +151,7 @@ export function insertQuestion(store: TaskStore, input: {
   // master: it would immediately hit the identical failure again. It stays a
   // main-owned problem (invisible to the user) and is parked from the scheduler
   // until an explicit retry or configuration recovery releases it.
-  const selfOwned = Boolean(master && master.id === input.nodeId);
+  const selfOwned = Boolean(master && conversation?.anchor_task_id === input.taskId && master.id === input.nodeId);
   store.db.prepare(
     'INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)',
   ).run(id, input.taskId, input.nodeId, input.operationId ?? null, input.kind, canonicalJson(input.data), owner);

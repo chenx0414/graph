@@ -11,6 +11,7 @@ export interface AgentToolFeatures {
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
   supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange' | 'requestModelAccess', boolean>>;
+  rsi?: Partial<Record<'status' | 'apply', boolean>>;
 }
 
 export function agentArtifactAccess(input: { role?: string; action: string }) {
@@ -272,6 +273,33 @@ function declarations(features: AgentToolFeatures) {
       name: 'apply_system_change', label: 'Apply approved system change', description: 'Apply one previously proposed system change only after the user approved its system_change question. Approval and proposal data are checked by the host; this tool cannot bypass the user decision.',
       parameters: Type.Object({ proposalId: Type.String() }),
       available: main && Boolean(features.systemContext?.applySystemChange),
+      externallyGated: false,
+    },
+    inspect_rsi_status: {
+      name: 'inspect_rsi_status', label: 'Inspect self-improvement status', description: 'Read the Recursive Self-Improvement surface for Graph itself: the source checkout root, current branch, any pending restart, and how many operations are still running. Use it before changing the harness and to see whether a previous change is waiting to reload.',
+      parameters: Type.Object({}),
+      available: main && Boolean(features.rsi?.status),
+      externallyGated: false,
+    },
+    apply_rsi_change: {
+      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule an automatic reload. Use it only for verified harness problems in this Graph checkout. Every call is reported to the user with the diff, checks and commit. Prefer a small, focused change set; write each file with action "write", patch an existing file with action "replace" (each oldText must match exactly once), and remove a file with action "delete".',
+      parameters: Type.Object({
+        title: Type.String(),
+        problem: Type.String(),
+        evidence: Type.Optional(Type.String()),
+        diagnosis: Type.Optional(Type.String()),
+        impact: Type.Optional(Type.String()),
+        risk: Type.Optional(Type.String()),
+        changes: Type.Array(Type.Object({
+          path: Type.String(),
+          action: Type.String(),
+          content: Type.Optional(Type.String()),
+          edits: Type.Optional(Type.Array(Type.Object({ oldText: Type.String(), newText: Type.String() }))),
+        })),
+        checks: Type.Optional(Type.Array(Type.Object({ command: Type.String(), args: Type.Array(Type.String()) }))),
+        activate: Type.Optional(Type.Boolean()),
+      }),
+      available: main && Boolean(features.rsi?.apply),
       externallyGated: false,
     },
     list_agent_combinations: {

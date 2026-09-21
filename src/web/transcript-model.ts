@@ -13,10 +13,26 @@ export type TranscriptTool = {
   error: boolean;
 };
 
+export type TranscriptRsi = {
+  id: string;
+  status: 'applied' | 'rolled_back' | 'unavailable';
+  title: string;
+  problem: string;
+  branch: string | null;
+  commit: string | null;
+  files: string[];
+  validation: { command: string; status: string }[];
+  restartRequired: boolean;
+  error?: string;
+  diff?: string;
+  report: string;
+};
+
 export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
+  | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
 
 export type TranscriptModelInput = {
@@ -43,6 +59,40 @@ function durableTool(message: ConversationMessage): TranscriptTool {
     summary: message.text,
     done: message.state !== 'pending',
     error: toolError(message),
+  };
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function durableRsi(message: ConversationMessage): TranscriptRsi {
+  const data = (message.data ?? {}) as Record<string, unknown>;
+  const status = data.status === 'applied' || data.status === 'rolled_back' || data.status === 'unavailable'
+    ? data.status
+    : 'unavailable';
+  const validation = Array.isArray(data.validation)
+    ? (data.validation as unknown[]).flatMap(item => {
+        if (!item || typeof item !== 'object') return [];
+        const record = item as Record<string, unknown>;
+        return typeof record.command === 'string' && typeof record.status === 'string'
+          ? [{ command: record.command, status: record.status }]
+          : [];
+      })
+    : [];
+  return {
+    id: message.id,
+    status,
+    title: typeof data.title === 'string' && data.title ? data.title : '自我改进',
+    problem: typeof data.problem === 'string' ? data.problem : '',
+    branch: typeof data.branch === 'string' ? data.branch : null,
+    commit: typeof data.commit === 'string' ? data.commit : null,
+    files: stringArray(data.files),
+    validation,
+    restartRequired: data.restartRequired === true,
+    ...(typeof data.error === 'string' ? { error: data.error } : {}),
+    ...(typeof data.diff === 'string' ? { diff: data.diff } : {}),
+    report: message.text,
   };
 }
 
@@ -106,6 +156,10 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
           text: message.text,
           streaming: false,
         });
+        continue;
+      }
+      if (message.role === 'system' && message.kind === 'rsi') {
+        rows.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) });
         continue;
       }
       rows.push({ kind: 'message', id: message.id, message });

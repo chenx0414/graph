@@ -5,6 +5,7 @@ import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { appendNodeEntry } from '../../src/core/node-run.ts';
+import { appendMessage } from '../../src/core/conversation.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openGraphServer } from '../../src/server/host.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
@@ -1702,4 +1703,53 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await page.getByTestId('agent-tool-write').uncheck();
   await page.getByRole('button', { name: '保存工具选择' }).click();
   await expect.poll(() => agentContext.disabledTools()).toContain('write');
+}, 60_000);
+
+test('a self-improvement report renders as its own card in the conversation', async () => {
+  const root = await temp('rsi-report');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '改进 harness', requestId: 'rsi-report' });
+  const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  cleanup.push(async () => projection.close());
+  appendMessage(projection, {
+    conversationId: created.conversationId,
+    role: 'system',
+    kind: 'rsi',
+    text: '### RSI 已应用：修复超时',
+    data: {
+      id: 'rsi-1',
+      status: 'applied',
+      title: '修复超时',
+      problem: '命令在含空格路径下失败',
+      branch: 'rsi/fix-timeout',
+      commit: 'a'.repeat(40),
+      files: ['src/runtime/rsi.ts'],
+      validation: [{ command: 'node --run check', status: 'passed', output: '' }],
+      restartRequired: true,
+      diff: 'diff --git a/x b/x',
+      report: '### RSI 已应用：修复超时',
+    },
+  });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  const card = page.getByTestId('rsi-report');
+  await card.waitFor();
+  expect(await card.getAttribute('data-status')).toBe('applied');
+  const text = await card.innerText();
+  expect(text).toContain('修复超时');
+  expect(text).toContain('已应用');
+  expect(text).toContain('src/runtime/rsi.ts');
+  expect(text).toContain('node --run check');
+  expect(text).toContain('已安排自动重载');
+  await page.getByRole('button', { name: '查看改动' }).click();
+  await expect.poll(() => card.innerText()).toContain('diff --git');
 }, 60_000);

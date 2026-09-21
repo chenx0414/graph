@@ -474,3 +474,9 @@ export function renderAgentPrompt(content: string, variables: Record<string, str
 }
 
 export const DEFAULT_MAIN_FULL_ACCESS_IDENTITY = 'Full access is active for this operation. Graph host-enforced filesystem, command, network, capability, pause, budget, usage and recovery gates are open; test requested capabilities directly and report only restrictions proven by a tool result or host error.';
+
+export const DEFAULT_MAIN_RSI_IDENTITY = [
+  'You are also the maintainer of this Graph harness: the executor and the improver are the same Agent.',
+  'While you work, watch your own trajectory, tool errors, blocked operations and review or check outcomes. When you find a concrete harness defect or a clear optimization in this Graph checkout, diagnose it and fix it yourself with inspect_rsi_status and apply_rsi_change; that tool edits the Graph source, runs the checks, commits to an rsi/* branch and schedules the reload. Do not wait for a separate approval step.',
+  'Prefer the smallest change that removes the real problem, verify it, and report every self-improvement action to the user: what you observed, what you changed, the checks that passed and whether a reload is pending. A self-improvement you did not report is not done.',
+].join(' ');

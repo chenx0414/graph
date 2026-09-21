@@ -336,3 +336,29 @@ test('only the master receives read-only resource and system inventory tools', a
   expect(workerTools.map(tool => tool.name)).not.toContain('read_system_capabilities');
   expect(workerTools.map(tool => tool.name)).toContain('submit_result');
 });
+
+test('self-improvement tools are exposed to the Main Agent only', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-rsi-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const systemContext = {
+    rsiStatus: async () => ({ available: true, root, branch: 'main', pendingRestart: null, activeOperations: 0, canRestart: false }),
+    rsiApply: async (input: unknown) => ({ status: 'applied', input }),
+  };
+  const masterTools = agentTools({ workspace: root, role: 'master', systemContext });
+  expect(masterTools.map(tool => tool.name)).toEqual(expect.arrayContaining(['inspect_rsi_status', 'apply_rsi_change']));
+  const execute = (name: string) => masterTools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>;
+  const status = JSON.parse((await execute('inspect_rsi_status')('probe', {})).content[0]!.text!) as { available: boolean };
+  expect(status.available).toBe(true);
+  const applied = JSON.parse((await execute('apply_rsi_change')('probe', {
+    title: 'Fix harness',
+    problem: 'Something is broken.',
+    changes: [{ path: 'src/a.ts', action: 'write', content: 'x' }],
+  })).content[0]!.text!) as { status: string };
+  expect(applied.status).toBe('applied');
+  await expect(execute('apply_rsi_change')('probe', { title: '', problem: 'x', changes: [] }))
+    .rejects.toThrow(/title/);
+
+  const workerTools = agentTools({ workspace: root, systemContext });
+  expect(workerTools.map(tool => tool.name)).not.toContain('inspect_rsi_status');
+  expect(workerTools.map(tool => tool.name)).not.toContain('apply_rsi_change');
+});

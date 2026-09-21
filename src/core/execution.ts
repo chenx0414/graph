@@ -8,7 +8,7 @@ import { loadGraph } from './graph.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
-import { insertQuestion } from './question-routing.ts';
+import { insertQuestion, isMasterParked } from './question-routing.ts';
 import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
 import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
@@ -242,14 +242,10 @@ export class Execution {
     if (task.phase === 'chatting') {
       // Without a confirmed graph the conversation master is the only node that
       // may run; each turn consumes exactly one pending or queued user message.
-      // A master parked on its own main-owned problem must not be retried by the
-      // drive loop: the identical failure would repeat forever. It resumes only
-      // after resolveProblem or configuration recovery clears that problem.
-      return this.store.db.prepare(`SELECT * FROM nodes n
+      const masters = this.store.db.prepare(`SELECT * FROM nodes n
         WHERE n.task_id=? AND n.status='pending' AND json_extract(n.spec,'$.role')='master'
-          AND NOT EXISTS (SELECT 1 FROM questions q
-            WHERE q.task_id=n.task_id AND q.node_id=n.id AND q.status='open' AND q.owner='main')
         ORDER BY n.rowid`).all(taskId) as ExecutionNodeRow[];
+      return masters.filter(node => !isMasterParked(this.store, taskId, node.id));
     }
     if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as ExecutionNodeRow[];
     if (task.phase !== 'running') return [];

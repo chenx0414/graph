@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   absolutePaths, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
-  parseBannerAddress, resolveAppPaths, resourceDirectory, saveSecrets, tailText,
+  parseBannerAddress, resolveAppPaths, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
 
@@ -41,6 +41,8 @@ if (!app.requestSingleInstanceLock()) {
   let smokeLogged = false;
   let notificationState = { primed: false, questions: {}, status: {} };
   let taskPoll = null;
+  let rsiPoll = null;
+  let rsiRestarting = false;
   let tray = null;
   let openQuestionTotal = 0;
 
@@ -310,6 +312,58 @@ if (!app.requestSingleInstanceLock()) {
       .catch(() => undefined);
   }
 
+  // Recursive Self-Improvement: the Main Agent commits a change to the Graph
+  // source checkout and writes a restart request. Once no operation is running
+  // any more, reload the daemon so the new code is live. The request is only
+  // cleared after the reload succeeds, so a crash keeps the intent.
+  function appToken() {
+    try {
+      return readFileSync(join(currentPaths().stateDir, 'app-token'), 'utf8').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  async function ackRestart(id) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (!readyUrl) return false;
+      try {
+        const response = await fetch(`${readyUrl}/api/app/rsi/restart-ack`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-graph-app-token': appToken(), origin: readyUrl },
+          body: JSON.stringify({ id }),
+        });
+        if (response.ok) return true;
+      } catch {
+        // daemon still starting up; retry
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    return false;
+  }
+
+  function pollRsi() {
+    if (!readyUrl || rsiRestarting) return;
+    void fetch(`${readyUrl}/api/app/rsi/status`, {
+      headers: { 'x-graph-app-token': appToken(), origin: readyUrl },
+    })
+      .then(async response => (response.ok ? response.json() : null))
+      .then(status => {
+        const pending = rsiRestartDecision(status, rsiRestarting);
+        if (!pending) return;
+        rsiRestarting = true;
+        void restartDaemon()
+          .then(async url => {
+            const cleared = await ackRestart(pending.id);
+            if (!cleared) console.warn('[app] rsi restart applied but the request was not acknowledged');
+            if (window) void window.loadURL(url);
+          })
+          .catch(error => console.warn('[app] rsi restart failed', error))
+          .finally(() => { rsiRestarting = false; });
+      })
+      .catch(() => undefined);
+  }
+
   function refreshTray() {
     if (!tray) return;
     tray.setContextMenu(Menu.buildFromTemplate(trayMenuItems(openQuestionTotal).map(item => {
@@ -367,6 +421,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     quitting = true;
     clearInterval(taskPoll);
+    clearInterval(rsiPoll);
     void Promise.race([stopDaemon(), new Promise(resolveStop => setTimeout(resolveStop, 7_000))]).then(() => app.exit(0));
   });
 
@@ -375,5 +430,6 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     startDaemon();
     taskPoll = setInterval(pollTasks, 4_000);
+    rsiPoll = setInterval(pollRsi, 5_000);
   });
 }

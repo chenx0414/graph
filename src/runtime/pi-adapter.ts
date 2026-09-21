@@ -65,6 +65,10 @@ export interface PiAdapterChannels {
   systemContext?: {
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
   };
+  rsi?: {
+    status(): Promise<unknown>;
+    apply(input: unknown, context: { taskId: string; conversationId?: string }): Promise<unknown>;
+  };
 }
 
 function toPiModel(entry: ModelEntry): Model<ModelApi> {
@@ -96,6 +100,8 @@ function summarizeToolCall(name: string, args: unknown) {
               : name === 'bind_project' ? target('projectId') ?? name
                 : name.startsWith('git_') ? [name, target('path') ?? target('ref') ?? ''].filter(Boolean).join(' ')
                   : name === 'submit_result' ? 'structured result'
+                    : name === 'apply_rsi_change' ? target('title') ?? 'self-improvement'
+                      : name === 'inspect_rsi_status' ? 'self-improvement status'
                     : name;
   return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
 }
@@ -314,6 +320,7 @@ export function createPiAdapter(options: {
             workspace,
             fullAccess,
             retrieval: Boolean(retrieval),
+            rsi: Boolean(channels?.rsi && spec.role === 'master' && fullAccess),
             ...(agentPromptLibrary ? { library: agentPromptLibrary } : {}),
             bootstrap: {
               ...(definitionId && channels?.bootstrapPrompts?.[definitionId]
@@ -359,9 +366,9 @@ export function createPiAdapter(options: {
               ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
               ...(artifactService ? { artifacts: artifactService } : {}),
               ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog } : {}),
-              ...(channels?.systemContext ? {
+              ...(channels?.systemContext || channels?.rsi ? {
                 systemContext: {
-                  ...(channels.systemContext.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
+                  ...(channels.systemContext?.systemSummary ? { systemSummary: channels.systemContext.systemSummary } : {}),
                   ...(conversation && spec.role === 'master' ? {
                     systemDiagnostics: async () => {
                       const taskIds = [...new Set([
@@ -541,6 +548,13 @@ export function createPiAdapter(options: {
                       modelAccessQuestion ??= data;
                       return data as Record<string, unknown>;
                     },
+                  } : {}),
+                  ...(channels.rsi && spec.role === 'master' && fullAccess ? {
+                    rsiStatus: async () => (await channels.rsi!.status()) as Record<string, unknown>,
+                    rsiApply: async (input: unknown) => (await channels.rsi!.apply(input, {
+                      taskId: operation.taskId,
+                      ...(conversation ? { conversationId: conversation.id } : {}),
+                    })) as Record<string, unknown>,
                   } : {}),
                 },
               } : {}),

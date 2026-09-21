@@ -31,6 +31,11 @@ export interface AppServices {
     secretValues(): Record<string, string>;
     verify(record: CapabilityRecord, values?: Record<string, string>): Promise<CapabilityCheckResult>;
   };
+  /** Host-side view of the RSI restart queue, polled by the desktop app. */
+  rsi?: {
+    status(): Promise<unknown>;
+    ack(id: string): Promise<unknown>;
+  };
 }
 
 export async function openGraphServer(options: Parameters<typeof openTaskRuntime>[0] & { origin?: string; port?: number; autoDrive?: boolean; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; configStore?: ConfigStore; configEnv?: Record<string, string | undefined>; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService; systemContext?: Parameters<typeof openTaskRuntime>[0]['systemContext'] }) {

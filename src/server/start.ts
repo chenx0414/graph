@@ -17,6 +17,7 @@ import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefr
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import { graphApplicationRoot } from '../runtime/graph-root.ts';
+import { openRsiService, resolveRsiRoot } from '../runtime/rsi.ts';
 import { graphDocumentationPaths } from '../runtime/agent-docs.ts';
 import { openGraphServer } from './host.ts';
 import { openAgentContextLibrary } from '../runtime/agent-context.ts';
@@ -273,6 +274,8 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   const stateDir = await realpath(options.stateDir);
   const appToken = randomUUID();
   await writeFile(join(stateDir, 'app-token'), `${appToken}\n`, { mode: 0o600 });
+  const rsiRoot = resolveRsiRoot(options.env, process.cwd());
+  const rsiService = openRsiService({ ...(rsiRoot ? { root: rsiRoot } : {}), stateDir });
 
   const runtimeReady = await ensureModelRuntime();
   const presetsRoot = options.presetsDir ?? fileURLToPath(new URL('../../presets', import.meta.url));
@@ -412,6 +415,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     systemContext: {
       systemSummary,
     },
+    ...(rsiService.root ? { rsi: rsiService } : {}),
     agentContext,
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
@@ -422,6 +426,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
         verify: (record, values = {}) => verifyMcpCapability(record, values),
       },
       appToken,
+      rsi: {
+        status: () => rsiService.status(),
+        ack: (id: string) => rsiService.ackRestart(id),
+      },
       snapshot: () => ({
         revision: live.revision(), effectiveRevision: live.revision(), applied: true,
         configured: live.enabled(), modelCount: live.entries().length, enabledModelCount: live.status().enabledModelCount,

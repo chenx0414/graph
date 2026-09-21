@@ -65,12 +65,14 @@ flowchart TB
 - [budget-ledger.ts](../src/core/budget-ledger.ts)：预算作用域与实例镜像、reservation、in-flight、usage commit、cap 改写与模型使用记录。
 - [model-selection.ts](../src/core/model-selection.ts)：模型等级选择、审查模型排除与独立审查就绪判断。
 - [operation-lifecycle.ts](../src/core/operation-lifecycle.ts)：operation 的 intent、dispatch、reconcile、settle、阻塞、未知用量与返工状态机。
+- [question-routing.ts](../src/core/question-routing.ts)：问题所有权、可用解决动作与答案类型的共同策略，以及主管停驻判断、消息重试和配置恢复的状态转换。
 - [program-adapters.ts](../src/core/program-adapters.ts)：`graph.verify`、`graph.command` 与人工检查程序节点。
 - [conversation.ts](../src/core/conversation.ts)：会话消息、队列投递、回复摘要与消息事件。
 - [conversation-projection.ts](../src/core/conversation-projection.ts)：会话历史分页覆盖、稳定 ID 归并、可恢复实时 delta/tool 合并、队列状态与消息排序；live snapshot 与 append/reset 协议见 [ADR 0019](adr/0019-recoverable-realtime-transcript.md)。
 - [agent-session.ts](../src/runtime/agent-session.ts)：Agent session transport contract、统一 inspect/turn 结果与 in-process/restricted-process adapter 选择。
 - [agent-context-assembly.ts](../src/runtime/agent-context-assembly.ts)：Agent 定义到运行上下文的同源装配；集中身份与规则选择、项目说明优先级、工具元数据和能力事实投影，供实际 operation 与下一次执行的预览使用。
 - [agent-tool-definitions.ts](../src/runtime/agent-tool-definitions.ts)：宿主工具唯一的描述、schema 与注册条件；预览只读取声明，`agent-tools.ts` 绑定实际执行。
+- [rsi.ts](../src/runtime/rsi.ts)：主管对 Graph 源码 checkout 的递归自我改进服务；文件变更、验证、`rsi/*` 分支提交、待重载请求与用户可见报告，见 [ADR 0026](adr/0026-main-agent-recursive-self-improvement.md)。
 - [pi-instance.ts](../src/runtime/pi-instance.ts)：in-process Pi session 生命周期、能力包绑定和受控模型门。
 - [pi-process.ts](../src/runtime/pi-process.ts)：受操作系统限制的 Pi session adapter、宿主请求路由与 worker 协议。
 - [pi-adapter.ts](../src/runtime/pi-adapter.ts)：Agent operation 的能力包、凭据、gate、fork policy 与 Graph 事件语义到 session transport 的组合。
@@ -149,6 +151,8 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 
 问题按 `owner` 分流：只有权限、预算、人工验收和明确需要用户决定的事项直接进入用户收件箱；恢复不明确、适配器错误、上下文拒绝、Git 冲突、用量异常、返工和停滞先路由给 main Agent。main Agent 读取结构化问题后，可以重试、调整图、回答 worker 或显式保留未知用量；用户界面只展示已经过这层处理的 `owner=user` 问题，避免把内部异常和原始 JSON 当作人工待办。见 [ADR 0018](adr/0018-main-agent-problem-routing.md)。
 
+`question-routing.ts` 集中上述分类、可答动作和主管恢复规则。主管停驻由自身未解决的内部问题判定，不单看节点的 `pending` 状态；节点身份同时包含任务与节点 ID。新消息只释放既有的执行错误类别（adapter、execution、context、recovery、Git conflict）；配置恢复可释放主管自身的其他内部问题，但所属任务仍有用户问题时不恢复。普通启动只补建缺失主管，不释放停驻问题。恢复写入加入外层命令事务；问题答复的预算、用量、授权和返工结算仍由 `operation-lifecycle.ts` 完成，主管通道的会话范围与幂等校验仍由 Task Runtime 负责。未知问题类型不宣称尚未支持的解决动作。
+
 暂停先关门，已发调用可结束，所有在途调用停稳后才报告 paused；长工具持续运行时保留 pausing 和对应记录，时长不限不意味着能虚报暂停成功。resume 不能解除未解决的预算或权限问题。
 
 ## 能力安装与权限落实
@@ -158,6 +162,8 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 Main Agent 同样通过版本化 Agent 配方装载能力：`mode=main` 的 `main` 配方编译为 `main@N`，新建主 Agent 实例使用最新已编译定义，已有实例保留原版本。规划、建图、调用 subagents、模型选择、监控、问题处理和汇报由 `master` 角色工具强制启用，配方负责组合额外的 Skills、MCP、Pi extensions 与 Prompt。需要宿主命令、持久状态、loopback 或 Unix socket 的 Pi extension 通过 `runtime` 声明最小外部依赖，Main Agent 与 subagent 共用同一边界；浏览器类扩展另外依赖 macOS 的 Chrome Crashpad、ProcessSingleton、DNS Mach service 和 Unix socket 边界。见 [ADR 0016](adr/0016-main-agent-capability-recipe.md) 与 [ADR 0022](adr/0022-pi-extension-runtime-declarations.md)。
 
 Main Agent 每轮获得裁剪后的系统自模型，并可通过只读 `inspect_graph_system` 查询失败节点、开放问题、未知用量、无效能力和待批准变更。系统修改采用两阶段边界：`propose_system_change` 只创建用户审批问题；用户批准后，同一实例才能调用 `apply_system_change`，由宿主写入版本化能力目录并重新扫描验证。未绑定项目不阻止自省或提出能力变更。见 [ADR 0020](adr/0020-main-agent-system-introspection-and-approved-changes.md)。
+
+在完全访问模式下，Main Agent 同时是 Harness 的改进者（RSI）。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求和仍在运行的 operation，再用 `apply_rsi_change` 修改 Graph 源码：`rsi.ts` 只接受 checkout 内的文件变更，拒绝 `.git` 与路径逃逸，要求目标文件无未提交改动，写入后运行检查（自定义 `node` 检查加 `node --run check`，激活时再加 `node --run app:build`），提交到专用 `rsi/*` 分支，并在 `activate` 时写出 `<stateDir>/rsi/restart.json`。验证失败会恢复文件快照并删除本轮新建的分支。桌面进程轮询 `/api/app/rsi/status`，等所有 operation 停稳后重启 daemon 并 ack 该请求，从而让改动自动生效。每次 RSI 操作都以 `rsi.change` 事件和 `kind=rsi` 的 conversation 系统消息向用户报告问题、证据、诊断、影响、风险、文件、验证、提交与重载状态。见 [ADR 0026](adr/0026-main-agent-recursive-self-improvement.md)。
 
 Agent 上下文来源采用程序解析的 `continue` / `fresh` / `fork` 三种模式。默认 Fresh：新实例只接收冻结 handoff、任务、验收、决策和产物引用。Fresh 的每条 incoming 依赖另有逐边前驱交接策略：普通实现与返工默认结果交接，独立审查与验证只读冻结证据；容器依赖展开到 leaf，缺失或失效的 `ResultHandoff` 失败关闭。已有实例返工或恢复使用 Continue。只有模型请求精确 transcript/tool-call 事实且源节点已成功时，才从源 session 的冻结 leaf 调用 Pi `createBranchedSession`，生成新 session file 与新 session ID；禁止多个 Agent 并发写同一 session。Fork 默认要求源与目标具有相同模型、定义、能力包和工具策略，不同配置必须显式 rebrand；独立审查始终 Fresh 且不得继承实现 transcript。Fork/Fresh 都创建新的 Agent 实例，Fork 加入源的预算作用域，写入型任务仍使用独立工作副本。具体决策见 [ADR 0014](adr/0014-agent-context-continuity.md) 与 [ADR 0015](adr/0015-predecessor-result-handoff-policy.md)。
 

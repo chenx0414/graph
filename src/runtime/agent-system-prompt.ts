@@ -57,6 +57,8 @@ export interface ComposeAgentSystemPromptInput {
   identity: string;
   /** Host-generated identity context such as the active access policy. */
   identityContext?: string;
+  /** Host-generated context for changing the Graph harness itself. */
+  harnessContext?: string;
   definitionVersion: string;
   toolGuidance: string;
   rules: {
@@ -243,6 +245,12 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
         title: 'Access policy',
         origin: 'generated' as const,
         content: input.identityContext.trim(),
+      }] : []),
+      ...(input.harnessContext?.trim() ? [{
+        id: 'identity.harness',
+        title: 'Harness self-improvement',
+        origin: 'generated' as const,
+        content: input.harnessContext.trim(),
       }] : []),
     ]),
     tools,

@@ -120,6 +120,64 @@ function sameVeils(left: MarkdownVeil[], right: MarkdownVeil[]) {
   });
 }
 
+function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
+  const [diffOpen, setDiffOpen] = useState(false);
+  const { rsi } = row;
+  const statusLabel = rsi.status === 'applied' ? '已应用' : rsi.status === 'rolled_back' ? '已回滚' : '不可用';
+  return (
+    <section className="rsi-report" data-testid="rsi-report" data-status={rsi.status}>
+      <header className="rsi-report-header">
+        <span className="rsi-report-icon" aria-hidden="true"><Icon name="spark" size={14} /></span>
+        <div className="rsi-report-heading">
+          <strong>{rsi.title}</strong>
+          <span className="rsi-report-badge">{statusLabel}</span>
+        </div>
+      </header>
+      {rsi.problem && <p className="rsi-report-problem">{rsi.problem}</p>}
+      {(rsi.branch || rsi.commit) && (
+        <dl className="rsi-report-meta">
+          {rsi.branch && <div><dt>分支</dt><dd>{rsi.branch}</dd></div>}
+          {rsi.commit && <div><dt>提交</dt><dd>{rsi.commit.slice(0, 12)}</dd></div>}
+        </dl>
+      )}
+      {rsi.files.length > 0 && (
+        <div className="rsi-report-files">
+          {rsi.files.map(file => <code key={file}>{file}</code>)}
+        </div>
+      )}
+      {rsi.validation.length > 0 && (
+        <ul className="rsi-report-checks">
+          {rsi.validation.map(item => (
+            <li key={item.command} data-status={item.status}>
+              <Icon name={item.status === 'passed' ? 'check' : 'alert'} size={12} />
+              <span className="rsi-report-check-command">{item.command}</span>
+              <span className="rsi-report-check-state">{item.status === 'passed' ? '通过' : '失败'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {rsi.error && <p className="rsi-report-error">{rsi.error}</p>}
+      {rsi.restartRequired && (
+        <p className="rsi-report-restart"><Icon name="refresh" size={12} />已安排自动重载，新的 Graph 代码将在重启后生效。</p>
+      )}
+      {rsi.diff && (
+        <>
+          <button
+            type="button"
+            className="rsi-report-diff-toggle"
+            onClick={() => setDiffOpen(current => !current)}
+            aria-expanded={diffOpen}
+          >
+            <span className="rsi-report-diff-chevron" data-open={diffOpen} aria-hidden="true"><Icon name="chevron" size={12} /></span>
+            {diffOpen ? '收起改动' : '查看改动'}
+          </button>
+          {diffOpen && <pre className="rsi-report-diff">{rsi.diff}</pre>}
+        </>
+      )}
+    </section>
+  );
+}
+
 const AssistantMarkdownBlock = memo(function AssistantMarkdownBlock(input: {
   source: string;
   veils: MarkdownVeil[];
@@ -194,6 +252,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor }: {
       : <AssistantResponse row={row} />;
   }
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
+  if (row.kind === 'rsi') return <RsiReport row={row} />;
   if (row.kind === 'thinking') {
     return (
       <div className="message-row agent-status-row" data-role="assistant" data-testid="agent-thinking">

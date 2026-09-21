@@ -142,3 +142,29 @@ test('project instruction read failures are surfaced instead of silently falling
   const catalog = new Catalog(store, { capabilityRoot });
   await expect(openAgentContextAssembly({ catalog, library, workspace, action: 'master', role: 'master' })).rejects.toThrow();
 });
+
+test('the Main Agent identity explains harness self-improvement only when RSI is available', async () => {
+  const { root, workspace, capabilityRoot, library } = await fixture();
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot });
+  const withRsi = await openAgentContextAssembly({
+    catalog, library, workspace, definitionVersion: 'main@1', action: 'master', role: 'master', fullAccess: true, rsi: true,
+  });
+  const rsiPreview = await withRsi.preview({
+    role: 'master', run: true,
+    rsi: { status: true, apply: true },
+  });
+  expect(rsiPreview.composed.sections.find(section => section.id === 'identity')?.parts.map(part => part.id))
+    .toContain('identity.harness');
+  expect(rsiPreview.composed.previewText).toContain('apply_rsi_change');
+  expect(rsiPreview.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['inspect_rsi_status', 'apply_rsi_change']));
+
+  const withoutRsi = await openAgentContextAssembly({
+    catalog, library, workspace, definitionVersion: 'main@1', action: 'master', role: 'master', fullAccess: true,
+  });
+  const plainPreview = await withoutRsi.preview({ role: 'master', run: true });
+  expect(plainPreview.composed.sections.find(section => section.id === 'identity')?.parts.map(part => part.id))
+    .not.toContain('identity.harness');
+  expect(plainPreview.tools.map(tool => tool.name)).not.toContain('apply_rsi_change');
+});

@@ -65,6 +65,17 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 完全访问模式会自动批准运行授权，但仍应保留提案、应用验证和审计记录。暂停、预算、未知用量和恢复问题不阻塞调用；并发上限、人工验收、模型订阅决策和任务图确认仍独立。
 
+## Harness 自我改进（RSI）
+
+在完全访问模式下，Main Agent 同时是 Graph Harness 的改进者。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求和仍在运行的 operation，再用 `apply_rsi_change` 提交一次结构化改动：
+
+- 修改 Graph 源码 checkout 内的文件（`write` / `replace` / `delete`），拒绝 `.git` 与路径逃逸，要求目标文件没有未提交改动；
+- 运行检查（自定义 `node` 检查、`node --run check`，`activate` 时再加 `node --run app:build`）；
+- 提交到专用 `rsi/*` 分支；
+- `activate` 为真时写出 `<stateDir>/rsi/restart.json`，由桌面进程在所有 operation 停稳后重启 daemon 让改动生效。
+
+验证失败会恢复文件快照并删除本轮新建的分支。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。源码 checkout 必须是干净的 Git 仓库；打包应用默认没有源码 checkout，需要用 `GRAPH_RSI_ROOT` 指向一个。
+
 ## 原版恢复
 
 Graph 在代码/preset 中保留每个可编辑 prompt 文件的原始版本。`defaults/` 只保存用户明确设为默认的内容；恢复默认只覆盖对应可编辑文件，不修改能力缓存、用户工具清单或项目文件。只读 Agent docs 直接来自源码，不存在需要恢复的用户覆盖版本。

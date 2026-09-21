@@ -240,3 +240,47 @@ test('creating a conversation over HTTP applies the selected model and thinking 
   const { conversationId } = created.json() as { conversationId: string };
   expect((await runtime.conversations.view(conversationId)).telemetry).toMatchObject({ model: 'm2', thinkingLevel: 'high' });
 });
+
+test('the app bridge exposes the RSI restart queue behind the app token', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m5-rsi-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: {} });
+  cleanup.push(() => runtime.close());
+  const acked: string[] = [];
+  const appServices: AppServices = {
+    appToken: 'rsi-token',
+    applyConfig: async () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
+    pushSecret: async () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
+    snapshot: () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
+    rsi: {
+      status: async () => ({ available: true, root, branch: 'main', pendingRestart: { id: 'rsi-1', root, branch: 'rsi/x', commit: 'c'.repeat(40), requestedAt: 1 }, activeOperations: 0, canRestart: true }),
+      ack: async id => { acked.push(id); return { cleared: true, pendingRestart: null }; },
+    },
+  };
+  const app = await createApp(runtime, { origin, appServices });
+  cleanup.push(() => app.close());
+
+  const denied = await app.inject({ method: 'GET', url: '/api/app/rsi/status', headers: { origin } });
+  expect(denied.statusCode).toBe(403);
+
+  const status = await app.inject({ method: 'GET', url: '/api/app/rsi/status', headers: { origin, 'x-graph-app-token': 'rsi-token' } });
+  expect(status.statusCode).toBe(200);
+  expect(status.json()).toMatchObject({ available: true, canRestart: true, pendingRestart: { id: 'rsi-1' } });
+
+  const ack = await app.inject({
+    method: 'POST',
+    url: '/api/app/rsi/restart-ack',
+    headers: { origin, 'x-graph-app-token': 'rsi-token', 'content-type': 'application/json' },
+    payload: JSON.stringify({ id: 'rsi-1' }),
+  });
+  expect(ack.statusCode).toBe(200);
+  expect(acked).toEqual(['rsi-1']);
+
+  const badAck = await app.inject({
+    method: 'POST',
+    url: '/api/app/rsi/restart-ack',
+    headers: { origin, 'x-graph-app-token': 'rsi-token', 'content-type': 'application/json' },
+    payload: JSON.stringify({}),
+  });
+  expect(badAck.statusCode).toBe(400);
+});

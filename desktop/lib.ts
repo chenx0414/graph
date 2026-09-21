@@ -215,6 +215,22 @@ export function taskNotifications(
   return { state: { primed: true, questions, status }, notifications, openTotal };
 }
 
+/** Decide whether a pending self-improvement reload can run right now. */
+export function rsiRestartDecision(
+  status: unknown,
+  restarting: boolean,
+): { id: string } | null {
+  if (restarting) return null;
+  if (!status || typeof status !== 'object') return null;
+  const body = status as { pendingRestart?: unknown; canRestart?: unknown };
+  const pending = body.pendingRestart;
+  if (!pending || typeof pending !== 'object') return null;
+  const id = (pending as { id?: unknown }).id;
+  if (typeof id !== 'string' || !id) return null;
+  if (body.canRestart !== true) return null;
+  return { id };
+}
+
 /** Last non-empty lines, for bounded error dialogs. */
 /** Validate and apply one `graph:save-secret` request. `value === null` is an
  * explicit revocation and must be expressible through the IPC bridge; an empty

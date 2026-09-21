@@ -4,7 +4,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { describeAgentTools, type AgentToolFeatures } from './agent-tool-definitions.ts';
 import {
   DEFAULT_COMMON_RULES, DEFAULT_MAIN_FULL_ACCESS_IDENTITY, DEFAULT_MAIN_RULES,
-  DEFAULT_MAIN_TOOL_GUIDANCE, DEFAULT_REVIEWER_RULES, DEFAULT_REVIEWER_TOOL_GUIDANCE,
+  DEFAULT_MAIN_RSI_IDENTITY, DEFAULT_MAIN_TOOL_GUIDANCE, DEFAULT_REVIEWER_RULES, DEFAULT_REVIEWER_TOOL_GUIDANCE,
   DEFAULT_WORKER_RULES, DEFAULT_WORKER_TOOL_GUIDANCE, DEFAULT_WORKER_PROMPT,
   renderAgentPrompt, type AgentContextLibrary,
 } from './agent-context.ts';
@@ -31,6 +31,8 @@ export interface AgentContextAssemblyOptions extends CapabilityBundleOptions {
   library?: AgentContextLibrary;
   fullAccess?: boolean;
   retrieval?: boolean;
+  /** The Main Agent may change this Graph checkout through the RSI tools. */
+  rsi?: boolean;
 }
 
 async function projectInstructions(workspace: string | null) {
@@ -65,6 +67,7 @@ function permission(name: string) {
   if (name === 'list_projects' || name === 'bind_project') return 'configured project binding';
   if (name.startsWith('git_')) return 'read-only work copy Git';
   if (name === 'apply_system_change' || name === 'propose_system_change') return 'user-approved system change';
+  if (name === 'inspect_rsi_status' || name === 'apply_rsi_change') return 'Graph source checkout (self-improvement)';
   return 'Graph call gate and current access policy';
 }
 
@@ -153,6 +156,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     const composed = composeAgentSystemPrompt({
       mode, identity, definitionVersion, toolGuidance,
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
+      ...(input.rsi && role === 'main' ? { harnessContext: DEFAULT_MAIN_RSI_IDENTITY } : {}),
       rules: { common, role: roleRules, ...(runtime === undefined ? {} : { runtime }) },
       docs, ...(projectContext ? { projectContext } : {}),
       tools: tools.filter(tool => tool.enabled && (mode === 'operation' || tool.available)).map(({ version, ...tool }) => ({

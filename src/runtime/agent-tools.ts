@@ -133,6 +133,8 @@ export function agentTools(input: {
     proposeSystemChange?: (input: { title: string; problem: string; change: Json; impact?: string; risk?: string }) => Promise<Record<string, unknown>>;
     applySystemChange?: (proposalId: string) => Promise<Record<string, unknown>>;
     requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
+    rsiStatus?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+    rsiApply?: (input: unknown) => Promise<Record<string, unknown>>;
   };
   onSubmit?: (output: Json) => void;
   /**
@@ -432,6 +434,15 @@ export function agentTools(input: {
       if (!proposalId || proposalId.length > 200) throw new Error('A bounded proposalId is required');
       return text(JSON.stringify(await input.systemContext!.applySystemChange!(proposalId)));
     },
+    inspect_rsi_status: async () => text(JSON.stringify(await input.systemContext!.rsiStatus!())),
+    apply_rsi_change: async (_id, params) => {
+      const body = fields(params);
+      const title = String(body.title ?? '').trim();
+      const problem = String(body.problem ?? '').trim();
+      if (!title || title.length > 200) throw new Error('An RSI title of at most 200 characters is required');
+      if (!problem || problem.length > 4_000) throw new Error('A concrete RSI problem of at most 4000 characters is required');
+      return text(JSON.stringify(await input.systemContext!.rsiApply!(params)));
+    },
     list_agent_combinations: async (_id, params) => {
       const body = fields(params);
       const query = typeof body.query === 'string' ? body.query.trim().toLowerCase() : '';
@@ -510,6 +521,10 @@ export function agentTools(input: {
       proposeSystemChange: Boolean(input.systemContext.proposeSystemChange),
       applySystemChange: Boolean(input.systemContext.applySystemChange),
       requestModelAccess: Boolean(input.systemContext.requestModelAccess),
+    } } : {}),
+    ...(input.systemContext?.rsiStatus || input.systemContext?.rsiApply ? { rsi: {
+      status: Boolean(input.systemContext.rsiStatus),
+      apply: Boolean(input.systemContext.rsiApply),
     } } : {}),
   });
   return descriptions.map(({ available: _available, externallyGated: hostGated, ...declaration }) => {

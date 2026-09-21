@@ -6,6 +6,54 @@ import {
   toolGroupSummary,
 } from '../../src/web/transcript-model.ts';
 
+test('an rsi system message becomes a self-improvement report row', () => {
+  const rows = buildTranscriptRows({
+    messages: [{
+      ...message({ id: 'rsi', seq: 1, role: 'system', text: '### RSI 已应用：修复超时' }),
+      kind: 'rsi',
+      data: {
+        id: 'rsi-1',
+        status: 'applied',
+        title: '修复超时',
+        problem: '命令在含空格路径下失败',
+        branch: 'rsi/fix-timeout',
+        commit: 'a'.repeat(40),
+        files: ['src/runtime/rsi.ts'],
+        validation: [{ command: 'node --run check', status: 'passed', output: '' }],
+        restartRequired: true,
+        diff: 'diff --git a/x b/x',
+        report: '### RSI 已应用：修复超时',
+      },
+    }],
+    liveTools: [],
+    streaming: [],
+    busy: false,
+  });
+  expect(rows.map(row => row.kind)).toEqual(['rsi']);
+  const row = rows[0];
+  if (row?.kind !== 'rsi') throw new Error('expected rsi row');
+  expect(row.rsi.status).toBe('applied');
+  expect(row.rsi.title).toBe('修复超时');
+  expect(row.rsi.branch).toBe('rsi/fix-timeout');
+  expect(row.rsi.files).toEqual(['src/runtime/rsi.ts']);
+  expect(row.rsi.validation[0]).toMatchObject({ command: 'node --run check', status: 'passed' });
+  expect(row.rsi.restartRequired).toBe(true);
+});
+
+test('an rsi report without receipt data still renders with a fallback title', () => {
+  const rows = buildTranscriptRows({
+    messages: [{ ...message({ id: 'rsi', seq: 1, role: 'system', text: 'plain report' }), kind: 'rsi' }],
+    liveTools: [],
+    streaming: [],
+    busy: false,
+  });
+  const row = rows[0];
+  if (row?.kind !== 'rsi') throw new Error('expected rsi row');
+  expect(row.rsi.status).toBe('unavailable');
+  expect(row.rsi.title).toBe('自我改进');
+  expect(row.rsi.report).toBe('plain report');
+});
+
 function message(input: {
   id: string;
   seq: number;

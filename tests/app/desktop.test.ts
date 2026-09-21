@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
-  resolveDaemonMode, resourceDirectory, saveSecrets, tailText, taskNotifications, trayIconPath, trayMenuItems,
+  resolveDaemonMode, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications, trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
 
@@ -176,5 +176,18 @@ describe('desktop secret bridge contract (C04)', () => {
     expect(applySecretRequest(before, 'bad ref', 'x')).toMatchObject({ ok: false });
     // Revoking an unknown ref is still a valid no-op revocation.
     expect(applySecretRequest(before, 'KEY_Z', null)).toEqual({ ok: true, secrets: { KEY_A: 'one', KEY_B: 'two' }, revoked: true });
+  });
+});
+
+describe('self-improvement reload decision', () => {
+  const pending = { pendingRestart: { id: 'rsi-1', root: '/graph', branch: 'rsi/x', commit: 'c'.repeat(40), requestedAt: 1 } };
+
+  test('reloads only when a request is pending and no operation is running', () => {
+    expect(rsiRestartDecision({ ...pending, canRestart: true }, false)).toEqual({ id: 'rsi-1' });
+    expect(rsiRestartDecision({ ...pending, canRestart: false }, false)).toBeNull();
+    expect(rsiRestartDecision({ ...pending, canRestart: true }, true)).toBeNull();
+    expect(rsiRestartDecision({ pendingRestart: null, canRestart: true }, false)).toBeNull();
+    expect(rsiRestartDecision(null, false)).toBeNull();
+    expect(rsiRestartDecision({ pendingRestart: {}, canRestart: true }, false)).toBeNull();
   });
 });
