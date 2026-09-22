@@ -32,17 +32,23 @@ export function insertAtCaret(input: { value: string; start: number; end: number
 /** A clipboard read that may be unavailable, denied or non-textual. */
 export type ClipboardReader = (() => Promise<string> | string) | undefined;
 
-/**
- * Read clipboard plain text. Missing reader, a missing Clipboard API, a denied
- * permission or a non-string result all resolve to an empty string so the
- * caller can stay silent instead of surfacing an error.
- */
-export async function readClipboardText(read: ClipboardReader): Promise<string> {
-  if (!read) return '';
+export interface ClipboardRead {
+  /** Plain text from the clipboard; empty when there is nothing to insert. */
+  text: string;
+  /**
+   * The clipboard could not be read at all (no reader, no Clipboard API, a denied permission or a
+   * non-textual result) rather than simply being empty. A blocked read is a capability problem the
+   * user can act on, so the caller may report it; an empty clipboard stays silent.
+   */
+  blocked: boolean;
+}
+
+export async function readClipboardText(read: ClipboardReader): Promise<ClipboardRead> {
+  if (!read) return { text: '', blocked: true };
   try {
     const text = await read();
-    return typeof text === 'string' ? text : '';
+    return typeof text === 'string' ? { text, blocked: false } : { text: '', blocked: true };
   } catch {
-    return '';
+    return { text: '', blocked: true };
   }
 }
