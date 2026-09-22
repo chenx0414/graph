@@ -320,7 +320,7 @@ export class OperationLifecycle {
       this.markNotSent(row, { resetNode: false });
       releaseMessages(this.store, operationId);
       this.block(row.task_id, row.node_id, 'adapter_error', { reason }, row.id);
-      recordConversationInterruption(this.store, operationFrom(row), reason);
+      recordConversationInterruption(this.store, operationFrom(row), reason, 'setup');
     });
   }
 
