@@ -20,7 +20,7 @@ const POLICIES: Readonly<Record<string, QuestionPolicy>> = {
   permission: { owner: 'user', answers: ['grant'] },
   budget: { owner: 'user', answers: ['add_budget'] },
   reservation_exceeded: { owner: 'user', answers: ['acknowledge'] },
-  human_check: { owner: 'user', answers: ['acknowledge'] },
+  human_check: { owner: 'user', answers: ['acknowledge', 'reject'] },
   system_change: { owner: 'user', answers: ['respond'] },
   unknown_usage: { owner: 'main', answers: ['usage', 'reconcile_usage'] },
   waiting: { owner: 'main', answers: ['respond'] },

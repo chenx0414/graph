@@ -68,12 +68,16 @@ export function QuestionReply({ taskId, question, onDone }: {
           </>}
           <input className="input" style={{ width: 240 }} data-testid="usage-proof" value={proof} onChange={event => setProof(event.target.value)} placeholder={usageMode === 'usage' ? '用量证据' : '无法核对的说明'} />
         </>}
+        {question.kind === 'human_check' && <input className="input" style={{ width: 260 }} data-testid="human-reason" value={value} onChange={event => setValue(event.target.value)} placeholder="若需驳回，写下具体问题" />}
         {question.kind === 'system_change' ? <>
           <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'respond', value: { decision: 'approved' } })}>批准并执行</Button>
           <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'respond', value: { decision: 'rejected' } })}>拒绝</Button>
         </> : question.kind === 'rework' || question.kind === 'stalled' ? <>
           <Button size="sm" icon="refresh" onClick={() => void submit({ type: 'retry' })}>重试</Button>
           <Button size="sm" onClick={() => void submit({ type: 'respond', value })}>答复</Button>
+        </> : question.kind === 'human_check' ? <>
+          <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'acknowledge' })}>确认通过</Button>
+          <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'reject', ...(value.trim() ? { reason: value.trim() } : {}) })}>驳回并返工</Button>
         </> : <Button size="sm" variant="primary" onClick={() => {
           if (question.kind === 'budget') return void submit({ type: 'add_budget', tokens: Number(tokens) });
           if (question.kind === 'waiting') return void submit({ type: 'respond', value });

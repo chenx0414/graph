@@ -586,6 +586,21 @@ export class OperationLifecycle {
         if (decision !== 'approved' && decision !== 'rejected') {
           throw new RuntimeError('invalid_answer', 'A system change must be approved or rejected');
         }
+      } else if (question.kind === 'human_check' && answer.type === 'reject') {
+        // A human rejection is a verdict, not an obstacle to clear: the acceptance did not pass, so the
+        // node stays blocked and the main Agent gets a rework problem carrying the user's reason.
+        const data = JSON.parse(question.data) as { prompt?: string };
+        insertQuestion(this.store, {
+          taskId,
+          nodeId: question.node_id,
+          kind: 'rework',
+          data: {
+            prompt: 'A human acceptance check was rejected and must be reworked',
+            reason: answer.reason ?? null,
+            rejected: data.prompt ?? null,
+          } as Json,
+        });
+        this.store.event(taskId, 'human.rejected', { questionId, nodeId: question.node_id, reason: answer.reason ?? null });
       }
       this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
       closeUserWait(this.store, taskId, question.node_id);
@@ -601,9 +616,10 @@ export class OperationLifecycle {
           .get(taskId, question.node_id) as { spec: string }).spec) as NodeSpec;
         const conversation = spec.role === 'master' ? conversationForTask(this.store, taskId) : undefined;
         const queued = conversation ? pendingMessages(this.store, conversation.id, 1).length : 0;
+        const rejected = question.kind === 'human_check' && answer.type === 'reject';
         if (!['rework', 'stalled'].includes(question.kind)) {
           this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?')
-            .run(question.kind === 'system_change' || !completed || queued ? 'pending' : 'succeeded', taskId, question.node_id);
+            .run(rejected ? 'blocked' : question.kind === 'system_change' || !completed || queued ? 'pending' : 'succeeded', taskId, question.node_id);
         }
       }
       if (['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond')) {
