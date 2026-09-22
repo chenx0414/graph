@@ -10,6 +10,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { InlineExtension } from '@earendil-works/pi-coding-agent';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { externallyGated, openPiInstance } from './pi-instance.ts';
+import { sdkPromptOptions } from './prompt-options.ts';
 import { replayAssistantStream } from './assistant-stream-frames.ts';
 import type { PiWorkerConfig } from './pi-process.ts';
 import type { AgentSessionInspect } from './agent-session.ts';
@@ -188,7 +189,7 @@ async function main() {
   const runPrompt = async (text: string, images: ImageContent[] | undefined) => {
     if (operationRunning) throw new Error('Pi worker already has a running operation');
     operationRunning = true;
-    await session.prompt(text, images?.length ? images : undefined);
+    await session.prompt(text, sdkPromptOptions(images));
     await Promise.all(pendingEvents);
     await finish();
   };
