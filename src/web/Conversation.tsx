@@ -4,6 +4,16 @@ import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
 import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
+import {
+  cancelQueuedMessage,
+  composerPrimaryDisabled,
+  composerPrimaryState,
+  readComposerDraft,
+  shouldScrollToLatest,
+  visibleTranscriptMessages,
+  writeComposerDraft,
+  type ComposerStorage,
+} from './composer-state.ts';
 import { ComposerTelemetry, type ThinkingLevel } from './ComposerTelemetry.tsx';
 import { composeSlashDirective, extractSlashTargets } from './SlashCommands.tsx';
 import {
@@ -141,25 +151,12 @@ const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
   succeeded: 'success', failed: 'danger', blocked: 'warn', skipped: 'neutral',
 };
 
-/** The composer draft is per-conversation and client-local: switching away or
- * reopening the window keeps whatever was typed, without a server record. */
-const COMPOSER_DRAFT_PREFIX = 'graph.conversation.composer.';
-
-function readComposerDraft(conversationId: string) {
+/** `window.localStorage` can throw when the host blocks storage. */
+function composerStorage(): ComposerStorage | null {
   try {
-    return window.localStorage.getItem(`${COMPOSER_DRAFT_PREFIX}${conversationId}`) ?? '';
+    return window.localStorage;
   } catch {
-    return '';
-  }
-}
-
-function writeComposerDraft(conversationId: string, value: string) {
-  try {
-    const key = `${COMPOSER_DRAFT_PREFIX}${conversationId}`;
-    if (value) window.localStorage.setItem(key, value);
-    else window.localStorage.removeItem(key);
-  } catch {
-    // A full or blocked local storage must never break composing.
+    return null;
   }
 }
 
@@ -532,7 +529,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       : Promise.resolve(null),
     [id, selectedProposalVersion],
   );
-  const [text, setText] = useState(() => readComposerDraft(id));
+  const [text, setText] = useState(() => readComposerDraft(composerStorage(), id));
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [steering, setSteering] = useState(false);
@@ -547,6 +544,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
+  const [dismissedQueue, setDismissedQueue] = useState<string[]>([]);
   const busy = view?.master?.status === 'preparing' || view?.master?.status === 'running';
   const transcriptFollow = useTranscriptFollow(conversationTab === 'chat' ? view?.id ?? null : null, Boolean(busy));
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -556,7 +554,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     refreshTimer.current = setTimeout(() => reload(), 150);
   }, [reload]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
-  useEffect(() => { writeComposerDraft(id, text); }, [id, text]);
+  useEffect(() => { writeComposerDraft(composerStorage(), id, text); }, [id, text]);
   const connected = useEventStream(view ? `/api/conversations/${view.id}/events/stream` : null, event => {
     const data = event.data as Parameters<typeof applyConversationEvent>[1]['data'];
     setProjection(current => applyConversationEvent(current, { type: event.type, ...(data ? { data } : {}) }));
@@ -569,6 +567,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   useEffect(() => {
     setPauseAction(null);
     setPausedOverride(null);
+    setDismissedQueue([]);
   }, [id]);
   useEffect(() => {
     if (view && pausedOverride !== null && view.paused === pausedOverride) setPausedOverride(null);
@@ -599,11 +598,13 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   // the chat tab re-arms the jump without yanking a reader on new arrivals.
   const enteredScrollRef = useRef(false);
   useEffect(() => {
-    if (conversationTab !== 'chat') {
-      enteredScrollRef.current = false;
-      return;
-    }
-    if (enteredScrollRef.current || !snapshot.messages.length) return;
+    const jump = shouldScrollToLatest({
+      tab: conversationTab,
+      hasMessages: snapshot.messages.length > 0,
+      alreadyJumped: enteredScrollRef.current,
+    });
+    if (conversationTab !== 'chat') enteredScrollRef.current = false;
+    if (!jump) return;
     enteredScrollRef.current = true;
     const frame = requestAnimationFrame(() => transcriptFollow.scrollToLatest('auto'));
     return () => cancelAnimationFrame(frame);
@@ -616,8 +617,20 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const proposal = view.proposal;
   const confirmable = Boolean(proposal && !proposal.stale && !acceptedVersions.has(proposal.version));
   const paused = pausedOverride ?? view.paused;
-  const queuedMessages = snapshot.queuedMessages;
+  const queuedMessages = dismissedQueue.reduce(
+    (list, messageId) => cancelQueuedMessage(list, messageId),
+    snapshot.queuedMessages,
+  );
   const promptSuggestion = snapshot.promptSuggestion;
+  const hasComposerInput = Boolean(text.trim() || attachments.length);
+  const primaryState = composerPrimaryState({
+    busy: Boolean(busy),
+    paused,
+    pending: pauseAction !== null,
+    hasInput: hasComposerInput,
+    queueLength: queuedMessages.length,
+    hasSuggestion: Boolean(promptSuggestion),
+  });
 
   async function act(action: () => Promise<unknown>, after?: () => void) {
     setActionError('');
@@ -715,23 +728,21 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
    * something to send. */
   async function submitPrimary() {
     if (sending || steering || pauseAction) return;
-    const hasInput = Boolean(text.trim() || attachments.length);
-    if (paused) {
-      if (hasInput) {
-        const sent = await send();
-        if (!sent) return;
-      }
-      await changePaused(false);
+    const action = primaryState.action;
+    if (action === 'pause') { await changePaused(true); return; }
+    if (action === 'resume') { await changePaused(false); return; }
+    if (action === 'send-and-resume') {
+      if (await send()) await changePaused(false);
       return;
     }
-    if (hasInput) return send();
-    if (busy) return changePaused(true);
-    if (queuedMessages.length) return steerQueued();
-    if (promptSuggestion) return send(promptSuggestion);
+    if (action === 'send') { await send(); return; }
+    if (action === 'steer') { await steerQueued(); return; }
+    if (action === 'suggestion') { await send(promptSuggestion); return; }
   }
 
   async function cancelQueued(messageId: string) {
     setActionError('');
+    setDismissedQueue(current => current.includes(messageId) ? current : [...current, messageId]);
     try {
       await api(`/api/conversations/${id}/messages/${encodeURIComponent(messageId)}/cancel`, {
         method: 'POST',
@@ -740,6 +751,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       reload();
       onChanged?.();
     } catch (reason) {
+      setDismissedQueue(current => current.filter(id => id !== messageId));
       const message = reason instanceof Error ? reason.message : String(reason);
       setActionError(message);
       toast(message, 'danger');
@@ -805,7 +817,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const graphRuntimeTaskId = activeProposalVersion === null
     ? null
     : view.accepted.find(item => item.proposalVersion === activeProposalVersion)?.taskId ?? null;
-  const displayMessages = snapshot.messages.filter(message => !(message.role === 'user' && message.state === 'cancelled'));
+  const displayMessages = visibleTranscriptMessages(snapshot.messages);
   const transcriptRows = buildTranscriptRows({
     messages: displayMessages,
     liveTools: snapshot.liveTools,
@@ -1144,7 +1156,16 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               busy={Boolean(busy)}
               paused={paused}
               pausePending={pauseAction !== null}
-              sendDisabled={sending || steering || pauseAction !== null || (!paused && !busy && !text.trim() && !attachments.length && !promptSuggestion)}
+              queueLength={queuedMessages.length}
+              hasSuggestion={Boolean(promptSuggestion)}
+              sendDisabled={composerPrimaryDisabled({
+                sending, steering,
+                pending: pauseAction !== null,
+                paused,
+                busy: Boolean(busy),
+                hasInput: hasComposerInput,
+                hasSuggestion: Boolean(promptSuggestion),
+              })}
             />
             <div className="composer-footer">
               <span className="composer-note">
