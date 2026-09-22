@@ -207,17 +207,19 @@ export function ChatComposer({
     const currentValue = input?.value ?? value;
     const start = input?.selectionStart ?? cursor;
     const end = input?.selectionEnd ?? cursor;
-    const text = await readClipboardText(
+    const read = await readClipboardText(
       typeof navigator !== 'undefined' && navigator.clipboard
         ? () => navigator.clipboard.readText()
         : undefined,
     );
-    // Empty, non-text or denied clipboard: stay silent and keep the input as-is.
-    if (!text) {
+    // An empty clipboard stays silent (nothing to paste); a blocked read is a capability problem the
+    // user can act on, so it is reported instead of looking like a paste that did nothing.
+    if (!read.text) {
+      if (read.blocked) toast('读不到剪贴板：请在系统设置里允许剪贴板访问，或按 Cmd+V 粘贴', 'danger');
       requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
-    const next = insertAtCaret({ value: currentValue, start, end, text });
+    const next = insertAtCaret({ value: currentValue, start, end, text: read.text });
     onChange(next.value);
     setCursor(next.caret);
     const slash = slashAt(next.value, next.caret);

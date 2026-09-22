@@ -16,12 +16,16 @@ test('空剪贴板保持输入不变，caret 停在原地', () => {
   expect(result).toEqual({ value: 'hello world', caret: 5 });
 });
 
-test('读取被拒或非文本时返回空串，静默不抛错', async () => {
-  await expect(readClipboardText(() => Promise.reject(new Error('denied')))).resolves.toBe('');
-  await expect(readClipboardText(() => Promise.reject('not allowed'))).resolves.toBe('');
-  await expect(readClipboardText(undefined)).resolves.toBe('');
+test('读取被拒或不可用时报告 blocked，而不是伪装成空剪贴板', async () => {
+  await expect(readClipboardText(() => Promise.reject(new Error('denied')))).resolves.toEqual({ text: '', blocked: true });
+  await expect(readClipboardText(() => Promise.reject('not allowed'))).resolves.toEqual({ text: '', blocked: true });
+  await expect(readClipboardText(undefined)).resolves.toEqual({ text: '', blocked: true });
+});
+
+test('空剪贴板是空文本，不是权限问题', async () => {
+  await expect(readClipboardText(() => Promise.resolve(''))).resolves.toEqual({ text: '', blocked: false });
 });
 
 test('读取成功时返回剪贴板纯文本', async () => {
-  await expect(readClipboardText(() => Promise.resolve('粘贴内容'))).resolves.toBe('粘贴内容');
+  await expect(readClipboardText(() => Promise.resolve('粘贴内容'))).resolves.toEqual({ text: '粘贴内容', blocked: false });
 });
