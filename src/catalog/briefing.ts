@@ -1,4 +1,5 @@
 import type { NodeSpec, Operation } from '../core/types.ts';
+import { isImageAttachment } from '../core/attachments.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
 export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attempt'>, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[]; agentCombinations?: { id: string; name: string; description: string; recommendedGrade: string; status: string }[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
@@ -8,12 +9,16 @@ export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attem
   const catalogCapabilities = extra.catalog?.capabilities ?? [];
   const catalogAgentCombinations = extra.catalog?.agentCombinations ?? [];
   const attachments = (operation.context.messages ?? []).flatMap(message =>
-    (message.attachments ?? []).map(attachment => [
-      `- ${attachment.name} (${attachment.size} bytes, ${attachment.type || 'text/plain'})`,
-      '```text',
-      attachment.text,
-      '```',
-    ].join('\n')));
+    (message.attachments ?? []).map(attachment => isImageAttachment(attachment)
+      // Image bytes reach the model through prompt(text, { images }); the
+      // briefing only names the file so it never carries base64.
+      ? `- ${attachment.name} (${attachment.size} bytes, ${attachment.type}); delivered as an image attachment`
+      : [
+          `- ${attachment.name} (${attachment.size} bytes, ${attachment.type || 'text/plain'})`,
+          '```text',
+          attachment.text,
+          '```',
+        ].join('\n')));
   return [
     `Request: ${extra.request}`,
     `Requirement version: ${operation.requirementVersion}`,

@@ -64,7 +64,10 @@ function graphAgentDetail(runtime: Runtime, definitionVersion: string | null | u
 }
 
 export async function createApp(runtime: Runtime, options: { origin: string; webDir?: string; startup?: StartupInfo; startupInfo?: () => StartupInfo; config?: { store: ConfigStore; env: Record<string, string | undefined> }; configTest?: (modelId: string) => Promise<unknown>; appServices?: AppServices; usage?: UsageService; agentContext?: AgentContextLibrary; systemContext?: { systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown> } }) {
-  const app = Fastify({ logger: false });
+  // Image attachments travel as base64 inside a chat message, so the default
+  // 1 MiB JSON limit would reject the very payloads the composer can build
+  // (up to 8 MiB of images plus text). Keep a bounded ceiling above that.
+  const app = Fastify({ logger: false, bodyLimit: 24 * 1024 * 1024 });
   const session = createSession();
   const capabilitySecretValues = () => options.appServices?.capabilityConfig?.secretValues() ?? Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim())),

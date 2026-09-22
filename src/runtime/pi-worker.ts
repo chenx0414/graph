@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline';
 import { Socket } from 'node:net';
 import {
   createAssistantMessageEventStream, InMemoryCredentialStore, Type,
-  type Api, type AssistantMessage, type AssistantMessageFrame, type Model,
+  type Api, type AssistantMessage, type AssistantMessageFrame, type ImageContent, type Model,
 } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { InlineExtension } from '@earendil-works/pi-coding-agent';
@@ -185,10 +185,10 @@ async function main() {
     process.exit(0);
   };
   let operationRunning = false;
-  const runPrompt = async (text: string) => {
+  const runPrompt = async (text: string, images: ImageContent[] | undefined) => {
     if (operationRunning) throw new Error('Pi worker already has a running operation');
     operationRunning = true;
-    await session.prompt(text);
+    await session.prompt(text, images?.length ? images : undefined);
     await Promise.all(pendingEvents);
     await finish();
   };
@@ -214,9 +214,9 @@ async function main() {
 
   for await (const line of createInterface({ input: process.stdin })) {
     if (!line.trim()) continue;
-    const command = JSON.parse(line) as { operation?: string; text?: string; keepAlive?: boolean };
+    const command = JSON.parse(line) as { operation?: string; text?: string; images?: ImageContent[]; keepAlive?: boolean };
     if (command.operation === 'prompt' && typeof command.text === 'string') {
-      void runPrompt(command.text).catch(async error => {
+      void runPrompt(command.text, Array.isArray(command.images) ? command.images : undefined).catch(async error => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         await writeFully(process.stderr, `${message}\n`).catch(() => undefined);
         process.exit(1);

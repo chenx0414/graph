@@ -1,5 +1,5 @@
 import type { StreamFn, ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type { Api, Model } from '@earendil-works/pi-ai';
+import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
 import type { AgentSessionEvent, ModelRuntime, RetrySettings, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { SendGate } from './controlled-openai.ts';
 import { openPiInstance } from './pi-instance.ts';
@@ -90,7 +90,7 @@ export interface AgentSessionRequest {
 }
 
 export interface AgentSession {
-  prompt(text: string): Promise<AgentSessionTurn>;
+  prompt(text: string, images?: ImageContent[]): Promise<AgentSessionTurn>;
   /** Prepare history before prompt; summary failure must not consume the turn.
    * A manual compaction may instead be followed directly by close(). */
   compact(customInstructions?: string): Promise<void>;
@@ -187,10 +187,10 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
       });
       const state = sessionState();
       return {
-        async prompt(text) {
+        async prompt(text, images) {
           state.beginPrompt();
           try {
-            await instance.prompt(text);
+            await instance.prompt(text, images);
             return turn(instance.inspect());
           } finally {
             state.endPrompt();
@@ -221,10 +221,10 @@ export function createRestrictedProcessAgentSessionTransport(): AgentSessionTran
       const process = await openPiProcess(request);
       const state = sessionState();
       return {
-        async prompt(text) {
+        async prompt(text, images) {
           state.beginPrompt();
           try {
-            const inspect = await process.prompt(text);
+            const inspect = await process.prompt(text, images);
             return turn(inspect);
           } finally {
             state.endPrompt();

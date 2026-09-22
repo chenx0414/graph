@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from './store.ts';
+import { stripAttachmentData } from './attachments.ts';
 import { RuntimeError, type Json, type NodeSpec, type Operation, type OperationResult } from './types.ts';
 
 /**
@@ -38,7 +39,9 @@ export function conversationForTask(store: TaskStore, taskId: string): Conversat
 export function publicMessage(row: MessageRow) {
   return {
     id: row.id, seq: row.seq, role: row.role, kind: row.kind, text: row.text,
-    data: row.data ? JSON.parse(row.data) as Json : null,
+    // The ledger keeps the full attachment payload, but the client projection
+    // never carries image base64: only name/type/size leave the process.
+    data: row.data ? stripAttachmentData(JSON.parse(row.data) as Json) : null,
     state: row.state, operationId: row.operation_id, turn: row.turn,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };

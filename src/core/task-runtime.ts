@@ -43,34 +43,13 @@ import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationRe
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError, type AttachmentInput, type ProjectConfig, type Proposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
+import { cleanAttachments, isImageAttachment } from './attachments.ts';
 
 const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 function asThinkingLevel(value: string): ThinkingLevel {
   if (!THINKING_LEVELS.includes(value as ThinkingLevel)) throw new RuntimeError('invalid_input', 'A valid thinking level is required');
   return value as ThinkingLevel;
-}
-
-function cleanAttachments(input: AttachmentInput[] | undefined) {
-  const attachments = input ?? [];
-  if (attachments.length > 5) throw new RuntimeError('invalid_input', 'A message can contain at most five attachments');
-  let totalBytes = 0;
-  return attachments.map(attachment => {
-    if (!attachment || typeof attachment.name !== 'string' || !attachment.name.trim() || attachment.name.length > 240) {
-      throw new RuntimeError('invalid_input', 'Attachment names must be nonempty and bounded');
-    }
-    if (typeof attachment.type !== 'string' || attachment.type.length > 160 || typeof attachment.text !== 'string') {
-      throw new RuntimeError('invalid_input', 'Attachment type and text are required');
-    }
-    const bytes = Buffer.byteLength(attachment.text, 'utf8');
-    if (!Number.isSafeInteger(attachment.size) || attachment.size < 0 || attachment.size > 262_144 || bytes > 262_144) {
-      throw new RuntimeError('invalid_input', `Attachment ${attachment.name} exceeds the 256 KiB text limit`);
-    }
-    totalBytes += bytes;
-    if (totalBytes > 524_288) throw new RuntimeError('invalid_input', 'Combined text attachments exceed 512 KiB');
-    if (attachment.text.includes('\0')) throw new RuntimeError('invalid_input', `Attachment ${attachment.name} is not a text file`);
-    return { name: attachment.name.trim(), type: attachment.type, size: attachment.size, text: attachment.text };
-  });
 }
 
 function steeringText(row: MessageRow) {
@@ -81,9 +60,20 @@ function steeringText(row: MessageRow) {
       if (Array.isArray(data.attachments)) {
         for (const value of data.attachments) {
           if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-          const attachment = value as { name?: unknown; text?: unknown };
-          if (typeof attachment.name === 'string' && typeof attachment.text === 'string') {
+          const attachment = value as { name?: unknown; text?: unknown; type?: unknown; data?: unknown; size?: unknown };
+          if (typeof attachment.name !== 'string') continue;
+          if (typeof attachment.text === 'string' && attachment.text.trim()) {
             parts.push(`附件 ${attachment.name}:\n${attachment.text}`);
+          } else if (isImageAttachment({
+            name: attachment.name,
+            type: typeof attachment.type === 'string' ? attachment.type : 'image/png',
+            size: typeof attachment.size === 'number' ? attachment.size : 0,
+            text: '',
+            ...(typeof attachment.data === 'string' ? { data: attachment.data } : {}),
+          })) {
+            // Steering is text-only today; keep the image visible by name
+            // instead of silently dropping the reference.
+            parts.push(`附件 ${attachment.name}（图片，请在发送消息中查看）`);
           }
         }
       }

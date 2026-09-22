@@ -10,6 +10,7 @@ import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
 import { inspectResultHandoffSubmission, resultHandoffFromSubmission, resultHandoffRecoveryContext } from '../core/predecessor-handoff.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
+import { promptImagesFromAttachments } from '../core/attachments.ts';
 import type { TaskStore } from '../core/store.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
@@ -892,7 +893,10 @@ export function createPiAdapter(options: {
                 text: briefing.slice(0, 20_000),
               });
             }
-            const result = await session.prompt(briefing);
+            const userImages = promptImagesFromAttachments(
+              (operation.context.messages ?? []).flatMap(message => message.attachments ?? []),
+            );
+            const result = await session.prompt(briefing, userImages.length ? userImages : undefined);
             flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
             if (reloadReceipt) {

@@ -4,6 +4,7 @@ import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ImageContent } from '@earendil-works/pi-ai';
 import type { AgentSessionEvent, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Json } from '../core/types.ts';
 import type {
@@ -284,12 +285,12 @@ export async function openPiProcess(options: PiProcessOptions) {
   }
 
   return {
-    async prompt(text: string) {
+    async prompt(text: string, images?: ImageContent[]) {
       if (closed) throw new Error('Pi process is closed');
       if (pendingCompaction) throw new Error('Pi process is compacting');
       if (promptStarted) throw new Error('Pi process already received a prompt');
       promptStarted = true;
-      if (!control?.write({ operation: 'prompt', text })) throw new Error('Pi process input is closed');
+      if (!control?.write({ operation: 'prompt', text, ...(images?.length ? { images } : {}) })) throw new Error('Pi process input is closed');
       const inspect = await runPromise;
       latestInspect = inspect;
       return inspect;

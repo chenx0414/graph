@@ -220,7 +220,11 @@ export interface Operation {
   inputVersions: Record<string, { activationId: string; outputVersion: number }[]>;
   workspace?: string;
 }
-export interface AttachmentInput { name: string; type: string; size: number; text: string }
+/** A user-supplied attachment. Text files carry their body in `text`; image
+ * files carry base64 bytes in `data` and an image mime in `type`, with `text`
+ * left empty. The base64 payload is never written to disk and never returned
+ * by the conversation view. */
+export interface AttachmentInput { name: string; type: string; size: number; text: string; data?: string }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
   /** Structured work-result handoff submitted by an Agent when a downstream edge requires it. */
