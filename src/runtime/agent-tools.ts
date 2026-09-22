@@ -525,6 +525,7 @@ export function agentTools(input: {
     ...(input.supervisor ? { supervisor: {
       validateProposal: Boolean(input.supervisor.validateProposal),
       graphState: Boolean(input.supervisor.graphState),
+      taskStatus: Boolean(input.supervisor.taskStatus),
       listProjects: Boolean(input.supervisor.listProjects),
       bindProject: Boolean(input.supervisor.bindProject),
       listProblems: Boolean(input.supervisor.listProblems),

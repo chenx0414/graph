@@ -177,7 +177,10 @@ test('the acceptance harness reuses one task, refuses stale confirmations, and c
   const currentQuestion = current[0]!;
   expect(currentQuestion.id).not.toBe(firstQuestion.id);
   expect(currentQuestion.data.commitSha).toBe(recheck.integrationSha);
-  expect(recheck.answeredChecks.map(check => check.questionId)).toContain(firstQuestion.id);
+  // The revision retired the activation that asked, so the stale question is superseded instead of
+  // staying answerable: the harness confirmed nothing, and only the new question can pass.
+  expect(recheck.answeredChecks).toEqual([]);
+  expect(recheck.questions.filter(question => question.id === firstQuestion.id && question.status === 'open')).toHaveLength(0);
   expect(provider.requests.length).toBe(10);
 
   // 6. Confirming the current question completes the task with bound evidence.

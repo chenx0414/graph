@@ -216,7 +216,7 @@ test('apply refuses a target file with uncommitted changes', async () => {
     title: 'Conflict',
     problem: 'Dirty target.',
     changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 3;\n' }],
-  }, { store, taskId, conversationId })).rejects.toThrow(/uncommitted changes/);
+  }, { store, taskId, conversationId })).rejects.toThrow(/Uncommitted changes outside this RSI change: src\/keep\.ts/);
 });
 
 test('a failed check keeps the change so the Agent can keep fixing', async () => {
@@ -466,4 +466,39 @@ test('custom checks give a fast inner loop without running the full gate', async
   }, { store, taskId, conversationId });
   expect(gated.status).toBe('checks_failed');
   expect(gated.validation.map(item => item.command)).toEqual(['node --run check']);
+});
+
+test('a green check refuses to verify a checkout whose changes the commit would miss', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  // Someone edited a file by hand: the checks would cover it, the commit would not.
+  await writeFile(join(root, 'src/keep.ts'), 'export const value = 9;\n');
+  await expect(service(root, dir).apply({
+    title: 'Checks-only re-run',
+    problem: 'Re-run the gate.',
+    activate: false,
+    changes: [],
+    checks: [{ command: 'node', args: ['--run', 'check'] }],
+  }, { store, taskId, conversationId })).rejects.toThrow(/Uncommitted changes outside this RSI change/);
+  expect(shell(root, ['log', '--oneline']).split('\n')).toHaveLength(1);
+  expect(await readFile(join(root, 'src/keep.ts'), 'utf8')).toBe('export const value = 9;\n');
+});
+
+test('a check that dirties the checkout does not become a verified commit', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const dirtying = async (): Promise<RsiValidationResult[]> => {
+    await writeFile(join(root, 'src/junk.ts'), 'export const junk = 1;\n');
+    return [{ command: 'mock check', status: 'passed', output: '' }];
+  };
+  const receipt = await service(root, dir, dirtying).apply({
+    title: 'Dirty check',
+    problem: 'A check writes a file.',
+    activate: false,
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 5;\n' }],
+    checks: [{ command: 'node', args: ['--eval', 'true'] }],
+  }, { store, taskId, conversationId });
+  expect(receipt.status).toBe('rolled_back');
+  expect(String(receipt.error)).toContain('Uncommitted changes outside this RSI change');
+  expect(shell(root, ['log', '--oneline']).split('\n')).toHaveLength(1);
 });

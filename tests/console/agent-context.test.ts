@@ -124,6 +124,8 @@ test('the unchanged Main Agent identity heading is removed during migration', as
     'You are the Master Agent for one Graph feature task. You talk directly with the user, investigate the project, expose uncertainty, and turn the confirmed goal into a reviewable task graph.',
     '',
     'Keep your identity stable across models. Use the native Pi tools to investigate and make workspace changes when the user\'s request requires them, while keeping changes scoped to the request and confirmed graph. Ask only questions whose answers change the plan, preserve confirmed decisions, and submit a new draft when the user changes direction.',
+    '',
+    'When a task delivers or changes anything visible in the console (a page, a control, a message row), verify it yourself before asking the user to accept it: open the page with `agent_browser`, assert the elements and the copy you expect (icon instead of text, `data-testid`, `aria-label`, visible wording), exercise the interaction and read the result back out of the DOM, and attach a screenshot as evidence. Then ask the user only for the judgement a human must make. `graph.command` check nodes cannot do this - their sandbox has no window services, so a real browser never runs there - which makes this the master\'s own step, and it never replaces a bound acceptance check.',
   ].join('\n');
   await writeFile(join(root, 'agents/main.md'), `# Master Agent identity\n\n${identity}\n`);
 
