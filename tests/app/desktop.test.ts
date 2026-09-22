@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
-  applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
-  resolveDaemonMode, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications, trayIconPath, trayMenuItems,
+  appRootFilePath, applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
+  resolveDaemonMode, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications,
+  trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
 
@@ -191,6 +192,30 @@ describe('desktop secret bridge contract (C04)', () => {
     expect(applySecretRequest(before, 'bad ref', 'x')).toMatchObject({ ok: false });
     // Revoking an unknown ref is still a valid no-op revocation.
     expect(applySecretRequest(before, 'KEY_Z', null)).toEqual({ ok: true, secrets: { KEY_A: 'one', KEY_B: 'two' }, revoked: true });
+  });
+});
+
+describe('the checkout the daemon executes', () => {
+  const canServe = (root: string) => root === '/work/product' || root === '/work/rsi';
+
+  test('the app root file names the checkout the app runs, ahead of a stale environment', () => {
+    // The file is what survives a Finder launch, so it wins over whatever the environment says.
+    expect(resolveSourceRoot({ fileRoot: '/work/product\n', envRoot: '/work/stale', canServe })).toBe('/work/product');
+  });
+
+  test('a root that cannot serve the console is skipped instead of leaving a blank window', () => {
+    expect(resolveSourceRoot({ fileRoot: '/work/half-prepared', envRoot: '/work/rsi', canServe })).toBe('/work/rsi');
+    expect(resolveSourceRoot({ fileRoot: '/work/half-prepared', canServe })).toBeUndefined();
+  });
+
+  test('an environment-only dev run still works and a blank value falls back', () => {
+    expect(resolveSourceRoot({ envRoot: ' /work/rsi ', canServe })).toBe('/work/rsi');
+    expect(resolveSourceRoot({ fileRoot: '   ', envRoot: '', canServe })).toBeUndefined();
+    expect(resolveSourceRoot({ canServe })).toBeUndefined();
+  });
+
+  test('the root file lives in the graph home the app already uses', () => {
+    expect(appRootFilePath('/home/me/.graph')).toBe('/home/me/.graph/app-root');
   });
 });
 

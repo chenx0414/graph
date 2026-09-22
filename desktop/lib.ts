@@ -3,7 +3,8 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export interface AppPaths {
   root: string;
-  /** Checkout the daemon actually runs from; equals root unless GRAPH_RSI_ROOT redirects it. */
+  /** Checkout the daemon actually runs from; equals root unless the app root file or
+   * GRAPH_RSI_ROOT redirects it. */
   sourceRoot: string;
   stateDir: string;
   graphHome: string;
@@ -44,6 +45,30 @@ export function resolveAppPaths(input: {
       ? join(sourceRoot, 'dist/web')
       : input.isPackaged ? join(root, 'web') : join(root, 'dist/web'),
   };
+}
+
+/** Where the app records the checkout it runs the daemon from. */
+export function appRootFilePath(graphHome: string): string {
+  return join(graphHome, 'app-root');
+}
+
+/** The checkout the daemon executes. The root file is the durable setting: a launch from Finder
+ * carries no environment, so the app has to read that choice from disk. GRAPH_RSI_ROOT stays the
+ * override for a dev run, and a root that cannot serve the console is skipped rather than leaving
+ * the window blank. The named checkout is the product line, because it is also the tree a
+ * self-improvement change edits and the tree `app:build` rebuilds. */
+export function resolveSourceRoot(input: {
+  fileRoot?: string;
+  envRoot?: string;
+  canServe: (root: string) => boolean;
+}): string | undefined {
+  for (const candidate of [input.fileRoot, input.envRoot]) {
+    const value = candidate?.trim();
+    if (!value) continue;
+    const root = resolve(value);
+    if (input.canServe(root)) return root;
+  }
+  return undefined;
 }
 
 export function trayIconPath(root: string): string {
