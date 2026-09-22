@@ -51,6 +51,9 @@ function attachmentSize(bytes: number) {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(bytes < 102_400 ? 1 : 0)} KB`;
 }
 
+/** The textarea grows with its content up to this height, then scrolls. */
+export const COMPOSER_MAX_HEIGHT = 180;
+
 export function ChatComposer({
   value,
   onChange,
@@ -59,7 +62,11 @@ export function ChatComposer({
   projectId,
   placeholder,
   onSend,
+  onSubmit,
   sendDisabled,
+  busy = false,
+  paused = false,
+  pausePending = false,
   suggestion,
   slashTools = [],
   slashCapabilities = [],
@@ -82,7 +89,16 @@ export function ChatComposer({
   projectId: string | null;
   placeholder: string;
   onSend: () => void;
+  /** Enter key action. Defaults to `onSend`; used to keep keyboard sending
+   * separate from the context-sensitive primary button. */
+  onSubmit?: () => void;
   sendDisabled: boolean;
+  /** The master is producing output, so the primary button offers pause. */
+  busy?: boolean;
+  /** The conversation is paused, so the primary button resumes or sends+resumes. */
+  paused?: boolean;
+  /** A pause/resume request is in flight; the primary button waits. */
+  pausePending?: boolean;
   suggestion?: string | null;
   slashTools?: AgentToolView[];
   slashCapabilities?: AgentCapabilityView[];
@@ -131,6 +147,23 @@ export function ChatComposer({
   const availableSuggestion = suggestion?.trim() ?? '';
   const showingSuggestion = Boolean(availableSuggestion) && value.length === 0
     && attachments.length === 0 && !mentionOpen && !slashOpen;
+  const primaryMode = pausePending ? 'pending' : paused ? 'resume' : busy ? (value.trim() || attachments.length ? 'send' : 'pause') : 'send';
+  const primaryLabel = primaryMode === 'pending'
+    ? '正在切换暂停状态…'
+    : primaryMode === 'pause'
+      ? '暂停主 Agent 的对话处理'
+      : primaryMode === 'resume'
+        ? '继续对话；输入内容时发送并继续'
+        : '发送消息';
+
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    if (!input) return;
+    input.style.height = 'auto';
+    const next = Math.min(input.scrollHeight, COMPOSER_MAX_HEIGHT);
+    input.style.height = `${next}px`;
+    input.style.overflowY = input.scrollHeight > COMPOSER_MAX_HEIGHT + 1 ? 'auto' : 'hidden';
+  }, [value]);
 
   useEffect(() => {
     const mention = mentionAt(value, cursor);
@@ -485,7 +518,7 @@ export function ChatComposer({
           }
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            if (!sendDisabled) onSend();
+            if (!sendDisabled) (onSubmit ?? onSend)();
           }
         }}
       />
@@ -507,8 +540,17 @@ export function ChatComposer({
         <FullAccessToggle />
         {leftActions}
         <div className="composer-spacer" />
-        <button type="button" className="icon-button primary" data-testid={sendTestId} disabled={sendDisabled} onClick={onSend} aria-label="发送消息">
-          <Icon name="send" size={17} />
+        <button
+          type="button"
+          className="icon-button primary"
+          data-testid={sendTestId}
+          data-mode={primaryMode}
+          disabled={sendDisabled}
+          onClick={onSend}
+          aria-label={primaryLabel}
+          title={primaryLabel}
+        >
+          <Icon name={primaryMode === 'pause' ? 'pause' : primaryMode === 'resume' ? 'play' : primaryMode === 'pending' ? 'refresh' : 'send'} size={17} />
         </button>
       </div>
     </div>
