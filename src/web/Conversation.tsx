@@ -732,7 +732,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     if (action === 'pause') { await changePaused(true); return; }
     if (action === 'resume') { await changePaused(false); return; }
     if (action === 'send-and-resume') {
-      if (await send()) await changePaused(false);
+      if (hasComposerInput && !(await send())) return;
+      await changePaused(false);
       return;
     }
     if (action === 'send') { await send(); return; }
