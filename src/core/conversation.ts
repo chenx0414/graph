@@ -176,11 +176,28 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
 /** Turn an internal failure into a short, actionable line for the chat. Raw
  * exception text, stack traces and JSON stay in the problem ledger. */
 export function turnFailureText(reason: string) {
+  // Keep the classification, but never hide the concrete reason: an unexplained
+  // "did not finish" is what made a session-restore defect look like a silent stall.
+  const detail = reason.replace(/\s+/g, ' ').trim().slice(0, 240);
+  const suffix = detail ? ` 原因：${detail}` : '';
   if (/unterminated string|unexpected end of json|json|output token limit|truncated/i.test(reason)) {
-    return '主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。';
+    return `主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。${suffix}`;
   }
-  if (/unknown usage|usage/i.test(reason)) return '主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。';
-  return '主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。';
+  if (/unknown usage|usage/i.test(reason)) return `主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。${suffix}`;
+  return `主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。${suffix}`;
+}
+
+/** The concrete reason behind a failed master turn: a setup failure carries setupError,
+ * a model failure carries error, and anything else falls back to the raw result. */
+export function turnFailureReason(result: OperationResult): string {
+  const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
+    ? result.output as { [key: string]: Json }
+    : undefined;
+  for (const key of ['error', 'setupError'] as const) {
+    const value = output?.[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return JSON.stringify(result.output ?? result.outcome);
 }
 
 /** Persist the durable side of one master turn: its assistant reply and the
@@ -231,7 +248,7 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
       });
     }
   } else if (result.outcome === 'failed') {
-    const reason = output && 'error' in output ? JSON.stringify(output.error) : JSON.stringify(result.output);
+    const reason = turnFailureReason(result);
     appendMessage(store, {
       conversationId: conversation.id,
       role: 'system',

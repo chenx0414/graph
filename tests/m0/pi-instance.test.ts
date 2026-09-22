@@ -199,7 +199,13 @@ test('a v3 capability change rebinds through a branched session and v2 migrates 
   delete legacy.piVersion;
   await writeFile(manifestPath, JSON.stringify(legacy));
   await expect(openPiInstance({ ...base, ...bundle })).rejects.toThrow('legacy capability digest is required');
-  await expect(openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'f'.repeat(64) })).rejects.toThrow('legacy capability bundle');
+  // A v2 mismatch rebinds exactly like v3: the conversation survives a legacy bundle change.
+  const v2Rebound = await openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'f'.repeat(64) });
+  await v2Rebound.close();
+  expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({
+    version: 3,
+    bundleDigest: bundle.bundleDigest,
+  });
   const migrated = await openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'e'.repeat(64) });
   await migrated.close();
   expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({

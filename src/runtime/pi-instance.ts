@@ -170,7 +170,8 @@ export async function openPiInstance(options: PiInstanceOptions) {
     if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
     if (!options.legacyCapabilityDigest) throw new Error('A legacy capability digest is required to restore this v2 Agent session');
     if (persistedDigest !== options.legacyCapabilityDigest) {
-      throw new Error(`Persisted legacy capability bundle does not match the Agent definition (${persistedDigest} != ${options.legacyCapabilityDigest})`);
+      // The same rule as v3: a legacy bundle change invalidates the bundle, not the conversation.
+      rebindFromManifest = manifest;
     }
   } else if (manifest && currentDigest) {
     throw new Error('Legacy Agent session has no capability digest and cannot be rebound silently');
@@ -208,13 +209,14 @@ export async function openPiInstance(options: PiInstanceOptions) {
     if (sourceContextDigest !== childContextDigest) {
       throw new Error('Rebased session context digest mismatch');
     }
+    const rebindSourceDigest = rebindFromManifest.bundleDigest ?? rebindFromManifest.capabilityDigest;
     contextInfo = {
       mode: 'rebind',
       ...(sourceSessionId ? { sourceSessionId } : {}),
       sourceSessionFile: rebindFromManifest.sessionFile,
       sourceLeafId,
       sourceContextDigest,
-      ...(rebindFromManifest.bundleDigest ? { reboundFromBundleDigest: rebindFromManifest.bundleDigest } : {}),
+      ...(rebindSourceDigest ? { reboundFromBundleDigest: rebindSourceDigest } : {}),
       childContextDigest,
     };
   } else if (options.forkFrom) {
