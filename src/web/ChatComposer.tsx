@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
+import { insertAtCaret, readClipboardText } from './chat-paste.ts';
 import { FullAccessToggle } from './FullAccessToggle.tsx';
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
 import type { ComposerModel, ComposerTelemetryView, ThinkingLevel } from './ComposerTelemetry.tsx';
@@ -202,6 +203,37 @@ export function ChatComposer({
     if (rejected) toast(`已忽略 ${rejected} 个不支持的附件；仅支持 256 KiB 以内的文本文件`, 'info');
   }
 
+  async function pasteClipboardAtCaret(input: HTMLTextAreaElement | null) {
+    const currentValue = input?.value ?? value;
+    const start = input?.selectionStart ?? cursor;
+    const end = input?.selectionEnd ?? cursor;
+    const text = await readClipboardText(
+      typeof navigator !== 'undefined' && navigator.clipboard
+        ? () => navigator.clipboard.readText()
+        : undefined,
+    );
+    // Empty, non-text or denied clipboard: stay silent and keep the input as-is.
+    if (!text) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
+    const next = insertAtCaret({ value: currentValue, start, end, text });
+    onChange(next.value);
+    setCursor(next.caret);
+    const slash = slashAt(next.value, next.caret);
+    setMentionOpen(Boolean(mentionAt(next.value, next.caret)));
+    setSlashOpen(Boolean(slash));
+    if (slash) {
+      setSlashScope('root');
+      setSlashIndex(0);
+    }
+    requestAnimationFrame(() => {
+      const target = textareaRef.current;
+      target?.focus();
+      target?.setSelectionRange(next.caret, next.caret);
+    });
+  }
+
   function chooseMention(entry: MentionEntry) {
     const mention = mentionAt(value, cursor);
     if (!mention) return;
@@ -371,6 +403,11 @@ export function ChatComposer({
         }}
         onSelect={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
         onClick={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
+        onContextMenu={event => {
+          // Paste the clipboard at the caret instead of opening any menu.
+          event.preventDefault();
+          void pasteClipboardAtCaret(event.currentTarget);
+        }}
         placeholder={showingSuggestion ? availableSuggestion : placeholder}
         data-suggestion={showingSuggestion ? availableSuggestion : undefined}
         autoFocus={autoFocus}
