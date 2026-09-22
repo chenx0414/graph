@@ -135,6 +135,41 @@ export class Execution {
 
   finish(taskId: string) { this.deliver(taskId); }
 
+  /**
+   * Operator stop. A task can end up with no path to completion - blocked
+   * nodes, failures nobody can answer - and it would keep the single active
+   * slot forever, so every queued task of every project waits behind it.
+   * Stopping therefore has to hand the slot on, exactly like completion does.
+   */
+  abandon(taskId: string, reason: string | null) {
+    const task = this.store.task(taskId);
+    if (task.phase === 'completed' || task.phase === 'abandoned') throw new RuntimeError('invalid_input', `A ${task.phase} task cannot be abandoned`);
+    if (this.store.db.prepare('SELECT id FROM operations WHERE task_id=? AND worker_active=1').get(taskId)) {
+      throw new RuntimeError('task_busy', 'Pause the task and wait for its running work to settle before abandoning it');
+    }
+    // The caller already holds a command transaction, so these writes are
+    // atomic with the receipt that records them.
+    // The task stops here, so its open problems stop with it: leaving them
+    // open would keep the project showing a question nobody can act on.
+    const resolved = this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND status='open'")
+      .run(canonicalJson({ type: 'abandoned', reason }), taskId);
+    this.store.db.prepare("UPDATE tasks SET phase='abandoned' WHERE id=?").run(taskId);
+    const cursor = this.store.event(taskId, 'task.abandoned', { reason, resolvedQuestions: resolved.changes });
+    const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+    if (active_task === taskId) this.promoteNextTask();
+    return cursor;
+  }
+
+  /** The single active code slot goes to the oldest queued task, if any. */
+  private promoteNextTask() {
+    const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;
+    this.store.db.prepare('UPDATE runtime SET active_task=?').run(next?.id ?? null);
+    if (!next) return null;
+    this.store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(next.id);
+    this.store.event(next.id, 'task.started', {});
+    return next.id;
+  }
+
   private block(node: ExecutionNodeRow, kind: string, data: Json, operationId: string | null = null) {
     this.lifecycle.block(node.task_id, node.id, kind, data, operationId);
   }
@@ -751,13 +786,8 @@ export class Execution {
   private completeTask(taskId: string) {
     const task = this.store.task(taskId);
     this.store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
-    const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;
-    this.store.db.prepare('UPDATE runtime SET active_task=?').run(next?.id ?? null);
     this.store.event(taskId, 'task.completed', { proposalVersion: task.accepted_proposal });
-    if (next) {
-      this.store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(next.id);
-      this.store.event(next.id, 'task.started', {});
-    }
+    this.promoteNextTask();
   }
 
   private deliver(taskId: string) {

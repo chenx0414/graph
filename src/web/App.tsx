@@ -84,7 +84,7 @@ type GraphPayload = {
 
 const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   discussing: 'info', running: 'accent', queued: 'neutral', paused: 'warn', pausing: 'warn',
-  blocked: 'warn', completed: 'success', failed: 'danger', skipped: 'neutral',
+  blocked: 'warn', completed: 'success', failed: 'danger', skipped: 'neutral', abandoned: 'danger',
 };
 const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   pending: 'neutral', ready: 'info', preparing: 'accent', running: 'accent',
@@ -732,6 +732,7 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
             <a className="btn" href={`#/tasks/${id}/graph`} data-testid="graph-link"><Icon name="graph" size={15} /><span style={{ marginLeft: 6 }}>查看任务图</span></a>
             <Button icon="pause" onClick={() => void act(() => api(`/api/tasks/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }), '已请求暂停')} data-testid="pause">暂停</Button>
             <Button icon="play" variant="primary" onClick={() => void act(() => api(`/api/tasks/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }), '已恢复执行')} data-testid="resume">继续</Button>
+            <Button icon="alert" onClick={() => { if (!confirm('终止后该任务无法继续，未完成的工作会被放弃。确定终止？')) return; void act(() => api(`/api/tasks/${id}/abandon`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID(), reason: '用户从任务页面终止' }) }), '已终止任务'); }} data-testid="abandon">终止</Button>
           </div>
         </div>
       </Card>

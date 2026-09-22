@@ -455,6 +455,15 @@ export async function openTaskRuntime(options: {
       return {
         async pause(requestId: string) { return setPaused(true, requestId); },
         async resume(requestId: string) { return setPaused(false, requestId); },
+        /** Stop the task for good, releasing the active slot to the queue. */
+        async abandon(requestId: string, reason?: string): Promise<Receipt> {
+          ensureOpen();
+          const receipt = store.command('user', requestId, { type: 'abandon', taskId, reason: reason ?? null }, () => ({
+            taskId, cursor: execution.abandon(taskId, reason ?? null),
+          }));
+          if (options.autoWake) execution.kick();
+          return receipt;
+        },
         /** User-owned budget policy change: a finite cap or explicit unlimited.
          * Instance identity, used total and every other gate stay untouched. */
         async setBudget(input: { nodeId: string; tokens: number | null; requestId: string }): Promise<Receipt> {
@@ -556,6 +565,13 @@ export async function openTaskRuntime(options: {
           const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null; owner: string }[];
           const userQuestions = questions.filter(question => question.owner === 'user');
           const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
+          // A queued task is invisible work: name the task holding the single
+          // active slot and how many problems it is stuck on, so a wedged queue
+          // is diagnosable from the task view instead of from the database.
+          const activeTask = store.db.prepare('SELECT id, project_id FROM tasks WHERE id=(SELECT active_task FROM runtime)').get() as { id: string; project_id: string } | undefined;
+          const queuedBehind = task.phase === 'queued' && activeTask
+            ? { taskId: activeTask.id, projectId: activeTask.project_id, openProblems: (store.db.prepare("SELECT COUNT(*) AS count FROM questions WHERE task_id=? AND owner='main' AND status='open'").get(activeTask.id) as { count: number }).count }
+            : null;
           const messages = (store.db.prepare("SELECT cursor,type,data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor").all(taskId) as { cursor: number; type: string; data: string }[]).map(row => {
             const message = JSON.parse(row.data) as { text?: string; request?: string; requirementVersion?: number };
             return { cursor: row.cursor, text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 };
@@ -570,7 +586,7 @@ export async function openTaskRuntime(options: {
               return { containers: graph ? graph.containers() : [], loops: graph ? graph.plan.loops : [] };
             })(),
             revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
-            targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused),
+            targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused), queuedBehind,
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
             status: task.paused ? (operations.some(op => op.workerActive) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operations: operations.map(row => ({ ...row.operation, state: row.state, reserved: row.reserved, workerActive: row.workerActive, result: row.result })),

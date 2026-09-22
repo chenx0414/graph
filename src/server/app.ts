@@ -433,6 +433,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const body = request.body as { proposalVersion: number; targetBranch: string; requestId: string };
     return runtime.user.task(params.taskId).accept({ proposalVersion: body.proposalVersion, targetBranch: body.targetBranch, requestId: body.requestId });
   });
+  app.post('/api/tasks/:taskId/abandon', async request => {
+    const params = request.params as { taskId: string };
+    const body = request.body as { requestId: string; reason?: string };
+    return runtime.user.task(params.taskId).abandon(body.requestId, body.reason);
+  });
   app.post('/api/tasks/:taskId/pause', async request => {
     const params = request.params as { taskId: string };
     const body = request.body as { requestId: string };

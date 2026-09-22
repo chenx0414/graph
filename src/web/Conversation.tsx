@@ -134,7 +134,7 @@ type ConversationView = {
 };
 const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   discussing: 'info', running: 'accent', queued: 'neutral', paused: 'warn', pausing: 'warn',
-  blocked: 'warn', completed: 'success', failed: 'danger', skipped: 'neutral',
+  blocked: 'warn', completed: 'success', failed: 'danger', skipped: 'neutral', abandoned: 'danger',
 };
 const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   pending: 'neutral', ready: 'info', preparing: 'accent', running: 'accent',
