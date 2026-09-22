@@ -19,7 +19,7 @@ import { formatTokens } from './insights.ts';
 import { NODE_LABEL, TASK_LABEL, describeQuestion } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { QuestionReply } from './Questions.tsx';
-import { ErrorBox, costText, useAsync, useEventStream } from './shared.tsx';
+import { ErrorBox, costText, useAsync, useEventStream, useTargetBranch } from './shared.tsx';
 import { TranscriptRowView } from './TranscriptRows.tsx';
 import { Button, Icon, Pill, Spinner, StatusDot, toast } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
@@ -516,7 +516,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [steering, setSteering] = useState(false);
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
-  const [branch, setBranch] = useState('main');
+  const { branch, setBranch } = useTargetBranch(view?.projectId ?? null);
   const [projection, setProjection] = useState(createConversationProjection);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from './api.ts';
 import { nextEventCursor } from './event-cursor.ts';
+import { defaultTargetBranch, type ProjectBranchView } from './project-branch.ts';
 import { Button, Icon } from './ui.tsx';
 
 /** One unambiguous rendering for possibly multi-currency costs. */
@@ -21,6 +23,19 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
       {onRetry && <Button size="sm" variant="danger" onClick={onRetry}>重试</Button>}
     </div>
   );
+}
+
+/** Target branch for a new task: the project's own branch, not a guessed default. */
+export function useTargetBranch(projectId: string | null) {
+  const [branch, setBranch] = useState('main');
+  const touched = useRef(false);
+  const projects = useAsync(() => api<ProjectBranchView[]>('/api/projects'), [projectId]);
+  useEffect(() => {
+    if (touched.current) return;
+    const known = defaultTargetBranch(projects.data, projectId);
+    if (known) setBranch(known);
+  }, [projects.data, projectId]);
+  return { branch, setBranch: (value: string) => { touched.current = true; setBranch(value); } };
 }
 
 export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {

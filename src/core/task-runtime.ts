@@ -633,7 +633,7 @@ export async function openTaskRuntime(options: {
     },
     async projects() {
       ensureOpen();
-      const withPreparation = <T extends { id: string }>(project: T) => ({ ...project, preparation: git.preparation(project.id) });
+      const withPreparation = <T extends { id: string }>(project: T) => ({ ...project, preparation: git.preparation(project.id), branch: git.currentBranch(project.id) });
       const configured = configuredProjects();
       if (configured !== undefined) {
         return configured.map(project => withPreparation({ id: project.id, root: resolve(project.root), grants: [...new Set(project.grants ?? [])].sort() }));

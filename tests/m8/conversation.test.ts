@@ -167,9 +167,11 @@ test('Main Agent can validate a graph, inspect its state, list projects and bind
     evidence: [],
   });
 
-  const projects = await supervisor.listProjects() as { id: string; preparation: unknown }[];
+  const projects = await supervisor.listProjects() as { id: string; preparation: unknown; branch: string | null }[];
   expect(projects.map(project => project.id)).toEqual(['one', 'two']);
   expect(projects.every(project => 'preparation' in project)).toBe(true);
+  // The console prefills a new task's target branch from the repository, not a hardcoded name.
+  expect(projects.every(project => 'branch' in project)).toBe(true);
 
   const validProposal = {
     requirementVersion: conversation.requirementVersion,

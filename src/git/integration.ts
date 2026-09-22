@@ -54,6 +54,13 @@ export class GitIntegration {
     };
   }
 
+  /** The repository's current branch, used to prefill a new task's target branch. */
+  currentBranch(projectId: string) {
+    const prepared = this.preparation(projectId);
+    if (!prepared?.repoRoot) return null;
+    return checkedOutBranch(prepared.repoRoot) ?? null;
+  }
+
   /** Read-only project paths for chat @-references. */
   visiblePaths(projectId: string, query = '', limit = 80) {
     const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(projectId) as { root: string } | undefined;

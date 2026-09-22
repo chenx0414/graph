@@ -9,7 +9,7 @@ import { NodeRunPanel } from './NodeDetail.tsx';
 import { ConversationPanel, type ConversationSummary, type GraphAgentDetail } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
-import { ErrorBox, costText, useAsync, useTaskStream } from './shared.tsx';
+import { ErrorBox, costText, useAsync, useTargetBranch, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
 import { UsagePage } from './Usage.tsx';
 import { ResourceLibrary as CapabilityResourceLibrary } from './ResourceLibrary.tsx';
@@ -685,7 +685,7 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
   const { data: events, reload: reloadEvents } = useAsync(() => api<EventRow[]>(`/api/tasks/${id}/events?limit=200`), [id]);
   const limits = useLimits();
   const [text, setText] = useState('');
-  const [branch, setBranch] = useState('main');
+  const { branch, setBranch } = useTargetBranch(view?.projectId ?? null);
   const [actionError, setActionError] = useState('');
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshAll = useCallback(() => {
