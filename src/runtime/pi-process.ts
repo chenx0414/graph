@@ -215,6 +215,10 @@ export async function openPiProcess(options: PiProcessOptions) {
     ],
     writePaths: [stateDir, ...capabilityWriteRoots, ...unixSockets, ...(options.readOnly ? [] : [workspace])],
     ...(options.filesystemAccess ? { filesystem: options.filesystemAccess } : {}),
+    // Full access grants host filesystem and network, so the Agent process is the user's own
+    // process; without this it still could not reach the window server, the pasteboard or a nested
+    // sandbox, which broke clipboard tools, Electron and browser automation despite the policy.
+    ...(options.filesystemAccess === 'host' ? { unsandboxed: true } : {}),
     ...(options.protectedPaths?.length ? { protectedPaths: options.protectedPaths } : {}),
     ...(options.filesystemAccess === 'host' ? { protectedPathExceptions: [stateDir] } : {}),
     ...(options.filesystemAccess === 'host' && protectedReadPathExceptions.length

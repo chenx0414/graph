@@ -98,6 +98,28 @@ test('worker preparation writes only to its granted scratch directory, even with
   } finally { broker.close(); }
 });
 
+test('a full-access host command is not wrapped in the seatbelt profile', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-unsandboxed-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  // Nesting `/usr/bin/sandbox-exec` is the sharpest possible probe: a seatbelt profile forbids it,
+  // and the same restriction silently denied the window server and pasteboard too.
+  const probe = "/usr/bin/sandbox-exec -p '(version 1)(allow default)' /bin/echo nested";
+  try {
+    const sandboxed = await executor.run({
+      broker, cwd: workspace, executable: '/bin/sh', args: ['-c', probe], filesystem: 'host',
+      readPaths: [workspace], writePaths: [workspace],
+    });
+    expect(sandboxed.code, sandboxed.stderr).not.toBe(0);
+    const free = await executor.run({
+      broker, cwd: workspace, executable: '/bin/sh', args: ['-c', probe], filesystem: 'host', unsandboxed: true,
+      readPaths: [workspace], writePaths: [workspace],
+    });
+    expect(free.code, free.stderr).toBe(0);
+    expect(free.stdout.trim()).toBe('nested');
+  } finally { broker.close(); }
+});
+
 test('host filesystem mode reaches outside the workspace while protected paths stay denied', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-filesystem-'))); dirs.push(root);
   const workspace = join(root, 'workspace'); await mkdir(workspace);

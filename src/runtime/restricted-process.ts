@@ -255,6 +255,11 @@ export interface RestrictedCommand {
   writePaths: string[];
   /** Host mode replaces the workspace/read/write allowlists with the host root. */
   filesystem?: 'bounded' | 'host';
+  /** Full access: this process is the user's own command and must not be wrapped in a seatbelt
+   * profile. A profile denies window-server and pasteboard mach lookups and forbids nesting
+   * `/usr/bin/sandbox-exec`, which silently breaks exactly what full access promised (clipboard
+   * tools, Electron, browser automation) even though host filesystem and network were granted. */
+  unsandboxed?: boolean;
   /** Paths denied for both read and write in host filesystem mode. */
   protectedPaths?: string[];
   /** Narrow subtrees that remain readable and writable inside an otherwise protected root. */
@@ -650,7 +655,13 @@ export async function openRestrictedExecutor() {
                   NO_PROXY: '', no_proxy: '', NODE_USE_ENV_PROXY: '1',
                 }
               : {};
-            const spawned = spawn('/usr/bin/sandbox-exec', ['-p', boundedProfile, '/bin/sh', '-c', launch], {
+            // A full-access process is the user's own command: seatbelt would deny window-server and
+            // pasteboard mach lookups and forbid nesting `/usr/bin/sandbox-exec`, quietly breaking
+            // exactly the tools full access promised.
+            const sandboxed = !command.unsandboxed;
+            const launched = sandboxed ? '/usr/bin/sandbox-exec' : '/bin/sh';
+            const launchedArgs = sandboxed ? ['-p', boundedProfile, '/bin/sh', '-c', launch] : ['-c', launch];
+            const spawned = spawn(launched, launchedArgs, {
               cwd, detached: true, env: { PATH: `${dirname(command.executable)}:/usr/bin:/bin`, HOME: homeDir, TMPDIR: tempDir, LANG: 'en_US.UTF-8', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1', ...(command.env ?? {}), ...proxyEnvironment, ...guardEnv },
               stdio,
             });
