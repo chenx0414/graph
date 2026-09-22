@@ -12,11 +12,12 @@ export interface AgentSessionBinding {
 }
 
 export interface AgentSessionContext {
-  mode: 'fresh' | 'fork';
+  mode: 'fresh' | 'fork' | 'rebind';
   sourceSessionId?: string;
   sourceSessionFile?: string;
   sourceLeafId?: string;
   sourceContextDigest?: string;
+  reboundFromBundleDigest?: string;
   childContextDigest: string;
 }
 

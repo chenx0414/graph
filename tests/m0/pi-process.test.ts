@@ -439,6 +439,7 @@ test('the production process path requires and verifies the persisted capability
     runtimePolicyDigest: '2'.repeat(64),
   });
   await first.prompt('first');
+  const before = first.inspect();
   await first.close();
 
   await expect(openPiProcess({
@@ -447,15 +448,23 @@ test('the production process path requires and verifies the persisted capability
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),
   })).rejects.toThrow('capability digest is required');
-  await expect(openPiProcess({
+  const rebound = await openPiProcess({
     ...base,
     bundleDigest: 'b'.repeat(64),
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),
-  })).rejects.toThrow('does not match');
+  });
+  expect(rebound.inspect().sessionId).not.toBe(before.sessionId);
+  expect(rebound.inspect().messages).toEqual(before.messages);
+  expect(rebound.inspect().context).toMatchObject({
+    mode: 'rebind',
+    sourceSessionId: before.sessionId,
+    reboundFromBundleDigest: 'a'.repeat(64),
+  });
+  await rebound.close();
   const same = await openPiProcess({
     ...base,
-    bundleDigest: 'a'.repeat(64),
+    bundleDigest: 'b'.repeat(64),
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),
   });
@@ -466,7 +475,7 @@ test('the production process path requires and verifies the persisted capability
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
   expect(manifest).toMatchObject({
     version: 3,
-    bundleDigest: 'a'.repeat(64),
+    bundleDigest: 'b'.repeat(64),
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),
     model: modelA.id,

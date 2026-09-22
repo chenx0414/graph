@@ -91,11 +91,13 @@ export interface PiInstanceOptions {
 }
 
 export interface SessionContextInfo {
-  mode: 'fresh' | 'fork';
+  mode: 'fresh' | 'fork' | 'rebind';
   sourceSessionId?: string;
   sourceSessionFile?: string;
   sourceLeafId?: string;
   sourceContextDigest?: string;
+  /** The bundle that owned the source session before a capability rebind. */
+  reboundFromBundleDigest?: string;
   childContextDigest: string;
 }
 
@@ -153,6 +155,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const persistedDigest = manifest?.capabilityDigest?.trim();
   const persistedBundleDigest = manifest?.bundleDigest?.trim();
   const currentDigest = options.bundleDigest?.trim();
+  let rebindFromManifest: Manifest | undefined;
   if (currentDigest && (!options.toolPolicyDigest?.trim() || !options.runtimePolicyDigest?.trim())) {
     throw new Error('Capability bundle digests require tool and runtime policy digests');
   }
@@ -160,7 +163,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
     if (!persistedBundleDigest) throw new Error('Persisted v3 capability bundle has no digest');
     if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
     if (persistedBundleDigest !== currentDigest) {
-      throw new Error(`Persisted capability bundle does not match the Agent definition (${persistedBundleDigest} != ${currentDigest})`);
+      rebindFromManifest = manifest;
     }
   } else if (manifest?.version === 2) {
     if (!persistedDigest) throw new Error('Persisted v2 capability bundle has no digest');
@@ -183,9 +186,37 @@ export async function openPiInstance(options: PiInstanceOptions) {
     }
   }
   let manager: SessionManager;
-  let contextInfo: SessionContextInfo | undefined = forceFresh ? undefined : manifest?.context;
-  if (manifest && !forceFresh) {
+  let contextInfo: SessionContextInfo | undefined = forceFresh || rebindFromManifest ? undefined : manifest?.context;
+  if (manifest && !forceFresh && !rebindFromManifest) {
     manager = SessionManager.open(manifest.sessionFile, sessionsDir, workspace);
+  } else if (rebindFromManifest) {
+    // A capability update invalidates the old bundle but not the conversation.
+    // Branch the persisted leaf into a new session file, then reopen it under
+    // the new bundle; the old session stays immutable for audit.
+    manager = SessionManager.open(rebindFromManifest.sessionFile, sessionsDir, workspace);
+    const sourceLeafId = manager.getLeafId();
+    if (!sourceLeafId) throw new Error('Cannot rebind a session without an active leaf');
+    const entries = manager.getEntries();
+    const byId = new Map(entries.map(entry => [entry.id, entry]));
+    const sourceContext = buildSessionContext(entries, sourceLeafId, byId);
+    const sourceSessionId = manager.getHeader()?.id;
+    const sourceContextDigest = contextDigest(sourceContext);
+    const branchedFile = manager.createBranchedSession(sourceLeafId);
+    if (!branchedFile) throw new Error('Failed to create a rebased session file');
+    const childContext = manager.buildSessionContext();
+    const childContextDigest = contextDigest(childContext);
+    if (sourceContextDigest !== childContextDigest) {
+      throw new Error('Rebased session context digest mismatch');
+    }
+    contextInfo = {
+      mode: 'rebind',
+      ...(sourceSessionId ? { sourceSessionId } : {}),
+      sourceSessionFile: rebindFromManifest.sessionFile,
+      sourceLeafId,
+      sourceContextDigest,
+      ...(rebindFromManifest.bundleDigest ? { reboundFromBundleDigest: rebindFromManifest.bundleDigest } : {}),
+      childContextDigest,
+    };
   } else if (options.forkFrom) {
     const sourceFile = resolve(options.forkFrom.sessionFile);
     manager = SessionManager.open(sourceFile, sessionsDir, workspace);
@@ -216,8 +247,8 @@ export async function openPiInstance(options: PiInstanceOptions) {
   }
   const sessionFile = manager.getSessionFile();
   if (!sessionFile) throw new Error('Expected a persistent Pi session');
-  if (manifest && !forceFresh && manager.getSessionId() !== manifest.sessionId) throw new Error('Persisted session identity changed');
-  if (!options.forkFrom && (!manifest || forceFresh)) {
+  if (manifest && !forceFresh && !rebindFromManifest && manager.getSessionId() !== manifest.sessionId) throw new Error('Persisted session identity changed');
+  if (!options.forkFrom && !rebindFromManifest && (!manifest || forceFresh)) {
     // Bootstrap the public JSONL header, then reopen it through Pi's public API.
     // Pi now owns all subsequent appends, including the first user message.
     await writeAtomic(sessionFile, JSON.stringify(manager.getHeader()) + '\n');
