@@ -1270,6 +1270,22 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   background: rgba(255,255,255,0.55);
   font-size: 11px;
 }
+.message-actions { display: flex; gap: 6px; margin-top: 5px; }
+.message-row[data-role="user"] .message-actions { justify-content: flex-end; }
+.message-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  line-height: 0;
+  cursor: pointer;
+}
+.message-copy:hover { background: var(--panel-soft); color: var(--text); }
+.message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .rsi-report {
   width: 100%;

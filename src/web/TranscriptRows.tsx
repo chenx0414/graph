@@ -3,6 +3,7 @@ import {
   messageAttachments,
   type ConversationMessage,
 } from '../core/conversation-projection.ts';
+import { copyText, writeClipboardText } from './chat-copy.ts';
 import { Markdown } from './Markdown.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
 import {
@@ -11,11 +12,26 @@ import {
   toolGroupSummary,
   type TranscriptRow,
 } from './transcript-model.ts';
-import { Icon } from './ui.tsx';
+import { Icon, toast } from './ui.tsx';
 import { usePacedStreamText } from './use-paced-stream.ts';
 import { useStreamVeils } from './use-stream-veils.ts';
 
-function MessageRow({ message, userAuthor }: { message: ConversationMessage; userAuthor?: string }) {
+function CopyButton({ text }: { text: string }) {
+  return (
+    <button
+      type="button"
+      className="message-copy"
+      data-testid="message-copy"
+      title="复制这条消息"
+      aria-label="复制这条消息"
+      onClick={() => void writeClipboardText(text, navigator.clipboard, toast)}
+    >
+      <Icon name="copy" size={14} />
+    </button>
+  );
+}
+
+function MessageRow({ message, userAuthor, copyable = '' }: { message: ConversationMessage; userAuthor?: string; copyable?: string }) {
   if (message.role === 'user') {
     const attachments = messageAttachments(message);
     return (
@@ -38,6 +54,9 @@ function MessageRow({ message, userAuthor }: { message: ConversationMessage; use
               </div>
             )}
           </div>
+          {copyable && (
+            <div className="message-actions"><CopyButton text={copyable} /></div>
+          )}
         </div>
       </div>
     );
@@ -197,9 +216,10 @@ const AssistantMarkdownBlock = memo(function AssistantMarkdownBlock(input: {
   return <Markdown text={input.source} veils={input.veils} />;
 }, (previous, next) => previous.source === next.source && sameVeils(previous.veils, next.veils));
 
-function AssistantResponse({ row, author }: {
+function AssistantResponse({ row, author, copyable = '' }: {
   row: Extract<TranscriptRow, { kind: 'assistant' }>;
   author?: string;
+  copyable?: string;
 }) {
   const paced = usePacedStreamText(row.text, row.id, row.streaming);
   const visualStreaming = row.streaming || paced.revealing;
@@ -243,6 +263,9 @@ function AssistantResponse({ row, author }: {
           </div>
           {visualStreaming && <span className="streaming-caret" aria-hidden="true" />}
         </div>
+        {copyable && (
+          <div className="message-actions"><CopyButton text={copyable} /></div>
+        )}
       </div>
     </div>
   );
@@ -255,13 +278,13 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor }: {
 }) {
   if (row.kind === 'message') {
     return userAuthor
-      ? <MessageRow message={row.message} userAuthor={userAuthor} />
-      : <MessageRow message={row.message} />;
+      ? <MessageRow message={row.message} userAuthor={userAuthor} copyable={copyText(row)} />
+      : <MessageRow message={row.message} copyable={copyText(row)} />;
   }
   if (row.kind === 'assistant') {
     return assistantAuthor
-      ? <AssistantResponse row={row} author={assistantAuthor} />
-      : <AssistantResponse row={row} />;
+      ? <AssistantResponse row={row} author={assistantAuthor} copyable={copyText(row)} />
+      : <AssistantResponse row={row} copyable={copyText(row)} />;
   }
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;

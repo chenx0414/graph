@@ -6,7 +6,7 @@ export type IconName =
   | 'overview' | 'inbox' | 'catalog' | 'usage' | 'wizard' | 'settings' | 'graph' | 'task'
   | 'play' | 'pause' | 'check' | 'alert' | 'clock' | 'plus' | 'refresh'
   | 'link' | 'bolt' | 'spark' | 'box' | 'chevron' | 'search' | 'message' | 'send' | 'close'
-  | 'folder' | 'file' | 'paperclip' | 'archive' | 'panel-left' | 'panel-right';
+  | 'folder' | 'file' | 'paperclip' | 'archive' | 'panel-left' | 'panel-right' | 'copy';
 
 const PATHS: Record<IconName, ReactNode> = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -39,6 +39,7 @@ const PATHS: Record<IconName, ReactNode> = {
   archive: <><rect x="3" y="4" width="18" height="5" rx="1.5" /><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M9 13h6" /></>,
   'panel-left': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
   'panel-right': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>,
+  copy: <><rect x="8.5" y="8.5" width="12" height="12" rx="2.2" /><path d="M5.5 15.5h-.2A2.3 2.3 0 0 1 3 13.2V5.3A2.3 2.3 0 0 1 5.3 3h7.9A2.3 2.3 0 0 1 15.5 5.3v.2" /></>,
 };
 
 export function Icon({ name, size = 16, className = '' }: { name: IconName; size?: number; className?: string }) {
