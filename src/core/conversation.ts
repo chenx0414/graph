@@ -173,31 +173,47 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
   store.event(conversationRow(store, row.conversation_id).anchor_task_id, 'message.updated', { message: publicMessage(row) });
 }
 
+/** Where a failed turn failed: before the model ran (a setup failure) or during the run.
+ * The distinction decides how the reason text is read. */
+export type TurnFailureKind = 'setup' | 'run';
+
 /** Turn an internal failure into a short, actionable line for the chat. Raw
  * exception text, stack traces and JSON stay in the problem ledger. */
-export function turnFailureText(reason: string) {
-  // A classified failure already says what happened, and its raw text (a parse error, a
-  // truncation offset) is noise for the user. Only an unclassified failure has to name its
-  // reason: an unexplained "did not finish" is what made a session-restore defect look silent.
-  const detail = reason.replace(/\s+/g, ' ').trim().slice(0, 240);
-  if (/unterminated string|unexpected end of json|json|output token limit|truncated/i.test(reason)) {
+export function turnFailureText(reason: string, kind: TurnFailureKind = 'run') {
+  // A setup failure never reached the model, so its text is the environment story and has to be
+  // shown. Reading a stack that merely mentions package_json_reader as a truncated model output
+  // is how a Pi worker that could not load its own modules became an actively misleading notice.
+  const detail = failureDetail(reason);
+  if (kind === 'setup') {
+    return `主 Agent 本轮没有启动起来，回复没有完成。消息已保留，可以再发一次重试。${detail ? ` 原因：${detail}` : ''}`;
+  }
+  if (/unterminated string|unexpected end of (json|input)|unexpected token|output token limit|truncat/i.test(reason)) {
     return '主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。';
   }
-  if (/unknown usage|usage/i.test(reason)) return '主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。';
+  if (/unknown usage/i.test(reason)) return '主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。';
   return `主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。${detail ? ` 原因：${detail}` : ''}`;
 }
 
-/** The concrete reason behind a failed master turn: a setup failure carries setupError,
- * a model failure carries error, and anything else falls back to the raw result. */
-export function turnFailureReason(result: OperationResult): string {
+/** The one line worth showing from a failure blob: its longest early line carries the message
+ * while stack frames stay short. Single line, bounded. */
+function failureDetail(reason: string) {
+  const lines = reason.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 8);
+  return lines.reduce((best, line) => (line.length > best.length ? line : best), '').slice(0, 240);
+}
+
+/** The concrete reason behind a failed master turn plus the field it came from: a run
+ * failure carries error, a setup failure carries setupError, and anything else falls back to
+ * the raw result. Reading the field is what keeps a setup failure from being described as a
+ * truncated model output. */
+export function turnFailureReason(result: OperationResult): { reason: string; kind: TurnFailureKind } {
   const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
     ? result.output as { [key: string]: Json }
     : undefined;
   for (const key of ['error', 'setupError'] as const) {
     const value = output?.[key];
-    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'string' && value.trim()) return { reason: value, kind: key === 'setupError' ? 'setup' : 'run' };
   }
-  return JSON.stringify(result.output ?? result.outcome);
+  return { reason: JSON.stringify(result.output ?? result.outcome), kind: 'run' };
 }
 
 /** Persist the durable side of one master turn: its assistant reply and the
@@ -248,12 +264,12 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
       });
     }
   } else if (result.outcome === 'failed') {
-    const reason = turnFailureReason(result);
+    const failure = turnFailureReason(result);
     appendMessage(store, {
       conversationId: conversation.id,
       role: 'system',
       kind: 'error',
-      text: turnFailureText(reason ?? ''),
+      text: turnFailureText(failure.reason ?? '', failure.kind),
       state: 'done',
       operationId: operation.id,
       turn: operation.attempt,
@@ -263,7 +279,7 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
 
 /** Record one plain-language interruption for a master turn whose outcome is
  * uncertain and which will therefore not reach recordConversationOutput. */
-export function recordConversationInterruption(store: TaskStore, operation: Operation, reason: string) {
+export function recordConversationInterruption(store: TaskStore, operation: Operation, reason: string, kind: TurnFailureKind = 'run') {
   if (operation.kind !== 'agent') return;
   const nodeSpec = JSON.parse((store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
     .get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
@@ -275,7 +291,7 @@ export function recordConversationInterruption(store: TaskStore, operation: Oper
     conversationId: conversation.id,
     role: 'system',
     kind: 'error',
-    text: turnFailureText(reason),
+    text: turnFailureText(reason, kind),
     state: 'done',
     operationId: operation.id,
     turn: operation.attempt,
