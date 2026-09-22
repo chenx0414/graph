@@ -187,6 +187,37 @@ test('a dirty target checkout in another worktree is not overwritten', async () 
   await expect(readFile(join(target, 'feature.txt'), 'utf8')).rejects.toThrow();
 });
 
+test('a human rejection keeps the check blocked and asks the main Agent for rework', async () => {
+  const root = await repo();
+  const reviewed = withIndependentReview({ work }, [
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
+    { id: 'check', kind: 'program', action: 'graph.human_check', dependsOn: ['work'] },
+  ], 'work');
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: reviewed.actions });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
+  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Human reject', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'Human reject',
+    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: reviewed.nodes,
+  }, 'proposal');
+  const task = runtime.user.task(taskId);
+  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+  let view = await task.view();
+  const acceptance = view.questions.find(question => question.kind === 'human_check' && question.status === 'open')!;
+  await task.answer(acceptance.id, { type: 'reject', reason: 'copy button still shows text' }, 'human-reject');
+  await runtime.host.drive();
+  view = await task.view();
+  // The rejection is a verdict: the acceptance must not pass, and the main Agent owns the rework.
+  expect(view.phase).toBe('running');
+  expect(view.nodes.find(node => node.id === 'check')!.status).toBe('blocked');
+  const rework = view.questions.find(question => question.kind === 'rework' && question.status === 'open')!;
+  expect(rework.data).toMatchObject({ reason: 'copy button still shows text' });
+  expect(view.evidence.some(entry => entry.acceptanceId === 'works' && entry.valid)).toBe(false);
+});
+
 test('a human check is bound to the current activation and commit', async () => {
   const root = await repo();
   const reviewed = withIndependentReview({ work }, [
