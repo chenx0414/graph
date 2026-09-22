@@ -53,6 +53,67 @@ function service(root: string, stateDir: string, validate = passing) {
   return new RsiService({ root, stateDir, validate });
 }
 
+test('a passed check keeps only its verdict and the full log moves to a report file', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const noisy = async (): Promise<RsiValidationResult[]> => [
+    { command: 'node --run check', status: 'passed', output: 'x'.repeat(20_000) },
+  ];
+  const receipt = await service(root, dir, noisy).apply({
+    title: 'Quiet receipt',
+    activate: false,
+    problem: 'Keep the conversation receipt small.',
+    changes: [],
+    checks: [{ command: 'node', args: ['--run', 'check'] }],
+  }, { store, taskId, conversationId });
+  expect(receipt.validation).toEqual([{ command: 'node --run check', status: 'passed', output: '' }]);
+  expect(receipt.outputPath).toBeTruthy();
+  expect((await readFile(receipt.outputPath!, 'utf8')).length).toBeGreaterThan(20_000);
+  expect(receipt.report).toContain('完整日志');
+});
+
+test('a runtime-only change skips app:build while a web change still builds', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const seen: (boolean | undefined)[] = [];
+  const spy = async (input: { root: string; checks: { command: string; args: string[] }[]; activate: boolean; needsBuild?: boolean }): Promise<RsiValidationResult[]> => {
+    seen.push(input.needsBuild);
+    return [{ command: 'mock check', status: 'passed', output: '' }];
+  };
+  const rsi = service(root, dir, spy as never);
+  await rsi.apply({
+    title: 'Runtime only', activate: false, problem: 'No bundle change.',
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 2;\n' }],
+  }, { store, taskId, conversationId });
+  expect(seen[0]).toBe(false);
+  await rsi.apply({
+    title: 'Web change', activate: false, problem: 'The bundle changes.',
+    changes: [{ path: 'src/web/panel.tsx', action: 'write', content: 'export const Panel = 1;\n' }],
+  }, { store, taskId, conversationId });
+  expect(seen[1]).toBe(true);
+});
+
+test('an activation that commits nothing new does not schedule a reload', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  await service(root, dir).apply({
+    title: 'Land a change', activate: false, problem: 'Commit once.',
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 3;\n' }],
+  }, { store, taskId, conversationId });
+  // A later service sees that commit as the running build, exactly like a daemon that already
+  // reloaded it: nothing new is pending, so activation must not interrupt the user again.
+  const receipt = await service(root, dir).apply({
+    title: 'Re-run the gate', activate: true, problem: 'Choose the confirmed program checks.',
+    changes: [],
+    checks: [{ command: 'node', args: ['--run', 'check'] }],
+  }, { store, taskId, conversationId });
+  expect(receipt.status).toBe('applied');
+  expect(receipt.restartRequired).toBe(false);
+  expect(receipt.activation).toEqual({ state: 'active' });
+  expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
+  expect(receipt.report).toContain('无需重载');
+});
+
 test('status reports an available checkout and its branch', async () => {
   const root = await repo();
   const real = await realpath(root);

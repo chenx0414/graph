@@ -66,6 +66,8 @@ export interface RsiReceipt {
   error?: string;
   diff?: string;
   report: string;
+  /** Full check output for this attempt, written outside the receipt the conversation stores. */
+  outputPath?: string;
 }
 
 export interface RsiStatus {
@@ -103,7 +105,7 @@ export interface RsiStatus {
 interface RsiServiceOptions {
   root?: string;
   stateDir: string;
-  validate?: (input: { root: string; checks: RsiCommand[]; activate: boolean }) => Promise<RsiValidationResult[]>;
+  validate?: (input: { root: string; checks: RsiCommand[]; activate: boolean; needsBuild?: boolean }) => Promise<RsiValidationResult[]>;
 }
 
 interface RsiApplyContext {
@@ -222,7 +224,27 @@ async function runCommand(root: string, command: RsiCommand, timeout: number): P
   }
 }
 
-async function defaultValidate(input: { root: string; checks: RsiCommand[]; activate: boolean }) {
+/** A passing suite is summarized by its verdict: the full log stays in the report file. A failure keeps
+ * its output, because that is what the failure digest and the Agent's fix depend on. */
+function summarizeValidation(result: RsiValidationResult): RsiValidationResult {
+  return result.status === 'passed' ? { ...result, output: '' } : result;
+}
+
+/** Paths whose change makes `node --run app:build` meaningful: the web bundle the window serves and
+ * the desktop package. A runtime-only change is fully covered by `node --run check`. */
+function buildRelevant(paths: string[]) {
+  return paths.some(path => path.startsWith('src/web/') || path.startsWith('desktop/')
+    || path === 'package.json' || path === 'index.html' || path.startsWith('vite.config'));
+}
+
+/** Files that differ from a known commit. An unknown base means "assume it needs a build". */
+function changedSince(root: string, base: string) {
+  const result = git(root, ['diff', '--name-only', `${base}..HEAD`]);
+  if (result.code !== 0) return null;
+  return result.stdout.split('\n').map(line => line.trim()).filter(Boolean);
+}
+
+async function defaultValidate(input: { root: string; checks: RsiCommand[]; activate: boolean; needsBuild?: boolean }) {
   const results: RsiValidationResult[] = [];
   for (const check of input.checks) {
     const result = await runCommand(input.root, check, CHECK_TIMEOUT_MS);
@@ -235,6 +257,7 @@ async function defaultValidate(input: { root: string; checks: RsiCommand[]; acti
   const check = await runCommand(input.root, { command: 'node', args: ['--run', 'check'] }, CHECK_TIMEOUT_MS);
   results.push(check);
   if (check.status === 'failed' || !input.activate) return results;
+  if (!input.needsBuild) return results;
   results.push(await runCommand(input.root, { command: 'node', args: ['--run', 'app:build'] }, BUILD_TIMEOUT_MS));
   return results;
 }
@@ -364,10 +387,11 @@ function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'
     `- 文件：${receipt.files.join(', ')}`,
     '- 验证：',
     ...receipt.validation.map(item => `  - ${item.command}: ${item.status}`),
+    ...(receipt.outputPath ? [`- 完整日志：${receipt.outputPath}`] : []),
     ...failureDigest(receipt.validation),
     `- 激活：${receipt.restartRequired
       ? receipt.force ? '已安排强制重载（可能中断在途 operation）' : '已安排自动重载（等待在途 operation 结束）'
-      : '仅保存，未重载'}`,
+      : receipt.activation?.state === 'active' ? '该提交已是运行中的版本，无需重载' : '仅保存，未重载'}`,
     ...(receipt.restartRequired ? ['- 当前回合已结束；等待宿主重载确认后才能报告“已生效”。'] : []),
     ...(receipt.diff ? ['', '```diff', receipt.diff, '```'] : []),
   ].join('\n');
@@ -416,6 +440,15 @@ export class RsiService {
 
   /** Keep queued work intact while the desktop drains existing operations. */
   hasPendingRestart() { return existsSync(this.restartPath()); }
+
+  /** Full check output for one attempt, kept out of the receipt that the conversation stores. */
+  private async writeReportFile(id: string, validation: RsiValidationResult[]) {
+    const directory = join(this.stateDir, 'rsi', 'reports');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const path = join(directory, `${id}.log`);
+    await writeFile(path, validation.map(item => `$ ${item.command}\n[${item.status}]\n${item.output}\n`).join('\n'), { mode: 0o600 });
+    return path;
+  }
 
   async status(): Promise<RsiStatus> {
     const root = this.available && this.root ? this.root : null;
@@ -621,7 +654,13 @@ export class RsiService {
       // parsed porcelain line whose first column is a space.
       const blocked = uniquePaths.filter(path => !owned.has(path)
         && git(root, ['status', '--porcelain=v1', '-uall', '--', path]).stdout.length > 0);
-      if (blocked.length) throw new RuntimeError('rsi_dirty', `RSI target files have uncommitted changes: ${blocked.join(', ')}`);
+      if (blocked.length) {
+        throw new RuntimeError('rsi_dirty',
+          `RSI target files have uncommitted changes: ${blocked.join(', ')}. `
+          + `Commit or revert them first, for example \`git -C ${root} add -A -- ${blocked.join(' ')} && git -C ${root} commit -m "wip"\`, `
+          + `or \`git -C ${root} restore --staged --worktree -- ${blocked.join(' ')}\`. `
+          + 'Files left behind by an earlier failed RSI attempt on this branch stay editable and are not reported.');
+      }
     }
 
     let createdBranch = false;
@@ -672,11 +711,19 @@ export class RsiService {
         await writeFile(absolute, content, { mode: 0o644 });
       }
 
-      const validation = await this.validate({
+      // `app:build` only matters when the served page or the desktop package can move; a runtime-only
+      // change is fully covered by `node --run check`, and rebuilding would overwrite the bundle the
+      // running window serves with this checkout's own build.
+      const changedPaths = this.runningCommit ? changedSince(root, this.runningCommit) : null;
+      const needsBuild = changedPaths === null || buildRelevant([...uniquePaths, ...owned, ...changedPaths]);
+      const raw = await this.validate({
         root,
         checks,
         activate: normalized.activate === true,
+        needsBuild,
       });
+      const outputPath = await this.writeReportFile(id, raw);
+      const validation = raw.map(summarizeValidation);
       const failed = validation.find(result => result.status === 'failed');
       if (failed) {
         // Keep the working tree so the Agent can iterate; a flaky or genuinely
@@ -685,7 +732,7 @@ export class RsiService {
         await this.writeWorking(branch, pendingFiles);
         const base: Omit<RsiReceipt, 'report'> = {
           id, status: 'checks_failed', title, root, branch, commit: null,
-          files: uniquePaths, validation, restartRequired: false, pendingFiles,
+          files: uniquePaths, validation, restartRequired: false, pendingFiles, outputPath,
         };
         const receipt: RsiReceipt = { ...base, report: checksFailedReport(normalized, base) };
         this.record(context, receipt);
@@ -711,7 +758,11 @@ export class RsiService {
       }
       await rm(this.workingPath(), { force: true });
 
-      const restartRequired = normalized.activate === true;
+      // Activation exists to put a new commit into the running daemon. When this call committed
+      // nothing and the daemon already runs HEAD (a checks-only re-run, for example), a reload would
+      // only interrupt the user, so it is skipped and reported as such.
+      const live = commit !== null && commit === this.runningCommit;
+      const restartRequired = normalized.activate === true && !live;
       if (restartRequired) {
         await writeAtomic(this.restartPath(), `${JSON.stringify({
           id, root, branch, commit, requestedAt: Date.now(),
@@ -730,7 +781,8 @@ export class RsiService {
         files: stagePaths,
         validation,
         restartRequired,
-        activation: { state: restartRequired ? 'pending_reload' : 'saved' },
+        activation: { state: restartRequired ? 'pending_reload' : live && normalized.activate === true ? 'active' : 'saved' },
+        ...(outputPath ? { outputPath } : {}),
         ...(normalized.force ? { force: true } : {}),
         ...(diff ? { diff } : {}),
       };
