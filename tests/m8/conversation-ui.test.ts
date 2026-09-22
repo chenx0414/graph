@@ -236,11 +236,14 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await includes(page, '执行记录显示');
   expect(await page.locator('[data-testid^="conversation-task-"]').first().innerText()).toContain('work');
 
-  // 6. Two messages in a row while the master is busy: both are kept.
+  // 6. Two messages in a row while the master is busy: both are kept. While the
+  // master is outputting the send control is the pause control (one click pauses
+  // the turn), so the keyboard stays the sending path and both prompts reach the
+  // record.
   await page.getByTestId('chat-input').fill('第一句说明。');
-  await page.getByTestId('chat-send').click();
+  await page.getByTestId('chat-input').press('Enter');
   await page.getByTestId('chat-input').fill('第二句说明。');
-  await page.getByTestId('chat-send').click();
+  await page.getByTestId('chat-input').press('Enter');
   await includes(page, '两条都收到。');
   expect(await page.getByTestId('message-user').filter({ hasText: '第一句说明' }).count()).toBe(1);
   expect(await page.getByTestId('message-user').filter({ hasText: '第二句说明' }).count()).toBe(1);
@@ -253,10 +256,12 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.screenshot({ path: join(evidence, '04-reloaded.png'), fullPage: true });
 
   // 8. Pause, queue a message, restart the daemon on the same state, resume.
+  // The primary control sends *and* resumes while paused, so the message is
+  // queued through the keyboard, which leaves the conversation paused.
   await page.getByTestId('conversation-pause').click();
   await includes(page, '已暂停');
   await page.getByTestId('chat-input').fill('重启后处理的消息。');
-  await page.getByTestId('chat-send').click();
+  await page.getByTestId('chat-input').press('Enter');
   await page.getByTestId('queued-message').filter({ hasText: '重启后处理的消息' }).waitFor();
   await server.close();
   server = await start(root, provider.baseUrl, provider.modelRuntime);

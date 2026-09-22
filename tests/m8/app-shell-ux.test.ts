@@ -441,12 +441,14 @@ test('the composer suggestion and queue steering follow the three Enter states',
 
   // State 3: an empty composer with a queued message sends that queue as steering.
   await input.press('Enter');
-  await expect.poll(() => steered.length).toBe(1);
+  // Under the full parallel gate a request that travels UI → HTTP → runtime can
+  // take longer than the default one-second poll.
+  await expect.poll(() => steered.length, { timeout: 10_000 }).toBe(1);
   expect(steered[0]).toContain('优先检查失败分支。');
   await expect.poll(async () => {
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
     return messages.find(message => message.text === '优先检查失败分支。')?.state;
-  }).toBe('delivered');
+  }, { timeout: 10_000 }).toBe('delivered');
 
   release();
   await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status).toBe('succeeded');
@@ -462,7 +464,7 @@ test('the composer suggestion and queue steering follow the three Enter states',
   await expect.poll(async () => {
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
     return messages.some(message => message.role === 'user' && message.text === '继续检查测试覆盖和失败分支。');
-  }).toBe(true);
+  }, { timeout: 10_000 }).toBe(true);
 });
 
 test('the project picker adds a local project to the sidebar', async () => {

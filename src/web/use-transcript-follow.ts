@@ -221,7 +221,11 @@ export function useTranscriptFollow(key: string | null, active = false) {
         runwayRef.current = next;
         setRunway(next);
       }
-      if (pinnedRef.current && baseHeight < thread.clientHeight) wake();
+      // A pinned reader follows every growth, not only a transcript that is
+      // shorter than the viewport and owns a runway. When the spring has already
+      // settled at the bottom, content that arrives afterwards must re-arm it,
+      // otherwise the viewport stays behind the newest answer.
+      if (pinnedRef.current) wake();
     };
     measureRef.current = measure;
     const observer = new ResizeObserver(measure);
