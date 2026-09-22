@@ -176,15 +176,15 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
 /** Turn an internal failure into a short, actionable line for the chat. Raw
  * exception text, stack traces and JSON stay in the problem ledger. */
 export function turnFailureText(reason: string) {
-  // Keep the classification, but never hide the concrete reason: an unexplained
-  // "did not finish" is what made a session-restore defect look like a silent stall.
+  // A classified failure already says what happened, and its raw text (a parse error, a
+  // truncation offset) is noise for the user. Only an unclassified failure has to name its
+  // reason: an unexplained "did not finish" is what made a session-restore defect look silent.
   const detail = reason.replace(/\s+/g, ' ').trim().slice(0, 240);
-  const suffix = detail ? ` 原因：${detail}` : '';
   if (/unterminated string|unexpected end of json|json|output token limit|truncated/i.test(reason)) {
-    return `主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。${suffix}`;
+    return '主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。';
   }
-  if (/unknown usage|usage/i.test(reason)) return `主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。${suffix}`;
-  return `主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。${suffix}`;
+  if (/unknown usage|usage/i.test(reason)) return '主 Agent 本轮缺少可核对的用量，消息已保留，稍后可以重试。';
+  return `主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。${detail ? ` 原因：${detail}` : ''}`;
 }
 
 /** The concrete reason behind a failed master turn: a setup failure carries setupError,

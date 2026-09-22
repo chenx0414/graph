@@ -7,15 +7,20 @@ test('a failed turn keeps its concrete reason instead of a generic apology', () 
   expect(text).toContain('原因：Persisted capability bundle does not match the Agent definition (a != b)');
 });
 
-test('the truncation and usage classifications keep their own lead and still name the reason', () => {
-  expect(turnFailureText('unexpected end of json input')).toContain('模型输出被截断');
-  expect(turnFailureText('unexpected end of json input')).toContain('原因：unexpected end of json input');
+test('a classified failure keeps its plain-language sentence without the raw parse error', () => {
+  const truncated = turnFailureText('unexpected end of json input');
+  expect(truncated).toContain('模型输出被截断');
+  // Raw exception text stays in the problem ledger; the user gets the actionable sentence.
+  expect(truncated).not.toContain('原因：');
+  expect(turnFailureText('SyntaxError: Unterminated string in JSON at position 1')).not.toContain('SyntaxError');
   expect(turnFailureText('unknown usage for this model')).toContain('缺少可核对的用量');
 });
 
-test('a long or blank reason never floods the message', () => {
+test('an unclassified failure names its reason, bounded to one line', () => {
+  expect(turnFailureText('Persisted capability bundle does not match the Agent definition (a != b)'))
+    .toContain('原因：Persisted capability bundle does not match the Agent definition (a != b)');
   expect(turnFailureText('')).not.toContain('原因：');
-  expect(turnFailureText('x'.repeat(900)).length).toBeLessThan(400);
+  expect(turnFailureText(`x\n${'y'.repeat(900)}`).length).toBeLessThan(400);
 });
 
 test('a setup failure is reported by its own reason, not as raw JSON', () => {
