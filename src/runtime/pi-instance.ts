@@ -290,6 +290,18 @@ export async function openPiInstance(options: PiInstanceOptions) {
     : [];
   const activeToolNames = session.getActiveToolNames().filter(name => customNames.has(name) || nativeToolNames.has(name) || extensionNames.includes(name));
   session.agent.streamFunction = options.stream;
+  // Graph's terminal tool result ends this operation even in a mixed batch.
+  // Let Pi persist all results, then stop before another model request.
+  let stopRequested = false;
+  const beforeToolCall = session.agent.beforeToolCall;
+  session.agent.beforeToolCall = async (context, signal) => stopRequested
+    ? { block: true, terminate: true, reason: 'The operation has completed; continue after the pending reload.' }
+    : beforeToolCall?.(context, signal);
+  session.agent.subscribe(event => {
+    if (event.type === 'tool_execution_end' && event.result.terminate === true) stopRequested = true;
+  });
+  const shouldStopAfterTurn = session.agent.shouldStopAfterTurn;
+  session.agent.shouldStopAfterTurn = (context, signal) => stopRequested || (shouldStopAfterTurn?.(context, signal) ?? false);
   if (options.onEvent) session.subscribe(options.onEvent);
   const loadedExtensions = loader.getExtensions().extensions.map(extension => extension.path);
   const loadedExtensionTools = loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()]);
@@ -312,7 +324,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   } satisfies Manifest));
 
   return {
-    async prompt(text: string) { await session.prompt(text); },
+    async prompt(text: string) { stopRequested = false; await session.prompt(text); },
     async steer(text: string) {
       await session.prompt(text, { streamingBehavior: 'steer', expandPromptTemplates: false });
     },

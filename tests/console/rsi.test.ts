@@ -106,6 +106,7 @@ test('apply replaces exactly once and refuses ambiguous edits', async () => {
   const rsi = service(root, dir);
   const applied = await rsi.apply({
     title: 'Bump value',
+    activate: false,
     problem: 'Value should be two.',
     changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'value = 1', newText: 'value = 2' }] }],
   }, { store, taskId, conversationId });
@@ -183,6 +184,7 @@ test('a failed check keeps the change so the Agent can keep fixing', async () =>
   fails = false;
   const fixed = await rsi.apply({
     title: 'Fix the regression',
+    activate: false,
     problem: 'Correct the earlier attempt.',
     changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'value = 42', newText: 'value = 7' }] }],
   }, { store, taskId, conversationId });
@@ -274,10 +276,32 @@ test('ackRestart clears only the matching request id', async () => {
     changes: [{ path: 'src/one.ts', action: 'write', content: '1\n' }],
   }, { store, taskId, conversationId });
   expect((await rsi.status()).pendingRestart?.id).toBe(receipt.id);
-  expect((await rsi.ackRestart('other')).cleared).toBe(false);
-  expect((await rsi.ackRestart(receipt.id)).cleared).toBe(true);
+  expect((await rsi.ackRestart('other', store)).cleared).toBe(false);
+  expect((await rsi.ackRestart(receipt.id, store)).cleared).toBe(false);
+  const restarted = service(root, dir);
+  expect((await restarted.ackRestart(receipt.id, store)).cleared).toBe(false);
+  store.db.prepare('UPDATE runtime SET generation=generation+1').run();
+  expect((await restarted.ackRestart(receipt.id, store)).cleared).toBe(true);
+  expect((await restarted.ackRestart(receipt.id, store)).cleared).toBe(false);
+  expect((await restarted.status()).lastActivation).toMatchObject({ id: receipt.id, commit: receipt.commit });
+  const message = store.db.prepare("SELECT data,text FROM messages WHERE kind='rsi'").get() as { data: string; text: string };
+  expect(JSON.parse(message.data)).toMatchObject({ activation: { state: 'active' } });
+  expect(message.text).toContain('重载已确认');
+  expect((store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE type='rsi.activated'").get() as { n: number }).n).toBe(1);
   expect((await rsi.status()).pendingRestart).toBeNull();
   expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
+});
+
+test('a pending reload cannot be replaced by another RSI change', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(root, dir);
+  const context = { store, taskId, conversationId };
+  const first = await rsi.apply({ title: 'First', problem: 'First change', changes: [{ path: 'first.ts', action: 'write', content: 'export {};\n' }], activate: true }, context);
+  await expect(rsi.apply({ title: 'Second', problem: 'Must wait', changes: [{ path: 'src/keep.ts', action: 'write', content: 'overwritten' }] }, context)).rejects.toThrow('waiting for reload');
+  expect((await rsi.status()).pendingRestart?.id).toBe(first.id);
+  expect(await readFile(join(root, 'src/keep.ts'), 'utf8')).toBe('export const value = 1;\n');
+  expect(shell(root, ['status', '--porcelain'])).toBe('');
 });
 
 test('resolveRsiRoot prefers an explicit GRAPH_RSI_ROOT', async () => {
@@ -295,7 +319,9 @@ test('status counts running operations so a reload can wait', async () => {
   store.db.prepare('INSERT INTO nodes(task_id,id,spec,status) VALUES(?,?,?,?)').run(taskId, 'master', '{}', 'running');
   store.db.prepare(`INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,worker_active)
     VALUES(?,?,?,?,?,?,?,?)`).run('op1', taskId, 'master', 0, '{}', 'dispatched', 0, 0);
-  const status = await service(root, dir).status();
+  const rsi = service(root, dir);
+  await rsi.apply({ title: 'Wait for other work', problem: 'Reload without interrupting it', changes: [{ path: 'next.ts', action: 'write', content: 'export {};\n' }] }, { store, taskId, conversationId });
+  const status = await rsi.status();
   expect(status.activeOperations).toBe(1);
   expect(status.operations).toEqual([{
     id: 'op1',
@@ -307,6 +333,8 @@ test('status counts running operations so a reload can wait', async () => {
     archived: false,
   }]);
   expect(status.canRestart).toBe(false);
+  store.db.prepare("UPDATE operations SET state='succeeded' WHERE id='op1'").run();
+  expect((await rsi.status()).canRestart).toBe(true);
 });
 
 test('a forced change reloads even with operations still running', async () => {

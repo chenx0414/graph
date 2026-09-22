@@ -357,6 +357,7 @@ export async function openTaskRuntime(options: {
         },
       } : {}),
       autoWake: Boolean(options.autoWake),
+      ...(options.rsi ? { dispatchAllowed: () => !options.rsi!.hasPendingRestart() } : {}),
     });
     // Tasks and conversations created while dispatch was disabled carry no
     // master node. Once a master binding exists they get one and become
@@ -1326,6 +1327,13 @@ export async function openTaskRuntime(options: {
     },
     conversations,
     host: {
+      async ackRsiRestart(id: string) {
+        ensureOpen();
+        if (!options.rsi) throw new RuntimeError('rsi_unavailable', 'RSI is unavailable');
+        const result = await options.rsi.ackRestart(id, store);
+        if (result.cleared && options.autoWake) execution.kick();
+        return result;
+      },
       async runReady() { ensureOpen(); return execution.runReady(); },
       /** Read-only candidate check: a hot config that moves the root of a
        * project with tasks in flight must be rejected before anything is

@@ -1717,7 +1717,7 @@ test('a self-improvement report renders as its own card in the conversation', as
   const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '改进 harness', requestId: 'rsi-report' });
   const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
   cleanup.push(async () => projection.close());
-  appendMessage(projection, {
+  const report = appendMessage(projection, {
     conversationId: created.conversationId,
     role: 'system',
     kind: 'rsi',
@@ -1746,10 +1746,17 @@ test('a self-improvement report renders as its own card in the conversation', as
   expect(await card.getAttribute('data-status')).toBe('applied');
   const text = await card.innerText();
   expect(text).toContain('修复超时');
-  expect(text).toContain('已应用');
+  expect(text).toContain('等待重载');
   expect(text).toContain('src/runtime/rsi.ts');
   expect(text).toContain('node --run check');
-  expect(text).toContain('已安排自动重载');
+  expect(text).toContain('等待正在执行的任务结束后重载');
   await page.getByRole('button', { name: '查看改动' }).click();
   await expect.poll(() => card.innerText()).toContain('diff --git');
+  appendMessage(projection, {
+    conversationId: created.conversationId, messageId: report.id, role: 'system', kind: 'rsi',
+    text: '重载已确认', data: { ...report.data as Record<string, import('../../src/core/types.ts').Json>, activation: { state: 'active', confirmedAt: Date.now() } },
+  });
+  await page.reload();
+  await expect.poll(() => card.innerText()).toContain('宿主已确认重载，改动已生效');
+  expect(await card.innerText()).not.toContain('等待重载');
 }, 60_000);

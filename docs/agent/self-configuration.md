@@ -76,6 +76,8 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 检查失败不会丢弃改动：文件保留在工作区、不提交、不重载，receipt 状态为 `checks_failed`。Main Agent 继续修复同一批文件，或传 `changes: []` 只重跑检查，直到通过；只有意外错误才恢复快照。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。
 
+`status=applied` 表示提交完成。`activate=true` 成功后，工具会结束当前回合，`activation.state=pending_reload` 表示等待重载；不要继续调用工具、追加 RSI 改动或报告“已生效”。已有 operation 结束前，新消息保持排队。宿主确认新 daemon 的提交与请求匹配后，报告更新为 `activation.state=active`，`inspect_rsi_status.lastActivation` 返回该次确认，排队消息恢复执行。需要先做多个中间提交时使用 `activate=false`（状态 `saved`），最后再请求激活。
+
 RSI 只改"正在运行的这份代码"，所以：
 
 - 在 checkout 里运行（`electron .` 或 CLI）：应用根就是 checkout，默认可用。

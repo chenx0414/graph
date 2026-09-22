@@ -59,6 +59,7 @@ export interface RsiReceipt {
   files: string[];
   validation: RsiValidationResult[];
   restartRequired: boolean;
+  activation?: { state: 'saved' | 'pending_reload' | 'active'; confirmedAt?: number; generation?: number };
   force?: boolean;
   /** Files left uncommitted by this or an earlier failed attempt, still fixable. */
   pendingFiles?: string[];
@@ -79,6 +80,7 @@ export interface RsiStatus {
     branch: string | null;
     commit: string | null;
     requestedAt: number;
+    generation?: number;
     force?: boolean;
   } | null;
   activeOperations: number;
@@ -95,6 +97,7 @@ export interface RsiStatus {
   /** False when the operation ledger could not be read, so a reload must wait. */
   operationsKnown: boolean;
   canRestart: boolean;
+  lastActivation: { id: string; commit: string | null; confirmedAt: number; generation: number } | null;
 }
 
 interface RsiServiceOptions {
@@ -349,7 +352,7 @@ function unavailableReport(input: RsiChangeInput, root: string | null, reason: s
 
 function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'>) {
   return [
-    `### RSI 已应用：${input.title}`,
+    `### RSI 已提交：${input.title}`,
     '',
     `- 问题：${input.problem}`,
     ...(input.evidence ? [`- 证据：${input.evidence}`] : []),
@@ -365,6 +368,7 @@ function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'
     `- 激活：${receipt.restartRequired
       ? receipt.force ? '已安排强制重载（可能中断在途 operation）' : '已安排自动重载（等待在途 operation 结束）'
       : '仅保存，未重载'}`,
+    ...(receipt.restartRequired ? ['- 当前回合已结束；等待宿主重载确认后才能报告“已生效”。'] : []),
     ...(receipt.diff ? ['', '```diff', receipt.diff, '```'] : []),
   ].join('\n');
 }
@@ -389,6 +393,8 @@ export class RsiService {
   readonly available: boolean;
   private readonly stateDir: string;
   private readonly validate: NonNullable<RsiServiceOptions['validate']>;
+  private readonly runningCommit: string | null;
+  private changing = false;
 
   constructor(options: RsiServiceOptions) {
     this.root = options.root ? resolveRoot(options.root) : undefined;
@@ -397,6 +403,7 @@ export class RsiService {
     this.available = Boolean(
       this.root && existsSync(join(this.root, 'package.json')) && detectRepo(this.root) === this.root,
     );
+    this.runningCommit = this.available ? revParse(this.root!, 'HEAD') ?? null : null;
   }
 
   private restartPath() {
@@ -407,11 +414,17 @@ export class RsiService {
     return join(this.stateDir, 'rsi', 'working.json');
   }
 
+  /** Keep queued work intact while the desktop drains existing operations. */
+  hasPendingRestart() { return existsSync(this.restartPath()); }
+
   async status(): Promise<RsiStatus> {
     const root = this.available && this.root ? this.root : null;
     const available = this.available;
     const branch = available ? checkedOutBranch(root!) ?? null : null;
     const pendingRestart = await this.readRestart();
+    let lastActivation: RsiStatus['lastActivation'] = null;
+    try { lastActivation = JSON.parse(await readFile(join(this.stateDir, 'rsi', 'activated.json'), 'utf8')) as RsiStatus['lastActivation']; }
+    catch { /* No confirmed reload yet. */ }
     let activeOperations = 0;
     let operations: RsiStatus['operations'] = [];
     let operationsKnown = true;
@@ -456,6 +469,7 @@ export class RsiService {
       branch,
       ...(available ? {} : { reason: this.unavailableReason() }),
       pendingRestart,
+      lastActivation,
       activeOperations,
       operations,
       operationsKnown,
@@ -481,9 +495,30 @@ export class RsiService {
    * that exact request. A stale id never clears a newer request, so a crashed
    * restart keeps its intent instead of silently dropping it.
    */
-  async ackRestart(id: string): Promise<{ cleared: boolean; pendingRestart: RsiStatus['pendingRestart'] }> {
+  async ackRestart(id: string, store: TaskStore): Promise<{ cleared: boolean; pendingRestart: RsiStatus['pendingRestart'] }> {
     const current = await this.readRestart();
     if (!current || current.id !== id) return { cleared: false, pendingRestart: current };
+    const { generation } = store.db.prepare('SELECT generation FROM runtime').get() as { generation: number };
+    // A matching HTTP response alone is not proof: the daemon must have
+    // restarted onto the requested commit, rather than still running old code.
+    if (current.root !== this.root || current.commit !== this.runningCommit
+      || (current.generation !== undefined && generation <= current.generation)) {
+      return { cleared: false, pendingRestart: current };
+    }
+    const confirmed = { id, commit: current.commit, confirmedAt: Date.now(), generation };
+    store.transaction(() => {
+      const messages = store.db.prepare("SELECT id,conversation_id,text,data FROM messages WHERE kind='rsi' AND json_extract(data,'$.id')=?").all(id) as { id: string; conversation_id: string; text: string; data: string }[];
+      for (const message of messages) {
+        const receipt = JSON.parse(message.data) as RsiReceipt;
+        if (receipt.activation?.state === 'active') continue;
+        receipt.activation = { state: 'active', confirmedAt: confirmed.confirmedAt, generation };
+        receipt.report = `${message.text}\n\n- 重载已确认：提交 ${current.commit} 已生效。`;
+        appendMessage(store, { conversationId: message.conversation_id, messageId: message.id, role: 'system', kind: 'rsi', text: receipt.report, data: receipt as unknown as Json, state: 'done' });
+        const taskId = (store.db.prepare('SELECT anchor_task_id FROM conversations WHERE id=?').get(message.conversation_id) as { anchor_task_id: string }).anchor_task_id;
+        store.event(taskId, 'rsi.activated', confirmed);
+      }
+    });
+    await writeAtomic(join(this.stateDir, 'rsi', 'activated.json'), JSON.stringify(confirmed));
     await rm(this.restartPath(), { force: true });
     return { cleared: true, pendingRestart: null };
   }
@@ -517,6 +552,13 @@ export class RsiService {
   }
 
   async apply(input: RsiChangeInput, context: RsiApplyContext): Promise<RsiReceipt> {
+    if (this.changing) throw new RuntimeError('rsi_busy', 'Another RSI change is still being validated.');
+    this.changing = true;
+    try { return await this.applyChange(input, context); }
+    finally { this.changing = false; }
+  }
+
+  private async applyChange(input: RsiChangeInput, context: RsiApplyContext): Promise<RsiReceipt> {
     const title = assertText(input.title, 'title', 200);
     const problem = assertText(input.problem, 'problem', 4_000);
     const evidence = input.evidence ? assertText(input.evidence, 'evidence', 4_000, false) : undefined;
@@ -556,6 +598,7 @@ export class RsiService {
     }
     const uniquePaths = [...new Set(paths as string[])];
     if (uniquePaths.length !== paths.length) throw new RuntimeError('invalid_input', 'RSI changes must use unique file paths');
+    if (this.hasPendingRestart()) throw new RuntimeError('rsi_reload_pending', 'RSI is waiting for reload confirmation. End this turn before starting another improvement.');
 
     const originalHead = revParse(root, 'HEAD');
     if (!originalHead) throw new RuntimeError('rsi_unavailable', 'Graph source checkout has no Git HEAD');
@@ -672,6 +715,7 @@ export class RsiService {
       if (restartRequired) {
         await writeAtomic(this.restartPath(), `${JSON.stringify({
           id, root, branch, commit, requestedAt: Date.now(),
+          generation: (context.store.db.prepare('SELECT generation FROM runtime').get() as { generation: number }).generation,
           ...(normalized.force ? { force: true } : {}),
         }, null, 2)}\n`);
       }
@@ -686,6 +730,7 @@ export class RsiService {
         files: stagePaths,
         validation,
         restartRequired,
+        activation: { state: restartRequired ? 'pending_reload' : 'saved' },
         ...(normalized.force ? { force: true } : {}),
         ...(diff ? { diff } : {}),
       };

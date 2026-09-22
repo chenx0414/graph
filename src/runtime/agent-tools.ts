@@ -441,7 +441,8 @@ export function agentTools(input: {
       const problem = String(body.problem ?? '').trim();
       if (!title || title.length > 200) throw new Error('An RSI title of at most 200 characters is required');
       if (!problem || problem.length > 4_000) throw new Error('A concrete RSI problem of at most 4000 characters is required');
-      return text(JSON.stringify(await input.systemContext!.rsiApply!(params)));
+      const receipt = await input.systemContext!.rsiApply!(params);
+      return { ...text(JSON.stringify(receipt)), ...(receipt.status === 'applied' && receipt.restartRequired === true ? { terminate: true } : {}) };
     },
     list_agent_combinations: async (_id, params) => {
       const body = fields(params);

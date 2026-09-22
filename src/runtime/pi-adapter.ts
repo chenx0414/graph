@@ -276,6 +276,7 @@ export function createPiAdapter(options: {
         let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
         let modelAccessQuestion: Json | undefined;
+        let reloadReceipt: Record<string, unknown> | undefined;
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
         let capabilityOperation: CapabilityOperation;
@@ -560,10 +561,14 @@ export function createPiAdapter(options: {
                     rsiStatus: async () => (await channels.rsi!.status()) as Record<string, unknown>,
                   } : {}),
                   ...(channels.rsi?.available && spec.role === 'master' && fullAccess ? {
-                    rsiApply: async (input: unknown) => (await channels.rsi!.apply(input, {
-                      taskId: operation.taskId,
-                      ...(conversation ? { conversationId: conversation.id } : {}),
-                    })) as Record<string, unknown>,
+                    rsiApply: async (input: unknown) => {
+                      const receipt = await channels.rsi!.apply(input, {
+                        taskId: operation.taskId,
+                        ...(conversation ? { conversationId: conversation.id } : {}),
+                      }) as Record<string, unknown>;
+                      if (receipt.status === 'applied' && receipt.restartRequired === true) reloadReceipt = receipt;
+                      return receipt;
+                    },
                   } : {}),
                 },
               } : {}),
@@ -883,6 +888,13 @@ export function createPiAdapter(options: {
             const result = await session.prompt(briefing);
             flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
+            if (reloadReceipt) {
+              return {
+                outcome: 'completed',
+                output: { text: `RSI 改动已提交，等待重载。当前回合已结束；重载确认后报告会更新为“已生效”。`, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}) },
+                usage: gate.total(),
+              };
+            }
             // A provider or transport error ends the turn with an assistant
             // error message; that is a failure, never a successful operation.
             if (result.stopReason === 'error') {

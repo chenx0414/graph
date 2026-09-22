@@ -123,7 +123,7 @@ function sameVeils(left: MarkdownVeil[], right: MarkdownVeil[]) {
 function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
   const [diffOpen, setDiffOpen] = useState(false);
   const { rsi } = row;
-  const statusLabel = rsi.status === 'applied' ? '已应用'
+  const statusLabel = rsi.status === 'applied' ? (rsi.activation === 'active' ? '已生效' : rsi.activation === 'pending_reload' ? '等待重载' : '已提交')
     : rsi.status === 'checks_failed' ? '检查未通过'
       : rsi.status === 'rolled_back' ? '已回滚' : '不可用';
   const files = rsi.files.length ? rsi.files : rsi.pendingFiles;
@@ -166,9 +166,10 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
       {rsi.restartRequired && (
         <p className="rsi-report-restart">
           <Icon name="refresh" size={12} />
-          {rsi.force
-            ? '已安排强制重载，可能中断仍在运行的 operation。'
-            : '已安排自动重载，等待在途 operation 结束后生效。'}
+          {rsi.activation === 'active' ? '宿主已确认重载，改动已生效。'
+            : rsi.force
+              ? '已提交，等待强制重载确认；可能中断正在执行的任务。'
+              : '已提交，等待正在执行的任务结束后重载。'}
         </p>
       )}
       {rsi.diff && (

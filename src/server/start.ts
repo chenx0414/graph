@@ -428,7 +428,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       appToken,
       rsi: {
         status: () => rsiService.status(),
-        ack: (id: string) => rsiService.ackRestart(id),
+        ack: (id: string) => server.runtime.host.ackRsiRestart(id),
       },
       snapshot: () => ({
         revision: live.revision(), effectiveRevision: live.revision(), applied: true,

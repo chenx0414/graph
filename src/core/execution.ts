@@ -43,12 +43,13 @@ export class Execution {
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean };
   private readonly access?: () => ResolvedAccessPolicy;
+  private readonly dispatchAllowed?: () => boolean;
   private readonly autoWake: boolean;
   private readonly generation: number;
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -59,6 +60,7 @@ export class Execution {
     if (extras.program) this.program = extras.program;
     if (extras.systemContext) this.systemContext = extras.systemContext;
     if (extras.access) this.access = extras.access;
+    if (extras.dispatchAllowed) this.dispatchAllowed = extras.dispatchAllowed;
     this.autoWake = Boolean(extras.autoWake);
     this.unsubscribeStore = store.onEvent(type => {
       if (this.autoWake && type === 'problem.routed') queueMicrotask(() => this.kick());
@@ -230,7 +232,7 @@ export class Execution {
   }
 
   private readyNodes(): ExecutionNodeRow[] {
-    if (this.stopping) return [];
+    if (this.stopping || this.dispatchAllowed?.() === false) return [];
     const nodes: ExecutionNodeRow[] = [];
     const fullAccess = isFullAccess(this.access?.());
     for (const taskId of this.laneTasks()) {
@@ -283,7 +285,7 @@ export class Execution {
   private async execute(node: ExecutionNodeRow): Promise<boolean> {
     const accessPolicy = this.access?.() ?? resolveAccessPolicy(standardAccessPolicy());
     const fullAccess = isFullAccess(accessPolicy);
-    if (this.stopping || (!fullAccess && this.store.task(node.task_id).paused)) return false;
+    if (this.stopping || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
     if (this.store.task(node.task_id).phase === 'chatting') {
       const conversation = conversationForTask(this.store, node.task_id);
@@ -673,7 +675,7 @@ export class Execution {
       this.lifecycle.markPreparationFailed(operation.id, String(error));
       return false;
     }
-    if (this.stopping || (!fullAccess && this.store.task(node.task_id).paused)) {
+    if (this.stopping || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) {
       this.lifecycle.cancelBeforeDispatch(operation.id);
       return false;
     }

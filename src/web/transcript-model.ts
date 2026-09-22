@@ -23,6 +23,7 @@ export type TranscriptRsi = {
   files: string[];
   validation: { command: string; status: string }[];
   restartRequired: boolean;
+  activation: 'saved' | 'pending_reload' | 'active' | null;
   force: boolean;
   pendingFiles: string[];
   error?: string;
@@ -93,6 +94,10 @@ function durableRsi(message: ConversationMessage): TranscriptRsi {
     files: stringArray(data.files),
     validation,
     restartRequired: data.restartRequired === true,
+    activation: data.activation && typeof data.activation === 'object' && !Array.isArray(data.activation)
+      && ['saved', 'pending_reload', 'active'].includes(String((data.activation as Record<string, unknown>).state))
+      ? (data.activation as Record<string, unknown>).state as 'saved' | 'pending_reload' | 'active'
+      : status === 'applied' ? (data.restartRequired === true ? 'pending_reload' : 'saved') : null,
     force: data.force === true,
     pendingFiles: stringArray(data.pendingFiles),
     ...(typeof data.error === 'string' ? { error: data.error } : {}),
