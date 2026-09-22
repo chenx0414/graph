@@ -152,6 +152,12 @@ test('Graph retries compaction before the next turn when the window is still ful
   // is still full gets another chance with the bounded instructions.
   expect(order[0]).toBe('completion');
   expect(order.slice(1).filter(kind => kind === 'summary').length).toBeGreaterThanOrEqual(2);
+  // The pre-turn summary must leave the worker ready for the user's actual
+  // request; recording a successful summary alone does not complete the turn.
+  expect(order.filter(kind => kind === 'completion')).toHaveLength(2);
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.messages.some(message => message.role === 'assistant' && message.text === '第二轮回复')).toBe(true);
+  expect(instanceTotals(root).every(instance => instance.used === instance.expected)).toBe(true);
   const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
   const compacted = (db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='session.compacted'").get() as { count: number }).count;
   const failed = (db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='session.compaction_failed'").get() as { count: number }).count;

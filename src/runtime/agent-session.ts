@@ -90,6 +90,8 @@ export interface AgentSessionRequest {
 
 export interface AgentSession {
   prompt(text: string): Promise<AgentSessionTurn>;
+  /** Prepare history before prompt; summary failure must not consume the turn.
+   * A manual compaction may instead be followed directly by close(). */
   compact(customInstructions?: string): Promise<void>;
   steer(text: string): Promise<void>;
   inspect(): AgentSessionInspect;

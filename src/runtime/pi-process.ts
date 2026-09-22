@@ -184,9 +184,10 @@ export async function openPiProcess(options: PiProcessOptions) {
   const check = (options.broker as { check?: (reservation?: number) => void }).check;
   let control: { write(message: unknown): boolean; kill(): boolean } | undefined;
   let readyInspect: PiWorkerInspect | undefined;
-  let finalInspect: PiWorkerInspect | undefined;
+  let latestInspect: PiWorkerInspect | undefined;
   let closed = false;
   let promptStarted = false;
+  let pendingCompaction: PromiseWithResolvers<PiWorkerInspect> | undefined;
   let resolveReady: (value: PiWorkerInspect) => void;
   let rejectReady: (error: unknown) => void;
   const ready = new Promise<PiWorkerInspect>((resolveReadyPromise, rejectReadyPromise) => {
@@ -244,6 +245,14 @@ export async function openPiProcess(options: PiProcessOptions) {
         }
         return null;
       }
+      if (value.operation === 'compaction_result') {
+        if (!pendingCompaction) throw new Error('Unexpected Pi compaction result');
+        const result = value.result as PiWorkerResult;
+        if (result.inspect) latestInspect = result.inspect;
+        if (result.ok && result.inspect) pendingCompaction.resolve(result.inspect);
+        else pendingCompaction.reject(new Error(result.error ?? 'Pi compaction failed without a result'));
+        return null;
+      }
       return requests(request);
     },
   }).then(result => {
@@ -253,10 +262,12 @@ export async function openPiProcess(options: PiProcessOptions) {
       if (!readyInspect) rejectReady(error);
       throw error;
     }
-    finalInspect = parseInspect(result.stdout);
-    return finalInspect;
+    latestInspect = parseInspect(result.stdout);
+    pendingCompaction?.reject(new Error('Pi process exited during compaction'));
+    return latestInspect;
   }).catch(error => {
     if (!readyInspect) rejectReady(error);
+    pendingCompaction?.reject(error);
     throw error;
   });
   void runPromise.catch(() => {});
@@ -270,32 +281,41 @@ export async function openPiProcess(options: PiProcessOptions) {
 
   return {
     async prompt(text: string) {
+      if (closed) throw new Error('Pi process is closed');
+      if (pendingCompaction) throw new Error('Pi process is compacting');
       if (promptStarted) throw new Error('Pi process already received a prompt');
       promptStarted = true;
       if (!control?.write({ operation: 'prompt', text })) throw new Error('Pi process input is closed');
       const inspect = await runPromise;
-      finalInspect = inspect;
+      latestInspect = inspect;
       return inspect;
     },
     async compact(customInstructions?: string) {
+      if (closed) throw new Error('Pi process is closed');
+      if (pendingCompaction) throw new Error('Pi process is compacting');
       if (promptStarted) throw new Error('Pi process already received a prompt');
-      promptStarted = true;
-      if (!control?.write({ operation: 'compact', ...(customInstructions ? { text: customInstructions } : {}) })) {
-        throw new Error('Pi process input is closed');
+      // Compaction prepares this operation's prompt; it must not consume the
+      // one-shot prompt or wait for the worker to exit.
+      pendingCompaction = Promise.withResolvers<PiWorkerInspect>();
+      try {
+        if (!control?.write({ operation: 'compact', keepAlive: true, ...(customInstructions ? { text: customInstructions } : {}) })) {
+          throw new Error('Pi process input is closed');
+        }
+        return await pendingCompaction.promise;
+      } finally {
+        pendingCompaction = undefined;
       }
-      const inspect = await runPromise;
-      finalInspect = inspect;
-      return inspect;
     },
     async steer(text: string) {
       if (!control?.write({ operation: 'steer', text })) throw new Error('Pi process input is closed');
     },
     inspect() {
-      return structuredClone(finalInspect ?? readyInspect!);
+      return structuredClone(latestInspect ?? readyInspect!);
     },
     async close() {
       if (closed) return;
       closed = true;
+      await pendingCompaction?.promise.catch(() => undefined);
       if (!promptStarted) control?.write({ operation: 'close' });
       await runPromise.catch(() => undefined);
       await acquired.release();

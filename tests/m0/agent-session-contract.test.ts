@@ -27,6 +27,74 @@ function bounded<T>(promise: Promise<T>, milliseconds: number, label: string) {
   ]);
 }
 
+test.each([
+  ...(['in-process', 'restricted-process'] as const).flatMap(kind =>
+    (['continue', 'failed-summary', 'close-and-resume'] as const).map(scenario => ({ kind, scenario }))),
+  { kind: 'restricted-process', scenario: 'worker-exit' } as const,
+])('the $kind transport settles compaction ($scenario)', async ({ kind, scenario }) => {
+  const root = await mkdtemp(join(tmpdir(), `graph-agent-compact-${kind}-`));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'project');
+  await mkdir(workspace);
+  const provider = await openaiServer([
+    { text: 'A previous response. '.repeat(300) },
+    {
+      text: 'Summary of the previous turn.', finishReason: scenario === 'failed-summary' ? 'length' : 'stop',
+      beforeReply: () => {
+        if (scenario === 'worker-exit') process.kill(session.inspect().processId!, 'SIGKILL');
+      },
+    },
+    { text: 'Continued successfully.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const broker = new CallBroker(join(root, 'calls.sqlite'), `compaction-${kind}`);
+  cleanup.push(() => broker.close());
+  const transport = kind === 'in-process'
+    ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
+    : createRestrictedProcessAgentSessionTransport();
+  const request: AgentSessionRequest = {
+    binding: { instanceId: `compact-${kind}`, nodeId: 'master', definitionVersion: 'master@1' },
+    workspace, stateDir: join(root, 'state'), model: provider.model,
+    stream: controlledOpenAIStream(broker, 'host-only-compaction-key'),
+    tools: [], bundleDigest: 'a'.repeat(64), toolPolicyDigest: 'b'.repeat(64),
+    runtimePolicyDigest: 'c'.repeat(64), readOnly: true, broker,
+    compaction: { enabled: false, reserveTokens: 256, keepRecentTokens: 1 },
+  };
+  let session = await transport.open(request);
+  cleanup.push(() => session.close());
+  await session.prompt('Prepare history for a follow-up. '.repeat(100));
+  const original = session.inspect();
+  await session.close();
+  session = await transport.open(request);
+
+  const compact = bounded(session.compact('Summarize briefly.'), 15_000, 'compaction');
+  if (scenario === 'worker-exit') {
+    await expect(compact).rejects.toThrow('SIGKILL');
+    await bounded(session.close(), 15_000, 'exited worker close');
+    expect(provider.requests).toHaveLength(2);
+    return;
+  }
+  if (scenario === 'failed-summary') await expect(compact).rejects.toThrow('token cap');
+  else {
+    await compact;
+    expect(JSON.stringify(session.inspect().messages)).toContain('Summary of the previous turn.');
+  }
+  if (scenario === 'close-and-resume') {
+    // A manual /compact finishes without a prompt and releases the worker.
+    await bounded(session.close(), 15_000, 'manual compaction close');
+    session = await transport.open(request);
+  }
+  const turn = await bounded(session.prompt('Continue after compaction.'), 15_000, 'continuation');
+  expect(turn).toMatchObject({
+    finalAssistantText: 'Continued successfully.', stopReason: 'stop',
+    inspect: { sessionId: original.sessionId, sessionFile: original.sessionFile },
+  });
+  expect(provider.requests).toHaveLength(3);
+  const continuation = JSON.stringify(provider.requests[2]);
+  expect(continuation).toContain(scenario === 'failed-summary' ? 'A previous response.' : 'Summary of the previous turn.');
+  await bounded(session.close(), 15_000, 'session close');
+}, 60_000);
+
 test.each(['in-process', 'restricted-process'] as const)(
   'the %s transport follows the Agent session contract',
   async kind => {
