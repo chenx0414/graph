@@ -1,6 +1,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
 import { insertAtCaret, readClipboardText } from './chat-paste.ts';
+import {
+  composerHistoryDown,
+  composerHistoryUp,
+  createComposerHistoryState,
+  recordComposerPrompt,
+  resetComposerHistory,
+  type ComposerHistoryState,
+} from './chat-history.ts';
+import {
+  composerEditKind,
+  createComposerUndoState,
+  recordComposerEdit,
+  redoComposer,
+  undoComposer,
+} from './chat-undo.ts';
 import { clampComposerHeight, composerPrimaryState } from './composer-state.ts';
 import { FullAccessToggle } from './FullAccessToggle.tsx';
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
@@ -67,6 +82,7 @@ export function ChatComposer({
   pausePending = false,
   queueLength = 0,
   hasSuggestion = false,
+  history,
   suggestion,
   slashTools = [],
   slashCapabilities = [],
@@ -103,6 +119,11 @@ export function ChatComposer({
   queueLength?: number;
   /** A suggested prompt is available, for the idle send branch. */
   hasSuggestion?: boolean;
+  /**
+   * The conversation's already-sent user prompts, oldest first. When omitted the
+   * composer recalls only the prompts it sent itself during this session.
+   */
+  history?: string[];
   suggestion?: string | null;
   slashTools?: AgentToolView[];
   slashCapabilities?: AgentCapabilityView[];
@@ -133,6 +154,11 @@ export function ChatComposer({
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  // An explicit snapshot stack: React writes the textarea value programmatically,
+  // so the browser's native undo has nothing to replay.
+  const undoRef = useRef(createComposerUndoState());
+  const historyRef = useRef(createComposerHistoryState());
+  const [historyBrowsing, setHistoryBrowsing] = useState(false);
   const activeMention = mentionAt(value, cursor);
   const activeSlash = slashAt(value, cursor);
   const allSlashEntries = useMemo(() => slashEntries({
@@ -163,6 +189,45 @@ export function ChatComposer({
       : primaryMode === 'resume'
         ? '继续对话；输入内容时发送并继续'
         : '发送消息';
+
+  /** Record a user edit so ⌘Z / ⇧⌘Z can step over it. */
+  function rememberEdit(previous: string, next: string) {
+    if (previous === next) return;
+    undoRef.current = recordComposerEdit(undoRef.current, previous, next, composerEditKind(previous, next));
+  }
+
+  /** Prompts available to ↑/↓: the conversation's sent messages, else this session's. */
+  function historyState(): ComposerHistoryState {
+    return history === undefined ? historyRef.current : { ...historyRef.current, entries: history };
+  }
+
+  function leaveHistory() {
+    historyRef.current = resetComposerHistory(historyRef.current);
+    setHistoryBrowsing(false);
+  }
+
+  /** Put a value in the box without treating it as a user edit (undo, recall). */
+  function applyProgrammatic(next: string) {
+    onChange(next);
+    const caret = next.length;
+    setCursor(caret);
+    setMentionOpen(false);
+    setSlashOpen(false);
+    requestAnimationFrame(() => {
+      const target = textareaRef.current;
+      target?.focus();
+      target?.setSelectionRange(caret, caret);
+    });
+  }
+
+  /** Remember a just-sent prompt unless the parent already tracks history. */
+  function rememberPrompt() {
+    if (history !== undefined) return;
+    const prompt = value.trim();
+    if (!prompt) return;
+    historyRef.current = recordComposerPrompt(historyRef.current, prompt);
+    setHistoryBrowsing(false);
+  }
 
   useLayoutEffect(() => {
     const input = textareaRef.current;
@@ -261,6 +326,8 @@ export function ChatComposer({
       return;
     }
     const next = insertAtCaret({ value: currentValue, start, end, text: read.text });
+    rememberEdit(currentValue, next.value);
+    leaveHistory();
     onChange(next.value);
     setCursor(next.caret);
     const slash = slashAt(next.value, next.caret);
@@ -283,6 +350,8 @@ export function ChatComposer({
     const token = `@${entry.path}${entry.kind === 'directory' ? '/' : ' '}`;
     const next = `${value.slice(0, mention.start)}${token}${value.slice(mention.end)}`;
     const nextCursor = mention.start + token.length;
+    rememberEdit(value, next);
+    leaveHistory();
     onChange(next);
     setCursor(nextCursor);
     setMentionIndex(0);
@@ -298,6 +367,8 @@ export function ChatComposer({
     if (!slash) return cursor;
     const next = `${value.slice(0, slash.start)}${value.slice(slash.end)}`.replace(/[ \t]+$/, '');
     const nextCursor = Math.min(slash.start, next.length);
+    rememberEdit(value, next);
+    leaveHistory();
     onChange(next);
     setCursor(nextCursor);
     requestAnimationFrame(() => {
@@ -332,6 +403,8 @@ export function ChatComposer({
           const token = `${slashTargetToken(target)} `;
           const next = `${currentValue.slice(0, start)}${token}${currentValue.slice(end)}`;
           const nextCursor = start + token.length;
+          rememberEdit(currentValue, next);
+          leaveHistory();
           onChange(next);
           setCursor(nextCursor);
           textareaRef.current?.focus();
@@ -431,10 +504,13 @@ export function ChatComposer({
       <textarea
         ref={textareaRef}
         data-testid={inputTestId}
+        data-history={historyBrowsing ? 'browsing' : undefined}
         value={value}
         onChange={event => {
           const next = event.target.value;
           const position = event.target.selectionStart ?? next.length;
+          rememberEdit(value, next);
+          leaveHistory();
           onChange(next);
           setCursor(position);
           setMentionOpen(Boolean(mentionAt(next, position)));
@@ -455,6 +531,18 @@ export function ChatComposer({
         data-suggestion={showingSuggestion ? availableSuggestion : undefined}
         autoFocus={autoFocus}
         onKeyDown={event => {
+          const shortcut = (event.metaKey || event.ctrlKey) && !event.altKey;
+          const key = event.key.toLowerCase();
+          if (shortcut && (key === 'z' || key === 'y')) {
+            const redo = key === 'y' || event.shiftKey;
+            event.preventDefault();
+            const move = redo ? redoComposer(undoRef.current, value) : undoComposer(undoRef.current, value);
+            if (!move) return;
+            undoRef.current = move.state;
+            leaveHistory();
+            applyProgrammatic(move.value);
+            return;
+          }
           if (slashOpen) {
             if (event.key === 'ArrowDown' && visibleSlashEntries.length) {
               event.preventDefault();
@@ -513,8 +601,42 @@ export function ChatComposer({
               return;
             }
           }
+          // Prompt history: only while neither the / nor @ menu is open, and
+          // only when the caret is on the edge line so multiline edits still work.
+          if (!slashOpen && !mentionOpen && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            const input = event.currentTarget;
+            const collapsed = input.selectionStart === input.selectionEnd;
+            const caret = input.selectionStart ?? value.length;
+            const browsing = historyRef.current.cursor !== null;
+            if (event.key === 'ArrowUp') {
+              if (browsing || (collapsed && !value.slice(0, caret).includes('\n'))) {
+                const move = composerHistoryUp(historyState(), value);
+                if (move) {
+                  event.preventDefault();
+                  historyRef.current = move.state;
+                  setHistoryBrowsing(move.state.cursor !== null);
+                  applyProgrammatic(move.value);
+                  return;
+                }
+              }
+              return;
+            }
+            if (browsing || (collapsed && !value.slice(caret).includes('\n'))) {
+              const move = composerHistoryDown(historyState());
+              if (move) {
+                event.preventDefault();
+                historyRef.current = move.state;
+                setHistoryBrowsing(move.state.cursor !== null);
+                applyProgrammatic(move.value);
+                return;
+              }
+            }
+            return;
+          }
           if (event.key === 'Tab' && showingSuggestion) {
             event.preventDefault();
+            rememberEdit(value, availableSuggestion);
+            leaveHistory();
             onChange(availableSuggestion);
             setCursor(availableSuggestion.length);
             requestAnimationFrame(() => {
@@ -526,7 +648,10 @@ export function ChatComposer({
           }
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            if (!sendDisabled) (onSubmit ?? onSend)();
+            if (!sendDisabled) {
+              rememberPrompt();
+              (onSubmit ?? onSend)();
+            }
           }
         }}
       />
@@ -554,7 +679,10 @@ export function ChatComposer({
           data-testid={sendTestId}
           data-mode={primaryMode}
           disabled={sendDisabled}
-          onClick={onSend}
+          onClick={() => {
+            if (!sendDisabled && primaryMode === 'send') rememberPrompt();
+            onSend();
+          }}
           aria-label={primaryLabel}
           title={primaryLabel}
         >

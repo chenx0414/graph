@@ -613,6 +613,9 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 }
 .new-chat-composer { width: min(720px, 100%); }
 .new-chat-composer-footer { width: min(720px, 100%); }
+/* While ↑/↓ browses sent prompts the composer marks itself, so a recalled prompt
+   is not mistaken for the draft that was being typed. */
+.chat-composer[data-history='browsing'] { border-color: var(--faint); }
 .chat-composer textarea {
   width: 100%;
   min-height: 72px;
