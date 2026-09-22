@@ -10,6 +10,10 @@ import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import { sandboxNetworkDomains } from '../core/domains.ts';
 import type { TokenUsage } from './call-broker.ts';
 
+/** Marks the one process that owns the host's IPC channel; the guard clears
+ * the mark so a forked descendant never installs the shim. */
+const LISTEN_GUARD_ENV = 'GRAPH_LISTEN_GUARD';
+
 /**
  * The host owns the only listening sockets of a local-network check. The
  * sandbox profile denies every bind, so a check and its children cannot create
@@ -24,6 +28,16 @@ const LOOPBACK_LISTEN_GUARD = String.raw`'use strict';
 // the only accepting descriptor. Removing this preload only removes the route;
 // it can never grant a bind, and a busy port keeps its original error instead
 // of being silently replaced by another one.
+//
+// Only the process the host spawned with this preload holds the host's channel.
+// NODE_OPTIONS reaches every descendant too, but a forked descendant (a test
+// runner worker) owns its channel to its own parent, and the guard's idle
+// unref would end it before it ever reports: such a process waits on that
+// channel and nothing else. The mark is cleared below so descendants stay
+// native — a descendant that asks a parent which never answers listener
+// requests would otherwise hang instead of failing.
+if (process.env.GRAPH_LISTEN_GUARD === '1') (function install() {
+delete process.env.GRAPH_LISTEN_GUARD;
 const net = require('node:net');
 const dgram = require('node:dgram');
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -188,6 +202,7 @@ process.on('message', (message, handle) => {
 });
 // No UDP listener is host-provided; the profile denies the bind as well.
 dgram.Socket.prototype.bind = function () { deny(); };
+})();
 `;
 
 /** A model turn can legitimately include large tool results and inline images. */
@@ -592,7 +607,7 @@ export async function openRestrictedExecutor() {
         // --test-isolation=none keeps node --test files in the process that owns
         // the IPC channel; an isolation child would have no route to the host.
         const guardEnv = listenGuard
-          ? { NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', quotedNodeOption(`--require=${listenGuard}`)].filter(Boolean).join(' ') }
+          ? { [LISTEN_GUARD_ENV]: '1', NODE_OPTIONS: [command.env?.NODE_OPTIONS, '--test-isolation=none', quotedNodeOption(`--require=${listenGuard}`)].filter(Boolean).join(' ') }
           : {};
         // Host listeners stay open until their handle is actually written to the
         // channel: Node queues handle sends behind an unacknowledged one and
