@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { lstatSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -314,6 +315,43 @@ test('a graph.command check resolves host-provided dependencies and environment'
   const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
   const body = JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { code: number; stdout: string };
   expect(body.stdout).toContain('pass');
+});
+
+test('a graph.command check resolves the project-owned dependencies without a host grant', async () => {
+  const root = await repo();
+  // Dependencies installed in the project itself are host configuration; the
+  // check must find them even though the host named no grant.
+  const modules = join(root, 'node_modules');
+  await mkdir(join(modules, 'probe'), { recursive: true });
+  await writeFile(join(modules, 'probe', 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', type: 'module', exports: './index.js' }));
+  await writeFile(join(modules, 'probe', 'index.js'), 'export const value = "project-dependency";\n');
+  const dependencyAction: ActionAdapter = {
+    kind: 'agent', reserveTokens: 100,
+    prepare: async operation => async () => {
+      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
+      await writeFile(join(operation.workspace!, 'test', 'project-deps.test.js'), [
+        "import { test } from 'node:test';",
+        "import assert from 'node:assert';",
+        "import { value } from 'probe';",
+        "test('project dependencies', () => assert.equal(value, 'project-dependency'));",
+      ].join('\n'));
+      return { outcome: 'completed', output: null, usage };
+    },
+  };
+  const { runtime, task } = await start(root, { work: dependencyAction }, nodes, { command: 'node', args: ['--test'] });
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
+  const body = JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { code: number; stdout: string };
+  expect(body.code).toBe(0);
+  expect(body.stdout).toContain('pass');
+  // The check gets a host-owned link; the project's own directory is untouched.
+  const link = join(root, 'state', 'worktrees', view.id, 'integration', 'node_modules');
+  expect(lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(realpathSync(link)).toBe(realpathSync(modules));
+  expect(lstatSync(modules).isSymbolicLink()).toBe(false);
 });
 
 test('a graph revision cannot weaken the confirmed command of an acceptance check', async () => {

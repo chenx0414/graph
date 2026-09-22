@@ -9,6 +9,8 @@ import {
 } from '../../src/core/operation-lifecycle.ts';
 import { TaskStore, canonicalJson } from '../../src/core/store.ts';
 import { problemActions } from '../../src/core/question-routing.ts';
+import { fullAccessPolicy, resolveAccessPolicy } from '../../src/core/access-policy.ts';
+import { appendMessage, deliverMessages, pendingMessages } from '../../src/core/conversation.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -68,6 +70,30 @@ test('intent recovery is conservative and attempt identity stays behind the life
   recovered.recover();
   expect(operationSnapshots(store, 't')).toMatchObject([{ state: 'not_sent', reserved: 0 }]);
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get()).toEqual({ status: 'pending' });
+});
+
+test.each([false, true])('full access restart only retries an uncertain chatting master with queued work (queued=%s)', async queued => {
+  const { store, lifecycle } = await fixture();
+  store.db.prepare("UPDATE tasks SET phase='chatting',conversation_id='c' WHERE id='t'").run();
+  store.db.prepare("INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES('c','p','t','chat',1,1)").run();
+  store.db.prepare("UPDATE nodes SET spec=? WHERE task_id='t' AND id='work'")
+    .run(canonicalJson({ id: 'work', kind: 'agent', action: 'work', role: 'master' }));
+  appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'first', state: 'pending' });
+  const operation = lifecycle.admit({
+    node: { id: 'work', taskId: 't', activationId: 'a' },
+    reservation: 100,
+    prepare: attempt => ({ ...intent(attempt), accessPolicy: resolveAccessPolicy(fullAccessPolicy()) }),
+  });
+  deliverMessages(store, operation.id, operation.attempt, pendingMessages(store, 'c'));
+  lifecycle.dispatch(operation);
+  if (queued) appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'next', state: 'queued' });
+
+  new OperationLifecycle(store, { advance: () => undefined }).recover();
+  expect(operationSnapshots(store, 't')).toMatchObject([{ state: 'not_sent', reserved: 0, workerActive: false }]);
+  expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get())
+    .toEqual({ status: queued ? 'pending' : 'failed' });
+  expect(pendingMessages(store, 'c').map(message => message.text)).toEqual(queued ? ['next'] : []);
+  expect(store.db.prepare("SELECT id FROM questions WHERE status='open'").all()).toEqual([]);
 });
 
 test('system-change questions accept only an explicit user decision', async () => {

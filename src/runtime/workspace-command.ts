@@ -30,15 +30,19 @@ export interface ResolvedCommand {
   env?: Record<string, string>;
 }
 
-/** `node` is the runtime that hosts Graph itself. Inside a packaged app that
- * is the Electron binary, which runs Node when ELECTRON_RUN_AS_NODE is set and
- * needs read access to the bundle's frameworks. */
-/** Node runtime for sandboxed helper processes. A packaged app ships a real
- * node binary (`runtime/node`); the Electron binary cannot start inside the OS
- * sandbox because it needs its Helper apps. `GRAPH_APP_NODE` is set by the
- * desktop shell for the daemon and every helper it spawns. */
+/** Name of the environment variable the desktop shell uses to point every
+ * helper it spawns at the app's own node runtime. */
+export const RUNTIME_NODE_ENV = 'GRAPH_APP_NODE';
+
+/** Node runtime for sandboxed helper processes: the node that hosts Graph
+ * itself. A packaged app ships a real node binary (`runtime/node`) and names it
+ * in `GRAPH_APP_NODE`; otherwise the binary running Graph is the answer, and
+ * inside Electron that is the Electron binary, which runs Node when
+ * ELECTRON_RUN_AS_NODE is set and needs read access to the bundle's frameworks.
+ * (The Electron binary cannot start inside the OS sandbox because it needs its
+ * Helper apps, so helpers are always pointed at the bundled node.) */
 export function graphNodeRuntime(env: Record<string, string | undefined> = process.env): { execPath: string; electron?: string | undefined } {
-  const bundled = env.GRAPH_APP_NODE?.trim();
+  const bundled = env[RUNTIME_NODE_ENV]?.trim();
   if (bundled) return { execPath: bundled };
   return { execPath: process.execPath, ...(process.versions.electron ? { electron: process.versions.electron } : {}) };
 }

@@ -179,29 +179,42 @@ async function main() {
   const inspect = () => ({ ...session.inspect(), processId: process.pid }) as AgentSessionInspect & { processId: number };
   await request({ operation: 'ready', inspect: inspect() });
 
-  let promptRunning = false;
-  const runPrompt = async (text: string) => {
-    if (promptRunning) throw new Error('Pi worker already has a running prompt');
-    promptRunning = true;
-    await session.prompt(text);
-    await Promise.all(pendingEvents);
+  const finish = async () => {
     await writeFully(process.stdout, `${JSON.stringify({ ok: true, inspect: inspect() })}\n`);
     await session.close();
     process.exit(0);
   };
-  const runCompact = async () => {
-    if (promptRunning) throw new Error('Pi worker already has a running operation');
-    promptRunning = true;
-    await session.compact();
+  let operationRunning = false;
+  const runPrompt = async (text: string) => {
+    if (operationRunning) throw new Error('Pi worker already has a running operation');
+    operationRunning = true;
+    await session.prompt(text);
     await Promise.all(pendingEvents);
-    await writeFully(process.stdout, `${JSON.stringify({ ok: true, inspect: inspect() })}\n`);
-    await session.close();
-    process.exit(0);
+    await finish();
+  };
+  const runCompact = async (customInstructions: string | undefined, keepAlive: boolean) => {
+    if (operationRunning) throw new Error('Pi worker already has a running operation');
+    operationRunning = true;
+    let failure: { error: string } | undefined;
+    try { await session.compact(customInstructions); }
+    catch (error) { failure = { error: error instanceof Error ? error.message : String(error) }; }
+    await Promise.all(pendingEvents.splice(0));
+    // During a source update an older daemon can launch this worker before
+    // reloading. Its compact command still expects the final result on exit.
+    if (!keepAlive) {
+      if (failure) throw new Error(failure.error);
+      await finish();
+      return;
+    }
+    // Report both success and summary failure without ending the session.
+    // The host may immediately send the user's prompt after this reply.
+    operationRunning = false;
+    await request({ operation: 'compaction_result', result: { ok: !failure, inspect: inspect(), ...failure } });
   };
 
   for await (const line of createInterface({ input: process.stdin })) {
     if (!line.trim()) continue;
-    const command = JSON.parse(line) as { operation?: string; text?: string };
+    const command = JSON.parse(line) as { operation?: string; text?: string; keepAlive?: boolean };
     if (command.operation === 'prompt' && typeof command.text === 'string') {
       void runPrompt(command.text).catch(async error => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
@@ -209,7 +222,7 @@ async function main() {
         process.exit(1);
       });
     } else if (command.operation === 'compact') {
-      void runCompact().catch(async error => {
+      void runCompact(typeof command.text === 'string' ? command.text : undefined, command.keepAlive === true).catch(async error => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         await writeFully(process.stderr, `${message}\n`).catch(() => undefined);
         process.exit(1);
@@ -219,8 +232,7 @@ async function main() {
         process.stderr.write(`Pi steer failed: ${String(error)}\n`);
       });
     } else if (command.operation === 'close') {
-      await session.close();
-      process.exit(0);
+      await finish();
     }
   }
 }

@@ -16,6 +16,7 @@ type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
   revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
+  taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
   validateProposal?(proposal: Proposal): Promise<unknown>;
   listProjects?(): Promise<unknown>;
   bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
@@ -330,6 +331,7 @@ export function agentTools(input: {
       const receipt = await input.supervisor!.revise({
         baseVersion: Number(body.baseVersion), reason: String(body.reason),
         nodes: JSON.parse(String(body.nodesJson)) as NodeSpec[], requestId: String(body.requestId),
+        ...(typeof body.taskId === 'string' && body.taskId.trim() ? { taskId: body.taskId.trim() } : {}),
       });
       return text(JSON.stringify(receipt));
     },
@@ -349,6 +351,18 @@ export function agentTools(input: {
       }
     },
     get_graph_state: async () => text(JSON.stringify(await input.supervisor!.graphState!())),
+    get_task_status: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      const optional = (key: string) => typeof body[key] === 'string' && (body[key] as string).trim() ? (body[key] as string).trim() : undefined;
+      const taskId = optional('taskId');
+      const nodeId = optional('nodeId');
+      const waitForNode = optional('waitForNode');
+      const timeoutMs = typeof body.timeoutMs === 'number' && Number.isFinite(body.timeoutMs) ? Math.trunc(body.timeoutMs) : undefined;
+      return text(JSON.stringify(await input.supervisor!.taskStatus!({
+        ...(taskId ? { taskId } : {}), ...(nodeId ? { nodeId } : {}),
+        ...(waitForNode ? { waitForNode } : {}), ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      })));
+    },
     list_projects: async () => text(JSON.stringify(await input.supervisor!.listProjects!())),
     bind_project: async (_id: string, params: unknown) => {
       const body = fields(params);
@@ -441,7 +455,8 @@ export function agentTools(input: {
       const problem = String(body.problem ?? '').trim();
       if (!title || title.length > 200) throw new Error('An RSI title of at most 200 characters is required');
       if (!problem || problem.length > 4_000) throw new Error('A concrete RSI problem of at most 4000 characters is required');
-      return text(JSON.stringify(await input.systemContext!.rsiApply!(params)));
+      const receipt = await input.systemContext!.rsiApply!(params);
+      return { ...text(JSON.stringify(receipt)), ...(receipt.status === 'applied' && receipt.restartRequired === true ? { terminate: true } : {}) };
     },
     list_agent_combinations: async (_id, params) => {
       const body = fields(params);

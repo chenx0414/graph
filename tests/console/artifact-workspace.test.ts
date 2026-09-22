@@ -37,6 +37,29 @@ function producer(operationId = 'op-1') {
   return { nodeId: 'research', instanceId: 'instance-1', operationId, activationId: 'activation-1', outputVersion: 1 };
 }
 
+test('accepts tags in any script while names and namespaces stay ASCII slugs', async () => {
+  const { store, workspace, artifacts } = await fixture();
+  const source = join(workspace, 'note.json');
+  await writeFile(source, '{"note":"one"}');
+
+  const published = await artifacts.publish({
+    taskId: 't1', workspace, namespace: 'research', name: 'note', sourcePath: source,
+    title: '中文标签', tags: ['编码', 'Known-Issue'], producer: producer(), requestId: 'publish-tag-1',
+  });
+  expect(published.tags).toEqual(['known-issue', '编码']);
+  const listed = await artifacts.list({ taskId: 't1', tag: '编码' });
+  expect(listed.artifacts.map(item => item.artifactId)).toContain(published.artifactId);
+
+  await expect(artifacts.publish({
+    taskId: 't1', workspace, namespace: 'research', name: 'note', sourcePath: source,
+    tags: ['bad tag'], producer: producer(), requestId: 'publish-tag-2',
+  })).rejects.toThrow(/must be a label/);
+  await expect(artifacts.publish({
+    taskId: 't1', workspace, namespace: 'research', name: '中文名', sourcePath: source,
+    producer: producer(), requestId: 'publish-tag-3',
+  })).rejects.toThrow(/lowercase slug/);
+});
+
 test('publishes immutable artifact versions and rejects stale compare-and-swap publishes', async () => {
   const { store, workspace, artifacts } = await fixture();
   const source = join(workspace, 'papers.json');

@@ -24,7 +24,7 @@ import { agentArtifactAccess } from './agent-tool-definitions.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
-import { compactionSettings } from './compaction.ts';
+import { COMPACTION_INSTRUCTIONS, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
@@ -38,14 +38,16 @@ import {
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
+import { linkProjectDependencies } from './project-dependencies.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT, type AgentContextLibrary } from './agent-context.ts';
 
 export interface PiAdapterChannels {
   supervisor: (taskId: string) => {
     propose(proposal: Proposal, requestId: string): Promise<unknown>;
-    revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+    revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string; taskId?: string }): Promise<unknown>;
     graphState?(): Promise<unknown>;
+    taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
     validateProposal?(proposal: Proposal): Promise<unknown>;
     listProjects?(): Promise<unknown>;
     bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
@@ -98,6 +100,7 @@ function summarizeToolCall(name: string, args: unknown) {
         : name === 'propose_graph' ? 'draft'
           : name === 'validate_proposal' ? 'validation'
             : name === 'get_graph_state' ? 'current graph'
+              : name === 'get_task_status' ? 'task status'
               : name === 'bind_project' ? target('projectId') ?? name
                 : name.startsWith('git_') ? [name, target('path') ?? target('ref') ?? ''].filter(Boolean).join(' ')
                   : name === 'submit_result' ? 'structured result'
@@ -275,6 +278,7 @@ export function createPiAdapter(options: {
         let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
         let modelAccessQuestion: Json | undefined;
+        let reloadReceipt: Record<string, unknown> | undefined;
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
         let capabilityOperation: CapabilityOperation;
@@ -341,11 +345,16 @@ export function createPiAdapter(options: {
           const masterReadRoots = spec.role === 'master'
             ? [...new Set([capabilityRoot, graphRoot, agentPromptLibrary?.contextRoot].filter((path): path is string => Boolean(path)))]
             : [];
+          // The work copy is dependency-free on disk; the project's own install
+          // is linked in and granted to the sandbox so a worker command resolves
+          // the project toolchain the way it would in the project root.
+          const dependencies = await linkProjectDependencies(workspace, join(project.root, 'node_modules'));
           commands = await openWorkspaceCommandRunner({
             workspace,
             scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'),
             gate,
             ...(accessPolicy ? { access: accessPolicy } : {}),
+            ...(dependencies ? { readPaths: [dependencies] } : {}),
           });
           capabilityOperation = await bundle.openOperation({
             workspace,
@@ -554,10 +563,14 @@ export function createPiAdapter(options: {
                     rsiStatus: async () => (await channels.rsi!.status()) as Record<string, unknown>,
                   } : {}),
                   ...(channels.rsi?.available && spec.role === 'master' && fullAccess ? {
-                    rsiApply: async (input: unknown) => (await channels.rsi!.apply(input, {
-                      taskId: operation.taskId,
-                      ...(conversation ? { conversationId: conversation.id } : {}),
-                    })) as Record<string, unknown>,
+                    rsiApply: async (input: unknown) => {
+                      const receipt = await channels.rsi!.apply(input, {
+                        taskId: operation.taskId,
+                        ...(conversation ? { conversationId: conversation.id } : {}),
+                      }) as Record<string, unknown>;
+                      if (receipt.status === 'applied' && receipt.restartRequired === true) reloadReceipt = receipt;
+                      return receipt;
+                    },
                   } : {}),
                 },
               } : {}),
@@ -715,6 +728,14 @@ export function createPiAdapter(options: {
               // A conversation keeps its messages untouched; the compaction is
               // reported as a session event instead of overwriting history.
               options.store.event(operation.taskId, 'session.compacted', { nodeId: operation.nodeId, ...data });
+            } else {
+              // Pi's own threshold/overflow compaction can fail without throwing
+              // (a summarizer that hits its output cap). Record it so the failure
+              // is visible instead of silently leaving the context oversized.
+              options.store.event(operation.taskId, 'session.compaction_failed', {
+                nodeId: operation.nodeId, operationId: operation.id, reason: event.reason,
+                error: event.errorMessage ?? 'compaction aborted',
+              });
             }
             return;
           }
@@ -730,6 +751,31 @@ export function createPiAdapter(options: {
           }
         };
         try {
+          // Context size comes from the last billed completion for this
+          // instance, so Graph can compact before the window is exceeded
+          // instead of waiting for a provider overflow. Ignore Pi's zero-usage
+          // placeholders, and use a newer successful compaction estimate when
+          // the previous turn ended in a manual compaction.
+          const lastContextTokens = (() => {
+            const completions = options.store.db.prepare(
+              `SELECT i.usage, COALESCE(o.settled_at, o.dispatched_at, 0) AS settled_at
+               FROM invocations i
+               JOIN operations o ON o.id = i.operation_id
+               WHERE i.instance_id = ? AND i.purpose = 'completion' AND i.usage IS NOT NULL
+               ORDER BY i.rowid DESC LIMIT 20`,
+            ).all(operation.instanceId!) as { usage: string; settled_at: number }[];
+            const lastCompaction = options.store.db.prepare(
+              `SELECT e.timestamp, e.data
+               FROM events e
+               JOIN operations o ON o.id = json_extract(e.data, '$.operationId')
+               WHERE e.task_id = ? AND e.type = 'session.compacted' AND o.instance_id = ?
+               ORDER BY e.cursor DESC LIMIT 1`,
+            ).get(operation.taskId, operation.instanceId!) as { timestamp: number; data: string } | undefined;
+            return latestContextTokens(
+              completions.map(row => ({ usage: row.usage, settledAt: row.settled_at })),
+              lastCompaction,
+            );
+          })();
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
@@ -804,19 +850,34 @@ export function createPiAdapter(options: {
           }
           try {
             const compactRequested = operation.context.messages?.some(message => message.command === 'compact') ?? false;
-            if (compactRequested) {
-              await session.compact();
-              flushDeltas(true);
-              if (gateRefusal) throw gateRefusal;
-              const text = '上下文已压缩。';
-              if (persistEntries) {
-                appendNodeEntry(options.store, {
-                  taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
-                  activationId: operation.activationId, operationId: operation.id, role: 'system', kind: 'compaction',
-                  text,
-                });
+            // Graph triggers compaction itself so the bounded instructions below
+            // apply. Pi's own threshold/overflow compaction stays enabled as a
+            // backstop for a context Graph mis-estimated.
+            const autoCompact = !compactRequested && shouldCompactContext(entry, lastContextTokens);
+            if (compactRequested || autoCompact) {
+              try {
+                await session.compact(COMPACTION_INSTRUCTIONS);
+                flushDeltas(true);
+                if (gateRefusal) throw gateRefusal;
+                const text = '上下文已压缩。';
+                if (persistEntries) {
+                  appendNodeEntry(options.store, {
+                    taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                    activationId: operation.activationId, operationId: operation.id, role: 'system', kind: 'compaction',
+                    text,
+                  });
+                }
+                if (compactRequested) return { outcome: 'completed', output: { text }, usage: gate.total() };
+              } catch (error) {
+                // A summarizer that hits its output cap must not poison the
+                // turn: the `compaction_end` event already recorded why, so
+                // keep going (or report it for a manual request) instead of
+                // failing the operation as an unknown dispatch.
+                const message = error instanceof Error ? error.message : String(error);
+                if (compactRequested) {
+                  return { outcome: 'failed', output: { error: `上下文压缩失败：${message}` }, usage: gate.total() };
+                }
               }
-              return { outcome: 'completed', output: { text }, usage: gate.total() };
             }
             const briefing = operation.context.briefing ?? `Continue work for ${operation.nodeId}`;
             if (persistEntries) {
@@ -829,6 +890,13 @@ export function createPiAdapter(options: {
             const result = await session.prompt(briefing);
             flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
+            if (reloadReceipt) {
+              return {
+                outcome: 'completed',
+                output: { text: `RSI 改动已提交，等待重载。当前回合已结束；重载确认后报告会更新为“已生效”。`, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}) },
+                usage: gate.total(),
+              };
+            }
             // A provider or transport error ends the turn with an assistant
             // error message; that is a failure, never a successful operation.
             if (result.stopReason === 'error') {

@@ -53,6 +53,67 @@ function service(root: string, stateDir: string, validate = passing) {
   return new RsiService({ root, stateDir, validate });
 }
 
+test('a passed check keeps only its verdict and the full log moves to a report file', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const noisy = async (): Promise<RsiValidationResult[]> => [
+    { command: 'node --run check', status: 'passed', output: 'x'.repeat(20_000) },
+  ];
+  const receipt = await service(root, dir, noisy).apply({
+    title: 'Quiet receipt',
+    activate: false,
+    problem: 'Keep the conversation receipt small.',
+    changes: [],
+    checks: [{ command: 'node', args: ['--run', 'check'] }],
+  }, { store, taskId, conversationId });
+  expect(receipt.validation).toEqual([{ command: 'node --run check', status: 'passed', output: '' }]);
+  expect(receipt.outputPath).toBeTruthy();
+  expect((await readFile(receipt.outputPath!, 'utf8')).length).toBeGreaterThan(20_000);
+  expect(receipt.report).toContain('完整日志');
+});
+
+test('a runtime-only change skips app:build while a web change still builds', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const seen: (boolean | undefined)[] = [];
+  const spy = async (input: { root: string; checks: { command: string; args: string[] }[]; activate: boolean; needsBuild?: boolean }): Promise<RsiValidationResult[]> => {
+    seen.push(input.needsBuild);
+    return [{ command: 'mock check', status: 'passed', output: '' }];
+  };
+  const rsi = service(root, dir, spy as never);
+  await rsi.apply({
+    title: 'Runtime only', activate: false, problem: 'No bundle change.',
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 2;\n' }],
+  }, { store, taskId, conversationId });
+  expect(seen[0]).toBe(false);
+  await rsi.apply({
+    title: 'Web change', activate: false, problem: 'The bundle changes.',
+    changes: [{ path: 'src/web/panel.tsx', action: 'write', content: 'export const Panel = 1;\n' }],
+  }, { store, taskId, conversationId });
+  expect(seen[1]).toBe(true);
+});
+
+test('an activation that commits nothing new does not schedule a reload', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  await service(root, dir).apply({
+    title: 'Land a change', activate: false, problem: 'Commit once.',
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 3;\n' }],
+  }, { store, taskId, conversationId });
+  // A later service sees that commit as the running build, exactly like a daemon that already
+  // reloaded it: nothing new is pending, so activation must not interrupt the user again.
+  const receipt = await service(root, dir).apply({
+    title: 'Re-run the gate', activate: true, problem: 'Choose the confirmed program checks.',
+    changes: [],
+    checks: [{ command: 'node', args: ['--run', 'check'] }],
+  }, { store, taskId, conversationId });
+  expect(receipt.status).toBe('applied');
+  expect(receipt.restartRequired).toBe(false);
+  expect(receipt.activation).toEqual({ state: 'active' });
+  expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
+  expect(receipt.report).toContain('无需重载');
+});
+
 test('status reports an available checkout and its branch', async () => {
   const root = await repo();
   const real = await realpath(root);
@@ -106,6 +167,7 @@ test('apply replaces exactly once and refuses ambiguous edits', async () => {
   const rsi = service(root, dir);
   const applied = await rsi.apply({
     title: 'Bump value',
+    activate: false,
     problem: 'Value should be two.',
     changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'value = 1', newText: 'value = 2' }] }],
   }, { store, taskId, conversationId });
@@ -183,6 +245,7 @@ test('a failed check keeps the change so the Agent can keep fixing', async () =>
   fails = false;
   const fixed = await rsi.apply({
     title: 'Fix the regression',
+    activate: false,
     problem: 'Correct the earlier attempt.',
     changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'value = 42', newText: 'value = 7' }] }],
   }, { store, taskId, conversationId });
@@ -224,6 +287,32 @@ test('activate=false commits without scheduling a reload', async () => {
   expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
 });
 
+test('a failed check report names the failing case even when the output window lost it', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  // A real gate interleaves concurrent workers, so the failure block can sit
+  // far away from the end of the captured output.
+  const interleaved = [
+    ' FAIL  tests/m8/app-shell-ux.test.ts > the composer suggestion and queue steering follow the three Enter states',
+    'AssertionError: expected +0 to be 1 // Object.is equality',
+    ' ❯ tests/m8/app-shell-ux.test.ts:444:43',
+    ...Array.from({ length: 400 }, (_, index) => `    concurrent worker output ${index} `.padEnd(140, 'x')),
+  ].join('\n');
+  const rsi = service(root, dir, async () => [
+    { command: 'node --run check', status: 'failed' as const, output: interleaved },
+  ]);
+  const failed = await rsi.apply({
+    title: 'Broken change',
+    problem: 'Introduce a regression.',
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 42;\n' }],
+  }, { store, taskId, conversationId });
+  expect(failed.status).toBe('checks_failed');
+  expect(failed.report).toContain('失败摘要');
+  expect(failed.report).toContain('app-shell-ux.test.ts:444:43');
+  expect(failed.report).toContain('AssertionError');
+  expect(failed.report.length).toBeLessThan(8_000);
+});
+
 test('an unavailable root is reported to the user instead of thrown', async () => {
   const stateDir = await mkdtemp(join(tmpdir(), 'graph-rsi-state-'));
   cleanup.push(() => rm(stateDir, { recursive: true, force: true }));
@@ -248,10 +337,32 @@ test('ackRestart clears only the matching request id', async () => {
     changes: [{ path: 'src/one.ts', action: 'write', content: '1\n' }],
   }, { store, taskId, conversationId });
   expect((await rsi.status()).pendingRestart?.id).toBe(receipt.id);
-  expect((await rsi.ackRestart('other')).cleared).toBe(false);
-  expect((await rsi.ackRestart(receipt.id)).cleared).toBe(true);
+  expect((await rsi.ackRestart('other', store)).cleared).toBe(false);
+  expect((await rsi.ackRestart(receipt.id, store)).cleared).toBe(false);
+  const restarted = service(root, dir);
+  expect((await restarted.ackRestart(receipt.id, store)).cleared).toBe(false);
+  store.db.prepare('UPDATE runtime SET generation=generation+1').run();
+  expect((await restarted.ackRestart(receipt.id, store)).cleared).toBe(true);
+  expect((await restarted.ackRestart(receipt.id, store)).cleared).toBe(false);
+  expect((await restarted.status()).lastActivation).toMatchObject({ id: receipt.id, commit: receipt.commit });
+  const message = store.db.prepare("SELECT data,text FROM messages WHERE kind='rsi'").get() as { data: string; text: string };
+  expect(JSON.parse(message.data)).toMatchObject({ activation: { state: 'active' } });
+  expect(message.text).toContain('重载已确认');
+  expect((store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE type='rsi.activated'").get() as { n: number }).n).toBe(1);
   expect((await rsi.status()).pendingRestart).toBeNull();
   expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
+});
+
+test('a pending reload cannot be replaced by another RSI change', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(root, dir);
+  const context = { store, taskId, conversationId };
+  const first = await rsi.apply({ title: 'First', problem: 'First change', changes: [{ path: 'first.ts', action: 'write', content: 'export {};\n' }], activate: true }, context);
+  await expect(rsi.apply({ title: 'Second', problem: 'Must wait', changes: [{ path: 'src/keep.ts', action: 'write', content: 'overwritten' }] }, context)).rejects.toThrow('waiting for reload');
+  expect((await rsi.status()).pendingRestart?.id).toBe(first.id);
+  expect(await readFile(join(root, 'src/keep.ts'), 'utf8')).toBe('export const value = 1;\n');
+  expect(shell(root, ['status', '--porcelain'])).toBe('');
 });
 
 test('resolveRsiRoot prefers an explicit GRAPH_RSI_ROOT', async () => {
@@ -265,13 +376,26 @@ test('resolveRsiRoot prefers an explicit GRAPH_RSI_ROOT', async () => {
 
 test('status counts running operations so a reload can wait', async () => {
   const root = await repo();
-  const { store, taskId, dir } = ledger();
+  const { store, taskId, conversationId, dir } = ledger();
   store.db.prepare('INSERT INTO nodes(task_id,id,spec,status) VALUES(?,?,?,?)').run(taskId, 'master', '{}', 'running');
   store.db.prepare(`INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,worker_active)
     VALUES(?,?,?,?,?,?,?,?)`).run('op1', taskId, 'master', 0, '{}', 'dispatched', 0, 0);
-  const status = await service(root, dir).status();
+  const rsi = service(root, dir);
+  await rsi.apply({ title: 'Wait for other work', problem: 'Reload without interrupting it', changes: [{ path: 'next.ts', action: 'write', content: 'export {};\n' }] }, { store, taskId, conversationId });
+  const status = await rsi.status();
   expect(status.activeOperations).toBe(1);
+  expect(status.operations).toEqual([{
+    id: 'op1',
+    taskId,
+    nodeId: 'master',
+    state: 'dispatched',
+    request: 'improve graph',
+    conversationId,
+    archived: false,
+  }]);
   expect(status.canRestart).toBe(false);
+  store.db.prepare("UPDATE operations SET state='succeeded' WHERE id='op1'").run();
+  expect((await rsi.status()).canRestart).toBe(true);
 });
 
 test('a forced change reloads even with operations still running', async () => {

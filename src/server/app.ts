@@ -69,7 +69,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   const capabilitySecretValues = () => options.appServices?.capabilityConfig?.secretValues() ?? Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim())),
   );
-  const html = options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
+  // The console is read per request. Every /assets/* file is already served
+  // from disk on each request, so pinning index.html at startup would let a
+  // rebuilt bundle sit behind a stale page - and a stale page can reference
+  // asset names the rebuild just removed.
+  const html = async () => options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
 
   app.setErrorHandler((error, _request, reply) => {
     const err = error as Error & { statusCode?: number; code?: string };
@@ -98,7 +102,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
 
   app.get('/', async (_request, reply) => {
     setSessionCookie(reply, session);
-    reply.type('text/html').send(html);
+    reply.type('text/html').send(await html());
   });
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/startup', async () => options.startupInfo?.() ?? options.startup ?? { mode: 'view' as const, configured: false, modelCount: 0, enabledModelCount: 0 });
@@ -432,6 +436,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const params = request.params as { taskId: string };
     const body = request.body as { proposalVersion: number; targetBranch: string; requestId: string };
     return runtime.user.task(params.taskId).accept({ proposalVersion: body.proposalVersion, targetBranch: body.targetBranch, requestId: body.requestId });
+  });
+  app.post('/api/tasks/:taskId/abandon', async request => {
+    const params = request.params as { taskId: string };
+    const body = request.body as { requestId: string; reason?: string };
+    return runtime.user.task(params.taskId).abandon(body.requestId, body.reason);
   });
   app.post('/api/tasks/:taskId/pause', async request => {
     const params = request.params as { taskId: string };

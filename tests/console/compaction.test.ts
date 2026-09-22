@@ -32,7 +32,7 @@ const LONG_TEXT = 'The worker keeps going. '.repeat(280); // ~6300 chars ≈ 150
 /** Local provider. Requests without a tool list are Pi summarization calls;
  * everything else is a normal agent turn. */
 async function compactionProvider(plan: (input: { index: number; tools: string[]; summary: boolean }) => {
-  text?: string; usage?: { prompt_tokens: number; completion_tokens: number } | null; pause?: () => Promise<void>;
+  text?: string; finish?: string; usage?: { prompt_tokens: number; completion_tokens: number } | null; pause?: () => Promise<void>;
 }) {
   const requests: { tools: string[]; messages: { role?: string; content?: unknown }[]; summary: boolean }[] = [];
   const server = createServer(async (request, response) => {
@@ -51,8 +51,9 @@ async function compactionProvider(plan: (input: { index: number; tools: string[]
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const chunk = (delta: unknown, finish: string | null) => response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
     chunk({ role: 'assistant', content: step.text ?? 'local reply' }, null);
-    chunk({}, 'stop');
-    response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage })}\n\n`);
+    const finish = step.finish ?? 'stop';
+    chunk({}, finish);
+    response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: finish }], usage })}\n\n`);
     response.end('data: [DONE]\n\n');
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -109,6 +110,130 @@ test('compaction settings derive from the model window and response budget', asy
   // leaves room to compact instead of an unusable negative threshold.
   const tiny = compactionSettings({ contextWindow: 512, maxTokens: 128 });
   expect(tiny).toEqual({ enabled: true, reserveTokens: 256, keepRecentTokens: 1_024 });
+});
+
+test('Graph retries compaction before the next turn when the window is still full', async () => {
+  const root = await temp('preemptive');
+  const provider = await compactionProvider(({ summary, index }) => {
+    if (summary) {
+      // Pi's own threshold compaction truncates first; Graph's bounded retry
+      // before the next turn succeeds.
+      return index === 1
+        ? { text: '## Goal\npartial', finish: 'length', usage: { prompt_tokens: 900, completion_tokens: 256 } }
+        : { text: '## Goal\nbounded handoff', usage: { prompt_tokens: 900, completion_tokens: 30 } };
+    }
+    return index === 0
+      ? { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 } }
+      : { text: '第二轮回复', usage: { prompt_tokens: 100, completion_tokens: 10 } };
+  });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    models: { entries: [modelEntry(provider.baseUrl)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  const created = await runtime.conversations.create({ text: '第一轮：先聊一下。', requestId: 'create' });
+  await runtime.host.runReady();
+  await runtime.conversations.chat(created.conversationId, { text: '第二轮：继续。', requestId: 'chat' });
+  await runtime.host.runReady();
+  // Let the second turn settle before reading the ledger.
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const probe = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
+    const states = (probe.prepare('SELECT state FROM operations').all() as { state: string }[]).map(row => row.state);
+    probe.close();
+    if (states.length >= 2 && states.every(state => state !== 'intent' && state !== 'dispatched')) break;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+
+  const order = provider.requests.map(request => request.summary ? 'summary' : 'completion');
+  console.log('[compaction-fixture] order=', JSON.stringify(order));
+  // The second turn compacts before it is sent, so a conversation whose window
+  // is still full gets another chance with the bounded instructions.
+  expect(order[0]).toBe('completion');
+  expect(order.slice(1).filter(kind => kind === 'summary').length).toBeGreaterThanOrEqual(2);
+  // The pre-turn summary must leave the worker ready for the user's actual
+  // request; recording a successful summary alone does not complete the turn.
+  expect(order.filter(kind => kind === 'completion')).toHaveLength(2);
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.messages.some(message => message.role === 'assistant' && message.text === '第二轮回复')).toBe(true);
+  expect(instanceTotals(root).every(instance => instance.used === instance.expected)).toBe(true);
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
+  const compacted = (db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='session.compacted'").get() as { count: number }).count;
+  const failed = (db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='session.compaction_failed'").get() as { count: number }).count;
+  db.close();
+  expect(compacted).toBeGreaterThanOrEqual(1);
+  expect(failed).toBeGreaterThanOrEqual(1);
+}, 60_000);
+
+test('a summarizer that hits its output cap fails cleanly instead of poisoning the turn', async () => {
+  const root = await temp('cap');
+  const provider = await compactionProvider(({ summary }) => summary
+    // Pi rejects a summary whose generation was cut off by the output cap.
+    ? { text: '## Goal\npartial summary', finish: 'length', usage: { prompt_tokens: 900, completion_tokens: 256 } }
+    : { text: LONG_TEXT, usage: { prompt_tokens: 50, completion_tokens: 10 } });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    models: { entries: [modelEntry(provider.baseUrl)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  const created = await runtime.conversations.create({ text: '第一轮：先聊一下。', requestId: 'create' });
+  await runtime.host.runReady();
+  await runtime.conversations.chat(created.conversationId, { text: '第二轮：继续。', requestId: 'chat' });
+  await runtime.host.runReady();
+  await runtime.conversations.compact(created.conversationId, { requestId: 'compact' });
+  await runtime.host.runReady();
+
+  expect(provider.requests.filter(request => request.summary)).toHaveLength(1);
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
+  const failures = (db.prepare("SELECT data FROM events WHERE type='session.compaction_failed'").all() as { data: string }[])
+    .map(row => JSON.parse(row.data) as { reason: string; error: string });
+  const openQuestions = db.prepare("SELECT kind FROM questions WHERE status='open'").all() as { kind: string }[];
+  db.close();
+  // The failure is recorded with its reason and routed as a normal execution
+  // failure, not as an unexplained unknown-usage hold that parks the
+  // conversation behind an uncertain dispatch.
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatchObject({ reason: 'manual' });
+  expect(failures[0]!.error).toContain('token cap');
+  expect(openQuestions.map(question => question.kind)).not.toContain('unknown_usage');
+}, 60_000);
+
+test('Graph compacts before the window is exceeded and asks for a bounded summary', async () => {
+  const { COMPACTION_INSTRUCTIONS, latestContextTokens, shouldCompactContext } = await import('../../src/runtime/compaction.ts');
+  const entry = { contextWindow: 131_072, maxTokens: 8_192 };
+  // Threshold is window - reserve; 122880 for this model.
+  expect(shouldCompactContext(entry, null)).toBe(false);
+  expect(shouldCompactContext(entry, 100_000)).toBe(false);
+  expect(shouldCompactContext(entry, 122_881)).toBe(true);
+  expect(shouldCompactContext(entry, 133_937)).toBe(true);
+  expect(shouldCompactContext(entry, Number.NaN)).toBe(false);
+  // The instructions must counter Pi's "preserve every previous detail" update
+  // prompt, which is what makes the summary grow past the output cap.
+  expect(COMPACTION_INSTRUCTIONS).toMatch(/under roughly 1500 tokens/);
+  expect(COMPACTION_INSTRUCTIONS).toMatch(/[Dd]rop resolved detail/);
+
+  const zero = JSON.stringify({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  const full = JSON.stringify({ input: 1_530, output: 1, cacheRead: 133_760, cacheWrite: 0 });
+  // Pi writes zero-usage placeholders after an overflowed call. They must not
+  // hide the last real context size.
+  expect(latestContextTokens([
+    { usage: zero, settledAt: 200 },
+    { usage: full, settledAt: 100 },
+  ])).toBe(135_291);
+  // A successful manual compaction is newer than the completion it summarized,
+  // so the next turn uses the smaller post-compaction estimate.
+  expect(latestContextTokens(
+    [{ usage: full, settledAt: 100 }],
+    { timestamp: 200, data: JSON.stringify({ tokensAfter: 18_000 }) },
+  )).toBe(18_000);
+  // A completion produced after a successful compaction is newer and wins.
+  expect(latestContextTokens(
+    [{ usage: JSON.stringify({ input: 4_000, output: 20, cacheRead: 2_000 }), settledAt: 300 }],
+    { timestamp: 200, data: JSON.stringify({ tokensAfter: 18_000 }) },
+  )).toBe(6_020);
 });
 
 test('the current schema tags every invocation with a purpose and keeps completion as the default', async () => {

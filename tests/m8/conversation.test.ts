@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -213,6 +214,72 @@ test('conversations can be archived and restored without deleting their history'
   expect(restored).toMatchObject({ archived: false, archivedAt: null });
   expect((await runtime.conversations.list()).map(item => item.id)).toContain(created.conversationId);
   expect((await runtime.conversations.view(created.conversationId)).messages).toHaveLength(1);
+});
+
+test('an archived conversation does not occupy a chatting lane', async () => {
+  const root = await temp('archive-lane');
+  const seen: Operation[] = [];
+  const runtime = await withRuntime(root, operation => {
+    seen.push(operation);
+    return { outcome: 'completed', output: { text: 'ok' }, usage };
+  });
+  const created = await runtime.conversations.create({ text: '先归档', requestId: 'archive-lane-create' });
+  await runtime.conversations.archive(created.conversationId, 'archive-lane');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect(seen).toHaveLength(0);
+  await runtime.conversations.unarchive(created.conversationId, 'archive-lane-restore');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(seen).toHaveLength(1);
+});
+
+test('full access does not retry a chatting master with an empty queue', async () => {
+  const root = await temp('full-access-empty-queue');
+  let attempts = 0;
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    access: () => fullAccessPolicy(),
+    actions: { master: scripted(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('uncertain after dispatch');
+      return { outcome: 'completed', output: { text: '恢复成功' }, usage };
+    }) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '你好', requestId: 'create' });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(attempts).toBe(1);
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect(attempts).toBe(1);
+  expect((await runtime.conversations.view(created.conversationId)).master?.status).toBe('failed');
+  await runtime.conversations.chat(created.conversationId, { text: '再试一次', requestId: 'retry' });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(attempts).toBe(2);
+  expect((await runtime.conversations.view(created.conversationId)).messages.at(-1)?.text).toBe('恢复成功');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+});
+
+test('full access preserves an explicit continuation after the chat message was consumed', async () => {
+  const root = await temp('full-access-continuation');
+  const seen: Operation[] = [];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    access: () => fullAccessPolicy(),
+    actions: { master: scripted(operation => {
+      seen.push(operation);
+      return seen.length === 1
+        ? { outcome: 'continue', output: { text: '继续处理' }, usage }
+        : { outcome: 'completed', output: { text: '处理完成' }, usage };
+    }) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '请处理', requestId: 'create' });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(seen[1]!.context.messages ?? []).toEqual([]);
+  expect((await runtime.conversations.view(created.conversationId)).messages.at(-1)?.text).toBe('处理完成');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
 });
 
 test('conversation model and thinking selection applies to the next master turn', async () => {
@@ -605,6 +672,87 @@ test('drafts version on the same requirement and only the latest can be confirme
     .rejects.toMatchObject({ code: 'stale_proposal' });
   // The feature task is visible as a normal task; the anchor is not.
   expect((await runtime.user.list()).map(task => task.id)).toEqual([confirmed.taskId]);
+});
+
+test('a conversation master revises the feature task it created', async () => {
+  const root = await temp('revise-feature');
+  const project = join(root, 'project');
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, 'check.js'), 'console.log("ok");\n');
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    actions: {
+      master: scripted(() => ({ outcome: 'completed', output: { text: '继续交流' }, usage })),
+      work: scripted(() => ({ outcome: 'completed', output: { built: true }, usage })),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '先做最小可用版', requestId: 'create' });
+  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await runtime.supervisor(anchorTaskId).propose({
+    requirementVersion: 1, summary: '最小可用版',
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  }, 'proposal');
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+
+  // The anchor task never holds a confirmed proposal, so the feature task is
+  // the only revision target: a model that a provider degrades must be
+  // replaceable after confirmation.
+  const revised = await runtime.supervisor(anchorTaskId).revise({
+    taskId: confirmed.taskId,
+    baseVersion: 1,
+    reason: '把实现模型换到另一个可用模型',
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm2' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+    requestId: 'revise-feature',
+  });
+  expect(revised).toMatchObject({ taskId: confirmed.taskId, graphVersion: 2 });
+  const graphState = await runtime.supervisor(anchorTaskId).graphState() as {
+    relatedTasks: { taskId: string; graphVersion: number; nodes: { id: string; model?: string }[] }[];
+  };
+  expect(graphState.relatedTasks).toEqual([
+    expect.objectContaining({
+      taskId: confirmed.taskId,
+      graphVersion: 2,
+      nodes: [expect.objectContaining({ id: 'work', model: 'm2' }), expect.objectContaining({ id: 'check' })],
+    }),
+  ]);
+
+  // The compact status read reports the same revision, the per-node model and
+  // the node input on demand, and it blocks until a node settles (or times out).
+  const supervisor = runtime.supervisor(anchorTaskId);
+  const status = await supervisor.taskStatus({ taskId: confirmed.taskId }) as {
+    taskId: string; graphVersion: number; nodes: { id: string; status: string; model?: string; input?: unknown }[];
+  };
+  expect(status).toMatchObject({ taskId: confirmed.taskId, graphVersion: 2 });
+  expect(status.nodes.map(node => node.id)).toEqual(['work', 'check']);
+  expect(status.nodes[0]).toMatchObject({ status: 'pending', model: 'm2', kind: 'agent' });
+  expect(status.nodes[0]!.input).toBeUndefined();
+  const focused = await supervisor.taskStatus({ taskId: confirmed.taskId, nodeId: 'check' }) as {
+    nodes: { id: string; input?: { command?: string; args?: string[] } }[];
+  };
+  expect(focused.nodes).toHaveLength(1);
+  expect(focused.nodes[0]!.input).toEqual({ command: 'node', args: ['check.js'] });
+  const waited = await supervisor.taskStatus({ taskId: confirmed.taskId, waitForNode: 'work', timeoutMs: 0 }) as { reason: string };
+  expect(waited).toMatchObject({ reason: 'timeout' });
+  await expect(supervisor.taskStatus({ nodeId: 'nope' })).rejects.toMatchObject({ code: 'not_found' });
+  await expect(supervisor.taskStatus({ taskId: '0faf1367-0000-0000-0000-000000000000' }))
+    .rejects.toMatchObject({ code: 'invalid_input' });
+
+  // Another task is not reachable through this channel.
+  await expect(runtime.supervisor(anchorTaskId).revise({
+    baseVersion: 2, reason: '越界', nodes: [], requestId: 'revise-outside', taskId: '0faf1367-0000-0000-0000-000000000000',
+  })).rejects.toMatchObject({ code: 'invalid_input' });
 });
 
 test('post-confirmation chat keeps the requirement fixed and sees real execution status', async () => {

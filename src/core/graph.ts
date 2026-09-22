@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { RuntimeError, type ContainerSpec, type DependencySource, type Json, type LoopSpec, type NodeSpec, type OperationResult, type Proposal } from './types.ts';
 import type { TaskStore } from './store.ts';
 import { unknownUsageIsNonBlocking } from './budget-ledger.ts';
+import { canonicalJson } from './store.ts';
+import { closeUserWait } from './time-ledger.ts';
 
 const invalid = (reason: string): never => { throw new RuntimeError('invalid_proposal', reason); };
 
@@ -168,11 +170,27 @@ export function hasLockedQuestion(store: TaskStore, taskId: string, nodeId: stri
 }
 
 /** Invalidate an idle node for recheck. Locked budget/usage/permission questions stay blocking. */
+/** A retired activation's open questions describe a version that no longer exists. Leaving them open
+ * keeps a stale acceptance (or stale problem) in the user's inbox, so a reset supersedes them and
+ * records why. The node re-asks when it is dispatched again. */
+export function supersedeOpenQuestions(store: TaskStore, taskId: string, nodeId: string) {
+  const open = store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'")
+    .all(taskId, nodeId) as { id: string }[];
+  for (const question of open) {
+    store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?")
+      .run(canonicalJson({ type: 'superseded', reason: 'the activation that asked was retired' }), question.id);
+    closeUserWait(store, taskId, nodeId);
+  }
+  if (open.length) store.event(taskId, 'question.superseded', { nodeId, count: open.length });
+  return open.length;
+}
+
 export function resetIdleNode(store: TaskStore, taskId: string, nodeId: string, graphVersion: number, round = 1, skipStatuses: string[] = []) {
   const node = store.db.prepare('SELECT instance_id,activation_id,status FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as { instance_id: string | null; activation_id: string; status: string };
   if (['preparing', 'running', ...skipStatuses].includes(node.status) || hasLockedQuestion(store, taskId, nodeId)) {
     return { reset: false, instanceId: node.instance_id };
   }
+  supersedeOpenQuestions(store, taskId, nodeId);
   store.db.prepare("UPDATE activations SET state='invalidated' WHERE id=?").run(node.activation_id);
   store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND node_id=? AND valid=1').run(taskId, nodeId);
   createActivation(store, taskId, nodeId, graphVersion, round);

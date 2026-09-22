@@ -98,6 +98,28 @@ test('worker preparation writes only to its granted scratch directory, even with
   } finally { broker.close(); }
 });
 
+test('a full-access host command is not wrapped in the seatbelt profile', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-unsandboxed-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  // Nesting `/usr/bin/sandbox-exec` is the sharpest possible probe: a seatbelt profile forbids it,
+  // and the same restriction silently denied the window server and pasteboard too.
+  const probe = "/usr/bin/sandbox-exec -p '(version 1)(allow default)' /bin/echo nested";
+  try {
+    const sandboxed = await executor.run({
+      broker, cwd: workspace, executable: '/bin/sh', args: ['-c', probe], filesystem: 'host',
+      readPaths: [workspace], writePaths: [workspace],
+    });
+    expect(sandboxed.code, sandboxed.stderr).not.toBe(0);
+    const free = await executor.run({
+      broker, cwd: workspace, executable: '/bin/sh', args: ['-c', probe], filesystem: 'host', unsandboxed: true,
+      readPaths: [workspace], writePaths: [workspace],
+    });
+    expect(free.code, free.stderr).toBe(0);
+    expect(free.stdout.trim()).toBe('nested');
+  } finally { broker.close(); }
+});
+
 test('host filesystem mode reaches outside the workspace while protected paths stay denied', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-host-filesystem-'))); dirs.push(root);
   const workspace = join(root, 'workspace'); await mkdir(workspace);
@@ -562,6 +584,38 @@ test('a local-network check loads its guard when the scratch path contains space
     });
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe('guard-loaded');
+  } finally { broker.close(); }
+});
+
+test('a local-network check keeps a forked descendant on its own channel', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-check-fork-'))); dirs.push(root);
+  const workspace = join(root, 'workspace'); await mkdir(workspace);
+  const scratch = join(root, 'scratch'); await mkdir(scratch);
+  // NODE_OPTIONS reaches every descendant, but a test-runner worker only waits
+  // on its own channel to its own parent: the host channel's idle unref must
+  // never reach it, or it exits before its first report and every fork-pool run
+  // looks like a crash. The mark that selects the host channel is cleared here.
+  await writeFile(join(workspace, 'worker.mjs'), [
+    "process.on('message', (message) => process.send({ echo: message, mark: process.env.GRAPH_LISTEN_GUARD ?? null }));",
+  ].join('\n'));
+  await writeFile(join(workspace, 'runner.mjs'), [
+    "import { fork } from 'node:child_process';",
+    "import { fileURLToPath } from 'node:url';",
+    "const worker = fork(fileURLToPath(new URL('./worker.mjs', import.meta.url)), [], { stdio: 'pipe', serialization: 'advanced' });",
+    "const done = (value) => process.stdout.write(JSON.stringify(value) + '\\n', () => { worker.kill(); process.exit(0); });",
+    "worker.on('message', (message) => done(message));",
+    "worker.on('exit', (code) => done({ exited: code }));",
+    "worker.send({ type: 'start' });",
+  ].join('\n'));
+  const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  try {
+    const result = await executor.run({
+      broker, cwd: workspace, scratchDir: scratch, executable: process.execPath, args: ['runner.mjs'],
+      filesystem: 'host', protectedPaths: [], writePaths: [workspace], readPaths: [dirname(process.execPath)],
+      localNetwork: true, timeoutMs: 15_000,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe('{"echo":{"type":"start"},"mark":null}');
   } finally { broker.close(); }
 });
 

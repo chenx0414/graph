@@ -20,12 +20,12 @@ const POLICIES: Readonly<Record<string, QuestionPolicy>> = {
   permission: { owner: 'user', answers: ['grant'] },
   budget: { owner: 'user', answers: ['add_budget'] },
   reservation_exceeded: { owner: 'user', answers: ['acknowledge'] },
-  human_check: { owner: 'user', answers: ['acknowledge'] },
+  human_check: { owner: 'user', answers: ['acknowledge', 'reject'] },
   system_change: { owner: 'user', answers: ['respond'] },
   unknown_usage: { owner: 'main', answers: ['usage', 'reconcile_usage'] },
   waiting: { owner: 'main', answers: ['respond'] },
   adapter_error: { owner: 'main', answers: ['retry'], retryOnMessage: true },
-  execution_failed: { owner: 'main', answers: ['retry'], retryOnMessage: true },
+  execution_failed: { owner: 'main', answers: ['retry'], retryOnMessage: true, escalate: true },
   model_unavailable: { owner: 'main', answers: ['retry'] },
   git_conflict: { owner: 'main', answers: ['retry'], retryOnMessage: true },
   context_rejected: { owner: 'main', answers: ['retry'], retryOnMessage: true, escalate: true },
@@ -96,8 +96,8 @@ export function isMasterParked(store: TaskStore, taskId: string, nodeId: string)
 /**
  * Release a master for an explicit message or configuration change. Startup
  * does not call this: simply reopening the runtime must leave problems parked.
- * Returns whether a parked problem was resolved. Writes join the caller's
- * command transaction, including its message or configuration receipt.
+ * Returns whether a parked problem was resolved. Writes join an existing
+ * command/recovery transaction, or open one when called on its own.
  */
 export function recoverMaster(store: TaskStore, taskId: string, reason: 'message' | 'configuration'): boolean {
   const apply = () => {

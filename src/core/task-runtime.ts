@@ -99,6 +99,78 @@ interface ProposalRow {
   decision_snapshot: string | null;
 }
 
+/** A revision names its target explicitly. Without one it revises this
+ * conversation own task; with one it may revise a feature task the same
+ * conversation created, never a task from another conversation. */
+function conversationTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined, what: string) {
+  if (requested === undefined || requested === supervisorTaskId) return supervisorTaskId;
+  const self = store.db.prepare('SELECT conversation_id FROM tasks WHERE id=?').get(supervisorTaskId) as { conversation_id: string | null } | undefined;
+  const target = store.db.prepare('SELECT conversation_id FROM tasks WHERE id=?').get(requested) as { conversation_id: string | null } | undefined;
+  if (!target || !self?.conversation_id || target.conversation_id !== self.conversation_id) {
+    throw new RuntimeError('invalid_input', `${what} may only target a task of this conversation`);
+  }
+  return requested;
+}
+
+function revisionTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined) {
+  return conversationTarget(store, supervisorTaskId, requested, 'A revision');
+}
+
+// A compact projection of one task: which node runs what, what still runs, what needs the user and
+// which acceptance evidence is currently valid. `graphState` carries the same information at roughly
+// ten times the size, so this is the read to poll with.
+function taskStatusView(store: TaskStore, taskId: string, nodeId?: string) {
+  const task = store.task(taskId);
+  const nodes = store.db.prepare(`SELECT n.id,n.spec,n.status,n.stall_count,i.model,i.definition_version
+    FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid`).all(taskId) as {
+      id: string; spec: string; status: string; stall_count: number; model: string | null; definition_version: string | null;
+    }[];
+  const selected = nodeId === undefined ? nodes : nodes.filter(row => row.id === nodeId);
+  if (nodeId !== undefined && !selected.length) throw new RuntimeError('not_found', `Task ${taskId} has no node ${nodeId}`);
+  const questions = store.db.prepare("SELECT id,node_id,kind,owner FROM questions WHERE task_id=? AND status='open' ORDER BY rowid").all(taskId) as {
+    id: string; node_id: string; kind: string; owner: string;
+  }[];
+  const evidence = store.db.prepare('SELECT node_id,data,valid,commit_sha FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as {
+    node_id: string; data: string; valid: number; commit_sha: string | null;
+  }[];
+  const current = new Map<string, { acceptanceId: string; nodeId: string; valid: boolean; commitSha?: string }>();
+  for (const row of evidence) {
+    const data = JSON.parse(row.data) as EvidenceInput;
+    current.set(data.acceptanceId, {
+      acceptanceId: data.acceptanceId, nodeId: row.node_id, valid: Boolean(row.valid),
+      ...(row.commit_sha ? { commitSha: row.commit_sha } : {}),
+    });
+  }
+  const userQuestions = questions.filter(question => question.owner === 'user');
+  return {
+    taskId,
+    phase: task.phase,
+    status: task.paused ? 'paused' : userQuestions.length ? 'blocked' : task.phase,
+    graphVersion: task.graph_version,
+    proposalVersion: task.latest_proposal,
+    acceptedProposalVersion: task.accepted_proposal,
+    targetBranch: task.target_branch,
+    integrationSha: task.integration_sha,
+    nodes: selected.map(row => {
+      const spec = JSON.parse(row.spec) as NodeSpec;
+      // A node reset by a revision is pending again while its old instance still carries the
+      // previous model, so the spec decides until the node is dispatched once more.
+      const model = row.status === 'pending' ? spec.model ?? row.model : row.model ?? spec.model;
+      return {
+        id: row.id, kind: spec.kind, action: spec.action, status: row.status,
+        ...(model ? { model } : {}),
+        ...(row.definition_version ? { definition: row.definition_version } : {}),
+        ...(row.stall_count ? { stallCount: row.stall_count } : {}),
+        ...(nodeId === undefined ? {} : { input: spec.input }),
+      };
+    }),
+    questions: userQuestions.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind })),
+    problems: questions.filter(question => question.owner === 'main')
+      .map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind })),
+    evidence: [...current.values()],
+  };
+}
+
 function conversationProposal(store: TaskStore, taskId: string, version: number, currentRequirementVersion: number) {
   const row = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?')
     .get(taskId, version) as ProposalRow | undefined;
@@ -150,7 +222,9 @@ export async function openTaskRuntime(options: {
     defaultBudgetTokens(): number | null;
     projects?(): ProjectConfig[];
   };
-  /** Host-selected grants and environment for confirmed program checks only. */
+  /** Host-selected grants and environment for confirmed program checks only.
+   * Without `nodeModulesPath` a check links the project root's own installed
+   * dependencies, so the project toolchain resolves in an isolated work copy. */
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   /** Read-only host inventory exposed to the master Agent. It must never
    * contain secret values or write configuration on the Agent's behalf. */
@@ -355,6 +429,7 @@ export async function openTaskRuntime(options: {
         },
       } : {}),
       autoWake: Boolean(options.autoWake),
+      ...(options.rsi ? { dispatchAllowed: () => !options.rsi!.hasPendingRestart() } : {}),
     });
     // Tasks and conversations created while dispatch was disabled carry no
     // master node. Once a master binding exists they get one and become
@@ -452,6 +527,15 @@ export async function openTaskRuntime(options: {
       return {
         async pause(requestId: string) { return setPaused(true, requestId); },
         async resume(requestId: string) { return setPaused(false, requestId); },
+        /** Stop the task for good, releasing the active slot to the queue. */
+        async abandon(requestId: string, reason?: string): Promise<Receipt> {
+          ensureOpen();
+          const receipt = store.command('user', requestId, { type: 'abandon', taskId, reason: reason ?? null }, () => ({
+            taskId, cursor: execution.abandon(taskId, reason ?? null),
+          }));
+          if (options.autoWake) execution.kick();
+          return receipt;
+        },
         /** User-owned budget policy change: a finite cap or explicit unlimited.
          * Instance identity, used total and every other gate stay untouched. */
         async setBudget(input: { nodeId: string; tokens: number | null; requestId: string }): Promise<Receipt> {
@@ -553,6 +637,13 @@ export async function openTaskRuntime(options: {
           const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null; owner: string }[];
           const userQuestions = questions.filter(question => question.owner === 'user');
           const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
+          // A queued task is invisible work: name the task holding the single
+          // active slot and how many problems it is stuck on, so a wedged queue
+          // is diagnosable from the task view instead of from the database.
+          const activeTask = store.db.prepare('SELECT id, project_id FROM tasks WHERE id=(SELECT active_task FROM runtime)').get() as { id: string; project_id: string } | undefined;
+          const queuedBehind = task.phase === 'queued' && activeTask
+            ? { taskId: activeTask.id, projectId: activeTask.project_id, openProblems: (store.db.prepare("SELECT COUNT(*) AS count FROM questions WHERE task_id=? AND owner='main' AND status='open'").get(activeTask.id) as { count: number }).count }
+            : null;
           const messages = (store.db.prepare("SELECT cursor,type,data FROM events WHERE task_id=? AND type IN ('task.created','requirement.changed') ORDER BY cursor").all(taskId) as { cursor: number; type: string; data: string }[]).map(row => {
             const message = JSON.parse(row.data) as { text?: string; request?: string; requirementVersion?: number };
             return { cursor: row.cursor, text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 };
@@ -567,7 +658,7 @@ export async function openTaskRuntime(options: {
               return { containers: graph ? graph.containers() : [], loops: graph ? graph.plan.loops : [] };
             })(),
             revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
-            targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused),
+            targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused), queuedBehind,
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
             status: task.paused ? (operations.some(op => op.workerActive) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operations: operations.map(row => ({ ...row.operation, state: row.state, reserved: row.reserved, workerActive: row.workerActive, result: row.result })),
@@ -1116,7 +1207,7 @@ export async function openTaskRuntime(options: {
         role: 'master', run: true, fetch: true, catalog: true,
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
-          validateProposal: true, graphState: true, listProjects: true,
+          validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
           bindProject: true, listProblems: true, resolveProblem: true,
         },
         ...(options.systemContext ? { systemContext: {
@@ -1324,6 +1415,13 @@ export async function openTaskRuntime(options: {
     },
     conversations,
     host: {
+      async ackRsiRestart(id: string) {
+        ensureOpen();
+        if (!options.rsi) throw new RuntimeError('rsi_unavailable', 'RSI is unavailable');
+        const result = await options.rsi.ackRestart(id, store);
+        if (result.cleared && options.autoWake) execution.kick();
+        return result;
+      },
       async runReady() { ensureOpen(); return execution.runReady(); },
       /** Read-only candidate check: a hot config that moves the root of a
        * project with tasks in flight must be rejected before anything is
@@ -1400,11 +1498,12 @@ export async function openTaskRuntime(options: {
             return { taskId, proposalVersion: version, cursor: store.event(taskId, 'proposal.created', { proposalVersion: version }) };
           });
         },
-        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string }) {
+        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string; taskId?: string }) {
           ensureOpen();
-          return store.command(`supervisor:${taskId}`, input.requestId, { type: 'revise', baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, containers: input.containers, loops: input.loops }, () => {
-            const revised = applyRevision(store, taskId, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
-            return { taskId, graphVersion: revised.version, cursor: revised.cursor };
+          const target = revisionTarget(store, taskId, input.taskId);
+          return store.command(`supervisor:${target}`, input.requestId, { type: 'revise', target, baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, containers: input.containers, loops: input.loops }, () => {
+            const revised = applyRevision(store, target, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
+            return { taskId: target, graphVersion: revised.version, cursor: revised.cursor };
           });
         },
         async validateProposal(proposal: Proposal) {
@@ -1531,6 +1630,29 @@ export async function openTaskRuntime(options: {
             cost: taskCost(taskId),
             relatedTasks,
           };
+        },
+        async taskStatus(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }) {
+          ensureOpen();
+          const target = conversationTarget(store, taskId, input.taskId, 'A status query');
+          const nodeId = input.nodeId === undefined ? undefined : String(input.nodeId);
+          const first = taskStatusView(store, target, nodeId);
+          const waiting = input.waitForNode === undefined ? undefined : String(input.waitForNode);
+          if (!waiting) return first;
+          const timeout = Math.max(0, Math.min(600_000, Math.trunc(input.timeoutMs ?? 120_000)));
+          const started = Date.now();
+          const known = new Set([...first.questions, ...first.problems].map(entry => entry.id));
+          let current = first;
+          let reason: 'settled' | 'needs_you' | 'timeout' = 'timeout';
+          for (;;) {
+            const node = current.nodes.find(entry => entry.id === waiting);
+            if (!node) throw new RuntimeError('not_found', `Task ${target} has no node ${waiting}`);
+            if ([...current.questions, ...current.problems].some(entry => !known.has(entry.id))) { reason = 'needs_you'; break; }
+            if (node.status !== 'pending' && node.status !== 'running') { reason = 'settled'; break; }
+            if (Date.now() - started >= timeout) { reason = 'timeout'; break; }
+            await new Promise(resolve => setTimeout(resolve, 1_000));
+            current = taskStatusView(store, target, nodeId);
+          }
+          return { ...current, waitedMs: Date.now() - started, reason };
         },
         async listProjects() {
           ensureOpen();

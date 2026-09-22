@@ -9,7 +9,7 @@ export interface AgentToolFeatures {
   fetch?: boolean;
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
-  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem', boolean>>;
+  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange' | 'requestModelAccess', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
 }
@@ -180,8 +180,8 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     revise_graph: {
-      name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson is a JSON array of NodeSpec objects using id, kind, action, dependsOn, input, definitionVersion, model, context and verifier fields as applicable.',
-      parameters: Type.Object({ baseVersion: Type.Number(), reason: Type.String(), nodesJson: Type.String(), requestId: Type.String() }),
+      name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson is a JSON array of NodeSpec objects using id, kind, action, dependsOn, input, definitionVersion, model, context and verifier fields as applicable. Pass taskId to revise a feature task this conversation created instead of this conversation own task; the task must belong to the same conversation.',
+      parameters: Type.Object({ baseVersion: Type.Number(), reason: Type.String(), nodesJson: Type.String(), requestId: Type.String(), taskId: Type.Optional(Type.String()) }),
       available: main && Boolean(features.supervisor),
       externallyGated: false,
     },
@@ -195,6 +195,17 @@ function declarations(features: AgentToolFeatures) {
       name: 'get_graph_state', label: 'Get graph state', description: 'Read the current proposal, graph revision, phase, node statuses, evidence, worktrees and internal problems for this conversation. Use this instead of guessing progress from chat history or the injected briefing.',
       parameters: Type.Object({}),
       available: main && Boolean(features.supervisor?.graphState),
+      externallyGated: false,
+    },
+    get_task_status: {
+      name: 'get_task_status', label: 'Get task status', description: 'Read a compact status of one task: phase, graph version, per-node status with the model that actually runs it, open user questions, open internal problems and which acceptance evidence is currently valid. Much smaller than get_graph_state, so prefer it while polling. Pass nodeId to also get that node full input (useful before revising it), and waitForNode plus timeoutMs to block until that node settles or something needs you instead of polling yourself.',
+      parameters: Type.Object({
+        taskId: Type.Optional(Type.String()),
+        nodeId: Type.Optional(Type.String()),
+        waitForNode: Type.Optional(Type.String()),
+        timeoutMs: Type.Optional(Type.Number()),
+      }),
+      available: main && Boolean(features.supervisor?.taskStatus),
       externallyGated: false,
     },
     list_projects: {
@@ -276,13 +287,13 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     inspect_rsi_status: {
-      name: 'inspect_rsi_status', label: 'Inspect self-improvement status', description: 'Read the Recursive Self-Improvement surface for Graph itself: the source checkout root, current branch, any pending restart, and how many operations are still running. Use it before changing the harness and to see whether a previous change is waiting to reload.',
+      name: 'inspect_rsi_status', label: 'Inspect self-improvement status', description: 'Read the Recursive Self-Improvement surface for Graph itself: the source checkout root, current branch, any pending restart, how many operations are still running, and the in-flight operation identities (id, task, node, request, archived). Use it before changing the harness and to see whether a previous change is waiting to reload.',
       parameters: Type.Object({}),
       available: main && Boolean(features.rsi?.status),
       externallyGated: false,
     },
     apply_rsi_change: {
-      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule a reload. Use it for any harness improvement you can justify — fixing a defect, refactoring, adding a feature, tightening commands or docs — not only bugs. Every call is reported to the user with the diff, checks and commit. Write each file with action "write", patch an existing file with action "replace" (each oldText must match exactly once), and remove a file with action "delete". Supply checks for a fast inner loop; the full `node --run check` and `app:build` gate runs before a change goes live. If checks fail the change is kept uncommitted so you can keep fixing and call again; pass changes: [] to just re-run checks. Set force to reload even while other operations are running (this can interrupt them).',
+      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule a reload. Use it for any harness improvement you can justify — fixing a defect, refactoring, adding a feature, tightening commands or docs — not only bugs. Every call is reported to the user with the diff, checks and commit. Write each file with action "write", patch an existing file with action "replace" (each oldText must match exactly once), and remove a file with action "delete". Supply checks for a fast inner loop; the full `node --run check` and `app:build` gate runs before a change goes live. If checks fail the change is kept uncommitted so you can keep fixing and call again; pass changes: [] to just re-run checks. A successful activate=true call ends this operation and leaves the change pending_reload; the host confirms active only after reload. Do not start another improvement while a reload is pending. Use activate=false for intermediate commits. Set force to reload even while other operations are running (this can interrupt them).',
       parameters: Type.Object({
         title: Type.String(),
         problem: Type.String(),

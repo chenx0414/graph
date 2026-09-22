@@ -344,7 +344,7 @@ if (!app.requestSingleInstanceLock()) {
           headers: { 'content-type': 'application/json', 'x-graph-app-token': appToken(), origin: readyUrl },
           body: JSON.stringify({ id }),
         });
-        if (response.ok) return true;
+        if (response.ok && (await response.json()).cleared === true) return true;
       } catch {
         // daemon still starting up; retry
       }

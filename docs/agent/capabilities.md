@@ -40,7 +40,7 @@ Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版�
 
 Main Agent 在完全访问模式下额外获得 `inspect_rsi_status` 与 `apply_rsi_change`，用于直接修改 Graph Harness——修缺陷、重构、新增功能、改进命令或文档都可以。它们只注册给 `master` 角色，不进入 worker 或 reviewer 的 tool surface。见 [self-configuration.md](self-configuration.md) 的“Harness 自我改进（RSI）”。
 
-Pi 原生工具在 Pi 子进程内执行。默认 full 模式放开宿主文件系统、命令、网络和能力运行时；standard 模式才启用 Graph send gate 与 workspace sandbox。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
+Pi 原生工具在 Pi 子进程内执行。默认 full 模式放开宿主文件系统、命令、网络和能力运行时；standard 模式才启用 Graph send gate 与 workspace sandbox。full 模式下 Agent 进程也不再套 seatbelt（`sandbox-exec`）profile，因此窗口服务、剪贴板（pasteboard）、Electron 与嵌套 `sandbox-exec` 都可用；standard 模式仍在 OS sandbox 内。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
 
 ## Capability binding
 
@@ -52,6 +52,10 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 - 完全访问模式下，网络、MCP、extension 和宿主文件系统限制不阻止调用；能力清单仍用于发现、版本与审计。
 - Native bash/powershell 在 standard 模式下不能越过 workspace、受保护路径和宿主访问策略。
 - `networkDomains`、工具自报 annotation 或 MCP 描述都不是权限本身。
+
+### 检查命令的运行边界
+
+`graph.command` 程序节点在 OS sandbox 内执行：不能嵌套 `sandbox-exec`，也看不到窗口服务，所以 Electron、真实浏览器自动化、宿主剪贴板在这里跑不起来（`sandbox_apply: Operation not permitted` 是嵌套被拒）。通过 RSI 传的 `checks` 在 checkout 里不受沙箱限制运行，适合需要真实浏览器或宿主能力的诊断；正式验收仍应落在 `graph.command` 节点上，因为验收证据必须来自受控检查。
 
 ## 发现与诊断
 

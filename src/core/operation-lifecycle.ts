@@ -194,10 +194,7 @@ export class OperationLifecycle {
         } else {
           const operation = operationFrom(row);
           if (isFullAccess(operation.accessPolicy)) {
-            this.markNotSent(row, {
-              resetNode: true,
-              eventReason: 'Full access recovery released the uncertain dispatch for retry',
-            });
+            this.releaseFullAccessRecovery(row, 'Full access recovery released the uncertain dispatch for retry');
             this.store.event(row.task_id, 'operation.recovery_bypassed', {
               operationId: row.id,
               policy: 'full_access',
@@ -285,6 +282,20 @@ export class OperationLifecycle {
     }
     if (options.eventReason !== undefined) {
       this.store.event(row.task_id, 'operation.not_sent', { operationId: row.id, reason: options.eventReason });
+    }
+  }
+
+  private releaseFullAccessRecovery(row: OperationDbRow, reason: string) {
+    this.markNotSent(row, { resetNode: true, eventReason: reason });
+    const node = this.nodeRow(row.task_id, row.node_id);
+    const spec = JSON.parse(node.spec) as NodeSpec;
+    const conversation = spec.role === 'master' && this.store.task(row.task_id).phase === 'chatting'
+      ? conversationForTask(this.store, row.task_id) : undefined;
+    // An uncertain turn already consumed its message. Do not turn it into a
+    // fresh request; explicit recovery can still set the master pending later.
+    if (conversation && !pendingMessages(this.store, conversation.id, 1).length) {
+      this.store.db.prepare("UPDATE nodes SET status='failed' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
+      this.store.db.prepare("UPDATE activations SET state='failed' WHERE id=?").run(node.activation_id);
     }
   }
 
@@ -482,10 +493,8 @@ export class OperationLifecycle {
         return false;
       }
       if (isFullAccess(operation.accessPolicy)) {
-        this.markNotSent(this.operationRow(operation.id), {
-          resetNode: true,
-          eventReason: `Full access released an uncertain dispatch for retry: ${String(error)}`,
-        });
+        this.releaseFullAccessRecovery(this.operationRow(operation.id),
+          `Full access released an uncertain dispatch for retry: ${String(error)}`);
         this.store.event(operation.taskId, 'operation.recovery_bypassed', {
           operationId: operation.id,
           reason: String(error),
@@ -577,6 +586,21 @@ export class OperationLifecycle {
         if (decision !== 'approved' && decision !== 'rejected') {
           throw new RuntimeError('invalid_answer', 'A system change must be approved or rejected');
         }
+      } else if (question.kind === 'human_check' && answer.type === 'reject') {
+        // A human rejection is a verdict, not an obstacle to clear: the acceptance did not pass, so the
+        // node stays blocked and the main Agent gets a rework problem carrying the user's reason.
+        const data = JSON.parse(question.data) as { prompt?: string };
+        insertQuestion(this.store, {
+          taskId,
+          nodeId: question.node_id,
+          kind: 'rework',
+          data: {
+            prompt: 'A human acceptance check was rejected and must be reworked',
+            reason: answer.reason ?? null,
+            rejected: data.prompt ?? null,
+          } as Json,
+        });
+        this.store.event(taskId, 'human.rejected', { questionId, nodeId: question.node_id, reason: answer.reason ?? null });
       }
       this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
       closeUserWait(this.store, taskId, question.node_id);
@@ -592,9 +616,10 @@ export class OperationLifecycle {
           .get(taskId, question.node_id) as { spec: string }).spec) as NodeSpec;
         const conversation = spec.role === 'master' ? conversationForTask(this.store, taskId) : undefined;
         const queued = conversation ? pendingMessages(this.store, conversation.id, 1).length : 0;
+        const rejected = question.kind === 'human_check' && answer.type === 'reject';
         if (!['rework', 'stalled'].includes(question.kind)) {
           this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?')
-            .run(question.kind === 'system_change' || !completed || queued ? 'pending' : 'succeeded', taskId, question.node_id);
+            .run(rejected ? 'blocked' : question.kind === 'system_change' || !completed || queued ? 'pending' : 'succeeded', taskId, question.node_id);
         }
       }
       if (['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond')) {

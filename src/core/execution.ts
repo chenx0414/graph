@@ -43,12 +43,13 @@ export class Execution {
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean };
   private readonly access?: () => ResolvedAccessPolicy;
+  private readonly dispatchAllowed?: () => boolean;
   private readonly autoWake: boolean;
   private readonly generation: number;
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -59,6 +60,7 @@ export class Execution {
     if (extras.program) this.program = extras.program;
     if (extras.systemContext) this.systemContext = extras.systemContext;
     if (extras.access) this.access = extras.access;
+    if (extras.dispatchAllowed) this.dispatchAllowed = extras.dispatchAllowed;
     this.autoWake = Boolean(extras.autoWake);
     this.unsubscribeStore = store.onEvent(type => {
       if (this.autoWake && type === 'problem.routed') queueMicrotask(() => this.kick());
@@ -132,6 +134,41 @@ export class Execution {
   }
 
   finish(taskId: string) { this.deliver(taskId); }
+
+  /**
+   * Operator stop. A task can end up with no path to completion - blocked
+   * nodes, failures nobody can answer - and it would keep the single active
+   * slot forever, so every queued task of every project waits behind it.
+   * Stopping therefore has to hand the slot on, exactly like completion does.
+   */
+  abandon(taskId: string, reason: string | null) {
+    const task = this.store.task(taskId);
+    if (task.phase === 'completed' || task.phase === 'abandoned') throw new RuntimeError('invalid_input', `A ${task.phase} task cannot be abandoned`);
+    if (this.store.db.prepare('SELECT id FROM operations WHERE task_id=? AND worker_active=1').get(taskId)) {
+      throw new RuntimeError('task_busy', 'Pause the task and wait for its running work to settle before abandoning it');
+    }
+    // The caller already holds a command transaction, so these writes are
+    // atomic with the receipt that records them.
+    // The task stops here, so its open problems stop with it: leaving them
+    // open would keep the project showing a question nobody can act on.
+    const resolved = this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND status='open'")
+      .run(canonicalJson({ type: 'abandoned', reason }), taskId);
+    this.store.db.prepare("UPDATE tasks SET phase='abandoned' WHERE id=?").run(taskId);
+    const cursor = this.store.event(taskId, 'task.abandoned', { reason, resolvedQuestions: resolved.changes });
+    const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
+    if (active_task === taskId) this.promoteNextTask();
+    return cursor;
+  }
+
+  /** The single active code slot goes to the oldest queued task, if any. */
+  private promoteNextTask() {
+    const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;
+    this.store.db.prepare('UPDATE runtime SET active_task=?').run(next?.id ?? null);
+    if (!next) return null;
+    this.store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(next.id);
+    this.store.event(next.id, 'task.started', {});
+    return next.id;
+  }
 
   private block(node: ExecutionNodeRow, kind: string, data: Json, operationId: string | null = null) {
     this.lifecycle.block(node.task_id, node.id, kind, data, operationId);
@@ -220,14 +257,17 @@ export class Execution {
 
   /** Conversation masters are their own interactive lane, ahead of the single active task. */
   private laneTasks(): string[] {
-    const chatting = (this.store.db.prepare("SELECT id FROM tasks WHERE phase='chatting' ORDER BY created_seq").all() as { id: string }[]).map(row => row.id);
+    const chatting = (this.store.db.prepare(`SELECT t.id FROM tasks t
+      LEFT JOIN conversations c ON c.id=t.conversation_id
+      WHERE t.phase='chatting' AND c.archived_at IS NULL
+      ORDER BY t.created_seq`).all() as { id: string }[]).map(row => row.id);
     const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
     if (active_task && !chatting.includes(active_task) && this.store.task(active_task).phase !== 'chatting') chatting.push(active_task);
     return chatting;
   }
 
   private readyNodes(): ExecutionNodeRow[] {
-    if (this.stopping) return [];
+    if (this.stopping || this.dispatchAllowed?.() === false) return [];
     const nodes: ExecutionNodeRow[] = [];
     const fullAccess = isFullAccess(this.access?.());
     for (const taskId of this.laneTasks()) {
@@ -240,8 +280,10 @@ export class Execution {
   private readyNodesFor(taskId: string): ExecutionNodeRow[] {
     const task = this.store.task(taskId);
     if (task.phase === 'chatting') {
-      // Without a confirmed graph the conversation master is the only node that
-      // may run; each turn consumes exactly one pending or queued user message.
+      // A chatting master may run for a queued message, an explicit recovery,
+      // or a continuation after an answer. Archived conversations never run.
+      const conversation = conversationForTask(this.store, taskId);
+      if (!conversation || conversation.archived_at !== null) return [];
       const masters = this.store.db.prepare(`SELECT * FROM nodes n
         WHERE n.task_id=? AND n.status='pending' AND json_extract(n.spec,'$.role')='master'
         ORDER BY n.rowid`).all(taskId) as ExecutionNodeRow[];
@@ -278,8 +320,12 @@ export class Execution {
   private async execute(node: ExecutionNodeRow): Promise<boolean> {
     const accessPolicy = this.access?.() ?? resolveAccessPolicy(standardAccessPolicy());
     const fullAccess = isFullAccess(accessPolicy);
-    if (this.stopping || (!fullAccess && this.store.task(node.task_id).paused)) return false;
+    if (this.stopping || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
+    if (this.store.task(node.task_id).phase === 'chatting') {
+      const conversation = conversationForTask(this.store, node.task_id);
+      if (!conversation || conversation.archived_at !== null) return false;
+    }
     const spec = JSON.parse(node.spec) as NodeSpec;
     const adapter = spec.action === 'graph.verify'
       ? graphVerifier(this.store, spec)
@@ -664,7 +710,7 @@ export class Execution {
       this.lifecycle.markPreparationFailed(operation.id, String(error));
       return false;
     }
-    if (this.stopping || (!fullAccess && this.store.task(node.task_id).paused)) {
+    if (this.stopping || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) {
       this.lifecycle.cancelBeforeDispatch(operation.id);
       return false;
     }
@@ -740,13 +786,8 @@ export class Execution {
   private completeTask(taskId: string) {
     const task = this.store.task(taskId);
     this.store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
-    const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;
-    this.store.db.prepare('UPDATE runtime SET active_task=?').run(next?.id ?? null);
     this.store.event(taskId, 'task.completed', { proposalVersion: task.accepted_proposal });
-    if (next) {
-      this.store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(next.id);
-      this.store.event(next.id, 'task.started', {});
-    }
+    this.promoteNextTask();
   }
 
   private deliver(taskId: string) {

@@ -106,3 +106,30 @@ test('failed project configuration leaves no partial registration and releases d
   await expect(restored.user.begin({ projectId: 'partial', request: 'Should not exist', requestId: 'invalid' })).rejects.toMatchObject({ code: 'invalid_input' });
   expect(await restored.user.begin({ projectId: 'original', request: 'Original project', requestId: 'valid' })).toHaveProperty('taskId');
 });
+
+test('abandoning a wedged active task hands the slot to the queued task', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-abandon-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }] });
+  cleanup.push(() => runtime.close());
+  const spec = { requirementVersion: 1, summary: 'Check', acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: [{ id: 'check', kind: 'program' as const, action: 'check' }] };
+  // Only a confirmed task takes the single active code slot; a second confirmed
+  // task waits in the queue behind it, which is what makes abandoning matter.
+  const first = await runtime.user.begin({ projectId: 'project', request: 'First', requestId: 'begin-1' });
+  const firstProposal = await runtime.supervisor(first.taskId).propose(spec, 'proposal-1');
+  await runtime.user.task(first.taskId).accept({ proposalVersion: firstProposal.proposalVersion, targetBranch: 'main', requestId: 'accept-1' });
+  const second = await runtime.user.begin({ projectId: 'project', request: 'Second', requestId: 'begin-2' });
+  const secondProposal = await runtime.supervisor(second.taskId).propose(spec, 'proposal-2');
+  await runtime.user.task(second.taskId).accept({ proposalVersion: secondProposal.proposalVersion, targetBranch: 'main', requestId: 'accept-2' });
+  const queued = await runtime.user.task(second.taskId).view();
+  expect(queued.phase).toBe('queued');
+  expect(queued.queuedBehind).toMatchObject({ taskId: first.taskId, projectId: 'project', openProblems: 0 });
+  const stream = runtime.user.task(first.taskId).watch((await runtime.user.task(first.taskId).view()).cursor);
+  const receipt = await runtime.user.task(first.taskId).abandon('abandon-1', 'no path to completion');
+  expect(await runtime.user.task(first.taskId).abandon('abandon-1', 'no path to completion')).toEqual(receipt);
+  expect((await runtime.user.task(first.taskId).view()).phase).toBe('abandoned');
+  expect(await runtime.user.task(second.taskId).view()).toMatchObject({ phase: 'running', queuedBehind: null });
+  expect((await stream.next()).value).toMatchObject({ type: 'task.abandoned', cursor: receipt.cursor });
+  await stream.return();
+  await expect(runtime.user.task(first.taskId).abandon('abandon-2')).rejects.toMatchObject({ code: 'invalid_input' });
+});
