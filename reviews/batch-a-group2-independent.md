@@ -2,23 +2,23 @@
 
 Requirement version: 1
 Reviewer: reviewer@8 (independent)
-Reviewed HEAD: `c7e00c5` (merge of impl-composer-input `154142a` + impl-preferences `b70e55e`)
+Reviewed HEAD: `c7e00c5` (merge of impl-composer-input `154142a` + impl-preferences `b70e55e`; worktree tip `d2130ef` only adds a prior review file)
 Scope: ① undo/redo, ② ↑/↓ sent-prompt history, ③ Markdown render preference, ④ candidate-prompt preference
 
 ## Verdict
 
 **pass**
 
-The four product features meet their acceptance criteria on the code paths that actually ship. The previous independent-review defect (browse cursor not reset after a parent-owned submit) is fixed in `154142a` and covered by a regression test that now passes. All four frozen program checks are green.
+The four product features meet their acceptance criteria on the paths that ship. The earlier independent-review defect (parent-owned submit left the browse cursor set, so the next ↑ skipped the newest prompt) is fixed in `154142a` via `submitComposerPrompt` and is covered by a regression test that now passes. All four frozen program checks are green with the digests supplied in this activation’s predecessor handoff.
 
 ## Frozen program checks
 
 | Check | Result | Digest (sha256 of check json) | Evidence path |
 |-------|--------|-------------------------------|---------------|
 | check-types | code 0 | `a2474bb10d1b87b61cb5493332b6e2be75ab0cbbe8526c2f89c29c771030fdb3` | `/Users/macmini/Library/Application Support/Graph/state/checks/check-types.json` |
-| check-undo | code 0, 10/10 | `74b7651ef4f40a4d6517b9a57f4476c03e360d98185e69fd651e9b941e8b8729` | `/Users/macmini/Library/Application Support/Graph/state/checks/check-undo.json` |
-| check-history | code 0, 16/16 | `7e43cbab15f116322163c5de11acf6d189861a8e8fc4b2c3ed09cc8c4d28b84b` | `/Users/macmini/Library/Application Support/Graph/state/checks/check-history.json` |
-| check-prefs | code 0, 11/11 | `dc7b956451b94828735bc28085139f2636b0c42f691c7247ba1362aa5a06c7bb` | `/Users/macmini/Library/Application Support/Graph/state/checks/check-prefs.json` |
+| check-undo | code 0, 10/10 | `780b26d1fcb36812c702a12215f36ca05c58eb2c3fd2ae65a24b757bd0e8d192` | `/Users/macmini/Library/Application Support/Graph/state/checks/check-undo.json` |
+| check-history | code 0, 16/16 | `6245699c1e2a8e01ec5ad8ae38fb2ab583518c9ab924b497ea487d65c8774d8a` | `/Users/macmini/Library/Application Support/Graph/state/checks/check-history.json` |
+| check-prefs | code 0, 11/11 | `a61e1479b3e4cd3dec88e2eccce0c2683bcafc8976460135adf8089786567284` | `/Users/macmini/Library/Application Support/Graph/state/checks/check-prefs.json` |
 
 Predecessor handoffs used: `impl-composer-input` rework (`b5480847@1`), `impl-preferences` (`a29ab927@1`). The original composer handoff (`7f4526cc@1`) is superseded for the submit path by the rework.
 
@@ -33,7 +33,7 @@ Evidence:
 - `src/web/chat-undo.ts`: explicit snapshot stack (`past` / `future`), cap `COMPOSER_UNDO_LIMIT = 100`, not persisted. `recordComposerEdit` coalesces a typed run; `paste` / `delete` / `clear` / `insert` are their own step; a new edit clears redo.
 - `src/web/ChatComposer.tsx`:
   - keyboard: lines 535–546 handle `(meta|ctrl)+Z` undo and `+shift+Z` / `ctrl+Y` redo **before** `/` and `@` handlers, `preventDefault` so the dead native stack never fires, then `applyProgrammatic` writes the value.
-  - recording: textarea `onChange` (line 512, typing / delete / clear / native paste), right-click `pasteClipboardAtCaret` (line 329, kind `paste` via `rememberEdit`), slash / mention / Tab-suggestion inserts (lines 353, 370, 406, 640).
+  - recording: textarea `onChange` (line 512, typing / delete / clear / native paste), right-click `pasteClipboardAtCaret` (line 329, kind via `composerEditKind` → `paste` when the delta is >1 char), slash / mention / Tab-suggestion inserts (lines 353, 370, 406, 640).
 - `tests/console/composer-undo.test.ts`: typed-run undo, right-click paste undo, delete + clear, redo + redo-invalidation, no-op skip, 100-step cap both directions, `composerEditKind` classification. Frozen check: 10/10.
 
 Impact of remaining design choice: a hand-typed sentence undoes as one step. That is documented in `chat-undo.ts` and still records the required kinds. Not a defect.
@@ -52,7 +52,7 @@ Acceptance: ↑/↓ 在输入框内可调出已发送的历史 prompt，/ 与 @ 
 
 ### Prior defect D1 — fixed in `154142a`
 
-The previous review failed because `rememberPrompt()` early-returned when `history !== undefined` (the Conversation path always passes `history`), so a recalled prompt sent with Enter left `cursor` non-null. Next ↑ skipped the newest entry.
+The previous review failed because `rememberPrompt()` early-returned when `history !== undefined` (the Conversation path always passes `history`), so a recalled prompt sent with Enter left `cursor` non-null. Next ↑ skipped the newest entry. Conversation `send()` still clears via `setText('')` (`Conversation.tsx:690`), which does not fire the composer's `onChange` (the only other `leaveHistory()` path).
 
 Current wiring:
 
@@ -62,10 +62,10 @@ Current wiring:
    historyRef.current = submitComposerPrompt(historyRef.current, value, history !== undefined);
    setHistoryBrowsing(false);
    ```
-3. Enter (`:653`) and the primary send button (`:684`, `primaryMode === 'send'`) both call `rememberPrompt()`. Conversation `send()` still clears via `setText('')` (`Conversation.tsx:690`), which does not fire `onChange`; the submit path no longer depends on that.
-4. Regression in `tests/console/composer-history.test.ts:90–107` constructs parent-owned entries, recalls (cursor 0), `submitComposerPrompt(..., true)`, then ↑ and asserts the newest prompt plus `cursor`/`draft` reset. Frozen check-history is 16/16 (was 14 before the rework). Source assertion (`:146–149`) requires `submitComposerPrompt(` in `ChatComposer.tsx`.
+3. Enter (`:653`) and the primary send button (`:684`, `primaryMode === 'send'`) both call `rememberPrompt()`. The submit path no longer depends on `onChange`.
+4. Regression in `tests/console/composer-history.test.ts:90–107` constructs parent-owned entries, recalls (cursor 0), `submitComposerPrompt(..., true)`, then ↑ and asserts the newest prompt plus `cursor`/`draft` reset. Frozen check-history is 16/16. Source assertion (`:146–149`) requires `submitComposerPrompt(` in `ChatComposer.tsx`.
 
-The Conversation path now resets browsing on submit. Feature ② is met.
+Parent-owned browsing still overlays `entries` from the `history` prop in `historyState()` (`ChatComposer.tsx:199–201`) while cursor/draft live on `historyRef`. After submit the cursor is cleared, so the next ↑ reads the current parent list from newest. The Conversation path now resets browsing on submit. Feature ② is met.
 
 ---
 
@@ -79,7 +79,7 @@ Evidence:
 - Settings: `src/web/Settings.tsx:341` sidebar **first** item `{ id: 'settings-general', label: '通用/偏好' }` before 「常规」. Default active page remains `settings-overview` (`:335`), so existing settings tests that land on 「常规」 are not broken. Both toggles live in the same `<section id="settings-general">` (`:262–292`).
 - Rendering:
   - Conversation passes `markdown={markdownEnabled(preferences)}` (`Conversation.tsx:1009`).
-  - User bubble: `TranscriptRows.tsx:45` `markdown ? <Markdown/> : <p>{message.text}</p>`.
+  - User bubble: `TranscriptRows.tsx:45` `markdown ? <Markdown/> : <p>{message.text}</p>`. `.message-content` already has `white-space: pre-wrap` (`styles.css:1145–1148`), so plain user text keeps newlines.
   - Finished assistant: `:70` `markdown ? <Markdown/> : <p className="message-plain">`.
   - Streaming assistant: `:273–297` markdown blocks vs `PlainText`; `PlainText` (`:225–244`) keeps `stream-veil` spans; streaming caret (`:298`) is outside the markdown branch. Veil / streaming behaviour preserved when off.
 - Copy: every row still uses `copyable={copyText(row)}` (`TranscriptRows.tsx:317–323`). `copyText` (`src/web/chat-copy.ts:15–18`) returns the original transcript text, independent of the `markdown` prop.
@@ -103,10 +103,10 @@ Evidence:
 
 ## Constraints — compliant
 
-- No new dependencies (`package.json` unchanged for this work; `chat-undo` / `chat-history` / `preferences` are local modules).
+- No new dependencies (`package.json` unchanged vs `d8385b9` for this work; `chat-undo` / `chat-history` / `preferences` are local modules).
 - No IPC / Electron / adapter / server / DB change. Preferences are `localStorage` with prefix `graph-pref-`.
 - Lane ownership: `styles.css` only gained the composer browsing hint (composer lane). Preference styles live in `src/web/preferences.css` imported from `preferences.ts`.
-- Composer-lane files were restored onto the integration copy before the preferences lane edited Conversation / Settings / TranscriptRows (handoff `a29ab927@1`). Working tree is clean at `c7e00c5`.
+- Composer-lane files were restored onto the integration copy before the preferences lane edited Conversation / Settings / TranscriptRows (handoff `a29ab927@1`). Implementation at `c7e00c5` is the merge of both lanes.
 
 ---
 
@@ -119,6 +119,8 @@ Evidence:
 3. **Agent-node transcript ignores the preference.** `AgentNodeChat.tsx:197` renders `TranscriptRowView` without `markdown`, so it stays at the component default `true`. Out of the conversation-composer scope of this batch.
 
 4. **Undo from a recalled prompt does not restore the draft.** ↑ uses `applyProgrammatic` (no undo snapshot), so ⌘Z after a recall jumps to the last typed snapshot, not `history.draft`. ↓ is the documented restore. Not in acceptance.
+
+5. **Parent-owned history is not capped at 100.** `COMPOSER_HISTORY_LIMIT` applies to `createComposerHistoryState` / `recordComposerPrompt`; Conversation's `sentUserPrompts` overlays the full transcript list. Walking a long thread with ↑ still works; not an acceptance miss.
 
 ---
 
