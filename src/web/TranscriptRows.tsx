@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useState, type ReactNode } from 'react';
 import {
   messageAttachments,
   type ConversationMessage,
@@ -31,7 +31,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function MessageRow({ message, userAuthor, copyable = '' }: { message: ConversationMessage; userAuthor?: string; copyable?: string }) {
+function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { message: ConversationMessage; userAuthor?: string; copyable?: string; markdown?: boolean }) {
   if (message.role === 'user') {
     const attachments = messageAttachments(message);
     return (
@@ -42,7 +42,7 @@ function MessageRow({ message, userAuthor, copyable = '' }: { message: Conversat
             {message.state === 'pending' && <span className="message-state"> · 等待处理</span>}
           </div>
           <div className="message-content">
-            {message.text && <p>{message.text}</p>}
+            {message.text && (markdown ? <Markdown text={message.text} /> : <p>{message.text}</p>)}
             {attachments.length > 0 && (
               <div className="message-attachments">
                 {attachments.map(attachment => (
@@ -66,7 +66,9 @@ function MessageRow({ message, userAuthor, copyable = '' }: { message: Conversat
       <div className="message-row answer-row" data-role="assistant" data-answer="true" data-testid="message-assistant">
         <div className="message-stack">
           <div className="message-author">主 Agent · 最终回答</div>
-          <div className="message-content answer-card"><Markdown text={message.text} /></div>
+          <div className="message-content answer-card">
+            {markdown ? <Markdown text={message.text} /> : <p className="message-plain">{message.text}</p>}
+          </div>
         </div>
       </div>
     );
@@ -216,10 +218,37 @@ const AssistantMarkdownBlock = memo(function AssistantMarkdownBlock(input: {
   return <Markdown text={input.source} veils={input.veils} />;
 }, (previous, next) => previous.source === next.source && sameVeils(previous.veils, next.veils));
 
-function AssistantResponse({ row, author, copyable = '' }: {
+/**
+ * Plain-text rendering that keeps the streaming veil fade without running the
+ * Markdown parser; used when the "Markdown 渲染" preference is off.
+ */
+function PlainText({ text, veils }: { text: string; veils: MarkdownVeil[] }) {
+  if (!veils.length) return <>{text}</>;
+  const cuts = new Set<number>([0, text.length]);
+  for (const veil of veils) {
+    if (veil.start > 0 && veil.start < text.length) cuts.add(veil.start);
+    if (veil.end > 0 && veil.end < text.length) cuts.add(veil.end);
+  }
+  const ordered = [...cuts].sort((left, right) => left - right);
+  const nodes: ReactNode[] = [];
+  for (let index = 0; index < ordered.length - 1; index += 1) {
+    const start = ordered[index]!;
+    const end = ordered[index + 1]!;
+    if (start === end) continue;
+    const segment = text.slice(start, end);
+    const veil = veils.find(item => item.start <= start && end <= item.end);
+    nodes.push(veil && veil.opacity < 1
+      ? <span className="stream-veil" key={`${start}-${end}`} style={{ opacity: veil.opacity }}>{segment}</span>
+      : <span key={`${start}-${end}`}>{segment}</span>);
+  }
+  return <>{nodes}</>;
+}
+
+function AssistantResponse({ row, author, copyable = '', markdown = true }: {
   row: Extract<TranscriptRow, { kind: 'assistant' }>;
   author?: string;
   copyable?: string;
+  markdown?: boolean;
 }) {
   const paced = usePacedStreamText(row.text, row.id, row.streaming);
   const visualStreaming = row.streaming || paced.revealing;
@@ -241,26 +270,32 @@ function AssistantResponse({ row, author, copyable = '' }: {
           {visualStreaming ? '思考与过程 · 生成中' : author ?? '主 Agent · 最终回答'}
         </div>
         <div className={`message-content ${visualStreaming ? 'streaming-card' : 'answer-card'}`}>
-          <div className="streaming-markdown">
-            {blocks.map((block, index) => {
-              const tail = visualStreaming && index === blocks.length - 1;
-              const source = tail ? mendStreamingMarkdown(block.source) : block.source;
-              const localVeils = veils.flatMap(veil => {
-                const start = Math.max(block.start, veil.start);
-                const end = Math.min(block.end, veil.end);
-                return start < end
-                  ? [{ start: start - block.start, end: end - block.start, opacity: veil.opacity }]
-                  : [];
-              });
-              return (
-                <AssistantMarkdownBlock
-                  key={`${row.id}.${block.index}`}
-                  source={source}
-                  veils={localVeils}
-                />
-              );
-            })}
-          </div>
+          {markdown ? (
+            <div className="streaming-markdown">
+              {blocks.map((block, index) => {
+                const tail = visualStreaming && index === blocks.length - 1;
+                const source = tail ? mendStreamingMarkdown(block.source) : block.source;
+                const localVeils = veils.flatMap(veil => {
+                  const start = Math.max(block.start, veil.start);
+                  const end = Math.min(block.end, veil.end);
+                  return start < end
+                    ? [{ start: start - block.start, end: end - block.start, opacity: veil.opacity }]
+                    : [];
+                });
+                return (
+                  <AssistantMarkdownBlock
+                    key={`${row.id}.${block.index}`}
+                    source={source}
+                    veils={localVeils}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <div className="streaming-markdown message-plain" data-plain="true" data-testid="message-plain">
+              <PlainText text={paced.text} veils={veils} />
+            </div>
+          )}
           {visualStreaming && <span className="streaming-caret" aria-hidden="true" />}
         </div>
         {copyable && (
@@ -271,20 +306,21 @@ function AssistantResponse({ row, author, copyable = '' }: {
   );
 }
 
-export function TranscriptRowView({ row, assistantAuthor, userAuthor }: {
+export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown = true }: {
   row: TranscriptRow;
   assistantAuthor?: string;
   userAuthor?: string;
+  markdown?: boolean;
 }) {
   if (row.kind === 'message') {
     return userAuthor
-      ? <MessageRow message={row.message} userAuthor={userAuthor} copyable={copyText(row)} />
-      : <MessageRow message={row.message} copyable={copyText(row)} />;
+      ? <MessageRow message={row.message} userAuthor={userAuthor} copyable={copyText(row)} markdown={markdown} />
+      : <MessageRow message={row.message} copyable={copyText(row)} markdown={markdown} />;
   }
   if (row.kind === 'assistant') {
     return assistantAuthor
-      ? <AssistantResponse row={row} author={assistantAuthor} copyable={copyText(row)} />
-      : <AssistantResponse row={row} copyable={copyText(row)} />;
+      ? <AssistantResponse row={row} author={assistantAuthor} copyable={copyText(row)} markdown={markdown} />
+      : <AssistantResponse row={row} copyable={copyText(row)} markdown={markdown} />;
   }
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;

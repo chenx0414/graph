@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
+import { createHistoryState, isNavigating, recallNewer, recallOlder, shouldRecallHistory } from './chat-history.ts';
 import { insertAtCaret, readClipboardText } from './chat-paste.ts';
+import { createUndoState, editGroup, recordUndo, redoStep, undoStep, undoValue } from './chat-undo.ts';
 import { clampComposerHeight, composerPrimaryState } from './composer-state.ts';
 import { FullAccessToggle } from './FullAccessToggle.tsx';
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
@@ -68,6 +70,7 @@ export function ChatComposer({
   queueLength = 0,
   hasSuggestion = false,
   suggestion,
+  history = [],
   slashTools = [],
   slashCapabilities = [],
   slashModels = [],
@@ -104,6 +107,8 @@ export function ChatComposer({
   /** A suggested prompt is available, for the idle send branch. */
   hasSuggestion?: boolean;
   suggestion?: string | null;
+  /** Already-sent user prompts of this conversation, oldest first; ↑/↓ recall them. */
+  history?: string[];
   slashTools?: AgentToolView[];
   slashCapabilities?: AgentCapabilityView[];
   slashModels?: ComposerModel[];
@@ -133,6 +138,10 @@ export function ChatComposer({
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  // The textarea is controlled, so the browser's native undo stack is discarded
+  // on every keystroke; this explicit stack replaces it for Cmd+Z/Cmd+Shift+Z.
+  const undoRef = useRef(createUndoState(value));
+  const historyRef = useRef(createHistoryState());
   const activeMention = mentionAt(value, cursor);
   const activeSlash = slashAt(value, cursor);
   const allSlashEntries = useMemo(() => slashEntries({
@@ -171,6 +180,17 @@ export function ChatComposer({
     const next = clampComposerHeight(input.scrollHeight);
     input.style.height = `${next.height}px`;
     input.style.overflowY = next.scrollable ? 'auto' : 'hidden';
+  }, [value]);
+
+  // Keep the explicit undo stack and the history cursor aligned with value
+  // changes that did not come from a keystroke in this input: sending clears
+  // the composer, a stored draft loads, a failed send restores the text. A real
+  // keystroke already recorded itself in `onChange`, so it matches and is not
+  // recorded twice.
+  useEffect(() => {
+    if (undoValue(undoRef.current) === value) return;
+    undoRef.current = recordUndo(undoRef.current, value, null);
+    historyRef.current = createHistoryState();
   }, [value]);
 
   useEffect(() => {
@@ -290,6 +310,28 @@ export function ChatComposer({
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }
+
+  /**
+   * Apply a value the composer produced itself (undo, redo, history recall):
+   * update the parent, move the caret, refresh the @ / slash menus and refocus
+   * the textarea so the next keystroke lands in the right place.
+   */
+  function applyValue(next: string, position: number) {
+    onChange(next);
+    setCursor(position);
+    setMentionOpen(Boolean(mentionAt(next, position)));
+    const slash = slashAt(next, position);
+    setSlashOpen(Boolean(slash));
+    if (slash) {
+      setSlashScope('root');
+      setSlashIndex(0);
+    }
+    requestAnimationFrame(() => {
+      const target = textareaRef.current;
+      target?.focus();
+      target?.setSelectionRange(position, position);
     });
   }
 
@@ -435,6 +477,8 @@ export function ChatComposer({
         onChange={event => {
           const next = event.target.value;
           const position = event.target.selectionStart ?? next.length;
+          undoRef.current = recordUndo(undoRef.current, next, editGroup(value, next));
+          historyRef.current = createHistoryState();
           onChange(next);
           setCursor(position);
           setMentionOpen(Boolean(mentionAt(next, position)));
@@ -455,6 +499,35 @@ export function ChatComposer({
         data-suggestion={showingSuggestion ? availableSuggestion : undefined}
         autoFocus={autoFocus}
         onKeyDown={event => {
+          const meta = event.metaKey || event.ctrlKey;
+          // Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z redoes. The composer is a
+          // controlled input, so these are the only working shortcuts.
+          if (meta && !event.altKey && event.key.toLowerCase() === 'z') {
+            event.preventDefault();
+            const step = event.shiftKey ? redoStep(undoRef.current) : undoStep(undoRef.current);
+            if (step) {
+              undoRef.current = step.state;
+              applyValue(step.value, step.value.length);
+            }
+            return;
+          }
+          // ↑/↓ recall already-sent prompts, but only while the / and @ menus
+          // are closed and only from the matching edge of a multi-line draft.
+          if (!meta && (event.key === 'ArrowUp' || event.key === 'ArrowDown') && !slashOpen && !mentionOpen) {
+            const direction = event.key === 'ArrowUp' ? 'older' : 'newer';
+            if ((history.length > 0 || isNavigating(historyRef.current)) && shouldRecallHistory(direction, value, cursor)) {
+              event.preventDefault();
+              const recall = direction === 'older'
+                ? recallOlder(historyRef.current, history, value)
+                : recallNewer(historyRef.current, history, value);
+              if (recall) {
+                historyRef.current = recall.state;
+                undoRef.current = recordUndo(undoRef.current, recall.value, null);
+                applyValue(recall.value, recall.value.length);
+              }
+              return;
+            }
+          }
           if (slashOpen) {
             if (event.key === 'ArrowDown' && visibleSlashEntries.length) {
               event.preventDefault();

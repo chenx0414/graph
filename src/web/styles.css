@@ -626,6 +626,10 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   background: transparent;
 }
 .chat-composer textarea::placeholder { color: var(--faint); opacity: 1; }
+/* The composer grows with its content up to a cap and then scrolls (see
+ * `clampComposerHeight`); keep that overflow scrollbar quiet. */
+.chat-composer textarea::-webkit-scrollbar { width: 8px; }
+.chat-composer textarea::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
 .chat-composer-controls { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 8px; }
 .full-access-toggle {
   height: 30px; padding: 0 8px; flex: 0 0 auto;

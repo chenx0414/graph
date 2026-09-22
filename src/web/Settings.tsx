@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
+import { usePreferences } from './preferences.ts';
 import { Setup } from './Setup.tsx';
 import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 import { STANDARD_ACCESS } from './access-presets.ts';
@@ -251,6 +252,48 @@ function ArchivedConversations() {
   );
 }
 
+/**
+ * Local rendering preferences. They live in `localStorage` (graph-pref-*) and
+ * are never saved to the server config, so toggling one is instant and offline.
+ */
+function PreferencesPage() {
+  const { preferences, update } = usePreferences();
+  return (
+    <section id="settings-general" className="settings-section" data-testid="settings-preferences">
+      <Card title="通用" icon="settings" subtitle="这些偏好保存在本机浏览器，不会写入配置文件，也不需要重启守护进程">
+        <div className="preference-list">
+          <label className="preference-item">
+            <span className="preference-copy">
+              <strong>Markdown 渲染</strong>
+              <span className="muted">开启后你与主 Agent 的消息都按 Markdown 渲染；关闭后显示原文。</span>
+            </span>
+            <input
+              type="checkbox"
+              className="preference-toggle"
+              data-testid="pref-markdown"
+              checked={preferences.markdownRendering}
+              onChange={event => update('markdownRendering', event.target.checked)}
+            />
+          </label>
+          <label className="preference-item">
+            <span className="preference-copy">
+              <strong>候选 prompt</strong>
+              <span className="muted">开启后，输入框为空且主 Agent 空闲时显示建议的下一步 prompt。</span>
+            </span>
+            <input
+              type="checkbox"
+              className="preference-toggle"
+              data-testid="pref-candidate-prompt"
+              checked={preferences.candidatePrompt}
+              onChange={event => update('candidatePrompt', event.target.checked)}
+            />
+          </label>
+        </div>
+      </Card>
+    </section>
+  );
+}
+
 function ThemePlaceholder() {
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
   const options = [
@@ -295,6 +338,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
     setActive(openGuide ? 'settings-models' : 'settings-overview');
   }, [openGuide]);
   const sections = [
+    { id: 'settings-general', label: '通用/偏好' },
     { id: 'settings-overview', label: '常规' },
     { id: 'settings-git', label: 'Git 准备' },
     { id: 'settings-models', label: '模型' },
@@ -335,6 +379,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <div className="settings-content">
           <div className="settings-root">
             <SettingsAdvanced active={active} autoSyncSubscriptions={!openGuide} />
+            {active === 'settings-general' && <PreferencesPage />}
             {active === 'settings-archived' && <section id="settings-archived" className="settings-section"><ArchivedConversations /></section>}
           </div>
         </div>
