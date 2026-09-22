@@ -107,12 +107,11 @@ describe('③ scroll-to-latest decision', () => {
 describe('④ primary button state machine', () => {
   const idle = { busy: false, paused: false, pending: false, hasInput: false, queueLength: 0, hasSuggestion: false };
 
-  test('outputting with an empty composer offers pause', () => {
+  test('outputting offers pause no matter what is typed or queued', () => {
     expect(composerPrimaryState({ ...idle, busy: true })).toEqual({ mode: 'pause', action: 'pause' });
-  });
-
-  test('outputting with typed content still sends', () => {
-    expect(composerPrimaryState({ ...idle, busy: true, hasInput: true })).toEqual({ mode: 'send', action: 'send' });
+    expect(composerPrimaryState({ ...idle, busy: true, hasInput: true })).toEqual({ mode: 'pause', action: 'pause' });
+    expect(composerPrimaryState({ ...idle, busy: true, queueLength: 3 })).toEqual({ mode: 'pause', action: 'pause' });
+    expect(composerPrimaryState({ ...idle, busy: true, hasInput: true, queueLength: 3 })).toEqual({ mode: 'pause', action: 'pause' });
   });
 
   test('paused with an empty composer and empty queue resumes', () => {
@@ -120,11 +119,11 @@ describe('④ primary button state machine', () => {
   });
 
   test('paused with input sends the message and auto-continues', () => {
-    expect(composerPrimaryState({ ...idle, paused: true, hasInput: true })).toEqual({ mode: 'resume', action: 'send-and-resume' });
+    expect(composerPrimaryState({ ...idle, paused: true, hasInput: true })).toEqual({ mode: 'send', action: 'send-and-resume' });
   });
 
-  test('paused with a nonempty queue resumes without sending', () => {
-    expect(composerPrimaryState({ ...idle, paused: true, queueLength: 2 })).toEqual({ mode: 'resume', action: 'resume' });
+  test('paused with a nonempty queue sends the queue and auto-continues', () => {
+    expect(composerPrimaryState({ ...idle, paused: true, queueLength: 2 })).toEqual({ mode: 'send', action: 'send-and-resume' });
   });
 
   test('a pause/resume in flight shows a pending control', () => {

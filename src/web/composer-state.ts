@@ -104,11 +104,15 @@ export interface ComposerPrimaryInput {
 export function composerPrimaryState(input: ComposerPrimaryInput): { mode: ComposerPrimaryMode; action: ComposerPrimaryAction } {
   if (input.pending) return { mode: 'pending', action: 'none' };
   if (input.paused) {
-    return { mode: 'resume', action: input.hasInput ? 'send-and-resume' : 'resume' };
+    // ② empty composer + empty queue resumes; ③/④ anything to send (typed
+    // content or a waiting queue) sends and auto-continues.
+    if (input.hasInput || input.queueLength > 0) return { mode: 'send', action: 'send-and-resume' };
+    return { mode: 'resume', action: 'resume' };
   }
   if (input.busy) {
-    // Outputting: an empty composer offers pause, typed content still sends.
-    return input.hasInput ? { mode: 'send', action: 'send' } : { mode: 'pause', action: 'pause' };
+    // ① While the master outputs the control is pause, unconditionally. Sending
+    // during output is the keyboard/Enter path, not this button.
+    return { mode: 'pause', action: 'pause' };
   }
   if (input.hasInput) return { mode: 'send', action: 'send' };
   if (input.queueLength > 0) return { mode: 'send', action: 'steer' };
