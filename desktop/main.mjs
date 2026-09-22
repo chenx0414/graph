@@ -14,8 +14,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  absolutePaths, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
-  parseBannerAddress, resolveAppPaths, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
+  absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
+  parseBannerAddress, resolveAppPaths, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
 
@@ -111,22 +111,24 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function currentPaths() {
-    // Pointing GRAPH_RSI_ROOT at a checkout runs the daemon from that checkout,
-    // so a self-improvement change lands in the code the app actually executes.
-    const configured = process.env.GRAPH_RSI_ROOT?.trim();
-    // Only redirect to a checkout that can actually serve the console, so a
-    // half-prepared checkout cannot leave the app with a blank window.
-    const sourceRoot = configured
-      && existsSync(join(resolve(configured), 'src/server/cli.ts'))
-      && existsSync(join(resolve(configured), 'dist/web/index.html'))
-      ? resolve(configured)
-      : undefined;
-    return absolutePaths(resolveAppPaths({
-      appPath: app.isPackaged ? app.getAppPath() : devRoot,
-      isPackaged: app.isPackaged,
-      userData: app.getPath('userData'),
-      ...(sourceRoot ? { sourceRoot } : {}),
-    }));
+    // The app runs the checkout named by the app root file: it is the product line, and it is also
+    // the tree a self-improvement change edits and `app:build` rebuilds, so a build can never drop
+    // a product feature. The file is the durable setting because a launch from Finder carries no
+    // environment; GRAPH_RSI_ROOT stays the override for a dev run.
+    const appPath = app.isPackaged ? app.getAppPath() : devRoot;
+    const base = resolveAppPaths({ appPath, isPackaged: app.isPackaged, userData: app.getPath('userData') });
+    const rootFile = appRootFilePath(base.graphHome);
+    const fileRoot = existsSync(rootFile) ? readFileSync(rootFile, 'utf8') : undefined;
+    const sourceRoot = resolveSourceRoot({
+      fileRoot,
+      envRoot: process.env.GRAPH_RSI_ROOT,
+      // Only redirect to a checkout that can actually serve the console, so a
+      // half-prepared checkout cannot leave the app with a blank window.
+      canServe: root => existsSync(join(root, 'src/server/cli.ts')) && existsSync(join(root, 'dist/web/index.html')),
+    });
+    return absolutePaths(sourceRoot
+      ? resolveAppPaths({ appPath, isPackaged: app.isPackaged, userData: app.getPath('userData'), sourceRoot })
+      : base);
   }
 
   function startDaemon() {
