@@ -141,6 +141,28 @@ const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
   succeeded: 'success', failed: 'danger', blocked: 'warn', skipped: 'neutral',
 };
 
+/** The composer draft is per-conversation and client-local: switching away or
+ * reopening the window keeps whatever was typed, without a server record. */
+const COMPOSER_DRAFT_PREFIX = 'graph.conversation.composer.';
+
+function readComposerDraft(conversationId: string) {
+  try {
+    return window.localStorage.getItem(`${COMPOSER_DRAFT_PREFIX}${conversationId}`) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function writeComposerDraft(conversationId: string, value: string) {
+  try {
+    const key = `${COMPOSER_DRAFT_PREFIX}${conversationId}`;
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // A full or blocked local storage must never break composing.
+  }
+}
+
 function DraftVersionToc({ history, selectedVersion, scope, onSelectVersion }: {
   history: ProposalVersion[];
   selectedVersion: number;
@@ -510,7 +532,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       : Promise.resolve(null),
     [id, selectedProposalVersion],
   );
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => readComposerDraft(id));
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [steering, setSteering] = useState(false);
@@ -534,6 +556,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     refreshTimer.current = setTimeout(() => reload(), 150);
   }, [reload]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
+  useEffect(() => { writeComposerDraft(id, text); }, [id, text]);
   const connected = useEventStream(view ? `/api/conversations/${view.id}/events/stream` : null, event => {
     const data = event.data as Parameters<typeof applyConversationEvent>[1]['data'];
     setProjection(current => applyConversationEvent(current, { type: event.type, ...(data ? { data } : {}) }));
@@ -571,6 +594,20 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   useEffect(() => {
     if (snapshot.streamNeedsResync) reload();
   }, [reload, snapshot.streamNeedsResync]);
+  // Entering a conversation (or reopening the window) starts at the newest
+  // message once the transcript window has rendered. Leaving and re-entering
+  // the chat tab re-arms the jump without yanking a reader on new arrivals.
+  const enteredScrollRef = useRef(false);
+  useEffect(() => {
+    if (conversationTab !== 'chat') {
+      enteredScrollRef.current = false;
+      return;
+    }
+    if (enteredScrollRef.current || !snapshot.messages.length) return;
+    enteredScrollRef.current = true;
+    const frame = requestAnimationFrame(() => transcriptFollow.scrollToLatest('auto'));
+    return () => cancelAnimationFrame(frame);
+  }, [conversationTab, snapshot.messages.length, transcriptFollow.scrollToLatest]);
   if (loading && !view) return <p>加载中…</p>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <p>加载中…</p>;
@@ -614,7 +651,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       setPauseAction(null);
     }
   }
-  async function send(outgoingOverride?: string) {
+  async function send(outgoingOverride?: string): Promise<boolean> {
     const rawOutgoing = (outgoingOverride ?? text).trim();
     const outgoing = composeSlashDirective(rawOutgoing, extractSlashTargets(
       rawOutgoing,
@@ -622,7 +659,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       agentContext?.capabilities ?? [],
     ));
     const outgoingAttachments = outgoingOverride === undefined ? attachments : [];
-    if (!outgoing && !outgoingAttachments.length) return;
+    if (!outgoing && !outgoingAttachments.length) return false;
     setText('');
     setAttachments([]);
     setSending(true);
@@ -635,10 +672,12 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       transcriptFollow.scrollToLatest('smooth');
       reload();
       onChanged?.();
+      return true;
     } catch (reason) {
       setText(current => current || rawOutgoing);
       setAttachments(current => current.length ? current : outgoingAttachments);
       setActionError(reason instanceof Error ? reason.message : String(reason));
+      return false;
     } finally {
       setSending(false);
     }
@@ -664,11 +703,47 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       setSteering(false);
     }
   }
-  async function submitComposer() {
+  async function submitEnter() {
     if (sending || steering) return;
     if (text.trim() || attachments.length) return send();
     if (busy && queuedMessages.length) return steerQueued();
     if (!busy && promptSuggestion) return send(promptSuggestion);
+  }
+
+  /** The context-sensitive primary button: pause while the master is
+   * outputting, resume when paused, and send + auto-continue when paused with
+   * something to send. */
+  async function submitPrimary() {
+    if (sending || steering || pauseAction) return;
+    const hasInput = Boolean(text.trim() || attachments.length);
+    if (paused) {
+      if (hasInput) {
+        const sent = await send();
+        if (!sent) return;
+      }
+      await changePaused(false);
+      return;
+    }
+    if (hasInput) return send();
+    if (busy) return changePaused(true);
+    if (queuedMessages.length) return steerQueued();
+    if (promptSuggestion) return send(promptSuggestion);
+  }
+
+  async function cancelQueued(messageId: string) {
+    setActionError('');
+    try {
+      await api(`/api/conversations/${id}/messages/${encodeURIComponent(messageId)}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `cancel-${crypto.randomUUID()}` }),
+      });
+      reload();
+      onChanged?.();
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setActionError(message);
+      toast(message, 'danger');
+    }
   }
 
   async function selectMasterModel(model: { id: string }, thinkingLevel: ThinkingLevel) {
@@ -730,7 +805,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const graphRuntimeTaskId = activeProposalVersion === null
     ? null
     : view.accepted.find(item => item.proposalVersion === activeProposalVersion)?.taskId ?? null;
-  const displayMessages = snapshot.messages;
+  const displayMessages = snapshot.messages.filter(message => !(message.role === 'user' && message.state === 'cancelled'));
   const transcriptRows = buildTranscriptRows({
     messages: displayMessages,
     liveTools: snapshot.liveTools,
@@ -1034,6 +1109,16 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         )}
                       </div>
                       <span className="queued-message-order">{index + 1}</span>
+                      <button
+                        type="button"
+                        className="queued-message-cancel"
+                        data-testid="queued-message-cancel"
+                        onClick={() => void cancelQueued(message.id)}
+                        aria-label="取消这条排队消息"
+                        title="取消这条排队消息"
+                      >
+                        <Icon name="close" size={12} />
+                      </button>
                     </div>
                   );
                 })}
@@ -1054,8 +1139,12 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               slashTelemetry={view.telemetry}
               onSlashModelSelect={selectMasterModel}
               onCompact={compactConversation}
-              onSend={() => void submitComposer()}
-              sendDisabled={sending || steering || (!text.trim() && !attachments.length && !(busy && queuedMessages.length) && !promptSuggestion)}
+              onSend={() => void submitPrimary()}
+              onSubmit={() => void submitEnter()}
+              busy={Boolean(busy)}
+              paused={paused}
+              pausePending={pauseAction !== null}
+              sendDisabled={sending || steering || pauseAction !== null || (!paused && !busy && !text.trim() && !attachments.length && !promptSuggestion)}
             />
             <div className="composer-footer">
               <span className="composer-note">
