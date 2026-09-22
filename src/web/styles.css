@@ -1273,13 +1273,15 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .message-actions { display: flex; gap: 6px; margin-top: 5px; }
 .message-row[data-role="user"] .message-actions { justify-content: flex-end; }
 .message-copy {
-  padding: 1px 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--faint);
-  font: inherit;
-  font-size: 11.5px;
+  line-height: 0;
   cursor: pointer;
 }
 .message-copy:hover { background: var(--panel-soft); color: var(--text); }

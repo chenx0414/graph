@@ -26,7 +26,7 @@ function CopyButton({ text }: { text: string }) {
       aria-label="复制这条消息"
       onClick={() => void writeClipboardText(text, navigator.clipboard, toast)}
     >
-      复制
+      <Icon name="copy" size={14} />
     </button>
   );
 }
