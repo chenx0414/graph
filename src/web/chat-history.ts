@@ -1,92 +1,100 @@
 /**
- * ↑/↓ recall of already-sent prompts in the chat composer.
+ * Pure rules behind the composer's ↑/↓ prompt history.
  *
- * The rules live here (no DOM, no React) so they can be verified without a
- * browser: the unsent draft is remembered before the first ↑ and restored by ↓
- * past the newest entry; recall stops at the earliest prompt; history is built
- * only from the user's sent messages, oldest first.
+ * The composer only wires keyboard events and text; deciding what "one step
+ * back in history" means, when to remember the draft and where the earliest
+ * prompt is stays here so it can be tested without a browser.
  */
 
-export interface HistoryState {
-  /** Index into the recall list, or null while showing the live draft. */
-  index: number | null;
-  /** The unsent value captured when navigation started. */
-  saved: string;
+/** Remembered prompts per composer session. Older prompts fall off the front. */
+export const COMPOSER_HISTORY_LIMIT = 100;
+
+export interface ComposerHistoryState {
+  /** Sent prompts oldest → newest. */
+  entries: string[];
+  /** `null` while editing the live draft; `0` is the newest prompt, larger is older. */
+  cursor: number | null;
+  /** The draft that was in the box when browsing started, restored on the way down. */
+  draft: string;
 }
 
-export interface RecalledValue {
-  state: HistoryState;
+function normalizeEntries(entries: string[]): string[] {
+  const normalized: string[] = [];
+  for (const entry of entries) {
+    const value = entry.trim();
+    if (!value || normalized[normalized.length - 1] === value) continue;
+    normalized.push(value);
+  }
+  return normalized.slice(-COMPOSER_HISTORY_LIMIT);
+}
+
+export function createComposerHistoryState(entries: string[] = []): ComposerHistoryState {
+  return { entries: normalizeEntries(entries), cursor: null, draft: '' };
+}
+
+/**
+ * Remember one sent prompt. Consecutive duplicates collapse, the newest value
+ * wins, and browsing resets because the box is empty right after a send.
+ */
+export function recordComposerPrompt(state: ComposerHistoryState, prompt: string): ComposerHistoryState {
+  const value = prompt.trim();
+  if (!value) return { entries: state.entries, cursor: null, draft: '' };
+  const entries = state.entries[state.entries.length - 1] === value
+    ? state.entries
+    : [...state.entries, value].slice(-COMPOSER_HISTORY_LIMIT);
+  return { entries, cursor: null, draft: '' };
+}
+
+/** A user edit leaves the browsing position but keeps the remembered prompts. */
+export function resetComposerHistory(state: ComposerHistoryState): ComposerHistoryState {
+  return state.cursor === null ? state : { entries: state.entries, cursor: null, draft: '' };
+}
+
+export interface ComposerHistoryMove {
+  state: ComposerHistoryState;
   value: string;
 }
 
-/** A message shape that carries the fields history cares about. */
-export interface HistoryMessage {
-  role: string;
-  text?: string;
-  kind?: string;
-  state?: string;
-}
-
-export function createHistoryState(): HistoryState {
-  return { index: null, saved: '' };
-}
-
-/** True while the composer is showing a recalled prompt rather than the draft. */
-export function isNavigating(state: HistoryState): boolean {
-  return state.index !== null;
+/**
+ * Move to an older prompt. The first ↑ out of the draft saves the draft and
+ * shows the newest prompt; at the oldest prompt it returns `null` so the key
+ * falls back to the caret moving.
+ */
+export function composerHistoryUp(state: ComposerHistoryState, liveValue: string): ComposerHistoryMove | null {
+  if (!state.entries.length) return null;
+  if (state.cursor === null) {
+    const cursor = 0;
+    return {
+      state: { entries: state.entries, cursor, draft: liveValue },
+      value: state.entries[state.entries.length - 1 - cursor]!,
+    };
+  }
+  if (state.cursor >= state.entries.length - 1) return null;
+  const cursor = state.cursor + 1;
+  return {
+    state: { ...state, cursor },
+    value: state.entries[state.entries.length - 1 - cursor]!,
+  };
 }
 
 /**
- * Sent user prompts of one conversation, oldest first. Briefings and messages
- * that were queued or cancelled were never sent by hand, so they are ignored;
- * an immediately repeated prompt is folded into one entry.
+ * Move to a newer prompt, and past the newest back to the remembered draft.
+ * `null` while already on the draft.
  */
-export function sentPrompts(messages: HistoryMessage[]): string[] {
-  const prompts: string[] = [];
-  for (const message of messages) {
-    if (message.role !== 'user') continue;
-    if (message.kind === 'briefing') continue;
-    if (message.state === 'queued' || message.state === 'cancelled') continue;
-    const text = (message.text ?? '').trim();
-    if (!text) continue;
-    if (prompts[prompts.length - 1] === text) continue;
-    prompts.push(text);
+export function composerHistoryDown(state: ComposerHistoryState): ComposerHistoryMove | null {
+  if (state.cursor === null) return null;
+  if (state.cursor <= 0) {
+    return { state: { entries: state.entries, cursor: null, draft: '' }, value: state.draft };
   }
-  return prompts;
+  const cursor = state.cursor - 1;
+  return {
+    state: { ...state, cursor },
+    value: state.entries[state.entries.length - 1 - cursor]!,
+  };
 }
 
-/**
- * Whether the arrow key should recall history instead of moving the caret.
- * A single-line composer always recalls; a multi-line draft only recalls from
- * the first line (↑) or the last line (↓), so normal caret movement still works
- * in the middle of a draft.
- */
-export function shouldRecallHistory(direction: 'older' | 'newer', value: string, cursor: number): boolean {
-  const firstBreak = value.indexOf('\n');
-  if (firstBreak === -1) return true;
-  if (direction === 'older') return cursor <= firstBreak;
-  const lastBreak = value.lastIndexOf('\n');
-  return cursor >= lastBreak + 1;
-}
-
-/** Recall the previous (older) prompt. Null when there is nothing older. */
-export function recallOlder(state: HistoryState, prompts: string[], current: string): RecalledValue | null {
-  if (!prompts.length) return null;
-  if (state.index === null) {
-    const index = prompts.length - 1;
-    return { state: { index, saved: current }, value: prompts[index]! };
-  }
-  if (state.index <= 0 || state.index >= prompts.length) return null;
-  const index = state.index - 1;
-  return { state: { ...state, index }, value: prompts[index]! };
-}
-
-/** Recall the next (newer) prompt; past the newest it returns the saved draft. */
-export function recallNewer(state: HistoryState, prompts: string[], _current?: string): RecalledValue | null {
-  if (state.index === null) return null;
-  if (state.index >= prompts.length - 1) {
-    return { state: createHistoryState(), value: state.saved };
-  }
-  const index = state.index + 1;
-  return { state: { ...state, index }, value: prompts[index]! };
+/** The prompt the cursor points at, for tests and hints. */
+export function composerHistoryValue(state: ComposerHistoryState): string | null {
+  if (state.cursor === null) return null;
+  return state.entries[state.entries.length - 1 - state.cursor] ?? null;
 }

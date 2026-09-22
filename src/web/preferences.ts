@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * Local display preferences for the console.
  *
@@ -73,6 +74,27 @@ export function readPreferences(storage: PreferenceStorage | null | undefined): 
     markdownRendering: readPreference(storage, 'markdownRendering'),
     candidatePrompt: readPreference(storage, 'candidatePrompt'),
   };
+}
+
+/**
+ * Pure rendering decisions shared by the transcript and the composer, so both
+ * the wire-up and the rules can be verified without a browser.
+ */
+
+/** True when user and agent messages render as Markdown instead of plain text. */
+export function markdownEnabled(preferences: Preferences): boolean {
+  return preferences.markdownRendering;
+}
+
+/**
+ * The suggested prompt the composer may show, or null when candidate prompts
+ * are disabled (the default) or no suggestion is available.
+ */
+export function visibleSuggestion(
+  preferences: Preferences,
+  suggestion: string | null | undefined,
+): string | null {
+  return preferences.candidatePrompt ? suggestion ?? null : null;
 }
 
 /** `window.localStorage` can throw when the host blocks storage. */

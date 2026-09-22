@@ -2,9 +2,11 @@ import { describe, expect, test } from 'vitest';
 import {
   DEFAULT_PREFERENCES,
   PREFERENCES_PREFIX,
+  markdownEnabled,
   preferenceKey,
   readPreference,
   readPreferences,
+  visibleSuggestion,
   writePreference,
   type PreferenceStorage,
 } from '../../src/web/preferences.ts';
@@ -87,5 +89,28 @@ describe('blocked storage', () => {
     expect(readPreferences(blocked)).toEqual(DEFAULT_PREFERENCES);
     expect(() => writePreference(blocked, 'markdownRendering', false)).not.toThrow();
     expect(() => writePreference(null, 'candidatePrompt', true)).not.toThrow();
+  });
+});
+
+describe('markdown rendering decision', () => {
+  test('is on by default and follows the preference', () => {
+    expect(markdownEnabled(DEFAULT_PREFERENCES)).toBe(true);
+    expect(markdownEnabled({ markdownRendering: true, candidatePrompt: false })).toBe(true);
+    expect(markdownEnabled({ markdownRendering: false, candidatePrompt: true })).toBe(false);
+  });
+});
+
+describe('candidate prompt decision', () => {
+  test('is off by default, so no suggestion reaches the composer', () => {
+    expect(visibleSuggestion(DEFAULT_PREFERENCES, '继续检查失败分支。')).toBeNull();
+    expect(visibleSuggestion({ markdownRendering: true, candidatePrompt: false }, '继续')).toBeNull();
+  });
+
+  test('when enabled it passes the suggestion through, or null without one', () => {
+    const on = { markdownRendering: true, candidatePrompt: true };
+    expect(visibleSuggestion(on, '继续检查失败分支。')).toBe('继续检查失败分支。');
+    expect(visibleSuggestion(on, null)).toBeNull();
+    expect(visibleSuggestion(on, undefined)).toBeNull();
+    expect(visibleSuggestion(on, '')).toBe('');
   });
 });

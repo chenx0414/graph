@@ -4,7 +4,6 @@ import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
 import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
-import { sentPrompts } from './chat-history.ts';
 import {
   cancelQueuedMessage,
   composerPrimaryDisabled,
@@ -15,7 +14,7 @@ import {
   writeComposerDraft,
   type ComposerStorage,
 } from './composer-state.ts';
-import { usePreferences } from './preferences.ts';
+import { markdownEnabled, usePreferences, visibleSuggestion } from './preferences.ts';
 import { ComposerTelemetry, type ThinkingLevel } from './ComposerTelemetry.tsx';
 import { composeSlashDirective, extractSlashTargets } from './SlashCommands.tsx';
 import {
@@ -160,6 +159,25 @@ function composerStorage(): ComposerStorage | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Already-sent user prompts of a conversation, oldest first, for the composer's
+ * ↑/↓ history. Briefings and messages that were queued or cancelled were never
+ * sent by hand; an immediately repeated prompt collapses into one entry.
+ */
+function sentUserPrompts(messages: ConversationMessage[]): string[] {
+  const prompts: string[] = [];
+  for (const message of messages) {
+    if (message.role !== 'user') continue;
+    if (message.kind === 'briefing') continue;
+    if (message.state === 'queued' || message.state === 'cancelled') continue;
+    const text = message.text.trim();
+    if (!text) continue;
+    if (prompts[prompts.length - 1] === text) continue;
+    prompts.push(text);
+  }
+  return prompts;
 }
 
 function DraftVersionToc({ history, selectedVersion, scope, onSelectVersion }: {
@@ -626,7 +644,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   );
   // Candidate prompts are an opt-in preference; when off, the composer never
   // shows (nor sends) a suggested next prompt.
-  const promptSuggestion = preferences.candidatePrompt ? snapshot.promptSuggestion : null;
+  const promptSuggestion = visibleSuggestion(preferences, snapshot.promptSuggestion);
   const hasComposerInput = Boolean(text.trim() || attachments.length);
   const primaryState = composerPrimaryState({
     busy: Boolean(busy),
@@ -824,7 +842,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     ? null
     : view.accepted.find(item => item.proposalVersion === activeProposalVersion)?.taskId ?? null;
   const displayMessages = visibleTranscriptMessages(snapshot.messages);
-  const composerHistory = sentPrompts(displayMessages);
+  const composerHistory = sentUserPrompts(displayMessages);
   const transcriptRows = buildTranscriptRows({
     messages: displayMessages,
     liveTools: snapshot.liveTools,
@@ -988,7 +1006,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
           >
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
-          {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} markdown={preferences.markdownRendering} />)}
+          {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} markdown={markdownEnabled(preferences)} />)}
 
           {!view.tasks.length && (
             <div className="thread-action-card" data-testid="no-conversation-tasks">

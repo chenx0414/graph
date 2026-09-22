@@ -429,9 +429,6 @@ test('the composer suggestion and queue steering follow the three Enter states',
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  // Candidate prompts are opt-in (settings → 通用/偏好, default off); this test
-  // exercises them, so turn the preference on for the whole page.
-  await page.addInitScript(() => { try { localStorage.setItem('graph-pref-candidate-prompt', 'true'); } catch { /* storage may be blocked */ } });
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   const input = page.getByTestId('chat-input');
   await input.waitFor();

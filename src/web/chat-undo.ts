@@ -1,110 +1,100 @@
 /**
- * Explicit undo/redo history for the chat composer.
+ * Pure undo/redo stack behind the composer's ⌘Z / ⇧⌘Z.
  *
- * The textarea is a controlled React input: every keystroke is written back
- * through `onChange`, which discards the browser's native undo stack. This
- * module keeps the snapshots itself, so Cmd+Z / Cmd+Shift+Z keep working.
- *
- * The rules live here (no DOM, no React) so they can be verified without a
- * browser: a snapshot is pushed for every edit; adjacent single-character
- * keystrokes of the same kind coalesce into one undo step; pastes, clears and
- * multi-character changes always start a new step; and editing after an undo
- * drops the redo branch.
+ * React writes the textarea value programmatically, so the browser never sees
+ * a native edit and its built-in undo history is dead. The composer therefore
+ * owns an explicit stack of value snapshots; every rule lives here so it can be
+ * verified without a browser.
  */
 
-/** Coalescing bucket for adjacent single-character edits. */
-export type EditGroup = 'typing' | 'deleting';
+/** Snapshots kept in each direction. The 101st edit drops the oldest one. */
+export const COMPOSER_UNDO_LIMIT = 100;
 
 /**
- * Maximum number of undo steps retained. The base snapshot is additional, so a
- * full stack holds `UNDO_LIMIT + 1` values and can be undone `UNDO_LIMIT` times.
+ * Why a value changed. A run of `typing` edits coalesces into one step so a
+ * sentence typed by hand undoes as a unit, while paste/delete/clear are always
+ * their own step.
  */
-export const UNDO_LIMIT = 100;
+export type ComposerEditKind = 'typing' | 'paste' | 'delete' | 'clear' | 'insert';
 
-export interface UndoState {
-  /** Snapshots oldest → newest; the entry at `index` is the live value. */
-  entries: string[];
-  /** Position of the live value inside `entries`. */
-  index: number;
-  /** Coalescing bucket of the live entry, or null when it is closed. */
-  group: EditGroup | null;
+export interface ComposerUndoState {
+  /** Snapshots older → newer; the last entry is the value right before the current one. */
+  past: string[];
+  /** Values undone from newest to oldest; surviving edits clear this. */
+  future: string[];
+  /** The kind that produced the current value, used to coalesce a typed run. */
+  lastKind: ComposerEditKind | null;
 }
 
-export function createUndoState(initial = ''): UndoState {
-  return { entries: [initial], index: 0, group: null };
+export function createComposerUndoState(): ComposerUndoState {
+  return { past: [], future: [], lastKind: null };
 }
 
-/** The current live value of the stack. */
-export function undoValue(state: UndoState): string {
-  return state.entries[state.index] ?? '';
-}
-
-export function canUndo(state: UndoState): boolean {
-  return state.index > 0;
-}
-
-export function canRedo(state: UndoState): boolean {
-  return state.index < state.entries.length - 1;
+/** True when the two values differ by exactly one inserted or deleted character. */
+function singleCharacterChange(previous: string, next: string): boolean {
+  if (Math.abs(previous.length - next.length) !== 1) return false;
+  const shorter = previous.length < next.length ? previous : next;
+  const longer = previous.length < next.length ? next : previous;
+  let index = 0;
+  while (index < shorter.length && shorter[index] === longer[index]) index += 1;
+  return shorter.slice(index) === longer.slice(index + 1);
 }
 
 /**
- * Classify a plain value change so adjacent keystrokes coalesce:
- * a one-character append is `typing`, a one-character removal from the same
- * spot is `deleting`. Newlines, pastes, clears, multi-character edits and any
- * non-prefix change return null and therefore start a fresh undo step.
+ * Record an edit from `previous` to `next`. A one-character typing continuation
+ * keeps the snapshot the run started from; anything else appends `previous`.
+ * Every outcome invalidates the redo branch.
  */
-export function editGroup(previous: string, next: string): EditGroup | null {
-  if (next === previous) return null;
-  if (next.length === previous.length + 1 && next.startsWith(previous)) {
-    return next.endsWith('\n') ? null : 'typing';
+export function recordComposerEdit(
+  state: ComposerUndoState,
+  previous: string,
+  next: string,
+  kind: ComposerEditKind = 'typing',
+): ComposerUndoState {
+  if (previous === next) return state;
+  if (kind === 'typing' && state.lastKind === 'typing' && singleCharacterChange(previous, next)) {
+    return { past: state.past, future: [], lastKind: 'typing' };
   }
-  if (previous.length === next.length + 1 && previous.startsWith(next)) {
-    return next.endsWith('\n') ? null : 'deleting';
-  }
-  return null;
+  const past = [...state.past, previous];
+  if (past.length > COMPOSER_UNDO_LIMIT) past.splice(0, past.length - COMPOSER_UNDO_LIMIT);
+  return { past, future: [], lastKind: kind };
 }
 
-function capped(entries: string[], index: number, group: EditGroup | null): UndoState {
-  let kept = entries;
-  let position = index;
-  while (kept.length > UNDO_LIMIT + 1) {
-    kept = kept.slice(1);
-    position -= 1;
-  }
-  return { entries: kept, index: Math.max(0, position), group };
+export interface ComposerUndoResult {
+  state: ComposerUndoState;
+  value: string;
 }
 
-/**
- * Record a new live value from an edit. `group` lets consecutive keystrokes of
- * the same kind collapse into one undo step; `null` (paste, clear, history
- * recall, external change) always starts a new step. The previous value is
- * never mutated.
- */
-export function recordUndo(state: UndoState, value: string, group: EditGroup | null = null): UndoState {
-  if (value === undoValue(state)) return state;
-  if (state.index < state.entries.length - 1) {
-    // Editing after an undo drops the redo branch.
-    return capped([...state.entries.slice(0, state.index + 1), value], state.index + 1, group);
-  }
-  if (group !== null && state.group === group) {
-    const entries = [...state.entries];
-    entries[state.index] = value;
-    return { entries, index: state.index, group };
-  }
-  return capped([...state.entries, value], state.entries.length, group);
+/** Step back one edit, or `null` when there is nothing left to undo. */
+export function undoComposer(state: ComposerUndoState, current: string): ComposerUndoResult | null {
+  if (!state.past.length) return null;
+  const value = state.past[state.past.length - 1]!;
+  return {
+    state: {
+      past: state.past.slice(0, -1),
+      future: [...state.future, current],
+      lastKind: null,
+    },
+    value,
+  };
 }
 
-/** Step one edit back; null when there is nothing to undo. */
-export function undoStep(state: UndoState): { state: UndoState; value: string } | null {
-  if (!canUndo(state)) return null;
-  const index = state.index - 1;
-  // Close the coalescing bucket so new typing starts a fresh step.
-  return { state: { ...state, index, group: null }, value: state.entries[index]! };
+/** Reapply the newest undone edit, or `null` when there is nothing to redo. */
+export function redoComposer(state: ComposerUndoState, current: string): ComposerUndoResult | null {
+  if (!state.future.length) return null;
+  const value = state.future[state.future.length - 1]!;
+  const past = [...state.past, current];
+  if (past.length > COMPOSER_UNDO_LIMIT) past.splice(0, past.length - COMPOSER_UNDO_LIMIT);
+  return {
+    state: { past, future: state.future.slice(0, -1), lastKind: null },
+    value,
+  };
 }
 
-/** Step one edit forward; null when there is nothing to redo. */
-export function redoStep(state: UndoState): { state: UndoState; value: string } | null {
-  if (!canRedo(state)) return null;
-  const index = state.index + 1;
-  return { state: { ...state, index, group: null }, value: state.entries[index]! };
+/** Classify an edit by how the text changed, for snapshot bookkeeping. */
+export function composerEditKind(previous: string, next: string): ComposerEditKind {
+  if (next.length === 0) return 'clear';
+  if (next.length < previous.length) return 'delete';
+  if (next.length - previous.length > 1) return 'paste';
+  return 'typing';
 }
