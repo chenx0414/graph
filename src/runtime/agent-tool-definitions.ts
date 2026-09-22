@@ -180,8 +180,8 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     revise_graph: {
-      name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson is a JSON array of NodeSpec objects using id, kind, action, dependsOn, input, definitionVersion, model, context and verifier fields as applicable.',
-      parameters: Type.Object({ baseVersion: Type.Number(), reason: Type.String(), nodesJson: Type.String(), requestId: Type.String() }),
+      name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson is a JSON array of NodeSpec objects using id, kind, action, dependsOn, input, definitionVersion, model, context and verifier fields as applicable. Pass taskId to revise a feature task this conversation created instead of this conversation own task; the task must belong to the same conversation.',
+      parameters: Type.Object({ baseVersion: Type.Number(), reason: Type.String(), nodesJson: Type.String(), requestId: Type.String(), taskId: Type.Optional(Type.String()) }),
       available: main && Boolean(features.supervisor),
       externallyGated: false,
     },

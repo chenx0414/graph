@@ -330,6 +330,7 @@ export function agentTools(input: {
       const receipt = await input.supervisor!.revise({
         baseVersion: Number(body.baseVersion), reason: String(body.reason),
         nodes: JSON.parse(String(body.nodesJson)) as NodeSpec[], requestId: String(body.requestId),
+        ...(typeof body.taskId === 'string' && body.taskId.trim() ? { taskId: body.taskId.trim() } : {}),
       });
       return text(JSON.stringify(receipt));
     },

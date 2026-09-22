@@ -45,7 +45,7 @@ import { DEFAULT_PROMPT_SUGGESTION_PROMPT, type AgentContextLibrary } from './ag
 export interface PiAdapterChannels {
   supervisor: (taskId: string) => {
     propose(proposal: Proposal, requestId: string): Promise<unknown>;
-    revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+    revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string; taskId?: string }): Promise<unknown>;
     graphState?(): Promise<unknown>;
     validateProposal?(proposal: Proposal): Promise<unknown>;
     listProjects?(): Promise<unknown>;

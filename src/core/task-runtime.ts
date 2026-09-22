@@ -99,6 +99,19 @@ interface ProposalRow {
   decision_snapshot: string | null;
 }
 
+/** A revision names its target explicitly. Without one it revises this
+ * conversation own task; with one it may revise a feature task the same
+ * conversation created, never a task from another conversation. */
+function revisionTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined) {
+  if (requested === undefined || requested === supervisorTaskId) return supervisorTaskId;
+  const self = store.db.prepare('SELECT conversation_id FROM tasks WHERE id=?').get(supervisorTaskId) as { conversation_id: string | null } | undefined;
+  const target = store.db.prepare('SELECT conversation_id FROM tasks WHERE id=?').get(requested) as { conversation_id: string | null } | undefined;
+  if (!target || !self?.conversation_id || target.conversation_id !== self.conversation_id) {
+    throw new RuntimeError('invalid_input', 'A revision may only target a task of this conversation');
+  }
+  return requested;
+}
+
 function conversationProposal(store: TaskStore, taskId: string, version: number, currentRequirementVersion: number) {
   const row = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?')
     .get(taskId, version) as ProposalRow | undefined;
@@ -1426,11 +1439,12 @@ export async function openTaskRuntime(options: {
             return { taskId, proposalVersion: version, cursor: store.event(taskId, 'proposal.created', { proposalVersion: version }) };
           });
         },
-        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string }) {
+        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string; taskId?: string }) {
           ensureOpen();
-          return store.command(`supervisor:${taskId}`, input.requestId, { type: 'revise', baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, containers: input.containers, loops: input.loops }, () => {
-            const revised = applyRevision(store, taskId, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
-            return { taskId, graphVersion: revised.version, cursor: revised.cursor };
+          const target = revisionTarget(store, taskId, input.taskId);
+          return store.command(`supervisor:${target}`, input.requestId, { type: 'revise', target, baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, containers: input.containers, loops: input.loops }, () => {
+            const revised = applyRevision(store, target, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
+            return { taskId: target, graphVersion: revised.version, cursor: revised.cursor };
           });
         },
         async validateProposal(proposal: Proposal) {

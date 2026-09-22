@@ -672,6 +672,66 @@ test('drafts version on the same requirement and only the latest can be confirme
   expect((await runtime.user.list()).map(task => task.id)).toEqual([confirmed.taskId]);
 });
 
+test('a conversation master revises the feature task it created', async () => {
+  const root = await temp('revise-feature');
+  const project = join(root, 'project');
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, 'check.js'), 'console.log("ok");\n');
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    actions: {
+      master: scripted(() => ({ outcome: 'completed', output: { text: '继续交流' }, usage })),
+      work: scripted(() => ({ outcome: 'completed', output: { built: true }, usage })),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '先做最小可用版', requestId: 'create' });
+  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await runtime.supervisor(anchorTaskId).propose({
+    requirementVersion: 1, summary: '最小可用版',
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  }, 'proposal');
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+
+  // The anchor task never holds a confirmed proposal, so the feature task is
+  // the only revision target: a model that a provider degrades must be
+  // replaceable after confirmation.
+  const revised = await runtime.supervisor(anchorTaskId).revise({
+    taskId: confirmed.taskId,
+    baseVersion: 1,
+    reason: '把实现模型换到另一个可用模型',
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm2' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+    requestId: 'revise-feature',
+  });
+  expect(revised).toMatchObject({ taskId: confirmed.taskId, graphVersion: 2 });
+  const graphState = await runtime.supervisor(anchorTaskId).graphState() as {
+    relatedTasks: { taskId: string; graphVersion: number; nodes: { id: string; model?: string }[] }[];
+  };
+  expect(graphState.relatedTasks).toEqual([
+    expect.objectContaining({
+      taskId: confirmed.taskId,
+      graphVersion: 2,
+      nodes: [expect.objectContaining({ id: 'work', model: 'm2' }), expect.objectContaining({ id: 'check' })],
+    }),
+  ]);
+
+  // Another task is not reachable through this channel.
+  await expect(runtime.supervisor(anchorTaskId).revise({
+    baseVersion: 2, reason: '越界', nodes: [], requestId: 'revise-outside', taskId: '0faf1367-0000-0000-0000-000000000000',
+  })).rejects.toMatchObject({ code: 'invalid_input' });
+});
+
 test('post-confirmation chat keeps the requirement fixed and sees real execution status', async () => {
   const root = await temp('post');
   const project = join(root, 'project');
