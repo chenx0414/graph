@@ -1,0 +1,51 @@
+/* Preferences page (settings → 通用/偏好).
+ *
+ * Owned by the preferences lane; import from `preferences.ts` so the styles
+ * travel with the module instead of growing `styles.css`.
+ */
+
+.preference-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preference-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  cursor: pointer;
+}
+
+.preference-item:hover {
+  border-color: var(--border-strong);
+}
+
+.preference-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.preference-copy strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.preference-copy span {
+  font-size: 12.5px;
+}
+
+.preference-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
