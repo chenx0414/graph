@@ -41,6 +41,8 @@ export function shouldCompactContext(
 export interface RecordedContextUsage {
   usage: string;
   settledAt: number;
+  /** Invocation ledger order, independent of containing operation settlement. */
+  sequence?: number;
 }
 
 export interface RecordedCompaction {
@@ -76,13 +78,21 @@ export function latestContextTokens(
     })()
     : null;
 
-  if (lastCompaction && (!completion || lastCompaction.timestamp >= completion.settledAt)) {
+  if (lastCompaction) {
     try {
-      const data = JSON.parse(lastCompaction.data) as { tokensAfter?: number };
-      if (typeof data.tokensAfter === 'number' && Number.isFinite(data.tokensAfter)) return data.tokensAfter;
+      const data = JSON.parse(lastCompaction.data) as { tokensAfter?: number; completionSequence?: number };
+      const summaryIsNewer = !completion || (data.completionSequence !== undefined && completion.sequence !== undefined
+        ? completion.sequence <= data.completionSequence
+        : lastCompaction.timestamp >= completion.settledAt);
+      if (summaryIsNewer && typeof data.tokensAfter === 'number' && Number.isFinite(data.tokensAfter)) return data.tokensAfter;
     } catch {
       // Fall through to the last billed completion when the event is malformed.
     }
   }
   return completionTokens;
+}
+
+/** Pi reports these no-op outcomes as exceptions; neither is an execution failure. */
+export function isCompactionNoop(message: string) {
+  return /^(?:Compaction failed: )?(?:Already compacted|Nothing to compact \(session too small\))$/.test(message);
 }

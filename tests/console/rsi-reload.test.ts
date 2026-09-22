@@ -13,8 +13,12 @@ afterEach(async () => { for (const action of cleanup.reverse()) await action(); 
 
 test.each([
   { mixed: false, mode: 'activate' }, { mixed: true, mode: 'activate' },
+  { mixed: false, mode: 'activate', queued: true },
+  { mixed: false, mode: 'activate', compact: true },
+  { mixed: false, mode: 'activate', paused: true },
+  { mixed: false, mode: 'activate', archived: true },
   { mixed: false, mode: 'save' }, { mixed: false, mode: 'failed' },
-])('RSI handles $mode and reload handoff (mixed tool batch: $mixed)', async ({ mixed, mode }) => {
+])('RSI handles $mode and reload handoff (mixed tool batch: $mixed)', async ({ mixed, mode, queued, paused, archived, compact }) => {
   const root = await mkdtemp(join(tmpdir(), 'graph-rsi-reload-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const checkout = join(root, 'checkout');
@@ -64,7 +68,10 @@ test.each([
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.messages.some(message => message.role === 'assistant' && message.text.includes('等待重载'))).toBe(true);
   expect(view.messages.find(message => message.kind === 'rsi')?.data).toMatchObject({ activation: { state: 'pending_reload' } });
-  await runtime.conversations.chat(created.conversationId, { text: 'Continue after reload.', requestId: 'next' });
+  if (queued) await runtime.conversations.chat(created.conversationId, { text: 'Prioritize the new request after reload.', requestId: 'next' });
+  if (compact) await runtime.conversations.compact(created.conversationId, { requestId: 'compact' });
+  if (paused) await runtime.conversations.pause(created.conversationId, 'pause');
+  if (archived) await runtime.conversations.archive(created.conversationId, 'archive');
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
   expect(provider.requests).toHaveLength(2);
   await runtime.close();
@@ -76,10 +83,21 @@ test.each([
   expect(await restarted.host.runReady()).toEqual({ dispatched: 0 });
   expect((await restarted.host.ackRsiRestart('stale-request')).cleared).toBe(false);
   expect((await restarted.host.ackRsiRestart(status.pendingRestart!.id)).cleared).toBe(true);
-  const activated = await restarted.conversations.view(created.conversationId);
+  expect((await restarted.host.ackRsiRestart(status.pendingRestart!.id)).cleared).toBe(false);
+  if (paused || archived) {
+    expect(await restarted.host.runReady()).toEqual({ dispatched: 0 });
+    if (paused) await restarted.conversations.resume(created.conversationId, 'resume');
+    if (archived) return;
+  }
+  // The ready continuation survives another crash before it can be admitted.
+  await restarted.close();
+  const resumedRuntime = await openTaskRuntime({ ...options, rsi: new RsiService({ root: checkout, stateDir }) });
+  cleanup.push(() => resumedRuntime.close());
+  const activated = await resumedRuntime.conversations.view(created.conversationId);
   expect(activated.messages.find(message => message.kind === 'rsi')?.data).toMatchObject({ activation: { state: 'active' } });
-  expect(await restarted.host.runReady()).toEqual({ dispatched: 1 });
+  expect(await resumedRuntime.host.runReady()).toEqual({ dispatched: 1 });
+  expect(await resumedRuntime.host.runReady()).toEqual({ dispatched: 0 });
   expect(provider.requests).toHaveLength(3);
-  const resumed = await restarted.conversations.view(created.conversationId);
+  const resumed = await resumedRuntime.conversations.view(created.conversationId);
   expect(resumed.messages.some(message => message.role === 'assistant' && message.text === 'This response must wait for the reload.')).toBe(true);
 }, 60_000);

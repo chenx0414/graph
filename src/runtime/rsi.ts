@@ -1,3 +1,4 @@
+import { awaitRsiReload, confirmRsiContinuation } from '../core/rsi-continuation.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
@@ -109,6 +110,7 @@ interface RsiServiceOptions {
 }
 
 interface RsiApplyContext {
+  operationId?: string;
   store: TaskStore;
   taskId: string;
   conversationId?: string;
@@ -571,6 +573,7 @@ export class RsiService {
         const taskId = (store.db.prepare('SELECT anchor_task_id FROM conversations WHERE id=?').get(message.conversation_id) as { anchor_task_id: string }).anchor_task_id;
         store.event(taskId, 'rsi.activated', confirmed);
       }
+      confirmRsiContinuation(store, id);
     });
     await writeAtomic(join(this.stateDir, 'rsi', 'activated.json'), JSON.stringify(confirmed));
     await rm(this.restartPath(), { force: true });
@@ -849,18 +852,23 @@ export class RsiService {
   }
 
   private record(context: RsiApplyContext, receipt: RsiReceipt) {
-    context.store.event(context.taskId, 'rsi.change', receipt as unknown as Json);
-    const conversation = context.conversationId
-      ? { id: context.conversationId }
-      : conversationForTask(context.store, context.taskId);
-    if (!conversation) return;
-    appendMessage(context.store, {
-      conversationId: conversation.id,
-      role: 'system',
-      kind: 'rsi',
-      text: receipt.report,
-      data: receipt as unknown as Json,
-      state: 'done',
+    context.store.transaction(() => {
+      if (receipt.restartRequired && receipt.commit && context.operationId) {
+        awaitRsiReload(context.store, receipt.id, context.operationId, receipt.commit);
+      }
+      context.store.event(context.taskId, 'rsi.change', receipt as unknown as Json);
+      const conversation = context.conversationId
+        ? { id: context.conversationId }
+        : conversationForTask(context.store, context.taskId);
+      if (!conversation) return;
+      appendMessage(context.store, {
+        conversationId: conversation.id,
+        role: 'system',
+        kind: 'rsi',
+        text: receipt.report,
+        data: receipt as unknown as Json,
+        state: 'done',
+      });
     });
   }
 }

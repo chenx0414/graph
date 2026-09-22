@@ -24,7 +24,7 @@ import { agentArtifactAccess } from './agent-tool-definitions.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
-import { COMPACTION_INSTRUCTIONS, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
+import { COMPACTION_INSTRUCTIONS, isCompactionNoop, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
@@ -70,7 +70,7 @@ export interface PiAdapterChannels {
   rsi?: {
     readonly available: boolean;
     status(): Promise<unknown>;
-    apply(input: unknown, context: { taskId: string; conversationId?: string }): Promise<unknown>;
+    apply(input: unknown, context: { taskId: string; conversationId?: string; operationId?: string }): Promise<unknown>;
   };
 }
 
@@ -565,6 +565,7 @@ export function createPiAdapter(options: {
                   ...(channels.rsi?.available && spec.role === 'master' && fullAccess ? {
                     rsiApply: async (input: unknown) => {
                       const receipt = await channels.rsi!.apply(input, {
+                        operationId: operation.id,
                         taskId: operation.taskId,
                         ...(conversation ? { conversationId: conversation.id } : {}),
                       }) as Record<string, unknown>;
@@ -716,6 +717,7 @@ export function createPiAdapter(options: {
               const data = {
                 reason: event.reason, operationId: operation.id,
                 tokensBefore: event.result.tokensBefore,
+                completionSequence: (options.store.db.prepare("SELECT COALESCE(MAX(rowid),0) AS sequence FROM invocations WHERE instance_id=? AND purpose='completion'").get(operation.instanceId!) as { sequence: number }).sequence,
                 ...(event.result.estimatedTokensAfter !== undefined ? { tokensAfter: event.result.estimatedTokensAfter } : {}),
               };
               if (persistEntries) {
@@ -732,7 +734,7 @@ export function createPiAdapter(options: {
               // Pi's own threshold/overflow compaction can fail without throwing
               // (a summarizer that hits its output cap). Record it so the failure
               // is visible instead of silently leaving the context oversized.
-              options.store.event(operation.taskId, 'session.compaction_failed', {
+              options.store.event(operation.taskId, isCompactionNoop(event.errorMessage ?? '') ? 'session.compaction_skipped' : 'session.compaction_failed', {
                 nodeId: operation.nodeId, operationId: operation.id, reason: event.reason,
                 error: event.errorMessage ?? 'compaction aborted',
               });
@@ -758,12 +760,12 @@ export function createPiAdapter(options: {
           // the previous turn ended in a manual compaction.
           const lastContextTokens = (() => {
             const completions = options.store.db.prepare(
-              `SELECT i.usage, COALESCE(o.settled_at, o.dispatched_at, 0) AS settled_at
+              `SELECT i.rowid AS sequence, i.usage, COALESCE(o.settled_at, o.dispatched_at, 0) AS settled_at
                FROM invocations i
                JOIN operations o ON o.id = i.operation_id
                WHERE i.instance_id = ? AND i.purpose = 'completion' AND i.usage IS NOT NULL
                ORDER BY i.rowid DESC LIMIT 20`,
-            ).all(operation.instanceId!) as { usage: string; settled_at: number }[];
+            ).all(operation.instanceId!) as { usage: string; settled_at: number; sequence: number }[];
             const lastCompaction = options.store.db.prepare(
               `SELECT e.timestamp, e.data
                FROM events e
@@ -772,7 +774,7 @@ export function createPiAdapter(options: {
                ORDER BY e.cursor DESC LIMIT 1`,
             ).get(operation.taskId, operation.instanceId!) as { timestamp: number; data: string } | undefined;
             return latestContextTokens(
-              completions.map(row => ({ usage: row.usage, settledAt: row.settled_at })),
+              completions.map(row => ({ usage: row.usage, settledAt: row.settled_at, sequence: row.sequence })),
               lastCompaction,
             );
           })();
@@ -867,14 +869,17 @@ export function createPiAdapter(options: {
                     text,
                   });
                 }
-                if (compactRequested) return { outcome: 'completed', output: { text }, usage: gate.total() };
+                if (compactRequested && !operation.context.rsiContinuation) return { outcome: 'completed', output: { text }, usage: gate.total() };
               } catch (error) {
                 // A summarizer that hits its output cap must not poison the
                 // turn: the `compaction_end` event already recorded why, so
                 // keep going (or report it for a manual request) instead of
                 // failing the operation as an unknown dispatch.
                 const message = error instanceof Error ? error.message : String(error);
-                if (compactRequested) {
+                if (compactRequested && !operation.context.rsiContinuation && isCompactionNoop(message)) {
+                  return { outcome: 'completed', output: { text: '上下文已是精简状态，无需再次压缩。' }, usage: gate.total() };
+                }
+                if (compactRequested && !isCompactionNoop(message)) {
                   return { outcome: 'failed', output: { error: `上下文压缩失败：${message}` }, usage: gate.total() };
                 }
               }
@@ -893,7 +898,7 @@ export function createPiAdapter(options: {
             if (reloadReceipt) {
               return {
                 outcome: 'completed',
-                output: { text: `RSI 改动已提交，等待重载。当前回合已结束；重载确认后报告会更新为“已生效”。`, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}) },
+                output: { text: `RSI 改动已提交，等待重载。当前回合已结束；重载确认后会自动继续，并将报告更新为“已生效”。`, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}) },
                 usage: gate.total(),
               };
             }

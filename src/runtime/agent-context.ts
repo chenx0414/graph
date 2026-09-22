@@ -77,7 +77,19 @@ export const DEFAULT_REVIEWER_RULES = [
   'Do not modify implementation files. Return an independent verdict that the verifier can evaluate.',
 ].join('\n');
 
-export const DEFAULT_MAIN_TOOL_GUIDANCE = '';
+/**
+ * Deliberately short: routing rules for choosing between capabilities. The tool and capability
+ * listings already carry names and descriptions, so repeating them here only dilutes attention.
+ */
+export const DEFAULT_MAIN_TOOL_GUIDANCE = [
+  '## Reaching for the right capability',
+  '',
+  '- Search inside the repository with the indexed extensions (`ffind`, `ffgrep`) instead of shell `find`/`grep`: they are git-aware and ranked by access frequency. Use shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.',
+  '- Skills are on-demand instructions, not background reading: when the work matches a skill\'s stated trigger, read its `SKILL.md` first and follow it. If a bound skill looks relevant and you skip it, say why.',
+  '- MCP and extension tools are first-class: call them instead of scripting around the same API whenever one exists.',
+  '- Poll with the compact reads (`get_task_status`) and pull a full dump (`get_graph_state`) only when the whole proposal matters.',
+  '- When a tool or capability description does not say when to use it, that is a harness defect: fix it or report it.',
+].join('\n');
 export const DEFAULT_WORKER_TOOL_GUIDANCE = 'Use the smallest set of workspace and capability tools needed for the assigned node. Read files before editing, keep edits local, and use the assigned command tool for verification.';
 export const DEFAULT_REVIEWER_TOOL_GUIDANCE = 'Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing.';
 
@@ -478,9 +490,7 @@ export function renderAgentPrompt(content: string, variables: Record<string, str
 export const DEFAULT_MAIN_FULL_ACCESS_IDENTITY = 'Full access is active for this operation. Graph host-enforced filesystem, command, network, capability, pause, budget, usage and recovery gates are open; test requested capabilities directly and report only restrictions proven by a tool result or host error.';
 
 export const DEFAULT_MAIN_RSI_IDENTITY = [
-  'You are also the maintainer of this Graph harness: the executor and the improver are the same Agent.',
-  'While you work, watch your own trajectory, tool errors, blocked operations and review or check outcomes, and look for any way the harness could be better. Self-improvement is not limited to bugs: when you see a real improvement you can justify — a refactor, a new capability or command, a clearer document or prompt, a faster path — make it yourself with inspect_rsi_status and apply_rsi_change. That tool edits the Graph source, runs the checks, commits to an rsi/* branch and schedules the reload; no separate approval step is required.',
-  'An applied RSI receipt means the commit and checks succeeded, not that the new code is active. When activate is true, the tool ends this operation so the host can drain and reload. Do not start another change, poll, or claim activation in the same turn. Only a matching reload confirmation (activation.state=active or lastActivation) proves the change is live. Use activate=false for intermediate commits.',
-  'Prefer the smallest change that achieves the improvement and verify it. If a check fails, the change stays in the working tree: keep fixing and call apply_rsi_change again until it passes, or pass changes: [] to re-run checks after a flaky failure. Use force only when you accept interrupting operations that are still running.',
-  'Report every self-improvement action to the user: what you observed, what you changed, the checks that passed and whether a reload is pending. A self-improvement you did not report is not done.',
+  'You are also the maintainer of this Graph harness: the executor and the improver are the same Agent. While you work, watch your own trajectory, tool errors, blocked operations and check outcomes, and fix what you can justify with inspect_rsi_status and apply_rsi_change - a defect, a refactor, a clearer prompt, a faster path. No separate approval step is required, and you must report every such action to the user.',
+  'An applied RSI receipt proves the commit and its checks, not that the change is live: activate=true ends the operation so the host can drain and reload, so never start another change, poll, or claim activation in the same turn. Only a reload confirmation proves the new code runs; use activate=false for intermediate commits.',
+  'Prefer the smallest change that achieves the improvement and verify it. If a check fails the change stays in the working tree: keep fixing, or pass changes: [] to re-run. Use force only when you accept interrupting operations that are still running.',
 ].join(' ');

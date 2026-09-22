@@ -139,7 +139,7 @@ test('a transient provider connection error is retried in the same Agent turn', 
   }
 });
 
-test('a v3 capability digest is required and v2 manifests migrate only with the legacy digest', async () => {
+test('a v3 capability change rebinds through a branched session and v2 migrates only with the legacy digest', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-instance-digest-'));
   directories.push(root);
   const workspace = join(root, 'workspace');
@@ -149,6 +149,7 @@ test('a v3 capability digest is required and v2 manifests migrate only with the 
     toolPolicyDigest: 'b'.repeat(64),
     runtimePolicyDigest: 'c'.repeat(64),
   };
+  const manifestPath = join(root, 'state', 'instance.json');
   const base = {
     binding: { instanceId: 'agent-digest', nodeId: 'node-digest', definitionVersion: 'coder@1' },
     workspace,
@@ -159,15 +160,31 @@ test('a v3 capability digest is required and v2 manifests migrate only with the 
   };
   const first = await openPiInstance({ ...base, ...bundle });
   await first.prompt('Persist with capability A');
+  const before = first.inspect();
   await first.close();
 
   await expect(openPiInstance(base)).rejects.toThrow('capability bundle digest is required');
-  await expect(openPiInstance({ ...base, ...bundle, bundleDigest: 'd'.repeat(64) })).rejects.toThrow('does not match');
+  const reboundBundle = { ...bundle, bundleDigest: 'd'.repeat(64) };
+  const rebound = await openPiInstance({ ...base, ...reboundBundle });
+  const after = rebound.inspect();
+  expect(after.sessionId).not.toBe(before.sessionId);
+  expect(after.messages).toEqual(before.messages);
+  expect(after.context).toMatchObject({
+    mode: 'rebind',
+    sourceSessionId: before.sessionId,
+    reboundFromBundleDigest: bundle.bundleDigest,
+  });
+  await rebound.close();
+  expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({
+    version: 3,
+    bundleDigest: reboundBundle.bundleDigest,
+    toolPolicyDigest: reboundBundle.toolPolicyDigest,
+    runtimePolicyDigest: reboundBundle.runtimePolicyDigest,
+  });
 
-  const same = await openPiInstance({ ...base, ...bundle });
+  const same = await openPiInstance({ ...base, ...reboundBundle });
   await same.close();
 
-  const manifestPath = join(root, 'state', 'instance.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
   const legacy = { ...manifest, version: 2, capabilityDigest: 'e'.repeat(64) } as Record<string, unknown>;
   delete legacy.bundleDigest;
@@ -182,7 +199,13 @@ test('a v3 capability digest is required and v2 manifests migrate only with the 
   delete legacy.piVersion;
   await writeFile(manifestPath, JSON.stringify(legacy));
   await expect(openPiInstance({ ...base, ...bundle })).rejects.toThrow('legacy capability digest is required');
-  await expect(openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'f'.repeat(64) })).rejects.toThrow('legacy capability bundle');
+  // A v2 mismatch rebinds exactly like v3: the conversation survives a legacy bundle change.
+  const v2Rebound = await openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'f'.repeat(64) });
+  await v2Rebound.close();
+  expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({
+    version: 3,
+    bundleDigest: bundle.bundleDigest,
+  });
   const migrated = await openPiInstance({ ...base, ...bundle, legacyCapabilityDigest: 'e'.repeat(64) });
   await migrated.close();
   expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({

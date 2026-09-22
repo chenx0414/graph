@@ -397,6 +397,7 @@ export async function openTaskRuntime(options: {
           apply: (input, context) => options.rsi!.apply(input as RsiChangeInput, {
             store,
             taskId: context.taskId,
+            ...(context.operationId ? { operationId: context.operationId } : {}),
             ...(context.conversationId ? { conversationId: context.conversationId } : {}),
           }),
         } } : {}),

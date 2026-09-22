@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
-import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
+import { DEFAULT_MAIN_TOOL_GUIDANCE, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
 import { composeAgentSystemPrompt } from '../../src/runtime/agent-system-prompt.ts';
 
@@ -107,7 +107,7 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.text).toContain('Current requirement version: 3.');
   expect(result.text).not.toContain('<workflow>');
   expect(result.text).toContain('<docs>');
-  expect(result.text).toContain('Graph documentation (read only when the user asks about Graph itself');
+  expect(result.text).toContain('Graph documentation (read when the user asks about Graph itself');
   expect(result.text).toContain('- Main documentation: /app/docs/agent/README.md');
   expect(result.text).toContain('- Additional docs: /app/docs/agent');
   expect(result.text).toContain('- Examples: /app/examples');
@@ -127,7 +127,7 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.previewText).toContain('<pi_cwd>');
 });
 
-test('the Agent context library seeds editable rules and an empty main tool guidance default', async () => {
+test('the Agent context library seeds editable rules and the main tool routing rules', async () => {
   const root = await temp();
   const library = openAgentContextLibrary(root, {
     identity: 'Original identity',
@@ -135,7 +135,7 @@ test('the Agent context library seeds editable rules and an empty main tool guid
   await library.ensure();
 
   expect(await readFile(join(root, 'rules/common.md'), 'utf8')).toContain('tool results');
-  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe('\n');
+  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe(`${DEFAULT_MAIN_TOOL_GUIDANCE}\n`);
   await expect(readFile(join(root, 'docs/INDEX.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
 
   await library.savePrompt('rules/common.md', 'Changed common rule.');

@@ -1,3 +1,4 @@
+import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuation.ts';
 import { isAbsolute } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
@@ -287,7 +288,8 @@ export class Execution {
       const masters = this.store.db.prepare(`SELECT * FROM nodes n
         WHERE n.task_id=? AND n.status='pending' AND json_extract(n.spec,'$.role')='master'
         ORDER BY n.rowid`).all(taskId) as ExecutionNodeRow[];
-      return masters.filter(node => !isMasterParked(this.store, taskId, node.id));
+      return masters.filter(node => !isMasterParked(this.store, taskId, node.id)
+        && !(task.paused && pendingRsiContinuation(this.store, taskId, node.id)));
     }
     if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as ExecutionNodeRow[];
     if (task.phase !== 'running') return [];
@@ -442,6 +444,7 @@ export class Execution {
           const task = this.store.task(node.task_id);
           conversation = task.phase === 'chatting' ? conversationForTask(this.store, node.task_id) : undefined;
           chatMessages = conversation ? pendingMessages(this.store, conversation.id, 1) : [];
+          const rsiContinuation = conversation ? pendingRsiContinuation(this.store, node.task_id, node.id) : undefined;
           const graph = task.phase === 'discussing' || task.phase === 'chatting' ? undefined : loadGraph(this.store, node.task_id);
           const dependencies = graph ? graph.inputs(node.id) : {};
           const dependencySources = graph ? graph.sources(node.id) : {};
@@ -491,6 +494,7 @@ export class Execution {
             proposalVersion: task.accepted_proposal ?? 0,
             requirementVersion: task.requirement_version,
             context: {
+              ...(rsiContinuation ? { rsiContinuation } : {}),
               previousOutput: node.output ? JSON.parse(node.output) as Json : null,
               answers,
               ...(messages.length ? { messages } : {}),
@@ -589,6 +593,7 @@ export class Execution {
           if (repair) intent.context.briefing = renderResultHandoffRepair(repair, { decisions: answers });
           intent.context.briefing = [
             intent.context.briefing,
+            rsiContinuation ? `RSI reload confirmed for ${rsiContinuation.commit} (request ${rsiContinuation.requestId}). Resume the unfinished user request from operation ${rsiContinuation.operationId} using the existing session. Completed changes and tool results remain valid. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
             renderPredecessorHandoffs(predecessor.projections),
             schemaInstruction,
           ].filter(Boolean).join('\n\n');
@@ -625,6 +630,7 @@ export class Execution {
           return intent;
         },
         afterIntent: admitted => {
+          consumeRsiContinuation(this.store, admitted);
           const agentContext = admitted.context.agentContext;
           if (agentContext && handoffPackage) {
             freezeContextHandoff(this.store, agentContext, {
@@ -710,7 +716,9 @@ export class Execution {
       this.lifecycle.markPreparationFailed(operation.id, String(error));
       return false;
     }
-    if (this.stopping || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) {
+    const deferredContinuation = operation.context.rsiContinuation && (this.store.task(node.task_id).paused
+      || conversationForTask(this.store, node.task_id)?.archived_at !== null);
+    if (this.stopping || deferredContinuation || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) {
       this.lifecycle.cancelBeforeDispatch(operation.id);
       return false;
     }

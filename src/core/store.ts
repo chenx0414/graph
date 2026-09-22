@@ -33,7 +33,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 28) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 29) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -468,6 +468,21 @@ export class TaskStore {
         );
         CREATE INDEX IF NOT EXISTS artifact_events_scope ON artifact_events(task_id,cursor);
         PRAGMA user_version=28;
+      `);
+    });
+    if (version < 29) this.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS rsi_continuations(
+          request_id TEXT PRIMARY KEY,
+          operation_id TEXT NOT NULL REFERENCES operations(id),
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          node_id TEXT NOT NULL,
+          commit_sha TEXT NOT NULL,
+          state TEXT NOT NULL CHECK(state IN ('waiting','ready','consumed','cancelled')),
+          resumed_operation_id TEXT REFERENCES operations(id)
+        );
+        CREATE INDEX IF NOT EXISTS rsi_continuations_ready ON rsi_continuations(task_id,node_id,state);
+        PRAGMA user_version=29;
       `);
     });
   }
