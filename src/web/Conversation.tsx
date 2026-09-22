@@ -4,6 +4,7 @@ import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
 import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
+import { attachmentPayload } from './attachments.ts';
 import {
   cancelQueuedMessage,
   composerPrimaryDisabled,
@@ -703,7 +704,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     try {
       await api(`/api/conversations/${id}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text: outgoing, attachments: outgoingAttachments, requestId: `msg-${crypto.randomUUID()}` }),
+        body: JSON.stringify({ text: outgoing, attachments: attachmentPayload(outgoingAttachments), requestId: `msg-${crypto.randomUUID()}` }),
       });
       transcriptFollow.scrollToLatest('smooth');
       reload();

@@ -17,6 +17,17 @@ import {
   undoComposer,
 } from './chat-undo.ts';
 import { clampComposerHeight, composerPrimaryState } from './composer-state.ts';
+import {
+  addComposerAttachment,
+  attachmentSize,
+  buildAttachment,
+  isImageAttachment,
+  rejectionMessage,
+  removeComposerAttachment,
+  validateAttachment,
+  type AttachmentCandidate,
+  type ChatAttachment,
+} from './attachments.ts';
 import { FullAccessToggle } from './FullAccessToggle.tsx';
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
 import type { ComposerModel, ComposerTelemetryView, ThinkingLevel } from './ComposerTelemetry.tsx';
@@ -30,16 +41,20 @@ import {
 } from './SlashCommands.tsx';
 import { Icon, toast } from './ui.tsx';
 
-export type ChatAttachment = { name: string; type: string; size: number; text: string };
+export type { ChatAttachment } from './attachments.ts';
 type MentionEntry = { path: string; kind: 'file' | 'directory' };
 type Mention = { start: number; end: number; query: string };
 type Slash = { start: number; end: number; query: string };
 
-const TEXT_ATTACHMENT_EXTENSIONS = new Set([
-  'md', 'markdown', 'txt', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'csv', 'tsv',
-  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'css', 'scss', 'html', 'xml', 'svg',
-  'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'sh', 'zsh', 'fish', 'sql', 'graphql',
-]);
+/** Read a dropped/pasted file as a local DataURL (image preview + base64). */
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('read error'));
+    reader.readAsDataURL(file);
+  });
+}
 
 function mentionAt(value: string, cursor: number): Mention | null {
   const match = /(?:^|\s)@([^\s@]*)$/.exec(value.slice(0, cursor));
@@ -55,16 +70,6 @@ function slashAt(value: string, cursor: number): Slash | null {
   const start = cursor - query.length - 1;
   if (start < 0) return null;
   return { start, end: cursor, query };
-}
-
-function isTextAttachment(file: File) {
-  if (file.type.startsWith('text/') || ['application/json', 'application/xml', 'image/svg+xml'].includes(file.type)) return true;
-  const extension = file.name.split('.').at(-1)?.toLowerCase() ?? '';
-  return TEXT_ATTACHMENT_EXTENSIONS.has(extension);
-}
-
-function attachmentSize(bytes: number) {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(bytes < 102_400 ? 1 : 0)} KB`;
 }
 
 export function ChatComposer({
@@ -151,6 +156,7 @@ export function ChatComposer({
     placement: 'up',
     maxHeight: 340,
   });
+  const [dragging, setDragging] = useState(false);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -291,23 +297,47 @@ export function ChatComposer({
   }, [slashOpen]);
 
   async function addAttachments(files: File[]) {
-    const next = [...attachments];
-    let rejected = 0;
+    let next = [...attachments];
+    const reasons: string[] = [];
     for (const file of files) {
-      if (next.length >= 5) { rejected += 1; continue; }
-      if (!isTextAttachment(file) || file.size > 262_144) { rejected += 1; continue; }
+      const candidate: AttachmentCandidate = { name: file.name, type: file.type, size: file.size };
+      const decision = validateAttachment(candidate, next);
+      if (!decision.ok) { reasons.push(decision.reason); continue; }
       try {
-        const body = await file.text();
-        if (body.includes('\0')) { rejected += 1; continue; }
-        if (!next.some(item => item.name === file.name && item.size === file.size)) {
-          next.push({ name: file.name, type: file.type || 'text/plain', size: file.size, text: body });
-        }
+        const content = decision.kind === 'image'
+          ? { dataUrl: await readFileAsDataUrl(file) }
+          : { text: await file.text() };
+        const built = buildAttachment(candidate, content);
+        if (!built.ok) { reasons.push(built.reason); continue; }
+        next = addComposerAttachment(next, built.attachment);
       } catch {
-        rejected += 1;
+        reasons.push(`无法读取附件 ${file.name}`);
       }
     }
     onAttachmentsChange(next);
-    if (rejected) toast(`已忽略 ${rejected} 个不支持的附件；仅支持 256 KiB 以内的文本文件`, 'info');
+    const message = rejectionMessage(reasons);
+    if (message) toast(message, 'danger');
+  }
+
+  /** Attach pasted files (images) and keep the plain-text paste untouched. */
+  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (!files.length) return;
+    event.preventDefault();
+    const pastedText = event.clipboardData?.getData('text') ?? '';
+    if (pastedText) {
+      const input = event.currentTarget;
+      const start = input.selectionStart ?? cursor;
+      const end = input.selectionEnd ?? cursor;
+      const inserted = insertAtCaret({ value, start, end, text: pastedText });
+      if (inserted.value !== value) {
+        rememberEdit(value, inserted.value);
+        leaveHistory();
+        onChange(inserted.value);
+        setCursor(inserted.caret);
+      }
+    }
+    void addAttachments(files);
   }
 
   async function pasteClipboardAtCaret(input: HTMLTextAreaElement | null) {
@@ -435,7 +465,27 @@ export function ChatComposer({
   }
 
   return (
-    <div className={`chat-composer ${className}`} ref={composerRef}>
+    <div
+      className={`chat-composer ${className}`}
+      ref={composerRef}
+      data-dragging={dragging}
+      onDragOver={event => {
+        if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) {
+          event.preventDefault();
+          setDragging(true);
+        }
+      }}
+      onDragLeave={event => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDragging(false);
+      }}
+      onDrop={event => {
+        event.preventDefault();
+        setDragging(false);
+        const files = Array.from(event.dataTransfer?.files ?? []);
+        if (files.length) void addAttachments(files);
+      }}
+    >
       {slashOpen && (
         <SlashMenu
           scope={slashScope}
@@ -491,11 +541,13 @@ export function ChatComposer({
       {attachments.length > 0 && (
         <div className="composer-attachments" data-testid="composer-attachments">
           {attachments.map(attachment => (
-            <span className="composer-attachment" key={`${attachment.name}:${attachment.size}`}>
-              <Icon name="paperclip" size={12} />
+            <span className="composer-attachment" data-kind={isImageAttachment(attachment) ? 'image' : 'text'} key={`${attachment.name}:${attachment.size}`}>
+              {isImageAttachment(attachment) && attachment.preview
+                ? <img className="composer-attachment-preview" src={attachment.preview} alt="" />
+                : <Icon name="paperclip" size={12} />}
               <span className="truncate">{attachment.name}</span>
               <span className="faint">{attachmentSize(attachment.size)}</span>
-              <button type="button" onClick={() => onAttachmentsChange(attachments.filter(item => item !== attachment))} aria-label={`移除附件 ${attachment.name}`}>
+              <button type="button" onClick={() => onAttachmentsChange(removeComposerAttachment(attachments, attachment))} aria-label={`移除附件 ${attachment.name}`}>
                 <Icon name="close" size={11} />
               </button>
             </span>
@@ -523,6 +575,7 @@ export function ChatComposer({
         }}
         onSelect={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
         onClick={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
+        onPaste={handlePaste}
         onContextMenu={event => {
           // Paste the clipboard at the caret instead of opening any menu.
           event.preventDefault();
