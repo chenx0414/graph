@@ -122,6 +122,36 @@ function commandOutput(stdout: string | Buffer, stderr: string | Buffer) {
   return [String(stdout), String(stderr)].filter(Boolean).join('\n').trim().slice(-40_000);
 }
 
+const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
+
+/** Lines a test runner prints for the case that failed. */
+const FAILURE_LINE = /(^|\s)FAIL |Failed Tests|AssertionError|Matcher did not succeed|Error: |❯ /;
+
+/** A failed check keeps only the last 40,000 characters of its output, and
+ * concurrent test workers interleave their reporter lines, so the line that
+ * names the failing case can fall outside that window. The report carries this
+ * bounded digest so a failure is always explainable without guessing. */
+export function failureDigest(validation: RsiValidationResult[], limit = 3_000, maxLines = 30) {
+  const lines: string[] = [];
+  let used = 0;
+  for (const item of validation) {
+    if (item.status !== 'failed') continue;
+    const found = String(item.output ?? '')
+      .replace(ANSI_PATTERN, '')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && FAILURE_LINE.test(line));
+    if (!found.length) continue;
+    lines.push(`  - ${item.command}:`);
+    for (const line of found) {
+      if (lines.length > maxLines || used + line.length > limit) break;
+      used += line.length;
+      lines.push(`    ${line}`);
+    }
+  }
+  return lines.length ? ['- 失败摘要：', ...lines] : [];
+}
+
 /** Locations a developer's shell puts on `PATH` but a desktop launch does not. */
 const DEVELOPER_PATH_DIRECTORIES = ['/opt/homebrew/bin', '/usr/local/bin', '/opt/homebrew/sbin', '/usr/local/sbin'];
 
@@ -287,7 +317,7 @@ function failureReport(input: RsiChangeInput, root: string | null, error: string
     `- 问题：${input.problem}`,
     `- 目标：${root ?? '不可用'}`,
     `- 原因：${error}`,
-    ...(validation.length ? ['- 验证：', ...validation.map(item => `  - ${item.command}: ${item.status}`)] : []),
+    ...(validation.length ? ['- 验证：', ...validation.map(item => `  - ${item.command}: ${item.status}`), ...failureDigest(validation)] : []),
   ].join('\n');
 }
 
@@ -301,6 +331,7 @@ function checksFailedReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 're
     `- 保留文件：${(receipt.pendingFiles ?? []).join(', ') || '（无文件改动）'}`,
     '- 验证：',
     ...receipt.validation.map(item => `  - ${item.command}: ${item.status}`),
+    ...failureDigest(receipt.validation),
     '',
     '改动仍在工作区、尚未提交，也不会触发重载。继续修复后再次调用 apply_rsi_change 即可（可用 changes: [] 只重跑检查）。',
   ].join('\n');
@@ -330,6 +361,7 @@ function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'
     `- 文件：${receipt.files.join(', ')}`,
     '- 验证：',
     ...receipt.validation.map(item => `  - ${item.command}: ${item.status}`),
+    ...failureDigest(receipt.validation),
     `- 激活：${receipt.restartRequired
       ? receipt.force ? '已安排强制重载（可能中断在途 operation）' : '已安排自动重载（等待在途 operation 结束）'
       : '仅保存，未重载'}`,

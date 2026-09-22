@@ -224,6 +224,32 @@ test('activate=false commits without scheduling a reload', async () => {
   expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
 });
 
+test('a failed check report names the failing case even when the output window lost it', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  // A real gate interleaves concurrent workers, so the failure block can sit
+  // far away from the end of the captured output.
+  const interleaved = [
+    ' FAIL  tests/m8/app-shell-ux.test.ts > the composer suggestion and queue steering follow the three Enter states',
+    'AssertionError: expected +0 to be 1 // Object.is equality',
+    ' ❯ tests/m8/app-shell-ux.test.ts:444:43',
+    ...Array.from({ length: 400 }, (_, index) => `    concurrent worker output ${index} `.padEnd(140, 'x')),
+  ].join('\n');
+  const rsi = service(root, dir, async () => [
+    { command: 'node --run check', status: 'failed' as const, output: interleaved },
+  ]);
+  const failed = await rsi.apply({
+    title: 'Broken change',
+    problem: 'Introduce a regression.',
+    changes: [{ path: 'src/keep.ts', action: 'write', content: 'export const value = 42;\n' }],
+  }, { store, taskId, conversationId });
+  expect(failed.status).toBe('checks_failed');
+  expect(failed.report).toContain('失败摘要');
+  expect(failed.report).toContain('app-shell-ux.test.ts:444:43');
+  expect(failed.report).toContain('AssertionError');
+  expect(failed.report.length).toBeLessThan(8_000);
+});
+
 test('an unavailable root is reported to the user instead of thrown', async () => {
   const stateDir = await mkdtemp(join(tmpdir(), 'graph-rsi-state-'));
   cleanup.push(() => rm(stateDir, { recursive: true, force: true }));
