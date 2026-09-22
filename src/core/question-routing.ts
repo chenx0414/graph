@@ -25,7 +25,7 @@ const POLICIES: Readonly<Record<string, QuestionPolicy>> = {
   unknown_usage: { owner: 'main', answers: ['usage', 'reconcile_usage'] },
   waiting: { owner: 'main', answers: ['respond'] },
   adapter_error: { owner: 'main', answers: ['retry'], retryOnMessage: true },
-  execution_failed: { owner: 'main', answers: ['retry'], retryOnMessage: true },
+  execution_failed: { owner: 'main', answers: ['retry'], retryOnMessage: true, escalate: true },
   model_unavailable: { owner: 'main', answers: ['retry'] },
   git_conflict: { owner: 'main', answers: ['retry'], retryOnMessage: true },
   context_rejected: { owner: 'main', answers: ['retry'], retryOnMessage: true, escalate: true },

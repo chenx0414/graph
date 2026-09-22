@@ -231,6 +231,18 @@ export async function gatedProviderFetch(
         sent = true;
         return (options.fetchImpl ?? fetch)(input, init);
       });
+      // A capacity answer (429 or 503) means the provider rejected the request before producing any
+      // token, exactly like an unsent connection: give the same logical send another attempt instead
+      // of failing the Agent turn. Other 5xx answers stay hard failures - they can be a provider bug
+      // that the unknown-usage path must see. Settling zero usage matters too: an unknown settlement
+      // would turn a provider hiccup into a blocking usage question for the user.
+      if ((response.status === 429 || response.status === 503) && attempt < maxAttempts) {
+        release?.();
+        broker.settle(id, ZERO_USAGE);
+        await response.body?.cancel().catch(() => undefined);
+        await (options.delay ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))))(500 * attempt);
+        continue;
+      }
       void options.onResponse?.(id, response, () => release?.());
       if (!response.body) { release?.(); return response; }
       // Capacity covers the whole body, not just the headers.
