@@ -99,8 +99,13 @@ test('credential aliases resolving to the same actual key share one limit', asyn
       credentials,
       limits: { credentials: { 'cred-a': 1, 'cred-b': 1 } },
     }));
+    // The daemon only ever serves a console this test never opens. A stub keeps the suite
+    // independent of the repository build output, which a fresh checkout does not have.
+    const web = join(root, 'web');
+    await mkdir(web, { recursive: true });
+    await writeFile(join(web, 'index.html'), '<!doctype html><html><body><div id="root">Graph</div></body></html>');
     const daemon = await startGraphDaemon({
-      configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir: join(process.cwd(), 'dist', 'web'), port: 0, mode: 'execute',
+      configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir: web, port: 0, mode: 'execute',
       env: { KEY_A: 'one-actual-key', KEY_B: 'one-actual-key' }, log: () => undefined,
     });
     cleanup.push(() => daemon.close());
