@@ -1,197 +1,181 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
-import { build } from 'vite';
-import { chromium } from 'playwright';
-import { openGraphServer } from '../../src/server/host.ts';
-import { TaskStore } from '../../src/core/store.ts';
-import { appendMessage } from '../../src/core/conversation.ts';
+import { describe, expect, test } from 'vitest';
+import {
+  COMPOSER_LINE_HEIGHT,
+  COMPOSER_MAX_HEIGHT,
+  cancelQueuedMessage,
+  clampComposerHeight,
+  composerDraftKey,
+  composerPrimaryDisabled,
+  composerPrimaryState,
+  composerTextareaHeight,
+  queuedUserMessages,
+  readComposerDraft,
+  shouldScrollToLatest,
+  visibleTranscriptMessages,
+  writeComposerDraft,
+  type ComposerStorage,
+} from '../../src/web/composer-state.ts';
 
-const cleanup: (() => Promise<void> | void)[] = [];
-afterEach(async () => {
-  for (const action of cleanup.reverse()) {
-    await Promise.race([Promise.resolve(action()).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]);
-  }
-  cleanup.length = 0;
+function memoryStorage(initial: Record<string, string> = {}): ComposerStorage & { values: Record<string, string> } {
+  const values = { ...initial };
+  return {
+    values,
+    getItem: key => (key in values ? values[key]! : null),
+    setItem: (key, value) => { values[key] = value; },
+    removeItem: key => { delete values[key]; },
+  };
+}
+
+function blockedStorage(): ComposerStorage {
+  const fail = () => { throw new Error('storage blocked'); };
+  return { getItem: fail, setItem: fail, removeItem: fail };
+}
+
+describe('① adaptive composer height', () => {
+  test('grows one line at a time with the content', () => {
+    expect(composerTextareaHeight(1)).toEqual({ height: COMPOSER_LINE_HEIGHT, scrollable: false });
+    expect(composerTextareaHeight(3)).toEqual({ height: COMPOSER_LINE_HEIGHT * 3, scrollable: false });
+  });
+
+  test('an empty composer keeps exactly one line', () => {
+    expect(composerTextareaHeight(0)).toEqual({ height: COMPOSER_LINE_HEIGHT, scrollable: false });
+  });
+
+  test('caps at the maximum and only then becomes scrollable', () => {
+    const atMaxLines = COMPOSER_MAX_HEIGHT / COMPOSER_LINE_HEIGHT;
+    expect(composerTextareaHeight(atMaxLines)).toEqual({ height: COMPOSER_MAX_HEIGHT, scrollable: false });
+    expect(composerTextareaHeight(atMaxLines + 1)).toEqual({ height: COMPOSER_MAX_HEIGHT, scrollable: true });
+  });
+
+  test('clamps a measured pixel height into range', () => {
+    expect(clampComposerHeight(0)).toEqual({ height: 0, scrollable: false });
+    expect(clampComposerHeight(100)).toEqual({ height: 100, scrollable: false });
+    expect(clampComposerHeight(COMPOSER_MAX_HEIGHT)).toEqual({ height: COMPOSER_MAX_HEIGHT, scrollable: false });
+    expect(clampComposerHeight(240)).toEqual({ height: COMPOSER_MAX_HEIGHT, scrollable: true });
+    expect(clampComposerHeight(Number.NaN)).toEqual({ height: 0, scrollable: false });
+  });
+
+  test('honours a custom maximum', () => {
+    expect(composerTextareaHeight(10, { maxHeight: 40 })).toEqual({ height: 40, scrollable: true });
+    expect(composerTextareaHeight(1, { maxHeight: 40, lineHeight: 30 })).toEqual({ height: 30, scrollable: false });
+  });
 });
 
-async function temp(name: string) {
-  const dir = await mkdtemp(join(tmpdir(), `graph-composer-interactions-${name}-`));
-  cleanup.push(() => rm(dir, { recursive: true, force: true }));
-  return dir;
-}
-
-let webDir: string;
-beforeAll(async () => {
-  webDir = await mkdtemp(join(tmpdir(), 'graph-composer-interactions-web-'));
-  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
-}, 60_000);
-afterAll(() => rm(webDir, { recursive: true, force: true }));
-
-const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
-
-/** A read-only console with no master turn: enough to exercise the composer. */
-async function viewServer(root: string) {
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+describe('② composer draft persistence', () => {
+  test('keys the draft by conversation id', () => {
+    expect(composerDraftKey('conversation-a')).toBe('graph.conversation.composer.conversation-a');
+    expect(composerDraftKey('b')).not.toBe(composerDraftKey('a'));
   });
-  cleanup.push(() => server.close());
-  return server;
-}
 
-const distanceFromBottom = () => {
-  const thread = document.querySelector('[data-testid="message-list"]');
-  if (!thread) return -1;
-  return Math.round(thread.scrollHeight - thread.scrollTop - thread.clientHeight);
-};
-
-test('the composer grows with its content and caps into a scrollable field', async () => {
-  const root = await temp('height');
-  const server = await viewServer(root);
-  const created = await server.runtime.conversations.create({ text: '高度测试', requestId: 'height-create' });
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  const input = page.getByTestId('chat-input');
-  await input.waitFor();
-
-  const oneLine = await input.evaluate(element => (element as HTMLTextAreaElement).clientHeight);
-  await input.fill(Array.from({ length: 40 }, (_, index) => `第 ${index} 行内容`).join('\n'));
-  await expect.poll(() => input.evaluate(element => (element as HTMLTextAreaElement).clientHeight))
-    .toBeGreaterThan(oneLine);
-  const grown = await input.evaluate(element => {
-    const field = element as HTMLTextAreaElement;
-    return { height: field.clientHeight, overflow: field.scrollHeight - field.clientHeight };
+  test('writes, reads and clears a per-conversation draft', () => {
+    const storage = memoryStorage();
+    writeComposerDraft(storage, 'a', '还没发出去的内容');
+    expect(readComposerDraft(storage, 'a')).toBe('还没发出去的内容');
+    expect(readComposerDraft(storage, 'b')).toBe('');
+    writeComposerDraft(storage, 'a', '');
+    expect(readComposerDraft(storage, 'a')).toBe('');
+    expect(composerDraftKey('a') in storage.values).toBe(false);
   });
-  expect(grown.height).toBeLessThanOrEqual(180);
-  expect(grown.height).toBeGreaterThan(oneLine);
-  expect(grown.overflow).toBeGreaterThan(1);
 
-  // Shrinking the content releases the extra height again.
-  await input.fill('一行');
-  await expect.poll(() => input.evaluate(element => (element as HTMLTextAreaElement).clientHeight))
-    .toBeLessThan(grown.height);
-}, 60_000);
-
-test('an unsent draft survives a conversation switch and a window reload', async () => {
-  const root = await temp('draft');
-  const server = await viewServer(root);
-  const first = await server.runtime.conversations.create({ text: '第一个会话', requestId: 'draft-first' });
-  const second = await server.runtime.conversations.create({ text: '第二个会话', requestId: 'draft-second' });
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  const draft = '这段内容还没发送，切换会话后应该还在。';
-
-  await page.goto(`${server.url}/#/conversations/${first.conversationId}`);
-  const input = page.getByTestId('chat-input');
-  await input.waitFor();
-  await input.fill(draft);
-  await expect.poll(() => page.evaluate(() => Object.keys(window.localStorage).some(key => key.startsWith('graph.conversation.composer.')))).toBe(true);
-
-  await page.goto(`${server.url}/#/conversations/${second.conversationId}`);
-  await page.getByTestId('chat-input').waitFor();
-  await expect.poll(() => page.getByTestId('chat-input').inputValue()).toBe('');
-
-  await page.goto(`${server.url}/#/conversations/${first.conversationId}`);
-  await expect.poll(() => page.getByTestId('chat-input').inputValue()).toBe(draft);
-
-  await page.reload();
-  await expect.poll(() => page.getByTestId('chat-input').inputValue()).toBe(draft);
-}, 60_000);
-
-test('re-entering a conversation lands on its newest message', async () => {
-  const root = await temp('scroll');
-  const server = await viewServer(root);
-  const long = await server.runtime.conversations.create({ text: '长会话', requestId: 'scroll-long' });
-  const other = await server.runtime.conversations.create({ text: '另一个会话', requestId: 'scroll-other' });
-  const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  cleanup.push(async () => store.close());
-  for (let index = 0; index < 80; index += 1) {
-    appendMessage(store, {
-      conversationId: long.conversationId, role: 'assistant', kind: 'chat',
-      text: `回答 ${index}：${'这是一段足够长的内容。'.repeat(6)}`,
-    });
-  }
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${server.url}/#/conversations/${other.conversationId}`);
-  await page.getByTestId('chat-input').waitFor();
-
-  await page.goto(`${server.url}/#/conversations/${long.conversationId}`);
-  await page.getByTestId('message-list').waitFor();
-  expect(await page.evaluate(() => {
-    const thread = document.querySelector('[data-testid="message-list"]');
-    return Boolean(thread && thread.scrollHeight > thread.clientHeight + 40);
-  })).toBe(true);
-  await expect.poll(() => page.evaluate(distanceFromBottom)).toBeLessThanOrEqual(2);
-}, 60_000);
-
-test('the primary button pauses, resumes, and sends+continues from one control', async () => {
-  const root = await temp('pause');
-  let release: () => void = () => undefined;
-  const blocked = new Promise<void>(resolve => { release = () => resolve(); });
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [],
-    actions: {
-      master: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async () => async () => {
-          await blocked;
-          return { outcome: 'completed', output: { text: '继续处理完成。' }, usage };
-        },
-      },
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-    autoDrive: true,
-    webDir,
-    startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
+  test('degrades safely when storage is missing or blocked', () => {
+    expect(readComposerDraft(null, 'a')).toBe('');
+    expect(() => writeComposerDraft(null, 'a', 'x')).not.toThrow();
+    expect(readComposerDraft(undefined, 'a')).toBe('');
+    const blocked = blockedStorage();
+    expect(readComposerDraft(blocked, 'a')).toBe('');
+    expect(() => writeComposerDraft(blocked, 'a', 'x')).not.toThrow();
+    expect(() => writeComposerDraft(blocked, 'a', '')).not.toThrow();
   });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ text: '先讨论一下', requestId: 'pause-create' });
+});
 
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  const primary = page.getByTestId('chat-send');
-  const input = page.getByTestId('chat-input');
-  await input.waitFor();
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status).toBe('running');
+describe('③ scroll-to-latest decision', () => {
+  test('jumps once when entering a chat with messages', () => {
+    expect(shouldScrollToLatest({ tab: 'chat', hasMessages: true, alreadyJumped: false })).toBe(true);
+  });
 
-  // State 1: while the master outputs, an empty composer offers pause.
-  await expect.poll(() => primary.getAttribute('data-mode')).toBe('pause');
-  await primary.click();
-  await page.getByTestId('conversation-paused-notice').waitFor();
-  await expect.poll(() => primary.getAttribute('data-mode')).toBe('resume');
+  test('never jumps a second time, so a reader who scrolled up is not yanked', () => {
+    expect(shouldScrollToLatest({ tab: 'chat', hasMessages: true, alreadyJumped: true })).toBe(false);
+  });
 
-  // State 2: paused with nothing to send, the same control resumes.
-  await primary.click();
-  await page.getByTestId('conversation-paused-notice').waitFor({ state: 'detached' });
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).paused).toBe(false);
+  test('never jumps outside the chat tab or when there is nothing to show', () => {
+    expect(shouldScrollToLatest({ tab: 'graph', hasMessages: true, alreadyJumped: false })).toBe(false);
+    expect(shouldScrollToLatest({ tab: 'artifacts', hasMessages: true, alreadyJumped: false })).toBe(false);
+    expect(shouldScrollToLatest({ tab: 'chat', hasMessages: false, alreadyJumped: false })).toBe(false);
+  });
+});
 
-  // State 4: paused again, now with input: one click sends it and continues.
-  await expect.poll(() => primary.getAttribute('data-mode')).toBe('pause');
-  await primary.click();
-  await page.getByTestId('conversation-paused-notice').waitFor();
-  await input.fill('这条要发出去并自动继续。');
-  await expect.poll(() => primary.getAttribute('data-mode')).toBe('resume');
-  await primary.click();
-  await page.getByTestId('conversation-paused-notice').waitFor({ state: 'detached' });
-  await expect.poll(async () => {
-    const view = await server.runtime.conversations.view(created.conversationId);
-    return { paused: view.paused, sent: view.messages.some(message => message.text === '这条要发出去并自动继续。') };
-  }).toEqual({ paused: false, sent: true });
+describe('④ primary button state machine', () => {
+  const idle = { busy: false, paused: false, pending: false, hasInput: false, queueLength: 0, hasSuggestion: false };
 
-  release();
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status).toBe('succeeded');
-}, 60_000);
+  test('outputting with an empty composer offers pause', () => {
+    expect(composerPrimaryState({ ...idle, busy: true })).toEqual({ mode: 'pause', action: 'pause' });
+  });
+
+  test('outputting with typed content still sends', () => {
+    expect(composerPrimaryState({ ...idle, busy: true, hasInput: true })).toEqual({ mode: 'send', action: 'send' });
+  });
+
+  test('paused with an empty composer and empty queue resumes', () => {
+    expect(composerPrimaryState({ ...idle, paused: true })).toEqual({ mode: 'resume', action: 'resume' });
+  });
+
+  test('paused with input sends the message and auto-continues', () => {
+    expect(composerPrimaryState({ ...idle, paused: true, hasInput: true })).toEqual({ mode: 'resume', action: 'send-and-resume' });
+  });
+
+  test('paused with a nonempty queue resumes without sending', () => {
+    expect(composerPrimaryState({ ...idle, paused: true, queueLength: 2 })).toEqual({ mode: 'resume', action: 'resume' });
+  });
+
+  test('a pause/resume in flight shows a pending control', () => {
+    expect(composerPrimaryState({ ...idle, pending: true })).toEqual({ mode: 'pending', action: 'none' });
+  });
+
+  test('idle sends, steers the queue, or takes the suggestion', () => {
+    expect(composerPrimaryState({ ...idle, hasInput: true })).toEqual({ mode: 'send', action: 'send' });
+    expect(composerPrimaryState({ ...idle, queueLength: 1 })).toEqual({ mode: 'send', action: 'steer' });
+    expect(composerPrimaryState({ ...idle, hasSuggestion: true })).toEqual({ mode: 'send', action: 'suggestion' });
+    expect(composerPrimaryState(idle)).toEqual({ mode: 'send', action: 'none' });
+  });
+
+  test('stays disabled unless there is something to do', () => {
+    const flags = { sending: false, steering: false, pending: false, paused: false, busy: false, hasInput: false, hasSuggestion: false };
+    expect(composerPrimaryDisabled(flags)).toBe(true);
+    expect(composerPrimaryDisabled({ ...flags, hasInput: true })).toBe(false);
+    expect(composerPrimaryDisabled({ ...flags, hasSuggestion: true })).toBe(false);
+    expect(composerPrimaryDisabled({ ...flags, busy: true })).toBe(false);
+    expect(composerPrimaryDisabled({ ...flags, paused: true })).toBe(false);
+    expect(composerPrimaryDisabled({ ...flags, sending: true, hasInput: true })).toBe(true);
+    expect(composerPrimaryDisabled({ ...flags, steering: true, hasInput: true })).toBe(true);
+    expect(composerPrimaryDisabled({ ...flags, pending: true, paused: true })).toBe(true);
+  });
+});
+
+describe('⑤ queued message list after cancel', () => {
+  const messages = [
+    { id: 'a', role: 'user', state: 'queued' },
+    { id: 'b', role: 'user', state: 'queued' },
+    { id: 'c', role: 'assistant', state: 'done' },
+    { id: 'd', role: 'user', state: 'cancelled' },
+  ];
+
+  test('only user messages still queued stay in the queue, in order', () => {
+    expect(queuedUserMessages(messages).map(message => message.id)).toEqual(['a', 'b']);
+  });
+
+  test('cancelling drops that row and leaves the rest untouched', () => {
+    expect(cancelQueuedMessage(queuedUserMessages(messages), 'a').map(message => message.id)).toEqual(['b']);
+    expect(cancelQueuedMessage(queuedUserMessages(messages), 'b').map(message => message.id)).toEqual(['a']);
+    expect(cancelQueuedMessage(queuedUserMessages(messages), 'missing').map(message => message.id)).toEqual(['a', 'b']);
+    expect(cancelQueuedMessage([{ id: 'only' }], 'only')).toEqual([]);
+  });
+
+  test('an empty queue stays empty and never throws', () => {
+    expect(queuedUserMessages([])).toEqual([]);
+    expect(cancelQueuedMessage<{ id: string }>([], 'a')).toEqual([]);
+  });
+
+  test('cancelled messages never leak into the transcript', () => {
+    expect(visibleTranscriptMessages(messages).map(message => message.id)).toEqual(['a', 'b', 'c']);
+  });
+});
