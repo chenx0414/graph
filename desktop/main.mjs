@@ -9,6 +9,7 @@
  */
 import { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import { spawn } from 'node:child_process';
+import { stopDaemonProcess } from './daemon-process.ts';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -142,13 +143,15 @@ if (!app.requestSingleInstanceLock()) {
     // Sandboxed helpers cannot start the Electron binary (no Helper apps), so
     // the packaged app ships a real node and points every helper at it.
     const bundledNode = join(paths.root, 'runtime/node');
-    child = spawn(process.execPath, [paths.serverEntry, ...args], {
+    const startedChild = spawn(process.execPath, [paths.serverEntry, ...args], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(existsSync(bundledNode) ? { GRAPH_APP_NODE: bundledNode } : {}), ...secrets },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    child = startedChild;
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', chunk => {
+      if (child !== startedChild) return;
       stdout += chunk;
       if (verbose) process.stdout.write(chunk);
       if (!readyUrl) {
@@ -168,10 +171,12 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     child.stderr.on('data', chunk => {
+      if (child !== startedChild) return;
       stderr += chunk;
       if (verbose) process.stderr.write(chunk);
     });
     child.on('exit', (code, signal) => {
+      if (child !== startedChild) return;
       if (quitting || restarting) {
         if (pendingReady) {
           const rejectReady = pendingReady.reject;
@@ -399,15 +404,7 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function stopDaemon() {
-    return new Promise(resolveStop => {
-      if (!child || child.exitCode !== null) return resolveStop();
-      const done = () => resolveStop();
-      child.once('exit', done);
-      child.kill('SIGTERM');
-      setTimeout(() => {
-        if (child && child.exitCode === null) child.kill('SIGKILL');
-      }, 5_000);
-    });
+    return stopDaemonProcess(child);
   }
 
   app.on('second-instance', () => {

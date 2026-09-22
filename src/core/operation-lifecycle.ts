@@ -1,3 +1,4 @@
+import { pendingRsiContinuation, releaseRsiContinuation } from './rsi-continuation.ts';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
@@ -277,6 +278,7 @@ export class OperationLifecycle {
       SET state='not_sent',worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
       WHERE id=?`).run(now, row.id);
     releaseOperationReservation(this.store, row.id);
+    releaseRsiContinuation(this.store, row.id);
     if (options.resetNode) {
       this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
     }
@@ -293,7 +295,8 @@ export class OperationLifecycle {
       ? conversationForTask(this.store, row.task_id) : undefined;
     // An uncertain turn already consumed its message. Do not turn it into a
     // fresh request; explicit recovery can still set the master pending later.
-    if (conversation && !pendingMessages(this.store, conversation.id, 1).length) {
+    if (conversation && !pendingMessages(this.store, conversation.id, 1).length
+      && !pendingRsiContinuation(this.store, row.task_id, row.node_id)) {
       this.store.db.prepare("UPDATE nodes SET status='failed' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
       this.store.db.prepare("UPDATE activations SET state='failed' WHERE id=?").run(node.activation_id);
     }
@@ -332,6 +335,9 @@ export class OperationLifecycle {
       this.store.db.prepare("UPDATE activations SET state='running' WHERE id=?")
         .run(operation.activationId);
       this.store.event(operation.taskId, 'operation.dispatched', { operationId: operation.id });
+      if (operation.context.rsiContinuation) this.store.event(operation.taskId, 'rsi.continuation_dispatched', {
+        requestId: operation.context.rsiContinuation.requestId, operationId: operation.id,
+      });
     });
   }
 

@@ -198,6 +198,7 @@ export interface Operation {
   proposalVersion: number; requirementVersion: number;
   context: {
     previousOutput: Json;
+    rsiContinuation?: { requestId: string; operationId: string; commit: string };
     answers: { questionId: string; value: Json }[];
     messages?: {
       id?: string;

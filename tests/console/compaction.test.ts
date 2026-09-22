@@ -236,11 +236,19 @@ test('Graph compacts before the window is exceeded and asks for a bounded summar
   )).toBe(6_020);
 });
 
+test('compaction ordering uses the invocation boundary even when clocks or settlement order differ', async () => {
+  const { latestContextTokens } = await import('../../src/runtime/compaction.ts');
+  const compaction = { timestamp: 200, data: JSON.stringify({ tokensAfter: 25_177, completionSequence: 5 }) };
+  const usage = JSON.stringify({ input: 496_000, output: 869 });
+  expect(latestContextTokens([{ usage, settledAt: 300, sequence: 5 }], compaction)).toBe(25_177);
+  expect(latestContextTokens([{ usage, settledAt: 100, sequence: 6 }], compaction)).toBe(496_869);
+});
+
 test('the current schema tags every invocation with a purpose and keeps completion as the default', async () => {
   const root = await temp('schema');
   const store = new TaskStore(join(root, 'tasks.sqlite'));
   cleanup.push(() => store.close());
-  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(28);
+  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(29);
   const columns = store.db.prepare('PRAGMA table_info(invocations)').all() as { name: string; dflt_value: string | null }[];
   expect(columns.find(column => column.name === 'purpose')).toMatchObject({ dflt_value: "'completion'" });
 });
@@ -467,4 +475,40 @@ test('a pause during auto-compaction stops the summary request through the task 
   // A paused task parks the node instead of blocking it on a question.
   expect((await runtime.user.task(taskId).view()).nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending' });
   expect(view.operations.every(operation => operation.state !== 'succeeded')).toBe(true);
+}, 60_000);
+
+test('post-turn compaction remains newer than the completion when the operation settles later', async () => {
+  const root = await temp('post-turn-clock');
+  const provider = await compactionProvider(({ summary, index }) => summary
+    ? { text: '## Goal\nKeep working on the next user request.', usage: { prompt_tokens: 900, completion_tokens: 30 } }
+    : index === 0
+      ? { text: LONG_TEXT.repeat(4), usage: { prompt_tokens: 8_000, completion_tokens: 40 } }
+      : { text: 'Continued without redundant compaction.', usage: { prompt_tokens: 40, completion_tokens: 10 } });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    models: { entries: [{ ...modelEntry(provider.baseUrl), contextWindow: 8_192 }], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  const created = await runtime.conversations.create({ text: 'Prepare history.', requestId: 'create' });
+  await runtime.host.runReady();
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'), { readOnly: true });
+  cleanup.push(() => db.close());
+  const before = db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='session.compaction_started'").get() as { count: number };
+  expect(before.count).toBe(1);
+  // The next turn must use the compacted context, not the large billed context
+  // whose containing operation was settled after the summary was stored.
+  await runtime.conversations.chat(created.conversationId, { text: 'Continue the work.', requestId: 'continue' });
+  await runtime.host.runReady();
+  expect(db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='session.compaction_started'").get()).toEqual(before);
+  expect((await runtime.conversations.view(created.conversationId)).messages.some(message => message.text === 'Continued without redundant compaction.')).toBe(true);
+  // Manual compaction may have nothing left to shorten. Neither that case nor
+  // a repeated compact command is an execution failure or a parked master.
+  await runtime.conversations.compact(created.conversationId, { requestId: 'compact-1' });
+  await runtime.host.runReady();
+  await runtime.conversations.compact(created.conversationId, { requestId: 'compact-2' });
+  await runtime.host.runReady();
+  expect(db.prepare("SELECT kind FROM questions WHERE status='open'").all()).toEqual([]);
+  expect(db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='session.compaction_failed'").get()).toEqual({ count: 0 });
 }, 60_000);

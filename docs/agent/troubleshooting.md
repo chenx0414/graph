@@ -47,7 +47,7 @@
 - `pendingRestart` 与 `canRestart`：有在途 operation 时普通请求不会重载；`pendingRestart.force` 为真时会跳过该条件；
 - `apply_rsi_change` 返回的 `status`：`checks_failed` 表示检查未通过但改动仍保留在工作区（继续修复或传 `changes: []` 重跑检查），`rolled_back` 表示意外错误并已恢复文件，`unavailable` 表示没有可用 checkout；
 - 桌面进程是否在轮询 `/api/app/rsi/status`，以及 `/api/app/rsi/restart-ack` 是否成功；
-- `activation.state=pending_reload` 表示已提交但尚未确认生效；成功请求激活后当前回合会结束，待重载期间新消息保持排队。只有 `activation.state=active` / `lastActivation` 才是重载确认；请求消失或工具返回 `applied` 都不能单独证明已生效；
+- `activation.state=pending_reload` 表示已提交但尚未确认生效；成功请求激活后当前回合会结束，待重载期间新消息保持排队。确认后会自动续跑原请求；`rsi.continuation_ready` 与 `rsi.continuation_dispatched` 可核对是否已领取。只有 `activation.state=active` / `lastActivation` 才是后台重载确认（窗口恢复还需单独检查）；请求消失或工具返回 `applied` 都不能单独证明已生效；
 - conversation 中的 `kind=rsi` 报告：它记录了分支、提交、验证结果与重载状态。
 
 不要在 checkout 有未提交改动时强行改同一文件；RSI 会拒绝并要求先处理脏文件。上一次失败尝试留下的文件属于例外：它们在 `<stateDir>/rsi/working.json` 中登记，仍可继续修改。
@@ -62,7 +62,7 @@
 - 模型的 `maxTokens`：摘要预算永远不会超过它，配置过小会让长会话的摘要永远放不下；
 - 会话是否已经超过窗口（UI 的“上下文”指标）。超过后每一轮都会失败，直到一次压缩成功。
 
-Graph 会在每次回合开始前，按上一次已计量的上下文判断是否需要压缩，并用 `COMPACTION_INSTRUCTIONS` 主动调用一次压缩：这套指令要求摘要控制在约 1500 tokens、允许丢弃已解决的细节，从而避免 Pi 默认“保留全部历史”的更新提示让摘要逐次膨胀直到超出输出上限。Pi 自己的阈值/溢出压缩仍作为兜底保留。手动压缩失败会作为一次普通执行失败上报，而不是变成无法解释的用量未知停驻。
+Graph 会在每次回合开始前，按上一次已计量的上下文判断是否需要压缩，并用 `COMPACTION_INSTRUCTIONS` 主动调用一次压缩：这套指令要求摘要控制在约 1500 tokens、允许丢弃已解决的细节，从而避免 Pi 默认“保留全部历史”的更新提示让摘要逐次膨胀直到超出输出上限。Pi 自己的阈值/溢出压缩仍作为兜底保留。压缩事件记录已覆盖的 completion 调用序号，下一轮按调用顺序选择压缩后估算或更新的模型用量，不按整轮结束时间判断。`Already compacted` / `Nothing to compact (session too small)` 是无需操作的成功结果，记录为 `session.compaction_skipped`，不会停驻主管。真正的手动压缩失败仍作为普通执行失败上报。排队的原任务与已确认重载后的续跑不因压缩命令丢失。
 
 ## 模型不可用
 
