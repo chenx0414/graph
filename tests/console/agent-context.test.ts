@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
+import { DEFAULT_MAIN_TOOL_GUIDANCE, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 
 const cleanup: string[] = [];
 afterEach(async () => {
@@ -92,10 +92,11 @@ test('legacy tool awareness is migrated into the structured tools directory', as
   expect(await library.prompt('tools/main.md')).toBe('Legacy custom tool guidance.');
 
   await library.resetPrompt('tools/main.md');
-  expect(await library.prompt('tools/main.md')).toBe('');
+  // Resetting restores the built-in routing rules; an empty default was the old policy.
+  expect(await library.prompt('tools/main.md')).toBe(DEFAULT_MAIN_TOOL_GUIDANCE);
 });
 
-test('the unchanged capability-awareness tool prompt migrates to empty without touching custom guidance', async () => {
+test('the unchanged capability-awareness tool prompt migrates to the current routing rules without touching custom guidance', async () => {
   const root = await temp();
   await mkdir(join(root, 'tools'), { recursive: true, mode: 0o700 });
   const capabilityAwareness = [
@@ -113,8 +114,8 @@ test('the unchanged capability-awareness tool prompt migrates to empty without t
   const library = openAgentContextLibrary(root);
   await library.ensure();
 
-  expect(await library.prompt('tools/main.md')).toBe('');
-  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe('\n');
+  expect(await library.prompt('tools/main.md')).toBe(DEFAULT_MAIN_TOOL_GUIDANCE);
+  expect(await readFile(join(root, 'tools/main.md'), 'utf8')).toBe(`${DEFAULT_MAIN_TOOL_GUIDANCE}\n`);
 });
 
 test('the unchanged Main Agent identity heading is removed during migration', async () => {
