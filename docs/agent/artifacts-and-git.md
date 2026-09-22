@@ -46,6 +46,8 @@ artifactId + version + digest
 
 不要用 artifact 替代任务图控制流或 evidence。Artifact 只承载内容、版本和发现。
 
+tag 是标签而非路径：任意文种都可以（例如 `编码`、`已知问题`），写入时统一小写并限长 60 字符；而 `namespace`、`name`、`prefix` 仍要求小写 ASCII slug，因为它们会进入 artifact URI。
+
 ## Evidence
 
 Evidence 证明某个 acceptance 在具体输入和提交上是否通过。它必须绑定：

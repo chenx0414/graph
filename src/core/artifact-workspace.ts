@@ -119,8 +119,18 @@ function parseSchema(value: string | undefined) {
   return { kind: match[1]!, version: Number(match[2]) };
 }
 
+// Tags are labels, not path components: any writing system is allowed, but the shape stays
+// slug-like (a letter or digit at both ends) so a tag remains a safe filter token.
+function tag(value: string, field: string) {
+  const normalized = requiredText(value, field, 60).toLowerCase();
+  if (!/^[\p{L}\p{N}](?:[\p{L}\p{N}._-]*[\p{L}\p{N}])?$/u.test(normalized)) {
+    throw new RuntimeError('invalid_artifact', `${field} must be a label of letters, digits, dot, dash or underscore in any script (at most 60 characters)`);
+  }
+  return normalized;
+}
+
 function normalizeTags(value: string[] | undefined) {
-  const tags = [...new Set((value ?? []).map(tag => slug(tag, 'tag')))].sort();
+  const tags = [...new Set((value ?? []).map(entry => tag(entry, 'tag')))].sort();
   if (tags.length > 20) throw new RuntimeError('invalid_artifact', 'An artifact may have at most 20 tags');
   return tags;
 }
@@ -440,7 +450,7 @@ export class ArtifactWorkspace {
     }
     if (input.tag) {
       conditions.push('EXISTS (SELECT 1 FROM json_each(artifacts.tags) WHERE value=?)');
-      params.push(slug(input.tag, 'tag'));
+      params.push(tag(input.tag, 'tag'));
     }
     if (input.trust) { conditions.push('trust=?'); params.push(input.trust); }
     const where = conditions.join(' AND ');
