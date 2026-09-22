@@ -1,4 +1,9 @@
 #!/bin/sh
 set -eu
 
+# Git exports its own repository variables to hooks. Left in place they leak into the gate,
+# whose tests run git inside their own temporary repositories: with GIT_DIR set those commands
+# either fail ("must be run in a work tree") or act on the repository being pushed.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX
+
 exec node --run check
