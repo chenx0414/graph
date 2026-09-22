@@ -5,8 +5,8 @@ import {
   composerHistoryDown,
   composerHistoryUp,
   createComposerHistoryState,
-  recordComposerPrompt,
   resetComposerHistory,
+  submitComposerPrompt,
   type ComposerHistoryState,
 } from './chat-history.ts';
 import {
@@ -220,12 +220,13 @@ export function ChatComposer({
     });
   }
 
-  /** Remember a just-sent prompt unless the parent already tracks history. */
+  /**
+   * Submit = always leave the browsing position. Only when the composer owns the
+   * list does it also remember the prompt; a parent-owned list is updated from
+   * the conversation's transcript instead.
+   */
   function rememberPrompt() {
-    if (history !== undefined) return;
-    const prompt = value.trim();
-    if (!prompt) return;
-    historyRef.current = recordComposerPrompt(historyRef.current, prompt);
+    historyRef.current = submitComposerPrompt(historyRef.current, value, history !== undefined);
     setHistoryBrowsing(false);
   }
 

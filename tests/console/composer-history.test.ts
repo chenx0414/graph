@@ -8,6 +8,7 @@ import {
   createComposerHistoryState,
   recordComposerPrompt,
   resetComposerHistory,
+  submitComposerPrompt,
 } from '../../src/web/chat-history.ts';
 
 function history(...prompts: string[]) {
@@ -86,6 +87,35 @@ describe('composer prompt history', () => {
     expect(sent.entries).toEqual(['a', 'b']);
   });
 
+  test('submitting a parent-owned history resets browsing so ↑ shows the newest again', () => {
+    // The conversation owns the list (Conversation.tsx passes `history`); the
+    // composer must still leave the browsing position on submit, otherwise the
+    // next ↑ keeps walking back and skips the newest prompt.
+    const entries = createComposerHistoryState(['第一条', '第二条']);
+    const recalled = composerHistoryUp(entries, '草稿')!;
+    expect(recalled.value).toBe('第二条');
+    expect(recalled.state.cursor).toBe(0);
+
+    const submitted = submitComposerPrompt(recalled.state, recalled.value, true);
+    expect(submitted.cursor).toBeNull();
+    expect(submitted.draft).toBe('');
+
+    // The box is empty right after a send: ↑ must surface the newest prompt.
+    const again = composerHistoryUp(submitted, '');
+    expect(again?.value).toBe('第二条');
+  });
+
+  test('submitting without a parent appends the prompt and resets browsing', () => {
+    const browsing = composerHistoryUp(history('a'), 'draft')!;
+    const submitted = submitComposerPrompt(browsing.state, ' b ', false);
+    expect(submitted.cursor).toBeNull();
+    expect(submitted.entries).toEqual(['a', 'b']);
+
+    // A parent-owned submit never appends (the transcript already has it).
+    const parentOwned = submitComposerPrompt(history('a'), 'b', true);
+    expect(parentOwned.entries).toEqual(['a']);
+  });
+
   test('reports the prompt under the cursor', () => {
     const start = history('one', 'two');
     expect(composerHistoryValue(start)).toBeNull();
@@ -118,8 +148,8 @@ describe('composer keyboard wiring', () => {
     expect(source).toMatch(/key === 'z'/);
   });
 
-  test('sending a prompt feeds the recalled history', () => {
-    expect(source).toContain('recordComposerPrompt(');
+  test('sending a prompt feeds the recalled history through one submit path', () => {
+    expect(source).toContain('submitComposerPrompt(');
     expect(source).toContain('rememberPrompt()');
   });
 });

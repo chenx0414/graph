@@ -50,6 +50,24 @@ export function resetComposerHistory(state: ComposerHistoryState): ComposerHisto
   return state.cursor === null ? state : { entries: state.entries, cursor: null, draft: '' };
 }
 
+/**
+ * Apply a submit to the history state.
+ *
+ * Submitting always leaves the browsing position: after ↑ recalled a prompt and
+ * it was sent, the box is empty, so a later ↑ must start again from the newest
+ * prompt instead of stepping further back. When the composer does not own the
+ * list (`parentOwned`), the conversation's transcript already carries the sent
+ * prompt, so only the position is reset; otherwise the prompt is appended here.
+ */
+export function submitComposerPrompt(
+  state: ComposerHistoryState,
+  prompt: string,
+  parentOwned = false,
+): ComposerHistoryState {
+  const reset = resetComposerHistory(state);
+  return parentOwned ? reset : recordComposerPrompt(reset, prompt);
+}
+
 export interface ComposerHistoryMove {
   state: ComposerHistoryState;
   value: string;
