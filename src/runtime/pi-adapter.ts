@@ -47,6 +47,7 @@ export interface PiAdapterChannels {
     propose(proposal: Proposal, requestId: string): Promise<unknown>;
     revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string; taskId?: string }): Promise<unknown>;
     graphState?(): Promise<unknown>;
+    taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
     validateProposal?(proposal: Proposal): Promise<unknown>;
     listProjects?(): Promise<unknown>;
     bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
@@ -99,6 +100,7 @@ function summarizeToolCall(name: string, args: unknown) {
         : name === 'propose_graph' ? 'draft'
           : name === 'validate_proposal' ? 'validation'
             : name === 'get_graph_state' ? 'current graph'
+              : name === 'get_task_status' ? 'task status'
               : name === 'bind_project' ? target('projectId') ?? name
                 : name.startsWith('git_') ? [name, target('path') ?? target('ref') ?? ''].filter(Boolean).join(' ')
                   : name === 'submit_result' ? 'structured result'

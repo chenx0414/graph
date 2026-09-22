@@ -16,6 +16,7 @@ type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
   revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
+  taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
   validateProposal?(proposal: Proposal): Promise<unknown>;
   listProjects?(): Promise<unknown>;
   bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
@@ -350,6 +351,18 @@ export function agentTools(input: {
       }
     },
     get_graph_state: async () => text(JSON.stringify(await input.supervisor!.graphState!())),
+    get_task_status: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      const optional = (key: string) => typeof body[key] === 'string' && (body[key] as string).trim() ? (body[key] as string).trim() : undefined;
+      const taskId = optional('taskId');
+      const nodeId = optional('nodeId');
+      const waitForNode = optional('waitForNode');
+      const timeoutMs = typeof body.timeoutMs === 'number' && Number.isFinite(body.timeoutMs) ? Math.trunc(body.timeoutMs) : undefined;
+      return text(JSON.stringify(await input.supervisor!.taskStatus!({
+        ...(taskId ? { taskId } : {}), ...(nodeId ? { nodeId } : {}),
+        ...(waitForNode ? { waitForNode } : {}), ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      })));
+    },
     list_projects: async () => text(JSON.stringify(await input.supervisor!.listProjects!())),
     bind_project: async (_id: string, params: unknown) => {
       const body = fields(params);

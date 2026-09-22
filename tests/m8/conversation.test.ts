@@ -726,6 +726,27 @@ test('a conversation master revises the feature task it created', async () => {
     }),
   ]);
 
+  // The compact status read reports the same revision, the per-node model and
+  // the node input on demand, and it blocks until a node settles (or times out).
+  const supervisor = runtime.supervisor(anchorTaskId);
+  const status = await supervisor.taskStatus({ taskId: confirmed.taskId }) as {
+    taskId: string; graphVersion: number; nodes: { id: string; status: string; model?: string; input?: unknown }[];
+  };
+  expect(status).toMatchObject({ taskId: confirmed.taskId, graphVersion: 2 });
+  expect(status.nodes.map(node => node.id)).toEqual(['work', 'check']);
+  expect(status.nodes[0]).toMatchObject({ status: 'pending', model: 'm2', kind: 'agent' });
+  expect(status.nodes[0]!.input).toBeUndefined();
+  const focused = await supervisor.taskStatus({ taskId: confirmed.taskId, nodeId: 'check' }) as {
+    nodes: { id: string; input?: { command?: string; args?: string[] } }[];
+  };
+  expect(focused.nodes).toHaveLength(1);
+  expect(focused.nodes[0]!.input).toEqual({ command: 'node', args: ['check.js'] });
+  const waited = await supervisor.taskStatus({ taskId: confirmed.taskId, waitForNode: 'work', timeoutMs: 0 }) as { reason: string };
+  expect(waited).toMatchObject({ reason: 'timeout' });
+  await expect(supervisor.taskStatus({ nodeId: 'nope' })).rejects.toMatchObject({ code: 'not_found' });
+  await expect(supervisor.taskStatus({ taskId: '0faf1367-0000-0000-0000-000000000000' }))
+    .rejects.toMatchObject({ code: 'invalid_input' });
+
   // Another task is not reachable through this channel.
   await expect(runtime.supervisor(anchorTaskId).revise({
     baseVersion: 2, reason: '越界', nodes: [], requestId: 'revise-outside', taskId: '0faf1367-0000-0000-0000-000000000000',

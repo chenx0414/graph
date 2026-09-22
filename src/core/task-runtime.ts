@@ -102,14 +102,73 @@ interface ProposalRow {
 /** A revision names its target explicitly. Without one it revises this
  * conversation own task; with one it may revise a feature task the same
  * conversation created, never a task from another conversation. */
-function revisionTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined) {
+function conversationTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined, what: string) {
   if (requested === undefined || requested === supervisorTaskId) return supervisorTaskId;
   const self = store.db.prepare('SELECT conversation_id FROM tasks WHERE id=?').get(supervisorTaskId) as { conversation_id: string | null } | undefined;
   const target = store.db.prepare('SELECT conversation_id FROM tasks WHERE id=?').get(requested) as { conversation_id: string | null } | undefined;
   if (!target || !self?.conversation_id || target.conversation_id !== self.conversation_id) {
-    throw new RuntimeError('invalid_input', 'A revision may only target a task of this conversation');
+    throw new RuntimeError('invalid_input', `${what} may only target a task of this conversation`);
   }
   return requested;
+}
+
+function revisionTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined) {
+  return conversationTarget(store, supervisorTaskId, requested, 'A revision');
+}
+
+// A compact projection of one task: which node runs what, what still runs, what needs the user and
+// which acceptance evidence is currently valid. `graphState` carries the same information at roughly
+// ten times the size, so this is the read to poll with.
+function taskStatusView(store: TaskStore, taskId: string, nodeId?: string) {
+  const task = store.task(taskId);
+  const nodes = store.db.prepare(`SELECT n.id,n.spec,n.status,n.stall_count,i.model,i.definition_version
+    FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid`).all(taskId) as {
+      id: string; spec: string; status: string; stall_count: number; model: string | null; definition_version: string | null;
+    }[];
+  const selected = nodeId === undefined ? nodes : nodes.filter(row => row.id === nodeId);
+  if (nodeId !== undefined && !selected.length) throw new RuntimeError('not_found', `Task ${taskId} has no node ${nodeId}`);
+  const questions = store.db.prepare("SELECT id,node_id,kind,owner FROM questions WHERE task_id=? AND status='open' ORDER BY rowid").all(taskId) as {
+    id: string; node_id: string; kind: string; owner: string;
+  }[];
+  const evidence = store.db.prepare('SELECT node_id,data,valid,commit_sha FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as {
+    node_id: string; data: string; valid: number; commit_sha: string | null;
+  }[];
+  const current = new Map<string, { acceptanceId: string; nodeId: string; valid: boolean; commitSha?: string }>();
+  for (const row of evidence) {
+    const data = JSON.parse(row.data) as EvidenceInput;
+    current.set(data.acceptanceId, {
+      acceptanceId: data.acceptanceId, nodeId: row.node_id, valid: Boolean(row.valid),
+      ...(row.commit_sha ? { commitSha: row.commit_sha } : {}),
+    });
+  }
+  const userQuestions = questions.filter(question => question.owner === 'user');
+  return {
+    taskId,
+    phase: task.phase,
+    status: task.paused ? 'paused' : userQuestions.length ? 'blocked' : task.phase,
+    graphVersion: task.graph_version,
+    proposalVersion: task.latest_proposal,
+    acceptedProposalVersion: task.accepted_proposal,
+    targetBranch: task.target_branch,
+    integrationSha: task.integration_sha,
+    nodes: selected.map(row => {
+      const spec = JSON.parse(row.spec) as NodeSpec;
+      // A node reset by a revision is pending again while its old instance still carries the
+      // previous model, so the spec decides until the node is dispatched once more.
+      const model = row.status === 'pending' ? spec.model ?? row.model : row.model ?? spec.model;
+      return {
+        id: row.id, kind: spec.kind, action: spec.action, status: row.status,
+        ...(model ? { model } : {}),
+        ...(row.definition_version ? { definition: row.definition_version } : {}),
+        ...(row.stall_count ? { stallCount: row.stall_count } : {}),
+        ...(nodeId === undefined ? {} : { input: spec.input }),
+      };
+    }),
+    questions: userQuestions.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind })),
+    problems: questions.filter(question => question.owner === 'main')
+      .map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind })),
+    evidence: [...current.values()],
+  };
 }
 
 function conversationProposal(store: TaskStore, taskId: string, version: number, currentRequirementVersion: number) {
@@ -1148,7 +1207,7 @@ export async function openTaskRuntime(options: {
         role: 'master', run: true, fetch: true, catalog: true,
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
-          validateProposal: true, graphState: true, listProjects: true,
+          validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
           bindProject: true, listProblems: true, resolveProblem: true,
         },
         ...(options.systemContext ? { systemContext: {
@@ -1571,6 +1630,29 @@ export async function openTaskRuntime(options: {
             cost: taskCost(taskId),
             relatedTasks,
           };
+        },
+        async taskStatus(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }) {
+          ensureOpen();
+          const target = conversationTarget(store, taskId, input.taskId, 'A status query');
+          const nodeId = input.nodeId === undefined ? undefined : String(input.nodeId);
+          const first = taskStatusView(store, target, nodeId);
+          const waiting = input.waitForNode === undefined ? undefined : String(input.waitForNode);
+          if (!waiting) return first;
+          const timeout = Math.max(0, Math.min(600_000, Math.trunc(input.timeoutMs ?? 120_000)));
+          const started = Date.now();
+          const known = new Set([...first.questions, ...first.problems].map(entry => entry.id));
+          let current = first;
+          let reason: 'settled' | 'needs_you' | 'timeout' = 'timeout';
+          for (;;) {
+            const node = current.nodes.find(entry => entry.id === waiting);
+            if (!node) throw new RuntimeError('not_found', `Task ${target} has no node ${waiting}`);
+            if ([...current.questions, ...current.problems].some(entry => !known.has(entry.id))) { reason = 'needs_you'; break; }
+            if (node.status !== 'pending' && node.status !== 'running') { reason = 'settled'; break; }
+            if (Date.now() - started >= timeout) { reason = 'timeout'; break; }
+            await new Promise(resolve => setTimeout(resolve, 1_000));
+            current = taskStatusView(store, target, nodeId);
+          }
+          return { ...current, waitedMs: Date.now() - started, reason };
         },
         async listProjects() {
           ensureOpen();
