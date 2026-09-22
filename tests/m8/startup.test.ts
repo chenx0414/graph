@@ -110,6 +110,19 @@ test('view-only start serves the real page, reports startup state, and has zero 
   expect(view.status).toBe('discussing');
 });
 
+test('a rebuilt web bundle is served without a daemon restart', async () => {
+  const dir = await temp('web-rebuild');
+  const web = await fakeWeb(join(dir, 'web'));
+  const path = await configFile(dir, { projects: [], ...modelConfig() });
+  const daemon = await startGraphDaemon({ configPath: path, stateDir: join(dir, 'state'), webDir: web, port: 0, mode: 'view', env: SECRET_ENV, log: () => undefined });
+  cleanup.push(() => daemon.close());
+  expect(await (await fetch(`${daemon.url}/`)).text()).toContain('id="root"');
+  // A window reload must be enough after a rebuild: the page is read from disk
+  // like its assets, not pinned when the daemon started.
+  await writeFile(join(web, 'index.html'), '<!doctype html><html><body><div id="root">Graph rebuilt</div></body></html>');
+  expect(await (await fetch(`${daemon.url}/`)).text()).toContain('Graph rebuilt');
+});
+
 test('the daemon seeds and compiles the Main Agent recipe for the resource library', async () => {
   const dir = await temp('main-recipe');
   const web = await fakeWeb(join(dir, 'web'));
