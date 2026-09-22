@@ -23,7 +23,7 @@ export function graphDocumentationPaths(appRoot = graphApplicationRoot()): Graph
 
 export function graphDocumentationPrompt(paths: GraphDocumentationPaths) {
   return [
-    'Graph documentation (read only when the user asks about Graph itself, its Agent runtime, tools, task execution, recovery, permissions, or configuration):',
+    'Graph documentation (read when the user asks about Graph itself, its Agent runtime, tools, task execution, recovery, permissions or configuration, and whenever you change Graph\'s own code, prompts or harness):',
     `- Main documentation: ${paths.main}`,
     `- Additional docs: ${paths.root}`,
     `- Examples: ${paths.examples} (runtime demos and acceptance fixtures)`,
