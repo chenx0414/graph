@@ -4,12 +4,12 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
   buildSessionContext,
-  type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension, type RetrySettings,
+  type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension, type PromptOptions, type RetrySettings,
 } from '@earendil-works/pi-coding-agent';
 import { canonicalJson } from '../core/store.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -357,9 +357,9 @@ export async function openPiInstance(options: PiInstanceOptions) {
   } satisfies Manifest));
 
   return {
-    async prompt(text: string, images?: ImageContent[]) {
+    async prompt(text: string, options?: PromptOptions) {
       stopRequested = false;
-      await session.prompt(text, images?.length ? { images } : undefined);
+      await session.prompt(text, options);
     },
     async steer(text: string) {
       await session.prompt(text, { streamingBehavior: 'steer', expandPromptTemplates: false });

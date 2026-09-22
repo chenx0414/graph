@@ -4,6 +4,7 @@ import type { AgentSessionEvent, ModelRuntime, RetrySettings, ToolDefinition } f
 import type { SendGate } from './controlled-openai.ts';
 import { openPiInstance } from './pi-instance.ts';
 import { openPiProcess } from './pi-process.ts';
+import { sdkPromptOptions } from './prompt-options.ts';
 
 export interface AgentSessionBinding {
   instanceId: string;
@@ -190,7 +191,7 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
         async prompt(text, images) {
           state.beginPrompt();
           try {
-            await instance.prompt(text, images);
+            await instance.prompt(text, sdkPromptOptions(images));
             return turn(instance.inspect());
           } finally {
             state.endPrompt();

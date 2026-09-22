@@ -11,6 +11,7 @@ import {
   MAX_TEXT_ATTACHMENT_BYTES,
 } from '../../src/core/attachments.ts';
 import { briefing } from '../../src/catalog/briefing.ts';
+import { sdkPromptOptions } from '../../src/runtime/prompt-options.ts';
 import { appendMessage, listMessages, publicMessage, type MessageRow } from '../../src/core/conversation.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import type { AttachmentInput, Json, Operation } from '../../src/core/types.ts';
@@ -110,6 +111,20 @@ test('unsupported types and over-limit payloads are rejected with a visible reas
 
   // A NUL byte is not a text file.
   expect(() => cleanAttachments([textAttachment({ text: 'a\0b' })])).toThrow(/不是文本文件/);
+});
+
+test('sdkPromptOptions puts images inside PromptOptions so the SDK receives them', () => {
+  // A text-only prompt passes no options at all; the SDK falls back to its
+  // default. This is the exact shape AgentSession.prompt(text, options?) wants.
+  expect(sdkPromptOptions(undefined)).toBeUndefined();
+  expect(sdkPromptOptions([])).toBeUndefined();
+
+  const images = promptImagesFromAttachments(cleanAttachments([imageAttachment()]));
+  const options = sdkPromptOptions(images);
+  expect(options).toEqual({ images });
+  expect(options).toEqual({ images: [{ type: 'image', data: PNG_BASE64, mimeType: 'image/png' }] });
+  // The images live under `options.images`, never as a bare second argument.
+  expect(options?.images).toBe(images);
 });
 
 test('the ledger keeps image base64 but the message view returns metadata only', async () => {
