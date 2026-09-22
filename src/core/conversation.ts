@@ -418,7 +418,9 @@ export function newConversationId() { return randomUUID(); }
  * through an instance id, so a replaced or rebound master instance can never
  * drop the numbers back to zero: the records still belong to this conversation.
  * `contextTokens` is the newest completed turn's `input+cacheRead+cacheWrite`;
- * the cache aggregate uses the same denominator over every completed turn.
+ * a completion whose usage is missing or adds up to zero (a turn that never
+ * really ran) is not a completed turn and must not overwrite a known value.
+ * The cache aggregate uses the same denominator over every recorded turn.
  */
 export function conversationMasterUsage(store: TaskStore, conversationId: string) {
   const rows = store.db.prepare(`SELECT i.usage AS usage,i.purpose AS purpose
@@ -437,9 +439,10 @@ export function conversationMasterUsage(store: TaskStore, conversationId: string
     const input = usage.input ?? 0;
     const cacheRead = usage.cacheRead ?? 0;
     const cacheWrite = usage.cacheWrite ?? 0;
-    cacheInput += input + cacheRead + cacheWrite;
+    const total = input + cacheRead + cacheWrite;
+    cacheInput += total;
     cachedInput += cacheRead;
-    if (row.purpose === 'completion') contextTokens = input + cacheRead + cacheWrite;
+    if (row.purpose === 'completion' && total > 0) contextTokens = total;
   }
   return { cachedInput, cacheInput, contextTokens };
 }
