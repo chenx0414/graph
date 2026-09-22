@@ -7,7 +7,9 @@ import { TaskStore, canonicalJson } from './store.ts';
 import { ArtifactWorkspace } from './artifact-workspace.ts';
 import {
   appendMessage,
+  cancelQueuedMessage,
   conversationForTask,
+  conversationMasterUsage,
   conversationRow,
   conversationStreams,
   deliverMessages,
@@ -888,7 +890,7 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
-      const master = store.db.prepare("SELECT n.status,i.id AS instance_id,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; instance_id: string | null; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null } | undefined;
+      const master = store.db.prepare("SELECT n.status,i.used,i.budget,i.unlimited,COALESCE(i.model,json_extract(n.spec,'$.model')) AS model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null } | undefined;
       const accepted = store.db.prepare('SELECT proposal_version,task_id,target_branch,accepted_at FROM conversation_acceptances WHERE conversation_id=? ORDER BY accepted_at').all(conversationId) as { proposal_version: number; task_id: string; target_branch: string; accepted_at: number }[];
       const acceptedVersions = new Set(accepted.map(row => row.proposal_version));
       const proposalRows = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? ORDER BY version').all(anchor.id) as unknown as ProposalRow[];
@@ -938,20 +940,10 @@ export async function openTaskRuntime(options: {
       const anyUnlimited = Boolean(master?.unlimited) || tasks.some(task => task.nodes.some(node => node.unlimited));
       const budget = anyUnlimited ? null : (master?.budget ?? 0) + tasks.reduce((sum, task) => sum + task.nodes.reduce((inner, node) => inner + (node.budget ?? 0), 0), 0);
       const messageCount = (store.db.prepare('SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?').get(conversationId) as { count: number }).count;
-      const masterInvocations = master?.instance_id
-        ? (store.db.prepare('SELECT usage,purpose FROM invocations WHERE instance_id=? ORDER BY rowid').all(master.instance_id) as { usage: string | null; purpose: string }[])
-        : [];
-      const knownMasterUsage = masterInvocations
-        .map(invocation => invocation.usage ? JSON.parse(invocation.usage) as { input: number; output: number; cacheRead: number; cacheWrite: number } : null)
-        .filter((usage): usage is { input: number; output: number; cacheRead: number; cacheWrite: number } => usage !== null);
-      const cacheInput = knownMasterUsage.reduce((sum, usage) => sum + usage.input + usage.cacheRead + usage.cacheWrite, 0);
-      const cachedInput = knownMasterUsage.reduce((sum, usage) => sum + usage.cacheRead, 0);
-      const latestCompletion = [...masterInvocations].reverse().find(invocation => invocation.purpose === 'completion' && invocation.usage !== null);
-      const latestUsage = latestCompletion?.usage
-        ? JSON.parse(latestCompletion.usage) as { input: number; cacheRead: number; cacheWrite: number }
-        : null;
+      const knownMasterUsage = conversationMasterUsage(store, conversationId);
+      const { cachedInput, cacheInput } = knownMasterUsage;
       const contextLimit = master?.model ? liveEntries().find(entry => entry.id === master.model)?.contextWindow ?? null : null;
-      const contextTokens = latestUsage ? latestUsage.input + latestUsage.cacheRead + latestUsage.cacheWrite : null;
+      const contextTokens = knownMasterUsage.contextTokens;
       return {
         id: conversation.id, title: conversation.title, projectId: conversation.project_id, projectRoot: project?.root ?? null,
         archived: conversation.archived_at !== null, archivedAt: conversation.archived_at,
@@ -968,7 +960,7 @@ export async function openTaskRuntime(options: {
         telemetry: {
           model: master?.model ?? null,
           thinkingLevel: conversation.thinking_level,
-          cacheHitRate: knownMasterUsage.length && cacheInput > 0 ? cachedInput / cacheInput : null,
+          cacheHitRate: cacheInput > 0 ? cachedInput / cacheInput : null,
           cachedInput,
           cacheInput,
           contextTokens,
@@ -1134,6 +1126,28 @@ export async function openTaskRuntime(options: {
     resume(conversationId: string, requestId: string) {
       ensureOpen();
       return user.task(conversationRow(store, conversationId).anchor_task_id).resume(requestId);
+    },
+    /** Drop one still-queued message from this conversation. Cancelling is
+     * scoped to state `queued` (the delivered history and the running turn are
+     * never touched) and idempotent through the shared requestId command log. */
+    cancelMessage(conversationId: string, input: { messageId: string; requestId: string }) {
+      ensureOpen();
+      const conversation = conversationRow(store, conversationId);
+      if (!input.messageId?.trim()) throw new RuntimeError('invalid_input', 'A messageId is required');
+      return store.command(`conversation:${conversationId}`, input.requestId, {
+        type: 'cancel_message', messageId: input.messageId,
+      }, () => {
+        const result = cancelQueuedMessage(store, conversationId, input.messageId);
+        return {
+          conversationId,
+          messageId: input.messageId,
+          state: result.state,
+          cancelled: result.cancelled,
+          cursor: result.changed
+            ? store.event(conversation.anchor_task_id, 'message.cancelled', { messageId: input.messageId })
+            : null as number | null,
+        };
+      });
     },
     watch(conversationId: string, after = 0): TaskWatch {
       ensureOpen();

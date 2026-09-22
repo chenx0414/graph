@@ -23,7 +23,7 @@ export interface ConversationStreamRow {
   text: string; length: number; updated_at: number;
 }
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
-export type MessageState = 'pending' | 'queued' | 'delivered' | 'done' | 'failed';
+export type MessageState = 'pending' | 'queued' | 'delivered' | 'done' | 'failed' | 'cancelled';
 
 export function conversationRow(store: TaskStore, conversationId: string): ConversationRow {
   const row = store.db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId) as ConversationRow | undefined;
@@ -171,6 +171,21 @@ export function publishMessageUpdate(store: TaskStore, messageId: string) {
   const row = store.db.prepare('SELECT * FROM messages WHERE id=?').get(messageId) as unknown as MessageRow | undefined;
   if (!row) return;
   store.event(conversationRow(store, row.conversation_id).anchor_task_id, 'message.updated', { message: publicMessage(row) });
+}
+
+/** Cancel one message that is still waiting in the conversation queue. Only a
+ * message that belongs to this conversation and is still `queued` can be
+ * cancelled: a delivered message and the running turn are never touched, and a
+ * message that was already cancelled stays cancelled without a new event. The
+ * state change is published so every viewer drops the row from its queue. */
+export function cancelQueuedMessage(store: TaskStore, conversationId: string, messageId: string) {
+  const row = store.db.prepare('SELECT conversation_id,state FROM messages WHERE id=?').get(messageId) as { conversation_id: string; state: string } | undefined;
+  if (!row || row.conversation_id !== conversationId) return { state: 'missing' as const, cancelled: false, changed: false };
+  if (row.state !== 'queued') return { state: row.state, cancelled: row.state === 'cancelled', changed: false };
+  const update = store.db.prepare("UPDATE messages SET state='cancelled',updated_at=MAX(?,updated_at+1) WHERE id=? AND state='queued'").run(Date.now(), messageId);
+  if (update.changes) publishMessageUpdate(store, messageId);
+  const current = store.db.prepare('SELECT state FROM messages WHERE id=?').get(messageId) as { state: string };
+  return { state: current.state, cancelled: current.state === 'cancelled', changed: Boolean(update.changes) };
 }
 
 /** Where a failed turn failed: before the model ran (a setup failure) or during the run.
@@ -396,3 +411,35 @@ export function conversationDigest(store: TaskStore, conversationId: string) {
 }
 
 export function newConversationId() { return randomUUID(); }
+
+/**
+ * Rebuild the master Agent's context and cache counters from the persisted
+ * invocation ledger. Invocations are joined through their operation's task, not
+ * through an instance id, so a replaced or rebound master instance can never
+ * drop the numbers back to zero: the records still belong to this conversation.
+ * `contextTokens` is the newest completed turn's `input+cacheRead+cacheWrite`;
+ * the cache aggregate uses the same denominator over every completed turn.
+ */
+export function conversationMasterUsage(store: TaskStore, conversationId: string) {
+  const rows = store.db.prepare(`SELECT i.usage AS usage,i.purpose AS purpose
+    FROM invocations i
+    JOIN operations o ON o.id=i.operation_id
+    JOIN tasks t ON t.id=o.task_id
+    WHERE t.conversation_id=?
+      AND EXISTS (SELECT 1 FROM nodes n WHERE n.task_id=o.task_id AND n.id=o.node_id AND json_extract(n.spec,'$.role')='master')
+    ORDER BY i.rowid`).all(conversationId) as { usage: string | null; purpose: string }[];
+  let cacheInput = 0;
+  let cachedInput = 0;
+  let contextTokens: number | null = null;
+  for (const row of rows) {
+    if (!row.usage) continue;
+    const usage = JSON.parse(row.usage) as { input?: number; cacheRead?: number; cacheWrite?: number };
+    const input = usage.input ?? 0;
+    const cacheRead = usage.cacheRead ?? 0;
+    const cacheWrite = usage.cacheWrite ?? 0;
+    cacheInput += input + cacheRead + cacheWrite;
+    cachedInput += cacheRead;
+    if (row.purpose === 'completion') contextTokens = input + cacheRead + cacheWrite;
+  }
+  return { cachedInput, cacheInput, contextTokens };
+}

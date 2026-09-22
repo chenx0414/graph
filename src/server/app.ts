@@ -354,6 +354,14 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
     });
   });
+  app.post('/api/conversations/:conversationId/messages/:messageId/cancel', async request => {
+    const params = request.params as { conversationId: string; messageId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.cancelMessage(params.conversationId, {
+      messageId: params.messageId,
+      requestId: body.requestId,
+    });
+  });
   app.post('/api/conversations/:conversationId/model', async request => {
     const params = request.params as { conversationId: string };
     const body = request.body as { model: string; thinkingLevel: string; requestId: string };
