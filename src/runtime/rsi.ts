@@ -438,6 +438,27 @@ export class RsiService {
     return join(this.stateDir, 'rsi', 'working.json');
   }
 
+  /**
+   * Uncommitted paths in the checkout. Checks run against the working tree, so a path here that the
+   * commit would not contain makes a green run prove the wrong thing.
+   */
+  private dirtyPaths(root: string) {
+    return [...new Set([
+      ...git(root, ['diff', '--name-only', 'HEAD']).stdout.split('\n'),
+      ...git(root, ['ls-files', '--others', '--exclude-standard']).stdout.split('\n'),
+    ].map(path => path.trim()).filter(Boolean))].sort();
+  }
+
+  private rsiDirtyError(root: string, blocked: string[]) {
+    const paths = blocked.join(' ');
+    return new RuntimeError('rsi_dirty',
+      `Uncommitted changes outside this RSI change: ${blocked.join(', ')}. `
+      + 'Checks run against the working tree, so they would verify changes that the commit does not contain. '
+      + `Commit them first, for example \`git -C ${root} add -A -- ${paths} && git -C ${root} commit -m "wip"\`, `
+      + `or revert them with \`git -C ${root} restore --staged --worktree -- ${paths}\`. `
+      + 'Files left behind by an earlier failed RSI attempt on this branch are committed instead of reported.');
+  }
+
   /** Keep queued work intact while the desktop drains existing operations. */
   hasPendingRestart() { return existsSync(this.restartPath()); }
 
@@ -649,19 +670,14 @@ export class RsiService {
     if (!normalized.changes.length && !checks.length && !owned.size) {
       throw new RuntimeError('invalid_input', 'Provide at least one file change or one check to run');
     }
-    if (uniquePaths.length) {
-      // Check each path on its own; `git()` trims stdout, which would corrupt a
-      // parsed porcelain line whose first column is a space.
-      const blocked = uniquePaths.filter(path => !owned.has(path)
-        && git(root, ['status', '--porcelain=v1', '-uall', '--', path]).stdout.length > 0);
-      if (blocked.length) {
-        throw new RuntimeError('rsi_dirty',
-          `RSI target files have uncommitted changes: ${blocked.join(', ')}. `
-          + `Commit or revert them first, for example \`git -C ${root} add -A -- ${blocked.join(' ')} && git -C ${root} commit -m "wip"\`, `
-          + `or \`git -C ${root} restore --staged --worktree -- ${blocked.join(' ')}\`. `
-          + 'Files left behind by an earlier failed RSI attempt on this branch stay editable and are not reported.');
-      }
-    }
+    // Checks run against the whole working tree, so a green run only proves the commit when the
+    // commit contains everything that was dirty while they ran. Anything else is refused up front
+    // instead of being silently left out of the commit that gets reported as verified.
+    // An unowned dirty path is somebody else's uncommitted work: overwriting a target would destroy
+    // it, and verifying a bystander would report a commit that does not contain it.
+    const unownedDirty = () => this.dirtyPaths(root).filter(path => !owned.has(path));
+    const blocked = unownedDirty();
+    if (blocked.length) throw this.rsiDirtyError(root, blocked);
 
     let createdBranch = false;
     if (branch !== originalBranch) {
@@ -738,6 +754,13 @@ export class RsiService {
         this.record(context, receipt);
         return receipt;
       }
+
+      // The checks just ran against the working tree, so they verified every path that is dirty
+      // here: a run that leaves the checkout dirty must not be committed as if it were green.
+      // Paths this attempt wrote are expected to be dirty; anything else was verified by the checks
+      // but would stay out of the commit, so the green run must not become a commit.
+      const unverified = this.dirtyPaths(root).filter(path => !owned.has(path) && !uniquePaths.includes(path));
+      if (unverified.length) throw this.rsiDirtyError(root, unverified);
 
       // Commit every path this attempt or a prior attempt owns, so a checks-only
       // re-run still lands the pending files. Stage only paths that exist now or
