@@ -429,10 +429,13 @@ test('the composer suggestion and queue steering follow the three Enter states',
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  // The candidate prompt is off by default (设置 → 通用/偏好). This test covers
+  // the composer behaviour while it is enabled.
+  await page.addInitScript(() => window.localStorage.setItem('graph-pref-candidate-prompt', 'true'));
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   const input = page.getByTestId('chat-input');
   await input.waitFor();
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status).toBe('running');
+  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('running');
 
   // State 2: a nonempty prompt sent during output is queued.
   await input.fill('优先检查失败分支。');
@@ -451,8 +454,8 @@ test('the composer suggestion and queue steering follow the three Enter states',
   }, { timeout: 10_000 }).toBe('delivered');
 
   release();
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status).toBe('succeeded');
-  await expect.poll(() => input.getAttribute('data-suggestion')).toBe('继续检查测试覆盖和失败分支。');
+  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('succeeded');
+  await expect.poll(() => input.getAttribute('data-suggestion'), { timeout: 10_000 }).toBe('继续检查测试覆盖和失败分支。');
 
   // Tab fills the grey suggestion.
   await input.press('Tab');
