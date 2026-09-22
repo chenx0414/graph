@@ -37,6 +37,18 @@ git config core.hooksPath .githooks
 ./.githooks/pre-push
 ```
 
+## 在 Git 工作树里验证
+
+`git worktree add` 只带出 tracked 文件，被忽略的依赖与构建产物不在其中。要在工作树里跑全量检查：
+
+```sh
+cp -al <主仓库>/node_modules <工作树>/node_modules
+```
+
+硬链接是工作树内的真实条目，不会越出工作树。不要手工 `ln -s` 指向主仓库的 `node_modules`：Graph 自己的工作副本由宿主建立链接，并把解析后的真实路径作为沙箱读取授权交给 Agent（见 ADR 0027）；手工链接没有这份授权，沙箱内的 Agent 子进程会以模块解析失败告终。
+
+全量检查不依赖预先构建的 `dist/web`：需要页面的用例在 `beforeAll` 里把 Web 构建到临时目录，只起守护进程的用例写一个桩 `index.html`（`tests/console/daemon-console.test.ts` 守住这条）。
+
 ## 会话回溯
 
 需要观察一次会话的用户请求、失败命令和最终仓库状态时运行：
