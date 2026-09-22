@@ -25,7 +25,7 @@ import { Button, Icon, Pill, Spinner, StatusDot, toast } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
 import { useTranscriptFollow } from './use-transcript-follow.ts';
 
-type Settings = { projects: { id: string; root: string }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean }[] };
+type Settings = { projects: { id: string; root: string; branch?: string | null; preparation?: { branch?: string | null } | null }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean }[] };
 export type ConversationSummary = {
   id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; updatedAt: number | null;
   openQuestions: number; taskCount: number; status: string;
@@ -516,7 +516,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [steering, setSteering] = useState(false);
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
-  const { branch, setBranch } = useTargetBranch(view?.projectId ?? null);
+  const { branch, setBranch } = useTargetBranch(settings?.projects ?? null, view?.projectId ?? null);
   const [projection, setProjection] = useState(createConversationProjection);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);

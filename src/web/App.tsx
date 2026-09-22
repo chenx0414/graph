@@ -56,7 +56,7 @@ type NodeView = {
   agent?: GraphAgentDetail | null;
 };
 export type Settings_ = {
-  projects: { id: string; root: string }[];
+  projects: { id: string; root: string; branch?: string | null; preparation?: { branch?: string | null } | null }[];
   defaultModel?: string | null;
   models: { id: string; grade: string; credentialId?: string; contextWindow?: number; reasoning?: boolean; defaultThinkingLevel?: string }[];
   definitions: { id: string; version: number }[];
@@ -685,7 +685,7 @@ function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (t
   const { data: events, reload: reloadEvents } = useAsync(() => api<EventRow[]>(`/api/tasks/${id}/events?limit=200`), [id]);
   const limits = useLimits();
   const [text, setText] = useState('');
-  const { branch, setBranch } = useTargetBranch(view?.projectId ?? null);
+  const { branch, setBranch } = useTargetBranch(settings?.projects ?? null, view?.projectId ?? null);
   const [actionError, setActionError] = useState('');
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshAll = useCallback(() => {
