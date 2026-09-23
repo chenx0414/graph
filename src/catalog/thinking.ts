@@ -7,8 +7,9 @@
  *
  * - a level the snapshot does not list for this model is denied (`null`), so no
  *   control ever offers a strength the model cannot take;
- * - the model's configured default is never denied: an explicit user setting
- *   outranks community catalog data.
+ * - the catalog decides availability, never the configuration: a saved default
+ *   the model does not accept is not offered and is clamped instead (the
+ *   console says so where it happens).
  *
  * The result is exactly the shape `Model.thinkingLevelMap` takes, so the SDK's
  * own `getSupportedThinkingLevels` / `clampThinkingLevel` stay the single
@@ -48,7 +49,5 @@ export function thinkingLevelMapFor(entry: ModelEntry, metadata?: ModelMetadata 
     // SDK will not invent on its own.
     map[level] = listed.size === 0 && !MAPPED_ONLY.includes(level) ? level : null;
   }
-  const configured = entry.defaultThinkingLevel;
-  if (configured && configured !== 'off' && map[configured] === null) map[configured] = configured;
   return map;
 }

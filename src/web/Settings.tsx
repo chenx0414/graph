@@ -769,6 +769,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                       <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? (entry.reasoning === false ? 'off' : '')} disabled={entry.reasoning === false} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
                         {entry.reasoning !== false && <option value="">未指定</option>}
                         {(entry.thinkingOptions ?? []).map(option => <option key={option.level} value={option.level}>{thinkingOptionLabel(option)}</option>)}
+                        {entry.defaultThinkingLevel && !(entry.thinkingOptions ?? []).some(option => option.level === entry.defaultThinkingLevel)
+                          ? <option value={entry.defaultThinkingLevel}>{entry.defaultThinkingLevel}（该模型不支持，请改选）</option>
+                          : null}
                       </select>
                     </Field>
                   </div>

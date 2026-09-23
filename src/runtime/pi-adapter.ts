@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
-import type { Model } from '@earendil-works/pi-ai';
+import { clampThinkingLevel, type Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
@@ -609,7 +609,10 @@ export function createPiAdapter(options: {
           return { outcome: 'failed', output: { setupError: String(error) }, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
         }
         const tools = [...capabilityOperation.tools];
-        const thinkingLevel = (conversation?.thinking_level ?? 'off') as ThinkingLevel;
+        // A stored level can predate a catalog refresh, or name a model the
+        // snapshot does not list: clamp it to a level this model accepts before
+        // the turn runs, using the same SDK rule the console displays.
+        const thinkingLevel = clampThinkingLevel(toPiModel(entry), (conversation?.thinking_level ?? 'off') as ThinkingLevel) as ThinkingLevel;
         const modelPolicyDigest = digest({
           id: entry.id,
           modelId: entry.modelId ?? null,

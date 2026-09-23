@@ -450,9 +450,11 @@ test('new conversations inherit the master model default thinking level', async 
   });
   cleanup.push(() => runtime.close());
   const created = await runtime.conversations.create({ text: '使用模型默认思考强度', requestId: 'default-thinking' });
+  // The synthetic provider is not in the catalog, so only Pi's default levels
+  // are available and the configured xhigh falls back to the strongest of them.
   expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({
     model: 'm-default',
-    thinkingLevel: 'xhigh',
+    thinkingLevel: 'high',
   });
 });
 

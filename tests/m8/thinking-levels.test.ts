@@ -42,6 +42,21 @@ describe('thinking control view', () => {
     expect(nearestLevel(options, 'bogus')).toBe('off');
   });
 
+  test('a saved level the model does not take is reported as a fallback', () => {
+    const view = thinkingView(
+      { id: 'grok', reasoning: true, thinkingOptions: [option('off'), option('low'), option('high'), option('max')] },
+      'xhigh',
+    );
+    expect(view.level).toBe('max');
+    expect(view.fallbackFrom).toBe('xhigh');
+    const exact = thinkingView(
+      { id: 'grok', reasoning: true, thinkingOptions: [option('off'), option('xhigh')] },
+      'xhigh',
+    );
+    expect(exact.level).toBe('xhigh');
+    expect(exact.fallbackFrom).toBeUndefined();
+  });
+
   test('levels are shown in the model own vocabulary, never translated', () => {
     expect(thinkingOptionLabel(option('high'))).toBe('high');
     expect(thinkingOptionLabel(option('xhigh'))).toBe('xhigh');

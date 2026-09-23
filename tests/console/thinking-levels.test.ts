@@ -64,10 +64,22 @@ describe('per-model thinking strengths', () => {
     expect(effectiveThinkingLevel(deepseek, 'off')).toBe('off');
   });
 
-  test('an explicit user default is never denied by catalog data', () => {
-    const configured = entry({ defaultThinkingLevel: 'max' });
-    expect(levels(configured)).toContain('max');
-    expect(effectiveThinkingLevel(configured)).toBe('max');
+  test('a saved default the model does not accept is not offered, only clamped', () => {
+    // deepseek names low/high/max: a stale xhigh default cannot make xhigh real.
+    const deepseek = entry({
+      id: 'opencode-go:deepseek-v4.1-flash', provider: 'opencode-go', modelId: 'deepseek-v4.1-flash',
+      defaultThinkingLevel: 'xhigh',
+    });
+    expect(levels(deepseek)).toEqual(['off', 'low', 'high', 'max']);
+    expect(thinkingLevelMapFor(deepseek)!.xhigh).toBeNull();
+    expect(effectiveThinkingLevel(deepseek)).toBe('max');
+    // A model the snapshot does not name keeps Pi's default levels, and the SDK
+    // will not invent xhigh without a catalog entry that names it.
+    const unknown = entry({
+      id: 'x:y', provider: 'no-such-provider', modelId: 'no-such-model', defaultThinkingLevel: 'xhigh',
+    });
+    expect(levels(unknown)).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    expect(effectiveThinkingLevel(unknown)).toBe('high');
   });
 
   test('the level map denies unlisted levels and maps the listed ones', () => {

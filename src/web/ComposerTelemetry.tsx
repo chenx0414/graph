@@ -115,7 +115,14 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
           aria-expanded={open}
         >
           <span title="当前主管使用的模型" data-testid="telemetry-model"><Icon name="bolt" size={13} />{telemetry?.model ?? '未选择模型'}</span>
-          <span title="当前 Agent 内核的思考强度" data-testid="telemetry-thinking" data-level={view.level}>
+          <span
+            title={view.fallbackFrom
+              ? `当前 Agent 内核的思考强度：已保存的 ${view.fallbackFrom} 不在该模型档位内，按 ${view.level} 执行`
+              : '当前 Agent 内核的思考强度'}
+            data-testid="telemetry-thinking"
+            data-level={view.level}
+            data-saved-level={view.fallbackFrom ?? undefined}
+          >
             <Icon name="clock" size={13} />思考 {current ? thinkingOptionLabel(current) : thinkingLabel(telemetry?.thinkingLevel)}
           </span>
           <Icon name="chevron" size={12} className="composer-model-chevron" />
@@ -148,6 +155,11 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
               {view.options.map(option => <span key={option.level} data-level={option.level}>{thinkingOptionLabel(option)}</span>)}
             </div>
             {view.disabled && <p className="thinking-note" data-testid="thinking-disabled">{view.reason}</p>}
+            {view.fallbackFrom && (
+              <p className="thinking-note" data-testid="thinking-fallback">
+                已保存的 {view.fallbackFrom} 不在该模型档位内，按 {view.level} 执行
+              </p>
+            )}
             <div className="model-options" role="listbox" aria-label="选择模型">
               {models.length === 0 && <span className="model-option-empty">没有可用模型</span>}
               {models.map(option => (

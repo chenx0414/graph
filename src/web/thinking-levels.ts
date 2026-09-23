@@ -46,6 +46,8 @@ export interface ThinkingView {
   level: string;
   disabled: boolean;
   reason: string;
+  /** The saved level this model does not accept, when it had to be replaced. */
+  fallbackFrom?: string;
 }
 
 export function thinkingView(model: ThinkingModelView | undefined, requested: string | undefined): ThinkingView {
@@ -53,7 +55,14 @@ export function thinkingView(model: ThinkingModelView | undefined, requested: st
   if (model.reasoning === false) return { options: [], level: 'off', disabled: true, reason: '该模型不支持思考强度' };
   const options = model.thinkingOptions ?? FALLBACK_OPTIONS;
   if (!options.length) return { options: [], level: 'off', disabled: true, reason: '该模型没有可选的思考强度档位' };
-  return { options, level: nearestLevel(options, requested), disabled: false, reason: '' };
+  const level = nearestLevel(options, requested);
+  return {
+    options,
+    level,
+    disabled: false,
+    reason: '',
+    ...(requested && requested !== level ? { fallbackFrom: requested } : {}),
+  };
 }
 
 /** Same fallback as the SDK: nearest stronger level, then nearest weaker. */
