@@ -661,7 +661,7 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
   expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
-  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('关闭');
+  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('思考 off');
 });
 
 test('live tool activity groups and streamed markdown follow the transcript tail', async () => {
@@ -1626,9 +1626,10 @@ test('the new-chat composer switches model and thinking before the conversation 
   await page.getByTestId('new-conversation-input').waitFor();
   const control = page.getByTestId('model-control');
   await control.waitFor();
-  // The pre-creation composer shows the daemon default and its thinking level.
+  // The pre-creation composer shows the daemon default and its thinking level,
+  // written in the model's own vocabulary (no translation).
   expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
-  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('低');
+  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('思考 low');
   await control.click();
   const fastOption = page.getByTestId('model-option-fast');
   await fastOption.waitFor();

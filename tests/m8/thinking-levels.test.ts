@@ -42,12 +42,14 @@ describe('thinking control view', () => {
     expect(nearestLevel(options, 'bogus')).toBe('off');
   });
 
-  test('a provider-specific name is shown next to the canonical label', () => {
-    expect(thinkingOptionLabel(option('high'))).toBe('高');
-    expect(thinkingOptionLabel(option('off', 'none'))).toBe('关闭（none）');
-    // A label that is already the console's own wording is not repeated.
-    expect(thinkingOptionLabel(option('off', '关闭'))).toBe('关闭');
-    expect(thinkingLabel('xhigh')).toBe('极高');
+  test('levels are shown in the model own vocabulary, never translated', () => {
+    expect(thinkingOptionLabel(option('high'))).toBe('high');
+    expect(thinkingOptionLabel(option('xhigh'))).toBe('xhigh');
+    // A provider's own spelling wins over Pi's name for the same level.
+    expect(thinkingOptionLabel(option('off', 'none'))).toBe('none');
+    expect(thinkingOptionLabel(option('max', 'max'))).toBe('max');
+    expect(thinkingLabel('xhigh')).toBe('xhigh');
+    expect(thinkingLabel('off')).toBe('off');
     expect(thinkingLabel(undefined)).toBe('—');
   });
 });

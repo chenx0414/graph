@@ -3,8 +3,13 @@
  *
  * The server sends the strengths each configured model accepts (computed with
  * the SDK's own rule, and named the way that model names them), so this module
- * only decides how they are labelled and which one is selected: no component
- * keeps a level list of its own.
+ * only decides which one is selected and how it is written: no component keeps
+ * a level list of its own.
+ *
+ * Levels are never translated. A strength is a provider vocabulary term
+ * (off, low, high, xhigh, max, or a provider's own spelling such as none), and
+ * a translated word would stop matching what the provider, the config file and
+ * the API calls actually say.
  */
 export interface ThinkingOptionView {
   level: string;
@@ -17,30 +22,23 @@ export interface ThinkingModelView {
   thinkingOptions?: ThinkingOptionView[];
 }
 
-const CANONICAL_LABELS: Record<string, string> = {
-  off: '关闭', minimal: '最小', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大',
-};
-
 /** Pi's level order, used only to fall back the way the SDK does. */
 const CANONICAL_ORDER = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 /** Levels a reasoning model is assumed to accept when the payload carries no
  * list at all (an older server): the previous console behaviour, never worse. */
 const FALLBACK_OPTIONS: ThinkingOptionView[] = ['off', 'minimal', 'low', 'medium', 'high']
-  .map(level => ({ level, label: CANONICAL_LABELS[level]! }));
+  .map(level => ({ level, label: level }));
 
+/** A level is written exactly as the model vocabulary writes it. */
 export function thinkingLabel(level: string | undefined): string {
-  return CANONICAL_LABELS[level ?? ''] ?? level ?? '—';
+  return level && level.trim() ? level : '—';
 }
 
-/** The model's own name for a level is shown whenever it differs from Pi's
- * vocabulary, so a provider-specific spelling is never hidden. A label that is
- * already the console's own wording adds nothing and is not repeated. */
+/** The provider's own spelling when the catalog names one (deepseek calls its
+ * top level max, ChatGPT calls the off level none), otherwise the level itself. */
 export function thinkingOptionLabel(option: ThinkingOptionView): string {
-  const canonical = thinkingLabel(option.level);
-  return option.label && option.label !== option.level && option.label !== canonical
-    ? `${canonical}（${option.label}）`
-    : canonical;
+  return option.label || option.level;
 }
 
 export interface ThinkingView {
