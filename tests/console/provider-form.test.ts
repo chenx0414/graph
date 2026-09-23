@@ -324,6 +324,45 @@ describe('price completeness (step 2)', () => {
   });
 });
 
+describe('unset default thinking strength (round A)', () => {
+  it('(A) never fabricates defaultThinkingLevel when the snapshot gives no default', () => {
+    // A reasoning model whose snapshot hit carries no explicit default level.
+    const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: { reasoning: true, thinkingLevels: ['low', 'medium', 'high'] } });
+    expect(draft.defaultThinkingLevel).toBeUndefined();
+    expect(draftToModelEntry(draft)).not.toHaveProperty('defaultThinkingLevel');
+    expect(metadataToFields({ reasoning: true }).defaultThinkingLevel).toBeNull();
+    expect(metadataToFields({ reasoning: true, defaultThinkingLevel: 'bogus' }).defaultThinkingLevel).toBeNull();
+  });
+
+  it('(A) only writes a default level when one is actually provided', () => {
+    const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: { reasoning: true, defaultThinkingLevel: 'high' } });
+    expect(draft.defaultThinkingLevel).toBe('high');
+    expect(draftToModelEntry(draft).defaultThinkingLevel).toBe('high');
+  });
+});
+
+describe('zero is a real free price (round A)', () => {
+  it('(A) a zero price round-trips through the cost helpers and is never treated as empty', () => {
+    const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    expect(costError(free)).toBeNull();
+    expect(completeCost(free)).toEqual(free);
+    // 0 is finite, so it is kept; only clearing (undefined) removes a side.
+    expect(withCostField({ input: 0 }, 'input', 0)).toEqual({ input: 0 });
+    expect(withCostField(undefined, 'input', 0)).toEqual({ input: 0 });
+    expect(withCostField({ input: 0 }, 'input', undefined)).toBeUndefined();
+  });
+
+  it('(A) a model with a complete zero price passes validation and persists as known', () => {
+    const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    const entry = { id: 'free', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium', cost: free };
+    expect(hasRequiredModelFields(entry)).toBe(true);
+    expect(missingRequiredModelFields([entry])).toEqual([]);
+    const persisted = draftToModelEntry({ id: 'free', modelId: 'free', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', grade: 'medium', contextWindow: 128_000, maxTokens: 4_096, cost: free });
+    expect(persisted.cost).toEqual(free);
+    expect(persisted.pricing?.status).toBe('known');
+  });
+});
+
 describe('settings registry (step 1 / concurrency)', () => {
   it('no longer declares an independent 并发限制 advanced section', () => {
     expect(ADVANCED_SETTING_IDS).not.toContain('settings-limits');
