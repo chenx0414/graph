@@ -304,14 +304,16 @@ export function modelVendorsFrom(
   });
 }
 
-/** Probe draft for a step-② vendor. A user-defined credential probes as
- * `custom` (the only platform id the daemon accepts with its own baseUrl). */
+/** Probe draft for a step-② vendor. Every vendor carries its own endpoint and
+ * compatibility mode (from the platform preset or the credential's existing
+ * model entry) so a probe never targets a blank endpoint; a user-defined
+ * credential probes as `custom`, the platform id the daemon accepts alongside
+ * its own baseUrl/label. */
 export function draftFromModelVendor(vendor: ModelVendor): ProviderDraft {
-  const custom = vendor.platformId === CUSTOM_PLATFORM_ID;
   return {
     platformId: vendor.platformId,
-    label: custom ? vendor.label : '',
-    baseUrl: custom ? vendor.baseUrl : '',
+    label: vendor.label,
+    baseUrl: vendor.baseUrl,
     api: vendor.api,
     credentialId: vendor.id,
     credentialRef: vendor.credentialRef,
@@ -323,6 +325,34 @@ export function draftFromModelVendor(vendor: ModelVendor): ProviderDraft {
 export function shouldAutoProbe(selectedVendorId: string, previous: string | null | undefined): boolean {
   const next = selectedVendorId.trim();
   return next.length > 0 && next !== (previous ?? '');
+}
+
+export interface AutoProbeDecision {
+  /** True when a probe request must go out now. */
+  probe: boolean;
+  /** What to remember as "already probed": the new id only after a request is
+   * really issued, otherwise the previous value unchanged. */
+  recorded: string | null;
+}
+
+/**
+ * Decide whether selecting `selectedVendorId` should auto-probe, and what to
+ * record afterwards. A vendor with no resolved endpoint yet (`baseUrl` blank)
+ * must not be marked as probed, so the same selection auto-probes once the
+ * endpoint becomes available; once a request goes out the id is recorded and
+ * later re-renders stay silent.
+ */
+export function autoProbeDecision(selectedVendorId: string, previous: string | null, baseUrl: string): AutoProbeDecision {
+  if (!shouldAutoProbe(selectedVendorId, previous)) return { probe: false, recorded: previous };
+  if (!baseUrl.trim()) return { probe: false, recorded: previous };
+  return { probe: true, recorded: selectedVendorId.trim() };
+}
+
+/** Failure copy for a model-list probe. The vendor's own wording is always kept
+ * (never generalized away) and the manual-id fallback stays offered. */
+export function probeFailureNote(message: string): string {
+  const detail = message.trim() || '未知错误';
+  return `模型列表获取失败（${detail}）；可手动添加模型 id。`;
 }
 
 export interface KeyEntryGuidance {
