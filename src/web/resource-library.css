@@ -1,0 +1,117 @@
+/* Resource library (B-0): configured / unconfigured grouping and filter. */
+
+.resource-split-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin: 8px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft, color-mix(in srgb, var(--border) 20%, transparent));
+  align-self: flex-start;
+}
+
+.resource-split-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.resource-split-option:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+
+.resource-split-option[data-active='true'] {
+  color: var(--text);
+  background: var(--panel, var(--panel-soft));
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 12%, transparent);
+}
+
+.resource-split-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 45%, transparent);
+  color: var(--faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.resource-split-option[data-active='true'] .resource-split-count {
+  color: var(--text);
+}
+
+.resource-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.resource-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resource-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.resource-group-head::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.resource-group-count {
+  order: 3;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 40%, transparent);
+  color: var(--faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.resource-group-empty {
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.resource-candidate-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resource-config-guidance {
+  margin: 0 0 4px 24px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--warn, var(--accent));
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--warn, var(--accent)) 10%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}

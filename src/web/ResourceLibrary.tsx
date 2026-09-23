@@ -6,6 +6,7 @@ import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
 import type { CapabilityRecord } from '../catalog/catalog.ts';
 import type { AgentCombination, AgentCombinationView } from '../catalog/agent-combinations.ts';
 import './setup.ts';
+import './resource-library.css';
 
 interface ResourceSettings {
   capabilities: CapabilityRecord[];
@@ -37,6 +38,72 @@ type CapabilityConfigItem = {
 };
 
 type CapabilitySort = 'alphabetical' | 'enabled' | 'popular';
+
+/* ------------------------------------------------- resource grouping */
+/* Pure, DOM-free helpers that split the library into configured and
+ * unconfigured entries. Shared by the component and the console test. */
+
+export type LibraryEntryFilter = 'all' | 'configured' | 'unconfigured';
+
+export interface LibraryEntryCounts {
+  all: number;
+  configured: number;
+  unconfigured: number;
+}
+
+export interface LibraryEntrySplit<T> {
+  configured: T[];
+  unconfigured: T[];
+  counts: LibraryEntryCounts;
+  /** Entries to render for the active filter, configured group first. */
+  visible: T[];
+}
+
+export const LIBRARY_FILTERS: readonly { id: LibraryEntryFilter; label: string }[] = [
+  { id: 'all', label: '全部' },
+  { id: 'configured', label: '已配置' },
+  { id: 'unconfigured', label: '未配置' },
+];
+
+/** Split entries by configured state and apply the three-state filter. */
+export function splitLibraryEntries<T>(
+  entries: readonly T[],
+  filter: LibraryEntryFilter,
+  isConfigured: (entry: T) => boolean,
+): LibraryEntrySplit<T> {
+  const configured: T[] = [];
+  const unconfigured: T[] = [];
+  for (const entry of entries) (isConfigured(entry) ? configured : unconfigured).push(entry);
+  const visible = filter === 'configured' ? [...configured]
+    : filter === 'unconfigured' ? [...unconfigured]
+      : [...configured, ...unconfigured];
+  return {
+    configured,
+    unconfigured,
+    counts: { all: configured.length + unconfigured.length, configured: configured.length, unconfigured: unconfigured.length },
+    visible,
+  };
+}
+
+/** A capability counts as configured when its manifest is readable and any
+ * required env/credential fields are present. Entries without a config view
+ * have nothing to configure. */
+export function capabilityIsConfigured(item: CapabilityRecord, config?: CapabilityConfigItem): boolean {
+  if (item.status !== 'available') return false;
+  return config ? config.ready : true;
+}
+
+/** One-line "how to configure" hint for an entry that is not ready yet. */
+export function capabilityConfigGuidance(item: CapabilityRecord, config?: CapabilityConfigItem): string {
+  if (item.status !== 'available') {
+    return item.error
+      ? `清单不可读：${item.error} 请在能力目录修复 capability.json 后重新扫描。`
+      : '清单不可读：请在能力目录补齐 capability.json 后重新扫描。';
+  }
+  if (config?.error) return `配置读取失败：${config.error} 请在能力目录修复后重新扫描。`;
+  if (config?.missing.length) return `需要配置 ${config.missing.join(' / ')}：设置对应环境变量，或到设置页保存凭据；保存后立即对新请求生效。`;
+  return '';
+}
 
 const CAPABILITY_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -444,6 +511,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
   const [editing, setEditing] = useState<AgentCombinationView | null | undefined>(undefined);
   const [resourceQuery, setResourceQuery] = useState('');
   const [resourceLimits, setResourceLimits] = useState<Record<string, number>>({});
+  const [libraryFilter, setLibraryFilter] = useState<LibraryEntryFilter>('all');
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const capabilities = settings?.capabilities ?? [];
   const agentCombinations = settings?.agentCombinations ?? [];
@@ -465,7 +533,15 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
     ...item.resources.map(resource => resource.resourceId),
   ].some(value => value?.toLowerCase().includes(query)));
   const visibleAgents = filteredAgents.slice(0, resourceLimits.agents ?? 40);
-  const visible = filtered.slice(0, resourceLimits[active.id] ?? 40);
+  const configByRef = new Map((settings?.capabilityConfig ?? []).map(item => [`${item.id}@${item.version}`, item]));
+  const configFor = (item: CapabilityRecord) => configByRef.get(`${item.id}@${item.version}`);
+  const split = splitLibraryEntries(filtered, libraryFilter, item => capabilityIsConfigured(item, configFor(item)));
+  const pageLimit = resourceLimits[active.id] ?? 40;
+  const configuredVisible = split.configured.slice(0, pageLimit);
+  const unconfiguredVisible = split.unconfigured.slice(0, pageLimit);
+  const showConfigured = libraryFilter !== 'unconfigured';
+  const showUnconfigured = libraryFilter !== 'configured';
+  const shownCount = (showConfigured ? configuredVisible.length : 0) + (showUnconfigured ? unconfiguredVisible.length : 0);
   const countFor = (id: string) => id === 'config' ? settings?.capabilityConfig?.length ?? 0
     : id === 'architectures' ? GRAPH_ARCHITECTURES.length
     : id === 'prompts' ? 6
@@ -606,8 +682,47 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
             ) : active.items.length ? (
               <>
                 <div className="resource-section-toolbar"><p>{active.description}</p><label className="resource-search"><Icon name="search" size={15} /><input value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} placeholder="搜索能力或路径" data-testid="resource-catalog-search" /><span className="faint">{filtered.length}</span></label></div>
-                {visible.length ? <div className="resource-candidate-list">{visible.map(item => <button key={`${item.id}@${item.version}`} type="button" className="resource-candidate-row" data-testid={`resource-entry-${item.id}`} onClick={() => setSelected(item)}><Icon name={active.icon} size={15} /><span className="resource-candidate-copy"><span>{item.name ?? item.id}</span><small>{item.status === 'invalid' ? item.error : item.description || item.source}</small></span><Icon name="chevron" size={14} /></button>)}</div> : <p className="muted">没有匹配的能力。</p>}
-                {filtered.length > visible.length && <Button size="sm" data-testid={`resource-more-${active.id}`} onClick={() => setResourceLimits(current => ({ ...current, [active.id]: (current[active.id] ?? 40) + 40 }))}>显示更多（{visible.length} / {filtered.length}）</Button>}
+                <div className="resource-split-toggle" role="group" aria-label="按配置状态筛选" data-testid={`resource-filter-${active.id}`}>
+                  {LIBRARY_FILTERS.map(option => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className="resource-split-option"
+                      data-active={option.id === libraryFilter}
+                      data-testid={`resource-filter-${active.id}-${option.id}`}
+                      onClick={() => setLibraryFilter(option.id)}
+                    >
+                      {option.label}
+                      <span className="resource-split-count">{option.id === 'all' ? split.counts.all : option.id === 'configured' ? split.counts.configured : split.counts.unconfigured}</span>
+                    </button>
+                  ))}
+                </div>
+                {filtered.length ? (
+                  <div className="resource-groups">
+                    {showConfigured && (
+                      <section className="resource-group" data-testid={`resource-group-${active.id}-configured`}>
+                        <h4 className="resource-group-head"><span>已配置</span><span className="resource-group-count">{split.counts.configured}</span></h4>
+                        {configuredVisible.length
+                          ? <div className="resource-candidate-list">{configuredVisible.map(item => <button key={`${item.id}@${item.version}`} type="button" className="resource-candidate-row" data-testid={`resource-entry-${item.id}`} onClick={() => setSelected(item)}><Icon name={active.icon} size={15} /><span className="resource-candidate-copy"><span>{item.name ?? item.id}</span><small>{item.status === 'invalid' ? item.error : item.description || item.source}</small></span><Icon name="chevron" size={14} /></button>)}</div>
+                          : <p className="muted resource-group-empty">没有匹配的已配置能力。</p>}
+                      </section>
+                    )}
+                    {showUnconfigured && (
+                      <section className="resource-group" data-testid={`resource-group-${active.id}-unconfigured`}>
+                        <h4 className="resource-group-head"><span>未配置</span><span className="resource-group-count">{split.counts.unconfigured}</span></h4>
+                        {unconfiguredVisible.length
+                          ? <div className="resource-candidate-list">{unconfiguredVisible.map(item => (
+                            <div className="resource-candidate-wrap" key={`${item.id}@${item.version}`}>
+                              <button type="button" className="resource-candidate-row" data-testid={`resource-entry-${item.id}`} onClick={() => setSelected(item)}><Icon name={active.icon} size={15} /><span className="resource-candidate-copy"><span>{item.name ?? item.id}</span><small>{item.status === 'invalid' ? item.error : item.description || item.source}</small></span><Icon name="chevron" size={14} /></button>
+                              <p className="resource-config-guidance" data-testid={`resource-guidance-${item.id}`}>{capabilityConfigGuidance(item, configFor(item))}</p>
+                            </div>
+                          ))}</div>
+                          : <p className="muted resource-group-empty">没有匹配的未配置能力。</p>}
+                      </section>
+                    )}
+                  </div>
+                ) : <p className="muted">没有匹配的能力。</p>}
+                {split.visible.length > shownCount && <Button size="sm" data-testid={`resource-more-${active.id}`} onClick={() => setResourceLimits(current => ({ ...current, [active.id]: (current[active.id] ?? 40) + 40 }))}>显示更多（{shownCount} / {split.visible.length}）</Button>}
               </>
             ) : <p className="muted">{active.id === 'agent-md' ? '暂无 Agent.md 能力' : `暂无 ${active.title.replace(' 库', '')} 能力`}</p>}
           </Card>
