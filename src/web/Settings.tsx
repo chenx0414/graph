@@ -13,23 +13,26 @@ import {
   completeCost,
   concurrencyControlIds,
   customDraft,
+  draftFromModelVendor,
   draftFromPlatform,
   draftFromPlatformWithCredential,
   draftToModelEntry,
   hasProviderErrors,
   hasRequiredModelFields,
   isCustomPlatform,
+  keyEntryGuidance,
   mergeProbeModels,
   metadataToFields,
   missingRequiredModelFields,
   modelFieldErrors,
+  modelVendorsFrom,
   normalizePlatforms,
   platformById,
   platformsRequest,
   probeRequest,
   readConcurrency,
   selectedProbeModels,
-  selectionBlockedReason,
+  shouldAutoProbe,
   uniqueLocalModelId,
   validateProviderDraft,
   withCostField,
@@ -403,6 +406,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   const [picks, setPicks] = useState<ModelPick[]>([]);
   const [manualId, setManualId] = useState('');
   const [note, setNote] = useState('');
+  const [selectedVendorId, setSelectedVendorId] = useState('');
+  const probedVendor = useRef<string | null>(null);
   const [concurrency, setConcurrency] = useState<ConcurrencyDraft>({ credentialLimit: '', sharedGroupId: '', sharedGroupLimit: '' });
 
   useEffect(() => {
@@ -423,7 +428,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   // credentialConfigured / credentialRef come from the daemon catalog; the
   // card must use the daemon's own ref name so the reason names the right env var.
   const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
-  const blockedReason = selectionBlockedReason({ resolved, credentialRef: active.credentialRef });
   const requiredProblems = missingRequiredModelFields(draft.models?.entries ?? []);
 
   useEffect(() => {
@@ -432,7 +436,17 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     setErrors({});
   }, [active.credentialId]);
   const entries = draft.models?.entries ?? [];
-  const providerEntries = entries.filter(entry => entry.credentialId === active.credentialId);
+  const activeEntries = entries.filter(entry => entry.credentialId === active.credentialId);
+  // ② 选择模型 has its own vendor picker: only credentials the config already
+  // holds (or the daemon resolved) are listed; everything else stays hidden.
+  const vendors = modelVendorsFrom(draft, platforms);
+  const selectedVendor = vendors.find(vendor => vendor.id === selectedVendorId);
+  const vendorDraft = selectedVendor ? draftFromModelVendor(selectedVendor) : undefined;
+  const vendorBlockedReason = selectedVendor && !selectedVendor.baseUrl.trim()
+    ? '该厂商还没有可用的端点地址：请先在「① 配置厂商」填写并保存 Base URL'
+    : null;
+  const vendorEntries = selectedVendor ? entries.filter(entry => entry.credentialId === selectedVendor.id) : [];
+  const keyGuidance = keyEntryGuidance({ hasBridge: Boolean(bridge), credentialRef: active.credentialRef });
   const limitIds = concurrencyControlIds(active.credentialId);
   // Ids the user typed because the endpoint has no /models reply must stay
   // visible as rows, otherwise 手动添加 looks like it did nothing.
@@ -445,8 +459,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   const verifyCandidate = (): string | undefined =>
     picks.find(pick => pick.selected)?.modelId?.trim()
     ?? (manualId.trim() || undefined)
-    ?? providerEntries[0]?.modelId?.trim()
-    ?? providerEntries[0]?.id;
+    ?? activeEntries[0]?.modelId?.trim()
+    ?? activeEntries[0]?.id;
 
   const choosePlatform = (id: string) => {
     setPlatformId(id);
@@ -456,31 +470,58 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     setKey('');
   };
 
-  const runProbe = async (modelId?: string) => {
-    setBusy(true);
-    setNote('正在请求厂商接口…');
+  const copyExportLine = async (line: string) => {
     try {
-      const request = probeRequest(active, crypto.randomUUID(), modelId);
+      if (typeof navigator === 'undefined' || !navigator.clipboard) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(line);
+      toast('已复制环境变量 export 行', 'success');
+    } catch {
+      toast('复制失败，请手动选择这一行复制', 'danger');
+    }
+  };
+
+  const runProbe = async (target: ProviderDraft, options: { modelId?: string; updateList?: boolean; verification?: boolean } = {}) => {
+    const updateList = options.updateList !== false;
+    const updateVerification = options.verification !== false;
+    setBusy(true);
+    if (updateList) setNote('正在请求厂商接口…');
+    try {
+      const request = probeRequest(target, crypto.randomUUID(), options.modelId);
       const result = await api<ProbeResponse>(request.url, request.init);
       const list = probeModelsFrom(result);
-      setProbeModels(list);
-      setPicks(current => mergeProbeModels(list, current));
-      const probe = result.verification;
-      const ok = Boolean(probe && probe.ok === true);
-      setVerification(ok ? { ok: true } : { ok: false, error: typeof probe?.error === 'string' ? probe.error : '厂商未返回可验证的响应' });
-      const modelsError = typeof result.modelsError === 'string' ? result.modelsError : '';
-      setNote(list.length
-        ? `已探测到 ${list.length} 个模型。`
-        : modelsError
-          ? `模型列表获取失败（${modelsError}）；可手动添加模型 id。`
-          : '该端点未返回模型列表，可手动添加模型 id。');
+      if (updateList) {
+        setProbeModels(list);
+        setPicks(current => mergeProbeModels(list, current));
+        const modelsError = typeof result.modelsError === 'string' ? result.modelsError : '';
+        setNote(list.length
+          ? `已探测到 ${list.length} 个模型。`
+          : modelsError
+            ? `模型列表获取失败（${modelsError}）；可手动添加模型 id。`
+            : '该端点未返回模型列表，可手动添加模型 id。');
+      }
+      if (updateVerification) {
+        const probe = result.verification;
+        const ok = Boolean(probe && probe.ok === true);
+        setVerification(ok ? { ok: true } : { ok: false, error: typeof probe?.error === 'string' ? probe.error : '厂商未返回可验证的响应' });
+      }
     } catch (reason) {
-      setVerification({ ok: false, error: (reason as Error).message });
-      setNote('');
+      if (updateVerification) setVerification({ ok: false, error: (reason as Error).message });
+      if (updateList) setNote('');
     } finally {
       setBusy(false);
     }
   };
+
+  // Selecting a vendor (a change, not every render) auto-fetches its model
+  // list. 重新获取 stays available for an explicit retry.
+  useEffect(() => {
+    if (!shouldAutoProbe(selectedVendorId, probedVendor.current)) return;
+    const vendor = vendors.find(item => item.id === selectedVendorId);
+    if (!vendor) return;
+    probedVendor.current = selectedVendorId;
+    void runProbe(draftFromModelVendor(vendor), { verification: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedVendorId]);
 
   const saveProvider = async () => {
     const found = validateProviderDraft(active, { custom: isCustom, hasKey: Boolean(key.trim()) || resolved });
@@ -510,29 +551,35 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     } finally {
       setBusy(false);
     }
-    await runProbe(verifyCandidate());
+    const candidate = verifyCandidate();
+    await runProbe(active, { ...(candidate ? { modelId: candidate } : {}), updateList: false });
   };
 
   const addSelected = async () => {
+    const vendor = selectedVendor;
+    if (!vendor) {
+      toast('请先选择厂商', 'danger');
+      return;
+    }
     const chosen = selectedProbeModels(picks);
     if (!chosen.length) {
       toast('请先勾选至少一个模型，或手动添加模型 id', 'danger');
       return;
     }
     setBusy(true);
-    const baseUrl = active.baseUrl.trim();
-    const prepared = await Promise.all(chosen.map(async pick => ({ pick, metadata: await lookupSnapshot(active.platformId, pick.modelId) })));
+    const baseUrl = vendor.baseUrl.trim();
+    const prepared = await Promise.all(chosen.map(async pick => ({ pick, metadata: await lookupSnapshot(vendor.platformId, pick.modelId) })));
     mutate(next => {
       const list = [...(next.models?.entries ?? [])];
       const taken = list.map(entry => entry.id);
       for (const { pick, metadata } of prepared) {
-        const id = uniqueLocalModelId(active.platformId, pick.modelId, taken);
+        const id = uniqueLocalModelId(vendor.platformId, pick.modelId, taken);
         taken.push(id);
         const built = draftToModelEntry(buildEntryDraft({
-          id, provider: active.platformId, baseUrl, api: active.api, credentialId: active.credentialId, modelId: pick.modelId,
+          id, provider: vendor.platformId, baseUrl, api: vendor.api, credentialId: vendor.id, modelId: pick.modelId,
           metadata,
         }));
-        const headers = modelRequestHeaders({ provider: active.platformId, baseUrl });
+        const headers = modelRequestHeaders({ provider: vendor.platformId, baseUrl });
         list.push({ ...built, ...(headers ? { headers } : {}) });
       }
       next.models = { entries: list };
@@ -567,7 +614,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
           </div>
           {platformsNote && <p className="muted" data-testid="provider-platforms-note">{platformsNote}</p>}
           {selected?.notes?.length ? <p className="muted">{selected.notes.join('；')}</p> : null}
-          {!selected?.modelsListSupported && <p className="muted" data-testid="provider-no-models-list">该端点不支持 /models 列表，请手动添加模型 id。</p>}
+          {!selected?.modelsListSupported && <p className="muted" data-testid="provider-no-models-list">目录提示该端点可能不支持 /models 列表；保存后仍会尝试请求并以厂商响应为准，失败时请手动添加模型 id。</p>}
 
           <div className="card-grid">
             {isCustom ? (
@@ -591,11 +638,20 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
           </div>
 
           {bridge ? (
-            <Field label="API 密钥 / 订阅凭据" hint="只写入系统钥匙串，不进入配置文件、接口响应或页面" error={fieldError('key')}>
+            <Field label={keyGuidance.title} hint="只写入系统钥匙串，不进入配置文件、接口响应或页面" error={fieldError('key')}>
               <input className="input" style={{ maxWidth: 'none' }} type="password" data-testid="provider-key" data-invalid={mark('key')} value={key} onChange={event => setKey(event.target.value)} placeholder="sk-…" />
             </Field>
           ) : (
-            <p className="muted" data-testid="provider-key-hint">浏览器模式：请先在环境中设置 <code>{active.credentialRef}</code>，再保存并验证。</p>
+            <div className="key-guidance" data-testid="provider-key-guidance">
+              <p className="key-guidance-title" data-testid="provider-key-hint">{keyGuidance.title}</p>
+              {keyGuidance.lines.map((line, index) => <p key={index} className="muted key-guidance-line">{line}</p>)}
+              {fieldError('key') && <p className="field-error" data-testid="provider-key-error">{fieldError('key')}</p>}
+              <div className="row key-guidance-export">
+                <code className="mono" data-testid="provider-key-env">{keyGuidance.envVar}</code>
+                <Button size="sm" icon="copy" data-testid="provider-key-copy" onClick={() => void copyExportLine(keyGuidance.exportLine)}>复制 export 行</Button>
+              </div>
+              <code className="mono key-export" data-testid="provider-key-export">{keyGuidance.exportLine}</code>
+            </div>
           )}
 
           <div className="provider-concurrency" data-testid="provider-concurrency">
@@ -620,21 +676,30 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
       </section>
 
       <section id="settings-models" className="settings-section" data-testid="provider-models">
-        <Card title="② 选择模型" icon="bolt" subtitle={`从 ${active.label || active.credentialId} 的 ${active.baseUrl || '端点'}/models 探测可用模型；端点不支持列表时可手动添加模型 id`}
+        <Card title="② 选择模型" icon="bolt" subtitle={selectedVendor ? `从 ${selectedVendor.label} 的 ${selectedVendor.baseUrl || '端点'}/models 自动探测可用模型；端点不支持列表时可手动添加模型 id` : '只列出已配置凭据的厂商：选中厂商后自动获取它的可用模型列表'}
           actions={<>
-            <Button size="sm" icon="refresh" data-testid="model-probe" disabled={busy || Boolean(blockedReason)} onClick={() => void runProbe()}>获取可用模型</Button>
-            <Button size="sm" icon="plus" data-testid="model-add-selected" disabled={busy || Boolean(blockedReason) || !picks.some(pick => pick.selected)} onClick={() => void addSelected()}>添加所选模型</Button>
+            <Button size="sm" icon="refresh" data-testid="model-probe" disabled={busy || !selectedVendor || Boolean(vendorBlockedReason)} onClick={() => { if (vendorDraft) void runProbe(vendorDraft, { verification: false }); }}>重新获取</Button>
+            <Button size="sm" icon="plus" data-testid="model-add-selected" disabled={busy || !selectedVendor || Boolean(vendorBlockedReason) || !picks.some(pick => pick.selected)} onClick={() => void addSelected()}>添加所选模型</Button>
           </>}>
-          {blockedReason && <p className="field-error" data-testid="provider-credential-blocked">{blockedReason}</p>}
+          <div className="model-vendor-picker">
+            <Field label="厂商" hint="只显示配置里已有凭据的厂商；选中即自动获取模型">
+              <select className="select" data-testid="model-vendor-select" value={selectedVendorId} disabled={!vendors.length} onChange={event => setSelectedVendorId(event.target.value)}>
+                <option value="">选择厂商…</option>
+                {vendors.map(vendor => <option key={vendor.id} value={vendor.id}>{`${vendor.label} · 已有 ${vendor.modelCount} 个`}</option>)}
+              </select>
+            </Field>
+          </div>
+          {!vendors.length && <p className="muted" data-testid="model-vendor-empty">还没有已配置凭据的厂商：请先在「① 配置厂商」保存一次。</p>}
+          {vendorBlockedReason && <p className="field-error" data-testid="provider-credential-blocked">{vendorBlockedReason}</p>}
           {requiredProblems.length > 0 && <p className="field-error" data-testid="model-required-missing">有 {requiredProblems.length} 个模型缺少必填字段（{requiredProblems.map(problem => problem.id).join('、')}）；请补全上下文上限/最大输出/模型等级，并确保价格成套填写（不完整的价格不会按 0 计算）。</p>}
-          <p className="muted" data-testid="model-probe-note">{note || '先「保存并验证」，或凭据就绪后点「获取可用模型」。'}</p>
+          <p className="muted" data-testid="model-probe-note">{note || (selectedVendor ? '选中厂商后会自动获取模型；也可点「重新获取」。' : '先选择一个已配置凭据的厂商。')}</p>
           {(probeModels.length > 0 || manualRows.length > 0) && (
             <div className="model-probe-list" data-testid="model-probe-list">
               {[...probeModels, ...manualRows].map(model => {
                 const pick = picks.find(item => item.modelId === model.id);
                 return (
                   <label key={model.id} className="list-item" style={{ cursor: 'pointer' }}>
-                    <input type="checkbox" disabled={Boolean(blockedReason)} data-testid={`model-probe-${model.id}`} checked={Boolean(pick?.selected)} onChange={event => setPicks(current => current.map(item => item.modelId === model.id ? { ...item, selected: event.target.checked } : item))} />
+                    <input type="checkbox" disabled={Boolean(vendorBlockedReason)} data-testid={`model-probe-${model.id}`} checked={Boolean(pick?.selected)} onChange={event => setPicks(current => current.map(item => item.modelId === model.id ? { ...item, selected: event.target.checked } : item))} />
                     <span className="grow">{model.name ?? model.id} <span className="muted">{model.id}</span></span>
                   </label>
                 );
@@ -642,12 +707,12 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
             </div>
           )}
           <div className="row" style={{ marginTop: 8 }}>
-            <input className="input" style={{ width: 260 }} data-testid="model-manual-id" value={manualId} disabled={Boolean(blockedReason)} onChange={event => setManualId(event.target.value)} placeholder="手动添加的模型 id" />
-            <Button size="sm" data-testid="model-manual-add" disabled={Boolean(blockedReason)} onClick={addManual}>手动添加</Button>
+            <input className="input" style={{ width: 260 }} data-testid="model-manual-id" value={manualId} disabled={Boolean(vendorBlockedReason)} onChange={event => setManualId(event.target.value)} placeholder="手动添加的模型 id" />
+            <Button size="sm" data-testid="model-manual-add" disabled={Boolean(vendorBlockedReason)} onClick={addManual}>手动添加</Button>
           </div>
 
-          {!providerEntries.length && <p className="muted">该厂商下还没有模型。</p>}
-          {providerEntries.map(entry => {
+          {!vendorEntries.length && <p className="muted">该厂商下还没有模型。</p>}
+          {vendorEntries.map(entry => {
             const index = entries.indexOf(entry);
             const fieldIssues = modelFieldErrors(entry);
             const complete = completeCost(entry.cost);

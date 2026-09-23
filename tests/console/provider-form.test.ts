@@ -18,16 +18,19 @@ import {
   completeCost,
   costError,
   customDraft,
+  draftFromModelVendor,
   draftFromPlatform,
   draftFromPlatformWithCredential,
   draftToModelEntry,
   fillEntryFromMetadata,
   hasProviderErrors,
   hasRequiredModelFields,
+  keyEntryGuidance,
   mergeProbeModels,
   metadataToFields,
   missingRequiredModelFields,
   modelFieldErrors,
+  modelVendorsFrom,
   normalizePlatforms,
   parseLimit,
   platformById,
@@ -36,6 +39,7 @@ import {
   readConcurrency,
   selectedProbeModels,
   selectionBlockedReason,
+  shouldAutoProbe,
   validateProviderDraft,
   withCostField,
   writeConcurrency,
@@ -109,7 +113,7 @@ describe('platform catalog normalization', () => {
   it('keeps the built-in credential environment variable names aligned with usage', () => {
     expect(platformById(FALLBACK_PLATFORMS, 'opencode-go')!.credentialRef).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
     expect(platformById(FALLBACK_PLATFORMS, 'chatgpt')!.credentialRef).toBe('GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN');
-    expect(platformById(FALLBACK_PLATFORMS, 'opencode-go')!.modelsListSupported).toBe(false);
+    expect(platformById(FALLBACK_PLATFORMS, 'opencode-go')!.modelsListSupported).toBe(true);
   });
 });
 
@@ -363,6 +367,77 @@ describe('zero is a real free price (round A)', () => {
     const persisted = draftToModelEntry({ id: 'free', modelId: 'free', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', grade: 'medium', contextWindow: 128_000, maxTokens: 4_096, cost: free });
     expect(persisted.cost).toEqual(free);
     expect(persisted.pricing?.status).toBe('known');
+  });
+});
+
+describe('model step vendor picker (step 2)', () => {
+  const platform = (id: string, credentialConfigured: boolean) => ({ ...platformById(FALLBACK_PLATFORMS, id)!, credentialConfigured });
+
+  it('lists only configured credentials and counts the models of each vendor', () => {
+    const platforms = [platform('opencode-go', true), platform('grok', false), platform('deepseek', true)];
+    const config = {
+      credentials: {
+        grok: { secretRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' },
+        local: { secretRef: 'GRAPH_LOCAL_KEY', displayName: '本地网关' },
+      },
+      models: { entries: [{ credentialId: 'grok' }, { credentialId: 'grok' }, { credentialId: 'local' }] },
+    };
+    const vendors = modelVendorsFrom(config, platforms);
+    expect(vendors.map(vendor => vendor.id)).toEqual(['opencode-go', 'deepseek', 'grok', 'local']);
+    const byId = Object.fromEntries(vendors.map(vendor => [vendor.id, vendor]));
+    expect(byId.grok).toMatchObject({ platformId: 'grok', label: 'Grok', modelCount: 2 });
+    expect(byId['opencode-go']).toMatchObject({ platformId: 'opencode-go', modelCount: 0 });
+    expect(byId.local).toMatchObject({ platformId: 'custom', label: '本地网关', credentialRef: 'GRAPH_LOCAL_KEY', modelCount: 1 });
+    // An unconfigured platform is hidden entirely, never greyed out.
+    expect(vendors.some(vendor => vendor.id === 'chatgpt')).toBe(false);
+  });
+
+  it('is empty when no credential is configured', () => {
+    expect(modelVendorsFrom(null, FALLBACK_PLATFORMS.map(item => ({ ...item, credentialConfigured: false })))).toEqual([]);
+    expect(modelVendorsFrom({ credentials: {}, models: { entries: [] } }, [])).toEqual([]);
+  });
+
+  it('probes a user-defined credential as the custom platform', () => {
+    const [vendor] = modelVendorsFrom({ credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } } }, []);
+    expect(draftFromModelVendor(vendor!)).toMatchObject({ platformId: 'custom', credentialId: 'local', credentialRef: 'GRAPH_LOCAL_KEY', api: 'openai-completions' });
+    const named = draftFromModelVendor(modelVendorsFrom({ credentials: {} }, [platform('grok', true)])[0]!);
+    expect(named).toMatchObject({ platformId: 'grok', credentialId: 'grok', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' });
+  });
+
+  it('auto-probes only when the selected vendor actually changes', () => {
+    expect(shouldAutoProbe('grok', null)).toBe(true);
+    expect(shouldAutoProbe('grok', 'deepseek')).toBe(true);
+    expect(shouldAutoProbe('grok', 'grok')).toBe(false);
+    expect(shouldAutoProbe('', 'grok')).toBe(false);
+    expect(shouldAutoProbe('   ', null)).toBe(false);
+  });
+});
+
+describe('key entry guidance', () => {
+  it('browser mode explains why there is no key box and points at the desktop app', () => {
+    const guidance = keyEntryGuidance({ hasBridge: false, credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' });
+    expect(guidance.mode).toBe('browser');
+    expect(guidance.envVar).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
+    expect(guidance.exportLine).toBe('export GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY=…');
+    const copy = guidance.lines.join(' ');
+    expect(copy).toContain('浏览器无法访问系统钥匙串');
+    expect(copy).toContain('桌面 App 窗口');
+    expect(copy).toContain('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
+    // The export line stays a placeholder: no plaintext secret anywhere.
+    expect(guidance.exportLine).toContain('=…');
+    expect(JSON.stringify(guidance)).not.toMatch(/sk-[A-Za-z0-9]/);
+  });
+
+  it('desktop mode keeps the keychain input path', () => {
+    const guidance = keyEntryGuidance({ hasBridge: true, credentialRef: 'GRAPH_PROVIDER_API_KEY' });
+    expect(guidance.mode).toBe('desktop');
+    expect(guidance.title).toContain('API 密钥');
+    expect(guidance.lines.join(' ')).toContain('钥匙串');
+    expect(guidance.lines.join(' ')).not.toContain('浏览器');
+  });
+
+  it('falls back to a real variable name when the ref is blank', () => {
+    expect(keyEntryGuidance({ hasBridge: false, credentialRef: '  ' }).envVar).toBe('GRAPH_PROVIDER_API_KEY');
   });
 });
 

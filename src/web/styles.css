@@ -3129,6 +3129,22 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 }
 .model-probe-list .list-item { padding: 7px 12px; border-bottom: 1px solid var(--border); }
 .model-probe-list .list-item:last-child { border-bottom: 0; }
+.model-vendor-picker { margin: 6px 0 10px; }
+.model-vendor-picker .field { max-width: 360px; margin: 0; }
+.key-guidance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+.key-guidance .key-guidance-title { margin: 0; font-weight: 620; color: var(--text); }
+.key-guidance .key-guidance-line { margin: 0; font-size: 12.5px; }
+.key-guidance-export { margin-top: 2px; }
+.key-export { display: inline-block; padding: 4px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--border); font-size: 12px; }
 #settings-credentials .card-grid .field { min-width: 200px; }
 .theme-options {
   display: grid;
