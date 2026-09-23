@@ -91,7 +91,7 @@ export function slashEntries(input: {
     return input.models.map(model => ({
       id: `model:${model.id}`,
       label: model.id,
-      description: `${model.grade}${model.reasoning === false ? ' · 不支持思考强度' : ''}`,
+      description: model.grade,
       group: '模型',
       icon: 'bolt',
       action: { type: 'model' as const, model },

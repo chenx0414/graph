@@ -83,7 +83,10 @@ export function toPiModel(entry: ModelEntry): Model<ModelApi> {
   const thinkingLevelMap = thinkingLevelMapFor(entry);
   return {
     id: entry.modelId ?? entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
-    reasoning: entry.reasoning !== false, input: entry.input ?? ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
+    // Every model is treated as thinking-capable: the console no longer asks,
+    // and the SDK's own supported-level rule short-circuits to `off` when this
+    // flag is false. A legacy `reasoning: false` entry is therefore ignored.
+    reasoning: true, input: entry.input ?? ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
     // A model takes only the effort levels its catalog entry names; the SDK maps
     // Pi's level onto the provider's own value at the wire.
     ...(thinkingLevelMap ? { thinkingLevelMap } : {}),

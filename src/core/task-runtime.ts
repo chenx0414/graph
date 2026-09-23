@@ -799,11 +799,10 @@ export async function openTaskRuntime(options: {
           }
           const effective = selected ?? liveEntries().find(model => model.id === masterModel());
           const requestedLevel = input.thinkingLevel ? asThinkingLevel(input.thinkingLevel) : undefined;
-          // A level this model does not accept falls back to one it does, so a
-          // stale preference never reaches the provider as an invalid value.
-          const level = effective && (requestedLevel ?? effective.defaultThinkingLevel)
-            ? effectiveThinkingLevel(effective, requestedLevel)
-            : undefined;
+          // Thinking is always on: a requested level this model does not accept
+          // (and `off`, which is no longer offered) resolves to one it does, so
+          // the stored level always matches what the next turn will run.
+          const level = effective ? effectiveThinkingLevel(effective, requestedLevel) : undefined;
           if (level) store.db.prepare('UPDATE conversations SET thinking_level=? WHERE id=?').run(level, conversationId);
         }
         let cursor = store.event(taskId, 'conversation.created', { conversationId, projectId, title });

@@ -302,7 +302,9 @@ test('conversation model and thinking selection applies to the next master turn'
   });
   cleanup.push(() => runtime.close());
   const created = await runtime.conversations.create({ text: '切换模型', requestId: 'model-create' });
-  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
+  // Thinking is always on, so the synthetic model (not in the catalog) gets the
+  // lowest of Pi's default levels rather than `off`.
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'minimal' });
 
   const selected = await runtime.conversations.selectModel(created.conversationId, {
     model: 'm2', thinkingLevel: 'high', requestId: 'model-select',
@@ -310,11 +312,13 @@ test('conversation model and thinking selection applies to the next master turn'
   expect(selected).toMatchObject({ model: 'm2', thinkingLevel: 'high', changed: true });
   expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm2', thinkingLevel: 'high' });
 
+  // The legacy reasoning flag no longer turns thinking off: every model keeps a
+  // real level, so switching back to m1 keeps the requested one.
   const clamped = await runtime.conversations.selectModel(created.conversationId, {
     model: 'm1', thinkingLevel: 'high', requestId: 'model-select-clamped',
   });
-  expect(clamped).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
-  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'off' });
+  expect(clamped).toMatchObject({ model: 'm1', thinkingLevel: 'high' });
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'high' });
 });
 
 test('an output-limit turn settles with a retry notice instead of staying in progress', async () => {

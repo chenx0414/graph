@@ -32,6 +32,7 @@ import {
 import { FullAccessToggle } from './FullAccessToggle.tsx';
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
 import type { ComposerModel, ComposerTelemetryView, ThinkingLevel } from './ComposerTelemetry.tsx';
+import { thinkingView } from './thinking-levels.ts';
 import {
   filterSlashEntries,
   slashTargetToken,
@@ -456,7 +457,7 @@ export function ChatComposer({
       }
       if (entry.action.type === 'model') {
         const currentLevel = (slashTelemetry?.thinkingLevel ?? 'off') as ThinkingLevel;
-        await onSlashModelSelect?.(entry.action.model, entry.action.model.reasoning === false ? 'off' : currentLevel);
+        await onSlashModelSelect?.(entry.action.model, thinkingView(entry.action.model, currentLevel).level as ThinkingLevel);
         return;
       }
       if (entry.action.type === 'thinking') {

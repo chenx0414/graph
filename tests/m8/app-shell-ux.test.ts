@@ -1500,7 +1500,8 @@ test('the composer slash menu selects tools, switches model and queues compactio
   await page.getByTestId('slash-system-model').click();
   await page.getByTestId('slash-model-fast').click();
   await expect.poll(() => modelRequests.length).toBe(1);
-  expect(modelRequests[0]).toMatchObject({ model: 'fast', thinkingLevel: 'off' });
+  // Thinking is always on, so a model without a level list gets its lowest one.
+  expect(modelRequests[0]).toMatchObject({ model: 'fast', thinkingLevel: 'minimal' });
 
   await input.fill('/compact');
   await page.getByTestId('slash-system-compact').click();
@@ -1643,8 +1644,9 @@ test('the new-chat composer switches model and thinking before the conversation 
   await page.getByTestId('new-conversation-start').click();
 
   await expect.poll(() => creates.length).toBe(1);
-  // A non-reasoning model clamps thinking to off before the conversation exists.
-  expect(creates[0]).toMatchObject({ text: '用选中的模型开始', model: 'fast', thinkingLevel: 'off' });
+  // Thinking is always on: the level carried over from the default model is
+  // clamped into the target model's levels (the lowest real one here).
+  expect(creates[0]).toMatchObject({ text: '用选中的模型开始', model: 'fast', thinkingLevel: 'low' });
 }, 60_000);
 
 test('settings opens as a second page with its own navigation and return control', async () => {

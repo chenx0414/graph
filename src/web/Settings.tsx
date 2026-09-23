@@ -766,8 +766,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                       </select>
                     </Field>
                     <Field label="默认思考强度">
-                      <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? (entry.reasoning === false ? 'off' : '')} disabled={entry.reasoning === false} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
-                        {entry.reasoning !== false && <option value="">未指定</option>}
+                      <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
+                        <option value="">未指定</option>
                         {(entry.thinkingOptions ?? []).map(option => <option key={option.level} value={option.level}>{thinkingOptionLabel(option)}</option>)}
                         {entry.defaultThinkingLevel && !(entry.thinkingOptions ?? []).some(option => option.level === entry.defaultThinkingLevel)
                           ? <option value={entry.defaultThinkingLevel}>{entry.defaultThinkingLevel}（该模型不支持，请改选）</option>
@@ -777,7 +777,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                   </div>
                   <div className="row">
                     <label className="checkbox-row"><input type="checkbox" data-testid={`model-${index}-images`} checked={(entry.input ?? ['text']).includes('image')} onChange={event => mutate(next => { next.models!.entries[index]!.input = event.target.checked ? ['text', 'image'] : ['text']; })} /><span>支持图片输入</span></label>
-                    <label className="checkbox-row"><input type="checkbox" data-testid={`model-${index}-reasoning`} checked={entry.reasoning !== false} onChange={event => mutate(next => { next.models!.entries[index]!.reasoning = event.target.checked; })} /><span>可思考模型</span></label>
                     <Field label="输入价/百万" error={fieldIssues.cost}><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={entry.cost?.input ?? ''} onChange={event => setCost('input', event.target.value)} /></Field>
                     <Field label="输出价/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-output-cost`} value={entry.cost?.output ?? ''} onChange={event => setCost('output', event.target.value)} /></Field>
                     <Field label="缓存读/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-cache-read-cost`} value={entry.cost?.cacheRead ?? ''} onChange={event => setCost('cacheRead', event.target.value)} /></Field>

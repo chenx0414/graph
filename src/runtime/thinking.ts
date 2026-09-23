@@ -11,10 +11,9 @@ import type { ModelEntry, ModelThinkingLevel, ModelThinkingOption } from '../cat
 import { modelMetadataFor } from '../catalog/thinking.ts';
 import { toPiModel } from './pi-adapter.ts';
 
-/** Thinking strengths this model accepts, in Pi's canonical order. Empty for a
- * model that cannot think at all. */
+/** Thinking strengths this model accepts, in Pi's canonical order. Never empty:
+ * every model is treated as thinking-capable and `off` is not offered. */
 export function thinkingOptionsFor(entry: ModelEntry): ModelThinkingOption[] {
-  if (entry.reasoning === false) return [];
   const labels = new Map((modelMetadataFor(entry)?.thinkingOptions ?? []).map(option => [option.level, option.label]));
   return getSupportedThinkingLevels(toPiModel(entry)).map(level => ({
     level,
@@ -27,9 +26,8 @@ export function thinkingOptionsFor(entry: ModelEntry): ModelThinkingOption[] {
 
 /** The level a model will actually run at: a level this model does not accept
  * falls back the way the SDK falls back (nearest stronger, then nearest
- * weaker), and a model that cannot think always runs with thinking off. */
+ * weaker), so thinking is always on. */
 export function effectiveThinkingLevel(entry: ModelEntry, requested?: string): ModelThinkingLevel {
-  if (entry.reasoning === false) return 'off';
   const wanted = (requested ?? entry.defaultThinkingLevel) as ModelThinkingLevel | undefined;
   return clampThinkingLevel(toPiModel(entry), wanted ?? 'off');
 }

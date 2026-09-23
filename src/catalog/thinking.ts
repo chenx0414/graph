@@ -11,6 +11,9 @@
  *   the model does not accept is not offered and is clamped instead (the
  *   console says so where it happens).
  *
+ * Every model is treated as thinking-capable and `off` is denied, so a strength
+ * is always chosen: the console offers real levels only.
+ *
  * The result is exactly the shape `Model.thinkingLevelMap` takes, so the SDK's
  * own `getSupportedThinkingLevels` / `clampThinkingLevel` stay the single
  * authority for what is offered and for where a stale level falls back to.
@@ -30,14 +33,16 @@ export function modelMetadataFor(entry: Pick<ModelEntry, 'provider' | 'id' | 'mo
   return lookupModelMetadata(entry.provider, entry.modelId ?? entry.id);
 }
 
-export function thinkingLevelMapFor(entry: ModelEntry, metadata?: ModelMetadata | null): ThinkingLevelMapView | undefined {
-  if (entry.reasoning === false) return undefined;
+export function thinkingLevelMapFor(entry: ModelEntry, metadata?: ModelMetadata | null): ThinkingLevelMapView {
   const options = (metadata === undefined ? modelMetadataFor(entry) : metadata)?.thinkingOptions ?? [];
   const listed = new Map(options.map(option => [option.level, option.label]));
   const map: ThinkingLevelMapView = {};
+  // `off` is denied outright: every model is treated as thinking-capable and a
+  // strength is always chosen. This only affects which levels the SDK reports;
+  // `off` never travels as an effort value anyway (the Agent loop sends no
+  // reasoning option for it), so the wire is unchanged.
+  map.off = null;
   for (const level of MODEL_THINKING_LEVELS) {
-    // `off` never travels as an effort value: the Agent loop sends no reasoning
-    // option at all for it, so it stays available without a mapping.
     if (level === 'off') continue;
     const label = listed.get(level);
     if (label !== undefined) {

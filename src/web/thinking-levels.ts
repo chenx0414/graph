@@ -25,9 +25,9 @@ export interface ThinkingModelView {
 /** Pi's level order, used only to fall back the way the SDK does. */
 const CANONICAL_ORDER = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
-/** Levels a reasoning model is assumed to accept when the payload carries no
- * list at all (an older server): the previous console behaviour, never worse. */
-const FALLBACK_OPTIONS: ThinkingOptionView[] = ['off', 'minimal', 'low', 'medium', 'high']
+/** Levels assumed when the payload carries no list at all (an older server).
+ * `off` is never among them: a strength is always chosen. */
+const FALLBACK_OPTIONS: ThinkingOptionView[] = ['minimal', 'low', 'medium', 'high']
   .map(level => ({ level, label: level }));
 
 /** A level is written exactly as the model vocabulary writes it. */
@@ -52,7 +52,6 @@ export interface ThinkingView {
 
 export function thinkingView(model: ThinkingModelView | undefined, requested: string | undefined): ThinkingView {
   if (!model) return { options: [], level: 'off', disabled: true, reason: '未选择模型' };
-  if (model.reasoning === false) return { options: [], level: 'off', disabled: true, reason: '该模型不支持思考强度' };
   const options = model.thinkingOptions ?? FALLBACK_OPTIONS;
   if (!options.length) return { options: [], level: 'off', disabled: true, reason: '该模型没有可选的思考强度档位' };
   const level = nearestLevel(options, requested);

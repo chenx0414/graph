@@ -19,39 +19,37 @@ const levels = (model: ModelEntry) => thinkingOptionsFor(model).map(option => op
 describe('per-model thinking strengths', () => {
   test('a model offers exactly the effort levels its catalog entry names', () => {
     // xai names low/medium/high/xhigh: no minimal, and its top level is xhigh.
-    expect(levels(entry())).toEqual(['off', 'low', 'medium', 'high', 'xhigh']);
+    expect(levels(entry())).toEqual(['low', 'medium', 'high', 'xhigh']);
     // deepseek names low/high/max: no medium, and its top level is max.
     const deepseek = entry({ id: 'deepseek-flash', provider: 'deepseek', modelId: 'deepseek-flash' });
-    expect(levels(deepseek)).toEqual(['off', 'low', 'high', 'max']);
+    expect(levels(deepseek)).toEqual(['low', 'high', 'max']);
   });
 
   test('the provider spelling of a level is kept as its label', () => {
     const options = thinkingOptionsFor(entry());
     expect(options.find(option => option.level === 'xhigh')?.label).toBe('xhigh');
-    // xai publishes no name for switching thinking off, so the level name stands
-    // in; the console renders its own label for that instead of a second name.
-    expect(options.find(option => option.level === 'off')?.label).toBe('off');
-    // ChatGPT does name it, and the console shows that name beside 关闭.
-    const gpt = thinkingOptionsFor(entry({ id: 'chatgpt:gpt-5.6', provider: 'chatgpt', modelId: 'gpt-5.6' }));
-    expect(gpt.find(option => option.level === 'off')?.label).toBe('none');
-    expect(gpt.map(option => option.level)).toEqual(['off', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect(options.find(option => option.level === 'low')?.label).toBe('low');
+    expect(options.some(option => option.level === 'off')).toBe(false);
   });
 
   test('a model with no discrete effort vocabulary keeps Pi default levels', () => {
     // mimo-v2.6-pro is reasoning-capable but only publishes a toggle.
     const mimo = entry({ id: 'opencode-go:mimo-v2.6-pro', provider: 'opencode-go', modelId: 'mimo-v2.6-pro' });
-    expect(levels(mimo)).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    expect(levels(mimo)).toEqual(['minimal', 'low', 'medium', 'high']);
   });
 
   test('a model missing from the snapshot falls back instead of guessing', () => {
     const unknown = entry({ id: 'x:y', provider: 'no-such-provider', modelId: 'no-such-model' });
-    expect(levels(unknown)).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    expect(levels(unknown)).toEqual(['minimal', 'low', 'medium', 'high']);
   });
 
-  test('a model that cannot think offers nothing and always runs off', () => {
+  test('every model is thinking-capable, including one flagged otherwise', () => {
+    // The console no longer asks whether a model can think: the legacy flag is
+    // ignored, so an old config entry still gets real levels and thinking on.
     const plain = entry({ reasoning: false, defaultThinkingLevel: 'high' });
-    expect(thinkingOptionsFor(plain)).toEqual([]);
-    expect(effectiveThinkingLevel(plain, 'high')).toBe('off');
+    expect(levels(plain)).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(effectiveThinkingLevel(plain, 'high')).toBe('high');
+    expect(effectiveThinkingLevel(plain, 'off')).toBe('low');
   });
 
   test('a level the model does not accept falls back like the SDK does', () => {
@@ -61,7 +59,9 @@ describe('per-model thinking strengths', () => {
     expect(effectiveThinkingLevel(entry(), 'minimal')).toBe('low');
     const deepseek = entry({ id: 'deepseek-flash', provider: 'deepseek', modelId: 'deepseek-flash' });
     expect(effectiveThinkingLevel(deepseek, 'medium')).toBe('high');
-    expect(effectiveThinkingLevel(deepseek, 'off')).toBe('off');
+    // off is never offered, so it falls forward to the lowest real level.
+    expect(effectiveThinkingLevel(deepseek, 'off')).toBe('low');
+    expect(effectiveThinkingLevel(entry(), 'off')).toBe('low');
   });
 
   test('a saved default the model does not accept is not offered, only clamped', () => {
@@ -70,26 +70,26 @@ describe('per-model thinking strengths', () => {
       id: 'opencode-go:deepseek-v4.1-flash', provider: 'opencode-go', modelId: 'deepseek-v4.1-flash',
       defaultThinkingLevel: 'xhigh',
     });
-    expect(levels(deepseek)).toEqual(['off', 'low', 'high', 'max']);
-    expect(thinkingLevelMapFor(deepseek)!.xhigh).toBeNull();
+    expect(levels(deepseek)).toEqual(['low', 'high', 'max']);
+    expect(thinkingLevelMapFor(deepseek).xhigh).toBeNull();
     expect(effectiveThinkingLevel(deepseek)).toBe('max');
     // A model the snapshot does not name keeps Pi's default levels, and the SDK
     // will not invent xhigh without a catalog entry that names it.
     const unknown = entry({
       id: 'x:y', provider: 'no-such-provider', modelId: 'no-such-model', defaultThinkingLevel: 'xhigh',
     });
-    expect(levels(unknown)).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    expect(levels(unknown)).toEqual(['minimal', 'low', 'medium', 'high']);
     expect(effectiveThinkingLevel(unknown)).toBe('high');
   });
 
-  test('the level map denies unlisted levels and maps the listed ones', () => {
-    const map = thinkingLevelMapFor(entry())!;
+  test('the level map denies off and every unlisted level', () => {
+    const map = thinkingLevelMapFor(entry());
+    expect(map.off).toBeNull();
     expect(map.minimal).toBeNull();
     expect(map.max).toBeNull();
     expect(map.xhigh).toBe('xhigh');
     expect(map.low).toBe('low');
-    // off travels as "no reasoning option", never as an effort value.
-    expect(map.off).toBeUndefined();
-    expect(thinkingLevelMapFor(entry({ reasoning: false }))).toBeUndefined();
+    // A model flagged as non-reasoning is still treated as thinking-capable.
+    expect(thinkingLevelMapFor(entry({ reasoning: false })).low).toBe('low');
   });
 });
