@@ -115,6 +115,11 @@ function positiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/** models.dev amounts are USD per million tokens. Input and output are the
+ * price of the model: if either is missing, the whole cost is omitted so an
+ * unknown price never becomes a zero. models.dev publishes no cache rate for
+ * models without prompt caching, so a missing cache rate is read as "no cache
+ * charge" (0) rather than as unknown. */
 function optionalCost(cost: ModelsDevModel['cost']): ModelCost | undefined {
   if (!cost) return undefined;
   const input = typeof cost.input === 'number' && Number.isFinite(cost.input) ? cost.input : undefined;
