@@ -101,13 +101,33 @@ describe('canvas and conversation source wiring', () => {
     expect(source).toContain('data-tone={info.tone}');
   });
 
-  test('the board renders a permanent four-item legend and keeps the task-graph testids', () => {
+  test('an unrecognised status gets a visible data-unknown badge on the card', () => {
+    const source = read('src/web/GraphCanvas.tsx');
+    expect(source).toContain('boardStateKnown(node.status)');
+    expect(source).toContain('data-unknown="true"');
+    expect(source).toContain('未知');
+  });
+
+  test('GraphCanvas itself renders the permanent four-item legend, so every task-graph view has it', () => {
+    const canvas = read('src/web/GraphCanvas.tsx');
+    expect(canvas).toContain('data-testid="legend"');
+    expect(canvas).toContain('boardStateCounts(statuses)');
+    expect(canvas).toContain('data-board-state={item.id}');
+    expect(canvas).toContain('含未知');
+    // The old five-tier legend on the task page is gone.
+    const app = read('src/web/App.tsx');
+    expect(app).not.toContain('data-testid="legend"');
+    expect(app).not.toContain('待执行 / 就绪');
+    expect(app).not.toContain('被阻塞 / 已跳过');
+  });
+
+  test('the conversation drawer keeps the task-graph testids without a second legend', () => {
     const source = read('src/web/Conversation.tsx');
-    expect(source).toContain('data-testid="graph-board-legend"');
-    expect(source).toContain('boardStateCounts(statuses)');
-    expect(source).toContain('data-board-state={item.id}');
     expect(source).toContain('data-testid="graph-state-summary"');
     expect(source).toContain('data-testid="draft-graph-detail"');
     expect(source).toContain('data-testid="conversation-node-detail"');
+    // The legend is single-sourced in GraphCanvas; the drawer must not render
+    // its own copy under a different testid.
+    expect(source).not.toContain('graph-board-legend');
   });
 });

@@ -230,8 +230,9 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.getByTestId('conversation-graph').waitFor();
   await page.getByTestId('draft-graph-detail').waitFor();
   expect(await page.getByTestId('graph-state-summary').innerText()).toContain('任务状态');
-  const legend = await page.getByTestId('graph-board-legend').innerText();
+  const legend = await page.getByTestId('legend').innerText();
   for (const label of ['待执行', '运行中', '已完成', '被阻塞']) expect(legend).toContain(label);
+  expect(await page.locator('[data-testid="legend"] [data-board-state]').count()).toBe(4);
   expect(await page.locator('.node-card[data-node-id="human"]').innerText()).toContain('human check');
   expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-node-type')).toBe('human');
   // The legacy tone/status semantics survive alongside the new board state.
@@ -340,6 +341,52 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   expect(await chat.innerText()).toContain('README.md');
   await chat.getByRole('button', { name: '关闭节点对话' }).click();
   await chat.waitFor({ state: 'detached' });
+});
+
+test('the task graph page keeps the permanent four-state legend', async () => {
+  const root = await temp('task-graph-legend');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root: project }],
+    webDir,
+    autoDrive: false,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'task-graph-legend-definition');
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '图例任务', requestId: 'task-graph-legend-create' });
+  const view = await server.runtime.conversations.view(created.conversationId);
+  await server.runtime.supervisor(view.anchorTaskId).propose({
+    requirementVersion: 1,
+    summary: '四态图例',
+    acceptance: [{ id: 'ok', description: '完成', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'graph.human_check', dependsOn: ['work'] },
+    ],
+  }, 'task-graph-legend-proposal');
+  await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'task-graph-legend-prepare', initialize: true, createBaseline: true });
+  const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
+    proposalVersion: 1,
+    targetBranch: 'main',
+    requestId: 'task-graph-legend-confirm',
+  });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/tasks/${confirmed.taskId}/graph`);
+  await page.getByTestId('graph').waitFor();
+  await page.locator('.node-card[data-node-id="work"]').waitFor();
+  await page.getByTestId('legend').waitFor();
+  const legend = await page.getByTestId('legend').innerText();
+  for (const label of ['待执行', '运行中', '已完成', '被阻塞']) expect(legend).toContain(label);
+  // Exactly the four board-state items, and no legacy five-tier legend left.
+  expect(await page.locator('[data-testid="legend"] [data-board-state]').count()).toBe(4);
+  expect(await page.locator('.legend li').count()).toBe(0);
+  expect(await page.getByTestId('legend').innerText()).not.toContain('待执行 / 就绪');
 });
 
 test('conversation pause and resume use one stateful action with visible feedback', async () => {
