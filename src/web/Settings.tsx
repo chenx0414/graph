@@ -7,25 +7,33 @@ import { STANDARD_ACCESS } from './access-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
 import { modelRequestHeaders, type ModelInput } from '../catalog/models.ts';
 import {
-  CUSTOM_PLATFORM_ID,
   FALLBACK_PLATFORMS,
   PROVIDER_COMPATIBILITIES,
   buildEntryDraft,
-  buildProbePayload,
+  completeCost,
   customDraft,
   draftFromPlatform,
   draftToModelEntry,
   hasProviderErrors,
+  hasRequiredModelFields,
   isCustomPlatform,
   mergeProbeModels,
+  metadataToFields,
+  missingRequiredModelFields,
+  modelFieldErrors,
   normalizePlatforms,
   platformById,
+  platformsRequest,
+  probeRequest,
   readConcurrency,
   selectedProbeModels,
+  selectionBlockedReason,
   uniqueLocalModelId,
   validateProviderDraft,
+  withCostField,
   writeConcurrency,
   type ConcurrencyDraft,
+  type ModelCostDraft,
   type ModelPick,
   type PlatformPreset,
   type ProbeModel,
@@ -46,12 +54,11 @@ function loadModelsDev(): Promise<ModelsDevModule> {
   return import('../catalog/models-dev.ts');
 }
 
-type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 const THINKING_LEVELS: ModelThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 type RawModel = {
-  id: string; provider: string; modelId?: string; grade: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
-  contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: Cost;
+  id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
+  contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: ModelCostDraft;
   input?: ModelInput[];
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string; retrievedAt?: string; catalogRevision?: string };
   headers?: Record<string, string>;
@@ -302,7 +309,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 ];
 
 /** One collapsible region inside the 高级设置 page. `fields` names the config
- * document paths it edits and `testIds` the controls that must keep working. */
+ * document paths it edits and `testIds` the controls that must keep working.
+ * The independent 并发限制 region was removed in B-1: both caps now live inside
+ * the ① 配置厂商 card, so this list is intentionally empty. */
 export interface AdvancedSetting {
   id: string;
   title: string;
@@ -313,16 +322,7 @@ export interface AdvancedSetting {
   defaultCollapsed: boolean;
 }
 
-export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
-  {
-    id: 'settings-limits',
-    title: '并发限制',
-    summary: '保存后立即对新请求生效；已有调用保留计数，不会中断在途请求',
-    fields: ['limits.credentials', 'limits.sharedGroups'],
-    testIds: ['limit-credential', 'limit-group', 'limit-credential-add', 'limit-group-add'],
-    defaultCollapsed: true,
-  },
-];
+export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [];
 
 export const ADVANCED_SETTING_IDS: readonly string[] = ADVANCED_SETTINGS.map(setting => setting.id);
 
@@ -341,7 +341,9 @@ export function isAdvancedOpen(open: Record<string, boolean>, id: string): boole
 
 type ProbeResponse = {
   models?: { id?: unknown; name?: unknown }[];
-  verification?: { ok?: unknown; error?: unknown };
+  modelsError?: unknown;
+  credentialConfigured?: unknown;
+  verification?: { ok?: unknown; error?: unknown; skipped?: unknown };
 };
 
 function probeModelsFrom(response: ProbeResponse): ProbeModel[] {
@@ -403,7 +405,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
 
   useEffect(() => {
     let cancelled = false;
-    void api<unknown>('/api/app/providers').then(result => {
+    const request = platformsRequest();
+    void api<unknown>(request.url).then(result => {
       if (cancelled) return;
       const list = normalizePlatforms(result);
       if (list.length) setPlatforms(list);
@@ -413,16 +416,19 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   }, []);
 
   const selected = platformById(platforms, platformId);
-  const isCustom = isCustomPlatform(platformId);
-  const active: ProviderDraft = selected ? draftFromPlatform(selected) : custom;
-  const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.configured);
+  const isCustom = isCustomPlatform(platformId) || selected?.custom === true;
+  const active: ProviderDraft = !isCustom && selected ? draftFromPlatform(selected) : custom;
+  // credentialConfigured / credentialRef come from the daemon catalog; the
+  // card must use the daemon's own ref name so the reason names the right env var.
+  const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
+  const blockedReason = selectionBlockedReason({ resolved, credentialRef: active.credentialRef });
+  const requiredProblems = missingRequiredModelFields(draft.models?.entries ?? []);
 
   useEffect(() => {
     setConcurrency(readConcurrency(draft, active.credentialId));
     setVerification(null);
     setErrors({});
   }, [active.credentialId]);
-
   const entries = draft.models?.entries ?? [];
   const providerEntries = entries.filter(entry => entry.credentialId === active.credentialId);
 
@@ -438,23 +444,20 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     setBusy(true);
     setNote('正在请求厂商接口…');
     try {
-      const result = await api<ProbeResponse>('/api/app/providers/probe', { method: 'POST', body: JSON.stringify(buildProbePayload(active, modelId)) });
+      const request = probeRequest(active, crypto.randomUUID(), modelId);
+      const result = await api<ProbeResponse>(request.url, request.init);
       const list = probeModelsFrom(result);
       setProbeModels(list);
       setPicks(current => mergeProbeModels(list, current));
       const probe = result.verification;
       const ok = Boolean(probe && probe.ok === true);
-      if (!ok && !modelId && list.length) {
-        // The endpoint listed models but needs a concrete model for the minimal
-        // chat request: verify the first discovered model once.
-        const retry = await api<ProbeResponse>('/api/app/providers/probe', { method: 'POST', body: JSON.stringify(buildProbePayload(active, list[0]!.id)) });
-        const retryProbe = retry.verification;
-        const retryOk = Boolean(retryProbe && retryProbe.ok === true);
-        setVerification(retryOk ? { ok: true } : { ok: false, error: typeof retryProbe?.error === 'string' ? retryProbe.error : '厂商未返回可验证的响应' });
-      } else {
-        setVerification(ok ? { ok: true } : { ok: false, error: typeof probe?.error === 'string' ? probe.error : '厂商未返回可验证的响应' });
-      }
-      setNote(list.length ? `已探测到 ${list.length} 个模型。` : '该端点未返回模型列表，可手动添加模型 id。');
+      setVerification(ok ? { ok: true } : { ok: false, error: typeof probe?.error === 'string' ? probe.error : '厂商未返回可验证的响应' });
+      const modelsError = typeof result.modelsError === 'string' ? result.modelsError : '';
+      setNote(list.length
+        ? `已探测到 ${list.length} 个模型。`
+        : modelsError
+          ? `模型列表获取失败（${modelsError}）；可手动添加模型 id。`
+          : '该端点未返回模型列表，可手动添加模型 id。');
     } catch (reason) {
       setVerification({ ok: false, error: (reason as Error).message });
       setNote('');
@@ -467,13 +470,13 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     const found = validateProviderDraft(active, { custom: isCustom, hasKey: Boolean(key.trim()) || resolved });
     setErrors(found);
     if (hasProviderErrors(found)) {
-      toast(isCustom ? '请补全自定义厂商的名称、Base URL、兼容格式与 API KEY' : '请填写 API KEY 或订阅凭据', 'danger');
+      toast(isCustom ? '请补全自定义厂商的厂商名、Base URL、兼容格式与 API KEY' : '请填写 API KEY 或订阅凭据', 'danger');
       return;
     }
     setBusy(true);
     try {
       if (bridge && key.trim()) {
-        const stored = await bridge.saveSecret(active.secretRef, key.trim());
+        const stored = await bridge.saveSecret(active.credentialRef, key.trim());
         if (!stored.stored) {
           toast(`密钥保存失败：${stored.message ?? '钥匙串不可用'}`, 'danger');
           return;
@@ -483,8 +486,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
       }
       mutate(next => {
         const credentials = { ...(next.credentials ?? {}) };
-        const previous = credentials[active.credentialId] ?? { secretRef: active.secretRef };
-        credentials[active.credentialId] = { ...previous, secretRef: active.secretRef, displayName: active.name || active.credentialId };
+        const previous = credentials[active.credentialId] ?? { secretRef: active.credentialRef };
+        credentials[active.credentialId] = { ...previous, secretRef: active.credentialRef, displayName: active.label || active.credentialId };
         next.credentials = credentials;
         writeConcurrency(next, active.credentialId, concurrency);
       });
@@ -511,7 +514,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
         taken.push(id);
         const built = draftToModelEntry(buildEntryDraft({
           id, provider: active.platformId, baseUrl, api: active.api, credentialId: active.credentialId, modelId: pick.modelId,
-          metadata, grade: 'medium',
+          metadata,
         }));
         const headers = modelRequestHeaders({ provider: active.platformId, baseUrl });
         list.push({ ...built, ...(headers ? { headers } : {}) });
@@ -520,7 +523,11 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     });
     setPicks(current => current.map(pick => chosen.some(item => item.modelId === pick.modelId) ? { ...pick, selected: false } : pick));
     setBusy(false);
-    toast('已添加所选模型；元数据已按内置快照填充，未知项留空可手填', 'success');
+    const missingCaps = prepared.filter(({ metadata }) => {
+      const fields = metadataToFields(metadata);
+      return !hasRequiredModelFields({ grade: 'pending', contextWindow: fields.contextWindow, maxTokens: fields.maxTokens });
+    }).length;
+    toast(`已添加所选模型；请为每个模型选择等级${missingCaps ? `，并为其中 ${missingCaps} 个填写上下文上限/最大输出` : ''}后才能保存（价格等未知项可留空，不会按 0 计算）`, 'info');
   };
 
   const addManual = () => {
@@ -541,15 +548,15 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
             {platforms.map(platform => (
               <Button key={platform.id} size="sm" variant={platform.id === platformId ? 'primary' : 'default'} data-testid={`provider-platform-${platform.id}`} onClick={() => choosePlatform(platform.id)}>{platform.label}</Button>
             ))}
-            <Button size="sm" variant={isCustom ? 'primary' : 'default'} data-testid={`provider-platform-${CUSTOM_PLATFORM_ID}`} onClick={() => choosePlatform(CUSTOM_PLATFORM_ID)}>自定义</Button>
           </div>
           {platformsNote && <p className="muted" data-testid="provider-platforms-note">{platformsNote}</p>}
           {selected?.notes?.length ? <p className="muted">{selected.notes.join('；')}</p> : null}
+          {!selected?.modelsListSupported && <p className="muted" data-testid="provider-no-models-list">该端点不支持 /models 列表，请手动添加模型 id。</p>}
 
           <div className="card-grid">
             {isCustom ? (
               <>
-                <Field label="厂商名" error={fieldError('name')}><input className="input" data-testid="provider-name" data-invalid={mark('name')} value={custom.name} onChange={event => setCustom({ ...custom, name: event.target.value })} placeholder="例如 本地网关" /></Field>
+                <Field label="厂商名" error={fieldError('label')}><input className="input" data-testid="provider-label" data-invalid={mark('label')} value={custom.label} onChange={event => setCustom({ ...custom, label: event.target.value })} placeholder="例如 本地网关" /></Field>
                 <Field label="Base URL" error={fieldError('baseUrl')}><input className="input" data-testid="provider-baseUrl" data-invalid={mark('baseUrl')} value={custom.baseUrl} onChange={event => setCustom({ ...custom, baseUrl: event.target.value })} placeholder="https://gateway.example.com/v1" /></Field>
                 <Field label="兼容格式" error={fieldError('api')}>
                   <select className="select" data-testid="provider-api" data-invalid={mark('api')} value={custom.api} onChange={event => setCustom({ ...custom, api: event.target.value as ProviderDraft['api'] })}>
@@ -564,7 +571,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
               </>
             )}
             <Field label="凭据 id"><input className="input" data-testid="provider-credentialId" data-invalid={mark('credentialId')} value={active.credentialId} readOnly={!isCustom} onChange={event => setCustom({ ...custom, credentialId: event.target.value })} /></Field>
-            <Field label="环境变量（secretRef）" hint="配置文件只保存这个名字" error={fieldError('secretRef')}><input className="input" data-testid="provider-secretRef" data-invalid={mark('secretRef')} value={active.secretRef} readOnly={!isCustom} onChange={event => setCustom({ ...custom, secretRef: event.target.value })} /></Field>
+            <Field label="环境变量（credentialRef）" hint="配置文件只保存这个名字" error={fieldError('credentialRef')}><input className="input" data-testid="provider-credentialRef" data-invalid={mark('credentialRef')} value={active.credentialRef} readOnly={!isCustom} onChange={event => setCustom({ ...custom, credentialRef: event.target.value })} /></Field>
           </div>
 
           {bridge ? (
@@ -572,7 +579,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
               <input className="input" style={{ maxWidth: 'none' }} type="password" data-testid="provider-key" data-invalid={mark('key')} value={key} onChange={event => setKey(event.target.value)} placeholder="sk-…" />
             </Field>
           ) : (
-            <p className="muted" data-testid="provider-key-hint">浏览器模式：请先在环境中设置 <code>{active.secretRef}</code>，再保存并验证。</p>
+            <p className="muted" data-testid="provider-key-hint">浏览器模式：请先在环境中设置 <code>{active.credentialRef}</code>，再保存并验证。</p>
           )}
 
           <div className="provider-concurrency" data-testid="provider-concurrency">
@@ -597,11 +604,13 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
       </section>
 
       <section id="settings-models" className="settings-section" data-testid="provider-models">
-        <Card title="② 选择模型" icon="bolt" subtitle={`从 ${active.name || active.credentialId} 的 ${active.baseUrl || '端点'}/models 探测可用模型；端点不支持列表时可手动添加模型 id`}
+        <Card title="② 选择模型" icon="bolt" subtitle={`从 ${active.label || active.credentialId} 的 ${active.baseUrl || '端点'}/models 探测可用模型；端点不支持列表时可手动添加模型 id`}
           actions={<>
-            <Button size="sm" icon="refresh" data-testid="model-probe" disabled={busy} onClick={() => void runProbe()}>获取可用模型</Button>
-            <Button size="sm" icon="plus" data-testid="model-add-selected" disabled={busy || !picks.some(pick => pick.selected)} onClick={() => void addSelected()}>添加所选模型</Button>
+            <Button size="sm" icon="refresh" data-testid="model-probe" disabled={busy || Boolean(blockedReason)} onClick={() => void runProbe()}>获取可用模型</Button>
+            <Button size="sm" icon="plus" data-testid="model-add-selected" disabled={busy || Boolean(blockedReason) || !picks.some(pick => pick.selected)} onClick={() => void addSelected()}>添加所选模型</Button>
           </>}>
+          {blockedReason && <p className="field-error" data-testid="provider-credential-blocked">{blockedReason}</p>}
+          {requiredProblems.length > 0 && <p className="field-error" data-testid="model-required-missing">有 {requiredProblems.length} 个模型缺少必填字段（{requiredProblems.map(problem => problem.id).join('、')}）；请补全上下文上限/最大输出/模型等级，并确保价格成套填写（不完整的价格不会按 0 计算）。</p>}
           <p className="muted" data-testid="model-probe-note">{note || '先「保存并验证」，或凭据就绪后点「获取可用模型」。'}</p>
           {probeModels.length > 0 && (
             <div className="model-probe-list" data-testid="model-probe-list">
@@ -609,7 +618,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                 const pick = picks.find(item => item.modelId === model.id);
                 return (
                   <label key={model.id} className="list-item" style={{ cursor: 'pointer' }}>
-                    <input type="checkbox" data-testid={`model-probe-${model.id}`} checked={Boolean(pick?.selected)} onChange={event => setPicks(current => current.map(item => item.modelId === model.id ? { ...item, selected: event.target.checked } : item))} />
+                    <input type="checkbox" disabled={Boolean(blockedReason)} data-testid={`model-probe-${model.id}`} checked={Boolean(pick?.selected)} onChange={event => setPicks(current => current.map(item => item.modelId === model.id ? { ...item, selected: event.target.checked } : item))} />
                     <span className="grow">{model.name ?? model.id} <span className="muted">{model.id}</span></span>
                   </label>
                 );
@@ -617,25 +626,41 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
             </div>
           )}
           <div className="row" style={{ marginTop: 8 }}>
-            <input className="input" style={{ width: 260 }} data-testid="model-manual-id" value={manualId} onChange={event => setManualId(event.target.value)} placeholder="手动添加的模型 id" />
-            <Button size="sm" data-testid="model-manual-add" onClick={addManual}>手动添加</Button>
+            <input className="input" style={{ width: 260 }} data-testid="model-manual-id" value={manualId} disabled={Boolean(blockedReason)} onChange={event => setManualId(event.target.value)} placeholder="手动添加的模型 id" />
+            <Button size="sm" data-testid="model-manual-add" disabled={Boolean(blockedReason)} onClick={addManual}>手动添加</Button>
           </div>
 
           {!providerEntries.length && <p className="muted">该厂商下还没有模型。</p>}
           {providerEntries.map(entry => {
             const index = entries.indexOf(entry);
+            const fieldIssues = modelFieldErrors(entry);
+            const complete = completeCost(entry.cost);
+            const setCost = (field: 'input' | 'output' | 'cacheRead' | 'cacheWrite', raw: string) => mutate(next => {
+              const target = next.models!.entries[index]!;
+              const parsed = raw === '' ? undefined : Number(raw);
+              const cost = withCostField(target.cost, field, parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined);
+              if (cost) target.cost = cost; else delete target.cost;
+              // A price is a set: only a complete one is known; a partial one is
+              // marked unknown (never written as 0).
+              const currency = target.pricing?.currency ?? '';
+              if (completeCost(target.cost) && currency) target.pricing = { currency, unit: 'per_million_tokens', status: 'known' };
+              else if (completeCost(target.cost)) target.pricing = { currency: 'USD', unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' };
+              else if (currency) target.pricing = { currency, unit: 'per_million_tokens', status: 'unknown' };
+              else delete target.pricing;
+            });
             return (
               <div className="model-card" key={entry.id} data-testid={`provider-model-${index}`}>
                 <div className="card-body">
                   <div className="row">
                     <strong className="grow">{entry.modelId ?? entry.id}</strong>
-                    <Pill tone={entry.cost ? 'info' : 'warn'} testid={`model-${index}-price`}>{entry.cost ? `价格 输入 ${entry.cost.input}/输出 ${entry.cost.output} 每百万（${entry.pricing?.currency ?? 'USD'}）` : '价格未知（pricing.status=unknown，不会按 0 计算）'}</Pill>
+                    <Pill tone={complete ? 'info' : 'warn'} testid={`model-${index}-price`}>{complete ? `价格 输入 ${complete.input}/输出 ${complete.output}/缓存读 ${complete.cacheRead}/缓存写 ${complete.cacheWrite} 每百万（${entry.pricing?.currency ?? 'USD'}）` : '价格未知（pricing.status=unknown，不会按 0 计算）'}</Pill>
                   </div>
                   <div className="row">
-                    <Field label="上下文上限"><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-context`} value={entry.contextWindow ?? ''} placeholder="未知" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.contextWindow; else target.contextWindow = Number(raw); })} /></Field>
-                    <Field label="最大输出"><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-maxTokens`} value={entry.maxTokens ?? ''} placeholder="未知" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.maxTokens; else target.maxTokens = Number(raw); })} /></Field>
-                    <Field label="模型等级">
-                      <select className="select" style={{ width: 110 }} data-testid={`model-${index}-grade`} value={entry.grade} onChange={event => mutate(next => { next.models!.entries[index]!.grade = event.target.value; })}>
+                    <Field label="上下文上限" error={fieldIssues.contextWindow}><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-context`} data-invalid={fieldIssues.contextWindow ? 'true' : undefined} value={entry.contextWindow ?? ''} placeholder="未知，请填写" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.contextWindow; else target.contextWindow = Number(raw); })} /></Field>
+                    <Field label="最大输出" error={fieldIssues.maxTokens}><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-maxTokens`} data-invalid={fieldIssues.maxTokens ? 'true' : undefined} value={entry.maxTokens ?? ''} placeholder="未知，请填写" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.maxTokens; else target.maxTokens = Number(raw); })} /></Field>
+                    <Field label="模型等级" error={fieldIssues.grade}>
+                      <select className="select" style={{ width: 130 }} data-testid={`model-${index}-grade`} data-invalid={fieldIssues.grade ? 'true' : undefined} value={entry.grade ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.grade = event.target.value; else delete target.grade; })}>
+                        <option value="">请选择</option>
                         {GRADES.map(grade => <option key={grade} value={grade}>{grade}</option>)}
                       </select>
                     </Field>
@@ -648,12 +673,15 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                   <div className="row">
                     <label className="checkbox-row"><input type="checkbox" data-testid={`model-${index}-images`} checked={(entry.input ?? ['text']).includes('image')} onChange={event => mutate(next => { next.models!.entries[index]!.input = event.target.checked ? ['text', 'image'] : ['text']; })} /><span>支持图片输入</span></label>
                     <label className="checkbox-row"><input type="checkbox" data-testid={`model-${index}-reasoning`} checked={entry.reasoning !== false} onChange={event => mutate(next => { next.models!.entries[index]!.reasoning = event.target.checked; })} /><span>可思考模型</span></label>
-                    <Field label="输入价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={entry.cost?.input ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '' || !Number.isFinite(Number(raw))) { delete target.cost; return; } target.cost = { input: Number(raw), output: target.cost?.output ?? 0, cacheRead: target.cost?.cacheRead ?? 0, cacheWrite: target.cost?.cacheWrite ?? 0 }; })} /></Field>
-                    <Field label="输出价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-output-cost`} value={entry.cost?.output ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '' || !Number.isFinite(Number(raw))) { delete target.cost; return; } target.cost = { input: target.cost?.input ?? 0, output: Number(raw), cacheRead: target.cost?.cacheRead ?? 0, cacheWrite: target.cost?.cacheWrite ?? 0 }; })} /></Field>
-                    <Field label="币种"><input className="input" style={{ width: 90 }} placeholder="未知" data-testid={`model-${index}-currency`} value={entry.pricing?.currency ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const currency = event.target.value.trim().toUpperCase(); if (!currency) { delete target.pricing; return; } target.pricing = { currency, unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' }; })} /></Field>
+                    <Field label="输入价/百万" error={fieldIssues.cost}><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={entry.cost?.input ?? ''} onChange={event => setCost('input', event.target.value)} /></Field>
+                    <Field label="输出价/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-output-cost`} value={entry.cost?.output ?? ''} onChange={event => setCost('output', event.target.value)} /></Field>
+                    <Field label="缓存读/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-cache-read-cost`} value={entry.cost?.cacheRead ?? ''} onChange={event => setCost('cacheRead', event.target.value)} /></Field>
+                    <Field label="缓存写/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-cache-write-cost`} value={entry.cost?.cacheWrite ?? ''} onChange={event => setCost('cacheWrite', event.target.value)} /></Field>
+                    <Field label="币种"><input className="input" style={{ width: 80 }} placeholder="USD" data-testid={`model-${index}-currency`} value={entry.pricing?.currency ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const currency = event.target.value.trim().toUpperCase(); if (!currency) { delete target.pricing; return; } target.pricing = { currency, unit: 'per_million_tokens', status: completeCost(target.cost) ? 'known' : 'unknown', sourceUrl: 'manual' }; })} /></Field>
                     <div className="topbar-spacer" />
                     <Button size="sm" variant="danger" data-testid={`model-${index}-remove`} onClick={() => mutate(next => { next.models!.entries.splice(index, 1); })}>删除</Button>
                   </div>
+                  {fieldIssues.cost && <p className="field-error" data-testid={`model-${index}-cost-error`}>{fieldIssues.cost}</p>}
                 </div>
               </div>
             );
@@ -797,6 +825,16 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     }
     const document = latestDraft.current;
     if (!document) return;
+    // The config parser requires positive contextWindow/maxTokens. A model whose
+    // snapshot hit did not cover them must be filled in first, so block the save
+    // with a named reason instead of sending a document the daemon will reject.
+    const missing = missingRequiredModelFields(document.models?.entries ?? []);
+    if (missing.length) {
+      const names = missing.map(problem => problem.id).join('、');
+      setError(Object.assign(new Error(`已阻止保存：模型 ${names} 缺少必填的上下文上限/最大输出/模型等级，或价格未成套填写；请修正后再试（其余未知项可留空，但绝不按 0 计算）`), { field: 'models.entries' }));
+      setStatus('');
+      return;
+    }
     const expectedRevision = latestRevision.current;
     saveInFlight.current = true;
     savePending.current = false;

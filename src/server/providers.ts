@@ -28,6 +28,15 @@ export interface PlatformPreset {
 
 export const CUSTOM_PLATFORM_ID = 'custom';
 
+/** Console provider endpoints. Deliberately registered on the session-cookie
+ * `/api` face, NOT under `/api/app/*`: that prefix requires the desktop bridge
+ * token the browser console cannot read, so probing would never reach the
+ * daemon from the settings page. */
+export const PROVIDER_ROUTES = {
+  list: '/api/providers',
+  probe: '/api/providers/probe',
+} as const;
+
 /** Built-in supported platforms. `custom` is the fallback for any other
  * OpenAI/Anthropic-compatible endpoint. Credential env names are shared with
  * the usage adapters (src/server/usage.ts) so one key configures both. */
@@ -134,11 +143,25 @@ export interface ResolvedProvider {
   label: string;
   api: ModelApi;
   baseUrl: string;
-  secretRef: string;
+  /** Environment variable / keychain entry name; never the secret value. */
+  credentialRef: string;
   credentialKind: ProviderCredentialKind;
   modelsListSupported: boolean;
   headers?: Record<string, string>;
   custom: boolean;
+}
+
+/** Provider draft as the settings page sends it in a probe/save request.
+ * Field names are the shared contract: the display name is `label` and the
+ * credential reference is `credentialRef` (never `name` / `secretRef`). */
+export interface ProviderDraftBody {
+  id?: string;
+  label?: string;
+  baseUrl?: string;
+  api?: string;
+  credentialRef?: string;
+  headers?: Record<string, string>;
+  modelsListSupported?: boolean;
 }
 
 export interface ProviderDraftError {
@@ -152,8 +175,8 @@ export type ProviderDraftValidation =
 
 /** Validate a provider draft coming from the settings page. A supported
  * platform only needs a credential reference (label/baseUrl/api default from
- * the directory); `自定义` must supply name + baseUrl + compatibility api +
- * credential reference itself. */
+ * the directory); `自定义` must supply label + baseUrl + compatibility api +
+ * credentialRef itself. */
 export function validateProviderDraft(input: unknown): ProviderDraftValidation {
   const draft = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
   const rawId = typeof draft.id === 'string' && draft.id.trim() ? draft.id.trim() : undefined;
@@ -183,12 +206,12 @@ export function validateProviderDraft(input: unknown): ProviderDraftValidation {
   const label = rawLabel ?? defaults?.label ?? '';
   if (!label) errors.push({ field: 'label', message: '自定义厂商必须填写厂商名' });
 
-  const rawSecretRef = typeof draft.secretRef === 'string' && draft.secretRef.trim() ? draft.secretRef.trim() : undefined;
+  const rawCredentialRef = typeof draft.credentialRef === 'string' && draft.credentialRef.trim() ? draft.credentialRef.trim() : undefined;
   // Every provider still needs a credential ref; the directory supplies the
   // default name (the wizard may choose a distinct one per custom provider).
-  const secretRef = rawSecretRef ?? preset?.credentialRef ?? '';
-  if (!secretRef) errors.push({ field: 'secretRef', message: '需要凭据引用（环境变量名或钥匙串条目）' });
-  else if (!SECRET_REF.test(secretRef)) errors.push({ field: 'secretRef', message: 'secretRef 必须是环境变量名' });
+  const credentialRef = rawCredentialRef ?? preset?.credentialRef ?? '';
+  if (!credentialRef) errors.push({ field: 'credentialRef', message: '需要凭据引用（环境变量名或钥匙串条目）' });
+  else if (!SECRET_REF.test(credentialRef)) errors.push({ field: 'credentialRef', message: 'credentialRef 必须是环境变量名' });
 
   const headers = { ...(preset?.headers ?? {}), ...(sanitizeHeaders(draft.headers) ?? {}) };
   const modelsListSupported = typeof draft.modelsListSupported === 'boolean'
@@ -203,11 +226,46 @@ export function validateProviderDraft(input: unknown): ProviderDraftValidation {
       label,
       api: api as ModelApi,
       baseUrl,
-      secretRef,
+      credentialRef,
       credentialKind: preset?.credentialKind ?? 'api-key',
       modelsListSupported,
       ...(Object.keys(headers).length ? { headers } : {}),
       custom,
+    },
+  };
+}
+
+export interface ProbeRequest {
+  requestId: string;
+  provider: ResolvedProvider;
+  modelId?: string;
+  probeModels?: boolean;
+}
+
+export type ProbeRequestValidation =
+  | { ok: true; request: ProbeRequest }
+  | { ok: false; errors: ProviderDraftError[] };
+
+/** Parse a probe body. `requestId` is the idempotency key the console POST
+ * must always carry; the provider draft lives under `provider` (a flat body is
+ * also accepted for convenience) and is validated by `validateProviderDraft`. */
+export function validateProbeRequest(input: unknown): ProbeRequestValidation {
+  const body = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  const errors: ProviderDraftError[] = [];
+  const requestId = typeof body.requestId === 'string' && body.requestId.trim() ? body.requestId.trim() : undefined;
+  if (!requestId) errors.push({ field: 'requestId', message: 'requestId is required' });
+  const validated = validateProviderDraft(body.provider ?? body);
+  if (!validated.ok) errors.push(...validated.errors);
+  if (errors.length || !requestId || !validated.ok) return { ok: false, errors };
+  const modelId = typeof body.modelId === 'string' && body.modelId.trim() ? body.modelId.trim() : undefined;
+  const probeModels = typeof body.probeModels === 'boolean' ? body.probeModels : undefined;
+  return {
+    ok: true,
+    request: {
+      requestId,
+      provider: validated.provider,
+      ...(modelId ? { modelId } : {}),
+      ...(probeModels !== undefined ? { probeModels } : {}),
     },
   };
 }
