@@ -2,11 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
+  CHAT_RESIDENT_PANEL_IDS,
   DRAWER_DRAFT_PAGES,
   defaultDrawerOpen,
   defaultDrawerPage,
+  drawerEntryLabel,
   drawerPageIds,
   drawerPanelIds,
+  draftStatusLabel,
   isDrawerPanel,
   isResidentPanel,
   panelPlacement,
@@ -15,9 +18,10 @@ import {
 
 const read = (relative: string) => readFileSync(join(process.cwd(), relative), 'utf8');
 
-/** Pure policy for the chat drawer: draft details + the task graph moved into
- * the right drawer and start collapsed, while the confirm and acceptance
- * entry points stay pinned to the main column. */
+/** Pure policy for the chat containment: only the transcript, the pending
+ * questions and the composer stay in the chat column. The draft card and every
+ * task / node overview move into the right drawer, which starts collapsed and
+ * is reached through a labelled, stateful entry. */
 
 describe('drawer default state', () => {
   test('the drawer is collapsed by default', () => {
@@ -26,9 +30,32 @@ describe('drawer default state', () => {
   });
 });
 
-describe('panel placement policy', () => {
-  test('draft version history, acceptance, nodes, decisions and the task graph all live in the drawer', () => {
-    for (const id of ['draft-versions', 'acceptance', 'nodes', 'decisions', 'graph']) {
+describe('chat-stream resident policy', () => {
+  test('the chat stream keeps only the transcript, the questions and the composer', () => {
+    for (const id of ['conversation-messages', 'conversation-questions', 'conversation-composer']) {
+      expect(residentPanelIds()).toContain(id);
+      expect(isResidentPanel(id)).toBe(true);
+      expect(panelPlacement(id)).toBe('main');
+    }
+    expect(CHAT_RESIDENT_PANEL_IDS).toEqual(['conversation-messages', 'conversation-questions', 'conversation-composer']);
+  });
+
+  test('the draft card and the task overviews are not resident any more', () => {
+    for (const id of ['proposal-draft', 'draft-acceptance', 'draft-graph', 'accept-branch', 'confirm-draft']) {
+      expect(residentPanelIds()).not.toContain(id);
+      expect(isResidentPanel(id)).toBe(false);
+      expect(panelPlacement(id)).toBe('drawer');
+    }
+    // The task cards and their node summary never appear in the chat stream.
+    expect(panelPlacement('conversation-task-abc')).toBeNull();
+    expect(residentPanelIds().some(id => id.startsWith('conversation-task'))).toBe(false);
+    expect(residentPanelIds()).not.toContain('node-summary-list');
+  });
+});
+
+describe('drawer panel policy', () => {
+  test('draft versions, the draft pages, the task graph and the task navigation all live in the drawer', () => {
+    for (const id of ['draft-versions', 'acceptance', 'nodes', 'decisions', 'graph', 'task-nav', 'task']) {
       expect(drawerPanelIds()).toContain(id);
       expect(isDrawerPanel(id)).toBe(true);
       expect(panelPlacement(id)).toBe('drawer');
@@ -37,20 +64,35 @@ describe('panel placement policy', () => {
     expect(drawerPageIds()).toContain('graph');
   });
 
-  test('confirm / target branch / acceptance / questions stay visible in the main column', () => {
-    for (const id of ['proposal-draft', 'draft-acceptance', 'draft-graph', 'accept-branch', 'confirm-draft', 'conversation-questions']) {
-      expect(residentPanelIds()).toContain(id);
-      expect(isResidentPanel(id)).toBe(true);
-      expect(panelPlacement(id)).toBe('main');
-    }
-  });
-
   test('main and drawer panels are disjoint and unknown ids have no placement', () => {
     const main = new Set(residentPanelIds());
     for (const id of drawerPanelIds()) expect(main.has(id)).toBe(false);
     expect(panelPlacement('not-a-panel')).toBeNull();
     expect(isResidentPanel('graph')).toBe(false);
-    expect(isDrawerPanel('confirm-draft')).toBe(false);
+    expect(isDrawerPanel('conversation-questions')).toBe(false);
+  });
+});
+
+describe('drawer entry label', () => {
+  test('carries the draft version, the draft status and the task count', () => {
+    expect(draftStatusLabel('pending')).toBe('待确认');
+    expect(draftStatusLabel('accepted')).toBe('已确认');
+    expect(draftStatusLabel('stale')).toBe('已过期');
+    expect(draftStatusLabel('none')).toBe('暂无草稿');
+
+    const pending = drawerEntryLabel({ proposalVersion: 12, draftStatus: 'pending', taskCount: 9 });
+    expect(pending).toContain('草稿 v12');
+    expect(pending).toContain('待确认');
+    expect(pending).toContain('任务 9');
+
+    const accepted = drawerEntryLabel({ proposalVersion: 3, draftStatus: 'accepted', taskCount: 1 });
+    expect(accepted).toContain('草稿 v3');
+    expect(accepted).toContain('已确认');
+    expect(accepted).toContain('任务 1');
+
+    const empty = drawerEntryLabel({ proposalVersion: null, draftStatus: 'none', taskCount: 0 });
+    expect(empty).toContain('暂无草稿');
+    expect(empty).toContain('任务 0');
   });
 });
 
@@ -63,28 +105,45 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('DRAWER_DRAFT_PAGES.map');
     expect(source).toContain('residentPanelIds().join');
     expect(source).toContain('drawerPanelIds().join');
-    expect(source).toContain("data-resident={residentFlag('proposal-draft')}");
-    expect(source).toContain("data-resident={residentFlag('confirm-draft')}");
+    expect(source).toContain('drawerEntryLabel(');
+    expect(source).toContain('data-testid="drawer-entry"');
+    // The questions keep their resident marker; the draft card no longer does.
     expect(source).toContain("data-resident={residentFlag('conversation-questions')}");
+    expect(source).toContain('className="conversation-question-region"');
   });
 
   test('the drawer renders the draft pages plus the task graph, keeping their testids', () => {
     const source = read('src/web/Conversation.tsx');
+    expect(source).toContain('data-testid="drawer-mode-tabs"');
     expect(source).toContain('data-testid="draft-page-tabs"');
     expect(source).toContain('data-testid={`draft-tab-${item.id}`}');
     expect(source).toContain('data-testid="draft-page-graph"');
     expect(source).toContain('data-testid="drawer-draft-toc"');
     expect(source).toContain('data-testid="conversation-graph"');
+    expect(source).toContain('data-testid="drawer-task-nav"');
   });
 
-  test('the main column keeps the draft entry points and their resident markers', () => {
+  test('the draft card, the confirm controls and the task cards moved into the drawer', () => {
     const source = read('src/web/Conversation.tsx');
     expect(source).toContain('data-testid="proposal-draft"');
     expect(source).toContain('data-testid="draft-graph"');
     expect(source).toContain('data-testid="draft-acceptance"');
     expect(source).toContain('data-testid="accept-branch"');
     expect(source).toContain('data-testid="confirm-draft"');
-    // Questions are never moved behind the drawer.
+    expect(source).toContain('data-testid={`conversation-task-${task.id}`}');
     expect(source).toContain('data-testid={`conversation-questions-${task.id}`}');
+  });
+
+  test('the chat thread itself no longer renders the draft card or the task cards', () => {
+    const source = read('src/web/Conversation.tsx');
+    const thread = source.split('conversation-thread-inner')[1]?.split('conversation-runway')[0] ?? '';
+    expect(thread).not.toContain('data-testid="proposal-draft"');
+    expect(thread).not.toContain('conversation-task-');
+    expect(thread).not.toContain('node-summary-list');
+    expect(thread).not.toContain('accept-branch');
+    expect(thread).not.toContain('confirm-draft');
+    // ...but the pending questions do stay in the chat stream.
+    expect(thread).toContain('data-testid="conversation-questions"');
+    expect(thread).toContain('data-testid={`conversation-questions-${task.id}`}');
   });
 });

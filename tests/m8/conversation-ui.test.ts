@@ -211,30 +211,57 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await includes(page, '项目 project');
   await page.getByTestId('chat-input').fill('先做最小可用版，预算有限，登录先不改。');
   await page.getByTestId('chat-send').click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v1'));
+  expect(await page.getByTestId('drawer-entry-label').innerText()).toContain('待确认');
+  // The draft card now lives in the drawer; the header entry advertises its
+  // version + status while the drawer is still collapsed.
+  await page.getByTestId('drawer-entry').click();
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('最小可用版');
-  // The draft graph renders from the same versioned proposal.
-  await page.getByTestId('draft-graph').waitFor();
+  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
+  // The draft graph renders from the same versioned proposal, inside the drawer.
+  await page.getByTestId('draft-graph').click();
+  await page.getByTestId('draft-page-graph').waitFor();
+  await page.getByTestId('conversation-graph').waitFor();
   await page.screenshot({ path: join(evidence, '02-first-draft.png'), fullPage: true });
+  // The chat thread itself no longer holds the draft card.
+  expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
+  await page.getByTestId('detail-toggle').click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 3. Overturn the draft before confirming; the new draft replaces it.
   await page.getByTestId('chat-input').fill('刚才那个方案先不要，改成先验证性能瓶颈。');
   await page.getByTestId('chat-send').click();
-  await page.waitForFunction(() => document.querySelector('[data-testid="proposal-draft"]')?.textContent?.includes('草稿 v2'));
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v2'));
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('先验证性能瓶颈');
 
   // 4. Confirm the current draft: a feature task appears and starts.
   await page.getByTestId('accept-branch').fill('main');
   await page.getByTestId('confirm-draft').click();
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid^="conversation-task-"]').length === 1);
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
   await includes(page, '已确认草稿 v2');
+  await page.getByTestId('drawer-mode-tasks').click();
+  await page.locator('[data-testid^="conversation-task-"]').first().waitFor();
+  await page.locator('[data-testid^="conversation-task-"]').first().click();
+  await page.getByTestId('drawer-task-detail').waitFor();
   await page.screenshot({ path: join(evidence, '03-confirmed.png'), fullPage: true });
+  // The task card never appears in the chat stream, only in the drawer.
+  expect(await page.locator('.conversation-thread-inner [data-testid^="conversation-task-"]').count()).toBe(0);
+  await page.getByTestId('detail-toggle').click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 5. Keep asking while the task executes; the answer comes from the ledger.
   await page.getByTestId('chat-input').fill('现在卡在哪里？');
   await page.getByTestId('chat-send').click();
   await includes(page, '执行记录显示');
-  expect(await page.locator('[data-testid^="conversation-task-"]').first().innerText()).toContain('work');
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('drawer-mode-tasks').click();
+  await page.locator('[data-testid^="conversation-nodes-"]').first().waitFor();
+  expect(await page.locator('[data-testid^="conversation-nodes-"]').first().innerText()).toContain('work');
+  await page.getByTestId('detail-toggle').click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 6. Two messages in a row while the master is busy: both are kept. While the
   // master is outputting the send control is the pause control (one click pauses
@@ -252,7 +279,12 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.reload();
   await page.getByTestId('conversation').waitFor();
   await includes(page, '两条都收到。');
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v2'));
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('先验证性能瓶颈');
+  await page.getByTestId('detail-toggle').click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
   await page.screenshot({ path: join(evidence, '04-reloaded.png'), fullPage: true });
 
   // 8. Pause, queue a message, restart the daemon on the same state, resume.

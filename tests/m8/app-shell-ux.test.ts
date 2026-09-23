@@ -154,7 +154,12 @@ test('the right drawer keeps proposal details and node inspection independent fr
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  await page.getByTestId('proposal-draft').waitFor();
+  await page.getByTestId('drawer-entry').waitFor();
+  // The collapsed drawer advertises its state in the header; the draft card is
+  // not part of the chat stream any more.
+  await expect.poll(() => page.getByTestId('drawer-entry-label').innerText()).toContain('草稿 v2');
+  expect(await page.getByTestId('drawer-entry-label').innerText()).toContain('待确认');
+  expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
   const pauseBox = await page.getByTestId('conversation-pause').boundingBox();
   const detailBox = await page.getByTestId('detail-toggle').boundingBox();
   expect(pauseBox).not.toBeNull();
@@ -162,21 +167,23 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(detailBox!.x).toBeGreaterThanOrEqual(pauseBox!.x + pauseBox!.width);
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
-  // The draft details and the task graph live in the drawer now, but the
-  // compact entry points stay visible in the main column.
-  expect(await page.getByTestId('proposal-draft').innerText()).toContain('第二版增加审查');
-  expect(await page.getByTestId('draft-graph').isVisible()).toBe(true);
-  expect(await page.getByTestId('draft-acceptance').isVisible()).toBe(true);
-  expect(await page.getByTestId('accept-branch').isVisible()).toBe(true);
-  expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
   const beforeMain = await page.locator('.conversation-main').boundingBox();
   const beforeComposer = await page.locator('.conversation-composer-wrap').boundingBox();
   expect(beforeMain).not.toBeNull();
   expect(beforeComposer).not.toBeNull();
 
-  await page.getByTestId('draft-acceptance').click();
+  // One click on the labelled header entry opens the drawer on the draft page,
+  // where the summary, the confirm controls and the graph/acceptance entries
+  // now live.
+  await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
+  await page.getByTestId('proposal-draft').waitFor();
+  expect(await page.getByTestId('proposal-draft').innerText()).toContain('第二版增加审查');
+  expect(await page.getByTestId('draft-graph').isVisible()).toBe(true);
+  expect(await page.getByTestId('draft-acceptance').isVisible()).toBe(true);
+  expect(await page.getByTestId('accept-branch').isVisible()).toBe(true);
+  expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
   await page.waitForTimeout(260);
   await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
     .toBeLessThan(beforeMain!.width - 240);
@@ -221,9 +228,11 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await expect.poll(() => page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
-  // The task graph opens in the drawer, not in the main column.
-  await page.getByTestId('draft-graph').click();
+  // The task graph opens inside the drawer, not in the main column.
+  await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
+  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
+  await page.getByTestId('draft-graph').click();
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
   expect(await page.getByTestId('chat-input').count()).toBe(1);
@@ -325,7 +334,10 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').waitFor();
   await page.getByTestId('draft-graph').click();
+  await page.getByTestId('conversation-graph').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
   await page.getByTestId('open-agent-chat').click();
   const chat = page.getByTestId('graph-agent-chat');

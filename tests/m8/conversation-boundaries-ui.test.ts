@@ -90,6 +90,16 @@ test('the conversation page surfaces master questions, live worker status, costs
   const confirmed = await server.runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
   const drive = server.runtime.host.runReady();
   const workerStatus = `[data-testid="conversation-nodes-${confirmed.taskId}"] [data-node="work"]`;
+  // The task / node overview lives in the right drawer now, so open it there.
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').waitFor();
+  await page.getByTestId('drawer-mode-tasks').click();
+  await page.locator(workerStatus).waitFor();
+  // Neither the draft card nor the task / node overview appears in the chat
+  // thread any more; the drawer is their only home.
+  expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
+  expect(await page.locator('.conversation-thread-inner [data-testid^="conversation-task-"]').count()).toBe(0);
   await page.waitForFunction(selector => document.querySelector(selector)?.getAttribute('data-status') === 'running', workerStatus);
   releaseWork();
   await drive;

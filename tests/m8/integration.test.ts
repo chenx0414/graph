@@ -180,8 +180,11 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.getByTestId('new-conversation-project').selectOption('integration');
   await page.getByTestId('new-conversation-start').click();
   await page.getByTestId('conversation').waitFor();
-  await page.getByTestId('proposal-draft').waitFor();
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v1'));
   console.log('[integration] proposal-ready');
+  // The draft card lives in the drawer; one click on the labelled entry opens it.
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('proposal-draft').waitFor();
   await page.screenshot({ path: join(evidenceDir, 't08-overview.png') });
 
   const proposalText = await page.getByTestId('proposal-draft').innerText();
@@ -189,6 +192,7 @@ test('the full productized flow runs from the formal start entry with a controll
   expect(proposalText).toContain('任务图');
   await page.screenshot({ path: join(evidenceDir, 't08-confirm.png') });
   await page.getByTestId('confirm-draft').click();
+  await page.getByTestId('drawer-mode-tasks').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid^="conversation-task-"]').length === 1);
   const taskId = await page.evaluate(async () => {
     const conversationId = location.hash.replace('#/conversations/', '');
