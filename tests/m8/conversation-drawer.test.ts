@@ -111,11 +111,26 @@ describe('drawer section resolution (the task navigation must stay open)', () =>
       .toEqual({ section: 'task', taskId: null });
   });
 
-  test('a disappeared selected task falls back to the draft page', () => {
+  test('a disappeared selected task keeps the task navigation and adopts the next task', () => {
+    // Never yank the user out of the section they picked: the empty note lives in the task
+    // section, and a stale selection is replaced rather than used as a reason to go back.
     expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: [], hasProposal: true }))
-      .toEqual({ section: 'draft', taskId: null });
+      .toEqual({ section: 'task', taskId: null });
     expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: ['t2'], hasProposal: false }))
-      .toEqual({ section: 'draft', taskId: null });
+      .toEqual({ section: 'task', taskId: 't2' });
+  });
+
+  test('the task navigation stays reachable while it is still empty', () => {
+    // The "no tasks yet" note is rendered inside the task section, so the policy must not send
+    // the user back to the draft page just because no task exists yet and no proposal is there.
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [], hasProposal: false }))
+      .toEqual({ section: 'task', taskId: null });
+    for (const hasProposal of [true, false]) {
+      for (const taskIds of [[], ['t1']]) {
+        expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds, hasProposal }).section).toBe('task');
+        expect(resolveDrawerSection({ current: 'draft', selectedTaskId: 't1', taskIds, hasProposal }).section).toBe('draft');
+      }
+    }
   });
 
   test('with tasks but no selection, task is shown and the first task is selected', () => {
@@ -123,9 +138,11 @@ describe('drawer section resolution (the task navigation must stay open)', () =>
       .toEqual({ section: 'task', taskId: 't1' });
   });
 
-  test('zero tasks and no proposal default to the draft page', () => {
+  test('opening the task navigation with no tasks keeps it open', () => {
+    // The "no tasks yet" note is rendered inside the task section, so the section must stay put
+    // even with zero tasks and no proposal; only the component's initial state is the draft page.
     expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [], hasProposal: false }))
-      .toEqual({ section: 'draft', taskId: null });
+      .toEqual({ section: 'task', taskId: null });
     expect(resolveDrawerSection({ current: 'draft', selectedTaskId: null, taskIds: [], hasProposal: false }))
       .toEqual({ section: 'draft', taskId: null });
   });

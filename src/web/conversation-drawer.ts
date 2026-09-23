@@ -43,20 +43,16 @@ export interface DrawerSectionResolution {
  * that was the bug that made the task navigation unclickable.
  */
 export function resolveDrawerSection(input: DrawerSectionInput): DrawerSectionResolution {
-  const { current, selectedTaskId, taskIds, hasProposal } = input;
-  // The draft page is the user's explicit choice; never yank them out of it.
+  const { current, selectedTaskId, taskIds } = input;
+  // The user's own choice always wins. Both sections are legitimate: the draft page is never
+  // yanked away, and the task navigation stays reachable even while it is still empty — the
+  // "no tasks yet" note lives there, so sending the user back to the draft page would make that
+  // note unreachable. `hasProposal` deliberately no longer overrides either choice.
   if (current === 'draft') return { section: 'draft', taskId: selectedTaskId };
-  if (selectedTaskId !== null && taskIds.includes(selectedTaskId)) {
-    return { section: 'task', taskId: selectedTaskId };
-  }
-  // The chosen task no longer exists: fall back to the draft page.
-  if (selectedTaskId !== null) return { section: 'draft', taskId: null };
-  // Nothing selected yet: adopt the first task as soon as one exists.
-  if (taskIds.length > 0) return { section: 'task', taskId: taskIds[0] ?? null };
-  // No task to select. Keep the task section while a proposal is still there
-  // (the task list may simply be loading); otherwise use the draft default.
-  if (hasProposal) return { section: 'task', taskId: null };
-  return { section: 'draft', taskId: null };
+  // Task navigation: keep the chosen task while it still exists, otherwise adopt the first one;
+  // with no tasks at all the section stays put and renders its empty note.
+  const stillThere = selectedTaskId !== null && taskIds.includes(selectedTaskId);
+  return { section: 'task', taskId: stillThere ? selectedTaskId : (taskIds[0] ?? null) };
 }
 
 /** Draft-detail pages that appear as tabs inside the drawer. */
