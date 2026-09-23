@@ -10,6 +10,7 @@ import {
   FALLBACK_PLATFORMS,
   PROVIDER_COMPATIBILITIES,
   buildEntryDraft,
+  completeCost,
   customDraft,
   draftFromPlatform,
   draftToModelEntry,
@@ -29,8 +30,10 @@ import {
   selectionBlockedReason,
   uniqueLocalModelId,
   validateProviderDraft,
+  withCostField,
   writeConcurrency,
   type ConcurrencyDraft,
+  type ModelCostDraft,
   type ModelPick,
   type PlatformPreset,
   type ProbeModel,
@@ -51,12 +54,11 @@ function loadModelsDev(): Promise<ModelsDevModule> {
   return import('../catalog/models-dev.ts');
 }
 
-type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 const THINKING_LEVELS: ModelThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 type RawModel = {
-  id: string; provider: string; modelId?: string; grade: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
-  contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: Cost;
+  id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
+  contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: ModelCostDraft;
   input?: ModelInput[];
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string; retrievedAt?: string; catalogRevision?: string };
   headers?: Record<string, string>;
@@ -512,7 +514,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
         taken.push(id);
         const built = draftToModelEntry(buildEntryDraft({
           id, provider: active.platformId, baseUrl, api: active.api, credentialId: active.credentialId, modelId: pick.modelId,
-          metadata, grade: 'medium',
+          metadata,
         }));
         const headers = modelRequestHeaders({ provider: active.platformId, baseUrl });
         list.push({ ...built, ...(headers ? { headers } : {}) });
@@ -521,12 +523,11 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     });
     setPicks(current => current.map(pick => chosen.some(item => item.modelId === pick.modelId) ? { ...pick, selected: false } : pick));
     setBusy(false);
-    const incomplete = prepared.filter(({ metadata }) => !hasRequiredModelFields(metadataToFields(metadata))).length;
-    if (incomplete) {
-      toast(`已添加所选模型；其中 ${incomplete} 个缺少必填的上下文上限/最大输出，填写后才能保存（价格等未知项可留空，不会按 0 计算）`, 'info');
-    } else {
-      toast('已添加所选模型；元数据已按内置快照填充', 'success');
-    }
+    const missingCaps = prepared.filter(({ metadata }) => {
+      const fields = metadataToFields(metadata);
+      return !hasRequiredModelFields({ grade: 'pending', contextWindow: fields.contextWindow, maxTokens: fields.maxTokens });
+    }).length;
+    toast(`已添加所选模型；请为每个模型选择等级${missingCaps ? `，并为其中 ${missingCaps} 个填写上下文上限/最大输出` : ''}后才能保存（价格等未知项可留空，不会按 0 计算）`, 'info');
   };
 
   const addManual = () => {
@@ -609,7 +610,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
             <Button size="sm" icon="plus" data-testid="model-add-selected" disabled={busy || Boolean(blockedReason) || !picks.some(pick => pick.selected)} onClick={() => void addSelected()}>添加所选模型</Button>
           </>}>
           {blockedReason && <p className="field-error" data-testid="provider-credential-blocked">{blockedReason}</p>}
-          {requiredProblems.length > 0 && <p className="field-error" data-testid="model-required-missing">有 {requiredProblems.length} 个模型缺少必填字段（{requiredProblems.map(problem => problem.id).join('、')}）；请填写上下文上限与最大输出后再保存（其它未知项可留空）。</p>}
+          {requiredProblems.length > 0 && <p className="field-error" data-testid="model-required-missing">有 {requiredProblems.length} 个模型缺少必填字段（{requiredProblems.map(problem => problem.id).join('、')}）；请补全上下文上限/最大输出/模型等级，并确保价格成套填写（不完整的价格不会按 0 计算）。</p>}
           <p className="muted" data-testid="model-probe-note">{note || '先「保存并验证」，或凭据就绪后点「获取可用模型」。'}</p>
           {probeModels.length > 0 && (
             <div className="model-probe-list" data-testid="model-probe-list">
@@ -633,18 +634,33 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
           {providerEntries.map(entry => {
             const index = entries.indexOf(entry);
             const fieldIssues = modelFieldErrors(entry);
+            const complete = completeCost(entry.cost);
+            const setCost = (field: 'input' | 'output' | 'cacheRead' | 'cacheWrite', raw: string) => mutate(next => {
+              const target = next.models!.entries[index]!;
+              const parsed = raw === '' ? undefined : Number(raw);
+              const cost = withCostField(target.cost, field, parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined);
+              if (cost) target.cost = cost; else delete target.cost;
+              // A price is a set: only a complete one is known; a partial one is
+              // marked unknown (never written as 0).
+              const currency = target.pricing?.currency ?? '';
+              if (completeCost(target.cost) && currency) target.pricing = { currency, unit: 'per_million_tokens', status: 'known' };
+              else if (completeCost(target.cost)) target.pricing = { currency: 'USD', unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' };
+              else if (currency) target.pricing = { currency, unit: 'per_million_tokens', status: 'unknown' };
+              else delete target.pricing;
+            });
             return (
               <div className="model-card" key={entry.id} data-testid={`provider-model-${index}`}>
                 <div className="card-body">
                   <div className="row">
                     <strong className="grow">{entry.modelId ?? entry.id}</strong>
-                    <Pill tone={entry.cost ? 'info' : 'warn'} testid={`model-${index}-price`}>{entry.cost ? `价格 输入 ${entry.cost.input}/输出 ${entry.cost.output} 每百万（${entry.pricing?.currency ?? 'USD'}）` : '价格未知（pricing.status=unknown，不会按 0 计算）'}</Pill>
+                    <Pill tone={complete ? 'info' : 'warn'} testid={`model-${index}-price`}>{complete ? `价格 输入 ${complete.input}/输出 ${complete.output}/缓存读 ${complete.cacheRead}/缓存写 ${complete.cacheWrite} 每百万（${entry.pricing?.currency ?? 'USD'}）` : '价格未知（pricing.status=unknown，不会按 0 计算）'}</Pill>
                   </div>
                   <div className="row">
                     <Field label="上下文上限" error={fieldIssues.contextWindow}><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-context`} data-invalid={fieldIssues.contextWindow ? 'true' : undefined} value={entry.contextWindow ?? ''} placeholder="未知，请填写" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.contextWindow; else target.contextWindow = Number(raw); })} /></Field>
                     <Field label="最大输出" error={fieldIssues.maxTokens}><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-maxTokens`} data-invalid={fieldIssues.maxTokens ? 'true' : undefined} value={entry.maxTokens ?? ''} placeholder="未知，请填写" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.maxTokens; else target.maxTokens = Number(raw); })} /></Field>
-                    <Field label="模型等级">
-                      <select className="select" style={{ width: 110 }} data-testid={`model-${index}-grade`} value={entry.grade} onChange={event => mutate(next => { next.models!.entries[index]!.grade = event.target.value; })}>
+                    <Field label="模型等级" error={fieldIssues.grade}>
+                      <select className="select" style={{ width: 130 }} data-testid={`model-${index}-grade`} data-invalid={fieldIssues.grade ? 'true' : undefined} value={entry.grade ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.grade = event.target.value; else delete target.grade; })}>
+                        <option value="">请选择</option>
                         {GRADES.map(grade => <option key={grade} value={grade}>{grade}</option>)}
                       </select>
                     </Field>
@@ -657,12 +673,15 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                   <div className="row">
                     <label className="checkbox-row"><input type="checkbox" data-testid={`model-${index}-images`} checked={(entry.input ?? ['text']).includes('image')} onChange={event => mutate(next => { next.models!.entries[index]!.input = event.target.checked ? ['text', 'image'] : ['text']; })} /><span>支持图片输入</span></label>
                     <label className="checkbox-row"><input type="checkbox" data-testid={`model-${index}-reasoning`} checked={entry.reasoning !== false} onChange={event => mutate(next => { next.models!.entries[index]!.reasoning = event.target.checked; })} /><span>可思考模型</span></label>
-                    <Field label="输入价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={entry.cost?.input ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '' || !Number.isFinite(Number(raw))) { delete target.cost; return; } target.cost = { input: Number(raw), output: target.cost?.output ?? 0, cacheRead: target.cost?.cacheRead ?? 0, cacheWrite: target.cost?.cacheWrite ?? 0 }; })} /></Field>
-                    <Field label="输出价/百万"><input className="input" style={{ width: 110 }} type="number" placeholder="未知" data-testid={`model-${index}-output-cost`} value={entry.cost?.output ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '' || !Number.isFinite(Number(raw))) { delete target.cost; return; } target.cost = { input: target.cost?.input ?? 0, output: Number(raw), cacheRead: target.cost?.cacheRead ?? 0, cacheWrite: target.cost?.cacheWrite ?? 0 }; })} /></Field>
-                    <Field label="币种"><input className="input" style={{ width: 90 }} placeholder="未知" data-testid={`model-${index}-currency`} value={entry.pricing?.currency ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const currency = event.target.value.trim().toUpperCase(); if (!currency) { delete target.pricing; return; } target.pricing = { currency, unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' }; })} /></Field>
+                    <Field label="输入价/百万" error={fieldIssues.cost}><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-input-cost`} value={entry.cost?.input ?? ''} onChange={event => setCost('input', event.target.value)} /></Field>
+                    <Field label="输出价/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-output-cost`} value={entry.cost?.output ?? ''} onChange={event => setCost('output', event.target.value)} /></Field>
+                    <Field label="缓存读/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-cache-read-cost`} value={entry.cost?.cacheRead ?? ''} onChange={event => setCost('cacheRead', event.target.value)} /></Field>
+                    <Field label="缓存写/百万"><input className="input" style={{ width: 100 }} type="number" placeholder="未知" data-testid={`model-${index}-cache-write-cost`} value={entry.cost?.cacheWrite ?? ''} onChange={event => setCost('cacheWrite', event.target.value)} /></Field>
+                    <Field label="币种"><input className="input" style={{ width: 80 }} placeholder="USD" data-testid={`model-${index}-currency`} value={entry.pricing?.currency ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; const currency = event.target.value.trim().toUpperCase(); if (!currency) { delete target.pricing; return; } target.pricing = { currency, unit: 'per_million_tokens', status: completeCost(target.cost) ? 'known' : 'unknown', sourceUrl: 'manual' }; })} /></Field>
                     <div className="topbar-spacer" />
                     <Button size="sm" variant="danger" data-testid={`model-${index}-remove`} onClick={() => mutate(next => { next.models!.entries.splice(index, 1); })}>删除</Button>
                   </div>
+                  {fieldIssues.cost && <p className="field-error" data-testid={`model-${index}-cost-error`}>{fieldIssues.cost}</p>}
                 </div>
               </div>
             );
@@ -812,7 +831,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     const missing = missingRequiredModelFields(document.models?.entries ?? []);
     if (missing.length) {
       const names = missing.map(problem => problem.id).join('、');
-      setError(Object.assign(new Error(`已阻止保存：模型 ${names} 缺少必填的上下文上限/最大输出，请填写后再试（未知项可留空，但不会按 0 计算）`), { field: 'models.entries' }));
+      setError(Object.assign(new Error(`已阻止保存：模型 ${names} 缺少必填的上下文上限/最大输出/模型等级，或价格未成套填写；请修正后再试（其余未知项可留空，但绝不按 0 计算）`), { field: 'models.entries' }));
       setStatus('');
       return;
     }

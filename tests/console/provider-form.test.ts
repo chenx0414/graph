@@ -15,6 +15,8 @@ import {
   FALLBACK_PLATFORMS,
   addManualModelPick,
   buildEntryDraft,
+  completeCost,
+  costError,
   customDraft,
   draftFromPlatform,
   draftToModelEntry,
@@ -34,11 +36,13 @@ import {
   selectedProbeModels,
   selectionBlockedReason,
   validateProviderDraft,
+  withCostField,
   writeConcurrency,
   type ConcurrencyConfig,
 } from '../../src/web/provider-form.ts';
 // @ts-ignore -- .tsx import from a NodeNext test program
 import { ADVANCED_SETTING_IDS } from '../../src/web/Settings.tsx';
+import { estimateCost } from '../../src/catalog/models.ts';
 
 const preset = FALLBACK_PLATFORMS[0]!;
 
@@ -219,6 +223,12 @@ describe('snapshot metadata mapping', () => {
     expect(entry.pricing?.status).toBe('unknown');
   });
 
+  it('never invents a grade when the snapshot (which has none) does not provide one', () => {
+    const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: { contextWindow: 128_000, maxTokens: 4_096 } });
+    expect(draft.grade).toBeUndefined();
+    expect(draftToModelEntry(draft)).not.toHaveProperty('grade');
+  });
+
   it('does not overwrite values the user already typed', () => {
     const typed = { ...buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null }), contextWindow: 9_999, maxTokens: 1_234, manual: false };
     const filled = fillEntryFromMetadata(typed, { contextWindow: 128_000, maxTokens: 4_096 });
@@ -248,16 +258,24 @@ describe('required model fields and credential gating (step 2)', () => {
     expect(errors.maxTokens).toMatch(/请填写/);
     expect(hasRequiredModelFields(unknown)).toBe(false);
 
-    const problems = missingRequiredModelFields([{ id: 'unknown-model' }, { id: 'known', contextWindow: 128_000, maxTokens: 4_096 }]);
+    const problems = missingRequiredModelFields([{ id: 'unknown-model' }, { id: 'known', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium' }]);
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatchObject({ index: 0, id: 'unknown-model', fields: ['contextWindow', 'maxTokens'] });
+    expect(problems[0]).toMatchObject({ index: 0, id: 'unknown-model' });
+    expect(problems[0]!.fields).toEqual(expect.arrayContaining(['contextWindow', 'maxTokens', 'grade']));
   });
 
-  it('passes once the user fills both required caps', () => {
-    const entry = { ...buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null }), contextWindow: 128_000, maxTokens: 8_192 };
+  it('passes once the user fills the required caps and picks a grade', () => {
+    const entry = { ...buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null }), contextWindow: 128_000, maxTokens: 8_192, grade: 'medium' as const };
     expect(modelFieldErrors(entry)).toEqual({});
     expect(hasRequiredModelFields(entry)).toBe(true);
     expect(missingRequiredModelFields([entry])).toEqual([]);
+  });
+
+  it('(e) requires the user to pick a grade instead of defaulting to medium', () => {
+    const unknownGrade = { id: 'm', contextWindow: 128_000, maxTokens: 4_096 };
+    expect(modelFieldErrors(unknownGrade).grade).toMatch(/请选择模型等级/);
+    expect(missingRequiredModelFields([unknownGrade])[0]!.fields).toContain('grade');
+    expect(modelFieldErrors({ ...unknownGrade, grade: 'high' }).grade).toBeUndefined();
   });
 
   it('blocks model selection while the credential is unresolved and names the daemon ref', () => {
@@ -265,6 +283,44 @@ describe('required model fields and credential gating (step 2)', () => {
     expect(blocked).toMatch(/凭据未解析/);
     expect(blocked).toContain('GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN');
     expect(selectionBlockedReason({ resolved: true, credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' })).toBeNull();
+  });
+});
+
+describe('price completeness (step 2)', () => {
+  it('(d) rejects a half-filled price and never turns a missing side into 0', () => {
+    expect(costError({ input: 5 })).toMatch(/成套/);
+    expect(costError({ input: 5, output: 6 })).toMatch(/成套/);
+    expect(completeCost({ input: 5, output: 6 })).toBeNull();
+
+    const entry = { id: 'm', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium', cost: { input: 5 } };
+    expect(modelFieldErrors(entry).cost).toMatch(/成套/);
+    // The partial cost is never completed with a zero.
+    expect(completeCost(entry.cost)).toBeNull();
+    expect(completeCost(entry.cost)).not.toEqual({ input: 5, output: 0, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it('accepts a complete price (including genuine free prices) and clears to unknown when emptied', () => {
+    const complete = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    expect(costError(complete)).toBeNull();
+    expect(completeCost(complete)).toEqual(complete);
+    expect(costError(undefined)).toBeNull();
+    expect(completeCost(undefined)).toBeNull();
+    const partial = withCostField({ input: 5 }, 'output', 6);
+    expect(partial).toEqual({ input: 5, output: 6 });
+    expect(withCostField(partial, 'output', undefined)).toEqual({ input: 5 });
+    expect(withCostField({ input: 5 }, 'input', undefined)).toBeUndefined();
+  });
+
+  it('(d) a partial cost blocks the document save', () => {
+    const problems = missingRequiredModelFields([{ id: 'm', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium', cost: { input: 1 } }]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]!.fields).toContain('cost');
+  });
+
+  it('(d) estimateCost treats a missing price side as unknown, never as 0', () => {
+    const usage = { input: 1_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 };
+    expect(estimateCost(usage, { input: 1, output: null as unknown as number, cacheRead: 0, cacheWrite: 0 })).toEqual({ unknown: true });
+    expect(estimateCost(usage, { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 })).toMatchObject({ amount: 2 });
   });
 });
 

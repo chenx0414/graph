@@ -111,6 +111,14 @@ export function parseDefinitionVersion(value: string) {
 
 export function estimateCost(usage: TokenUsage, cost?: ModelCost, pricing?: ModelPricing): Json {
   if (!cost) return { unknown: true };
+  // A price is a complete set. A missing side (for example `null` from a hand-
+  // written document) must never be multiplied as 0: treat it as unknown so an
+  // incomplete cost cannot silently bill at zero. Genuine zeroes (free models)
+  // are finite numbers and still estimate normally.
+  for (const field of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) {
+    const value = cost[field];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return { unknown: true };
+  }
   const amount = (usage.input * cost.input + usage.output * cost.output + usage.cacheRead * cost.cacheRead + usage.cacheWrite * cost.cacheWrite) / 1_000_000;
   if (!Number.isFinite(amount)) return { unknown: true };
   // The currency and price revision are frozen with the amount so a later

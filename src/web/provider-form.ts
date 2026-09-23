@@ -378,6 +378,49 @@ export function metadataToFields(metadata: SnapshotMetadata | null | undefined):
 
 /** A model entry under construction. Numeric fields stay optional so an
  * unmatched model shows blank inputs instead of a fake `0`. */
+/** A hand-edited price may be partially typed while the user works; a price is
+ * only a value once all four sides are known. Partial sides are an error and are
+ * never persisted as 0 (a zero would be billed as a real, free price). */
+export interface ModelCostDraft {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
+export const MODEL_COST_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
+
+function finitePrice(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/** `null` means the price is fine (complete or entirely absent); a string is the
+ * explicit reason a partial/negative price blocks saving. */
+export function costError(cost?: ModelCostDraft | null): string | null {
+  if (!cost) return null;
+  const present = MODEL_COST_FIELDS.filter(field => cost[field] !== undefined);
+  if (!present.length) return null;
+  if (present.length < MODEL_COST_FIELDS.length) return '价格需要成套填写（输入/输出/缓存读/缓存写）；缺失项不会按 0 计算';
+  return MODEL_COST_FIELDS.every(field => finitePrice(cost[field]))
+    ? null
+    : '价格需要成套填写（输入/输出/缓存读/缓存写）；缺失项不会按 0 计算';
+}
+
+/** The complete `ModelCost`, or null when the price is absent/partial. */
+export function completeCost(cost?: ModelCostDraft | null): ModelCost | null {
+  if (!cost) return null;
+  if (!MODEL_COST_FIELDS.every(field => finitePrice(cost[field]))) return null;
+  return { input: cost.input!, output: cost.output!, cacheRead: cost.cacheRead!, cacheWrite: cost.cacheWrite! };
+}
+
+/** Update one price side. Clearing a side leaves the cost partial (never 0). */
+export function withCostField(cost: ModelCostDraft | undefined, field: keyof ModelCost, value: number | undefined): ModelCostDraft | undefined {
+  const next: ModelCostDraft = { ...(cost ?? {}) };
+  if (value === undefined || !Number.isFinite(value)) delete next[field];
+  else next[field] = value;
+  return Object.keys(next).length ? next : undefined;
+}
+
 export interface ModelEntryDraft {
   id: string;
   modelId: string;
@@ -391,7 +434,7 @@ export interface ModelEntryDraft {
   input?: ModelInput[];
   reasoning?: boolean;
   defaultThinkingLevel?: ModelThinkingLevel;
-  cost?: ModelCost;
+  cost?: ModelCostDraft;
   pricing?: ModelPricing;
   /** User-edited fields are never overwritten by a later probe. */
   manual?: boolean;
@@ -456,20 +499,30 @@ export function fillEntryFromMetadata(entry: ModelEntryDraft, metadata: Snapshot
 
 /** The existing `ModelEntry` shape, except the context/output caps stay
  * optional: an unmatched model must show blank inputs (the server then asks
- * the user to fill them) rather than a fabricated positive number. */
-export type PersistedModelEntry = Omit<ModelEntry, 'contextWindow' | 'maxTokens' | 'credentialId'> & {
+ * the user to fill them) rather than a fabricated positive number. `grade` is
+ * optional too: the models.dev snapshot carries no grade, so the user must
+ * choose it explicitly instead of inheriting a silent default. */
+export type PersistedModelEntry = Omit<ModelEntry, 'contextWindow' | 'maxTokens' | 'credentialId' | 'grade'> & {
   contextWindow?: number;
   maxTokens?: number;
   credentialId: string;
+  grade?: ModelGrade;
 };
 
-/** Persist a draft without inventing values for unknown metadata. */
+/** Persist a draft without inventing values for unknown metadata: no fake
+ * grade, and a price only when all four sides are known. */
 export function draftToModelEntry(draft: ModelEntryDraft): PersistedModelEntry {
+  const cost = completeCost(draft.cost);
+  const pricing = cost
+    ? (draft.pricing && draft.pricing.status !== 'unknown'
+        ? draft.pricing
+        : { currency: draft.pricing?.currency || 'USD', unit: 'per_million_tokens' as const, status: 'known' as const, sourceUrl: 'manual' })
+    : draft.pricing;
   return {
     id: draft.id,
     provider: draft.provider,
     ...(draft.modelId !== draft.id ? { modelId: draft.modelId } : {}),
-    grade: draft.grade ?? 'medium',
+    ...(draft.grade ? { grade: draft.grade } : {}),
     api: draft.api,
     baseUrl: draft.baseUrl,
     ...(draft.contextWindow !== undefined ? { contextWindow: draft.contextWindow } : {}),
@@ -478,8 +531,8 @@ export function draftToModelEntry(draft: ModelEntryDraft): PersistedModelEntry {
     ...(draft.reasoning !== undefined ? { reasoning: draft.reasoning } : {}),
     ...(draft.defaultThinkingLevel ? { defaultThinkingLevel: draft.defaultThinkingLevel } : {}),
     credentialId: draft.credentialId,
-    ...(draft.cost ? { cost: draft.cost } : {}),
-    ...(draft.pricing ? { pricing: draft.pricing } : {}),
+    ...(cost ? { cost } : {}),
+    ...(pricing ? { pricing } : {}),
   };
 }
 
@@ -497,43 +550,52 @@ function positiveInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
-export interface ModelNumericFields {
+export interface ModelValidationFields {
+  /** Required by the config parser; unknown means the user must choose. */
+  grade?: string | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
+  /** Partial while the user types; a partial price is an error. */
+  cost?: ModelCostDraft | null;
 }
 
 export interface ModelFieldErrors {
   contextWindow?: string;
   maxTokens?: string;
+  grade?: string;
+  cost?: string;
 }
 
-/** `contextWindow`/`maxTokens` are required by the config parser. A model whose
- * snapshot hit did not cover them must stay unsaved until the user types them;
- * every other field may stay blank with unknown semantics. */
-export function modelFieldErrors(entry: ModelNumericFields): ModelFieldErrors {
+/** `contextWindow`/`maxTokens`/`grade` are required by the config parser. A
+ * model whose snapshot hit did not cover them must stay unsaved until the user
+ * provides them; every other field may stay blank with unknown semantics. */
+export function modelFieldErrors(entry: ModelValidationFields): ModelFieldErrors {
   const errors: ModelFieldErrors = {};
   if (positiveInt(entry.contextWindow) === undefined) errors.contextWindow = '上下文上限未知，请填写后再保存';
   if (positiveInt(entry.maxTokens) === undefined) errors.maxTokens = '最大输出未知，请填写后再保存';
+  if (!entry.grade) errors.grade = '请选择模型等级（快照不提供 grade，必须显式选择）';
+  const price = costError(entry.cost);
+  if (price) errors.cost = price;
   return errors;
 }
 
-export function hasRequiredModelFields(entry: ModelNumericFields): boolean {
+export function hasRequiredModelFields(entry: ModelValidationFields): boolean {
   return Object.keys(modelFieldErrors(entry)).length === 0;
 }
 
 export interface MissingModelFields {
   index: number;
   id: string;
-  fields: ('contextWindow' | 'maxTokens')[];
+  fields: (keyof ModelFieldErrors)[];
 }
 
 /** Required-field problems for the whole document, so the autosave can block
  * with a named reason instead of sending a document the parser will reject. */
-export function missingRequiredModelFields(entries: readonly ({ id?: string } & ModelNumericFields)[]): MissingModelFields[] {
+export function missingRequiredModelFields(entries: readonly ({ id?: string } & ModelValidationFields)[]): MissingModelFields[] {
   const problems: MissingModelFields[] = [];
   entries.forEach((entry, index) => {
     const errors = modelFieldErrors(entry);
-    const fields = (['contextWindow', 'maxTokens'] as const).filter(field => errors[field]);
+    const fields = (['contextWindow', 'maxTokens', 'grade', 'cost'] as const).filter(field => errors[field]);
     if (fields.length) problems.push({ index, id: entry.id ?? `entries[${index}]`, fields: [...fields] });
   });
   return problems;
