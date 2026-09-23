@@ -96,10 +96,21 @@ function toDraft(config: ConfigResponse['config']): RawConfig {
   return {
     version: 1,
     projects: config.projects ?? [],
-    ...(config.models ? { models: { entries: config.models.entries.map(({ thinkingOptions: _derived, ...entry }) => entry) } } : {}),
+    ...(config.models ? { models: { entries: config.models.entries } } : {}),
     credentials,
     limits: config.limits ?? {},
     access: config.access ?? STANDARD_ACCESS,
+  };
+}
+
+/** The document the daemon stores: view-only fields the console derives (the
+ * per-model thinking strengths) are dropped here, so a save can never write
+ * derived data into the configuration file. */
+function toDocument(draft: RawConfig): RawConfig {
+  if (!draft.models) return draft;
+  return {
+    ...draft,
+    models: { ...draft.models, entries: draft.models.entries.map(({ thinkingOptions: _derived, ...entry }) => entry) },
   };
 }
 
@@ -936,7 +947,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
         method: 'POST',
         body: JSON.stringify({
           expectedRevision,
-          document: { ...document, version: 1 },
+          document: { ...toDocument(document), version: 1 },
         }),
       });
       latestRevision.current = response.revision;

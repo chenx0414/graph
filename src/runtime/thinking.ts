@@ -11,8 +11,6 @@ import type { ModelEntry, ModelThinkingLevel, ModelThinkingOption } from '../cat
 import { modelMetadataFor } from '../catalog/thinking.ts';
 import { toPiModel } from './pi-adapter.ts';
 
-const OFF_LABEL = '关闭';
-
 /** Thinking strengths this model accepts, in Pi's canonical order. Empty for a
  * model that cannot think at all. */
 export function thinkingOptionsFor(entry: ModelEntry): ModelThinkingOption[] {
@@ -20,7 +18,10 @@ export function thinkingOptionsFor(entry: ModelEntry): ModelThinkingOption[] {
   const labels = new Map((modelMetadataFor(entry)?.thinkingOptions ?? []).map(option => [option.level, option.label]));
   return getSupportedThinkingLevels(toPiModel(entry)).map(level => ({
     level,
-    label: level === 'off' ? OFF_LABEL : labels.get(level) ?? level,
+    // The label is the provider's own spelling of this level, and only that:
+    // when the snapshot names none, the level name itself stands in and the
+    // console renders its own label instead of inventing a second name.
+    label: labels.get(level) ?? level,
   }));
 }
 

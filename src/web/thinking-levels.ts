@@ -34,10 +34,13 @@ export function thinkingLabel(level: string | undefined): string {
 }
 
 /** The model's own name for a level is shown whenever it differs from Pi's
- * vocabulary, so a provider-specific spelling is never hidden. */
+ * vocabulary, so a provider-specific spelling is never hidden. A label that is
+ * already the console's own wording adds nothing and is not repeated. */
 export function thinkingOptionLabel(option: ThinkingOptionView): string {
   const canonical = thinkingLabel(option.level);
-  return option.label && option.label !== option.level ? `${canonical}（${option.label}）` : canonical;
+  return option.label && option.label !== option.level && option.label !== canonical
+    ? `${canonical}（${option.label}）`
+    : canonical;
 }
 
 export interface ThinkingView {

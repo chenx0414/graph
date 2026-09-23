@@ -28,7 +28,13 @@ describe('per-model thinking strengths', () => {
   test('the provider spelling of a level is kept as its label', () => {
     const options = thinkingOptionsFor(entry());
     expect(options.find(option => option.level === 'xhigh')?.label).toBe('xhigh');
-    expect(options.find(option => option.level === 'off')?.label).toBe('关闭');
+    // xai publishes no name for switching thinking off, so the level name stands
+    // in; the console renders its own label for that instead of a second name.
+    expect(options.find(option => option.level === 'off')?.label).toBe('off');
+    // ChatGPT does name it, and the console shows that name beside 关闭.
+    const gpt = thinkingOptionsFor(entry({ id: 'chatgpt:gpt-5.6', provider: 'chatgpt', modelId: 'gpt-5.6' }));
+    expect(gpt.find(option => option.level === 'off')?.label).toBe('none');
+    expect(gpt.map(option => option.level)).toEqual(['off', 'low', 'medium', 'high', 'xhigh', 'max']);
   });
 
   test('a model with no discrete effort vocabulary keeps Pi default levels', () => {

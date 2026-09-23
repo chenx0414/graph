@@ -45,6 +45,8 @@ describe('thinking control view', () => {
   test('a provider-specific name is shown next to the canonical label', () => {
     expect(thinkingOptionLabel(option('high'))).toBe('高');
     expect(thinkingOptionLabel(option('off', 'none'))).toBe('关闭（none）');
+    // A label that is already the console's own wording is not repeated.
+    expect(thinkingOptionLabel(option('off', '关闭'))).toBe('关闭');
     expect(thinkingLabel('xhigh')).toBe('极高');
     expect(thinkingLabel(undefined)).toBe('—');
   });
