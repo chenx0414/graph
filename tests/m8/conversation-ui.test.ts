@@ -160,7 +160,9 @@ test('conversation telemetry comes from recorded master usage and the configured
   const view = await server.runtime.conversations.view(created.conversationId);
   expect(view.telemetry).toMatchObject({
     model: 'local',
-    thinkingLevel: 'off',
+    // Thinking is always on: the fixture provider is not in the catalog, so the
+    // lowest of Pi's default levels is used instead of `off`.
+    thinkingLevel: 'minimal',
     cacheHitRate: 0,
     cachedInput: 0,
     cacheInput: 12,
