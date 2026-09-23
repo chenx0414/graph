@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
-import { GitIntegration } from '../../src/git/integration.ts';
+import { GitIntegration, rechecksAfterIntegrationChange } from '../../src/git/integration.ts';
+import type { NodeSpec } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -201,4 +202,48 @@ test('a judging node re-reads the current integration instead of its stale work 
   git(lane!, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'lane own commit']);
   const laneAgain = integration.workspace('t', 'inst-lane', 'impl-x', 'agent', 'work');
   expect(existsSync(join(laneAgain!, 'own.txt'))).toBe(true);
+}, 30_000);
+
+test('only program checks and judging agent nodes re-run when the integration moves', () => {
+  const spec = (kind: string, action: string) => ({ kind, action } as unknown as NodeSpec);
+  expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'succeeded')).toBe(true);
+  // A review read the integration sha it judged; after a lane rework its verdict is about old code.
+  expect(rechecksAfterIntegrationChange(spec('agent', 'review'), 'succeeded')).toBe(true);
+  // A work lane keeps its own commits, and a node that never finished has nothing to invalidate.
+  expect(rechecksAfterIntegrationChange(spec('agent', 'work'), 'succeeded')).toBe(false);
+  expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'running')).toBe(false);
+  expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'blocked')).toBe(false);
+});
+
+test('a terminal task releases its working copies but keeps its integration branch', async () => {
+  const root = await temp('release');
+  const state = join(root, '.state');
+  git(root, ['init', '-q', '-b', 'main']);
+  await writeFile(join(root, 'app.txt'), 'base\n');
+  git(root, ['add', 'app.txt']);
+  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'init']);
+  const { db, integration } = await makeProject(root, state);
+  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
+  db.db.prepare("INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES('t','p','清理工作副本',1,0,'running',0,1)").run();
+  integration.prepareTask('t', 'main');
+  expect(integration.workspace('t', 'inst-work', 'impl-x', 'agent', 'work')).toBeTruthy();
+  const rows = db.db.prepare('SELECT instance_id,path,branch FROM worktrees WHERE task_id=?').all('t') as { instance_id: string; path: string; branch: string }[];
+  expect(rows.length).toBeGreaterThan(1);
+  const taskBranch = rows.find(row => row.instance_id.startsWith('integration:'))!.branch;
+  const copyBranches = rows.map(row => row.branch).filter(branch => branch.startsWith('graph/copy/'));
+  expect(copyBranches.length).toBeGreaterThan(0);
+  for (const row of rows) expect(existsSync(row.path)).toBe(true);
+
+  db.db.prepare("UPDATE tasks SET phase='completed' WHERE id='t'").run();
+  expect(integration.sweepTerminalWorkcopies()).toBe(1);
+
+  for (const row of rows) expect(existsSync(row.path)).toBe(false);
+  expect(db.db.prepare('SELECT COUNT(*) AS n FROM worktrees WHERE task_id=?').get('t')).toEqual({ n: 0 });
+  for (const branch of copyBranches) {
+    expect(() => git(root, ['rev-parse', '--verify', '--quiet', branch])).toThrow();
+  }
+  expect(git(root, ['rev-parse', '--verify', '--quiet', taskBranch])).toBeTruthy();
+  // A running task keeps its copies: only terminal phases are swept.
+  db.db.prepare("UPDATE tasks SET phase='running' WHERE id='t'").run();
+  expect(integration.sweepTerminalWorkcopies()).toBe(0);
 }, 30_000);

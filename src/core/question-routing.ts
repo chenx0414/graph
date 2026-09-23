@@ -32,8 +32,11 @@ const POLICIES: Readonly<Record<string, QuestionPolicy>> = {
   recovery: { owner: 'main', answers: ['retry'], retryOnMessage: true },
   result_noncompliant: { owner: 'main', answers: ['retry'], escalate: true },
   git_dirty: { owner: 'main', answers: ['acknowledge'] },
-  rework: { owner: 'main', answers: ['respond', 'retry'] },
-  stalled: { owner: 'main', answers: ['respond', 'retry'] },
+  // A node stuck for three rounds or returned for rework may need a decision only the user can
+  // make. Escalating hands the decision over with the main Agent's own explanation attached
+  // instead of looping on a retry that cannot change the outcome.
+  rework: { owner: 'main', answers: ['respond', 'retry'], escalate: true },
+  stalled: { owner: 'main', answers: ['respond', 'retry'], escalate: true },
 };
 const UNKNOWN_POLICY: QuestionPolicy = { owner: 'main', answers: [] };
 

@@ -133,6 +133,13 @@ test.each([
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get()).toEqual({ status: 'pending' });
 });
 
+test('a stuck problem can be escalated to the user instead of looping', () => {
+  // Three blocked rounds or a returned lane may need a decision only the user can make; without
+  // escalate the main Agent has no path to ask and is stuck with a retry that changes nothing.
+  expect(problemActions('stalled')).toEqual(expect.arrayContaining(['retry', 'respond', 'escalate']));
+  expect(problemActions('rework')).toEqual(expect.arrayContaining(['retry', 'respond', 'escalate']));
+});
+
 test('unrecognized problem kinds do not advertise a retry that settlement rejects', async () => {
   const { store, lifecycle } = await fixture();
   store.db.prepare("UPDATE nodes SET status='blocked' WHERE task_id='t' AND id='work'").run();

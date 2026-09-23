@@ -248,7 +248,18 @@ export class Execution {
 
   /** Ensure a newly queued message is dispatched even if no drive loop is active. */
   kick() {
+    this.sweepWorkcopies();
     if (this.driveActive === 0) void this.drive().catch(() => undefined);
+  }
+
+  private sweptAt = 0;
+
+  /** A task that reached a terminal phase must not keep working copies. Best-effort and throttled. */
+  private sweepWorkcopies() {
+    const now = Date.now();
+    if (now - this.sweptAt < 5_000) return;
+    this.sweptAt = now;
+    try { this.git?.sweepTerminalWorkcopies(); } catch { /* cleanup must never break the drive loop */ }
   }
 
   private remainingSlots(kind: NodeSpec['kind']) {

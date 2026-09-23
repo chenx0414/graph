@@ -16,6 +16,18 @@ interface PreparationFields {
   baselineSha?: string | null | undefined; detail?: Json | null | undefined;
 }
 
+/**
+ * A node has to run again once the integration commit moves on. Program checks recompute evidence
+ * that is bound to the integration sha, and a judging agent node (a review) read that sha when it
+ * ran: keeping its verdict lets the gate consume a report about code that is no longer there, which
+ * is how a reworked lane ends up stuck behind a stale blocker. A work lane keeps its own commits,
+ * so it is never re-checked here.
+ */
+export function rechecksAfterIntegrationChange(spec: NodeSpec, status: string): boolean {
+  if (status !== 'succeeded') return false;
+  return spec.kind === 'program' || spec.action === 'review';
+}
+
 /** Task integration branch and per-instance work copies. Git effects stay outside SQLite transactions. */
 export class GitIntegration {
   private readonly store: TaskStore;
@@ -413,7 +425,7 @@ export class GitIntegration {
     const graph = loadGraph(this.store, taskId);
     const reset = new Set<string>();
     for (const [id, spec] of graph.plan.nodes) {
-      if (spec.kind !== 'program' || graph.status(id) !== 'succeeded') continue;
+      if (!rechecksAfterIntegrationChange(spec, graph.status(id))) continue;
       reset.add(id);
       for (const dependent of graph.plan.dependents(id)) {
         if (!['preparing', 'running'].includes(graph.status(dependent))) reset.add(dependent);
@@ -431,5 +443,37 @@ export class GitIntegration {
     }
     this.store.event(taskId, 'git.recheck', { reason: 'Integration commit changed' });
     return rebases;
+  }
+
+  /**
+   * A terminal task keeps no working copies. They are scratch checkouts whose paths and copy
+   * branches would otherwise accumulate for the lifetime of the state directory, because every
+   * node of every task leaves one behind and nothing used to release them. The task's own
+   * integration branch is kept for traceability; only its per-node `graph/copy/...` branches go.
+   */
+  releaseWorkcopies(taskId: string) {
+    const rows = this.store.db.prepare('SELECT instance_id,path,branch FROM worktrees WHERE task_id=?')
+      .all(taskId) as { instance_id: string; path: string; branch: string }[];
+    if (!rows.length) return 0;
+    const repo = this.repoRoot(taskId);
+    if (!repo) return 0;
+    let removed = 0;
+    for (const row of rows) {
+      if (row.path && git(repo, ['worktree', 'remove', '--force', row.path]).code === 0) removed += 1;
+      // Only a per-node copy branch is deleted; the task branch is never touched.
+      if (row.branch.startsWith('graph/copy/')) git(repo, ['branch', '-D', row.branch]);
+    }
+    git(repo, ['worktree', 'prune']);
+    this.store.db.prepare('DELETE FROM worktrees WHERE task_id=?').run(taskId);
+    this.store.event(taskId, 'git.workcopies.released', { registered: rows.length, removed });
+    return rows.length;
+  }
+
+  /** Idempotent sweep for tasks that already reached a terminal phase. */
+  sweepTerminalWorkcopies() {
+    const rows = this.store.db.prepare(`SELECT DISTINCT w.task_id FROM worktrees w JOIN tasks t ON t.id=w.task_id
+      WHERE t.phase IN ('completed','abandoned')`).all() as { task_id: string }[];
+    for (const row of rows) this.releaseWorkcopies(row.task_id);
+    return rows.length;
   }
 }
