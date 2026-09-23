@@ -1324,7 +1324,7 @@ export async function openTaskRuntime(options: {
       if (!row) throw new RuntimeError('not_found', `Unknown node ${nodeId}`);
       const task = store.task(taskId);
       const spec = JSON.parse(row.spec) as NodeSpec;
-      const workspace = git.workspace(taskId, row.instance_id, nodeId, spec.kind);
+      const workspace = git.workspace(taskId, row.instance_id, nodeId, spec.kind, spec.action);
       if (workspace) return workspace;
       const project = store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string } | undefined;
       return project?.root ?? null;

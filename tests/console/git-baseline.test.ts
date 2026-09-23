@@ -164,3 +164,41 @@ test('deleting files in a selected subdirectory never changes sibling trees (UC-
   expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
   expect(git(parent, ['rev-parse', 'HEAD'])).toBe(settled);
 }, 30_000);
+
+test('a judging node re-reads the current integration instead of its stale work copy', async () => {
+  const root = await temp('reseed');
+  const state = join(root, '.state');
+  git(root, ['init', '-q', '-b', 'main']);
+  await writeFile(join(root, 'app.txt'), 'base\n');
+  git(root, ['add', 'app.txt']);
+  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'init']);
+  const { db, integration } = await makeProject(root, state);
+  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
+  db.db.prepare("INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES('t','p','审查看板四态',1,0,'running',0,1)").run();
+  integration.prepareTask('t', 'main');
+
+  // The review work copy is seeded from the integration tip of its first run.
+  const first = integration.workspace('t', 'inst-review', 'review', 'agent', 'review');
+  expect(first).toBeTruthy();
+  expect(git(first!, ['rev-parse', 'HEAD'])).toBe(git(root, ['rev-parse', 'HEAD']));
+
+  // A reworked lane advances the integration tip; a judging node must read the new tree, not the
+  // one it was first seeded with (reusing the old tree made reviews restate stale findings).
+  await writeFile(join(root, 'lane.txt'), 'reworked\n');
+  git(root, ['add', 'lane.txt']);
+  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'lane rework']);
+  const tip = git(root, ['rev-parse', 'HEAD']);
+  db.db.prepare('UPDATE tasks SET integration_sha=? WHERE id=?').run(tip, 't');
+  const again = integration.workspace('t', 'inst-review', 'review', 'agent', 'review');
+  expect(git(again!, ['rev-parse', 'HEAD'])).toBe(tip);
+  expect(existsSync(join(again!, 'lane.txt'))).toBe(true);
+
+  // A work lane is deliberately left alone: its own commits survive a retry.
+  const lane = integration.workspace('t', 'inst-lane', 'impl-x', 'agent', 'work');
+  expect(lane).toBeTruthy();
+  await writeFile(join(lane!, 'own.txt'), 'lane work in progress\n');
+  git(lane!, ['add', 'own.txt']);
+  git(lane!, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'lane own commit']);
+  const laneAgain = integration.workspace('t', 'inst-lane', 'impl-x', 'agent', 'work');
+  expect(existsSync(join(laneAgain!, 'own.txt'))).toBe(true);
+}, 30_000);

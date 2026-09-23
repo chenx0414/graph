@@ -237,7 +237,7 @@ export class GitIntegration {
     });
   }
 
-  workspace(taskId: string, instanceId: string | null, nodeId: string, kind: NodeSpec['kind']) {
+  workspace(taskId: string, instanceId: string | null, nodeId: string, kind: NodeSpec['kind'], action?: NodeSpec['action']) {
     const task = this.store.task(taskId);
     if (!task.integration_branch) return;
     const repo = this.repoRoot(taskId);
@@ -250,7 +250,21 @@ export class GitIntegration {
       return row?.path ? (subdir ? join(row.path, subdir) : row.path) : undefined;
     }
     const existing = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(instanceId) as { path: string } | undefined;
-    if (existing) return subdir ? join(existing.path, subdir) : existing.path;
+    if (existing) {
+      // A node that judges the integration (review) must read the current tip, not the tree its work
+      // copy was first seeded with: a reworked lane advances the integration, and reusing the old tree
+      // made the reviewer restate stale findings until the gate stalled. Work lanes keep their own
+      // commits across retries, so only non-work nodes are re-seeded.
+      if (action && action !== 'work') {
+        const tip = task.integration_sha ?? revParse(repo, task.integration_branch)!;
+        const head = revParse(existing.path, 'HEAD');
+        if (tip && head !== tip) {
+          resetHard(existing.path, tip);
+          this.store.event(taskId, 'git.workcopy.reseeded', { nodeId, from: head, to: tip });
+        }
+      }
+      return subdir ? join(existing.path, subdir) : existing.path;
+    }
     const branch = workCopyBranchName(task.request, taskId, nodeId);
     const root = join(this.stateDir, 'worktrees', taskWorktreeDirName(task.request, taskId));
     const taken = new Set<string>();

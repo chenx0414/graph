@@ -426,7 +426,7 @@ export class Execution {
       }
     }
     let workspace: string | undefined;
-    try { workspace = this.git?.workspace(node.task_id, node.instance_id, node.id, spec.kind); }
+    try { workspace = this.git?.workspace(node.task_id, node.instance_id, node.id, spec.kind, spec.action); }
     catch (error) {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: String(error) }));
       return false;
