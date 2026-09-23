@@ -17,10 +17,10 @@ export interface PlatformPreset {
   /** Environment variable that holds the key; config stores only this name. */
   credentialRef: string;
   credentialKind: ProviderCredentialKind;
-  /** Catalog hint for the settings wizard: true when the vendor is known to
-   * expose a `<baseUrl>/models` listing endpoint. It is NOT a probe gate — a
-   * probe always attempts `/models` unless the request explicitly sets
-   * `probeModels: false`, and the vendor's real response decides. */
+  /** Advisory only: hints whether the vendor is known to answer
+   * `<baseUrl>/models`. It never gates the probe - a wrong local guess must
+   * not hide a vendor that really does list models - so it only shapes copy.
+   * False means "expect a manual model id", not "do not request". */
   modelsListSupported: boolean;
   /** Headers that must travel with every request (routing hints). */
   headers?: Record<string, string>;
@@ -53,7 +53,7 @@ export const PLATFORM_PRESETS: readonly PlatformPreset[] = [
     modelsListSupported: true,
     headers: { 'x-opencode-session': 'graph-console' },
     docsUrl: 'https://opencode.ai/docs/zen',
-    notes: ['订阅凭据；优先从 <baseUrl>/models 探测可用模型（实测该端点返回标准 {object:"list",data:[…]}）。', '所有请求自动附带 x-opencode-session。'],
+    notes: ['订阅凭据；<baseUrl>/models 实测可用，自动列出订阅侧模型；端点拒绝时按原始错误提示并允许手动添加模型 id。', '所有请求自动附带 x-opencode-session。'],
   },
   {
     id: 'command-goat',
@@ -137,14 +137,6 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** Whether a probe should attempt `<baseUrl>/models`. The `modelsListSupported`
- * catalog marker is display guidance only: it never suppresses the request.
- * Only an explicit `probeModels: false` from the caller skips model listing, so
- * a stale/incorrect marker cannot hide a vendor that really does answer. */
-export function shouldProbeModelList(_provider: Pick<ResolvedProvider, 'modelsListSupported'>, probeModels?: boolean): boolean {
-  return probeModels !== false;
 }
 
 /** A fully resolved provider draft: every field the probe and save paths need. */
@@ -250,6 +242,15 @@ export interface ProbeRequest {
   provider: ResolvedProvider;
   modelId?: string;
   probeModels?: boolean;
+}
+
+/** Whether a probe should ask the vendor for its model list. The directory's
+ * `modelsListSupported` flag is advisory copy only and must never gate the
+ * request: only an explicit `probeModels:false` suppresses it. The vendor's
+ * real response is the source of truth - a rejection surfaces its own error
+ * text and the wizard can still add a model id by hand. */
+export function shouldProbeModels(probeModels: boolean | undefined): boolean {
+  return probeModels !== false;
 }
 
 export type ProbeRequestValidation =
