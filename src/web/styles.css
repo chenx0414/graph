@@ -3110,6 +3110,52 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .model-quick-grid .select { width: 100%; }
 .model-advanced { margin-top: 12px; }
 .model-advanced .row { align-items: flex-end; }
+/* B-1 two-step provider cards: step 1 (vendor + credentials + concurrency) and
+   step 2 (model selection) live in one card per configured vendor. */
+.provider-card {
+  margin: 10px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+.provider-card:last-child { margin-bottom: 0; }
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.provider-fields { align-items: flex-end; }
+.provider-fields .field { margin: 0; }
+.provider-concurrency {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.provider-concurrency .field { margin: 0; }
+.provider-step-two {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.provider-step-two h4 { margin: 0 0 8px; font-size: 13px; }
+.provider-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.provider-model-list .checkbox-row { align-items: center; }
 .theme-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

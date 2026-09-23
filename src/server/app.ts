@@ -15,6 +15,8 @@ import type { DefinitionSpec } from '../catalog/catalog.ts';
 import { capabilityConfigViews } from '../catalog/capability-config.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import type { AgentContextLibrary, AgentPromptKey } from '../runtime/agent-context.ts';
+import { buildModelsRequest, buildVerifyRequest, parseModelsResponse, parseVerifyResponse, platformCatalog, platformPreset, resolveProviderSecret, validateProviderDraft, type DiscoveredModel, type ProviderDraft } from './providers.ts';
+import { lookupModelMetadata } from '../catalog/models-dev.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 function graphAgentDetail(runtime: Runtime, definitionVersion: string | null | undefined) {
@@ -165,6 +167,75 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     if (body.value !== null && typeof body.value !== 'string') throw new RuntimeError('invalid_input', 'The secret value must be a string or null');
     return options.appServices.pushSecret(body.ref, body.value as string | null);
   });
+  // B-1: two-step provider setup. The platform directory carries endpoint and
+  // credential-ref defaults; the probe sends a real request server-side and
+  // returns the vendor's own error text. Neither route can return a secret
+  // value: they only ever receive a secretRef and place the resolved value in
+  // an outbound header.
+  app.get('/api/app/providers', async () => ({ platforms: platformCatalog(capabilitySecretValues()) }));
+  // Browser-reachable alias: the console page authenticates with the session
+  // cookie, while the Electron bridge uses /api/app/* with the app token.
+  app.get('/api/providers', async () => ({ platforms: platformCatalog(capabilitySecretValues()) }));
+  const probeProvider = async (request: { body: unknown }) => {
+    const body = request.body as { provider?: Partial<ProviderDraft>; modelId?: unknown } | undefined;
+    const provider = validateProviderDraft(body?.provider);
+    const preset = platformPreset(provider.platformId ?? 'custom');
+    // Resolution order matches the runtime: live keychain imports and pushed
+    // secrets win over the process environment; a ref that resolves nowhere is
+    // reported without any outbound request.
+    const secret = resolveProviderSecret(provider.secretRef, capabilitySecretValues());
+    if (provider.secretRef && !secret) {
+      return {
+        modelList: { supported: Boolean(preset?.supportsModelList) },
+        verification: { ok: false, error: `凭据 ${provider.secretRef} 未解析：请在环境中设置该变量，或通过钥匙串保存后再试` },
+      };
+    }
+    const call = async (url: string, headers: Record<string, string>, payload?: unknown) => {
+      const response = await fetch(url, {
+        method: payload === undefined ? 'GET' : 'POST',
+        headers,
+        ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const text = await response.text();
+      let parsed: unknown = text;
+      try { parsed = text ? JSON.parse(text) : null; } catch { /* keep the raw vendor body */ }
+      return { status: response.status, body: parsed };
+    };
+    const modelList: { supported: boolean; error?: string } = { supported: Boolean(preset?.supportsModelList) };
+    // Each discovered model carries the build-time models.dev metadata (or null
+    // when the snapshot has no entry) so the wizard can auto-fill without ever
+    // downloading the catalog itself.
+    const decorate = (model: DiscoveredModel) => ({ ...model, metadata: lookupModelMetadata(provider.platformId ?? 'custom', model.id) });
+    let models: (DiscoveredModel & { metadata: unknown })[] | undefined;
+    if (preset?.supportsModelList) {
+      const listRequest = buildModelsRequest(provider, secret ?? undefined);
+      const response = await call(listRequest.url, listRequest.headers);
+      const outcome = parseModelsResponse(provider, response.status, response.body);
+      if ('models' in outcome) models = outcome.models.map(decorate);
+      else modelList.error = outcome.error;
+    }
+    const requested = typeof body?.modelId === 'string' && body.modelId.trim() ? body.modelId.trim() : undefined;
+    const verifyModel = requested ?? (models?.length ? models[0]!.id : preset?.defaultModel);
+    if (!verifyModel) {
+      return {
+        ...(models ? { models } : {}),
+        modelList,
+        verification: { ok: false, ...(modelList.error ? { error: modelList.error } : { error: '尚未选择模型，无法发起验证请求' }) },
+      };
+    }
+    const verifyRequest = buildVerifyRequest(provider, verifyModel, secret ?? undefined);
+    const response = await call(verifyRequest.url, verifyRequest.headers, verifyRequest.body);
+    const verification = parseVerifyResponse(response.status, response.body);
+    return {
+      ...(models ? { models } : {}),
+      modelList,
+      verification: { ...verification, status: response.status, model: verifyModel },
+      metadata: lookupModelMetadata(provider.platformId ?? 'custom', verifyModel),
+    };
+  };
+  app.post('/api/app/providers/probe', probeProvider);
+  app.post('/api/providers/probe', probeProvider);
   app.get('/api/app/rsi/status', async () => {
     if (!options.appServices?.rsi) return { available: false, pendingRestart: null, canRestart: false };
     return options.appServices.rsi.status();
