@@ -665,7 +665,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                       </select>
                     </Field>
                     <Field label="默认思考强度">
-                      <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? (entry.reasoning === false ? 'off' : 'medium')} disabled={entry.reasoning === false} onChange={event => mutate(next => { next.models!.entries[index]!.defaultThinkingLevel = event.target.value as ModelThinkingLevel; })}>
+                      <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? (entry.reasoning === false ? 'off' : '')} disabled={entry.reasoning === false} onChange={event => mutate(next => { next.models!.entries[index]!.defaultThinkingLevel = event.target.value as ModelThinkingLevel; })}>
+                        {entry.reasoning !== false && <option value="">未指定</option>}
                         {THINKING_LEVELS.map(level => <option key={level} value={level}>{level}</option>)}
                       </select>
                     </Field>
