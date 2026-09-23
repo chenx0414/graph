@@ -52,7 +52,12 @@ describe('platform directory', () => {
     const deepseek = view.platforms.find(platform => platform.id === 'deepseek')!;
     const grok = view.platforms.find(platform => platform.id === 'grok')!;
     expect(deepseek.credentialConfigured).toBe(true);
+    // An unresolved platform stays usable for configuration but must advertise
+    // both the flag and the ref so the page can disable its models with the
+    // right environment variable name.
     expect(grok.credentialConfigured).toBe(false);
+    expect(grok.credentialRef).toBe(PLATFORM_CREDENTIAL_REFS['grok']);
+    expect(view.platforms.every(platform => typeof platform.credentialRef === 'string' && typeof platform.credentialConfigured === 'boolean')).toBe(true);
     expect(JSON.stringify(view)).not.toContain(KEY);
   });
 });
@@ -146,19 +151,19 @@ describe('provider draft validation', () => {
       id: 'opencode-go',
       api: 'openai-completions',
       baseUrl: 'https://opencode.ai/zen/go/v1',
-      secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
+      credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
       custom: false,
       modelsListSupported: false,
     });
     expect(result.provider.headers?.['x-opencode-session']).toBe('graph-console');
   });
 
-  test('a custom provider requires name + baseUrl + api + secret ref', () => {
+  test('a custom provider requires name + baseUrl + api + credential ref', () => {
     const complete = validateProviderDraft({
-      id: 'custom', label: 'My Gateway', baseUrl: 'http://127.0.0.1:8080/v1', api: 'anthropic-messages', secretRef: 'MY_GATEWAY_KEY',
+      id: 'custom', label: 'My Gateway', baseUrl: 'http://127.0.0.1:8080/v1', api: 'anthropic-messages', credentialRef: 'MY_GATEWAY_KEY',
     });
     expect(complete.ok).toBe(true);
-    if (complete.ok) expect(complete.provider).toMatchObject({ label: 'My Gateway', api: 'anthropic-messages', baseUrl: 'http://127.0.0.1:8080/v1', secretRef: 'MY_GATEWAY_KEY', custom: true });
+    if (complete.ok) expect(complete.provider).toMatchObject({ label: 'My Gateway', api: 'anthropic-messages', baseUrl: 'http://127.0.0.1:8080/v1', credentialRef: 'MY_GATEWAY_KEY', custom: true });
 
     const missing = validateProviderDraft({ id: 'custom' });
     expect(missing.ok).toBe(false);
@@ -168,23 +173,34 @@ describe('provider draft validation', () => {
     // A custom provider may omit the credential name; the directory default is used.
     const defaultRef = validateProviderDraft({ id: 'custom', label: 'My Gateway', baseUrl: 'https://gw.example/v1', api: 'openai-completions' });
     expect(defaultRef.ok).toBe(true);
-    if (defaultRef.ok) expect(defaultRef.provider.secretRef).toBe(PLATFORM_CREDENTIAL_REFS['custom']);
+    if (defaultRef.ok) expect(defaultRef.provider.credentialRef).toBe(PLATFORM_CREDENTIAL_REFS['custom']);
 
-    const badUrl = validateProviderDraft({ id: 'custom', label: 'x', baseUrl: 'not-a-url', api: 'openai-completions', secretRef: 'X_KEY' });
+    const badUrl = validateProviderDraft({ id: 'custom', label: 'x', baseUrl: 'not-a-url', api: 'openai-completions', credentialRef: 'X_KEY' });
     expect(badUrl.ok).toBe(false);
     if (!badUrl.ok) expect(badUrl.errors.some(error => error.field === 'baseUrl')).toBe(true);
 
-    const badRef = validateProviderDraft({ id: 'custom', label: 'x', baseUrl: 'https://x.dev/v1', api: 'openai-completions', secretRef: 'not a ref' });
+    const badRef = validateProviderDraft({ id: 'custom', label: 'x', baseUrl: 'https://x.dev/v1', api: 'openai-completions', credentialRef: 'not a ref' });
     expect(badRef.ok).toBe(false);
-    if (!badRef.ok) expect(badRef.errors.some(error => error.field === 'secretRef')).toBe(true);
+    if (!badRef.ok) expect(badRef.errors.some(error => error.field === 'credentialRef')).toBe(true);
 
-    const badApi = validateProviderDraft({ id: 'custom', label: 'x', baseUrl: 'https://x.dev/v1', api: 'responses', secretRef: 'X_KEY' });
+    const badApi = validateProviderDraft({ id: 'custom', label: 'x', baseUrl: 'https://x.dev/v1', api: 'responses', credentialRef: 'X_KEY' });
     expect(badApi.ok).toBe(false);
     if (!badApi.ok) expect(badApi.errors.some(error => error.field === 'api')).toBe(true);
   });
 
+  test('the display-name field is label, not name', () => {
+    // `name` is ignored: a custom provider that only sends `name` has no label.
+    const viaName = validateProviderDraft({ id: 'custom', name: 'My Gateway', baseUrl: 'https://gw.example/v1', api: 'openai-completions', credentialRef: 'GW_KEY' });
+    expect(viaName.ok).toBe(false);
+    if (!viaName.ok) expect(viaName.errors.some(error => error.field === 'label')).toBe(true);
+
+    const viaLabel = validateProviderDraft({ id: 'custom', label: 'My Gateway', baseUrl: 'https://gw.example/v1', api: 'openai-completions', credentialRef: 'GW_KEY' });
+    expect(viaLabel.ok).toBe(true);
+    if (viaLabel.ok) expect(viaLabel.provider.label).toBe('My Gateway');
+  });
+
   test('an unknown platform is rejected', () => {
-    const result = validateProviderDraft({ id: 'not-a-platform', baseUrl: 'https://x.dev/v1', api: 'openai-completions', secretRef: 'X_KEY' });
+    const result = validateProviderDraft({ id: 'not-a-platform', baseUrl: 'https://x.dev/v1', api: 'openai-completions', credentialRef: 'X_KEY' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors.some(error => error.field === 'id')).toBe(true);
   });
@@ -214,6 +230,12 @@ describe('console provider endpoints', () => {
     if (complete.ok) {
       expect(complete.request).toMatchObject({ requestId: 'probe-1', modelId: 'deepseek-chat', provider: { id: 'deepseek' } });
     }
+
+    // A flat body (draft fields at the top level) is accepted as well, and the
+    // canonical draft field names are label/credentialRef.
+    const flat = validateProbeRequest({ requestId: 'probe-flat', id: 'custom', label: 'Flat', baseUrl: 'https://flat.example/v1', api: 'openai-completions', credentialRef: 'FLAT_KEY' });
+    expect(flat.ok).toBe(true);
+    if (flat.ok) expect(flat.request.provider).toMatchObject({ label: 'Flat', credentialRef: 'FLAT_KEY' });
 
     const badDraft = validateProbeRequest({ requestId: 'probe-2', provider: { id: 'custom' } });
     expect(badDraft.ok).toBe(false);

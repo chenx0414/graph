@@ -143,7 +143,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       throw new RuntimeError('invalid_input', parsedBody.errors.map(error => `${error.field}: ${error.message}`).join('; '));
     }
     const { provider, modelId: requestedModel, probeModels } = parsedBody.request;
-    const apiKey = providerSecrets()[provider.secretRef]?.trim() || undefined;
+    const apiKey = providerSecrets()[provider.credentialRef]?.trim() || undefined;
     const target: ProbeTarget = {
       baseUrl: provider.baseUrl,
       api: provider.api,
@@ -162,7 +162,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const verifyModel = requestedModel ?? models[0]?.id;
     let verification: { ok: boolean; status?: number; error?: string; skipped?: boolean };
     if (!apiKey) {
-      verification = { ok: false, error: `凭据未解析：${provider.secretRef}（请在环境变量或钥匙串中提供）` };
+      verification = { ok: false, error: `凭据未解析：${provider.credentialRef}（请在环境变量或钥匙串中提供）` };
     } else if (verifyModel) {
       const response = await probeHttp(buildVerifyRequest(target, verifyModel));
       const parsed = parseVerifyResponse(response.status, response.body);
@@ -180,7 +180,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
         label: provider.label,
         baseUrl: provider.baseUrl,
         api: provider.api,
-        credentialRef: provider.secretRef,
+        credentialRef: provider.credentialRef,
         credentialKind: provider.credentialKind,
         custom: provider.custom,
       },
