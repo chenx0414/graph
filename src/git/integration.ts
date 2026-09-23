@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { basename, join, relative, resolve, sep } from 'node:path';
+import { taskBranchName, taskWorktreeDirName, uniqueWorktreeDirName, workCopyBranchName } from '../core/branch-naming.ts';
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json, type NodeSpec, type Operation } from '../core/types.ts';
 import { loadGraph, resetIdleNode } from '../core/graph.ts';
@@ -223,8 +224,8 @@ export class GitIntegration {
     const repo = prep.repoRoot!;
     const targetSha = revParse(repo, targetBranch);
     if (!targetSha) throw new RuntimeError('invalid_input', `Unknown target branch ${targetBranch}`);
-    const branch = `graph/task/${taskId}`;
-    const integrationPath = join(this.stateDir, 'worktrees', taskId, 'integration');
+    const branch = taskBranchName(task.request, taskId);
+    const integrationPath = join(this.stateDir, 'worktrees', taskWorktreeDirName(task.request, taskId), 'integration');
     ensureWorktree(repo, integrationPath, branch, targetSha);
     const sha = revParse(integrationPath, 'HEAD') ?? targetSha;
     this.store.transaction(() => {
@@ -250,8 +251,14 @@ export class GitIntegration {
     }
     const existing = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(instanceId) as { path: string } | undefined;
     if (existing) return subdir ? join(existing.path, subdir) : existing.path;
-    const branch = `graph/copy/${taskId}/${nodeId}`;
-    const path = join(this.stateDir, 'worktrees', taskId, instanceId);
+    const branch = workCopyBranchName(task.request, taskId, nodeId);
+    const root = join(this.stateDir, 'worktrees', taskWorktreeDirName(task.request, taskId));
+    const taken = new Set<string>();
+    for (const row of this.store.db.prepare('SELECT path FROM worktrees WHERE task_id=?').all(taskId) as { path: string }[]) {
+      taken.add(basename(row.path));
+    }
+    if (existsSync(root)) for (const entry of readdirSync(root)) taken.add(entry);
+    const path = join(root, uniqueWorktreeDirName(nodeId, taken));
     const start = task.integration_sha ?? revParse(repo, task.integration_branch)!;
     ensureWorktree(repo, path, branch, start);
     this.store.db.prepare('INSERT OR IGNORE INTO worktrees VALUES(?,?,?,?,?)').run(instanceId, taskId, nodeId, path, branch);
