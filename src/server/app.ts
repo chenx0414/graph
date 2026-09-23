@@ -17,6 +17,7 @@ import {
   platformCatalogView,
   PROVIDER_ROUTES,
   sanitizeProviderView,
+  shouldProbeModelList,
   validateProbeRequest,
   type HttpRequestSpec,
   type ProbeTarget,
@@ -135,8 +136,9 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       clearTimeout(timer);
     }
   };
-  /** Probe an unsaved provider draft: list models when the vendor supports it,
-   * then send one minimal chat request. Vendor failures keep their own text. */
+  /** Probe an unsaved provider draft: always attempt `<baseUrl>/models` (the
+   * vendor's response decides whether listing works), then send one minimal chat
+   * request. Vendor failures keep their own text. */
   const runProviderProbe = async (rawBody: unknown) => {
     const parsedBody = validateProbeRequest(rawBody);
     if (!parsedBody.ok) {
@@ -150,7 +152,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(apiKey ? { apiKey } : {}),
       ...(provider.headers ? { headers: provider.headers } : {}),
     };
-    const wantModels = provider.modelsListSupported && probeModels !== false;
+    const wantModels = shouldProbeModelList(provider, probeModels);
     const models: ProviderModelSummary[] = [];
     let modelsError: string | undefined;
     if (wantModels) {
@@ -172,7 +174,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     } else if (modelsError) {
       verification = { ok: false, error: modelsError };
     } else {
-      verification = { ok: false, skipped: true, error: '没有可验证的模型：该端点不支持模型列表，请手动添加模型 id' };
+      verification = { ok: false, skipped: true, error: '厂商未返回可验证的模型：请手动添加模型 id 后再验证' };
     }
     return {
       provider: {

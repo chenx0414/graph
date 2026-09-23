@@ -9,6 +9,7 @@ import {
   parseModelsResponse,
   parseVerifyResponse,
   sanitizeProviderView,
+  shouldProbeModelList,
   validateProbeRequest,
   validateProviderDraft,
   vendorErrorText,
@@ -35,6 +36,26 @@ describe('platform directory', () => {
   test('covers the supported vendors and the custom entry', () => {
     const ids = PLATFORM_PRESETS.map(preset => preset.id);
     expect(ids).toEqual(expect.arrayContaining(['opencode-go', 'command-goat', 'grok', 'chatgpt', 'deepseek', 'custom']));
+  });
+
+  test('OpenCode Go advertises its /models listing (regression pin)', () => {
+    // GET https://opencode.ai/zen/go/v1/models answers 200 with the standard
+    // {object:'list',data:[{id}]} shape, so the catalog must not claim otherwise.
+    expect(platformPreset('opencode-go')!.modelsListSupported).toBe(true);
+  });
+
+  test('the models-list marker is display guidance, never a probe gate', () => {
+    // A false marker must not suppress the request: the default probe still
+    // builds <baseUrl>/models and the vendor's real response decides. Only an
+    // explicit probeModels:false skips it.
+    expect(shouldProbeModelList({ modelsListSupported: false })).toBe(true);
+    expect(shouldProbeModelList({ modelsListSupported: false }, true)).toBe(true);
+    expect(shouldProbeModelList({ modelsListSupported: false }, false)).toBe(false);
+    expect(shouldProbeModelList({ modelsListSupported: true })).toBe(true);
+    expect(shouldProbeModelList({ modelsListSupported: true }, false)).toBe(false);
+    // The request builder itself ignores the marker entirely.
+    const behindMarker: ProbeTarget = { baseUrl: 'https://vendor.example/v1', api: 'openai-completions', apiKey: KEY };
+    expect(buildModelsRequest(behindMarker)).toMatchObject({ method: 'GET', url: 'https://vendor.example/v1/models' });
   });
 
   test('credential environment variable names match src/server/usage.ts', async () => {
@@ -153,7 +174,7 @@ describe('provider draft validation', () => {
       baseUrl: 'https://opencode.ai/zen/go/v1',
       credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
       custom: false,
-      modelsListSupported: false,
+      modelsListSupported: true,
     });
     expect(result.provider.headers?.['x-opencode-session']).toBe('graph-console');
   });

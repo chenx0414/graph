@@ -112,6 +112,13 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.locator('#settings-limits').count()).toBe(0);
   expect(await page.getByTestId('provider-concurrency').isVisible()).toBe(true);
   expect(await page.getByTestId('limit-credential-local').count()).toBe(0);
+  // Browser mode has no keychain channel, so the page shows guidance (reason +
+  // desktop path + env var name + copyable export line) instead of a key input.
+  expect(await page.getByTestId('provider-key').count()).toBe(0);
+  expect(await page.getByTestId('provider-key-guidance').isVisible()).toBe(true);
+  expect(await page.getByTestId('provider-key-hint').innerText()).toContain('浏览器');
+  expect(await page.getByTestId('provider-key-export').innerText()).toBe('export GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY=…');
+  expect(await page.getByTestId('provider-key-copy').isVisible()).toBe(true);
   expect(stub.requests).toHaveLength(0);
 
   // ① configure a custom vendor whose credential is the fixture `local`, so the
@@ -138,9 +145,18 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
   await page.getByTestId('config-status').waitFor();
   expect(await page.getByTestId('config-status').innerText()).toContain('已自动保存 revision 1');
-  // ② the failed list is reported instead of pretending a list arrived, and an id
+  // ② 选择模型 offers only configured vendors: the custom vendor just saved
+  // (credential `local`) is present, an unconfigured preset is not.
+  const vendorOptions = await page.getByTestId('model-vendor-select').innerText();
+  expect(vendorOptions).toContain('本地网关');
+  expect(vendorOptions).not.toContain('Grok');
+  const beforeVendorPick = stub.requests.length;
+  await page.getByTestId('model-vendor-select').selectOption('local');
+  // Selecting the vendor auto-fetches /models — no button press required.
+  await expect.poll(async () => stub.requests.length, { timeout: 15_000 }).toBeGreaterThan(beforeVendorPick);
+  expect(stub.requests.filter(request => request.path === '/v1/models')).toHaveLength(2);
+  // The failed list is reported instead of pretending a list arrived, and an id
   // typed by hand stays visible as a row the user can pick.
-  await page.getByTestId('model-probe').click();
   await expect.poll(async () => page.getByTestId('model-probe-note').innerText(), { timeout: 15_000 }).toContain('模型列表');
   await page.getByTestId('model-manual-id').fill('stub-manual');
   await page.getByTestId('model-manual-add').click();
@@ -169,6 +185,9 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await openPage('模型');
   await page.getByTestId('provider-platform-custom').click();
   await page.getByTestId('provider-credentialId').fill('local');
+  // ② the picker persists too: re-selecting the configured vendor brings back the
+  // models under it (and auto-fetches again, which is fine).
+  await page.getByTestId('model-vendor-select').selectOption('local');
   await expect.poll(async () => page.getByTestId('limit-credential-local').inputValue(), { timeout: 10_000 }).toBe('2');
   await expect.poll(async () => page.getByTestId('limit-group-id-local').inputValue(), { timeout: 10_000 }).toBe('group-1');
   await expect.poll(async () => page.getByTestId('limit-group-local').inputValue(), { timeout: 10_000 }).toBe('4');

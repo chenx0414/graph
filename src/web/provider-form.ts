@@ -48,7 +48,8 @@ export interface PlatformPreset {
   /** Environment variable / keychain entry name; config stores only this. */
   credentialRef: string;
   credentialKind: CredentialKind;
-  /** False when the vendor has no `<baseUrl>/models` listing endpoint. */
+  /** True when the vendor is known to expose `<baseUrl>/models`. Display-only:
+   * a probe always attempts `/models` and lets the vendor's response decide. */
   modelsListSupported: boolean;
   custom?: boolean;
   /** Whether the daemon could already resolve this platform's credential. */
@@ -61,7 +62,7 @@ export interface PlatformPreset {
 /** Offline fallback only. The daemon catalog is authoritative; this mirrors the
  * built-in presets so the page still renders when the endpoint is unreachable. */
 export const FALLBACK_PLATFORMS: readonly PlatformPreset[] = [
-  { id: 'opencode-go', label: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', credentialKind: 'subscription', modelsListSupported: false, headers: { 'x-opencode-session': 'graph-console' }, notes: ['订阅凭据；端点不支持 /models 时请手动添加模型 id。'] },
+  { id: 'opencode-go', label: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', credentialKind: 'subscription', modelsListSupported: true, headers: { 'x-opencode-session': 'graph-console' }, notes: ['订阅凭据；优先从 <baseUrl>/models 探测可用模型。'] },
   { id: 'command-goat', label: 'Command Goat', api: 'openai-completions', baseUrl: 'https://api.commandcode.ai/provider/v1', credentialRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY', credentialKind: 'subscription', modelsListSupported: true },
   { id: 'grok', label: 'Grok', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true },
   { id: 'chatgpt', label: 'ChatGPT', api: 'openai-completions', baseUrl: 'https://chatgpt.com/backend-api/codex', credentialRef: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true },
@@ -233,6 +234,136 @@ export function draftFromPlatformWithCredential(
   const draft = draftFromPlatform(platform);
   const existing = credentials?.[draft.credentialId]?.secretRef?.trim();
   return existing && existing !== draft.credentialRef ? { ...draft, credentialRef: existing } : draft;
+}
+
+/** The slice of a config document the model step needs: the credentials that
+exist and the models already attached to them. */
+export interface ModelVendorConfig {
+  credentials?: Record<string, { secretRef?: string; displayName?: string } | undefined>;
+  models?: { entries: readonly { credentialId?: string; baseUrl?: string; api?: ModelApi }[] };
+}
+
+/** One selectable vendor in ② 选择模型. It is derived from a *configured*
+ * credential: either a platform preset the daemon resolved or a credential that
+ * already lives in the saved config. Unconfigured platforms never appear. */
+export interface ModelVendor {
+  /** Config credential id (`credentials[<id>]`) — the models of this vendor. */
+  id: string;
+  /** Probe platform id: the preset id, or `custom` for a user-defined ref. */
+  platformId: string;
+  label: string;
+  baseUrl: string;
+  api: ModelApi;
+  credentialRef: string;
+  modelCount: number;
+}
+
+function fallbackCredentialRef(id: string): string {
+  return `GRAPH_${id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_KEY`;
+}
+
+/**
+ * The vendors ② 选择模型 may offer: only credentials that are already
+ * configured. A platform counts as configured when the daemon resolved its
+ * credential (`credentialConfigured`) or the saved config already has an entry
+ * for that credential id. Everything else is hidden entirely (not greyed out).
+ */
+export function modelVendorsFrom(
+  config: ModelVendorConfig | null | undefined,
+  platforms: readonly PlatformPreset[],
+): ModelVendor[] {
+  const credentials = config?.credentials ?? {};
+  const entries = config?.models?.entries ?? [];
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const platform of platforms) {
+    if (!platform.credentialConfigured || seen.has(platform.id)) continue;
+    seen.add(platform.id);
+    ids.push(platform.id);
+  }
+  for (const id of Object.keys(credentials)) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids.map(id => {
+    const platform = platformById(platforms, id);
+    const credential = credentials[id];
+    const own = entries.filter(entry => entry.credentialId === id);
+    const namedPlatform = platform && platform.id !== CUSTOM_PLATFORM_ID ? platform : undefined;
+    const existing = own.find(entry => typeof entry.baseUrl === 'string' && entry.baseUrl.trim());
+    return {
+      id,
+      platformId: namedPlatform ? namedPlatform.id : CUSTOM_PLATFORM_ID,
+      label: namedPlatform ? namedPlatform.label : (credential?.displayName?.trim() || id),
+      baseUrl: namedPlatform?.baseUrl.trim() || existing?.baseUrl?.trim() || '',
+      api: (namedPlatform ?? existing)?.api ?? 'openai-completions',
+      credentialRef: credential?.secretRef?.trim() || platform?.credentialRef || fallbackCredentialRef(id),
+      modelCount: own.length,
+    };
+  });
+}
+
+/** Probe draft for a step-② vendor. A user-defined credential probes as
+ * `custom` (the only platform id the daemon accepts with its own baseUrl). */
+export function draftFromModelVendor(vendor: ModelVendor): ProviderDraft {
+  const custom = vendor.platformId === CUSTOM_PLATFORM_ID;
+  return {
+    platformId: vendor.platformId,
+    label: custom ? vendor.label : '',
+    baseUrl: custom ? vendor.baseUrl : '',
+    api: vendor.api,
+    credentialId: vendor.id,
+    credentialRef: vendor.credentialRef,
+  };
+}
+
+/** Auto-probe fires exactly once per vendor change, never on every render: a
+ * nonempty id that differs from the previously probed one triggers the fetch. */
+export function shouldAutoProbe(selectedVendorId: string, previous: string | null | undefined): boolean {
+  const next = selectedVendorId.trim();
+  return next.length > 0 && next !== (previous ?? '');
+}
+
+export interface KeyEntryGuidance {
+  mode: 'desktop' | 'browser';
+  title: string;
+  lines: readonly string[];
+  /** Environment variable name the daemon resolves for this credential. */
+  envVar: string;
+  /** One-click-copyable shell line; the value stays a placeholder (no secret). */
+  exportLine: string;
+}
+
+/**
+ * Copy for the key-entry area. The desktop window has a real keychain channel,
+ * so it keeps the password input. The browser console has none, so it explains
+ * why there is no input and gives the two executable paths. It never carries a
+ * secret value — only the variable name and a placeholder export line.
+ */
+export function keyEntryGuidance(input: { hasBridge: boolean; credentialRef: string }): KeyEntryGuidance {
+  const envVar = input.credentialRef.trim() || 'GRAPH_PROVIDER_API_KEY';
+  const exportLine = `export ${envVar}=…`;
+  if (input.hasBridge) {
+    return {
+      mode: 'desktop',
+      title: 'API 密钥 / 订阅凭据',
+      lines: ['在桌面 App 窗口里填写，保存后只写入系统钥匙串；密钥不会进入配置文件、接口响应或页面。'],
+      envVar,
+      exportLine,
+    };
+  }
+  return {
+    mode: 'browser',
+    title: '浏览器模式没有密钥输入框',
+    lines: [
+      '当前是浏览器模式：浏览器无法访问系统钥匙串，所以这里没有密钥输入框，也不会把密钥发到服务端。',
+      '用桌面 App 窗口打开同一地址，即可在「① 配置厂商」填写 API 密钥 / 订阅凭据并保存到钥匙串。',
+      `或者先在运行环境里设置环境变量 ${envVar}，再回到这里点「保存并验证」。`,
+    ],
+    envVar,
+    exportLine,
+  };
 }
 
 /** Console platform catalog request (session-cookie `/api` face). */
