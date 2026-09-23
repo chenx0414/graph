@@ -223,6 +223,18 @@ export function normalizePlatforms(payload: unknown): PlatformPreset[] {
   return platforms;
 }
 
+/** A platform draft that never retargets a working credential: a preset names the
+ * variable it ships with, but an existing install may resolve another one, and
+ * saving the platform must keep the name that already works. */
+export function draftFromPlatformWithCredential(
+  platform: PlatformPreset,
+  credentials: Record<string, { secretRef?: string } | undefined> | undefined,
+): ProviderDraft {
+  const draft = draftFromPlatform(platform);
+  const existing = credentials?.[draft.credentialId]?.secretRef?.trim();
+  return existing && existing !== draft.credentialRef ? { ...draft, credentialRef: existing } : draft;
+}
+
 /** Console platform catalog request (session-cookie `/api` face). */
 export function platformsRequest(): { url: string } {
   return { url: PROVIDER_ROUTES.list };

@@ -19,6 +19,7 @@ import {
   costError,
   customDraft,
   draftFromPlatform,
+  draftFromPlatformWithCredential,
   draftToModelEntry,
   fillEntryFromMetadata,
   hasProviderErrors,
@@ -398,5 +399,14 @@ describe('concurrency limits inside a provider entry', () => {
     expect(parseLimit('4')).toBe(4);
     expect(parseLimit('4.5')).toBeUndefined();
     expect(parseLimit('-1')).toBeUndefined();
+  });
+
+  it('keeps the env var name a working credential already stores', () => {
+    const platform = FALLBACK_PLATFORMS.find(item => item.id === 'opencode-go');
+    expect(platform).toBeDefined();
+    expect(draftFromPlatformWithCredential(platform!, { 'opencode-go': { secretRef: 'OPENCODE_GO_API_KEY' } }).credentialRef).toBe('OPENCODE_GO_API_KEY');
+    expect(draftFromPlatformWithCredential(platform!, { 'opencode-go': { secretRef: '   ' } }).credentialRef).toBe(platform!.credentialRef);
+    expect(draftFromPlatformWithCredential(platform!, {}).credentialRef).toBe(platform!.credentialRef);
+    expect(draftFromPlatformWithCredential(platform!, undefined).credentialRef).toBe(platform!.credentialRef);
   });
 });

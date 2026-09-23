@@ -14,6 +14,7 @@ import {
   concurrencyControlIds,
   customDraft,
   draftFromPlatform,
+  draftFromPlatformWithCredential,
   draftToModelEntry,
   hasProviderErrors,
   hasRequiredModelFields,
@@ -418,7 +419,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
 
   const selected = platformById(platforms, platformId);
   const isCustom = isCustomPlatform(platformId) || selected?.custom === true;
-  const active: ProviderDraft = !isCustom && selected ? draftFromPlatform(selected) : custom;
+  const active: ProviderDraft = !isCustom && selected ? draftFromPlatformWithCredential(selected, draft.credentials) : custom;
   // credentialConfigured / credentialRef come from the daemon catalog; the
   // card must use the daemon's own ref name so the reason names the right env var.
   const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
