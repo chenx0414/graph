@@ -17,8 +17,10 @@ export interface PlatformPreset {
   /** Environment variable that holds the key; config stores only this name. */
   credentialRef: string;
   credentialKind: ProviderCredentialKind;
-  /** False when the vendor has no `<baseUrl>/models` listing endpoint, so the
-   * wizard must accept a manually typed model id. */
+  /** Advisory only: hints whether the vendor is known to answer
+   * `<baseUrl>/models`. It never gates the probe - a wrong local guess must
+   * not hide a vendor that really does list models - so it only shapes copy.
+   * False means "expect a manual model id", not "do not request". */
   modelsListSupported: boolean;
   /** Headers that must travel with every request (routing hints). */
   headers?: Record<string, string>;
@@ -48,10 +50,10 @@ export const PLATFORM_PRESETS: readonly PlatformPreset[] = [
     baseUrl: 'https://opencode.ai/zen/go/v1',
     credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
     credentialKind: 'subscription',
-    modelsListSupported: false,
+    modelsListSupported: true,
     headers: { 'x-opencode-session': 'graph-console' },
     docsUrl: 'https://opencode.ai/docs/zen',
-    notes: ['订阅凭据；模型列表由订阅侧提供，端点不支持 /models 时请手动添加模型 id。', '所有请求自动附带 x-opencode-session。'],
+    notes: ['订阅凭据；<baseUrl>/models 实测可用，自动列出订阅侧模型；端点拒绝时按原始错误提示并允许手动添加模型 id。', '所有请求自动附带 x-opencode-session。'],
   },
   {
     id: 'command-goat',
@@ -240,6 +242,15 @@ export interface ProbeRequest {
   provider: ResolvedProvider;
   modelId?: string;
   probeModels?: boolean;
+}
+
+/** Whether a probe should ask the vendor for its model list. The directory's
+ * `modelsListSupported` flag is advisory copy only and must never gate the
+ * request: only an explicit `probeModels:false` suppresses it. The vendor's
+ * real response is the source of truth - a rejection surfaces its own error
+ * text and the wizard can still add a model id by hand. */
+export function shouldProbeModels(probeModels: boolean | undefined): boolean {
+  return probeModels !== false;
 }
 
 export type ProbeRequestValidation =

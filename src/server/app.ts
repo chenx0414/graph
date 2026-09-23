@@ -17,6 +17,7 @@ import {
   platformCatalogView,
   PROVIDER_ROUTES,
   sanitizeProviderView,
+  shouldProbeModels,
   validateProbeRequest,
   type HttpRequestSpec,
   type ProbeTarget,
@@ -135,8 +136,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       clearTimeout(timer);
     }
   };
-  /** Probe an unsaved provider draft: list models when the vendor supports it,
-   * then send one minimal chat request. Vendor failures keep their own text. */
+  /** Probe an unsaved provider draft: always attempt the vendor's `/models`
+   * list (unless the body says `probeModels:false`), then send one minimal
+   * chat request. The `modelsListSupported` flag is copy-only - a vendor that
+   * really answers `/models` is never skipped because of a local guess, and a
+   * rejection keeps its own wording while manual model ids stay allowed. */
   const runProviderProbe = async (rawBody: unknown) => {
     const parsedBody = validateProbeRequest(rawBody);
     if (!parsedBody.ok) {
@@ -150,7 +154,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(apiKey ? { apiKey } : {}),
       ...(provider.headers ? { headers: provider.headers } : {}),
     };
-    const wantModels = provider.modelsListSupported && probeModels !== false;
+    const wantModels = shouldProbeModels(probeModels);
     const models: ProviderModelSummary[] = [];
     let modelsError: string | undefined;
     if (wantModels) {

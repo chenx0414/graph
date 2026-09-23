@@ -9,6 +9,7 @@ import {
   parseModelsResponse,
   parseVerifyResponse,
   sanitizeProviderView,
+  shouldProbeModels,
   validateProbeRequest,
   validateProviderDraft,
   vendorErrorText,
@@ -114,6 +115,53 @@ describe('model listing request/response', () => {
   });
 });
 
+describe('model listing gate', () => {
+  test('OpenCode Go is marked as listing models (regression pin)', () => {
+    // Verified against the live vendor: GET <baseUrl>/models returns 200 with a
+    // standard { object: 'list', data: [{ id }] } body, so the preset must not
+    // claim otherwise.
+    expect(platformPreset('opencode-go')!.modelsListSupported).toBe(true);
+  });
+
+  test('every preset still advertises a boolean listing hint', () => {
+    for (const preset of PLATFORM_PRESETS) {
+      expect(typeof preset.modelsListSupported).toBe('boolean');
+    }
+  });
+
+  test('only an explicit probeModels:false skips the model list', () => {
+    expect(shouldProbeModels(undefined)).toBe(true);
+    expect(shouldProbeModels(true)).toBe(true);
+    expect(shouldProbeModels(false)).toBe(false);
+  });
+
+  test('a draft marked modelsListSupported:false still probes /models', () => {
+    // The platform flag must not be a hard gate: even a draft that claims no
+    // listing support produces a /models request unless probeModels is false.
+    const draft = validateProviderDraft({ id: 'opencode-go', modelsListSupported: false });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    expect(draft.provider.modelsListSupported).toBe(false);
+    expect(shouldProbeModels(undefined)).toBe(true);
+  });
+
+  test('the probe handler no longer hard-gates on modelsListSupported', async () => {
+    const source = await readFile(new URL('../../src/server/app.ts', import.meta.url), 'utf8');
+    expect(source).toContain('shouldProbeModels(probeModels)');
+    expect(source).not.toContain('provider.modelsListSupported && probeModels');
+  });
+
+  test('a vendor rejection keeps its raw error and manual model ids still work', () => {
+    const target = targetFor('opencode-go');
+    const refused = parseModelsResponse(target, 403, { error: { message: 'subscription does not allow listing' } });
+    expect(refused).toEqual({ error: 'subscription does not allow listing' });
+    // Adding a model id by hand never depends on the listing succeeding.
+    const manual = validateProbeRequest({ requestId: 'probe-manual', provider: { id: 'opencode-go' }, modelId: 'deepseek-v4-flash', probeModels: false });
+    expect(manual.ok).toBe(true);
+    if (manual.ok) expect(manual.request).toMatchObject({ modelId: 'deepseek-v4-flash', probeModels: false });
+  });
+});
+
 describe('minimal verification request/response', () => {
   test('OpenAI-compatible verification posts one tiny chat request', () => {
     const request = buildVerifyRequest(targetFor('command-goat'), 'goat-model');
@@ -153,7 +201,7 @@ describe('provider draft validation', () => {
       baseUrl: 'https://opencode.ai/zen/go/v1',
       credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
       custom: false,
-      modelsListSupported: false,
+      modelsListSupported: true,
     });
     expect(result.provider.headers?.['x-opencode-session']).toBe('graph-console');
   });
