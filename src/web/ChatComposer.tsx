@@ -22,10 +22,11 @@ import {
   attachmentSize,
   buildAttachment,
   isImageAttachment,
-  rejectionMessage,
+  rejectionNotices,
   removeComposerAttachment,
   validateAttachment,
   type AttachmentCandidate,
+  type AttachmentResult,
   type ChatAttachment,
 } from './attachments.ts';
 import { FullAccessToggle } from './FullAccessToggle.tsx';
@@ -157,6 +158,7 @@ export function ChatComposer({
     maxHeight: 340,
   });
   const [dragging, setDragging] = useState(false);
+  const [attachmentNotices, setAttachmentNotices] = useState<string[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -298,25 +300,27 @@ export function ChatComposer({
 
   async function addAttachments(files: File[]) {
     let next = [...attachments];
-    const reasons: string[] = [];
+    const results: AttachmentResult[] = [];
     for (const file of files) {
       const candidate: AttachmentCandidate = { name: file.name, type: file.type, size: file.size };
       const decision = validateAttachment(candidate, next);
-      if (!decision.ok) { reasons.push(decision.reason); continue; }
+      if (!decision.ok) { results.push({ name: file.name, accepted: false, reason: decision.reason }); continue; }
       try {
         const content = decision.kind === 'image'
           ? { dataUrl: await readFileAsDataUrl(file) }
           : { text: await file.text() };
         const built = buildAttachment(candidate, content);
-        if (!built.ok) { reasons.push(built.reason); continue; }
+        if (!built.ok) { results.push({ name: file.name, accepted: false, reason: built.reason }); continue; }
         next = addComposerAttachment(next, built.attachment);
+        results.push({ name: file.name, accepted: true });
       } catch {
-        reasons.push(`无法读取附件 ${file.name}`);
+        results.push({ name: file.name, accepted: false, reason: '无法读取文件' });
       }
     }
     onAttachmentsChange(next);
-    const message = rejectionMessage(reasons);
-    if (message) toast(message, 'danger');
+    // A visible, per-file reason for everything that was rejected. A later add
+    // with nothing rejected (or sending) clears the notices again.
+    setAttachmentNotices(rejectionNotices(results));
   }
 
   /** Attach pasted files (images) and keep the plain-text paste untouched. */
@@ -554,6 +558,16 @@ export function ChatComposer({
           ))}
         </div>
       )}
+      {attachmentNotices.length > 0 && (
+        <div className="composer-notices" data-testid="composer-attachment-notices" role="alert" aria-live="polite">
+          {attachmentNotices.map(notice => (
+            <div className="composer-notice" key={notice}>
+              <Icon name="alert" size={12} />
+              <span>{notice}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         data-testid={inputTestId}
@@ -703,6 +717,7 @@ export function ChatComposer({
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             if (!sendDisabled) {
+              setAttachmentNotices([]);
               rememberPrompt();
               (onSubmit ?? onSend)();
             }
@@ -734,7 +749,10 @@ export function ChatComposer({
           data-mode={primaryMode}
           disabled={sendDisabled}
           onClick={() => {
-            if (!sendDisabled && primaryMode === 'send') rememberPrompt();
+            if (!sendDisabled) {
+              setAttachmentNotices([]);
+              if (primaryMode === 'send') rememberPrompt();
+            }
             onSend();
           }}
           aria-label={primaryLabel}

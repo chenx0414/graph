@@ -13,10 +13,12 @@ import {
   clearComposerAttachments,
   imageMimeFor,
   isImageAttachment,
-  rejectionMessage,
+  noticeText,
+  rejectionNotices,
   removeComposerAttachment,
   validateAttachment,
   type AttachmentCandidate,
+  type AttachmentResult,
   type ChatAttachment,
 } from '../../src/web/attachments.ts';
 
@@ -75,9 +77,9 @@ describe('② 校验与上限（拒绝必须有可见原因）', () => {
 
   test('不支持的 pdf/docx/bmp 给出具体原因', () => {
     expect(validateAttachment({ name: 'doc.pdf', type: 'application/pdf', size: 4 }, []))
-      .toEqual({ ok: false, reason: '不支持的文件类型：doc.pdf' });
+      .toEqual({ ok: false, reason: '不支持的文件类型' });
     expect(validateAttachment({ name: 'doc.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 4 }, []))
-      .toEqual({ ok: false, reason: '不支持的文件类型：doc.docx' });
+      .toEqual({ ok: false, reason: '不支持的文件类型' });
     expect(validateAttachment({ name: 'scan.bmp', type: 'image/bmp', size: 4 }, []).ok).toBe(false);
     const bmp = validateAttachment({ name: 'scan.bmp', type: 'image/bmp', size: 4 }, []);
     expect(bmp.ok === false && bmp.reason).toMatch(/不支持的图片格式/);
@@ -193,11 +195,54 @@ describe('⑤ 条目增删与发送后清空', () => {
   });
 });
 
-describe('⑥ 可见原因与大小文案', () => {
-  test('单个原因原样展示，多个原因合并后仍提示数量', () => {
-    expect(rejectionMessage([])).toBe('');
-    expect(rejectionMessage(['不支持的文件类型：a.pdf'])).toBe('不支持的文件类型：a.pdf');
-    expect(rejectionMessage(['x', 'y', 'z'])).toMatch(/另有 1 个文件被拒/);
+describe('⑥ 被拒文件的可见原因', () => {
+  /** Mirror how the composer turns a validation decision into a notice. */
+  function attempt(candidate: AttachmentCandidate, existing: readonly ChatAttachment[] = []): AttachmentResult {
+    const decision = validateAttachment(candidate, existing);
+    return decision.ok
+      ? { name: candidate.name, accepted: true }
+      : { name: candidate.name, accepted: false, reason: decision.reason };
+  }
+
+  test('不支持的 mime 逐条给出文件名与原因', () => {
+    expect(rejectionNotices([attempt({ name: 'run.exe', type: 'application/x-msdownload', size: 10 })]))
+      .toEqual(['run.exe：不支持的文件类型']);
+    expect(rejectionNotices([attempt({ name: 'scan.bmp', type: 'image/bmp', size: 10 })])[0])
+      .toMatch(/^scan\.bmp：不支持的图片格式/);
+  });
+
+  test('超限大小给出上限值（图片 >5MB、文本 >1MB）', () => {
+    expect(rejectionNotices([attempt(candidate({ name: 'big.png', size: MAX_IMAGE_ATTACHMENT_BYTES + 1 }))]))
+      .toEqual(['big.png：图片超过单文件 5MB 上限']);
+    expect(rejectionNotices([attempt(textCandidate({ name: 'long.txt', size: MAX_TEXT_ATTACHMENT_BYTES + 1 }))]))
+      .toEqual(['long.txt：文本附件超过单文件 1MB 上限']);
+  });
+
+  test('单条消息图片总量超限也逐条给出原因', () => {
+    const half = MAX_MESSAGE_IMAGE_BYTES / 2 + 1;
+    const existing = [imageChip({ name: 'a.png', size: half })];
+    expect(rejectionNotices([attempt(candidate({ name: 'b.png', size: half }), existing)]))
+      .toEqual(['b.png：单条消息的图片总量超过 8MB 上限（该文件未加入）']);
+  });
+
+  test('混合输入只列出被拒项，已接受的文件不出现', () => {
+    const results = [
+      attempt(candidate({ name: 'ok.png' })),
+      attempt({ name: 'run.exe', type: 'application/x-msdownload', size: 10 }),
+      attempt(candidate({ name: 'big.png', size: MAX_IMAGE_ATTACHMENT_BYTES + 1 })),
+      attempt(textCandidate({ name: 'notes.md' })),
+    ];
+    const notices = rejectionNotices(results);
+    expect(notices).toHaveLength(2);
+    expect(notices).toEqual(['run.exe：不支持的文件类型', 'big.png：图片超过单文件 5MB 上限']);
+    expect(notices.join('\n')).not.toContain('ok.png');
+    expect(notices.join('\n')).not.toContain('notes.md');
+    expect(noticeText(results)).toBe('run.exe：不支持的文件类型；big.png：图片超过单文件 5MB 上限');
+  });
+
+  test('全部接受时没有任何提示', () => {
+    expect(rejectionNotices([attempt(candidate({ name: 'ok.png' }))])).toEqual([]);
+    expect(noticeText([{ name: 'ok.png', accepted: true }])).toBe('');
   });
 
   test('大小文案覆盖 B / KB / MB', () => {

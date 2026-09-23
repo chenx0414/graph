@@ -2118,6 +2118,28 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   outline-offset: 2px;
   border-radius: 10px;
 }
+.composer-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(180, 60, 60, 0.28);
+  border-radius: 8px;
+  background: rgba(180, 60, 60, 0.06);
+  color: #a33a3a;
+  font-size: 11px;
+}
+.composer-notice {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.composer-notice > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .composer-attachment button {
   width: 20px;
   height: 20px;
