@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import type { AgentContextView } from './AgentContext.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
+import { attachmentPayload } from './attachments.ts';
 import { ComposerTelemetry, type ComposerTelemetryView } from './ComposerTelemetry.tsx';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
@@ -537,7 +538,7 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
         body: JSON.stringify({
           ...(projectId ? { projectId } : {}),
           ...(outgoing.trim() ? { text: outgoing.trim() } : {}),
-          ...(attachments.length ? { attachments } : {}),
+          ...(attachments.length ? { attachments: attachmentPayload(attachments) } : {}),
           ...(modelId ? { model: modelId } : {}),
           ...(thinkingLevel ? { thinkingLevel } : {}),
           requestId: `conv-${crypto.randomUUID()}`,
