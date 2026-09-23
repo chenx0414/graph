@@ -248,6 +248,41 @@ test('a terminal task releases its working copies but keeps its integration bran
   expect(integration.sweepTerminalWorkcopies()).toBe(0);
 }, 30_000);
 
+test('an identical tree keeps the acceptance while a content change re-checks it', async () => {
+  const root = await temp('retarget');
+  const state = join(root, '.state');
+  git(root, ['init', '-q', '-b', 'main']);
+  await writeFile(join(root, 'app.txt'), 'base\n');
+  git(root, ['add', 'app.txt']);
+  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'init']);
+  const { db, integration } = await makeProject(root, state);
+  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
+  db.db.prepare("INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES('t','p','同树前进',1,0,'running',0,1)").run();
+  integration.prepareTask('t', 'main');
+  const accepted = git(root, ['rev-parse', 'HEAD']);
+  // The fixture writes an evidence row directly; its operation reference has no matching row in this
+  // throwaway database, so foreign keys are off for this test only.
+  db.db.exec('PRAGMA foreign_keys = OFF');
+  db.db.prepare("INSERT INTO evidence(id,task_id,node_id,operation_id,acceptance_id,proposal_version,requirement_version,data,commit_sha,valid) VALUES('e','t','human-accept','op','acceptance',1,1,'{}',?,1)").run(accepted);
+
+  // A commit that does not change the tree: the acceptance still describes the current content, so
+  // the evidence is re-bound instead of forcing the user through the same acceptance again.
+  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '--allow-empty', '-m', 'delivery fast-forward']);
+  const identical = git(root, ['rev-parse', 'HEAD']);
+  expect(integration.retargetEvidence('t', accepted, identical)).toBe(true);
+  expect(db.db.prepare("SELECT commit_sha FROM evidence WHERE id='e'").get()).toEqual({ commit_sha: identical });
+  const rebound = db.db.prepare("SELECT data FROM events WHERE task_id='t' AND type='git.evidence.retargeted'").get() as { data: string };
+  expect(rebound.data).toContain(identical);
+
+  // A real content change must still invalidate the acceptance.
+  await writeFile(join(root, 'app.txt'), 'changed\n');
+  git(root, ['add', 'app.txt']);
+  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'content change']);
+  const changed = git(root, ['rev-parse', 'HEAD']);
+  expect(integration.retargetEvidence('t', identical, changed)).toBe(false);
+  expect(db.db.prepare("SELECT commit_sha FROM evidence WHERE id='e'").get()).toEqual({ commit_sha: identical });
+}, 30_000);
+
 test('a lane that carries a sibling lane file is restored to its own scope before merging', async () => {
   // A file scope may name a file or a directory prefix; everything else belongs to a sibling lane,
   // except the node's own evidence directory, which is its submission material.

@@ -346,7 +346,7 @@ export class GitIntegration {
       const previous = this.store.task(operation.taskId).integration_sha;
       this.store.db.prepare('UPDATE tasks SET integration_sha=? WHERE id=?').run(merged.sha, operation.taskId);
       this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(merged.sha, operation.taskId, operation.nodeId, operation.id, 'integration');
-      if (previous && previous !== merged.sha) rebases = this.invalidateChecks(operation.taskId);
+      if (previous && previous !== merged.sha && !this.retargetEvidence(operation.taskId, previous, merged.sha)) rebases = this.invalidateChecks(operation.taskId);
     });
     for (const rebase of rebases) resetHard(rebase.path, rebase.sha);
     return merged;
@@ -424,15 +424,36 @@ export class GitIntegration {
   }
 
   private recheckAgainstTarget(taskId: string, integrationPath: string, targetBranch: string, targetSha: string) {
+    const before = revParse(integrationPath, 'HEAD');
     const moved = mergeRef(integrationPath, targetBranch);
     if (!moved.ok) return { status: 'blocked' as const, data: { kind: 'git_conflict', conflicts: moved.conflicts, reason: 'Target branch changed' } as Json };
     let rebases: { path: string; sha: string }[] = [];
     this.store.transaction(() => {
       this.store.db.prepare('UPDATE tasks SET integration_sha=?,target_sha=? WHERE id=?').run(moved.sha, targetSha, taskId);
-      rebases = this.invalidateChecks(taskId);
+      rebases = before && before !== moved.sha && this.retargetEvidence(taskId, before, moved.sha) ? [] : this.invalidateChecks(taskId);
     });
     for (const rebase of rebases) resetHard(rebase.path, rebase.sha);
     return { status: 'recheck' as const };
+  }
+
+  /**
+   * An integration advance that leaves the accepted tree byte-identical - a delivery fast-forward, a
+   * rebase onto the same content - invalidates nothing. The evidence is re-bound to the new commit
+   * and the graph keeps its acceptance, so the user is never asked to accept the same content twice
+   * (the completion judgement compares evidence.commit_sha to the current integration sha, and a
+   * stale sha would force the whole verification chain, human checks included, to run again).
+   * A real content change still invalidates and re-runs exactly as before. Returns true when the
+   * evidence was re-bound and no re-check is needed.
+   */
+  retargetEvidence(taskId: string, from: string, to: string): boolean {
+    if (from === to) return true;
+    const integration = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${taskId}`) as { path: string } | undefined;
+    const cwd = integration?.path ?? this.repoRoot(taskId);
+    if (!cwd) return false;
+    if (git(cwd, ['diff', '--quiet', from, to]).code !== 0) return false;
+    const changed = this.store.db.prepare('UPDATE evidence SET commit_sha=? WHERE task_id=? AND commit_sha=?').run(to, taskId, from).changes;
+    this.store.event(taskId, 'git.evidence.retargeted', { from, to, rows: changed });
+    return true;
   }
 
   /** The node's declared file list, or null when it declared none. */
