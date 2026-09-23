@@ -14,6 +14,21 @@ export type {
   DefinitionSpec,
 } from './capability-library.ts';
 
+/** Result of saving a recipe. Saving always persists the document and then
+ * compiles it. `definition` is present when compilation published/extended a
+ * definition; `compileError` is present instead when a saved recipe could not
+ * be compiled. The two are mutually exclusive. */
+export interface SavedAgentCombination {
+  combination: AgentCombinationView;
+  definition?: {
+    combination: AgentCombinationView;
+    definitionId: string;
+    definitionVersion: string;
+    version: number;
+  };
+  compileError?: string;
+}
+
 /** Versioned Agent definitions and capabilities. Published rows are immutable. */
 export class Catalog {
   private readonly store: TaskStore;
@@ -98,12 +113,21 @@ export class Catalog {
     return this.capabilityLibrary.searchAgentCombinations(input);
   }
 
-  async saveAgentCombination(combination: AgentCombination) {
+  /** Persist a recipe and compile it in the same step.
+   *
+   * Every recipe is a deployable definition, not a draft-only document, so the
+   * compile is no longer limited to `main` and callers never need a second
+   * request. Persisting and compiling are deliberately separate: a failed
+   * compile must not discard a successful save, so the failure is reported
+   * through `compileError` while `combination` stays persisted. */
+  async saveAgentCombination(combination: AgentCombination): Promise<SavedAgentCombination> {
     const saved = await this.capabilityLibrary.saveAgentCombination(combination);
-    // Main Agent changes are a deployable recipe, not a draft-only document:
-    // compile immediately so newly created master nodes use the latest version.
-    if (saved.mode === 'main') this.compileAgentCombination(saved.id);
-    return saved;
+    try {
+      const definition = this.compileAgentCombination(saved.id);
+      return { combination: saved, definition };
+    } catch (error) {
+      return { combination: saved, compileError: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async updateAgentCombinationDescription(id: string, description: string) {

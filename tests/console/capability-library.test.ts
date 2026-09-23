@@ -387,7 +387,7 @@ test('catalog composes the capability library and persists recipe compilation on
   cleanup.push(() => store.close());
   const catalog = new Catalog(store, { capabilityRoot, recipesPath: join(root, 'agent-combinations.json') });
   await catalog.refresh();
-  await catalog.saveAgentCombination({
+  const saved = await catalog.saveAgentCombination({
     id: 'worker',
     name: 'Worker',
     description: 'Use one skill.',
@@ -396,6 +396,8 @@ test('catalog composes the capability library and persists recipe compilation on
     tags: ['worker'],
     resources: [{ resourceId: 'skill', version: '1.0.0', role: 'skill', required: true }],
   });
+  expect(saved.definition?.definitionVersion).toBe('worker@1');
+  expect(saved.compileError).toBeUndefined();
   const first = catalog.compileAgentCombination('worker');
   const second = catalog.compileAgentCombination('worker');
   expect(first.definitionVersion).toBe('worker@1');

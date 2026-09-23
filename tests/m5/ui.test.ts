@@ -140,7 +140,11 @@ test('the Agent combination library renders and compiles recipes over filesystem
     expect(await page.getByTestId('resource-detail-drawer').innerText()).toContain(name);
     await page.getByTestId('resource-detail-close').click();
   }
-  await page.getByRole('button', { name: '编译' }).click();
+  // Saving a recipe compiles it automatically: there is no manual compile button.
+  expect(await page.getByRole('button', { name: '编译', exact: true }).count()).toBe(0);
+  await page.getByTestId('agent-combination-review').getByRole('button', { name: '编辑' }).click();
+  await page.getByTestId('agent-recipe-id').waitFor();
+  await page.locator('.recipe-editor').getByRole('button', { name: '保存配方' }).click();
   await expect.poll(async () => (await page.getByTestId('toasts').innerText()).includes('已编译为 review@1')).toBe(true);
 }, 60_000);
 

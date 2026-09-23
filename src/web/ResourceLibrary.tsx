@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { Button, Card, Empty, Icon, Pill, toast } from './ui.tsx';
 import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
-import type { CapabilityRecord } from '../catalog/catalog.ts';
+import type { CapabilityRecord, SavedAgentCombination } from '../catalog/catalog.ts';
 import type { AgentCombination, AgentCombinationView } from '../catalog/agent-combinations.ts';
 import './setup.ts';
 import './resource-library.css';
@@ -343,7 +343,7 @@ function AgentCombinationEditor(input: {
   combinations: AgentCombinationView[];
   initial?: AgentCombinationView;
   onClose(): void;
-  onSaved(): void;
+  onSaved(result: SavedAgentCombination): void;
   onDescriptionSaved?(combination: AgentCombinationView): void;
 }) {
   const promptCapabilities = input.capabilities.filter(item => item.status === 'available' && item.kind === 'prompt' && item.role === 'agent');
@@ -425,7 +425,7 @@ function AgentCombinationEditor(input: {
         const kind = extensions.find(item => `${item.id}@${item.version}` === key)?.kind;
         resources.push({ ...binding(key), role: kind === 'extension' ? 'extension' : 'pi-extension' });
       }
-      await api<AgentCombinationView>('/api/catalog/combinations', {
+      const result = await api<SavedAgentCombination>('/api/catalog/combinations', {
         method: 'POST',
         body: JSON.stringify({
           combination: {
@@ -436,7 +436,7 @@ function AgentCombinationEditor(input: {
         }),
       });
       lastSavedDescription.current = description;
-      input.onSaved();
+      input.onSaved(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -621,14 +621,6 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
       toast(cause instanceof Error ? cause.message : String(cause), 'danger');
     }
   };
-  const compile = async (id: string) => {
-    try {
-      const result = await api<{ definitionVersion: string }>(`/api/catalog/combinations/${encodeURIComponent(id)}/compile`, { method: 'POST' });
-      toast(`已编译为 ${result.definitionVersion}`, 'success');
-    } catch (cause) {
-      toast(cause instanceof Error ? cause.message : String(cause), 'danger');
-    }
-  };
   async function openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md' | 'prompts') {
     if (!bridge?.openResource) {
       toast('请在桌面 APP 中使用访达打开能力目录', 'info');
@@ -712,7 +704,6 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                         </div>
                         {item.issues.map(issue => <div className="form-error" key={issue}>{issue}</div>)}
                         <div className="recipe-card-actions">
-                          <Button size="sm" disabled={item.status !== 'valid'} onClick={() => void compile(item.id)}>编译</Button>
                           <Button size="sm" variant="ghost" onClick={() => setEditing(item)}>编辑</Button>
                           <Button size="sm" variant="danger" disabled={item.mode === 'main'} onClick={() => void remove(item.id)}>删除</Button>
                         </div>
@@ -795,7 +786,13 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
           {...(editing ? { initial: editing } : {})}
           onClose={() => setEditing(undefined)}
           onDescriptionSaved={() => window.dispatchEvent(new Event('graph:settings-changed'))}
-          onSaved={() => { setEditing(undefined); window.dispatchEvent(new Event('graph:settings-changed')); toast('配方已保存', 'success'); }}
+          onSaved={result => {
+            setEditing(undefined);
+            window.dispatchEvent(new Event('graph:settings-changed'));
+            if (result.compileError) toast(`配方已保存，但编译失败：${result.compileError}`, 'danger');
+            else if (result.definition) toast(`配方已保存，已编译为 ${result.definition.definitionVersion}`, 'success');
+            else toast('配方已保存', 'success');
+          }}
         />
       )}
     </div>
