@@ -9,8 +9,9 @@
  * so the server gains no new runtime network dependency.
  *
  * The snapshot keeps models.dev's provider/model structure verbatim under
- * `providers` and adds provenance next to it (source URL, fetch timestamp and
- * the license/attribution note). `src/catalog/models-dev.ts` does the mapping.
+ * `providers` and adds a top-level `_meta` block with the source URL, fetch
+ * timestamp and the license/attribution note. `src/catalog/models-dev.ts` does
+ * the mapping.
  *
  * Usage: node --run catalog:refresh
  */
@@ -19,7 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SOURCE_URL = 'https://models.dev/api.json';
-const LICENSE = 'models.dev community catalog (MIT). Attribution: https://models.dev';
+const ATTRIBUTION = 'models.dev community catalog (MIT). Attribution: https://models.dev';
 const OUTPUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'catalog', 'models-dev.snapshot.json');
 
 const response = await fetch(SOURCE_URL, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(120_000) });
@@ -38,9 +39,7 @@ if (!providers) {
   process.exit(1);
 }
 const snapshot = {
-  fetchedAt: new Date().toISOString(),
-  sourceUrl: SOURCE_URL,
-  license: LICENSE,
+  _meta: { sourceUrl: SOURCE_URL, fetchedAt: new Date().toISOString(), attribution: ATTRIBUTION },
   providers: body,
 };
 await writeFile(OUTPUT, `${JSON.stringify(snapshot)}\n`);

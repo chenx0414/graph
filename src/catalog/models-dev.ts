@@ -20,7 +20,9 @@ import { readFileSync } from 'node:fs';
 import { MODEL_THINKING_LEVELS, type ModelCost, type ModelInput, type ModelThinkingLevel } from './models.ts';
 
 export const MODELS_DEV_SOURCE_URL = 'https://models.dev/api.json';
-export const MODELS_DEV_LICENSE = 'models.dev community catalog (MIT). Attribution: https://models.dev';
+export const MODELS_DEV_ATTRIBUTION = 'models.dev community catalog (MIT). Attribution: https://models.dev';
+/** @deprecated kept for older callers; use MODELS_DEV_ATTRIBUTION. */
+export const MODELS_DEV_LICENSE = MODELS_DEV_ATTRIBUTION;
 
 export interface ModelsDevReasoningOption {
   type?: string;
@@ -44,10 +46,20 @@ export interface ModelsDevProvider {
 }
 
 export interface ModelsDevSnapshot {
-  fetchedAt?: string;
+  /** Top-level `_meta` block written by `catalog:refresh`. */
   sourceUrl?: string;
-  license?: string;
+  fetchedAt?: string;
+  attribution?: string;
   providers: Record<string, ModelsDevProvider>;
+}
+
+/** Provenance the caller writes into `ModelPricing`; `unit` is always
+ * `per_million_tokens` for models.dev amounts. */
+export interface CatalogProvenance {
+  sourceUrl: string;
+  retrievedAt: string | undefined;
+  catalogRevision: string | undefined;
+  attribution: string;
 }
 
 /** Mapped metadata for one model; every field is optional and an absent field
@@ -135,17 +147,23 @@ function inputModalities(model: ModelsDevModel): ModelInput[] | undefined {
   return inputs.includes('image') ? ['text', 'image'] : ['text'];
 }
 
-/** Normalize either the vendored wrapper or a bare provider map. */
+/** Normalize the vendored snapshot. Accepts the `{ _meta, providers }` wrapper
+ * written by `catalog:refresh`, the earlier `{ fetchedAt, sourceUrl, license,
+ * providers }` shape, and a bare provider map. */
 export function normalizeModelsDevSnapshot(raw: unknown): ModelsDevSnapshot {
   const root = record(raw);
   if (!root) return { providers: {} };
-  const { providers, ...rest } = root;
+  const meta = record(root._meta) ?? {};
+  const { providers, _meta: _ignoredMeta, ...rest } = root;
   if (providers !== undefined) {
     const mapped = record(providers) ?? {};
+    const sourceUrl = meta.sourceUrl ?? rest.sourceUrl ?? rest.license;
+    const fetchedAt = meta.fetchedAt ?? rest.fetchedAt;
+    const attribution = meta.attribution ?? meta.license ?? rest.attribution ?? rest.license;
     return {
-      ...(typeof rest.fetchedAt === 'string' ? { fetchedAt: rest.fetchedAt } : {}),
-      ...(typeof rest.sourceUrl === 'string' ? { sourceUrl: rest.sourceUrl } : {}),
-      ...(typeof rest.license === 'string' ? { license: rest.license } : {}),
+      ...(typeof sourceUrl === 'string' ? { sourceUrl } : {}),
+      ...(typeof fetchedAt === 'string' ? { fetchedAt } : {}),
+      ...(typeof attribution === 'string' ? { attribution } : {}),
       providers: mapped as Record<string, ModelsDevProvider>,
     };
   }
@@ -173,6 +191,19 @@ export function builtinModelsDevSnapshot(): ModelsDevSnapshot {
   return cached;
 }
 
+/** Where the snapshot came from, for `ModelPricing`. Pass a snapshot to read
+ * another copy; the default is the vendored one. */
+export function catalogProvenance(snapshot?: unknown): CatalogProvenance {
+  const source = snapshot === undefined ? builtinModelsDevSnapshot() : normalizeModelsDevSnapshot(snapshot);
+  const retrievedAt = source.fetchedAt;
+  return {
+    sourceUrl: source.sourceUrl ?? MODELS_DEV_SOURCE_URL,
+    retrievedAt,
+    catalogRevision: retrievedAt ? `models-dev.${retrievedAt}` : undefined,
+    attribution: source.attribution ?? MODELS_DEV_ATTRIBUTION,
+  };
+}
+
 function resolveProvider(snapshot: ModelsDevSnapshot, providerHint: string): ModelsDevProvider | undefined {
   const hint = providerHint.trim().toLowerCase();
   if (!hint) return undefined;
@@ -189,10 +220,15 @@ function resolveModel(provider: ModelsDevProvider, modelId: string): ModelsDevMo
   if (!id) return undefined;
   const models = provider.models;
   if (!models) return undefined;
-  const direct = models[id];
+  // models.dev lists some models under a `vendor/model` key, and callers may
+  // pass either that spelling or the bare model segment.
+  const segment = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+  const direct = models[id] ?? models[segment];
   if (direct) return direct;
   for (const [key, model] of Object.entries(models)) {
-    if (key === id || model?.id === id) return model;
+    if (key === id || key === segment) return model;
+    if (key.endsWith(`/${segment}`) || key.slice(key.lastIndexOf('/') + 1) === segment) return model;
+    if (model?.id === id || model?.id === segment) return model;
   }
   return undefined;
 }
@@ -202,9 +238,10 @@ function resolveModel(provider: ModelsDevProvider, modelId: string): ModelsDevMo
  * metadata. Returns `null` when the snapshot or the provider/model is missing;
  * a matched model without a price simply omits `cost` (never a zero price).
  */
-export function lookupModelMetadata(providerHint: string, modelId: string, snapshot: ModelsDevSnapshot = builtinModelsDevSnapshot()): ModelMetadata | null {
-  if (!snapshot || !snapshot.providers) return null;
-  const provider = resolveProvider(snapshot, providerHint);
+export function lookupModelMetadata(providerHint: string, modelId: string, snapshot?: unknown): ModelMetadata | null {
+  const source = snapshot === undefined ? builtinModelsDevSnapshot() : normalizeModelsDevSnapshot(snapshot);
+  if (!source || !source.providers) return null;
+  const provider = resolveProvider(source, providerHint);
   if (!provider) return null;
   const model = resolveModel(provider, modelId);
   if (!model) return null;
@@ -215,8 +252,7 @@ export function lookupModelMetadata(providerHint: string, modelId: string, snaps
   const reasoning = typeof model.reasoning === 'boolean' ? model.reasoning : undefined;
   const levels = thinkingLevels(model);
   const cost = optionalCost(model.cost);
-  const sourceUrl = typeof snapshot.sourceUrl === 'string' && snapshot.sourceUrl ? snapshot.sourceUrl : MODELS_DEV_SOURCE_URL;
-  const catalogRevision = snapshot.fetchedAt ? `models-dev.${snapshot.fetchedAt}` : undefined;
+  const provenance = catalogProvenance(source);
 
   return {
     ...(contextWindow !== undefined ? { contextWindow } : {}),
@@ -227,7 +263,7 @@ export function lookupModelMetadata(providerHint: string, modelId: string, snaps
     ...(reasoning && levels.includes('medium') ? { defaultThinkingLevel: 'medium' as ModelThinkingLevel } : {}),
     ...(cost ? { cost } : {}),
     ...(cost ? { currency: typeof model.cost?.currency === 'string' && model.cost.currency ? model.cost.currency : 'USD' } : {}),
-    sourceUrl,
-    ...(catalogRevision ? { catalogRevision } : {}),
+    sourceUrl: provenance.sourceUrl,
+    ...(provenance.catalogRevision ? { catalogRevision: provenance.catalogRevision } : {}),
   };
 }
