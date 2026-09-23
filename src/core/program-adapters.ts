@@ -26,11 +26,22 @@ export function graphVerifier(store: TaskStore, spec: NodeSpec): ActionAdapter {
       const acceptanceIds = proposal.acceptance
         .filter(item => item.checkNode === operation.nodeId)
         .map(item => item.id);
+      // The files any node already declares, so the gate can name what nobody owns yet.
+      const owned = (store.db.prepare('SELECT spec FROM nodes WHERE task_id=?').all(operation.taskId) as { spec: string }[])
+        .flatMap(row => {
+          try {
+            const node = JSON.parse(row.spec) as NodeSpec;
+            const input = node.input && typeof node.input === 'object' && !Array.isArray(node.input) ? node.input as Record<string, unknown> : null;
+            const files = input?.['files'];
+            return Array.isArray(files) ? files.filter((item): item is string => typeof item === 'string') : [];
+          } catch { return []; }
+        });
       try {
         return evaluateVerifier(spec.verifier, {
           dependencies: operation.dependencies,
           dependencySources: operation.dependencySources,
           acceptanceIds,
+          owned,
         });
       } catch (error) {
         if (error instanceof RuntimeError && error.code === 'invalid_evidence') {

@@ -50,6 +50,42 @@ function implementReviewGate(root: string, config: VerifierConfig, review: (oper
   };
 }
 
+test('a failing judgment names the files the fix must touch, and the gate marks the unowned ones', async () => {
+  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
+    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
+  };
+  const { runtime, task } = await setup(root => {
+    const artifact = { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('version one') };
+    return {
+      actions: {
+        implement: { kind: 'agent' as const, reserveTokens: 100, prepare: async () => async () => {
+          await writeFile(artifact.path, 'version one');
+          return { outcome: 'completed' as const, output: { version: 1 }, artifacts: [artifact], usage };
+        } },
+        review: { kind: 'agent' as const, reserveTokens: 100, prepare: async operation => async () => ({
+          outcome: 'completed' as const, usage,
+          output: json({ schemaVersion: 1, subject: operation.dependencySources.implementation![0]!.artifacts[0]!,
+            body: { kind: 'multiview', dimensions: { correctness: { verdict: 'fail', reason: 'The legend is not persistent', evidence: [artifact], files: ['src/web/App.tsx', 'docs/legend.md'] } } } }),
+        }) },
+      },
+      nodes: [
+        { id: 'implementation', kind: 'agent' as const, action: 'implement', ...coder, input: { files: ['src/web/GraphCanvas.tsx'] } },
+        { id: 'review', kind: 'agent' as const, action: 'review', definitionVersion: 'reviewer@1', model: 'scripted-review', dependsOn: ['implementation'] },
+        { id: 'gate', kind: 'program' as const, action: 'graph.verify', dependsOn: ['implementation', 'review'], verifier: config },
+      ],
+    };
+  });
+  for (let i = 0; i < 3; i++) await runtime.host.runReady();
+  const output = (await task.view()).operations.find(operation => operation.nodeId === 'gate')?.result?.output;
+  // The blocker names the files; the gate also reports which of them no node's scope covers, so the
+  // main Agent can extend exactly those in one revision.
+  expect(output).toMatchObject({
+    outcome: 'rework',
+    blockers: [{ id: 'correctness', files: ['src/web/App.tsx', 'docs/legend.md'] }],
+    unowned: ['src/web/App.tsx', 'docs/legend.md'],
+  });
+});
+
 test('a built-in multiview gate delivers evidence for the exact artifact checked by its required reviewer', async () => {
   const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
     dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],

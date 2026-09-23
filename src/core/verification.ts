@@ -4,7 +4,7 @@ import { canonicalJson } from './store.ts';
 import { RuntimeError, type ArtifactVersion, type DependencySource, type Json, type OperationResult, type Proposal } from './types.ts';
 
 export type Proof = { path: string; digest: string };
-export type Judgment = { verdict: 'pass' | 'fail' | 'unresolved'; reason: string; evidence: Proof[] };
+export type Judgment = { verdict: 'pass' | 'fail' | 'unresolved'; reason: string; evidence: Proof[]; files?: string[] };
 type CommonConfig = { reportNodes: string[] };
 export type VerifierConfig = CommonConfig & (
   | { kind: 'adversarial'; subjectNode: string; acceptanceCriteria: string[] }
@@ -25,9 +25,11 @@ export type ReviewReport = { schemaVersion: 1 } & (
 );
 type Source = Pick<DependencySource, 'nodeId' | 'operationId' | 'activationId'>;
 export type VerificationDecision = { kind: 'verification'; outcome: 'pass' | 'rework'; subjects: ArtifactVersion[];
-  reports: Source[]; blockers: { id: string; reason: string; evidence: Proof[] }[];
+  reports: Source[]; blockers: { id: string; reason: string; evidence: Proof[]; files?: string[] }[];
+  /** Files a blocker names that no node's declared scope covers: the main Agent must extend a node. */
+  unowned?: string[];
   ranking?: { candidateId: string; score: number; eligible: boolean }[]; winner?: string };
-export type VerificationContext = { dependencies: Record<string, Json>; dependencySources: Record<string, DependencySource[]>; acceptanceIds: string[] };
+export type VerificationContext = { dependencies: Record<string, Json>; dependencySources: Record<string, DependencySource[]>; acceptanceIds: string[]; owned?: string[] };
 function invalid(reason: string): never { throw new RuntimeError('invalid_evidence', reason); }
 function invalidProposal(reason: string): never { throw new RuntimeError('invalid_proposal', reason); }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -39,7 +41,20 @@ function unique(ids: string[], label: string) {
 function judgment(value: unknown): Judgment {
   if (!record(value) || !['pass', 'fail', 'unresolved'].includes(String(value.verdict)) || !nonempty(value.reason)
       || !Array.isArray(value.evidence) || !value.evidence.length || !value.evidence.every(proof)) invalid('Review judgments require a verdict, reason and evidence');
+  if (value.files !== undefined) {
+    // Repository-relative paths the fix has to touch. Naming them in the report is what lets the
+    // main Agent extend the affected nodes' file lists in one revision instead of re-reading prose.
+    if (!Array.isArray(value.files) || !value.files.length
+        || !value.files.every(item => nonempty(item) && !isAbsolute(item))) {
+      invalid('Review judgment files must be nonempty repository-relative paths');
+    }
+  }
   return value as Judgment;
+}
+
+/** A blocker carries the judgment's reason, evidence and the files the fix must touch. */
+function blocker(id: string, checked: Judgment): VerificationDecision['blockers'][number] {
+  return { id, reason: checked.reason, evidence: checked.evidence, ...(checked.files ? { files: checked.files } : {}) };
 }
 function source(context: VerificationContext, node: string): DependencySource {
   const sources = context.dependencySources[node];
@@ -160,7 +175,7 @@ function evaluateMultiview(config: Extract<VerifierConfig, { kind: 'multiview' }
         continue;
       }
       const checked = judgment(raw);
-      if (dimension.required && checked.verdict !== 'pass') decision.blockers.push({ id: dimension.id, reason: checked.reason, evidence: checked.evidence });
+      if (dimension.required && checked.verdict !== 'pass') decision.blockers.push(blocker(dimension.id, checked));
     }
   }
 }
@@ -176,7 +191,7 @@ function evaluateAdversarial(config: Extract<VerifierConfig, { kind: 'adversaria
   }
   for (const criterion of config.acceptanceCriteria) {
     const checked = judgment(checks[criterion]);
-    if (checked.verdict !== 'pass') decision.blockers.push({ id: criterion, reason: checked.reason, evidence: checked.evidence });
+    if (checked.verdict !== 'pass') decision.blockers.push(blocker(criterion, checked));
   }
   const seen = new Set<string>();
   for (const item of counterexamples) {
@@ -188,7 +203,7 @@ function evaluateAdversarial(config: Extract<VerifierConfig, { kind: 'adversaria
     if (!config.acceptanceCriteria.includes(item.acceptanceId)) invalid('Counterexample must refer to a configured acceptance criterion');
     const judged = judgment(item.judgment);
     if (item.impactsAcceptance && item.resolution === 'open' && item.validity !== 'invalid') {
-      decision.blockers.push({ id: item.id, reason: judged.reason, evidence: judged.evidence });
+      decision.blockers.push(blocker(item.id, judged));
     }
   }
 }
@@ -267,6 +282,12 @@ export function evaluateVerifier(config: VerifierConfig, context: VerificationCo
   else if (config.kind === 'independent') evaluateIndependent(config, context, reports, decision);
   else evaluateJury(config, context, reports, decision);
   decision.outcome = decision.blockers.length ? 'rework' : 'pass';
+  // A file the gate demands but no node owns cannot be fixed by any lane: naming it lets the main
+  // Agent extend the owning node's file list in one revision instead of guessing from prose.
+  const owned = context.owned ?? [];
+  const unowned = [...new Set(decision.blockers.flatMap(item => item.files ?? []))]
+    .filter(path => !owned.some(scope => path === scope || path.startsWith(scope.endsWith('/') ? scope : `${scope}/`)));
+  if (unowned.length) decision.unowned = unowned;
   const artifact = decision.subjects[0];
   if (decision.outcome === 'pass' && !artifact) invalid('Verifier requires an artifact');
   return { outcome: 'completed', output: decision as unknown as Json,
