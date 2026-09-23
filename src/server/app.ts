@@ -9,6 +9,18 @@ import { layoutGraph } from './layout.ts';
 
 import type { AppServices, StartupInfo } from './host.ts';
 import { sanitizeConfig, type ConfigStore } from './config-service.ts';
+import {
+  buildModelsRequest,
+  buildVerifyRequest,
+  parseModelsResponse,
+  parseVerifyResponse,
+  platformCatalogView,
+  sanitizeProviderView,
+  validateProviderDraft,
+  type HttpRequestSpec,
+  type ProbeTarget,
+  type ProviderModelSummary,
+} from './providers.ts';
 import type { UsageService } from './usage.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { DefinitionSpec } from '../catalog/catalog.ts';
@@ -77,6 +89,111 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   // rebuilt bundle sit behind a stale page - and a stale page can reference
   // asset names the rebuild just removed.
   const html = async () => options.webDir ? await readFile(join(options.webDir, 'index.html'), 'utf8').catch(() => defaultPage()) : defaultPage();
+  // Provider configuration reuses the credential view the runtime already
+  // merges (environment + APP/keychain pushes, minus revocations). Values are
+  // consumed in-process only; responses carry names and flags, never a secret.
+  const providerSecrets = (): Record<string, string | undefined> => {
+    // The runtime's merged view is authoritative: it already drops revoked refs
+    // even when the process environment still names the variable.
+    const live = options.appServices?.capabilityConfig?.secretValues();
+    return live ?? { ...(options.config?.env ?? {}) };
+  };
+  const providersView = async () => {
+    const secrets = providerSecrets();
+    let credentials: ReturnType<typeof sanitizeProviderView>['credentials'] = {};
+    if (options.config) {
+      try {
+        const { config } = await options.config.store.snapshot();
+        credentials = sanitizeProviderView(config, secrets).credentials;
+      } catch {
+        credentials = {};
+      }
+    }
+    return { platforms: platformCatalogView(secrets).platforms, credentials };
+  };
+  /** One request/response round-trip for a probe; no secret ever reaches the reply. */
+  const probeHttp = async (spec: HttpRequestSpec): Promise<{ status: number; body: unknown }> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(spec.url, {
+        method: spec.method,
+        headers: spec.headers,
+        ...(spec.body ? { body: spec.body } : {}),
+        signal: controller.signal,
+      });
+      const text = await response.text().catch(() => '');
+      let body: unknown;
+      if (text) {
+        try { body = JSON.parse(text) as unknown; } catch { body = text; }
+      }
+      return { status: response.status, body };
+    } catch (error) {
+      return { status: 0, body: error instanceof Error ? error.message : String(error) };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  /** Probe an unsaved provider draft: list models when the vendor supports it,
+   * then send one minimal chat request. Vendor failures keep their own text. */
+  const runProviderProbe = async (rawBody: unknown) => {
+    const body = rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody) ? rawBody as Record<string, unknown> : {};
+    if (typeof body.requestId !== 'string' || !body.requestId.trim()) {
+      throw new RuntimeError('invalid_input', 'requestId is required');
+    }
+    const validated = validateProviderDraft(body.provider);
+    if (!validated.ok) {
+      throw new RuntimeError('invalid_input', validated.errors.map(error => `${error.field}: ${error.message}`).join('; '));
+    }
+    const provider = validated.provider;
+    const apiKey = providerSecrets()[provider.secretRef]?.trim() || undefined;
+    const target: ProbeTarget = {
+      baseUrl: provider.baseUrl,
+      api: provider.api,
+      ...(apiKey ? { apiKey } : {}),
+      ...(provider.headers ? { headers: provider.headers } : {}),
+    };
+    const wantModels = provider.modelsListSupported && body.probeModels !== false;
+    const models: ProviderModelSummary[] = [];
+    let modelsError: string | undefined;
+    if (wantModels) {
+      const response = await probeHttp(buildModelsRequest(target));
+      const parsed = parseModelsResponse(target, response.status, response.body);
+      if ('models' in parsed) models.push(...parsed.models);
+      else modelsError = parsed.error;
+    }
+    const requestedModel = typeof body.modelId === 'string' && body.modelId.trim() ? body.modelId.trim() : undefined;
+    const verifyModel = requestedModel ?? models[0]?.id;
+    let verification: { ok: boolean; status?: number; error?: string; skipped?: boolean };
+    if (!apiKey) {
+      verification = { ok: false, error: `凭据未解析：${provider.secretRef}（请在环境变量或钥匙串中提供）` };
+    } else if (verifyModel) {
+      const response = await probeHttp(buildVerifyRequest(target, verifyModel));
+      const parsed = parseVerifyResponse(response.status, response.body);
+      verification = parsed.ok
+        ? { ok: true, status: parsed.status }
+        : { ok: false, status: parsed.status, error: parsed.error };
+    } else if (modelsError) {
+      verification = { ok: false, error: modelsError };
+    } else {
+      verification = { ok: false, skipped: true, error: '没有可验证的模型：该端点不支持模型列表，请手动添加模型 id' };
+    }
+    return {
+      provider: {
+        id: provider.id,
+        label: provider.label,
+        baseUrl: provider.baseUrl,
+        api: provider.api,
+        credentialRef: provider.secretRef,
+        credentialKind: provider.credentialKind,
+        custom: provider.custom,
+      },
+      credentialConfigured: Boolean(apiKey),
+      models,
+      ...(modelsError ? { modelsError } : {}),
+      verification,
+    };
+  };
 
   app.setErrorHandler((error, _request, reply) => {
     const err = error as Error & { statusCode?: number; code?: string };
@@ -158,6 +275,13 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     app.post('/api/usage/refresh', async () => options.usage!.get(true));
     app.get('/api/usage/credentials', async () => ({ credentials: await options.usage!.credentials() }));
   }
+  // Provider directory + probe. `/api/providers` is the browser-console path
+  // (session cookie); the `/api/app/*` aliases match the desktop bridge/token
+  // guard the other app-only routes use.
+  app.get('/api/providers', async () => providersView());
+  app.get('/api/app/providers', async () => providersView());
+  app.post('/api/providers/probe', async request => runProviderProbe(request.body));
+  app.post('/api/app/providers/probe', async request => runProviderProbe(request.body));
   app.post('/api/app/secret', async request => {
     if (!options.appServices) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');
     const body = request.body as { ref?: unknown; value?: unknown };
@@ -183,7 +307,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       return {
         revision,
         ...(status ? { effectiveRevision: status.effectiveRevision, configured: status.configured } : {}),
-        config: sanitizeConfig(config, options.config!.env),
+        config: sanitizeConfig(config, providerSecrets()),
       };
     });
     app.post('/api/config', async request => {
