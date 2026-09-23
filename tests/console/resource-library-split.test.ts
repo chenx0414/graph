@@ -3,7 +3,7 @@ import { expect, test } from 'vitest';
 /* ResourceLibrary is a .tsx module; the NodeNext test program cannot compile
  * TSX, so vitest transpiles it and the web project typechecks it instead. */
 // @ts-ignore -- .tsx import from a NodeNext test program
-import { LIBRARY_FILTERS, capabilityConfigGuidance, capabilityIsConfigured, splitLibraryEntries } from '../../src/web/ResourceLibrary.tsx';
+import { LIBRARY_FILTERS, capabilityConfigGuidance, capabilityConfigItemGuidance, capabilityConfigItemIsConfigured, capabilityIsConfigured, configGuidance, splitLibraryEntries } from '../../src/web/ResourceLibrary.tsx';
 
 type Filter = 'all' | 'configured' | 'unconfigured';
 
@@ -92,5 +92,55 @@ test('unconfigured entries carry a one-line how-to-configure hint', () => {
   expect(guidance).toContain('设置页');
 
   expect(capabilityConfigGuidance(record('broken', 'invalid'))).toContain('清单不可读');
-  expect(capabilityConfigGuidance(record('ok'), config('ok', true))).toBe('');
+});
+
+test('the guidance falls back to a generic instruction when nothing specific is missing', () => {
+  const item = config('no-detail', false, []);
+  const fallback = capabilityConfigGuidance(record('no-detail'), item);
+  expect(fallback.trim().length).toBeGreaterThan(0);
+  expect(fallback).toContain('设置页');
+  expect(capabilityConfigItemGuidance(item)).toBe(fallback);
+  expect(configGuidance({})).toContain('设置页');
+});
+
+test('every unconfigured entry gets a non-empty hint in both views', () => {
+  const entries = [record('missing-keys'), record('no-detail'), record('broken', 'invalid')];
+  const configMap = new Map([
+    ['missing-keys@1.0.0', config('missing-keys', false, ['API_KEY'])],
+    ['no-detail@1.0.0', config('no-detail', false, [])],
+  ]);
+  const isConfigured = (entry: { id: string; version: string }) => capabilityIsConfigured(entry, configMap.get(`${entry.id}@${entry.version}`));
+  const split = splitLibraryEntries(entries, 'unconfigured', isConfigured);
+  expect(split.unconfigured.map((entry: { id: string }) => entry.id)).toEqual(['missing-keys', 'no-detail', 'broken']);
+  for (const entry of split.unconfigured) {
+    expect(capabilityConfigGuidance(entry, configMap.get(`${entry.id}@${entry.version}`)).trim().length).toBeGreaterThan(0);
+  }
+  for (const item of configMap.values()) {
+    if (!capabilityConfigItemIsConfigured(item)) {
+      expect(capabilityConfigItemGuidance(item).trim().length).toBeGreaterThan(0);
+    }
+  }
+});
+
+test('the config view and the list view share the same splitLibraryEntries entry point', () => {
+  const capabilities = [record('s1'), record('m1'), record('m2')];
+  const configMap = new Map([
+    ['s1@1.0.0', config('s1', true)],
+    ['m1@1.0.0', config('m1', false, ['M1_KEY'])],
+    ['m2@1.0.0', config('m2', true)],
+  ]);
+
+  const listSplit = splitLibraryEntries(capabilities, 'all', (entry: { id: string; version: string }) => capabilityIsConfigured(entry, configMap.get(`${entry.id}@${entry.version}`)));
+  const configSplit = splitLibraryEntries([...configMap.values()], 'all', capabilityConfigItemIsConfigured);
+
+  // Both views feed the same function, so the grouping and counts agree.
+  expect(listSplit.counts).toEqual({ all: 3, configured: 2, unconfigured: 1 });
+  expect(configSplit.counts).toEqual(listSplit.counts);
+  expect(listSplit.unconfigured.map((entry: { id: string }) => entry.id)).toEqual(['m1']);
+  expect(configSplit.unconfigured.map((entry: { id: string }) => entry.id)).toEqual(['m1']);
+
+  // The three-state filter selects the same group in both views.
+  expect(splitLibraryEntries(capabilities, 'configured', (entry: { id: string; version: string }) => capabilityIsConfigured(entry, configMap.get(`${entry.id}@${entry.version}`))).visible.map((entry: { id: string }) => entry.id)).toEqual(['s1', 'm2']);
+  expect(splitLibraryEntries([...configMap.values()], 'configured', capabilityConfigItemIsConfigured).visible.map((entry: { id: string }) => entry.id)).toEqual(['s1', 'm2']);
+  expect(splitLibraryEntries([...configMap.values()], 'unconfigured', capabilityConfigItemIsConfigured).visible.map((entry: { id: string }) => entry.id)).toEqual(['m1']);
 });

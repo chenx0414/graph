@@ -93,16 +93,33 @@ export function capabilityIsConfigured(item: CapabilityRecord, config?: Capabili
   return config ? config.ready : true;
 }
 
-/** One-line "how to configure" hint for an entry that is not ready yet. */
+/** Shared "how to configure" hint. Both the capability list view and the
+ * config view funnel through this, so an unconfigured entry is never rendered
+ * with an empty hint: the no-detail case falls back to a generic instruction. */
+export function configGuidance(input: { missing?: string[] | undefined; error?: string | undefined }): string {
+  if (input.error) return `配置读取失败：${input.error} 请在能力目录修复后重新扫描。`;
+  if (input.missing?.length) return `需要配置 ${input.missing.join(' / ')}：设置对应环境变量，或到设置页保存凭据；保存后立即对新请求生效。`;
+  return '需要配置：到设置页连接模型或保存对应凭据；保存后立即生效。';
+}
+
+/** One-line "how to configure" hint for a capability-list entry. */
 export function capabilityConfigGuidance(item: CapabilityRecord, config?: CapabilityConfigItem): string {
   if (item.status !== 'available') {
     return item.error
       ? `清单不可读：${item.error} 请在能力目录修复 capability.json 后重新扫描。`
       : '清单不可读：请在能力目录补齐 capability.json 后重新扫描。';
   }
-  if (config?.error) return `配置读取失败：${config.error} 请在能力目录修复后重新扫描。`;
-  if (config?.missing.length) return `需要配置 ${config.missing.join(' / ')}：设置对应环境变量，或到设置页保存凭据；保存后立即对新请求生效。`;
-  return '';
+  return configGuidance(config ?? {});
+}
+
+/** Config-view entries carry their own ready/error state. */
+export function capabilityConfigItemIsConfigured(item: CapabilityConfigItem): boolean {
+  return item.ready && !item.error;
+}
+
+/** How-to-configure hint for a config-view entry. */
+export function capabilityConfigItemGuidance(item: CapabilityConfigItem): string {
+  return configGuidance(item);
 }
 
 const CAPABILITY_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -200,7 +217,7 @@ function CapabilityDetail({ item }: { item: CapabilityRecord }) {
   );
 }
 
-function CapabilityConfigPanel({ items }: { items: CapabilityConfigItem[] }) {
+function CapabilityConfigPanel({ items, filter, onFilterChange }: { items: CapabilityConfigItem[]; filter: LibraryEntryFilter; onFilterChange(filter: LibraryEntryFilter): void }) {
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -235,13 +252,12 @@ function CapabilityConfigPanel({ items }: { items: CapabilityConfigItem[] }) {
       setBusy(null);
     }
   };
-  return (
-    <div className="capability-config-list" data-testid="capability-config-list">
-      {items.map(item => {
-        const key = `${item.id}@${item.version}`;
-        const result = results[key];
-        return (
-          <article className="capability-config-item" key={key} data-testid={`capability-config-${item.id}`}>
+  const split = splitLibraryEntries(items, filter, capabilityConfigItemIsConfigured);
+  const renderConfigItem = (item: CapabilityConfigItem) => {
+    const key = `${item.id}@${item.version}`;
+    const result = results[key];
+    return (
+      <article className="capability-config-item" key={key} data-testid={`capability-config-${item.id}`}>
             <header>
               <div><strong>{item.name}</strong><code>{item.id}@{item.version}</code></div>
               <Pill tone={item.ready ? 'success' : item.missing.length ? 'warn' : 'danger'}>
@@ -282,7 +298,42 @@ function CapabilityConfigPanel({ items }: { items: CapabilityConfigItem[] }) {
             )}
           </article>
         );
-      })}
+  };
+  const showConfigured = filter !== 'unconfigured';
+  const showUnconfigured = filter !== 'configured';
+  return (
+    <div className="capability-config-list" data-testid="capability-config-list">
+      <div className="resource-split-toggle" role="group" aria-label="按配置状态筛选" data-testid="resource-filter-config">
+        {LIBRARY_FILTERS.map(option => (
+          <button key={option.id} type="button" className="resource-split-option" data-active={option.id === filter} data-testid={`resource-filter-config-${option.id}`} onClick={() => onFilterChange(option.id)}>
+            {option.label}
+            <span className="resource-split-count">{option.id === 'all' ? split.counts.all : option.id === 'configured' ? split.counts.configured : split.counts.unconfigured}</span>
+          </button>
+        ))}
+      </div>
+      <div className="resource-groups">
+        {showUnconfigured && (
+          <section className="resource-group" data-testid="capability-config-group-unconfigured">
+            <h4 className="resource-group-head"><span>未配置</span><span className="resource-group-count">{split.counts.unconfigured}</span></h4>
+            {split.unconfigured.length
+              ? split.unconfigured.map(item => (
+                <div className="resource-candidate-wrap" key={`${item.id}@${item.version}`}>
+                  {renderConfigItem(item)}
+                  <p className="resource-config-guidance" data-testid={`capability-config-guidance-${item.id}`}>{capabilityConfigItemGuidance(item)}</p>
+                </div>
+              ))
+              : <p className="muted resource-group-empty">没有未配置的能力。</p>}
+          </section>
+        )}
+        {showConfigured && (
+          <section className="resource-group" data-testid="capability-config-group-configured">
+            <h4 className="resource-group-head"><span>已配置</span><span className="resource-group-count">{split.counts.configured}</span></h4>
+            {split.configured.length
+              ? split.configured.map(renderConfigItem)
+              : <p className="muted resource-group-empty">没有已配置的能力。</p>}
+          </section>
+        )}
+      </div>
     </div>
   );
 }
@@ -676,7 +727,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                 <Button size="sm" icon="folder" onClick={() => void openResource('prompts')}>打开 Prompt 文件夹</Button>
               </div>
             ) : active.id === 'config' ? (
-              <CapabilityConfigPanel items={settings?.capabilityConfig ?? []} />
+              <CapabilityConfigPanel items={settings?.capabilityConfig ?? []} filter={libraryFilter} onFilterChange={setLibraryFilter} />
             ) : active.id === 'architectures' ? (
               <div className="architecture-list" data-testid="architecture-library">{GRAPH_ARCHITECTURES.map(item => <article className="architecture-item" key={item.name}><div className="architecture-flow mono">{item.flow}</div><div><strong>{item.name}</strong><p>{item.description}</p></div></article>)}</div>
             ) : active.items.length ? (
