@@ -92,12 +92,26 @@ describe('models.dev snapshot mapping (B-1)', () => {
       contextWindow: 1_000_000,
       maxTokens: 30_000,
       reasoning: true,
-      defaultThinkingLevel: 'medium',
     });
     expect(metadata!.thinkingLevels).toEqual(['off', 'low', 'medium', 'high']);
+    // models.dev records no default thinking strength, even though 'medium' is a
+    // listed level; the wizard must not invent one.
+    expect(metadata!.defaultThinkingLevel).toBeUndefined();
     // No cache-write rate is published, so the price (and currency) is left to the user.
     expect(metadata!.cost).toBeUndefined();
     expect(metadata!.currency).toBeUndefined();
+  });
+
+  it('never invents a default thinking strength for a reasoning model', () => {
+    // 'medium' is one of the listed levels and the model reasons, but the
+    // snapshot says nothing about a default, so the result must not carry one.
+    for (const [provider, id] of [['grok', 'grok-4.3'], ['deepseek', 'deepseek-v4-flash'], ['anthropic', 'claude-sonnet-4-6']] as const) {
+      const metadata = lookupModelMetadata(provider, id);
+      expect(metadata).not.toBeNull();
+      expect(metadata!.reasoning).toBe(true);
+      expect(metadata!.defaultThinkingLevel).toBeUndefined();
+      expect('defaultThinkingLevel' in metadata!).toBe(false);
+    }
   });
 
   it('keeps only thinking levels the repository models and never invents one', () => {
