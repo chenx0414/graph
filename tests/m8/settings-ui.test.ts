@@ -100,7 +100,8 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.locator('#settings-credentials').isVisible()).toBe(true);
   expect(await page.locator('#settings-models').isVisible()).toBe(true);
   expect(await page.locator('#settings-preferences').count()).toBe(0);
-  expect(await page.locator('#settings-limits').isVisible()).toBe(true);
+  // Concurrency limits moved into the collapsed 高级设置 section (asserted below).
+  expect(await page.locator('#settings-limits').count()).toBe(0);
   expect(await page.getByTestId('setup').isVisible()).toBe(true);
   expect(await page.locator('#settings-project').count()).toBe(0);
   expect(await page.getByTestId('settings-save').count()).toBe(0);
@@ -129,6 +130,12 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.getByTestId('model-1-maxTokens').fill('256');
   await page.getByTestId('model-1-reasoning').uncheck();
   await page.getByTestId('model-1-images').check();
+  await openPage('高级设置');
+  expect(await page.locator('#settings-limits').count()).toBe(1);
+  expect(await page.getByTestId('advanced-setting-toggle-settings-limits').getAttribute('aria-expanded')).toBe('false');
+  await page.getByTestId('advanced-setting-toggle-settings-limits').click();
+  expect(await page.getByTestId('advanced-setting-toggle-settings-limits').getAttribute('aria-expanded')).toBe('true');
+  expect(await page.locator('#settings-limits').isVisible()).toBe(true);
   await page.getByTestId('limit-group-add').click();
   await page.getByTestId('limit-group-0').fill('4');
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
@@ -150,6 +157,9 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.locator('[data-testid="credential-row-1"] .credential-advanced summary').click();
   expect(await page.getByTestId('credential-1-group').inputValue()).toBe('group-1');
   expect(await page.getByTestId('credential-1-state').innerText()).toBe('缺失');
+  // Concurrency limits persist under the collapsed 高级设置 section.
+  await openPage('高级设置');
+  await page.getByTestId('advanced-setting-toggle-settings-limits').click();
   expect(await page.getByTestId('limit-group-0').inputValue()).toBe('4');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
 
