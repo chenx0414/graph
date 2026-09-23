@@ -249,9 +249,11 @@ test('a terminal task releases its working copies but keeps its integration bran
 }, 30_000);
 
 test('a lane that carries a sibling lane file is restored to its own scope before merging', async () => {
-  // A file scope may name a file or a directory prefix; everything else belongs to a sibling lane.
+  // A file scope may name a file or a directory prefix; everything else belongs to a sibling lane,
+  // except the node's own evidence directory, which is its submission material.
   expect(outOfScopePaths(['src/a.txt', 'src/b.txt', 'docs/x.md'], ['src/a.txt'])).toEqual(['src/b.txt', 'docs/x.md']);
   expect(outOfScopePaths(['src/a/x.ts', 'src/ab/x.ts'], ['src/a/'])).toEqual(['src/ab/x.ts']);
+  expect(outOfScopePaths(['evidence/shot.png', 'src/b.txt'], ['src/a.txt'])).toEqual(['src/b.txt']);
 
   const root = await temp('scope');
   const state = join(root, '.state');
@@ -281,4 +283,10 @@ test('a lane that carries a sibling lane file is restored to its own scope befor
   expect(git(integrationPath, ['show', 'HEAD:src/b.txt'])).toBe('b');
   const event = db.db.prepare("SELECT data FROM events WHERE task_id='t' AND type='git.out-of-scope.restored'").get() as { data: string } | undefined;
   expect(event?.data).toContain('src/b.txt');
+  // A file the lane created outside its scope is reported, never deleted.
+  await writeFile(join(lane, 'src', 'created-by-lane.txt'), 'new\n');
+  expect(integration.integrate({ ...operation, id: 'op-b' } as unknown as Operation)).toMatchObject({ ok: true });
+  expect(existsSync(join(lane, 'src', 'created-by-lane.txt'))).toBe(true);
+  const reported = db.db.prepare("SELECT data FROM events WHERE task_id='t' AND type='git.out-of-scope.restored' ORDER BY rowid DESC LIMIT 1").get() as { data: string };
+  expect(reported.data).toContain('created-by-lane.txt');
 }, 30_000);

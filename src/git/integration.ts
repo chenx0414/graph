@@ -28,14 +28,18 @@ export function rechecksAfterIntegrationChange(spec: NodeSpec, status: string): 
   return spec.kind === 'program' || spec.action === 'review';
 }
 
+const EVIDENCE_PREFIXES = ['evidence/'];
+
 /**
  * A lane owns the paths its node declares and nothing else. A work copy that also carries a sibling
  * lane's file merges as a conflict, or silently rewrites work it does not own, so those paths are
  * put back to the integration tip before the merge - the recovery the worker rule asks a human for,
- * done deterministically. Content from outside the scope is never adopted.
+ * done deterministically. Content from outside the scope is never adopted. A node's own evidence
+ * directory is its submission material, never a sibling's file.
  */
 export function outOfScopePaths(changed: readonly string[], scope: readonly string[]): string[] {
-  return changed.filter(path => !scope.some(owned => path === owned || path.startsWith(owned.endsWith('/') ? owned : `${owned}/`)));
+  return changed.filter(path => !EVIDENCE_PREFIXES.some(prefix => path.startsWith(prefix))
+    && !scope.some(owned => path === owned || path.startsWith(owned.endsWith('/') ? owned : `${owned}/`)));
 }
 
 /** Task integration branch and per-instance work copies. Git effects stay outside SQLite transactions. */
@@ -452,9 +456,18 @@ export class GitIntegration {
     if (changed.code !== 0) return;
     const foreign = outOfScopePaths(changed.stdout.split('\n').map(line => line.trim()).filter(Boolean), scope);
     if (!foreign.length) return;
-    if (git(tree.path, ['checkout', base, '--', ...foreign]).code !== 0) return;
-    const sha = commitAll(tree.path, `graph:${operation.nodeId}:${operation.id}:scope`, identity);
-    this.store.event(operation.taskId, 'git.out-of-scope.restored', { nodeId: operation.nodeId, paths: foreign, sha: sha ?? null });
+    // Only a path the base already has is restored. A file the lane created outside its scope cannot
+    // be reverted by checkout, and deleting it would destroy submission material, so it is reported
+    // instead of removed.
+    const baseFiles = new Set(git(tree.path, ['ls-tree', '-r', '--name-only', base]).stdout.split('\n').map(line => line.trim()).filter(Boolean));
+    const restorable = foreign.filter(path => baseFiles.has(path));
+    const created = foreign.filter(path => !baseFiles.has(path));
+    let sha: string | undefined;
+    if (restorable.length) {
+      if (git(tree.path, ['checkout', base, '--', ...restorable]).code !== 0) return;
+      sha = commitAll(tree.path, `graph:${operation.nodeId}:${operation.id}:scope`, identity);
+    }
+    this.store.event(operation.taskId, 'git.out-of-scope.restored', { nodeId: operation.nodeId, restored: restorable, created, sha: sha ?? null });
   }
 
   private invalidateChecks(taskId: string) {
