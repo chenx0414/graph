@@ -373,7 +373,7 @@ small { color: var(--muted); }
 
 /* ---------- graph ---------- */
 
-.graph-wrap { height: 480px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--panel-soft); }
+.graph-wrap { position: relative; height: 480px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--panel-soft); }
 .graph-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
 .legend { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; }
 .legend li {

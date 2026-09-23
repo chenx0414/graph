@@ -918,14 +918,6 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
             ))}
           </div>
         </div>
-        <ul className="legend" data-testid="legend" style={{ marginTop: 10 }}>
-          <li data-tone="pending">待执行 / 就绪</li>
-          <li data-tone="active">执行中</li>
-          <li data-tone="success">已完成</li>
-          <li data-tone="error">失败</li>
-          <li data-tone="blocked">被阻塞 / 已跳过</li>
-          <li data-tone="loop">橙色虚线为返工回边</li>
-        </ul>
       </Card>
 
       <Card title="任务图" icon="graph" subtitle={graph.nodes.length ? `${graph.nodes.length} 个节点` : undefined}>

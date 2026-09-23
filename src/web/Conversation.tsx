@@ -27,11 +27,7 @@ import {
   observeConversationView,
   type ConversationMessage,
 } from '../core/conversation-projection.ts';
-import {
-  boardStateCounts,
-  boardUnknownCount,
-  formatTokens,
-} from './insights.ts';
+import { formatTokens } from './insights.ts';
 import {
   DRAWER_DRAFT_PAGES,
   defaultDrawerOpen,
@@ -369,12 +365,6 @@ function ConversationGraphBoard({
     setChatNodeId(null);
   }, [selectedNodeId]);
 
-  // Four board states for the current draft, plus a count of statuses the
-  // board had to fold into 待执行 as unknown.
-  const statuses = (graph?.nodes ?? []).map(node => node.status);
-  const boardCounts = boardStateCounts(statuses);
-  const unknownCount = boardUnknownCount(statuses);
-
   return (
     <div className="conversation-graph-main" data-testid="conversation-graph">
       <header className="conversation-graph-header">
@@ -389,16 +379,6 @@ function ConversationGraphBoard({
           </div>
         </div>
       </header>
-      <div className="graph-board-legend" data-testid="graph-board-legend" role="list" aria-label="节点状态图例">
-        {boardCounts.map(item => (
-          <span className="graph-board-legend-item" role="listitem" key={item.id} data-board-state={item.id}>
-            <span className="graph-board-legend-icon" aria-hidden="true" style={{ color: item.color }}>{item.icon}</span>
-            <span className="graph-board-legend-label">{item.label}</span>
-            <span className="graph-board-legend-count" data-count={item.count}>{item.count}</span>
-            {item.id === 'pending' && unknownCount > 0 && <span className="graph-board-legend-note">含未知 {unknownCount}</span>}
-          </span>
-        ))}
-      </div>
       <div className="conversation-graph-stage">
         <aside
           className="graph-state-summary"

@@ -4,7 +4,10 @@ import {
   BOARD_STATE_META,
   NODE_TONE_COLOR,
   boardNodeState,
+  boardStateCounts,
+  boardStateKnown,
   boardStateLabel,
+  boardUnknownCount,
   nodeTone,
   type BoardNodeState,
   type NodeTone,
@@ -38,6 +41,8 @@ type NodeData = {
   tone: NodeTone;
   status: string;
   boardState: BoardNodeState;
+  /** Status the four-state board did not recognise; shown with a visible 未知 badge. */
+  unknown: boolean;
 };
 
 const NODE_TYPE_LABEL: Record<GraphNodeVisualKind, string> = {
@@ -73,6 +78,7 @@ function GraphNode({ data, selected }: NodeProps) {
         >
           {BOARD_STATE_META[info.boardState].icon}
         </span>
+        {info.unknown && <span className="node-unknown" data-unknown="true" title={boardStateLabel(info.status)}>未知</span>}
         <span className="node-label">{info.label}</span>
       </div>
       <Handle id="source-bottom" type="source" position={Position.Bottom} style={handleStyle} />
@@ -161,7 +167,7 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const nodeType = graphNodeVisualKind(node);
       return {
         id: node.id, type: 'graphNode', position: relativePosition(node.id, position),
-        data: { id: node.id, label: graphNodeLabel(node), nodeType, tone, status: node.status, boardState: boardNodeState(node.status) } satisfies NodeData,
+        data: { id: node.id, label: graphNodeLabel(node), nodeType, tone, status: node.status, boardState: boardNodeState(node.status), unknown: !boardStateKnown(node.status) } satisfies NodeData,
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
@@ -203,8 +209,23 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
           : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),
       };
     });
+  // The four-state legend is rendered here so every view that draws a task
+  // graph (task page and conversation drawer) shows the same permanent legend.
+  const statuses = graph.nodes.map(node => node.status);
+  const legend = boardStateCounts(statuses);
+  const unknownCount = boardUnknownCount(statuses);
   return (
     <div className="graph-wrap" data-testid="flow">
+      <ul className="graph-board-legend" data-testid="legend" aria-label="节点状态图例">
+        {legend.map(item => (
+          <li className="graph-board-legend-item" key={item.id} data-board-state={item.id}>
+            <span className="graph-board-legend-icon" aria-hidden="true" style={{ color: item.color }}>{item.icon}</span>
+            <span className="graph-board-legend-label">{item.label}</span>
+            <span className="graph-board-legend-count" data-count={item.count}>{item.count}</span>
+            {item.id === 'pending' && unknownCount > 0 && <span className="graph-board-legend-note" data-unknown="true">含未知 {unknownCount}</span>}
+          </li>
+        ))}
+      </ul>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false} nodesConnectable={false} elementsSelectable
         edgeTypes={edgeTypes}
         onNodeClick={(_event, node) => onSelect(node.id)} fitView fitViewOptions={{ padding: 0.18 }}
