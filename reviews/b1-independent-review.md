@@ -1,52 +1,90 @@
-# Independent review · 批 B-1（模型厂商与模型配置）
+# B-1 independent review
 
-Reviewed integration HEAD ac5971bc7cd1c7910a014eb08575648a29ce23cf (same tree as this work copy). Program checks all exited 0:
+Verdict: fail
 
-- check-types: `node --run typecheck` code 0
-- check-provider-rules: provider-api.test.ts 23 passed
-- check-catalog-rules: catalog-models-dev.test.ts 14 passed
-- check-provider-form: provider-form.test.ts 33 passed
+Reviewed the frozen integration worktree at HEAD `34f691c` (branch `graph/copy/362a8f59-d14f-4e89-b3e7-980d40996ef3/review`, clean). Program checks all exited 0:
 
-Those checks do not cover the two UI/runtime defects below. Verdict: **fail**.
+- `check-types` (`node --run typecheck`) code 0
+- `check-provider-rules` 23/23 passed
+- `check-catalog-rules` 15/15 passed
+- `check-provider-form` 37/37 passed
+
+Those checks only cover the pure helpers they import. They do not exercise `saveProvider` / `runProbe` in `src/web/Settings.tsx` or `runProviderProbe` in `src/server/app.ts`. The two-step flow on the page is broken for the vendors this batch is supposed to configure.
 
 ## Findings
 
-### 1. Default thinking strength is invented as `medium` when the snapshot does not name one
+### 1. Saving a supported vendor never verifies, and the page reports a generic error instead of the vendor text
 
-Acceptance ② says a selected model is auto-filled for 默认思考强度 from the vendored models.dev snapshot, and unmatched fields stay blank. Lane notes say unmappable reasoning options must be omitted, not invented, and grade must not be silently defaulted. The thinking default has the same failure mode.
+Acceptance `provider-configure`: after save, automatically send one minimal request; success marks the provider usable; failure shows the vendor's original error text.
 
-- `src/catalog/models-dev.ts` sets `defaultThinkingLevel: 'medium'` whenever `reasoning` is true and the mapped level list happens to contain `'medium'`:
+`src/web/Settings.tsx` `saveProvider` always calls `runProbe()` with no model id. `probePayload` (`src/web/provider-form.ts`) does not send `modelsListSupported`, so the daemon uses the preset. For OpenCode Go that preset is `modelsListSupported: false` (`src/server/providers.ts` line 51). `runProviderProbe` (`src/server/app.ts` lines 152-174) then skips `/models`, has no `verifyModel`, and returns:
 
+```text
+verification: { ok: false, skipped: true, error: '没有可验证的模型：该端点不支持模型列表，请手动添加模型 id' }
 ```
-...(reasoning && levels.includes('medium') ? { defaultThinkingLevel: 'medium' as ModelThinkingLevel } : {}),
+
+The page (`Settings.tsx` lines 451-453) treats any non-ok probe as failure and displays that string. So the required "supported vendor, fill KEY only, save, one minimal request" path never sends the chat request, never marks the vendor usable, and never surfaces a vendor response. The user is told to add a model id in step 2, but step 2 is a separate action and does not re-verify.
+
+The same path breaks custom vendors whose `/models` is unsupported or returns an empty list: `probePayload` never forwards `modelsListSupported: false`, the daemon defaults custom to `true`, a failed or empty list becomes the verification error, and no minimal chat is sent.
+
+Impact: acceptance item ① cannot be completed for the named supported vendor OpenCode Go, and "failure shows the vendor's raw text" is not what the page shows.
+
+### 2. Verification runs before the new key is visible to the daemon
+
+`saveProvider` (`Settings.tsx` 468-495) writes the key via `bridge.saveSecret`, then calls `mutate(...)` (which only schedules autosave, 550ms, `scheduleSave`), then immediately `await runProbe()`.
+
+`pushSecret` (`src/server/start.ts` 542-568) updates the live credential map. The probe does not read that map. `providerSecrets` (`src/server/app.ts` 98-101) reads `capabilityConfig.secretValues()`, which is `capabilitySecretValues` (`src/server/start.ts` 357-367): process env plus `live.secrets()`. `live.secrets()` is the keychain import from startup (`usageService.secretValues()`), not the map `pushSecret` just updated. A key typed in the form is therefore absent from the probe, which returns `凭据未解析：<credentialRef>` (`app.ts` 164-165) even after the keychain write succeeded.
+
+Impact: the automatic post-save verification fails for a newly entered KEY/subscription token. The page shows a local "credential unresolved" string, not a vendor response, and does not mark the provider usable. This blocks both the supported-vendor and custom-vendor legs of acceptance ①.
+
+### 3. Price 0 is erased by the settings inputs, so a free price cannot round-trip
+
+Lane note A requires a price of 0 to be a legal free price: it must save, count as known, and must not be deleted because 0 is treated as empty. `withCostField` / `completeCost` / `costError` do treat 0 as finite (`provider-form.ts` 393-410; tests at `provider-form.test.ts` 346-352). The page does not.
+
+`Settings.tsx` line 675:
+
+```tsx
+value={entry.cost?.input ?? ''}
+onChange={event => setCost('input', event.target.value)}
 ```
 
-models.dev `reasoning_options` has no default field (the interface only has `type` / `values`). The catalog test then locks `lookupModelMetadata('grok', 'grok-4.3').defaultThinkingLevel === 'medium'` as if the snapshot said so (`tests/console/catalog-models-dev.test.ts`).
+`setCost` (line 640) maps `''` to `undefined`, and `withCostField` deletes that side. A controlled `<input type="number">` displays `0` as an empty string, so the next edit of any price field (or a re-render that fires change) clears the zero side. The same pattern is on the other three price inputs (lines 676-678). Once a side is missing, `completeCost` returns null and the pill shows `pricing.status=unknown`.
 
-- `src/web/Settings.tsx` renders the select as `value={entry.defaultThinkingLevel ?? (entry.reasoning === false ? 'off' : 'medium')}`. A controlled select with no matching option still displays the first option, but this expression displays `medium` for every reasoning model the snapshot did not score. The first change of any other field on that card runs `mutate`, which clones the draft and schedules `persistDraft`. The select's `onChange` is not required: any sibling edit (context window, grade, image checkbox, price) persists the displayed `medium` into `models.entries[].defaultThinkingLevel`.
-- `src/core/task-runtime.ts` uses that stored value: `requestedLevel ?? effective?.defaultThinkingLevel`. A new conversation therefore starts at medium even when the user never chose a strength and the snapshot never published one.
+Impact: a free model (all four amounts 0, which the catalog mapper can emit via `finiteAmount`) cannot be kept as a known price in the UI. The regression the lane was told to preserve is only true in the helper, not on the page that saves the model.
 
-Impact: 默认思考强度 is not "filled from the snapshot or left blank". It is a silent default, the same class of defect the lane was told not to repeat for `grade`.
+### 4. Unresolved credentials are not what disables model selection
 
-### 2. A genuine zero price cannot be saved, so a free model cannot complete step 2
+Acceptance `secrets-stay-out`: models with an unresolved credential must not be dispatched. Dispatch itself is guarded (`pi-adapter.ts` 201-202 throws `No credential bound` when `credentialFor` misses). The settings contract is not.
 
-Acceptance and lane note (d) say a missing price side must not be stored as 0, and a real 0 must not be treated as missing. `estimateCost` in `src/catalog/models.ts` already distinguishes the two: a non-finite or negative side is unknown; a finite 0 is a real free rate. The settings path collapses them.
+`ProviderWorkbench` treats a platform as resolved when any of three flags is true (`Settings.tsx` 423):
 
-- `src/web/Settings.tsx` `setCost`: an empty input becomes `undefined`, but `Number('0')` is `0`, which is finite, so it is passed to `withCostField`.
-- `src/web/provider-form.ts` `withCostField` only deletes a side when `value === undefined || !Number.isFinite(value)`. `0` is stored.
-- `src/web/provider-form.ts` `costError` treats "present" as `cost[field] !== undefined`. A draft `{ input: 0, output: 1.1, cacheRead: 0, cacheWrite: 0 }` (free input, real output, zero cache — a normal models.dev shape, and exactly what a user types for a free model) has all four sides present and finite, so `costError` returns null and `completeCost` would accept it.
-- The card never reaches that state. The inputs bind `value={entry.cost?.input ?? ''}` (and the same for output / cacheRead / cacheWrite). In JavaScript `0 ?? ''` is `0`, but a React number input with value `0` is the same DOM value as an empty cleared field after the user deletes a digit. The next `onChange` sees `raw === ''` and deletes the side. Clearing the visible `0` is how a user "leaves it blank"; the handler cannot tell a typed zero from a cleared field. After any such edit the cost is partial, `costError` returns the 成套填写 message, and `persistDraft` refuses the whole document.
+```ts
+keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured
+```
 
-Impact: a model whose real per-million price is 0 on any side (free input, free cache, or an entirely free model) cannot be saved through the two-step form. The user is told the price is incomplete. That blocks acceptance ② ("可手填") for the price fields, and it blocks human-b1 for any model the snapshot or the user prices at zero. The guard that was supposed to stop a missing side being billed as 0 now also rejects a genuine 0.
+`credentialState` comes from `GET /api/config` `configured` (`Settings.tsx` 783-786). `configured` is `Boolean(env[secretRef])` inside `sanitizeConfig`, and `/api/config` passes `providerSecrets()` as that env (`app.ts` 304). `providerSecrets()` returns every resolved capability secret, not a boolean map. `Boolean(env[secretRef])` is therefore true whenever the ref exists as a key, even when the merged value is empty or the credential was revoked. Combined with finding 2, `keyResolved` is set true after a keychain write that the probe cannot see. Either path clears `blockedReason` and enables "获取可用模型" / model checkboxes for a credential that is not actually resolved.
 
-## What was checked and holds
+Impact: the page will offer and persist models under a credential the daemon has not resolved. Dispatch later refuses them, but the UI contract ("disable unresolved platforms and name the env var") is wrong in both directions.
 
-- Provider routes are `GET /api/providers` and `POST /api/providers/probe` (`src/server/app.ts`, `PROVIDER_ROUTES` in `src/server/providers.ts`). Probe requires `requestId`. Custom drafts require `label` + `baseUrl` + `api` (`openai-completions` | `anthropic-messages`) + `credentialRef`. Presets only need the credential ref. Probe failure text comes from `vendorErrorText` / `parseVerifyResponse`, not a wrapped generic error.
-- `ADVANCED_SETTINGS` is an empty list (`src/web/Settings.tsx`). The per-credential cap and shared-group cap are edited inside the ① 配置厂商 card (`data-testid="provider-concurrency"`, `limit-credential-${id}` / `limit-group-${id}`). The advanced page only renders the moved-note. `writeConcurrency` still writes `limits.credentials` and `limits.sharedGroups`; desktop save goes through `applyConfig` (`src/server/app.ts`), which hot-applies and does not cancel in-flight slots.
-- Config stores `secretRef` only (`src/server/config.ts` credential parse; `sanitizeConfig` / `sanitizeProviderView` return the ref plus a boolean). Probe responses carry `credentialRef` and `credentialConfigured`, not the key. The page password input is cleared after `bridge.saveSecret`. Unresolved credentials are not placed in `live-config`'s credential map (`src/server/live-config.ts`, `if (!resolved?.value) continue`), and `pi-adapter.ts` refuses to send when `credentialFor` returns nothing.
-- `lookupModelMetadata` omits `cost` unless input, output, cache_read and cache_write are all finite (`optionalCost`). A miss returns `null`. No `grade` is written by the snapshot mapper. The settings grade select starts empty and `modelFieldErrors` blocks save until the user picks one.
-- Local connection id is `provider:modelId` via `uniqueLocalModelId`; upstream id stays in `modelId`.
+### 5. B-0 settings tests now contradict the inlined concurrency UI
 
-## Not claimed
+`ADVANCED_SETTINGS` is `[]` (`Settings.tsx` 324) and the old `advanced-setting-settings-limits` card is gone, which matches B-1. `tests/console/settings-sections.test.ts` still requires that card:
 
-Human console walkthrough (human-b1) was not run. Real vendor HTTP and keychain storage are outside this review. The two defects above are visible in the frozen tree without that walkthrough.
+- line 63: `ADVANCED_IDS` must contain `settings-limits`
+- line 72: `ADVANCED.length` must be greater than 0
+- lines 90-96: the advanced region must still expose `limit-credential-add` / `limit-group-add`
+
+Those tests are not in this batch's check nodes, so the green checks do not cover the regression. Running the B-0 settings suite against this tree will fail. The B-1 replacement controls (`limit-credential-${id}`, `limit-group-${id}`) do exist inside the provider card (lines 588-590), so this is a stale assertion, not a missing control — but it is an acceptance gap for the concurrency move: the previous batch's check no longer passes, and nothing in B-1 updates it.
+
+## What holds
+
+- Catalog mapping does not invent `defaultThinkingLevel` (`models-dev.ts` 366-368); reasoning models omit it; partial prices omit `cost` entirely; a miss returns null. Snapshot plus `catalog:refresh` are present.
+- Provider routes are `GET /api/providers` and `POST /api/providers/probe` on the session face; `/api/app/providers` is absent; probe rejects a missing `requestId`; draft field is `label`, not `name`.
+- Config documents store `secretRef` only (`config.ts` CredentialConfig). `sanitizeConfig` / `sanitizeProviderView` do not echo secret values. The desktop bridge stores secrets in the encrypted keychain file and posts the value only to the token-gated `/api/app/secret` bridge, not to the console JSON.
+- Per-credential and shared-group limits are edited inside the provider card, and `writeConcurrency` still writes `limits.credentials` / `limits.sharedGroups`. Hot apply still goes through `live.apply` without interrupting in-flight waits (`pi-adapter.ts` refresh path). That part of concurrency-inline is met; finding 5 is the leftover contract break.
+- Local connection id vs upstream `modelId` is preserved (`uniqueLocalModelId`, `draftToModelEntry`).
+- Thinking-level `<select>` keeps an explicit empty "未指定" option and deletes `defaultThinkingLevel` when cleared (`Settings.tsx` 668-670). That half of lane note A holds; the price-0 half does not (finding 3).
+
+## Checks
+
+Green checks are necessary but not sufficient. `provider-api.test.ts` asserts route strings and pure parsers; it never runs `runProviderProbe`. `provider-form.test.ts` asserts `probeRequest` shape and helper price-0 behavior; it never renders `saveProvider`. The failures above sit in those untested call paths.
