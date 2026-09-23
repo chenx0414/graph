@@ -19,7 +19,7 @@ export interface GraphRevisionInput {
 /** Apply a supervisor graph revision after the confirmed acceptance threshold is locked. */
 export function applyRevision(store: TaskStore, taskId: string, input: GraphRevisionInput) {
   const task = store.task(taskId);
-  if (task.accepted_proposal === null) throw new RuntimeError('invalid_command', 'Graph revision requires confirmed requirements');
+  if (task.accepted_proposal === null) throw new RuntimeError('invalid_command', `Task ${taskId} has no confirmed proposal to revise; pass taskId to name the feature task you mean`);
   if (task.graph_version !== input.baseVersion) throw new RuntimeError('stale_graph', 'Revision must reference the current graph version');
   if (!input.reason.trim()) throw new RuntimeError('invalid_proposal', 'A revision reason is required');
   const accepted = JSON.parse((store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal) as { spec: string }).spec) as Proposal;

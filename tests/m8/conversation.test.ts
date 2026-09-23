@@ -703,11 +703,10 @@ test('a conversation master revises the feature task it created', async () => {
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
   const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
 
-  // The anchor task never holds a confirmed proposal, so the feature task is
-  // the only revision target: a model that a provider degrades must be
-  // replaceable after confirmation.
+  // The anchor task never holds a confirmed proposal, so the feature task is the only revision
+  // target and a revision without taskId must land on it: a model that a provider degrades has to
+  // be replaceable after confirmation.
   const revised = await runtime.supervisor(anchorTaskId).revise({
-    taskId: confirmed.taskId,
     baseVersion: 1,
     reason: '把实现模型换到另一个可用模型',
     nodes: [
@@ -826,6 +825,13 @@ test('a pre-send failure returns the message to the queue instead of losing it',
     action: 'retry',
     requestId: 'retry',
   });
+  // Answering the same problem twice is safe: it reports itself as already settled instead of
+  // pretending it never existed (the main Agent may retry a receipt it never saw).
+  await expect(runtime.supervisor(blocked.anchorTaskId).resolveProblem({
+    questionId: problems[0]!.id,
+    action: 'retry',
+    requestId: 'retry-again',
+  })).resolves.toMatchObject({ questionId: problems[0]!.id, alreadyResolved: true });
   await runtime.host.runReady();
   const after = await runtime.conversations.view(created.conversationId);
   expect(after.messages.find(message => message.role === 'user')!.state).toBe('delivered');

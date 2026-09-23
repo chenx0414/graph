@@ -105,7 +105,15 @@ function conversationTarget(store: TaskStore, supervisorTaskId: string, requeste
 }
 
 function revisionTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined) {
-  return conversationTarget(store, supervisorTaskId, requested, 'A revision');
+  if (requested !== undefined) return conversationTarget(store, supervisorTaskId, requested, 'A revision');
+  // Without taskId the default is the supervisor's own (anchor) task, which can never be revised -
+  // it has no confirmed proposal - so the call failed with a message about requirements. When this
+  // conversation has exactly one live feature task, that is plainly the target; anything else stays
+  // ambiguous and keeps the old default rather than guessing.
+  const live = store.db.prepare(`SELECT id FROM tasks
+    WHERE conversation_id=(SELECT conversation_id FROM tasks WHERE id=?) AND id<>? AND phase IN ('running','queued')`)
+    .all(supervisorTaskId, supervisorTaskId) as { id: string }[];
+  return live.length === 1 ? live[0]!.id : supervisorTaskId;
 }
 
 // A compact projection of one task: which node runs what, what still runs, what needs the user and
@@ -1721,7 +1729,19 @@ export async function openTaskRuntime(options: {
             const row = store.db.prepare(`SELECT id,task_id,node_id,kind,data
               FROM questions WHERE id=? AND owner='main' AND status='open' AND task_id IN (${placeholders})`)
               .get(input.questionId, ...scopedTasks) as { id: string; task_id: string; node_id: string; kind: string; data: string } | undefined;
-            if (!row) throw new RuntimeError('not_found', 'No open main-Agent problem with that id');
+            if (!row) {
+              // A problem that was already settled is not an error: answering it twice must be safe
+              // (a receipt the main Agent never saw), and "already resolved" must stay
+              // distinguishable from "no such problem".
+              const settled = store.db.prepare(`SELECT id,task_id,answer FROM questions
+                WHERE id=? AND owner='main' AND status='resolved' AND task_id IN (${placeholders})`)
+                .get(input.questionId, ...scopedTasks) as { id: string; task_id: string; answer: string | null } | undefined;
+              if (!settled) throw new RuntimeError('not_found', 'No open main-Agent problem with that id');
+              return {
+                questionId: settled.id, taskId: settled.task_id, action: input.action,
+                resolved: true as const, alreadyResolved: true as const, answer: settled.answer,
+              };
+            }
             const allowed = problemActions(row.kind) as readonly string[];
             if (!allowed.includes(input.action)) {
               throw new RuntimeError('invalid_answer', `Problem ${row.kind} does not accept ${input.action}`);
