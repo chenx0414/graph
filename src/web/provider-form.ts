@@ -2,7 +2,7 @@
  * Pure logic for the two-step model-provider flow (B-1).
  *
  * Step 1 「配置厂商」 validates a provider draft, normalizes the platform
- * catalog served by `GET /api/app/providers` and edits the concurrency limits
+ * catalog served by `GET /api/providers` and edits the concurrency limits
  * that live *inside* a provider entry. Step 2 「选择模型」 merges the models
  * probed from `<baseUrl>/models` with the metadata mapped from the vendored
  * models.dev snapshot.
@@ -31,7 +31,7 @@ export const PROVIDER_COMPATIBILITIES: readonly { id: ModelApi; label: string }[
 
 export type CredentialKind = 'api-key' | 'subscription';
 
-/** One entry of the built-in platform catalog (`GET /api/app/providers`). */
+/** One entry of the built-in platform catalog (`GET /api/providers`). */
 export interface PlatformPreset {
   id: string;
   label: string;
@@ -195,8 +195,20 @@ export function hasProviderErrors(errors: ProviderDraftErrors): boolean {
   return Object.keys(errors).length > 0;
 }
 
+export interface CredentialResolution {
+  resolved: boolean;
+  secretRef: string;
+}
+
+/** Models under a provider whose credential is unresolved cannot be selected
+ * or dispatched. The UI shows this reason instead of letting the user pick. */
+export function selectionBlockedReason(input: CredentialResolution): string | null {
+  if (input.resolved) return null;
+  return `凭据未解析：请设置环境变量 ${input.secretRef || '（对应环境变量名）'}，或在桌面端把密钥保存到钥匙串后再选择模型`;
+}
+
 /**
- * Normalize the `GET /api/app/providers` payload. Accepts `{ platforms: [] }`
+ * Normalize the `GET /api/providers` payload. Accepts `{ platforms: [] }`
  * or a bare array and drops entries that cannot describe a provider, so a
  * shape change on the daemon never crashes the settings page.
  */
@@ -231,10 +243,18 @@ export function normalizePlatforms(payload: unknown): PlatformPreset[] {
   return platforms;
 }
 
-/** Request body for `POST /api/app/providers/probe`: an unsaved provider draft
- * plus the credential *reference* (never a secret value). */
-export function buildProbePayload(draft: ProviderDraft, modelId?: string) {
+/** Request for the console platform catalog. The console authenticates with
+ * the session cookie, so the path stays under `/api` (never `/api/app/*`,
+ * which requires an app token the page does not hold). */
+export function platformsRequest(): { url: string } {
+  return { url: '/api/providers' };
+}
+
+/** Body for `POST /api/providers/probe`: an unsaved provider draft, the
+ * credential *reference* (never a secret value) and the idempotency key. */
+export function probePayload(draft: ProviderDraft, requestId: string, modelId?: string) {
   return {
+    requestId,
     provider: {
       id: draft.platformId,
       name: draft.name,
@@ -244,6 +264,17 @@ export function buildProbePayload(draft: ProviderDraft, modelId?: string) {
       secretRef: draft.secretRef,
     },
     ...(modelId ? { modelId } : {}),
+  };
+}
+
+/** One-shot probe request; `requestId` makes the retry safe on the daemon. */
+export function probeRequest(draft: ProviderDraft, requestId: string, modelId?: string): {
+  url: string;
+  init: { method: 'POST'; headers: Record<string, string>; body: string };
+} {
+  return {
+    url: '/api/providers/probe',
+    init: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(probePayload(draft, requestId, modelId)) },
   };
 }
 
@@ -493,6 +524,52 @@ export function uniqueLocalModelId(providerId: string, modelId: string, taken: r
     const candidate = `${base}-${suffix}`;
     if (!taken.includes(candidate)) return candidate;
   }
+}
+
+function positiveInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+export interface ModelNumericFields {
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+}
+
+export interface ModelFieldErrors {
+  contextWindow?: string;
+  maxTokens?: string;
+}
+
+/** `contextWindow`/`maxTokens` are required by the config parser. A model whose
+ * snapshot hit did not cover them must stay unsaved until the user types them;
+ * every other field may stay blank with unknown semantics. */
+export function modelFieldErrors(entry: ModelNumericFields): ModelFieldErrors {
+  const errors: ModelFieldErrors = {};
+  if (positiveInt(entry.contextWindow) === undefined) errors.contextWindow = '上下文上限未知，请填写后再保存';
+  if (positiveInt(entry.maxTokens) === undefined) errors.maxTokens = '最大输出未知，请填写后再保存';
+  return errors;
+}
+
+export function hasRequiredModelFields(entry: ModelNumericFields): boolean {
+  return Object.keys(modelFieldErrors(entry)).length === 0;
+}
+
+export interface MissingModelFields {
+  index: number;
+  id: string;
+  fields: ('contextWindow' | 'maxTokens')[];
+}
+
+/** Required-field problems for the whole document, so the autosave can block
+ * with a named reason instead of sending a document the parser will reject. */
+export function missingRequiredModelFields(entries: readonly ({ id?: string } & ModelNumericFields)[]): MissingModelFields[] {
+  const problems: MissingModelFields[] = [];
+  entries.forEach((entry, index) => {
+    const errors = modelFieldErrors(entry);
+    const fields = (['contextWindow', 'maxTokens'] as const).filter(field => errors[field]);
+    if (fields.length) problems.push({ index, id: entry.id ?? `entries[${index}]`, fields: [...fields] });
+  });
+  return problems;
 }
 
 export interface ConcurrencyConfig {

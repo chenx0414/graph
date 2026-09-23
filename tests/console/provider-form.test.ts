@@ -11,19 +11,24 @@ import {
   FALLBACK_PLATFORMS,
   addManualModelPick,
   buildEntryDraft,
-  buildProbePayload,
   customDraft,
   draftFromPlatform,
   draftToModelEntry,
   fillEntryFromMetadata,
   hasProviderErrors,
+  hasRequiredModelFields,
   mergeProbeModels,
   metadataToFields,
+  missingRequiredModelFields,
+  modelFieldErrors,
   normalizePlatforms,
   parseLimit,
   platformById,
+  platformsRequest,
+  probeRequest,
   readConcurrency,
   selectedProbeModels,
+  selectionBlockedReason,
   validateProviderDraft,
   writeConcurrency,
   type ConcurrencyConfig,
@@ -89,12 +94,20 @@ describe('platform catalog normalization', () => {
 });
 
 describe('probe request/response handling (step 2)', () => {
-  it('builds a probe payload that carries a credential reference, never a secret', () => {
+  it('targets the console /api/providers path and always carries a requestId', () => {
+    expect(platformsRequest().url).toBe('/api/providers');
     const draft = { ...draftFromPlatform(preset), secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' };
-    const payload = buildProbePayload(draft, 'gpt-5');
-    expect(payload.provider).toMatchObject({ id: 'opencode-go', api: 'openai-completions', secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' });
-    expect(payload.modelId).toBe('gpt-5');
-    expect(JSON.stringify(payload)).not.toMatch(/sk-/);
+    const request = probeRequest(draft, 'probe-123', 'gpt-5');
+    expect(request.url).toBe('/api/providers/probe');
+    expect(request.init.method).toBe('POST');
+    const body = JSON.parse(request.init.body) as { requestId: string; modelId?: string; provider: Record<string, unknown> };
+    expect(body.requestId).toBe('probe-123');
+    expect(body.modelId).toBe('gpt-5');
+    expect(body.provider).toMatchObject({ id: 'opencode-go', api: 'openai-completions', secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' });
+    // The probe carries a credential reference, never a secret value.
+    expect(request.init.body).not.toMatch(/sk-/);
+    expect(probeRequest(draft, 'probe-456').url).toBe('/api/providers/probe');
+    expect(JSON.parse(probeRequest(draft, 'probe-456').init.body)).not.toHaveProperty('modelId');
   });
 
   it('merges a probed list without overwriting the user’s existing picks', () => {
@@ -208,6 +221,43 @@ describe('snapshot metadata mapping', () => {
     expect(filled.contextWindow).toBe(128_000);
     expect(filled.cost).toBeUndefined();
     expect(filled.pricing?.status).toBe('unknown');
+  });
+});
+
+describe('required model fields and credential gating (step 2)', () => {
+  it('blocks saving until contextWindow and maxTokens are known, with a named reason', () => {
+    const unknown = buildEntryDraft({ id: 'unknown-model', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null });
+    const errors = modelFieldErrors(unknown);
+    expect(errors.contextWindow).toMatch(/请填写/);
+    expect(errors.maxTokens).toMatch(/请填写/);
+    expect(hasRequiredModelFields(unknown)).toBe(false);
+
+    const problems = missingRequiredModelFields([{ id: 'unknown-model' }, { id: 'known', contextWindow: 128_000, maxTokens: 4_096 }]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatchObject({ index: 0, id: 'unknown-model', fields: ['contextWindow', 'maxTokens'] });
+  });
+
+  it('passes once the user fills both required caps', () => {
+    const entry = { ...buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null }), contextWindow: 128_000, maxTokens: 8_192 };
+    expect(modelFieldErrors(entry)).toEqual({});
+    expect(hasRequiredModelFields(entry)).toBe(true);
+    expect(missingRequiredModelFields([entry])).toEqual([]);
+  });
+
+  it('does not count optional unknown metadata as a required error', () => {
+    const entry = { id: 'm', contextWindow: 64_000, maxTokens: 8_192 };
+    expect(modelFieldErrors(entry)).toEqual({});
+    // price/currency/image/thinking stay optional and unknown, never zero.
+    const fields = metadataToFields(null);
+    expect(fields.cost).toBeNull();
+    expect(fields.pricing.status).toBe('unknown');
+  });
+
+  it('blocks model selection while the credential is unresolved', () => {
+    const blocked = selectionBlockedReason({ resolved: false, secretRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' });
+    expect(blocked).toMatch(/凭据未解析/);
+    expect(blocked).toContain('GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN');
+    expect(selectionBlockedReason({ resolved: true, secretRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' })).toBeNull();
   });
 });
 
