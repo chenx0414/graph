@@ -3,11 +3,13 @@ import { describe, expect, test } from 'vitest';
 import {
   PLATFORM_CREDENTIAL_REFS,
   PLATFORM_PRESETS,
+  PROVIDER_ROUTES,
   platformCatalogView,
   platformPreset,
   parseModelsResponse,
   parseVerifyResponse,
   sanitizeProviderView,
+  validateProbeRequest,
   validateProviderDraft,
   vendorErrorText,
   buildModelsRequest,
@@ -185,6 +187,37 @@ describe('provider draft validation', () => {
     const result = validateProviderDraft({ id: 'not-a-platform', baseUrl: 'https://x.dev/v1', api: 'openai-completions', secretRef: 'X_KEY' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors.some(error => error.field === 'id')).toBe(true);
+  });
+});
+
+describe('console provider endpoints', () => {
+  test('are registered on the session-cookie /api face, not the app-token face', async () => {
+    expect(PROVIDER_ROUTES.list).toBe('/api/providers');
+    expect(PROVIDER_ROUTES.probe).toBe('/api/providers/probe');
+    const source = await readFile(new URL('../../src/server/app.ts', import.meta.url), 'utf8');
+    // The app registers exactly these constants and keeps no /api/app alias.
+    expect(source).toContain('PROVIDER_ROUTES.list');
+    expect(source).toContain('PROVIDER_ROUTES.probe');
+    expect(source).not.toContain('/api/app/providers');
+  });
+
+  test('a probe request must carry the requestId idempotency key', () => {
+    const missing = validateProbeRequest({ provider: { id: 'deepseek' } });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.errors.some(error => error.field === 'requestId')).toBe(true);
+
+    const blank = validateProbeRequest({ requestId: '   ', provider: { id: 'deepseek' } });
+    expect(blank.ok).toBe(false);
+
+    const complete = validateProbeRequest({ requestId: 'probe-1', provider: { id: 'deepseek' }, modelId: 'deepseek-chat' });
+    expect(complete.ok).toBe(true);
+    if (complete.ok) {
+      expect(complete.request).toMatchObject({ requestId: 'probe-1', modelId: 'deepseek-chat', provider: { id: 'deepseek' } });
+    }
+
+    const badDraft = validateProbeRequest({ requestId: 'probe-2', provider: { id: 'custom' } });
+    expect(badDraft.ok).toBe(false);
+    if (!badDraft.ok) expect(badDraft.errors.some(error => error.field === 'baseUrl')).toBe(true);
   });
 });
 
