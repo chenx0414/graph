@@ -35,7 +35,9 @@ export const DRAWER_DRAFT_PAGES: readonly DrawerPanelDescriptor[] = [
 ];
 
 /** Everything the drawer hosts: the draft versions, the draft pages, the task
- * navigation list and one selected task's execution detail. */
+ * navigation list with its empty state, one selected task's execution detail
+ * and the project-binding initialization panel. Everything here is reached by
+ * the drawer; none of it may be rendered unconditionally in the chat stream. */
 export const DRAWER_PANEL_IDS = [
   'draft-versions',
   'acceptance',
@@ -44,6 +46,15 @@ export const DRAWER_PANEL_IDS = [
   'graph',
   'task-nav',
   'task',
+  'task-empty',
+  'bind-project',
+] as const;
+
+/** Drawer panels that are neither a draft page nor a task detail but the
+ * initialization state shown before anything exists. */
+export const DRAWER_INIT_PANEL_IDS = [
+  'task-empty',
+  'bind-project',
 ] as const;
 
 /**
@@ -98,6 +109,12 @@ export function drawerEntryPanelIds(): readonly string[] {
   return DRAWER_ENTRY_PANEL_IDS;
 }
 
+/** The drawer's initialization panels: the task-list empty state and the
+ * project-binding panel, both shown before a task exists. */
+export function drawerInitPanelIds(): readonly string[] {
+  return DRAWER_INIT_PANEL_IDS;
+}
+
 /** Panel ids that stay in the chat column. */
 export function residentPanelIds(): readonly string[] {
   return CHAT_RESIDENT_PANEL_IDS;
@@ -136,17 +153,23 @@ export interface DrawerEntryState {
   proposalVersion: number | null;
   draftStatus: DraftStatus;
   taskCount: number;
+  /** When false the entry also states that no project is bound yet. */
+  projectBound: boolean;
 }
 
 /**
  * The header entry text. It always carries the draft version + status and the
- * task count, so the collapsed drawer still tells the user what waits inside.
+ * task count — and, while no project is bound, that too — so the collapsed
+ * drawer still tells the user what waits inside.
  */
 export function drawerEntryLabel(state: DrawerEntryState): string {
   const draft = state.proposalVersion === null || state.draftStatus === 'none'
     ? '暂无草稿'
     : `草稿 v${state.proposalVersion} · ${draftStatusLabel(state.draftStatus)}`;
-  return `${draft} · 任务 ${state.taskCount}`;
+  const parts = [draft];
+  if (!state.projectBound) parts.push('未绑定项目');
+  parts.push(`任务 ${state.taskCount}`);
+  return parts.join(' · ');
 }
 
 export function drawerEntryAriaLabel(state: DrawerEntryState): string {

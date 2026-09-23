@@ -209,3 +209,16 @@
   background: #fffaf0;
 }
 .conversation-question-group + .conversation-question-group { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+
+/* Drawer initialization panels: the empty task list and the project binding.
+ * Both used to live in the chat stream and moved here when the chat column was
+ * reduced to the transcript, the pending questions and the composer. */
+.drawer-init-note {
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: #fff;
+}
+.drawer-init-note .thread-card-title { margin-bottom: 4px; }
+.drawer-init-note .thread-card-copy { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.drawer-bind-card .thread-card-actions { margin-top: 10px; }
