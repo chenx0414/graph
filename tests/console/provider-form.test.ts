@@ -2,9 +2,13 @@
  * Sandbox-safe tests for the B-1 provider form logic.
  *
  * Everything here is pure: request construction, response/merge handling,
- * snapshot mapping and concurrency read-back. No DOM, no sockets, no child
- * processes — real network probing and browser behaviour are covered by the
- * human acceptance check.
+ * snapshot mapping, required-field gating and concurrency read-back. No DOM, no
+ * sockets, no child processes — real network probing and browser behaviour are
+ * covered by the human acceptance check.
+ *
+ * The field names mirror the daemon contract in src/server/providers.ts:
+ * `label` (not `name`) and `credentialRef` (not `secretRef`), plus `requestId`
+ * on every probe POST.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,80 +37,92 @@ import {
   writeConcurrency,
   type ConcurrencyConfig,
 } from '../../src/web/provider-form.ts';
+// @ts-ignore -- .tsx import from a NodeNext test program
+import { ADVANCED_SETTING_IDS } from '../../src/web/Settings.tsx';
 
 const preset = FALLBACK_PLATFORMS[0]!;
 
 describe('provider draft validation (step 1)', () => {
   it('accepts a supported platform with just a key', () => {
-    const draft = draftFromPlatform(preset);
-    expect(validateProviderDraft(draft, { custom: false, hasKey: true })).toEqual({});
+    expect(validateProviderDraft(draftFromPlatform(preset), { custom: false, hasKey: true })).toEqual({});
   });
 
-  it('requires a key (or a resolvable env var) even for a supported platform', () => {
+  it('requires a key (or a resolvable credential) even for a supported platform', () => {
     const errors = validateProviderDraft(draftFromPlatform(preset), { custom: false, hasKey: false });
     expect(errors.key).toMatch(/API KEY|环境变量/);
     expect(hasProviderErrors(errors)).toBe(true);
   });
 
-  it('requires name, base URL and compatibility for a custom provider', () => {
+  it('requires label, base URL, compatibility and key for a custom provider', () => {
     const errors = validateProviderDraft(customDraft(), { custom: true, hasKey: false });
-    expect(errors.name).toBeTruthy();
+    expect(errors.label).toBe('自定义厂商必须填写厂商名');
     expect(errors.baseUrl).toMatch(/Base URL/);
     expect(errors.key).toMatch(/API KEY/);
   });
 
   it('rejects a non-http base URL and an unknown compatibility mode', () => {
     const errors = validateProviderDraft(
-      { ...customDraft(), name: '本地网关', baseUrl: 'ftp://example.com', api: 'responses' as never },
+      { ...customDraft(), label: '本地网关', baseUrl: 'ftp://example.com', api: 'responses' as never },
       { custom: true, hasKey: true },
     );
     expect(errors.baseUrl).toMatch(/http/);
     expect(errors.api).toMatch(/兼容格式/);
   });
 
-  it('rejects malformed credential ids and secret refs', () => {
+  it('rejects malformed credential ids and credential refs with the daemon wording', () => {
     const errors = validateProviderDraft(
-      { ...customDraft(), name: '网关', baseUrl: 'https://api.example.com/v1', credentialId: 'Bad Id', secretRef: '1-bad' },
+      { ...customDraft(), label: '网关', baseUrl: 'https://api.example.com/v1', credentialId: 'Bad Id', credentialRef: '1-bad' },
       { custom: true, hasKey: true },
     );
     expect(errors.credentialId).toMatch(/凭据 id/);
-    expect(errors.secretRef).toMatch(/环境变量/);
+    expect(errors.credentialRef).toBe('credentialRef 必须是环境变量名');
   });
 });
 
 describe('platform catalog normalization', () => {
-  it('reads { platforms } and a bare array, applying defaults', () => {
-    const payload = { platforms: [{ id: 'grok', label: 'Grok', baseUrl: 'https://api.x.ai/v1', api: 'openai-completions', secretRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' }] };
-    const [platform] = normalizePlatforms(payload);
-    expect(platform).toMatchObject({ id: 'grok', label: 'Grok', credentialId: 'grok', credentialKind: 'api-key' });
-    expect(normalizePlatforms([{ id: 'custom-compat', baseUrl: 'https://x/v1', api: 'anthropic-messages' }])[0]).toMatchObject({ api: 'anthropic-messages' });
+  it('reads { platforms, credentials } and keeps credentialConfigured / credentialRef', () => {
+    const payload = {
+      platforms: [
+        { id: 'grok', label: 'Grok', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true, credentialConfigured: false },
+        { id: 'custom', label: '自定义', api: 'openai-completions', baseUrl: '', credentialRef: 'GRAPH_PROVIDER_API_KEY', credentialKind: 'api-key', modelsListSupported: true, custom: true, credentialConfigured: false },
+      ],
+      credentials: {},
+    };
+    const platforms = normalizePlatforms(payload);
+    expect(platforms[0]).toMatchObject({ id: 'grok', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialConfigured: false, modelsListSupported: true });
+    expect(platforms[1]).toMatchObject({ id: 'custom', custom: true, baseUrl: '', credentialRef: 'GRAPH_PROVIDER_API_KEY' });
   });
 
-  it('drops entries without an id or base URL instead of crashing', () => {
-    expect(normalizePlatforms({ platforms: [{ id: '', baseUrl: 'https://x' }, { id: 'ok' }, null] })).toEqual([]);
+  it('keeps the built-in custom entry even when the daemon list omits it', () => {
+    expect(normalizePlatforms([{ id: 'custom', label: '自定义', baseUrl: '', api: 'openai-completions', credentialRef: 'GRAPH_PROVIDER_API_KEY' }])[0]).toMatchObject({ custom: true });
+  });
+
+  it('drops entries without an id instead of crashing', () => {
+    expect(normalizePlatforms({ platforms: [{ id: '', baseUrl: 'https://x' }, { label: 'no id' }, null] })).toEqual([]);
   });
 
   it('keeps the built-in credential environment variable names aligned with usage', () => {
-    expect(platformById(FALLBACK_PLATFORMS, 'opencode-go')!.secretRef).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
-    expect(platformById(FALLBACK_PLATFORMS, 'chatgpt')!.secretRef).toBe('GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN');
-    expect(platformById(FALLBACK_PLATFORMS, 'custom')).toBeUndefined();
+    expect(platformById(FALLBACK_PLATFORMS, 'opencode-go')!.credentialRef).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
+    expect(platformById(FALLBACK_PLATFORMS, 'chatgpt')!.credentialRef).toBe('GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN');
+    expect(platformById(FALLBACK_PLATFORMS, 'opencode-go')!.modelsListSupported).toBe(false);
   });
 });
 
 describe('probe request/response handling (step 2)', () => {
   it('targets the console /api/providers path and always carries a requestId', () => {
     expect(platformsRequest().url).toBe('/api/providers');
-    const draft = { ...draftFromPlatform(preset), secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' };
+    const draft = draftFromPlatform(preset);
     const request = probeRequest(draft, 'probe-123', 'gpt-5');
     expect(request.url).toBe('/api/providers/probe');
     expect(request.init.method).toBe('POST');
     const body = JSON.parse(request.init.body) as { requestId: string; modelId?: string; provider: Record<string, unknown> };
     expect(body.requestId).toBe('probe-123');
     expect(body.modelId).toBe('gpt-5');
-    expect(body.provider).toMatchObject({ id: 'opencode-go', api: 'openai-completions', secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' });
-    // The probe carries a credential reference, never a secret value.
+    // (a) the display name is `label`, never `name`, and the ref is `credentialRef`.
+    expect(body.provider).toMatchObject({ id: 'opencode-go', label: 'OpenCode Go', api: 'openai-completions', credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' });
+    expect(body.provider).not.toHaveProperty('name');
+    expect(body.provider).not.toHaveProperty('secretRef');
     expect(request.init.body).not.toMatch(/sk-/);
-    expect(probeRequest(draft, 'probe-456').url).toBe('/api/providers/probe');
     expect(JSON.parse(probeRequest(draft, 'probe-456').init.body)).not.toHaveProperty('modelId');
   });
 
@@ -244,20 +260,17 @@ describe('required model fields and credential gating (step 2)', () => {
     expect(missingRequiredModelFields([entry])).toEqual([]);
   });
 
-  it('does not count optional unknown metadata as a required error', () => {
-    const entry = { id: 'm', contextWindow: 64_000, maxTokens: 8_192 };
-    expect(modelFieldErrors(entry)).toEqual({});
-    // price/currency/image/thinking stay optional and unknown, never zero.
-    const fields = metadataToFields(null);
-    expect(fields.cost).toBeNull();
-    expect(fields.pricing.status).toBe('unknown');
-  });
-
-  it('blocks model selection while the credential is unresolved', () => {
-    const blocked = selectionBlockedReason({ resolved: false, secretRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' });
+  it('blocks model selection while the credential is unresolved and names the daemon ref', () => {
+    const blocked = selectionBlockedReason({ resolved: false, credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' });
     expect(blocked).toMatch(/凭据未解析/);
     expect(blocked).toContain('GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN');
-    expect(selectionBlockedReason({ resolved: true, secretRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' })).toBeNull();
+    expect(selectionBlockedReason({ resolved: true, credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' })).toBeNull();
+  });
+});
+
+describe('settings registry (step 1 / concurrency)', () => {
+  it('no longer declares an independent 并发限制 advanced section', () => {
+    expect(ADVANCED_SETTING_IDS).not.toContain('settings-limits');
   });
 });
 

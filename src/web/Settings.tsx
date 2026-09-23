@@ -7,7 +7,6 @@ import { STANDARD_ACCESS } from './access-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
 import { modelRequestHeaders, type ModelInput } from '../catalog/models.ts';
 import {
-  CUSTOM_PLATFORM_ID,
   FALLBACK_PLATFORMS,
   PROVIDER_COMPATIBILITIES,
   buildEntryDraft,
@@ -308,7 +307,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 ];
 
 /** One collapsible region inside the 高级设置 page. `fields` names the config
- * document paths it edits and `testIds` the controls that must keep working. */
+ * document paths it edits and `testIds` the controls that must keep working.
+ * The independent 并发限制 region was removed in B-1: both caps now live inside
+ * the ① 配置厂商 card, so this list is intentionally empty. */
 export interface AdvancedSetting {
   id: string;
   title: string;
@@ -319,16 +320,7 @@ export interface AdvancedSetting {
   defaultCollapsed: boolean;
 }
 
-export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
-  {
-    id: 'settings-limits',
-    title: '并发限制',
-    summary: '保存后立即对新请求生效；已有调用保留计数，不会中断在途请求',
-    fields: ['limits.credentials', 'limits.sharedGroups'],
-    testIds: ['limit-credential', 'limit-group', 'limit-credential-add', 'limit-group-add'],
-    defaultCollapsed: true,
-  },
-];
+export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [];
 
 export const ADVANCED_SETTING_IDS: readonly string[] = ADVANCED_SETTINGS.map(setting => setting.id);
 
@@ -347,7 +339,9 @@ export function isAdvancedOpen(open: Record<string, boolean>, id: string): boole
 
 type ProbeResponse = {
   models?: { id?: unknown; name?: unknown }[];
-  verification?: { ok?: unknown; error?: unknown };
+  modelsError?: unknown;
+  credentialConfigured?: unknown;
+  verification?: { ok?: unknown; error?: unknown; skipped?: unknown };
 };
 
 function probeModelsFrom(response: ProbeResponse): ProbeModel[] {
@@ -420,10 +414,12 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   }, []);
 
   const selected = platformById(platforms, platformId);
-  const isCustom = isCustomPlatform(platformId);
-  const active: ProviderDraft = selected ? draftFromPlatform(selected) : custom;
-  const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.configured);
-  const blockedReason = selectionBlockedReason({ resolved, secretRef: active.secretRef });
+  const isCustom = isCustomPlatform(platformId) || selected?.custom === true;
+  const active: ProviderDraft = !isCustom && selected ? draftFromPlatform(selected) : custom;
+  // credentialConfigured / credentialRef come from the daemon catalog; the
+  // card must use the daemon's own ref name so the reason names the right env var.
+  const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
+  const blockedReason = selectionBlockedReason({ resolved, credentialRef: active.credentialRef });
   const requiredProblems = missingRequiredModelFields(draft.models?.entries ?? []);
 
   useEffect(() => {
@@ -453,18 +449,13 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
       setPicks(current => mergeProbeModels(list, current));
       const probe = result.verification;
       const ok = Boolean(probe && probe.ok === true);
-      if (!ok && !modelId && list.length) {
-        // The endpoint listed models but needs a concrete model for the minimal
-        // chat request: verify the first discovered model once.
-        const retryRequest = probeRequest(active, crypto.randomUUID(), list[0]!.id);
-        const retry = await api<ProbeResponse>(retryRequest.url, retryRequest.init);
-        const retryProbe = retry.verification;
-        const retryOk = Boolean(retryProbe && retryProbe.ok === true);
-        setVerification(retryOk ? { ok: true } : { ok: false, error: typeof retryProbe?.error === 'string' ? retryProbe.error : '厂商未返回可验证的响应' });
-      } else {
-        setVerification(ok ? { ok: true } : { ok: false, error: typeof probe?.error === 'string' ? probe.error : '厂商未返回可验证的响应' });
-      }
-      setNote(list.length ? `已探测到 ${list.length} 个模型。` : '该端点未返回模型列表，可手动添加模型 id。');
+      setVerification(ok ? { ok: true } : { ok: false, error: typeof probe?.error === 'string' ? probe.error : '厂商未返回可验证的响应' });
+      const modelsError = typeof result.modelsError === 'string' ? result.modelsError : '';
+      setNote(list.length
+        ? `已探测到 ${list.length} 个模型。`
+        : modelsError
+          ? `模型列表获取失败（${modelsError}）；可手动添加模型 id。`
+          : '该端点未返回模型列表，可手动添加模型 id。');
     } catch (reason) {
       setVerification({ ok: false, error: (reason as Error).message });
       setNote('');
@@ -477,13 +468,13 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     const found = validateProviderDraft(active, { custom: isCustom, hasKey: Boolean(key.trim()) || resolved });
     setErrors(found);
     if (hasProviderErrors(found)) {
-      toast(isCustom ? '请补全自定义厂商的名称、Base URL、兼容格式与 API KEY' : '请填写 API KEY 或订阅凭据', 'danger');
+      toast(isCustom ? '请补全自定义厂商的厂商名、Base URL、兼容格式与 API KEY' : '请填写 API KEY 或订阅凭据', 'danger');
       return;
     }
     setBusy(true);
     try {
       if (bridge && key.trim()) {
-        const stored = await bridge.saveSecret(active.secretRef, key.trim());
+        const stored = await bridge.saveSecret(active.credentialRef, key.trim());
         if (!stored.stored) {
           toast(`密钥保存失败：${stored.message ?? '钥匙串不可用'}`, 'danger');
           return;
@@ -493,8 +484,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
       }
       mutate(next => {
         const credentials = { ...(next.credentials ?? {}) };
-        const previous = credentials[active.credentialId] ?? { secretRef: active.secretRef };
-        credentials[active.credentialId] = { ...previous, secretRef: active.secretRef, displayName: active.name || active.credentialId };
+        const previous = credentials[active.credentialId] ?? { secretRef: active.credentialRef };
+        credentials[active.credentialId] = { ...previous, secretRef: active.credentialRef, displayName: active.label || active.credentialId };
         next.credentials = credentials;
         writeConcurrency(next, active.credentialId, concurrency);
       });
@@ -556,15 +547,15 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
             {platforms.map(platform => (
               <Button key={platform.id} size="sm" variant={platform.id === platformId ? 'primary' : 'default'} data-testid={`provider-platform-${platform.id}`} onClick={() => choosePlatform(platform.id)}>{platform.label}</Button>
             ))}
-            <Button size="sm" variant={isCustom ? 'primary' : 'default'} data-testid={`provider-platform-${CUSTOM_PLATFORM_ID}`} onClick={() => choosePlatform(CUSTOM_PLATFORM_ID)}>自定义</Button>
           </div>
           {platformsNote && <p className="muted" data-testid="provider-platforms-note">{platformsNote}</p>}
           {selected?.notes?.length ? <p className="muted">{selected.notes.join('；')}</p> : null}
+          {!selected?.modelsListSupported && <p className="muted" data-testid="provider-no-models-list">该端点不支持 /models 列表，请手动添加模型 id。</p>}
 
           <div className="card-grid">
             {isCustom ? (
               <>
-                <Field label="厂商名" error={fieldError('name')}><input className="input" data-testid="provider-name" data-invalid={mark('name')} value={custom.name} onChange={event => setCustom({ ...custom, name: event.target.value })} placeholder="例如 本地网关" /></Field>
+                <Field label="厂商名" error={fieldError('label')}><input className="input" data-testid="provider-label" data-invalid={mark('label')} value={custom.label} onChange={event => setCustom({ ...custom, label: event.target.value })} placeholder="例如 本地网关" /></Field>
                 <Field label="Base URL" error={fieldError('baseUrl')}><input className="input" data-testid="provider-baseUrl" data-invalid={mark('baseUrl')} value={custom.baseUrl} onChange={event => setCustom({ ...custom, baseUrl: event.target.value })} placeholder="https://gateway.example.com/v1" /></Field>
                 <Field label="兼容格式" error={fieldError('api')}>
                   <select className="select" data-testid="provider-api" data-invalid={mark('api')} value={custom.api} onChange={event => setCustom({ ...custom, api: event.target.value as ProviderDraft['api'] })}>
@@ -579,7 +570,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
               </>
             )}
             <Field label="凭据 id"><input className="input" data-testid="provider-credentialId" data-invalid={mark('credentialId')} value={active.credentialId} readOnly={!isCustom} onChange={event => setCustom({ ...custom, credentialId: event.target.value })} /></Field>
-            <Field label="环境变量（secretRef）" hint="配置文件只保存这个名字" error={fieldError('secretRef')}><input className="input" data-testid="provider-secretRef" data-invalid={mark('secretRef')} value={active.secretRef} readOnly={!isCustom} onChange={event => setCustom({ ...custom, secretRef: event.target.value })} /></Field>
+            <Field label="环境变量（credentialRef）" hint="配置文件只保存这个名字" error={fieldError('credentialRef')}><input className="input" data-testid="provider-credentialRef" data-invalid={mark('credentialRef')} value={active.credentialRef} readOnly={!isCustom} onChange={event => setCustom({ ...custom, credentialRef: event.target.value })} /></Field>
           </div>
 
           {bridge ? (
@@ -587,7 +578,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
               <input className="input" style={{ maxWidth: 'none' }} type="password" data-testid="provider-key" data-invalid={mark('key')} value={key} onChange={event => setKey(event.target.value)} placeholder="sk-…" />
             </Field>
           ) : (
-            <p className="muted" data-testid="provider-key-hint">浏览器模式：请先在环境中设置 <code>{active.secretRef}</code>，再保存并验证。</p>
+            <p className="muted" data-testid="provider-key-hint">浏览器模式：请先在环境中设置 <code>{active.credentialRef}</code>，再保存并验证。</p>
           )}
 
           <div className="provider-concurrency" data-testid="provider-concurrency">
@@ -612,7 +603,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
       </section>
 
       <section id="settings-models" className="settings-section" data-testid="provider-models">
-        <Card title="② 选择模型" icon="bolt" subtitle={`从 ${active.name || active.credentialId} 的 ${active.baseUrl || '端点'}/models 探测可用模型；端点不支持列表时可手动添加模型 id`}
+        <Card title="② 选择模型" icon="bolt" subtitle={`从 ${active.label || active.credentialId} 的 ${active.baseUrl || '端点'}/models 探测可用模型；端点不支持列表时可手动添加模型 id`}
           actions={<>
             <Button size="sm" icon="refresh" data-testid="model-probe" disabled={busy || Boolean(blockedReason)} onClick={() => void runProbe()}>获取可用模型</Button>
             <Button size="sm" icon="plus" data-testid="model-add-selected" disabled={busy || Boolean(blockedReason) || !picks.some(pick => pick.selected)} onClick={() => void addSelected()}>添加所选模型</Button>
