@@ -34,6 +34,7 @@ import {
   defaultDrawerPage,
   drawerEntryAriaLabel,
   drawerEntryLabel,
+  drawerInitPanelIds,
   drawerPanelIds,
   draftStatusLabel,
   isResidentPanel,
@@ -924,7 +925,11 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     proposalVersion: proposal?.version ?? null,
     draftStatus,
     taskCount: tasks.length,
+    projectBound: Boolean(view.projectId),
   };
+  // The initialization panels (empty task list, project binding) are declared by
+  // the policy module; the view only renders what the policy places in the drawer.
+  const deferredInitPanelIds = drawerInitPanelIds();
   return (
     <section className="conversation-page" data-testid="conversation">
       <header className="conversation-header">
@@ -1080,26 +1085,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             </section>
           )}
 
-          {!view.tasks.length && (
-            <div className="thread-action-card" data-testid="no-conversation-tasks">
-              <div className="thread-card-title">尚无功能任务</div>
-              <div className="thread-card-copy">确认草稿后才会创建并开始执行。</div>
-            </div>
-          )}
-
-          {!view.projectId && (
-            <section className="thread-action-card binding-card" data-testid="bind-project">
-              <div className="thread-card-title">绑定项目</div>
-              <div className="thread-card-copy">未绑定项目时主 Agent 无法读取代码；可以先聊天再选择项目。</div>
-              <div className="thread-card-actions">
-                <select className="select" style={{ width: 220 }} data-testid="bind-select" value={bindId} onChange={event => setBindId(event.target.value)}>
-                  <option value="">选择项目…</option>
-                  {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
-                </select>
-                <Button size="sm" data-testid="bind-submit" disabled={!bindId} onClick={() => void act(() => api(`/api/conversations/${id}/bind`, { method: 'POST', body: JSON.stringify({ projectId: bindId, requestId: crypto.randomUUID() }) }))}>绑定</Button>
-              </div>
-            </section>
-          )}
           <div className="conversation-runway" style={{ height: transcriptFollow.runway }} aria-hidden="true" />
           </div>
           </div>
@@ -1247,6 +1232,22 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               </nav>
             )}
 
+            {drawerOpen && !view.projectId && deferredInitPanelIds.includes('bind-project') && (
+              <section className="drawer-section drawer-bind-card" data-testid="bind-project" data-panel="bind-project">
+                <div className="drawer-section-head">
+                  <h3>绑定项目</h3>
+                </div>
+                <p className="muted">未绑定项目时主 Agent 无法读取代码；可以先聊天再选择项目。</p>
+                <div className="thread-card-actions">
+                  <select className="select" style={{ width: 220 }} data-testid="bind-select" value={bindId} onChange={event => setBindId(event.target.value)}>
+                    <option value="">选择项目…</option>
+                    {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
+                  </select>
+                  <Button size="sm" data-testid="bind-submit" disabled={!bindId} onClick={() => void act(() => api(`/api/conversations/${id}/bind`, { method: 'POST', body: JSON.stringify({ projectId: bindId, requestId: crypto.randomUUID() }) }))}>绑定</Button>
+                </div>
+              </section>
+            )}
+
             {drawerOpen && drawerSection === 'draft' && activeProposal && (
               <section className="drawer-section drawer-draft-card" data-testid="proposal-draft" data-resident={residentFlag('proposal-draft')}>
                 {drawerPage !== 'graph' && (
@@ -1322,26 +1323,30 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                   <h3>任务导航</h3>
                   <span>{tasks.length} 个任务</span>
                 </div>
-                {tasks.length === 0
-                  ? <p className="muted" data-testid="drawer-task-nav-empty">尚无功能任务。确认草稿后会出现在这里。</p>
-                  : (
-                    <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="全部任务">
-                      {tasks.map(task => (
-                        <button
-                          key={task.id}
-                          type="button"
-                          className="drawer-task-nav-item"
-                          data-testid={`conversation-task-${task.id}`}
-                          data-active={task.id === detailTask?.id}
-                          aria-pressed={task.id === detailTask?.id}
-                          onClick={() => setSelectedTaskId(task.id)}
-                        >
-                          <span className="grow truncate">{task.request}</span>
-                          <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
-                        </button>
-                      ))}
-                    </nav>
-                  )}
+                {tasks.length === 0 && deferredInitPanelIds.includes('task-empty') && (
+                  <div className="drawer-init-note" data-testid="no-conversation-tasks" data-panel="task-empty">
+                    <div className="thread-card-title">尚无功能任务</div>
+                    <div className="thread-card-copy">确认草稿后才会创建并开始执行。</div>
+                  </div>
+                )}
+                {tasks.length > 0 && (
+                  <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="全部任务">
+                    {tasks.map(task => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        className="drawer-task-nav-item"
+                        data-testid={`conversation-task-${task.id}`}
+                        data-active={task.id === detailTask?.id}
+                        aria-pressed={task.id === detailTask?.id}
+                        onClick={() => setSelectedTaskId(task.id)}
+                      >
+                        <span className="grow truncate">{task.request}</span>
+                        <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
+                      </button>
+                    ))}
+                  </nav>
+                )}
                 {detailTask && (
                   <div className="drawer-task-detail" data-testid="drawer-task-detail">
                     <dl className="kv">

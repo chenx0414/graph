@@ -4,9 +4,12 @@ import { describe, expect, test } from 'vitest';
 import {
   CHAT_RESIDENT_PANEL_IDS,
   DRAWER_DRAFT_PAGES,
+  DRAWER_INIT_PANEL_IDS,
+  DRAWER_PANEL_IDS,
   defaultDrawerOpen,
   defaultDrawerPage,
   drawerEntryLabel,
+  drawerInitPanelIds,
   drawerPageIds,
   drawerPanelIds,
   draftStatusLabel,
@@ -64,6 +67,29 @@ describe('drawer panel policy', () => {
     expect(drawerPageIds()).toContain('graph');
   });
 
+  test('the empty task state and the project binding are drawer initialization panels', () => {
+    expect(DRAWER_INIT_PANEL_IDS).toEqual(['task-empty', 'bind-project']);
+    expect(drawerInitPanelIds()).toEqual(['task-empty', 'bind-project']);
+    for (const id of ['task-empty', 'bind-project']) {
+      expect(drawerPanelIds()).toContain(id);
+      expect(isDrawerPanel(id)).toBe(true);
+      expect(isResidentPanel(id)).toBe(false);
+      expect(panelPlacement(id)).toBe('drawer');
+    }
+  });
+
+  test('every declared panel is either main-resident or drawer, with no third home', () => {
+    const declared = [...residentPanelIds(), ...drawerPanelIds(), ...DRAWER_PANEL_IDS];
+    for (const id of declared) {
+      const placement = panelPlacement(id);
+      expect(placement === 'main' || placement === 'drawer').toBe(true);
+    }
+    // Anything not declared has no placement and therefore cannot be rendered
+    // in the chat stream as a policy-backed block.
+    expect(panelPlacement('no-conversation-tasks')).toBeNull();
+    expect(panelPlacement('some-ad-hoc-card')).toBeNull();
+  });
+
   test('main and drawer panels are disjoint and unknown ids have no placement', () => {
     const main = new Set(residentPanelIds());
     for (const id of drawerPanelIds()) expect(main.has(id)).toBe(false);
@@ -80,19 +106,28 @@ describe('drawer entry label', () => {
     expect(draftStatusLabel('stale')).toBe('已过期');
     expect(draftStatusLabel('none')).toBe('暂无草稿');
 
-    const pending = drawerEntryLabel({ proposalVersion: 12, draftStatus: 'pending', taskCount: 9 });
+    const pending = drawerEntryLabel({ proposalVersion: 12, draftStatus: 'pending', taskCount: 9, projectBound: true });
     expect(pending).toContain('草稿 v12');
     expect(pending).toContain('待确认');
     expect(pending).toContain('任务 9');
+    expect(pending).not.toContain('未绑定项目');
 
-    const accepted = drawerEntryLabel({ proposalVersion: 3, draftStatus: 'accepted', taskCount: 1 });
+    const accepted = drawerEntryLabel({ proposalVersion: 3, draftStatus: 'accepted', taskCount: 1, projectBound: true });
     expect(accepted).toContain('草稿 v3');
     expect(accepted).toContain('已确认');
     expect(accepted).toContain('任务 1');
 
-    const empty = drawerEntryLabel({ proposalVersion: null, draftStatus: 'none', taskCount: 0 });
+    const empty = drawerEntryLabel({ proposalVersion: null, draftStatus: 'none', taskCount: 0, projectBound: true });
     expect(empty).toContain('暂无草稿');
     expect(empty).toContain('任务 0');
+  });
+
+  test('also states that no project is bound, alongside the draft state and task count', () => {
+    const unbound = drawerEntryLabel({ proposalVersion: 2, draftStatus: 'pending', taskCount: 0, projectBound: false });
+    expect(unbound).toContain('草稿 v2');
+    expect(unbound).toContain('待确认');
+    expect(unbound).toContain('未绑定项目');
+    expect(unbound).toContain('任务 0');
   });
 });
 
@@ -106,6 +141,7 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('residentPanelIds().join');
     expect(source).toContain('drawerPanelIds().join');
     expect(source).toContain('drawerEntryLabel(');
+    expect(source).toContain('drawerInitPanelIds()');
     expect(source).toContain('data-testid="drawer-entry"');
     // The questions keep their resident marker; the draft card no longer does.
     expect(source).toContain("data-resident={residentFlag('conversation-questions')}");
@@ -134,6 +170,14 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('data-testid={`conversation-questions-${task.id}`}');
   });
 
+  test('the empty task state and the project binding live in the drawer, keeping their testids', () => {
+    const source = read('src/web/Conversation.tsx');
+    expect(source).toContain('data-testid="bind-project"');
+    expect(source).toContain('data-testid="bind-select"');
+    expect(source).toContain('data-testid="bind-submit"');
+    expect(source).toContain('data-testid="no-conversation-tasks"');
+  });
+
   test('the chat thread itself no longer renders the draft card or the task cards', () => {
     const source = read('src/web/Conversation.tsx');
     const thread = source.split('conversation-thread-inner')[1]?.split('conversation-runway')[0] ?? '';
@@ -142,6 +186,9 @@ describe('components genuinely use the policy module', () => {
     expect(thread).not.toContain('node-summary-list');
     expect(thread).not.toContain('accept-branch');
     expect(thread).not.toContain('confirm-draft');
+    // The empty task state and the project binding moved out of the chat stream.
+    expect(thread).not.toContain('no-conversation-tasks');
+    expect(thread).not.toContain('bind-project');
     // ...but the pending questions do stay in the chat stream.
     expect(thread).toContain('data-testid="conversation-questions"');
     expect(thread).toContain('data-testid={`conversation-questions-${task.id}`}');

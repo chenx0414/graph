@@ -203,9 +203,19 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await includes(page, '更在意稳定性');
   await page.screenshot({ path: join(evidence, '01-vague-goal.png'), fullPage: true });
   expect(await page.getByTestId('conversation-project').innerText()).toContain('未绑定项目');
+  // The chat stream stays conversation-only: the empty task state and the
+  // project binding moved into the right drawer, reached from the entry.
+  expect(await page.locator('.conversation-thread-inner [data-testid="no-conversation-tasks"]').count()).toBe(0);
+  expect(await page.locator('.conversation-thread-inner [data-testid="bind-project"]').count()).toBe(0);
+  expect(await page.getByTestId('drawer-entry-label').innerText()).toContain('未绑定项目');
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').waitFor();
+  await page.getByTestId('bind-project').waitFor();
+  expect(await page.getByTestId('bind-project').innerText()).toContain('未绑定项目');
+  await page.getByTestId('drawer-mode-tasks').click();
   expect(await page.getByTestId('no-conversation-tasks').innerText()).toContain('尚无功能任务');
 
-  // 2. Bind the project and let the master draft.
+  // 2. Bind the project and let the master draft, still from the drawer.
   await page.getByTestId('bind-select').selectOption('project');
   await page.getByTestId('bind-submit').click();
   await includes(page, '项目 project');
