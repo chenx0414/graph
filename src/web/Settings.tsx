@@ -331,19 +331,54 @@ function ThemePlaceholder() {
   );
 }
 
+/** Sidebar sections and their fixed order (B-0). Plain data so the console
+ * tests can assert navigation without rendering the page. */
+export interface SettingsSection {
+  id: string;
+  label: string;
+}
+
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  { id: 'settings-general', label: '通用/偏好' },
+  { id: 'settings-overview', label: '常规' },
+  { id: 'settings-models', label: '模型' },
+  { id: 'settings-advanced', label: '高级设置' },
+  { id: 'settings-git', label: 'Git 准备' },
+  { id: 'settings-archived', label: '归档对话' },
+];
+
+/** One collapsible region inside the 高级设置 page. `fields` names the config
+ * document paths it edits and `testIds` the controls that must keep working. */
+export interface AdvancedSetting {
+  id: string;
+  title: string;
+  summary: string;
+  fields: readonly string[];
+  testIds: readonly string[];
+  /** Advanced regions start closed so the common path stays uncluttered. */
+  defaultCollapsed: boolean;
+}
+
+export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
+  {
+    id: 'settings-limits',
+    title: '并发限制',
+    summary: '保存后立即对新请求生效；已有调用保留计数，不会中断在途请求',
+    fields: ['limits.credentials', 'limits.sharedGroups'],
+    testIds: ['limit-credential', 'limit-group', 'limit-credential-add', 'limit-group-add'],
+    defaultCollapsed: true,
+  },
+];
+
+export const ADVANCED_SETTING_IDS: readonly string[] = ADVANCED_SETTINGS.map(setting => setting.id);
+
 export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   const [active, setActive] = useState(openGuide ? 'settings-models' : 'settings-overview');
   const [search, setSearch] = useState('');
   useEffect(() => {
     setActive(openGuide ? 'settings-models' : 'settings-overview');
   }, [openGuide]);
-  const sections = [
-    { id: 'settings-general', label: '通用/偏好' },
-    { id: 'settings-overview', label: '常规' },
-    { id: 'settings-git', label: 'Git 准备' },
-    { id: 'settings-models', label: '模型' },
-    { id: 'settings-archived', label: '归档对话' },
-  ];
+  const sections = SETTINGS_SECTIONS;
   const visibleSections = sections.filter(section => section.label.toLowerCase().includes(search.trim().toLowerCase()));
   function go(id: string) {
     setActive(id);
@@ -463,7 +498,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
   }, []);
   useEffect(() => { void api<Startup>('/api/startup').then(startup => setEffectiveRevision(startup.effectiveRevision ?? null)).catch(() => undefined); }, []);
 
-  const configurationPage = ['settings-overview', 'settings-git', 'settings-models'].includes(active);
+  const configurationPage = ['settings-overview', 'settings-git', 'settings-models', 'settings-advanced'].includes(active);
   if (!configurationPage) return <div className="settings-page-empty" data-testid="settings-page" data-page={active} />;
   if (!draft) return (
     <div className="settings-page-loading" data-testid="settings-page" data-page={active}>
@@ -844,10 +879,20 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
       <Setup onSaved={() => void load()} />
       </section>}
 
-      {active === 'settings-models' && <section className="settings-feature">
-      <h2>并发控制</h2>
-      <section id="settings-limits" className="settings-section">
-      <Card title="并发限制" icon="clock" subtitle="保存后立即对新请求生效；已有调用保留计数，不会中断在途请求">
+      {active === 'settings-advanced' && <section className="settings-feature">
+      <h2>高级设置</h2>
+      <p className="muted">这些选项面向手动调优；不改动它们时保持运行时默认值即可。</p>
+      <section id="settings-advanced" className="settings-section settings-advanced-list">
+      {ADVANCED_SETTINGS.map(setting => (
+        <details
+          key={setting.id}
+          className="disclosure advanced-setting"
+          data-testid={`advanced-setting-${setting.id}`}
+          open={setting.defaultCollapsed ? undefined : true}
+        >
+          <summary>{setting.title}</summary>
+          <p className="field-hint">{setting.summary}</p>
+          {setting.id === 'settings-limits' && <section id={setting.id} className="settings-section">
         {!Object.keys(draft.limits?.credentials ?? {}).length && !Object.keys(draft.limits?.sharedGroups ?? {}).length && <p className="muted">尚未配置并发上限，使用运行时默认值。</p>}
         <div className="row">
           {Object.entries(draft.limits?.credentials ?? {}).map(([id, value], index) => (
@@ -867,7 +912,9 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
           <Button size="sm" icon="plus" data-testid="limit-credential-add" onClick={() => mutate(next => { next.limits = { ...(next.limits ?? {}), credentials: { ...(next.limits?.credentials ?? {}), [credentialIds[0] ?? 'credential']: 2 } }; })}>添加凭据上限</Button>
           <Button size="sm" icon="plus" data-testid="limit-group-add" onClick={() => mutate(next => { next.limits = { ...(next.limits ?? {}), sharedGroups: { ...(next.limits?.sharedGroups ?? {}), 'group-1': 4 } }; })}>添加共享组上限</Button>
         </div>
-      </Card>
+      </section>}
+        </details>
+      ))}
       </section>
       </section>}
 

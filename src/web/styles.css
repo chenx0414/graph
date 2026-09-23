@@ -3064,6 +3064,11 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .settings-feature { margin: 22px 0 30px; }
 .settings-feature > h2 { margin: 0 0 10px; font-size: 14px; }
 .settings-feature-stack { display: flex; flex-direction: column; gap: 12px; }
+.settings-advanced-list { display: flex; flex-direction: column; gap: 10px; }
+.settings-advanced-list .advanced-setting { margin: 0; }
+.advanced-setting > summary { font-size: 13px; }
+.advanced-setting[open] > summary { color: var(--text); }
+.advanced-setting .settings-section { margin-top: 8px; }
 .subscription-strip {
   display: flex;
   align-items: center;
