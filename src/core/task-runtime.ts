@@ -32,6 +32,7 @@ import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
+import { effectiveThinkingLevel, thinkingOptionsFor } from '../runtime/thinking.ts';
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
@@ -798,7 +799,11 @@ export async function openTaskRuntime(options: {
           }
           const effective = selected ?? liveEntries().find(model => model.id === masterModel());
           const requestedLevel = input.thinkingLevel ? asThinkingLevel(input.thinkingLevel) : undefined;
-          const level = effective?.reasoning === false ? 'off' : requestedLevel ?? effective?.defaultThinkingLevel;
+          // A level this model does not accept falls back to one it does, so a
+          // stale preference never reaches the provider as an invalid value.
+          const level = effective && (requestedLevel ?? effective.defaultThinkingLevel)
+            ? effectiveThinkingLevel(effective, requestedLevel)
+            : undefined;
           if (level) store.db.prepare('UPDATE conversations SET thinking_level=? WHERE id=?').run(level, conversationId);
         }
         let cursor = store.event(taskId, 'conversation.created', { conversationId, projectId, title });
@@ -868,7 +873,7 @@ export async function openTaskRuntime(options: {
       }, () => {
         const entry = liveEntries().find(model => model.id === input.model.trim());
         if (!entry) throw new RuntimeError('model_unavailable', 'The selected model is not configured');
-        const thinkingLevel = entry.reasoning === false ? 'off' : requestedThinking;
+        const thinkingLevel = effectiveThinkingLevel(entry, requestedThinking);
         const master = store.db.prepare(`
           SELECT n.instance_id,n.spec
           FROM nodes n
@@ -1801,8 +1806,10 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       // Settings must reflect the models configured right now. The `models`
       // table is append-only history for old task records, so reading it here
-      // would keep offering models the user already removed.
-      return liveEntries();
+      // would keep offering models the user already removed. Each entry carries
+      // the thinking strengths that model accepts, so no console control has to
+      // keep a level list of its own.
+      return liveEntries().map(entry => ({ ...entry, thinkingOptions: thinkingOptionsFor(entry) }));
     },
     /** The model a new conversation would use before any per-chat override. */
     defaultModel() {

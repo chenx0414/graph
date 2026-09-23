@@ -6,6 +6,7 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
+import { thinkingLevelMapFor } from '../catalog/thinking.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
 import { inspectResultHandoffSubmission, resultHandoffFromSubmission, resultHandoffRecoveryContext } from '../core/predecessor-handoff.ts';
@@ -75,11 +76,17 @@ export interface PiAdapterChannels {
   };
 }
 
-function toPiModel(entry: ModelEntry): Model<ModelApi> {
+/** The SDK model Graph sends with. Exported so the thinking-strength view is
+ * computed from the very object the transport uses. */
+export function toPiModel(entry: ModelEntry): Model<ModelApi> {
   const headers = modelRequestHeaders(entry);
+  const thinkingLevelMap = thinkingLevelMapFor(entry);
   return {
     id: entry.modelId ?? entry.id, name: entry.id, provider: entry.provider, api: entry.api, baseUrl: entry.baseUrl,
     reasoning: entry.reasoning !== false, input: entry.input ?? ['text'], contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
+    // A model takes only the effort levels its catalog entry names; the SDK maps
+    // Pi's level onto the provider's own value at the wire.
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
     // Pi's Model.cost is required numeric metadata; Graph billing uses catalog cost, never this placeholder.
     cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     // Gateway routing headers (for example x-opencode-session) must travel

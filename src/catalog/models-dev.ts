@@ -17,7 +17,7 @@
  *   source and revision so a later refresh cannot rewrite a frozen cost.
  */
 import { readFileSync } from 'node:fs';
-import { MODEL_THINKING_LEVELS, type ModelCost, type ModelInput, type ModelThinkingLevel } from './models.ts';
+import { MODEL_THINKING_LEVELS, type ModelCost, type ModelInput, type ModelThinkingLevel, type ModelThinkingOption } from './models.ts';
 
 export const MODELS_DEV_SOURCE_URL = 'https://models.dev/api.json';
 export const MODELS_DEV_ATTRIBUTION = 'models.dev community catalog (MIT). Attribution: https://models.dev';
@@ -70,6 +70,8 @@ export interface ModelMetadata {
   input?: ModelInput[];
   reasoning?: boolean;
   thinkingLevels?: ModelThinkingLevel[];
+  /** The same levels, each with the name the provider uses for it. */
+  thinkingOptions?: ModelThinkingOption[];
   defaultThinkingLevel?: ModelThinkingLevel;
   cost?: ModelCost;
   currency?: string;
@@ -136,17 +138,25 @@ function finiteAmount(value: unknown): number | undefined {
 }
 
 /** Only effort vocabularies the repository already models are reported; other
- * option types (toggle, budget_tokens) carry no discrete level. */
-function thinkingLevels(model: ModelsDevModel): ModelThinkingLevel[] {
-  const found: ModelThinkingLevel[] = [];
+ * option types (toggle, budget_tokens) carry no discrete level. The provider's
+ * own spelling is kept beside the normalized level: models name their strengths
+ * differently (xai calls its top level xhigh, deepseek calls it max), and the
+ * console has to show the name that model actually uses. */
+function thinkingOptions(model: ModelsDevModel): ModelThinkingOption[] {
+  const found = new Map<ModelThinkingLevel, string>();
   for (const option of Array.isArray(model.reasoning_options) ? model.reasoning_options : []) {
     if (!option || option.type !== 'effort') continue;
     for (const value of Array.isArray(option.values) ? option.values : []) {
-      const level = THINKING_ALIASES[String(value).trim().toLowerCase()];
-      if (level && !found.includes(level)) found.push(level);
+      const label = String(value).trim();
+      const level = THINKING_ALIASES[label.toLowerCase()];
+      if (level && !found.has(level)) found.set(level, label);
     }
   }
-  return MODEL_THINKING_LEVELS.filter(level => found.includes(level));
+  return MODEL_THINKING_LEVELS.filter(level => found.has(level)).map(level => ({ level, label: found.get(level)! }));
+}
+
+function thinkingLevels(model: ModelsDevModel): ModelThinkingLevel[] {
+  return thinkingOptions(model).map(option => option.level);
 }
 
 function inputModalities(model: ModelsDevModel): ModelInput[] | undefined {
@@ -260,7 +270,8 @@ export function lookupModelMetadata(providerHint: string, modelId: string, snaps
   const maxTokens = positiveNumber(model.limit?.output);
   const input = inputModalities(model);
   const reasoning = typeof model.reasoning === 'boolean' ? model.reasoning : undefined;
-  const levels = thinkingLevels(model);
+  const options = thinkingOptions(model);
+  const levels = options.map(option => option.level);
   const cost = optionalCost(model.cost);
   const provenance = catalogProvenance(source);
 
@@ -270,6 +281,7 @@ export function lookupModelMetadata(providerHint: string, modelId: string, snaps
     ...(input ? { input } : {}),
     ...(reasoning !== undefined ? { reasoning } : {}),
     ...(levels.length ? { thinkingLevels: levels } : {}),
+    ...(options.length ? { thinkingOptions: options } : {}),
     // models.dev records no explicit default thinking strength (reasoning_options
     // only describe toggles/token budgets), so never invent one here - the user
     // picks the default per model instead.

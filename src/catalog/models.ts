@@ -8,6 +8,13 @@ export type ModelInput = (typeof MODEL_INPUTS)[number];
 export type ModelApi = 'openai-completions' | 'anthropic-messages';
 export const MODEL_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ModelThinkingLevel = (typeof MODEL_THINKING_LEVELS)[number];
+/** One thinking strength a model accepts. `level` is Pi's own vocabulary (the
+ * only value Graph stores and sends); `label` is the name the model's provider
+ * uses for that level, which differs between models and vendors. */
+export interface ModelThinkingOption {
+  level: ModelThinkingLevel;
+  label: string;
+}
 export interface ModelCost { input: number; output: number; cacheRead: number; cacheWrite: number }
 /** Price provenance. Amounts are normalized per million tokens; `unknown`
  * means no usable price (never zero) and `stale` marks a snapshot to refresh. */
@@ -45,6 +52,11 @@ export interface ModelEntry {
    * identity (same provider model id on two platforms must not overwrite). */
   modelId?: string;
 }
+
+/** A configured model as the console reads it: the stored entry plus the
+ * thinking strengths this model accepts. View-only: the field is derived, never
+ * written back into the config document. */
+export type ModelEntryView = ModelEntry & { thinkingOptions: ModelThinkingOption[] };
 
 /** Provider-required HTTP headers that must travel with every model request.
  * OpenCode Go rejects chat completions without a session identifier. */

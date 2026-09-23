@@ -1,6 +1,7 @@
 import { open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { RuntimeError } from '../core/types.ts';
+import { thinkingOptionsFor } from '../runtime/thinking.ts';
 import { assertCredentialGroups, loadGraphConfig, parseGraphConfig, type GraphConfig } from './config.ts';
 
 export interface ConfigSnapshot {
@@ -8,13 +9,17 @@ export interface ConfigSnapshot {
   config: GraphConfig;
 }
 
-/** Credential view safe for the browser: no secret value can ever be included. */
+/** Credential view safe for the browser: no secret value can ever be included.
+ * Model entries also carry the thinking strengths they accept; the console
+ * strips that derived field before a document is saved back. */
 export function sanitizeConfig(config: GraphConfig, env: Record<string, string | undefined>) {
   return {
     path: config.path,
     configured: config.configured,
     projects: config.projects,
-    models: config.models,
+    models: config.models
+      ? { ...config.models, entries: config.models.entries.map(entry => ({ ...entry, thinkingOptions: thinkingOptionsFor(entry) })) }
+      : config.models,
     credentials: Object.fromEntries(Object.entries(config.credentials).map(([id, credential]) => [id, {
       secretRef: credential.secretRef,
       configured: Boolean(env[credential.secretRef]?.trim()),
