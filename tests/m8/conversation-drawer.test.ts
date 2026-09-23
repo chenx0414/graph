@@ -17,6 +17,7 @@ import {
   isResidentPanel,
   panelPlacement,
   residentPanelIds,
+  resolveDrawerSection,
 } from '../../src/web/conversation-drawer.ts';
 
 const read = (relative: string) => readFileSync(join(process.cwd(), relative), 'utf8');
@@ -99,6 +100,42 @@ describe('drawer panel policy', () => {
   });
 });
 
+describe('drawer section resolution (the task navigation must stay open)', () => {
+  test('clicking the task navigation stays on task even when a proposal exists', () => {
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 't1', taskIds: ['t1', 't2'], hasProposal: true }))
+      .toEqual({ section: 'task', taskId: 't1' });
+  });
+
+  test('a proposal never forces the still-loading task list back to the draft page', () => {
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [], hasProposal: true }))
+      .toEqual({ section: 'task', taskId: null });
+  });
+
+  test('a disappeared selected task falls back to the draft page', () => {
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: [], hasProposal: true }))
+      .toEqual({ section: 'draft', taskId: null });
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: ['t2'], hasProposal: false }))
+      .toEqual({ section: 'draft', taskId: null });
+  });
+
+  test('with tasks but no selection, task is shown and the first task is selected', () => {
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: ['t1', 't2'], hasProposal: true }))
+      .toEqual({ section: 'task', taskId: 't1' });
+  });
+
+  test('zero tasks and no proposal default to the draft page', () => {
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [], hasProposal: false }))
+      .toEqual({ section: 'draft', taskId: null });
+    expect(resolveDrawerSection({ current: 'draft', selectedTaskId: null, taskIds: [], hasProposal: false }))
+      .toEqual({ section: 'draft', taskId: null });
+  });
+
+  test('the draft page stays put and is never yanked away', () => {
+    expect(resolveDrawerSection({ current: 'draft', selectedTaskId: 't1', taskIds: ['t1'], hasProposal: true }))
+      .toEqual({ section: 'draft', taskId: 't1' });
+  });
+});
+
 describe('drawer entry label', () => {
   test('carries the draft version, the draft status and the task count', () => {
     expect(draftStatusLabel('pending')).toBe('待确认');
@@ -142,6 +179,7 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('drawerPanelIds().join');
     expect(source).toContain('drawerEntryLabel(');
     expect(source).toContain('drawerInitPanelIds()');
+    expect(source).toContain('resolveDrawerSection({');
     expect(source).toContain('data-testid="drawer-entry"');
     // The questions keep their resident marker; the draft card no longer does.
     expect(source).toContain("data-resident={residentFlag('conversation-questions')}");

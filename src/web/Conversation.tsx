@@ -39,6 +39,7 @@ import {
   draftStatusLabel,
   isResidentPanel,
   residentPanelIds,
+  resolveDrawerSection,
   type ConversationDrawerPage,
   type ConversationDrawerSection,
   type DraftStatus,
@@ -628,11 +629,14 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   }, [selectedProposalVersion]);
   useEffect(() => {
     if (!view || !drawerOpen) return;
-    if (drawerSection === 'task' && (!selectedTaskId || !view.tasks.some(task => task.id === selectedTaskId))) {
-      const next = view.tasks[0]?.id ?? null;
-      if (next) setSelectedTaskId(next);
-      else if (view.proposal) setDrawerSection('draft');
-    }
+    const resolved = resolveDrawerSection({
+      current: drawerSection,
+      selectedTaskId,
+      taskIds: view.tasks.map(task => task.id),
+      hasProposal: Boolean(view.proposal),
+    });
+    if (resolved.section !== drawerSection) setDrawerSection(resolved.section);
+    if (resolved.taskId !== selectedTaskId) setSelectedTaskId(resolved.taskId);
   }, [view, drawerOpen, drawerSection, selectedTaskId]);
   useEffect(() => {
     if (view) setProjection(current => observeConversationView(current, view));

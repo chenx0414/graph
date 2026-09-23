@@ -192,7 +192,12 @@ test('the full productized flow runs from the formal start entry with a controll
   expect(proposalText).toContain('任务图');
   await page.screenshot({ path: join(evidenceDir, 't08-confirm.png') });
   await page.getByTestId('confirm-draft').click();
+  // After confirming, the task navigation must really open (it used to bounce
+  // back to the draft page): wait on the entry state, then the task entries.
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
   await page.getByTestId('drawer-mode-tasks').click();
+  await page.getByTestId('drawer-task-detail').waitFor();
+  expect(await page.getByTestId('drawer-task-detail').innerText()).toContain('目标分支');
   await page.waitForFunction(() => document.querySelectorAll('[data-testid^="conversation-task-"]').length === 1);
   const taskId = await page.evaluate(async () => {
     const conversationId = location.hash.replace('#/conversations/', '');
@@ -206,6 +211,14 @@ test('the full productized flow runs from the formal start entry with a controll
   // The credential cap is one, so the second work node must wait for a slot.
   await page.waitForFunction(() => document.querySelector('[data-testid="node-list"]')?.textContent?.includes('等待 API 名额'));
   expect(await page.getByTestId('node-list').innerText()).toContain('等待 API 名额');
+
+  // Batch C: the task graph keeps its four-state legend.
+  await page.goto(`${url}/#/tasks/${taskId}/graph`);
+  await page.getByTestId('legend').waitFor();
+  const taskLegend = await page.getByTestId('legend').innerText();
+  for (const label of ['待执行', '运行中', '已完成', '被阻塞']) expect(taskLegend).toContain(label);
+  await page.goto(`${url}/#/tasks/${taskId}`);
+  await page.getByTestId('proposal').waitFor();
   await page.screenshot({ path: join(evidenceDir, 't08-waiting.png') });
   // A config change during the wait is versioned, takes effect on restart, and must not disturb the running task.
   const saved = await page.evaluate(async currentPath => {
