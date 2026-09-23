@@ -2400,6 +2400,8 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   font-size: 10px;
 }
 .thinking-labels span { width: 0; white-space: nowrap; text-align: center; }
+/* Why a model offers no thinking-strength choice (cannot think, or no level). */
+.thinking-note { margin: 2px 8px 0; color: var(--faint); font-size: 10px; }
 .model-options {
   max-height: 188px;
   margin-top: 13px;

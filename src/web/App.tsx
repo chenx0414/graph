@@ -59,7 +59,7 @@ type NodeView = {
 export type Settings_ = {
   projects: { id: string; root: string; branch?: string | null; preparation?: { branch?: string | null } | null }[];
   defaultModel?: string | null;
-  models: { id: string; grade: string; credentialId?: string; contextWindow?: number; reasoning?: boolean; defaultThinkingLevel?: string }[];
+  models: { id: string; grade: string; credentialId?: string; contextWindow?: number; reasoning?: boolean; defaultThinkingLevel?: string; thinkingOptions?: { level: string; label: string }[] }[];
   definitions: { id: string; version: number }[];
   capabilities: CapabilityRecord[];
   agentCombinations?: AgentCombinationView[];

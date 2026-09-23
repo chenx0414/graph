@@ -6,6 +6,7 @@ import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 import { STANDARD_ACCESS } from './access-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
 import { modelRequestHeaders, type ModelInput } from '../catalog/models.ts';
+import { thinkingOptionLabel } from './thinking-levels.ts';
 import {
   FALLBACK_PLATFORMS,
   PROVIDER_COMPATIBILITIES,
@@ -61,10 +62,11 @@ function loadModelsDev(): Promise<ModelsDevModule> {
 }
 
 type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-const THINKING_LEVELS: ModelThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 type RawModel = {
   id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
   contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: ModelCostDraft;
+  /** Per-model strengths the server adds to the view; stripped before saving. */
+  thinkingOptions?: { level: string; label: string }[];
   input?: ModelInput[];
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string; retrievedAt?: string; catalogRevision?: string };
   headers?: Record<string, string>;
@@ -94,7 +96,7 @@ function toDraft(config: ConfigResponse['config']): RawConfig {
   return {
     version: 1,
     projects: config.projects ?? [],
-    ...(config.models ? { models: { entries: config.models.entries } } : {}),
+    ...(config.models ? { models: { entries: config.models.entries.map(({ thinkingOptions: _derived, ...entry }) => entry) } } : {}),
     credentials,
     limits: config.limits ?? {},
     access: config.access ?? STANDARD_ACCESS,
@@ -755,7 +757,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                     <Field label="默认思考强度">
                       <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? (entry.reasoning === false ? 'off' : '')} disabled={entry.reasoning === false} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
                         {entry.reasoning !== false && <option value="">未指定</option>}
-                        {THINKING_LEVELS.map(level => <option key={level} value={level}>{level}</option>)}
+                        {(entry.thinkingOptions ?? []).map(option => <option key={option.level} value={option.level}>{thinkingOptionLabel(option)}</option>)}
                       </select>
                     </Field>
                   </div>

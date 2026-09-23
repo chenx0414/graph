@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { formatTokens } from './insights.ts';
 import { Icon, toast } from './ui.tsx';
+import { thinkingLabel, thinkingOptionLabel, thinkingView } from './thinking-levels.ts';
 
-export const THINKING_LEVELS = ['off', 'low', 'medium', 'high'] as const;
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+export { thinkingLabel };
+
+/** Pi's own thinking vocabulary: the only value Graph stores or sends. Which of
+ * these a given model accepts is decided per model (see thinking-levels.ts). */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type ComposerModel = {
   id: string;
@@ -12,6 +16,7 @@ export type ComposerModel = {
   contextWindow?: number;
   reasoning?: boolean;
   defaultThinkingLevel?: string;
+  thinkingOptions?: { level: string; label: string }[];
 };
 
 export type ComposerTelemetryView = {
@@ -24,10 +29,6 @@ export type ComposerTelemetryView = {
   contextLimit: number | null;
   contextPercent: number | null;
 };
-
-export function thinkingLabel(level: string | undefined) {
-  return ({ off: '关闭', minimal: '最小', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大' } as Record<string, string>)[level ?? ''] ?? level ?? '—';
-}
 
 function telemetryValue(value: number | null | undefined, render: (value: number) => string) {
   return value === null || value === undefined ? '—' : render(value);
@@ -43,14 +44,11 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [draftLevel, setDraftLevel] = useState<ThinkingLevel>('off');
+  const [draftLevel, setDraftLevel] = useState('off');
   const rootRef = useRef<HTMLDivElement>(null);
   const model = models.find(item => item.id === telemetry?.model);
-  const reasoning = Boolean(model && model.reasoning !== false);
-  const currentLevel = (THINKING_LEVELS.includes(telemetry?.thinkingLevel as ThinkingLevel)
-    ? telemetry?.thinkingLevel
-    : 'off') as ThinkingLevel;
-  useEffect(() => setDraftLevel(currentLevel), [currentLevel]);
+  const view = thinkingView(model, telemetry?.thinkingLevel);
+  useEffect(() => setDraftLevel(view.level), [view.level]);
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
@@ -64,12 +62,14 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
       document.removeEventListener('keydown', escape);
     };
   }, [open]);
-  async function applySelection(nextModel: ComposerModel | undefined, nextLevel: ThinkingLevel) {
+  async function applySelection(nextModel: ComposerModel | undefined, nextLevel: string) {
     if (!nextModel || saving || disabled) return false;
-    const level = nextModel.reasoning === false ? 'off' : nextLevel;
+    // The level is re-resolved against the model being switched to: a model with
+    // fewer strengths must never be handed one it does not accept.
+    const level = thinkingView(nextModel, nextLevel).level;
     setSaving(true);
     try {
-      await onSelect(nextModel, level);
+      await onSelect(nextModel, level as ThinkingLevel);
       return true;
     } catch (reason) {
       toast(`切换失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
@@ -79,15 +79,18 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
     }
   }
   async function commitThinking(value: string) {
-    const level = THINKING_LEVELS[Number(value)] ?? 'off';
+    const level = view.options[Number(value)]?.level ?? view.level;
     setDraftLevel(level);
-    if (!reasoning || saving || disabled || level === currentLevel) return;
-    if (!await applySelection(model, level)) setDraftLevel(currentLevel);
+    if (view.disabled || saving || disabled || level === view.level) return;
+    if (!await applySelection(model, level)) setDraftLevel(view.level);
   }
-  const draftIndex = THINKING_LEVELS.indexOf(draftLevel);
+  const draftIndex = Math.max(0, view.options.findIndex(option => option.level === draftLevel));
+  const sliderMax = Math.max(0, view.options.length - 1);
   const sliderStyle = {
-    '--thinking-progress': `${(draftIndex / (THINKING_LEVELS.length - 1)) * 100}%`,
+    '--thinking-progress': `${sliderMax ? (draftIndex / sliderMax) * 100 : 0}%`,
   } as CSSProperties;
+  const current = view.options.find(option => option.level === view.level);
+  const draft = view.options.find(option => option.level === draftLevel);
   return (
     <div className="composer-telemetry" data-testid="composer-telemetry" aria-label="当前模型运行指标">
       <span title="缓存输入占全部输入 token 的比例" data-testid="telemetry-cache">
@@ -112,35 +115,39 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
           aria-expanded={open}
         >
           <span title="当前主管使用的模型" data-testid="telemetry-model"><Icon name="bolt" size={13} />{telemetry?.model ?? '未选择模型'}</span>
-          <span title="当前 Agent 内核的思考强度" data-testid="telemetry-thinking"><Icon name="clock" size={13} />思考 {thinkingLabel(telemetry?.thinkingLevel)}</span>
+          <span title="当前 Agent 内核的思考强度" data-testid="telemetry-thinking" data-level={view.level}>
+            <Icon name="clock" size={13} />思考 {current ? thinkingOptionLabel(current) : thinkingLabel(telemetry?.thinkingLevel)}
+          </span>
           <Icon name="chevron" size={12} className="composer-model-chevron" />
         </button>
         {open && (
           <div className="model-control-popover" data-testid="model-menu" role="dialog" aria-label="模型与思考强度">
             <div className="model-control-head">
               <span>思考强度</span>
-              <span data-testid="thinking-current">{thinkingLabel(draftLevel)}</span>
+              <span data-testid="thinking-current">{draft ? thinkingOptionLabel(draft) : thinkingLabel(draftLevel)}</span>
             </div>
             <div className="model-control-selected">{telemetry?.model ?? '未选择模型'}</div>
             <input
               className="thinking-slider"
               data-testid="thinking-slider"
+              data-levels={view.options.map(option => option.level).join(',')}
               type="range"
               min="0"
-              max={THINKING_LEVELS.length - 1}
+              max={sliderMax}
               step="1"
               value={draftIndex}
               style={sliderStyle}
-              disabled={!reasoning || saving || disabled}
+              disabled={view.disabled || saving || disabled}
               aria-label="思考强度"
-              aria-valuetext={thinkingLabel(draftLevel)}
-              onChange={event => setDraftLevel(THINKING_LEVELS[Number(event.currentTarget.value)] ?? 'off')}
+              aria-valuetext={draft ? thinkingOptionLabel(draft) : thinkingLabel(draftLevel)}
+              onChange={event => setDraftLevel(view.options[Number(event.currentTarget.value)]?.level ?? view.level)}
               onPointerUp={event => void commitThinking(event.currentTarget.value)}
               onKeyUp={event => void commitThinking(event.currentTarget.value)}
             />
-            <div className="thinking-labels">
-              {THINKING_LEVELS.map(level => <span key={level}>{thinkingLabel(level)}</span>)}
+            <div className="thinking-labels" data-testid="thinking-labels">
+              {view.options.map(option => <span key={option.level} data-level={option.level}>{thinkingOptionLabel(option)}</span>)}
             </div>
+            {view.disabled && <p className="thinking-note" data-testid="thinking-disabled">{view.reason}</p>}
             <div className="model-options" role="listbox" aria-label="选择模型">
               {models.length === 0 && <span className="model-option-empty">没有可用模型</span>}
               {models.map(option => (
@@ -152,7 +159,7 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
                   data-active={option.id === telemetry?.model}
                   data-testid={`model-option-${option.id}`}
                   disabled={saving || disabled}
-                  onClick={() => void applySelection(option, currentLevel)}
+                  onClick={() => void applySelection(option, view.level)}
                 >
                   <span className="grow truncate">{option.id}</span>
                   {option.id === telemetry?.model && <Icon name="check" size={13} />}

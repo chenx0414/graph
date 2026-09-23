@@ -54,7 +54,7 @@ import { Button, Icon, Pill, Spinner, StatusDot, toast } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
 import { useTranscriptFollow } from './use-transcript-follow.ts';
 
-type Settings = { projects: { id: string; root: string; branch?: string | null; preparation?: { branch?: string | null } | null }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean }[] };
+type Settings = { projects: { id: string; root: string; branch?: string | null; preparation?: { branch?: string | null } | null }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean; thinkingOptions?: { level: string; label: string }[] }[] };
 export type ConversationSummary = {
   id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; updatedAt: number | null;
   openQuestions: number; taskCount: number; status: string;

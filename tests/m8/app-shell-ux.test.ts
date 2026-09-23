@@ -952,8 +952,16 @@ test('the composer model control switches model and thinking as one persisted se
     body: JSON.stringify({
       projects: [{ id: 'alpha', root }],
       models: [
-        { id: 'local', grade: 'high', credentialId: 'local', contextWindow: 32_000, reasoning: true },
-        { id: 'fast', grade: 'medium', credentialId: 'local', contextWindow: 16_000, reasoning: false },
+        // Each model carries the strengths it accepts: an xai-style model tops
+        // out at xhigh, so the slider must not offer a level it cannot take.
+        {
+          id: 'local', grade: 'high', credentialId: 'local', contextWindow: 32_000, reasoning: true,
+          thinkingOptions: [
+            { level: 'off', label: '关闭' }, { level: 'low', label: 'low' },
+            { level: 'medium', label: 'medium' }, { level: 'xhigh', label: 'xhigh' },
+          ],
+        },
+        { id: 'fast', grade: 'medium', credentialId: 'local', contextWindow: 16_000, reasoning: false, thinkingOptions: [] },
       ],
       definitions: [],
       capabilities: [],
@@ -995,7 +1003,7 @@ test('the composer model control switches model and thinking as one persisted se
     input.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
   });
   await expect.poll(() => selections.length).toBe(1);
-  expect(selections[0]).toMatchObject({ model: 'local', thinkingLevel: 'high' });
+  expect(selections[0]).toMatchObject({ model: 'local', thinkingLevel: 'xhigh' });
   expect(await page.getByTestId('toasts').innerText()).not.toContain('已切换为');
   await page.getByTestId('model-menu').waitFor();
 

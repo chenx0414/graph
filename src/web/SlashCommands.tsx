@@ -1,5 +1,6 @@
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
-import { THINKING_LEVELS, thinkingLabel, type ComposerModel, type ComposerTelemetryView, type ThinkingLevel } from './ComposerTelemetry.tsx';
+import { type ComposerModel, type ComposerTelemetryView, type ThinkingLevel } from './ComposerTelemetry.tsx';
+import { thinkingLabel, thinkingOptionLabel, thinkingView } from './thinking-levels.ts';
 import { Icon, type IconName } from './ui.tsx';
 
 export type SlashTarget = {
@@ -99,15 +100,20 @@ export function slashEntries(input: {
   }
   if (input.scope === 'thinking') {
     const currentModel = input.models.find(model => model.id === input.telemetry?.model);
-    const reasoning = Boolean(currentModel && currentModel.reasoning !== false);
-    return THINKING_LEVELS.map(level => ({
-      id: `thinking:${level}`,
-      label: thinkingLabel(level),
-      description: level === input.telemetry?.thinkingLevel ? '当前思考强度' : '用于下一轮模型请求',
+    const view = thinkingView(currentModel, input.telemetry?.thinkingLevel);
+    if (view.disabled) {
+      return [{
+        id: 'thinking:unavailable', label: '思考强度不可用', description: view.reason,
+        group: '思考强度', icon: 'clock', action: { type: 'open-thinking' }, disabled: true,
+      }];
+    }
+    return view.options.map(option => ({
+      id: `thinking:${option.level}`,
+      label: thinkingOptionLabel(option),
+      description: option.level === input.telemetry?.thinkingLevel ? '当前思考强度' : '用于下一轮模型请求',
       group: '思考强度',
       icon: 'clock',
-      action: { type: 'thinking' as const, level },
-      disabled: !reasoning,
+      action: { type: 'thinking' as const, level: option.level as ThinkingLevel },
     }));
   }
   const system: SlashEntry[] = [];
@@ -128,7 +134,7 @@ export function slashEntries(input: {
       group: '系统',
       icon: 'clock',
       action: { type: 'open-thinking' },
-      disabled: !currentModel || currentModel.reasoning === false,
+      disabled: thinkingView(currentModel, input.telemetry?.thinkingLevel).disabled,
     });
   }
   if (input.canCompact) {
