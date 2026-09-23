@@ -174,6 +174,17 @@ export function selectionBlockedReason(input: CredentialResolution): string | nu
   return `凭据未解析：请设置环境变量 ${input.credentialRef || '（对应环境变量名）'}，或在桌面端把密钥保存到钥匙串后再选择模型`;
 }
 
+/** Test ids of the inline concurrency controls of one credential. B-1 moved both
+ * caps inside the ① 配置厂商 card and removed the standalone 并发限制 region, so
+ * the three ids are derived once here instead of being written out three times. */
+export function concurrencyControlIds(credentialId: string): { credential: string; groupId: string; groupLimit: string } {
+  return {
+    credential: `limit-credential-${credentialId}`,
+    groupId: `limit-group-id-${credentialId}`,
+    groupLimit: `limit-group-${credentialId}`,
+  };
+}
+
 /**
  * Normalize the `GET /api/providers` payload. Accepts `{ platforms: [] }`
  * (or a bare array) and drops entries without an id, so a shape change on the
@@ -513,11 +524,14 @@ export type PersistedModelEntry = Omit<ModelEntry, 'contextWindow' | 'maxTokens'
  * grade, and a price only when all four sides are known. */
 export function draftToModelEntry(draft: ModelEntryDraft): PersistedModelEntry {
   const cost = completeCost(draft.cost);
+  // An unknown price is simply absent: the daemon requires a nonempty currency
+  // whenever a `pricing` object is present, and inventing a currency (or a 0)
+  // would both be a lie about the price. A known price always carries its own.
   const pricing = cost
     ? (draft.pricing && draft.pricing.status !== 'unknown'
         ? draft.pricing
         : { currency: draft.pricing?.currency || 'USD', unit: 'per_million_tokens' as const, status: 'known' as const, sourceUrl: 'manual' })
-    : draft.pricing;
+    : (draft.pricing && draft.pricing.currency.trim() ? draft.pricing : undefined);
   return {
     id: draft.id,
     provider: draft.provider,

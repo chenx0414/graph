@@ -11,6 +11,7 @@ import {
   PROVIDER_COMPATIBILITIES,
   buildEntryDraft,
   completeCost,
+  concurrencyControlIds,
   customDraft,
   draftFromPlatform,
   draftToModelEntry,
@@ -431,6 +432,20 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   }, [active.credentialId]);
   const entries = draft.models?.entries ?? [];
   const providerEntries = entries.filter(entry => entry.credentialId === active.credentialId);
+  const limitIds = concurrencyControlIds(active.credentialId);
+  // Ids the user typed because the endpoint has no /models reply must stay
+  // visible as rows, otherwise 手动添加 looks like it did nothing.
+  const manualRows: ProbeModel[] = picks
+    .filter(pick => pick.manual && !probeModels.some(model => model.id === pick.modelId))
+    .map(pick => ({ id: pick.modelId, ...(pick.name ? { name: pick.name } : {}) }));
+  /** A save must verify a real model. A vendor without a model list has no
+   * `/models` reply to fall back on, so fall back to the model that this
+   * credential already uses instead of skipping verification. */
+  const verifyCandidate = (): string | undefined =>
+    picks.find(pick => pick.selected)?.modelId?.trim()
+    ?? (manualId.trim() || undefined)
+    ?? providerEntries[0]?.modelId?.trim()
+    ?? providerEntries[0]?.id;
 
   const choosePlatform = (id: string) => {
     setPlatformId(id);
@@ -494,7 +509,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     } finally {
       setBusy(false);
     }
-    await runProbe();
+    await runProbe(verifyCandidate());
   };
 
   const addSelected = async () => {
@@ -585,9 +600,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
           <div className="provider-concurrency" data-testid="provider-concurrency">
             <p className="field-hint">并发控制（保存后立即对新请求生效，不中断在途请求）：每个凭据上限与跨凭据共享组上限都在本厂商条目内编辑。</p>
             <div className="row">
-              <Field label="本凭据并发上限"><input className="input" style={{ width: 120 }} type="number" data-testid={`limit-credential-${active.credentialId}`} value={concurrency.credentialLimit} onChange={event => setConcurrency({ ...concurrency, credentialLimit: event.target.value })} placeholder="默认" /></Field>
-              <Field label="共享组 id"><input className="input" style={{ width: 180 }} data-testid={`limit-group-id-${active.credentialId}`} value={concurrency.sharedGroupId} onChange={event => setConcurrency({ ...concurrency, sharedGroupId: event.target.value })} placeholder="可选" /></Field>
-              <Field label="共享组并发上限"><input className="input" style={{ width: 120 }} type="number" data-testid={`limit-group-${active.credentialId}`} value={concurrency.sharedGroupLimit} onChange={event => setConcurrency({ ...concurrency, sharedGroupLimit: event.target.value })} placeholder="默认" /></Field>
+              <Field label="本凭据并发上限"><input className="input" style={{ width: 120 }} type="number" data-testid={limitIds.credential} value={concurrency.credentialLimit} onChange={event => setConcurrency({ ...concurrency, credentialLimit: event.target.value })} placeholder="默认" /></Field>
+              <Field label="共享组 id"><input className="input" style={{ width: 180 }} data-testid={limitIds.groupId} value={concurrency.sharedGroupId} onChange={event => setConcurrency({ ...concurrency, sharedGroupId: event.target.value })} placeholder="可选" /></Field>
+              <Field label="共享组并发上限"><input className="input" style={{ width: 120 }} type="number" data-testid={limitIds.groupLimit} value={concurrency.sharedGroupLimit} onChange={event => setConcurrency({ ...concurrency, sharedGroupLimit: event.target.value })} placeholder="默认" /></Field>
             </div>
           </div>
 
@@ -612,9 +627,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
           {blockedReason && <p className="field-error" data-testid="provider-credential-blocked">{blockedReason}</p>}
           {requiredProblems.length > 0 && <p className="field-error" data-testid="model-required-missing">有 {requiredProblems.length} 个模型缺少必填字段（{requiredProblems.map(problem => problem.id).join('、')}）；请补全上下文上限/最大输出/模型等级，并确保价格成套填写（不完整的价格不会按 0 计算）。</p>}
           <p className="muted" data-testid="model-probe-note">{note || '先「保存并验证」，或凭据就绪后点「获取可用模型」。'}</p>
-          {probeModels.length > 0 && (
+          {(probeModels.length > 0 || manualRows.length > 0) && (
             <div className="model-probe-list" data-testid="model-probe-list">
-              {probeModels.map(model => {
+              {[...probeModels, ...manualRows].map(model => {
                 const pick = picks.find(item => item.modelId === model.id);
                 return (
                   <label key={model.id} className="list-item" style={{ cursor: 'pointer' }}>
@@ -874,7 +889,10 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     }
   }
   const mutate = (change: (next: RawConfig) => void) => {
-    const next = structuredClone(draft) as RawConfig;
+    // Clone the newest draft rather than the render-scope value: two edits that
+    // land in the same render frame would otherwise make the second one discard
+    // the first, so a freshly added model silently vanishes from the document.
+    const next = structuredClone(latestDraft.current ?? draft) as RawConfig;
     change(next);
     latestDraft.current = next;
     editVersion.current += 1;

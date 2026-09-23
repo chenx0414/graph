@@ -220,7 +220,9 @@ describe('snapshot metadata mapping', () => {
     expect(entry).not.toHaveProperty('contextWindow');
     expect(entry).not.toHaveProperty('maxTokens');
     expect(entry).not.toHaveProperty('cost');
-    expect(entry.pricing?.status).toBe('unknown');
+    // An unknown price carries no `pricing` at all: the daemon rejects an empty
+    // currency and inventing one (or a 0) would be a lie about the price.
+    expect(entry).not.toHaveProperty('pricing');
   });
 
   it('never invents a grade when the snapshot (which has none) does not provide one', () => {

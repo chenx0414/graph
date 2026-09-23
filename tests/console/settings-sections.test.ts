@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
  * so vitest transpiles it and the web project typechecks it instead. */
 // @ts-ignore -- .tsx import from a NodeNext test program
 import { ADVANCED_SETTINGS, ADVANCED_SETTING_IDS, SETTINGS_SECTIONS, defaultAdvancedOpen, isAdvancedOpen } from '../../src/web/Settings.tsx';
+import { concurrencyControlIds } from '../../src/web/provider-form.ts';
 
 type Section = { id: string; label: string };
 type AdvancedSetting = {
@@ -21,15 +22,21 @@ const ADVANCED_IDS = ADVANCED_SETTING_IDS as readonly string[];
 const initialOpen = defaultAdvancedOpen as (settings?: readonly AdvancedSetting[]) => Record<string, boolean>;
 const readOpen = isAdvancedOpen as (open: Record<string, boolean>, id: string) => boolean;
 
+const SAMPLE: readonly AdvancedSetting[] = [
+  { id: 'settings-sample', title: '示例', summary: '示例说明', fields: ['sample.field'], testIds: ['sample-control'], defaultCollapsed: true },
+];
+
 /**
- * B-0 settings-page tidy-up, asserted as pure data.
+ * B-0 settings-page tidy-up, re-encoded for B-1.
  *
- * The console tests must not render React or touch a DOM, so this file only
- * checks the exported section registry and the advanced-setting grouping that
- * `Settings.tsx` consumes. It intentionally says nothing about CSS classes or
- * the exact JSX of any card.
+ * B-0 grouped the concurrency caps into a collapsed 高级设置 region. B-1 moved
+ * both caps inside the ① 配置厂商 card and removed that region, so the registry
+ * is intentionally empty and this file asserts the new contract instead: the caps
+ * are addressable through the derived inline ids and no top-level page claims
+ * them. The console tests must not render React or touch a DOM, so everything
+ * here is pure data and pure helpers.
  */
-describe('settings navigation sections (B-0)', () => {
+describe('settings navigation sections (B-0/B-1)', () => {
   it('orders the sidebar as 通用/偏好 → 常规 → 模型 → 高级设置 → Git 准备 → 归档对话', () => {
     expect(SECTIONS.map(section => section.id)).toEqual([
       'settings-general',
@@ -60,38 +67,41 @@ describe('settings navigation sections (B-0)', () => {
     expect(SECTIONS.map(section => section.id)).not.toContain('settings-limits');
   });
 
-  it('groups the credential and shared-group concurrency limits under 高级设置', () => {
-    expect(ADVANCED_IDS).toContain('settings-limits');
-    const limits = ADVANCED.find(setting => setting.id === 'settings-limits');
-    expect(limits).toBeDefined();
-    expect(limits!.fields).toEqual(expect.arrayContaining(['limits.credentials', 'limits.sharedGroups']));
+  it('no longer groups the concurrency caps under 高级设置 (B-1 moved them inline)', () => {
+    expect(ADVANCED_IDS).not.toContain('settings-limits');
+    expect(ADVANCED).toEqual([]);
+  });
+
+  it('derives the inline concurrency controls of one credential', () => {
+    expect(concurrencyControlIds('local')).toEqual({
+      credential: 'limit-credential-local',
+      groupId: 'limit-group-id-local',
+      groupLimit: 'limit-group-local',
+    });
+    expect(Object.values(concurrencyControlIds('second'))).toEqual([
+      'limit-credential-second',
+      'limit-group-id-second',
+      'limit-group-second',
+    ]);
   });
 
   it('starts every advanced region collapsed', () => {
-    expect(ADVANCED.length).toBeGreaterThan(0);
-    expect(ADVANCED.every(setting => setting.defaultCollapsed)).toBe(true);
+    expect(SAMPLE.length).toBeGreaterThan(0);
+    expect(SAMPLE.every(setting => setting.defaultCollapsed)).toBe(true);
+    expect(initialOpen(SAMPLE)).toEqual({});
   });
 
   it('derives a default open-state that renders every advanced region closed', () => {
-    const open = initialOpen();
-    expect(open).toEqual({});
-    for (const setting of ADVANCED) {
+    const open = initialOpen(SAMPLE);
+    for (const setting of SAMPLE) {
       expect(readOpen(open, setting.id)).toBe(false);
       expect(readOpen(open, setting.id)).toBeFalsy();
     }
   });
 
   it('reads an explicitly opened region from the controlled map', () => {
-    expect(readOpen({ 'settings-limits': true }, 'settings-limits')).toBe(true);
-    expect(readOpen({ 'settings-limits': false }, 'settings-limits')).toBe(false);
-    expect(readOpen({}, 'settings-limits')).toBe(false);
-  });
-
-  it('keeps the existing concurrency-limit controls addressable', () => {
-    const limits = ADVANCED.find(setting => setting.id === 'settings-limits');
-    expect(limits!.testIds).toEqual(expect.arrayContaining([
-      'limit-credential-add',
-      'limit-group-add',
-    ]));
+    expect(readOpen({ 'settings-sample': true }, 'settings-sample')).toBe(true);
+    expect(readOpen({ 'settings-sample': false }, 'settings-sample')).toBe(false);
+    expect(readOpen({}, 'settings-sample')).toBe(false);
   });
 });
