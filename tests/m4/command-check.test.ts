@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, NodeSpec } from '../../src/core/types.ts';
@@ -348,7 +348,13 @@ test('a graph.command check resolves the project-owned dependencies without a ho
   expect(body.code).toBe(0);
   expect(body.stdout).toContain('pass');
   // The check gets a host-owned link; the project's own directory is untouched.
-  const link = join(root, 'state', 'worktrees', view.id, 'integration', 'node_modules');
+  // The worktree path and branch come from the runtime, not from a hardcoded layout:
+  // their naming is a product decision (a readable slug plus the short task id).
+  const integration = view.worktrees.find(item => item.nodeId === 'integration');
+  expect(integration).toBeDefined();
+  expect(integration!.branch).toMatch(/^graph\/task\/[a-z0-9-]+-[0-9a-f]{8}$/);
+  expect(basename(dirname(integration!.path))).toMatch(/^[a-z0-9-]+-[0-9a-f]{8}$/);
+  const link = join(integration!.path, 'node_modules');
   expect(lstatSync(link).isSymbolicLink()).toBe(true);
   expect(realpathSync(link)).toBe(realpathSync(modules));
   expect(lstatSync(modules).isSymbolicLink()).toBe(false);
