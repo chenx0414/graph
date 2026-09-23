@@ -270,7 +270,10 @@ export function lookupModelMetadata(providerHint: string, modelId: string, snaps
     ...(input ? { input } : {}),
     ...(reasoning !== undefined ? { reasoning } : {}),
     ...(levels.length ? { thinkingLevels: levels } : {}),
-    ...(reasoning && levels.includes('medium') ? { defaultThinkingLevel: 'medium' as ModelThinkingLevel } : {}),
+    // models.dev records no explicit default thinking strength (reasoning_options
+    // only describe toggles/token budgets), so never invent one here - the user
+    // picks the default per model instead.
+
     ...(cost ? { cost } : {}),
     ...(cost ? { currency: typeof model.cost?.currency === 'string' && model.cost.currency ? model.cost.currency : 'USD' } : {}),
     sourceUrl: provenance.sourceUrl,
