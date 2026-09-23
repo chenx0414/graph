@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   builtinModelsDevSnapshot,
+  catalogProvenance,
   lookupModelMetadata,
   normalizeModelsDevSnapshot,
+  MODELS_DEV_ATTRIBUTION,
   MODELS_DEV_SOURCE_URL,
   type ModelsDevSnapshot,
 } from '../../src/catalog/models-dev.ts';
@@ -120,6 +122,31 @@ describe('models.dev snapshot mapping (B-1)', () => {
     expect(metadata!.cost).toBeUndefined();
     expect(metadata!.thinkingLevels).toBeUndefined();
     expect(metadata!.defaultThinkingLevel).toBeUndefined();
+  });
+
+  it('accepts both the bare model id and the vendor/model spelling', () => {
+    const bare = lookupModelMetadata('deepseek', 'deepseek-v4-flash');
+    const qualified = lookupModelMetadata('deepseek', 'deepseek/deepseek-v4-flash');
+    expect(qualified).toEqual(bare);
+    expect(bare).not.toBeNull();
+    // A bare segment only matches inside a provider that also resolves.
+    expect(lookupModelMetadata('anthropic', 'deepseek-v4-flash')).toBeNull();
+  });
+
+  it('exposes snapshot provenance for ModelPricing', () => {
+    const provenance = catalogProvenance();
+    expect(provenance.sourceUrl).toBe(MODELS_DEV_SOURCE_URL);
+    expect(provenance.retrievedAt).toMatch(/^20\d\d-/);
+    expect(provenance.catalogRevision).toBe(`models-dev.${provenance.retrievedAt}`);
+    expect(provenance.attribution).toContain('models.dev');
+    expect(catalogProvenance({ providers: {} }).attribution).toBe(MODELS_DEV_ATTRIBUTION);
+  });
+
+  it('reads the vendored `_meta` block and the earlier top-level metadata shape', () => {
+    const withMeta = normalizeModelsDevSnapshot({ _meta: { sourceUrl: 'https://meta.test/api.json', fetchedAt: '2026-05-06T07:08:09.000Z', attribution: 'meta attribution' }, providers: {} });
+    expect(withMeta).toMatchObject({ sourceUrl: 'https://meta.test/api.json', fetchedAt: '2026-05-06T07:08:09.000Z', attribution: 'meta attribution' });
+    expect(catalogProvenance(withMeta)).toMatchObject({ sourceUrl: 'https://meta.test/api.json', catalogRevision: 'models-dev.2026-05-06T07:08:09.000Z' });
+    expect(normalizeModelsDevSnapshot({ sourceUrl: 'https://legacy.test', fetchedAt: '2025-01-01T00:00:00.000Z', license: 'legacy', providers: {} })).toMatchObject({ sourceUrl: 'https://legacy.test', fetchedAt: '2025-01-01T00:00:00.000Z', attribution: 'legacy' });
   });
 
   it('accepts a bare provider map as a snapshot', () => {
