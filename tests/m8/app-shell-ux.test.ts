@@ -514,6 +514,13 @@ test('the composer suggestion and queue steering follow the three Enter states',
   await input.fill('优先检查失败分支。');
   await input.press('Enter');
   await page.getByTestId('queued-message').filter({ hasText: '优先检查失败分支。' }).waitFor();
+  // The chip is optimistic: the runtime may not have accepted the queue yet, and the second Enter
+  // would then steer a queue that does not exist. Assert the real precondition instead of pressing
+  // Enter into the dark (a bigger poll budget cannot fix a missing precondition).
+  await expect.poll(async () => {
+    const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
+    return messages.find(message => message.text === '优先检查失败分支。')?.state;
+  }, { timeout: 10_000 }).toBe('queued');
 
   // State 3: an empty composer with a queued message sends that queue as steering.
   await input.press('Enter');

@@ -110,7 +110,9 @@ export class Execution {
         integrate: async operation => {
           if (!this.git) return;
           const merged = await this.git.exclusive(operation.taskId, () => this.git!.integrate(operation));
-          if (merged && !merged.ok) throw new RuntimeError('git_conflict', merged.conflicts.join(', '));
+          if (merged && !merged.ok) {
+            throw new RuntimeError('git_conflict', `Merge conflicts in ${merged.conflicts.join(', ')}. Inside that lane work copy restore those paths to the integration tip (git checkout <integration sha> -- <paths>) and commit, then retry; never adopt the conflicted content.`);
+          }
         },
       });
       if (taskId) this.deliver(taskId);
