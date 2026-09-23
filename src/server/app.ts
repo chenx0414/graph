@@ -15,8 +15,9 @@ import {
   parseModelsResponse,
   parseVerifyResponse,
   platformCatalogView,
+  PROVIDER_ROUTES,
   sanitizeProviderView,
-  validateProviderDraft,
+  validateProbeRequest,
   type HttpRequestSpec,
   type ProbeTarget,
   type ProviderModelSummary,
@@ -137,15 +138,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   /** Probe an unsaved provider draft: list models when the vendor supports it,
    * then send one minimal chat request. Vendor failures keep their own text. */
   const runProviderProbe = async (rawBody: unknown) => {
-    const body = rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody) ? rawBody as Record<string, unknown> : {};
-    if (typeof body.requestId !== 'string' || !body.requestId.trim()) {
-      throw new RuntimeError('invalid_input', 'requestId is required');
+    const parsedBody = validateProbeRequest(rawBody);
+    if (!parsedBody.ok) {
+      throw new RuntimeError('invalid_input', parsedBody.errors.map(error => `${error.field}: ${error.message}`).join('; '));
     }
-    const validated = validateProviderDraft(body.provider);
-    if (!validated.ok) {
-      throw new RuntimeError('invalid_input', validated.errors.map(error => `${error.field}: ${error.message}`).join('; '));
-    }
-    const provider = validated.provider;
+    const { provider, modelId: requestedModel, probeModels } = parsedBody.request;
     const apiKey = providerSecrets()[provider.secretRef]?.trim() || undefined;
     const target: ProbeTarget = {
       baseUrl: provider.baseUrl,
@@ -153,7 +150,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(apiKey ? { apiKey } : {}),
       ...(provider.headers ? { headers: provider.headers } : {}),
     };
-    const wantModels = provider.modelsListSupported && body.probeModels !== false;
+    const wantModels = provider.modelsListSupported && probeModels !== false;
     const models: ProviderModelSummary[] = [];
     let modelsError: string | undefined;
     if (wantModels) {
@@ -162,7 +159,6 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       if ('models' in parsed) models.push(...parsed.models);
       else modelsError = parsed.error;
     }
-    const requestedModel = typeof body.modelId === 'string' && body.modelId.trim() ? body.modelId.trim() : undefined;
     const verifyModel = requestedModel ?? models[0]?.id;
     let verification: { ok: boolean; status?: number; error?: string; skipped?: boolean };
     if (!apiKey) {
@@ -275,13 +271,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     app.post('/api/usage/refresh', async () => options.usage!.get(true));
     app.get('/api/usage/credentials', async () => ({ credentials: await options.usage!.credentials() }));
   }
-  // Provider directory + probe. `/api/providers` is the browser-console path
-  // (session cookie); the `/api/app/*` aliases match the desktop bridge/token
-  // guard the other app-only routes use.
-  app.get('/api/providers', async () => providersView());
-  app.get('/api/app/providers', async () => providersView());
-  app.post('/api/providers/probe', async request => runProviderProbe(request.body));
-  app.post('/api/app/providers/probe', async request => runProviderProbe(request.body));
+  // Provider directory + probe on the console's session-cookie `/api` face.
+  // The page cannot read the desktop app token, so these must NOT live under
+  // `/api/app/*`.
+  app.get(PROVIDER_ROUTES.list, async () => providersView());
+  app.post(PROVIDER_ROUTES.probe, async request => runProviderProbe(request.body));
   app.post('/api/app/secret', async request => {
     if (!options.appServices) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');
     const body = request.body as { ref?: unknown; value?: unknown };

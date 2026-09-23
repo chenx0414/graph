@@ -28,6 +28,15 @@ export interface PlatformPreset {
 
 export const CUSTOM_PLATFORM_ID = 'custom';
 
+/** Console provider endpoints. Deliberately registered on the session-cookie
+ * `/api` face, NOT under `/api/app/*`: that prefix requires the desktop bridge
+ * token the browser console cannot read, so probing would never reach the
+ * daemon from the settings page. */
+export const PROVIDER_ROUTES = {
+  list: '/api/providers',
+  probe: '/api/providers/probe',
+} as const;
+
 /** Built-in supported platforms. `custom` is the fallback for any other
  * OpenAI/Anthropic-compatible endpoint. Credential env names are shared with
  * the usage adapters (src/server/usage.ts) so one key configures both. */
@@ -208,6 +217,41 @@ export function validateProviderDraft(input: unknown): ProviderDraftValidation {
       modelsListSupported,
       ...(Object.keys(headers).length ? { headers } : {}),
       custom,
+    },
+  };
+}
+
+export interface ProbeRequest {
+  requestId: string;
+  provider: ResolvedProvider;
+  modelId?: string;
+  probeModels?: boolean;
+}
+
+export type ProbeRequestValidation =
+  | { ok: true; request: ProbeRequest }
+  | { ok: false; errors: ProviderDraftError[] };
+
+/** Parse a probe body. `requestId` is the idempotency key the console POST
+ * must always carry; the provider draft is validated by
+ * `validateProviderDraft`. */
+export function validateProbeRequest(input: unknown): ProbeRequestValidation {
+  const body = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  const errors: ProviderDraftError[] = [];
+  const requestId = typeof body.requestId === 'string' && body.requestId.trim() ? body.requestId.trim() : undefined;
+  if (!requestId) errors.push({ field: 'requestId', message: 'requestId is required' });
+  const validated = validateProviderDraft(body.provider);
+  if (!validated.ok) errors.push(...validated.errors);
+  if (errors.length || !requestId || !validated.ok) return { ok: false, errors };
+  const modelId = typeof body.modelId === 'string' && body.modelId.trim() ? body.modelId.trim() : undefined;
+  const probeModels = typeof body.probeModels === 'boolean' ? body.probeModels : undefined;
+  return {
+    ok: true,
+    request: {
+      requestId,
+      provider: validated.provider,
+      ...(modelId ? { modelId } : {}),
+      ...(probeModels !== undefined ? { probeModels } : {}),
     },
   };
 }
