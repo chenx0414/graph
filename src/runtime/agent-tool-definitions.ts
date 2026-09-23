@@ -293,7 +293,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     apply_rsi_change: {
-      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule a reload. Use it for any harness improvement you can justify, not only bugs. Each file needs action "write" (full content), "replace" (each oldText must match exactly once) or "delete". Supply checks for a fast inner loop; the full `node --run check` and `app:build` gate runs before a change goes live. If checks fail the change stays uncommitted so you can keep fixing; pass changes: [] to just re-run checks. activate=true ends this operation and leaves the change pending_reload, so do not start another improvement while a reload is pending. force reloads even while other operations run.',
+      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule a reload. Use it for any harness improvement you can justify, not only bugs. Every change needs a repository-relative path, whatever its action: action "write" (full content), "replace" (each oldText must match exactly once in that file) or "delete". Supply checks for a fast inner loop; the full `node --run check` and `app:build` gate runs before a change goes live. If checks fail the change stays uncommitted so you can keep fixing; pass changes: [] to just re-run checks. activate=true ends this operation and leaves the change pending_reload, so do not start another improvement while a reload is pending. force reloads even while other operations run.',
       parameters: Type.Object({
         title: Type.String(),
         problem: Type.String(),
@@ -302,7 +302,7 @@ function declarations(features: AgentToolFeatures) {
         impact: Type.Optional(Type.String()),
         risk: Type.Optional(Type.String()),
         changes: Type.Optional(Type.Array(Type.Object({
-          path: Type.String(),
+          path: Type.String({ description: 'Repository-relative file this change writes, replaces or deletes.' }),
           action: Type.String(),
           content: Type.Optional(Type.String()),
           edits: Type.Optional(Type.Array(Type.Object({ oldText: Type.String(), newText: Type.String() }))),
