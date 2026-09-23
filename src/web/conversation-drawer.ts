@@ -18,6 +18,47 @@ export type ConversationDrawerPage = 'acceptance' | 'nodes' | 'decisions' | 'gra
 /** The drawer's two top-level sections: the draft details and the task list. */
 export type ConversationDrawerSection = 'draft' | 'task';
 
+export interface DrawerSectionInput {
+  /** The section the user is currently looking at. */
+  current: ConversationDrawerSection;
+  /** The task the user (or a previous resolve) selected, if any. */
+  selectedTaskId: string | null;
+  /** Every task id that currently exists, in display order. */
+  taskIds: readonly string[];
+  /** Whether the conversation already has a proposal / draft. */
+  hasProposal: boolean;
+}
+
+export interface DrawerSectionResolution {
+  section: ConversationDrawerSection;
+  taskId: string | null;
+}
+
+/**
+ * Sticky drawer-section resolution. The user's choice wins: once the task
+ * navigation is open it stays open even while a proposal exists or the task
+ * list is still loading. It only falls back to the draft page when the chosen
+ * task has disappeared, or when there is nothing to select and no proposal to
+ * show. A proposal must never force the task section back to the draft page —
+ * that was the bug that made the task navigation unclickable.
+ */
+export function resolveDrawerSection(input: DrawerSectionInput): DrawerSectionResolution {
+  const { current, selectedTaskId, taskIds, hasProposal } = input;
+  // The draft page is the user's explicit choice; never yank them out of it.
+  if (current === 'draft') return { section: 'draft', taskId: selectedTaskId };
+  if (selectedTaskId !== null && taskIds.includes(selectedTaskId)) {
+    return { section: 'task', taskId: selectedTaskId };
+  }
+  // The chosen task no longer exists: fall back to the draft page.
+  if (selectedTaskId !== null) return { section: 'draft', taskId: null };
+  // Nothing selected yet: adopt the first task as soon as one exists.
+  if (taskIds.length > 0) return { section: 'task', taskId: taskIds[0] ?? null };
+  // No task to select. Keep the task section while a proposal is still there
+  // (the task list may simply be loading); otherwise use the draft default.
+  if (hasProposal) return { section: 'task', taskId: null };
+  return { section: 'draft', taskId: null };
+}
+
 /** Draft-detail pages that appear as tabs inside the drawer. */
 export interface DrawerPanelDescriptor {
   id: Exclude<ConversationDrawerPage, 'task'>;
