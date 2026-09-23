@@ -130,38 +130,40 @@ export type AttachmentValidation =
   | { ok: true; kind: AttachmentKind }
   | { ok: false; reason: string };
 
-/** Reject with a concrete, user-visible reason; never silently drop a file. */
+/** Reject with a concrete, user-visible reason; never silently drop a file.
+ * Reasons stay name-less so the composer can pair each one with the file it
+ * belongs to when rendering the visible notice line. */
 export function validateAttachment(candidate: AttachmentCandidate, existing: readonly ChatAttachment[]): AttachmentValidation {
   const name = (candidate.name ?? '').trim() || '未命名文件';
   if (existing.length >= MAX_ATTACHMENTS) {
     return { ok: false, reason: `一条消息最多附加 ${MAX_ATTACHMENTS} 个文件` };
   }
   if (existing.some(item => item.name === name && item.size === candidate.size)) {
-    return { ok: false, reason: `已添加同名文件：${name}` };
+    return { ok: false, reason: '已添加同名文件' };
   }
   const kind = attachmentKind({ ...candidate, name });
   if (!kind) {
     if (normalizeMime(candidate.type).startsWith('image/')) {
       return { ok: false, reason: `不支持的图片格式：${candidate.type || fileExtension(name)}（仅支持 png/jpeg/webp/gif）` };
     }
-    return { ok: false, reason: `不支持的文件类型：${name}` };
+    return { ok: false, reason: '不支持的文件类型' };
   }
   if (kind === 'image') {
     if (!Number.isFinite(candidate.size) || candidate.size > MAX_IMAGE_ATTACHMENT_BYTES) {
-      return { ok: false, reason: `图片 ${name} 超过单文件 5MB 上限` };
+      return { ok: false, reason: '图片超过单文件 5MB 上限' };
     }
     const total = existing.reduce((sum, item) => sum + (isImageAttachment(item) ? item.size : 0), 0) + candidate.size;
     if (total > MAX_MESSAGE_IMAGE_BYTES) {
-      return { ok: false, reason: `单条消息的图片总量超过 8MB 上限（${name} 未加入）` };
+      return { ok: false, reason: '单条消息的图片总量超过 8MB 上限（该文件未加入）' };
     }
     return { ok: true, kind };
   }
   if (!Number.isFinite(candidate.size) || candidate.size > MAX_TEXT_ATTACHMENT_BYTES) {
-    return { ok: false, reason: `文本附件 ${name} 超过单文件 1MB 上限` };
+    return { ok: false, reason: '文本附件超过单文件 1MB 上限' };
   }
   const textTotal = existing.reduce((sum, item) => sum + (isImageAttachment(item) ? 0 : item.size), 0) + candidate.size;
   if (textTotal > MAX_TEXT_ATTACHMENTS_TOTAL_BYTES) {
-    return { ok: false, reason: `文本类附件合计超过 5MB 上限（${name} 未加入）` };
+    return { ok: false, reason: '文本类附件合计超过 5MB 上限（该文件未加入）' };
   }
   return { ok: true, kind };
 }
@@ -192,14 +194,14 @@ export function buildAttachment(
     const dataUrl = content.dataUrl ?? '';
     const data = base64FromDataUrl(dataUrl);
     const mime = imageMimeFor({ ...candidate, name }) ?? 'image/png';
-    if (!data) return { ok: false, reason: `无法读取图片 ${name}` };
+    if (!data) return { ok: false, reason: '无法读取图片' };
     return {
       ok: true,
       attachment: { name, type: mime, size: candidate.size, text: '', data, preview: dataUrl },
     };
   }
   const text = content.text ?? '';
-  if (text.includes('\0')) return { ok: false, reason: `${name} 不是文本文件` };
+  if (text.includes('\0')) return { ok: false, reason: '不是文本文件' };
   return { ok: true, attachment: { name, type: textMimeFor({ ...candidate, name }), size: candidate.size, text } };
 }
 
@@ -224,12 +226,27 @@ export function attachmentSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Join rejection reasons for one visible toast. */
-export function rejectionMessage(reasons: readonly string[]): string {
-  if (!reasons.length) return '';
-  if (reasons.length === 1) return reasons[0]!;
-  const head = reasons.slice(0, 2).join('；');
-  return reasons.length > 2 ? `${head}；另有 ${reasons.length - 2} 个文件被拒` : head;
+/** One visible line per rejected file, so a drop is never silently ignored.
+ * Accepted files never appear here, and the file name is paired with its own
+ * reason (type unsupported / over an explicitly stated limit). */
+export interface AttachmentResult {
+  name: string;
+  accepted: boolean;
+  reason?: string;
+}
+
+export function rejectionNotices(results: readonly AttachmentResult[]): string[] {
+  const notices: string[] = [];
+  for (const result of results) {
+    if (result.accepted || !result.reason) continue;
+    notices.push(`${result.name}：${result.reason}`);
+  }
+  return notices;
+}
+
+/** Join a batch of notices for a single-line fallback such as a toast. */
+export function noticeText(results: readonly AttachmentResult[]): string {
+  return rejectionNotices(results).join('；');
 }
 
 export function addComposerAttachment(state: readonly ChatAttachment[], attachment: ChatAttachment): ChatAttachment[] {
