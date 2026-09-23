@@ -372,6 +372,19 @@ export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
 
 export const ADVANCED_SETTING_IDS: readonly string[] = ADVANCED_SETTINGS.map(setting => setting.id);
 
+/** Initial open-state for the collapsible advanced regions. Collapsed entries
+ * are omitted, so the default map is empty and every region renders closed. */
+export function defaultAdvancedOpen(settings: readonly AdvancedSetting[] = ADVANCED_SETTINGS): Record<string, boolean> {
+  const open: Record<string, boolean> = {};
+  for (const setting of settings) if (!setting.defaultCollapsed) open[setting.id] = true;
+  return open;
+}
+
+/** Read helper for the controlled collapse, shared with the pure test. */
+export function isAdvancedOpen(open: Record<string, boolean>, id: string): boolean {
+  return Boolean(open[id]);
+}
+
 export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   const [active, setActive] = useState(openGuide ? 'settings-models' : 'settings-overview');
   const [search, setSearch] = useState('');
@@ -439,6 +452,8 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [plansError, setPlansError] = useState('');
+  // Controlled collapse for the 高级设置 regions; empty means all closed.
+  const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>(defaultAdvancedOpen);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saveInFlight = useRef(false);
   const savePending = useRef(false);
@@ -883,14 +898,23 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
       <h2>高级设置</h2>
       <p className="muted">这些选项面向手动调优；不改动它们时保持运行时默认值即可。</p>
       <section id="settings-advanced" className="settings-section settings-advanced-list">
-      {ADVANCED_SETTINGS.map(setting => (
-        <details
-          key={setting.id}
-          className="disclosure advanced-setting"
-          data-testid={`advanced-setting-${setting.id}`}
-          open={setting.defaultCollapsed ? undefined : true}
-        >
-          <summary>{setting.title}</summary>
+      {ADVANCED_SETTINGS.map(setting => {
+        const open = isAdvancedOpen(advancedOpen, setting.id);
+        const bodyId = `advanced-setting-body-${setting.id}`;
+        return (
+        <div key={setting.id} className="advanced-setting" data-testid={`advanced-setting-${setting.id}`}>
+          <button
+            type="button"
+            className="advanced-setting-toggle"
+            data-testid={`advanced-setting-toggle-${setting.id}`}
+            aria-expanded={open}
+            aria-controls={bodyId}
+            onClick={() => setAdvancedOpen(current => ({ ...current, [setting.id]: !isAdvancedOpen(current, setting.id) }))}
+          >
+            <Icon name="chevron" size={14} className={`advanced-setting-chevron${open ? ' is-open' : ''}`} />
+            <span>{setting.title}</span>
+          </button>
+          <div id={bodyId} className="advanced-setting-body" hidden={!open}>
           <p className="field-hint">{setting.summary}</p>
           {setting.id === 'settings-limits' && <section id={setting.id} className="settings-section">
         {!Object.keys(draft.limits?.credentials ?? {}).length && !Object.keys(draft.limits?.sharedGroups ?? {}).length && <p className="muted">尚未配置并发上限，使用运行时默认值。</p>}
@@ -913,8 +937,10 @@ function SettingsAdvanced({ active, autoSyncSubscriptions }: { active: string; a
           <Button size="sm" icon="plus" data-testid="limit-group-add" onClick={() => mutate(next => { next.limits = { ...(next.limits ?? {}), sharedGroups: { ...(next.limits?.sharedGroups ?? {}), 'group-1': 4 } }; })}>添加共享组上限</Button>
         </div>
       </section>}
-        </details>
-      ))}
+          </div>
+        </div>
+        );
+      })}
       </section>
       </section>}
 
