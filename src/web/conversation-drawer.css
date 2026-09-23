@@ -1,0 +1,93 @@
+/* Batch C: the conversation right drawer hosts the draft details and the task
+ * graph overview, and the task board paints its four node states.
+ *
+ * `.node-card.node-card[...]` doubles the class on purpose: styles.css paints
+ * the same cards from `data-node-type` / `data-tone`, and the board state must
+ * win regardless of stylesheet order. */
+
+/* The drawer keeps its narrow reading width for the draft pages, but the task
+ * graph needs room for the canvas, legend and node inspector. */
+.detail-drawer[data-page="graph"][data-open="true"] {
+  flex-basis: min(860px, 62vw);
+  width: min(860px, 62vw);
+}
+.detail-drawer[data-page="graph"] .drawer-inner {
+  width: min(860px, 62vw);
+  min-width: min(620px, 62vw);
+}
+
+/* The graph page fills the drawer and scrolls internally, not the page body. */
+.drawer-page-content[data-page="graph"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px 1px 6px;
+}
+.drawer-page-content[data-page="graph"] .drawer-graph-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  margin-bottom: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.drawer-page-content[data-page="graph"] .conversation-graph-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+/* Always-on four-item legend under the graph header. */
+.graph-board-legend {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  font-size: 11.5px;
+}
+.graph-board-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.graph-board-legend-icon { font-size: 12px; line-height: 1; }
+.graph-board-legend-label { color: var(--text); font-weight: 650; }
+.graph-board-legend-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(26, 28, 31, 0.07);
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.graph-board-legend-note { color: var(--faint); font-size: 10.5px; }
+
+/* Per-node board-state icon; the readable id + name text is untouched. */
+.node-state-icon {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Only the top/right/bottom edges follow the board state; the left edge keeps
+ * the node-type accent (agent/tool/human/gate), which other views assert. */
+.node-card.node-card[data-board-state="pending"] { border-top-color: #94a3b8; border-right-color: #94a3b8; border-bottom-color: #94a3b8; }
+.node-card.node-card[data-board-state="running"] { border-top-color: #2563eb; border-right-color: #2563eb; border-bottom-color: #2563eb; }
+.node-card.node-card[data-board-state="done"] { border-top-color: #16a34a; border-right-color: #16a34a; border-bottom-color: #16a34a; background: #f5fbf6; }
+.node-card.node-card[data-board-state="blocked"] { border-top-color: #d97706; border-right-color: #d97706; border-bottom-color: #d97706; background: #fff8ec; }
+
+/* Narrow layouts turn the drawer into a full-height overlay (see styles.css);
+ * the graph page must not keep the desktop width there. */
+@media (max-width: 860px) {
+  .detail-drawer.detail-drawer[data-page="graph"][data-open="true"] { width: 100%; flex-basis: auto; }
+  .detail-drawer[data-page="graph"] .drawer-inner { width: 100%; min-width: 0; }
+}

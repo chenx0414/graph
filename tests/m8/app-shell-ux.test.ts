@@ -117,7 +117,7 @@ test('conversations archive from the sidebar and restore from settings', async (
   await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('需要归档的对话');
 });
 
-test('chat and graph tabs keep proposal details and node inspection independent', async () => {
+test('the right drawer keeps proposal details and node inspection independent from the chat', async () => {
   const root = await temp('drawer');
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
@@ -162,7 +162,13 @@ test('chat and graph tabs keep proposal details and node inspection independent'
   expect(detailBox!.x).toBeGreaterThanOrEqual(pauseBox!.x + pauseBox!.width);
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
-  expect(await page.getByTestId('conversation-tab-graph').getAttribute('data-active')).toBe('false');
+  // The draft details and the task graph live in the drawer now, but the
+  // compact entry points stay visible in the main column.
+  expect(await page.getByTestId('proposal-draft').innerText()).toContain('第二版增加审查');
+  expect(await page.getByTestId('draft-graph').isVisible()).toBe(true);
+  expect(await page.getByTestId('draft-acceptance').isVisible()).toBe(true);
+  expect(await page.getByTestId('accept-branch').isVisible()).toBe(true);
+  expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
   const beforeMain = await page.locator('.conversation-main').boundingBox();
   const beforeComposer = await page.locator('.conversation-composer-wrap').boundingBox();
   expect(beforeMain).not.toBeNull();
@@ -215,23 +221,30 @@ test('chat and graph tabs keep proposal details and node inspection independent'
   await expect.poll(() => page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
+  // The task graph opens in the drawer, not in the main column.
   await page.getByTestId('draft-graph').click();
+  await page.getByTestId('detail-drawer').waitFor();
+  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
+  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
+  expect(await page.getByTestId('chat-input').count()).toBe(1);
   await page.getByTestId('conversation-graph').waitFor();
-  expect(await page.getByTestId('conversation-tab-graph').getAttribute('data-active')).toBe('true');
-  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('false');
-  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
-  expect(await page.getByTestId('chat-input').count()).toBe(0);
   await page.getByTestId('draft-graph-detail').waitFor();
   expect(await page.getByTestId('graph-state-summary').innerText()).toContain('任务状态');
+  const legend = await page.getByTestId('graph-board-legend').innerText();
+  for (const label of ['待执行', '运行中', '已完成', '被阻塞']) expect(legend).toContain(label);
   expect(await page.locator('.node-card[data-node-id="human"]').innerText()).toContain('human check');
   expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-node-type')).toBe('human');
+  // The legacy tone/status semantics survive alongside the new board state.
+  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-status')).toBe('draft');
+  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-tone')).toBe('pending');
+  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-board-state')).toBe('pending');
   await expect.poll(async () => {
-    const body = await page.locator('.conversation-body').boundingBox();
+    const drawer = await page.getByTestId('detail-drawer').boundingBox();
     const graph = await page.locator('.conversation-graph-main').boundingBox();
-    return Boolean(body && graph && Math.abs(body.width - graph.width) <= 1);
+    return Boolean(drawer && graph && graph.width <= drawer.width + 1 && graph.width > 300);
   }).toBe(true);
 
-  await page.getByTestId('draft-version-1').click();
+  await page.getByTestId('drawer-draft-version-1').click();
   await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('先做一个最小版本');
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
   const nodeDetail = page.getByTestId('conversation-node-detail');
@@ -243,9 +256,11 @@ test('chat and graph tabs keep proposal details and node inspection independent'
   expect(await nodeDetail.innerText()).toContain('灌输的指令');
   expect(await nodeDetail.innerText()).toMatch(/传递的 handoff/i);
 
-  await page.getByTestId('conversation-tab-chat').click();
+  // The chat column stayed mounted and interactive while the drawer was open.
   await page.locator('.conversation-composer-wrap').waitFor();
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
+  await page.getByTestId('chat-input').fill('草稿详情已移入右侧抽屉。');
+  expect(await page.getByTestId('chat-input').inputValue()).toBe('草稿详情已移入右侧抽屉。');
 });
 
 test('a graph agent node opens the same chat transcript used by the main agent', async () => {
@@ -375,11 +390,10 @@ test('the right drawer toggle stays available and opens an empty state', async (
   await toggle.waitFor();
   expect(await toggle.getAttribute('data-open')).toBe('false');
 
-  await page.getByTestId('conversation-tab-graph').click();
-  await page.getByTestId('conversation-graph-empty').waitFor();
-  expect(await page.getByTestId('conversation-tab-graph').getAttribute('data-active')).toBe('true');
-  await page.getByTestId('conversation-tab-chat').click();
+  // Without a proposal there is no draft entry point and the drawer stays shut.
   await page.locator('.conversation-main').waitFor();
+  expect(await page.getByTestId('conversation-graph').count()).toBe(0);
+  expect(await page.locator('.conversation-composer-wrap').isVisible()).toBe(true);
 
   await toggle.click();
   await page.getByTestId('detail-drawer').waitFor();
