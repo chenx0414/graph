@@ -28,6 +28,16 @@ export function rechecksAfterIntegrationChange(spec: NodeSpec, status: string): 
   return spec.kind === 'program' || spec.action === 'review';
 }
 
+/**
+ * A lane owns the paths its node declares and nothing else. A work copy that also carries a sibling
+ * lane's file merges as a conflict, or silently rewrites work it does not own, so those paths are
+ * put back to the integration tip before the merge - the recovery the worker rule asks a human for,
+ * done deterministically. Content from outside the scope is never adopted.
+ */
+export function outOfScopePaths(changed: readonly string[], scope: readonly string[]): string[] {
+  return changed.filter(path => !scope.some(owned => path === owned || path.startsWith(owned.endsWith('/') ? owned : `${owned}/`)));
+}
+
 /** Task integration branch and per-instance work copies. Git effects stay outside SQLite transactions. */
 export class GitIntegration {
   private readonly store: TaskStore;
@@ -324,6 +334,7 @@ export class GitIntegration {
     const identity = this.agentIdentity(operation.instanceId, operation.nodeId);
     const sha = commitAll(tree.path, `graph:${operation.nodeId}:${operation.id}`, identity);
     if (sha) this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(sha, operation.taskId, operation.nodeId, operation.id, 'instance');
+    this.restoreOutOfScope(tree, task.integration_sha, operation, identity);
     const merged = mergeRef(integration.path, tree.branch);
     if (!merged.ok) return merged;
     let rebases: { path: string; sha: string }[] = [];
@@ -420,9 +431,39 @@ export class GitIntegration {
     return { status: 'recheck' as const };
   }
 
+  /** The node's declared file list, or null when it declared none. */
+  private declaredScope(taskId: string, nodeId: string): string[] | null {
+    const row = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as { spec: string } | undefined;
+    if (!row) return null;
+    let spec: NodeSpec;
+    try { spec = JSON.parse(row.spec) as NodeSpec; } catch { return null; }
+    const input = spec.input && typeof spec.input === 'object' && !Array.isArray(spec.input) ? spec.input as Record<string, unknown> : null;
+    const files = input?.['files'];
+    if (!Array.isArray(files) || !files.length) return null;
+    return files.every(item => typeof item === 'string') ? files as string[] : null;
+  }
+
+  /** Put a lane's out-of-scope paths back to the integration tip before its branch is merged. */
+  private restoreOutOfScope(tree: { path: string; branch: string }, base: string | null, operation: Operation, identity: GitIdentity) {
+    if (!base) return;
+    const scope = this.declaredScope(operation.taskId, operation.nodeId);
+    if (!scope) return;
+    const changed = git(tree.path, ['diff', '--name-only', `${base}..HEAD`]);
+    if (changed.code !== 0) return;
+    const foreign = outOfScopePaths(changed.stdout.split('\n').map(line => line.trim()).filter(Boolean), scope);
+    if (!foreign.length) return;
+    if (git(tree.path, ['checkout', base, '--', ...foreign]).code !== 0) return;
+    const sha = commitAll(tree.path, `graph:${operation.nodeId}:${operation.id}:scope`, identity);
+    this.store.event(operation.taskId, 'git.out-of-scope.restored', { nodeId: operation.nodeId, paths: foreign, sha: sha ?? null });
+  }
+
   private invalidateChecks(taskId: string) {
     this.store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND valid=1').run(taskId);
-    const graph = loadGraph(this.store, taskId);
+    // A task always has a graph revision in production, but a git-level caller must not crash inside
+    // a transaction over a task that has none: the evidence is already invalidated above, and there
+    // are no succeeded nodes to re-run.
+    let graph: ReturnType<typeof loadGraph>;
+    try { graph = loadGraph(this.store, taskId); } catch { return []; }
     const reset = new Set<string>();
     for (const [id, spec] of graph.plan.nodes) {
       if (!rechecksAfterIntegrationChange(spec, graph.status(id))) continue;

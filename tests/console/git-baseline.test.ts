@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
-import { GitIntegration, rechecksAfterIntegrationChange } from '../../src/git/integration.ts';
-import type { NodeSpec } from '../../src/core/types.ts';
+import { GitIntegration, outOfScopePaths, rechecksAfterIntegrationChange } from '../../src/git/integration.ts';
+import type { NodeSpec, Operation } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -246,4 +246,39 @@ test('a terminal task releases its working copies but keeps its integration bran
   // A running task keeps its copies: only terminal phases are swept.
   db.db.prepare("UPDATE tasks SET phase='running' WHERE id='t'").run();
   expect(integration.sweepTerminalWorkcopies()).toBe(0);
+}, 30_000);
+
+test('a lane that carries a sibling lane file is restored to its own scope before merging', async () => {
+  // A file scope may name a file or a directory prefix; everything else belongs to a sibling lane.
+  expect(outOfScopePaths(['src/a.txt', 'src/b.txt', 'docs/x.md'], ['src/a.txt'])).toEqual(['src/b.txt', 'docs/x.md']);
+  expect(outOfScopePaths(['src/a/x.ts', 'src/ab/x.ts'], ['src/a/'])).toEqual(['src/ab/x.ts']);
+
+  const root = await temp('scope');
+  const state = join(root, '.state');
+  git(root, ['init', '-q', '-b', 'main']);
+  await mkdir(join(root, 'src'), { recursive: true });
+  await writeFile(join(root, 'src', 'a.txt'), 'a\n');
+  await writeFile(join(root, 'src', 'b.txt'), 'b\n');
+  git(root, ['add', 'src']);
+  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'init']);
+  const { db, integration } = await makeProject(root, state);
+  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
+  db.db.prepare("INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES('t','p','车道越界',1,0,'running',0,1)").run();
+  integration.prepareTask('t', 'main');
+  for (const [id, file] of [['impl-a', 'src/a.txt'], ['impl-b', 'src/b.txt']] as const) {
+    db.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)')
+      .run('t', id, JSON.stringify({ id, kind: 'agent', action: 'work', input: { files: [file] } }), `inst-${id}`);
+  }
+  const lane = integration.workspace('t', 'inst-impl-a', 'impl-a', 'agent', 'work')!;
+  // The lane edits its own file and, by mistake, the sibling's.
+  await writeFile(join(lane, 'src', 'a.txt'), 'a fixed\n');
+  await writeFile(join(lane, 'src', 'b.txt'), 'b rewritten by the wrong lane\n');
+  const operation = { id: 'op-a', taskId: 't', instanceId: 'inst-impl-a', nodeId: 'impl-a', kind: 'agent' } as unknown as Operation;
+  expect(integration.integrate(operation)).toMatchObject({ ok: true });
+  const integrationPath = (db.db.prepare("SELECT path FROM worktrees WHERE instance_id='integration:t'").get() as { path: string }).path;
+  // The lane's own work landed; the sibling file never did, and the recovery is recorded.
+  expect(git(integrationPath, ['show', 'HEAD:src/a.txt'])).toBe('a fixed');
+  expect(git(integrationPath, ['show', 'HEAD:src/b.txt'])).toBe('b');
+  const event = db.db.prepare("SELECT data FROM events WHERE task_id='t' AND type='git.out-of-scope.restored'").get() as { data: string } | undefined;
+  expect(event?.data).toContain('src/b.txt');
 }, 30_000);
