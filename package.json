@@ -33,6 +33,7 @@
     "start:execute": "node src/server/cli.ts --execute",
     "dev": "vite",
     "session:summary": "node scripts/session-summary.mjs",
+    "catalog:refresh": "node scripts/refresh-models-dev.mjs",
     "demo:m1": "node examples/m1-demo.ts",
     "accept:m7": "node examples/m7-acceptance.ts",
     "accept:m7:contract": "node examples/m7-contract.ts",
