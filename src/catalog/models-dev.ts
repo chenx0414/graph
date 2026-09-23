@@ -115,19 +115,24 @@ function positiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-/** models.dev amounts are USD per million tokens. Input and output are the
- * price of the model: if either is missing, the whole cost is omitted so an
- * unknown price never becomes a zero. models.dev publishes no cache rate for
- * models without prompt caching, so a missing cache rate is read as "no cache
- * charge" (0) rather than as unknown. */
+/** models.dev amounts are USD per million tokens. The price is a set: input,
+ * output, cache read and cache write must all be finite numbers before any of
+ * them is exposed. If the snapshot only prices part of the model, the whole
+ * cost is omitted (the caller marks the price unknown and the user can fill it
+ * by hand) instead of treating a missing side as 0, which would make
+ * `estimateCost` bill a free ride. */
 function optionalCost(cost: ModelsDevModel['cost']): ModelCost | undefined {
   if (!cost) return undefined;
-  const input = typeof cost.input === 'number' && Number.isFinite(cost.input) ? cost.input : undefined;
-  const output = typeof cost.output === 'number' && Number.isFinite(cost.output) ? cost.output : undefined;
-  if (input === undefined || output === undefined) return undefined;
-  const cacheRead = typeof cost.cache_read === 'number' && Number.isFinite(cost.cache_read) ? cost.cache_read : 0;
-  const cacheWrite = typeof cost.cache_write === 'number' && Number.isFinite(cost.cache_write) ? cost.cache_write : 0;
+  const input = finiteAmount(cost.input);
+  const output = finiteAmount(cost.output);
+  const cacheRead = finiteAmount(cost.cache_read);
+  const cacheWrite = finiteAmount(cost.cache_write);
+  if (input === undefined || output === undefined || cacheRead === undefined || cacheWrite === undefined) return undefined;
   return { input, output, cacheRead, cacheWrite };
+}
+
+function finiteAmount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 /** Only effort vocabularies the repository already models are reported; other

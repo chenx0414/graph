@@ -44,13 +44,21 @@ const SAMPLE: ModelsDevSnapshot = normalizeModelsDevSnapshot({
           modalities: { input: ['text'] },
           limit: { context: 4_096, output: 1_024 },
         },
+        'acme-partial': {
+          id: 'acme-partial',
+          name: 'Acme Partial Price',
+          reasoning: false,
+          modalities: { input: ['text'] },
+          limit: { context: 8_000, output: 2_000 },
+          cost: { input: 2, output: 8 },
+        },
       },
     },
   },
 });
 
 describe('models.dev snapshot mapping (B-1)', () => {
-  it('maps a built-in snapshot entry onto context, output, modalities, cost and currency', () => {
+  it('maps a built-in snapshot entry onto context, output, modalities and provenance', () => {
     const metadata = lookupModelMetadata('deepseek', 'deepseek-v4-flash');
     expect(metadata).not.toBeNull();
     expect(metadata).toMatchObject({
@@ -58,13 +66,24 @@ describe('models.dev snapshot mapping (B-1)', () => {
       maxTokens: 384_000,
       input: ['text', 'image'],
       reasoning: true,
-      cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
-      currency: 'USD',
       sourceUrl: MODELS_DEV_SOURCE_URL,
     });
     expect(metadata!.catalogRevision).toMatch(/^models-dev\./);
+    // This entry prices only three of the four sides, so no cost is reported.
+    expect(metadata!.cost).toBeUndefined();
     // The snapshot really is the vendored copy and not an empty stub.
     expect(Object.keys(builtinModelsDevSnapshot().providers).length).toBeGreaterThan(50);
+  });
+
+  it('reports a built-in price only when all four amounts are present', () => {
+    const metadata = lookupModelMetadata('anthropic', 'claude-sonnet-4-6');
+    expect(metadata).toMatchObject({
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+      input: ['text', 'image'],
+      cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+      currency: 'USD',
+    });
   });
 
   it('resolves a console platform id through its catalog alias (grok → xai)', () => {
@@ -74,10 +93,11 @@ describe('models.dev snapshot mapping (B-1)', () => {
       maxTokens: 30_000,
       reasoning: true,
       defaultThinkingLevel: 'medium',
-      currency: 'USD',
     });
     expect(metadata!.thinkingLevels).toEqual(['off', 'low', 'medium', 'high']);
-    expect(metadata!.cost?.input).toBe(1.25);
+    // No cache-write rate is published, so the price (and currency) is left to the user.
+    expect(metadata!.cost).toBeUndefined();
+    expect(metadata!.currency).toBeUndefined();
   });
 
   it('keeps only thinking levels the repository models and never invents one', () => {
@@ -106,6 +126,15 @@ describe('models.dev snapshot mapping (B-1)', () => {
     expect(lookupModelMetadata('not-a-provider', 'deepseek-v4-flash')).toBeNull();
     expect(lookupModelMetadata('deepseek', 'no-such-model')).toBeNull();
     expect(lookupModelMetadata('', 'deepseek-v4-flash')).toBeNull();
+  });
+
+  it('omits cost entirely when the snapshot prices only part of the model', () => {
+    const metadata = lookupModelMetadata('acme', 'acme-partial', SAMPLE);
+    expect(metadata).not.toBeNull();
+    expect(metadata!.contextWindow).toBe(8_000);
+    expect(metadata!.cost).toBeUndefined();
+    // No side may quietly become 0.
+    expect(JSON.stringify(metadata)).not.toMatch(/"(input|output|cacheRead|cacheWrite)":0\b/);
   });
 
   it('leaves a price unknown instead of zero-filling it', () => {
