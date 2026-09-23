@@ -152,14 +152,24 @@ export function normalizeModelsDevSnapshot(raw: unknown): ModelsDevSnapshot {
   return { providers: root as Record<string, ModelsDevProvider> };
 }
 
+/** Resolved snapshot location. In Node (daemon, vitest) this is a `file:` URL
+ * read from disk; the Vite browser build rewrites the literal to the emitted
+ * JSON asset, so it is fetched once at module load instead. */
+const SNAPSHOT_URL = new URL('./models-dev.snapshot.json', import.meta.url);
+
 let cached: ModelsDevSnapshot | undefined;
+
+// Browser bundle: `node:fs` is unavailable, so preload the emitted asset here.
+// The lookup stays synchronous because a dynamic `import()` only resolves after
+// this top-level await finishes.
+if (SNAPSHOT_URL.protocol !== 'file:') {
+  const response = await fetch(SNAPSHOT_URL);
+  cached = normalizeModelsDevSnapshot(await response.json());
+}
 
 /** The vendored snapshot that ships with the build. Parsed once per process. */
 export function builtinModelsDevSnapshot(): ModelsDevSnapshot {
-  if (!cached) {
-    const text = readFileSync(new URL('./models-dev.snapshot.json', import.meta.url), 'utf8');
-    cached = normalizeModelsDevSnapshot(JSON.parse(text));
-  }
+  if (!cached) cached = normalizeModelsDevSnapshot(JSON.parse(readFileSync(SNAPSHOT_URL, 'utf8')));
   return cached;
 }
 
