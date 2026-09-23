@@ -1,6 +1,14 @@
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, type EdgeProps, type NodeProps } from '@xyflow/react';
 import { graphNodeLabel, graphNodeVisualKind, type GraphNodeVisualKind } from '../core/graph-presentation.ts';
-import { NODE_TONE_COLOR, nodeTone, type NodeTone } from './insights.ts';
+import {
+  BOARD_STATE_META,
+  NODE_TONE_COLOR,
+  boardNodeState,
+  boardStateLabel,
+  nodeTone,
+  type BoardNodeState,
+  type NodeTone,
+} from './insights.ts';
 
 const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
@@ -29,6 +37,7 @@ type NodeData = {
   nodeType: GraphNodeVisualKind;
   tone: NodeTone;
   status: string;
+  boardState: BoardNodeState;
 };
 
 const NODE_TYPE_LABEL: Record<GraphNodeVisualKind, string> = {
@@ -48,13 +57,22 @@ const handleStyle = { opacity: 0, width: 1, height: 1, border: 0, background: 't
 function GraphNode({ data, selected }: NodeProps) {
   const info = data as unknown as NodeData;
   return (
-    <div className="node-card" data-node-id={info.id} data-node-type={info.nodeType} data-status={info.status} data-tone={info.tone} data-selected={selected ? 'true' : 'false'}>
+    <div className="node-card" data-node-id={info.id} data-node-type={info.nodeType} data-status={info.status} data-tone={info.tone} data-board-state={info.boardState} data-selected={selected ? 'true' : 'false'}>
       <Handle id="target-top" type="target" position={Position.Top} style={handleStyle} />
       <Handle id="target-left" type="target" position={Position.Left} style={handleStyle} />
       <Handle id="target-right" type="target" position={Position.Right} style={handleStyle} />
       <div className="node-head">
         <span className="node-dot" style={{ background: NODE_TONE_COLOR[info.tone] }} />
         <span className="node-kind" title={info.nodeType}>{NODE_TYPE_LABEL[info.nodeType]}</span>
+        <span
+          className="node-state-icon"
+          data-board-state={info.boardState}
+          style={{ color: BOARD_STATE_META[info.boardState].color }}
+          title={boardStateLabel(info.status)}
+          aria-label={boardStateLabel(info.status)}
+        >
+          {BOARD_STATE_META[info.boardState].icon}
+        </span>
         <span className="node-label">{info.label}</span>
       </div>
       <Handle id="source-bottom" type="source" position={Position.Bottom} style={handleStyle} />
@@ -143,7 +161,7 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const nodeType = graphNodeVisualKind(node);
       return {
         id: node.id, type: 'graphNode', position: relativePosition(node.id, position),
-        data: { id: node.id, label: graphNodeLabel(node), nodeType, tone, status: node.status } satisfies NodeData,
+        data: { id: node.id, label: graphNodeLabel(node), nodeType, tone, status: node.status, boardState: boardNodeState(node.status) } satisfies NodeData,
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
