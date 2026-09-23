@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FALLBACK_PLATFORMS,
   addManualModelPick,
+  autoProbeDecision,
   buildEntryDraft,
   completeCost,
   costError,
@@ -35,6 +36,7 @@ import {
   parseLimit,
   platformById,
   platformsRequest,
+  probeFailureNote,
   probeRequest,
   readConcurrency,
   selectedProbeModels,
@@ -404,12 +406,56 @@ describe('model step vendor picker (step 2)', () => {
     expect(named).toMatchObject({ platformId: 'grok', credentialId: 'grok', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' });
   });
 
+  it('carries each vendor’s own endpoint and api instead of a blank one', () => {
+    // A supported platform keeps the preset endpoint (never an empty probe URL).
+    const named = draftFromModelVendor(modelVendorsFrom({ credentials: {} }, [platform('grok', true)])[0]!);
+    expect(named.baseUrl).toBe('https://api.x.ai/v1');
+    expect(named.api).toBe('openai-completions');
+    expect(named.baseUrl).not.toBe('');
+    // A user-defined credential takes the endpoint of the models already under it.
+    const customVendor = modelVendorsFrom({
+      credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+      models: { entries: [{ credentialId: 'local', baseUrl: 'http://127.0.0.1:9999/v1', api: 'anthropic-messages' }] },
+    }, [])[0]!;
+    const customDraft = draftFromModelVendor(customVendor);
+    expect(customDraft.baseUrl).toBe('http://127.0.0.1:9999/v1');
+    expect(customDraft.api).toBe('anthropic-messages');
+  });
+
   it('auto-probes only when the selected vendor actually changes', () => {
     expect(shouldAutoProbe('grok', null)).toBe(true);
     expect(shouldAutoProbe('grok', 'deepseek')).toBe(true);
     expect(shouldAutoProbe('grok', 'grok')).toBe(false);
     expect(shouldAutoProbe('', 'grok')).toBe(false);
     expect(shouldAutoProbe('   ', null)).toBe(false);
+  });
+
+  it('records a vendor as probed only when a request is really issued', () => {
+    // No endpoint yet: do not probe and do not record, so the same selection
+    // can auto-probe later.
+    expect(autoProbeDecision('grok', null, '')).toEqual({ probe: false, recorded: null });
+    expect(autoProbeDecision('grok', null, 'https://api.x.ai/v1')).toEqual({ probe: true, recorded: 'grok' });
+    // Already probed: a later render stays silent.
+    expect(autoProbeDecision('grok', 'grok', 'https://api.x.ai/v1')).toEqual({ probe: false, recorded: 'grok' });
+  });
+
+  it('still auto-probes once when the vendor only becomes resolvable later', () => {
+    // Effect run 1: the vendor is selected but not resolvable yet (no baseUrl).
+    const first = autoProbeDecision('grok', null, '');
+    expect(first.probe).toBe(false);
+    let probed = first.recorded;
+    // Effect run 2: the catalog arrived; the id is still unrecorded, so it probes.
+    const second = autoProbeDecision('grok', probed, 'https://api.x.ai/v1');
+    expect(second.probe).toBe(true);
+    probed = second.recorded;
+    expect(probed).toBe('grok');
+    expect(autoProbeDecision('grok', probed, 'https://api.x.ai/v1').probe).toBe(false);
+  });
+
+  it('keeps the vendor’s own wording in the model-list failure copy', () => {
+    expect(probeFailureNote('Rate limit reached')).toContain('Rate limit reached');
+    expect(probeFailureNote('Rate limit reached')).toContain('手动添加模型 id');
+    expect(probeFailureNote('  ')).toContain('未知错误');
   });
 });
 

@@ -9,6 +9,7 @@ import { modelRequestHeaders, type ModelInput } from '../catalog/models.ts';
 import {
   FALLBACK_PLATFORMS,
   PROVIDER_COMPATIBILITIES,
+  autoProbeDecision,
   buildEntryDraft,
   completeCost,
   concurrencyControlIds,
@@ -29,10 +30,10 @@ import {
   normalizePlatforms,
   platformById,
   platformsRequest,
+  probeFailureNote,
   probeRequest,
   readConcurrency,
   selectedProbeModels,
-  shouldAutoProbe,
   uniqueLocalModelId,
   validateProviderDraft,
   withCostField,
@@ -496,7 +497,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
         setNote(list.length
           ? `已探测到 ${list.length} 个模型。`
           : modelsError
-            ? `模型列表获取失败（${modelsError}）；可手动添加模型 id。`
+            ? probeFailureNote(modelsError)
             : '该端点未返回模型列表，可手动添加模型 id。');
       }
       if (updateVerification) {
@@ -505,23 +506,29 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
         setVerification(ok ? { ok: true } : { ok: false, error: typeof probe?.error === 'string' ? probe.error : '厂商未返回可验证的响应' });
       }
     } catch (reason) {
-      if (updateVerification) setVerification({ ok: false, error: (reason as Error).message });
-      if (updateList) setNote('');
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (updateVerification) setVerification({ ok: false, error: message });
+      // Never drop the vendor's own rejection wording: it is the only clue for
+      // the manual-id fallback.
+      if (updateList) setNote(probeFailureNote(message));
     } finally {
       setBusy(false);
     }
   };
 
-  // Selecting a vendor (a change, not every render) auto-fetches its model
-  // list. 重新获取 stays available for an explicit retry.
+  // Selecting a vendor auto-fetches its model list exactly once per switch. The
+  // effect depends on the resolved vendor source, not only the id, so a vendor
+  // that only becomes resolvable after the catalog/config loads still triggers.
+  // A vendor whose endpoint is not ready yet is NOT recorded, so it auto-probes
+  // once the endpoint arrives instead of being silently skipped.
   useEffect(() => {
-    if (!shouldAutoProbe(selectedVendorId, probedVendor.current)) return;
-    const vendor = vendors.find(item => item.id === selectedVendorId);
-    if (!vendor) return;
-    probedVendor.current = selectedVendorId;
+    const vendor = selectedVendorId ? vendors.find(item => item.id === selectedVendorId) : undefined;
+    const decision = autoProbeDecision(selectedVendorId, probedVendor.current, vendor?.baseUrl ?? '');
+    if (!decision.probe || !vendor) return;
+    probedVendor.current = decision.recorded;
     void runProbe(draftFromModelVendor(vendor), { verification: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedVendorId]);
+  }, [selectedVendorId, vendors]);
 
   const saveProvider = async () => {
     const found = validateProviderDraft(active, { custom: isCustom, hasKey: Boolean(key.trim()) || resolved });
