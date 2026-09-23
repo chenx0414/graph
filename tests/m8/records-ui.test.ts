@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -109,13 +110,31 @@ test('success, failure, waiting and rework states are explained, answer isolatio
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="questions"] li').length === 1);
   expect(await questions.locator('li').allInnerTexts()).toEqual([expect.stringContaining('rework')]);
 
+  // A long-lived node opens at its latest attempts and pages by cursor,
+  // including history beyond the API's old 100-row cap.
+  const history = new DatabaseSync(join(root, 'state/tasks.sqlite'));
+  const gateOperation = view.operations.find(operation => operation.nodeId === 'gate')!;
+  const insert = history.prepare(`INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,worker_active,result)
+    VALUES(?,?,'gate',1,?,'succeeded',0,0,?)`);
+  for (let i = 0; i < 125; i++) insert.run(`history-${i}`, taskId,
+    JSON.stringify({ ...gateOperation, id: `history-${i}` }),
+    JSON.stringify({ outcome: 'completed', output: { marker: `attempt-${i}` } }));
+  history.close();
   // Node detail explains the missing usage and lists operation records.
   await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
   await page.getByTestId('graph').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'gate' }).first().click();
   const detail = await page.getByTestId('node-detail').innerText();
   expect(detail).toContain('未知（无权威计量）');
-  expect(await page.getByTestId('operations-more').innerText()).toContain('加载更多');
+  const records = page.getByTestId('node-detail').locator(':scope > .card-body > ol[data-testid="node-operations"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="node-detail"] > .card-body > ol')?.textContent?.includes('attempt-124'));
+  expect(await records.locator('li').count()).toBe(20);
+  await page.getByTestId('operations-more').click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="node-detail"] > .card-body > ol')?.textContent?.includes('attempt-104'));
+  expect(await records.innerText()).not.toContain('attempt-124');
+  await page.getByRole('button', { name: '回到最新记录', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="node-detail"] > .card-body > ol')?.textContent?.includes('attempt-124'));
+  expect(await records.locator('li').count()).toBe(20);
 }, 90_000);
 
 test('a queued model request is displayed as waiting for a slot, not as running', async () => {

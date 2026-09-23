@@ -157,6 +157,13 @@ export function createPiAdapter(options: {
   return {
     kind: 'agent',
     reserveTokens: PI_SESSION_RESERVE,
+    canReplayBeforeSend: operation => {
+      // Capability load is recorded before transport.open can start the Pi
+      // session (including extension hooks). A model send is also recorded
+      // before it reaches the provider. Only replay before both boundaries.
+      return !options.store.db.prepare('SELECT 1 FROM node_capabilities WHERE operation_id=? LIMIT 1').get(operation.id)
+        && !options.store.db.prepare('SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1').get(operation.id);
+    },
     async steer(operation, text) {
       const active = activeInstances.get(operation.id);
       if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting steering messages');

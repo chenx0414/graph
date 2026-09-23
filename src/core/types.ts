@@ -248,6 +248,8 @@ export interface ActionAdapter {
   /** Deliver a steering message into an already dispatched operation. */
   steer?(operation: Operation, text: string): Promise<void>;
   reconcile?(operation: Operation): Promise<Reconciliation>;
+  /** Durable adapter evidence that no session/send began; absence of a receipt alone is insufficient. */
+  canReplayBeforeSend?(operation: Operation): boolean;
 }
 
 export class RuntimeError extends Error {

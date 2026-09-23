@@ -506,8 +506,12 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/tasks/:taskId/operations', async request => {
     const params = request.params as { taskId: string };
-    const query = request.query as { after?: string; limit?: string };
-    return runtime.operations(params.taskId, { ...(query.after ? { after: query.after } : {}), limit: query.limit ? Number(query.limit) : 50 });
+    const query = request.query as { after?: string; before?: string; latest?: string; nodeId?: string; limit?: string };
+    return runtime.operations(params.taskId, {
+      ...(query.after ? { after: query.after } : {}), ...(query.before ? { before: query.before } : {}),
+      ...(query.nodeId ? { nodeId: query.nodeId } : {}), latest: query.latest === 'true',
+      limit: query.limit ? Number(query.limit) : 50,
+    });
   });
   app.get('/api/tasks/:taskId/graph', async request => {
     const params = request.params as { taskId: string };

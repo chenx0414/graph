@@ -626,7 +626,10 @@ export async function openTaskRuntime(options: {
             return sum + value;
           }, 0) };
           const evidence = store.db.prepare('SELECT node_id,operation_id,proposal_version,requirement_version,data,activation_id,valid,commit_sha FROM evidence WHERE task_id=? ORDER BY rowid').all(taskId) as { node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string; activation_id: string; valid: number; commit_sha: string | null }[];
-          const operations = operationSnapshots(store, taskId);
+          const operations = operationSnapshots(store, taskId, { latest: true, limit: 50 });
+          const operationTotals = store.db.prepare(`SELECT node_id,COUNT(*) AS total,SUM(reserved) AS reserved,MAX(worker_active) AS active
+            FROM operations WHERE task_id=? GROUP BY node_id`).all(taskId) as { node_id: string; total: number; reserved: number; active: number }[];
+          const operationCount = operationTotals.reduce((sum, row) => sum + row.total, 0);
           const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null; owner: string }[];
           const userQuestions = questions.filter(question => question.owner === 'user');
           const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
@@ -653,7 +656,8 @@ export async function openTaskRuntime(options: {
             revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused), queuedBehind,
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
-            status: task.paused ? (operations.some(op => op.workerActive) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
+            status: task.paused ? (operationTotals.some(row => row.active) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
+            operationHistory: { total: operationCount, limit: 50, hasOlder: operationCount > operations.length, oldestId: operations[0]?.id ?? null },
             operations: operations.map(row => ({ ...row.operation, state: row.state, reserved: row.reserved, workerActive: row.workerActive, result: row.result })),
             questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, owner: row.owner, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
             internalProblemCount: questions.filter(row => row.owner === 'main' && row.status === 'open').length,
@@ -662,7 +666,7 @@ export async function openTaskRuntime(options: {
             integrationSha: task.integration_sha,
             nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget,
               ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
-              reserved: operations.filter(op => op.operation.nodeId === row.id).reduce((sum, op) => sum + op.reserved, 0) })),
+              reserved: operationTotals.find(total => total.node_id === row.id)?.reserved ?? 0 })),
             evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid), ...(row.commit_sha ? { commitSha: row.commit_sha } : {}) })),
             invocations, cost,
             cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
@@ -1759,23 +1763,13 @@ export async function openTaskRuntime(options: {
       return (store.db.prepare('SELECT cursor,type,data,timestamp FROM events WHERE task_id=? AND cursor>? ORDER BY cursor LIMIT ?').all(taskId, after, cap) as { cursor: number; type: string; data: string; timestamp: number }[])
         .map(row => ({ cursor: row.cursor, type: row.type, data: JSON.parse(row.data) as Json, timestamp: row.timestamp, taskId }));
     },
-    operations(taskId: string, query: { after?: string; limit?: number } = {}) {
+    operations(taskId: string, query: import('./operation-lifecycle.ts').OperationQuery = {}) {
       ensureOpen(); store.task(taskId);
       const limit = Number.isSafeInteger(query.limit) && query.limit! > 0 ? Math.min(query.limit!, 100) : 50;
-      const rows = operationSnapshots(store, taskId, { ...(query.after ? { after: query.after } : {}), limit });
-      const ids = rows.map(row => row.id);
-      const times = ids.length ? store.db.prepare(`SELECT type,data,timestamp FROM events WHERE task_id=? AND type IN ('operation.dispatched','operation.result') AND json_extract(data,'$.operationId') IN (${ids.map(() => '?').join(',')}) ORDER BY cursor`).all(taskId, ...ids) as { type: string; data: string; timestamp: number }[] : [];
-      const started = new Map<string, number>();
-      const ended = new Map<string, number>();
-      for (const row of times) {
-        const data = JSON.parse(row.data) as { operationId?: string };
-        if (!data.operationId) continue;
-        if (row.type === 'operation.dispatched') started.set(data.operationId, row.timestamp);
-        if (row.type === 'operation.result') ended.set(data.operationId, row.timestamp);
-      }
+      const rows = operationSnapshots(store, taskId, { ...query, limit });
       return rows.map(row => {
-        const start = started.get(row.id);
-        const stop = ended.get(row.id);
+        const start = row.dispatchedAt;
+        const stop = row.settledAt;
         return {
           ...row.operation, state: row.state, reserved: row.reserved, workerActive: row.workerActive,
           result: row.result,

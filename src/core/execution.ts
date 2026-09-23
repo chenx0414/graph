@@ -68,6 +68,10 @@ export class Execution {
     });
     this.lifecycle = new OperationLifecycle(store, {
       advance: taskId => this.advance(taskId),
+      canReplayBeforeSend: operation => {
+        const adapter = Object.hasOwn(this.actions, operation.action) ? this.actions[operation.action] : this.fallback;
+        return adapter?.canReplayBeforeSend?.(operation) === true;
+      },
     });
     this.generation = this.lifecycle.recover();
     const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };

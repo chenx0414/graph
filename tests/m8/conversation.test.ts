@@ -1,6 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { installPresets } from '../../src/catalog/presets.ts';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
@@ -249,7 +251,7 @@ test('full access does not retry a chatting master with an empty queue', async (
   expect(attempts).toBe(1);
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
   expect(attempts).toBe(1);
-  expect((await runtime.conversations.view(created.conversationId)).master?.status).toBe('failed');
+  expect((await runtime.user.task(created.taskId).view()).questions).toMatchObject([{ kind: 'recovery', owner: 'main', status: 'open' }]);
   await runtime.conversations.chat(created.conversationId, { text: '再试一次', requestId: 'retry' });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
   expect(attempts).toBe(2);
@@ -1431,3 +1433,51 @@ test('a worker result the harness cannot use is routed to the main Agent and esc
   expect(seen[1]!.context.briefing).toContain('BROKEN_HANDOFF_SENTINEL');
   expect(runtime.events(confirmed.taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
 }, 120_000);
+
+
+test.each(['before_session', 'session_opened', 'model_sent'])('restart resumes only a proven unsent Pi conversation (%s)', async stage => {
+  const root = await temp(`restart-${stage}`);
+  const provider = await openaiServer([{ text: 'Recovered and answered the original request.' }]);
+  cleanup.push(() => provider.close());
+  let started!: () => void;
+  const waiting = new Promise<void>(resolve => { started = resolve; });
+  const options = {
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    access: () => fullAccessPolicy(),
+    master: { action: 'master', definitionVersion: 'main@1', model: 'local' },
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high' as const,
+      api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'local-test', modelRuntime: provider.runtime },
+  };
+  const original = await openTaskRuntime({ ...options, actions: { master: scripted(async () => {
+    started();
+    return new Promise<OperationResult>(() => undefined);
+  }) } });
+  cleanup.push(() => original.close());
+  await installPresets(original.catalog, fileURLToPath(new URL('../../presets', import.meta.url)));
+  const created = await original.conversations.create({ projectId: 'p', text: '查看运行状态', requestId: 'start' });
+  await original.host.pump();
+  await waiting;
+  await original.close();
+  const db = new DatabaseSync(join(root, 'state/tasks.sqlite'));
+  const operation = db.prepare("SELECT id,instance_id FROM operations WHERE state='dispatched'").get() as { id: string; instance_id: string };
+  if (stage === 'session_opened') db.prepare(`INSERT INTO node_capabilities(task_id,node_id,instance_id,operation_id,read_only,loaded,created_at)
+    VALUES(?,'master',?,?,0,'[]',1)`).run(created.taskId, operation.instance_id, operation.id);
+  if (stage === 'model_sent') db.prepare("INSERT INTO invocations(id,operation_id,instance_id,model) VALUES('sent',?,?,'local')")
+    .run(operation.id, operation.instance_id);
+  db.close();
+  const restored = await openTaskRuntime(options);
+  cleanup.push(() => restored.close());
+  const dispatch = await restored.host.runReady();
+  expect(dispatch.dispatched).toBe(stage === 'before_session' ? 1 : 0);
+  const view = await restored.conversations.view(created.conversationId);
+  if (stage === 'before_session') {
+    expect(view.messages.filter(message => message.role === 'assistant').map(message => message.text))
+      .toEqual(['Recovered and answered the original request.']);
+    expect(view.messages.filter(message => message.role === 'user')).toHaveLength(1);
+    expect(await restored.host.runReady()).toEqual({ dispatched: 0 });
+  } else {
+    expect(view.messages.filter(message => message.role === 'assistant')).toHaveLength(0);
+    expect(view.master?.status).toBe('failed');
+  }
+});

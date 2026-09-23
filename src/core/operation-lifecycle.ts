@@ -88,6 +88,8 @@ export interface OperationSnapshot {
   reserved: number;
   workerActive: boolean;
   result: OperationResult | null;
+  dispatchedAt: number | null;
+  settledAt: number | null;
 }
 
 export interface OperationRun {
@@ -107,6 +109,7 @@ export interface OperationRun {
 
 export interface OperationLifecycleHooks {
   advance(taskId: string): void;
+  canReplayBeforeSend?(operation: Operation): boolean;
 }
 
 function operationFrom(row: OperationDbRow) {
@@ -170,6 +173,8 @@ export class OperationLifecycle {
       reserved: row.reserved,
       workerActive: Boolean(row.worker_active),
       result: row.result ? JSON.parse(row.result) as OperationResult : null,
+      dispatchedAt: row.dispatched_at,
+      settledAt: row.settled_at,
     };
   }
 
@@ -192,8 +197,10 @@ export class OperationLifecycle {
             resetNode: true,
             eventReason: 'Recovered before dispatch',
           });
+          releaseMessages(this.store, row.id);
         } else {
           const operation = operationFrom(row);
+          if (this.restoreUnsentConversation(row)) continue;
           if (isFullAccess(operation.accessPolicy)) {
             this.releaseFullAccessRecovery(row, 'Full access recovery released the uncertain dispatch for retry');
             this.store.event(row.task_id, 'operation.recovery_bypassed', {
@@ -217,11 +224,55 @@ export class OperationLifecycle {
           }, row.id);
         }
       }
+      // Heal messages stranded by the old full-access restart path. Only the
+      // unanswered tail is eligible; never resurrect a request followed by a
+      // settled turn or an open problem. The adapter must still prove no send.
+      const stranded = this.store.db.prepare(`WITH candidates AS MATERIALIZED (
+        SELECT DISTINCT o.* FROM operations o
+        JOIN messages m ON m.operation_id=o.id AND m.role='user' AND m.state='delivered'
+        JOIN tasks t ON t.id=o.task_id
+        JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+        WHERE o.state='not_sent' AND t.phase='chatting' AND n.status IN ('pending','failed')
+          AND o.activation_id=n.activation_id)
+        SELECT o.* FROM candidates o WHERE NOT EXISTS (SELECT 1 FROM operations later WHERE later.task_id=o.task_id AND later.node_id=o.node_id
+            AND later.rowid>(SELECT rowid FROM operations WHERE id=o.id) AND (later.state!='not_sent' OR later.result IS NOT NULL))
+          AND EXISTS (SELECT 1 FROM events e WHERE e.task_id=o.task_id AND e.type='operation.recovery_bypassed'
+            AND json_extract(e.data,'$.operationId')=o.id)`)
+        .all() as unknown as OperationDbRow[];
+      for (const row of stranded) this.restoreUnsentConversation(row);
       // Rows already marked unknown by an earlier process can keep a stale
       // worker flag as well (for example after a crash during reconciliation).
       this.store.db.prepare("UPDATE operations SET worker_active=0 WHERE state='unknown' AND worker_active=1").run();
       return generation;
     });
+  }
+
+  private restoreUnsentConversation(row: OperationDbRow): boolean {
+    const task = this.store.task(row.task_id);
+    if (task.phase !== 'chatting' || task.paused || row.result) return false;
+    const node = this.nodeRow(row.task_id, row.node_id);
+    if ((JSON.parse(node.spec) as NodeSpec).role !== 'master' || node.activation_id !== row.activation_id) return false;
+    const conversation = conversationForTask(this.store, row.task_id);
+    if (!conversation || conversation.archived_at !== null) return false;
+    if (this.store.db.prepare("SELECT 1 FROM questions WHERE task_id=? AND node_id=? AND status='open' LIMIT 1")
+      .get(row.task_id, row.node_id)) return false;
+    if (!this.store.db.prepare("SELECT 1 FROM messages WHERE operation_id=? AND role='user' AND state='delivered' LIMIT 1").get(row.id)) return false;
+    if (this.hooks.canReplayBeforeSend?.(operationFrom(row)) !== true) return false;
+    if (row.state === 'not_sent') {
+      // A later turn may have read the earlier request from conversation
+      // history. Old full-access recovery also called uncertain sends
+      // not_sent, so that label alone cannot prove the entire tail is safe.
+      const later = this.store.db.prepare(`SELECT spec FROM operations WHERE task_id=? AND node_id=?
+        AND rowid>(SELECT rowid FROM operations WHERE id=?) ORDER BY rowid`);
+      for (const next of later.iterate(row.task_id, row.node_id, row.id)) {
+        if (this.hooks.canReplayBeforeSend?.(JSON.parse(next.spec as string) as Operation) !== true) return false;
+      }
+    }
+    this.markNotSent(row, { resetNode: true, eventReason: 'Recovered conversation before adapter session/send' });
+    releaseMessages(this.store, row.id);
+    this.store.db.prepare("UPDATE activations SET state='pending' WHERE id=?").run(node.activation_id);
+    this.store.event(row.task_id, 'conversation.turn_requeued', { operationId: row.id, reason: 'adapter_not_started' });
+    return true;
   }
 
   /**
@@ -498,17 +549,9 @@ export class OperationLifecycle {
         });
         return false;
       }
-      if (isFullAccess(operation.accessPolicy)) {
-        this.releaseFullAccessRecovery(this.operationRow(operation.id),
-          `Full access released an uncertain dispatch for retry: ${String(error)}`);
-        this.store.event(operation.taskId, 'operation.recovery_bypassed', {
-          operationId: operation.id,
-          reason: String(error),
-          quiescent,
-        });
-        recordConversationInterruption(this.store, operation, String(error));
-        return true;
-      }
+      // Access policy grants capabilities; it cannot make an execution or
+      // settlement exception safe to replay. Preserve the uncertain attempt
+      // and route one recovery problem instead of spinning on the same error.
       this.store.db.prepare("UPDATE operations SET state='unknown',worker_active=? WHERE id=?")
         .run(Number(!quiescent), operation.id);
       // Terminal for the live transcript: the stream must stop showing an
@@ -779,9 +822,10 @@ export class OperationLifecycle {
     const graph = loadGraph(this.store, operation.taskId);
     const loops = graph.plan.loops.filter(loop => loop.from === operation.nodeId);
     const decision = result.output as unknown as VerificationDecision;
-    const targets = loops.length ? loops.map(loop => loop.to) : decision.subjects.map(subject => subject.nodeId);
+    const requestedTargets = loops.length ? loops.map(loop => loop.to) : decision.subjects.map(subject => subject.nodeId);
+    const targets = [...new Set(requestedTargets.length ? requestedTargets : [operation.nodeId])];
     let halt = false;
-    for (const target of new Set(targets.length ? targets : [operation.nodeId])) {
+    for (const target of targets) {
       const previous = this.store.db.prepare(`SELECT result FROM operations
         WHERE task_id=? AND node_id=? AND state='succeeded' AND id!=? ORDER BY rowid DESC LIMIT 1`)
         .get(operation.taskId, operation.nodeId, operation.id) as { result: string } | undefined;
@@ -803,7 +847,7 @@ export class OperationLifecycle {
     if (halt) {
       const attempts = this.store.db.prepare('SELECT node_id,round,state FROM activations WHERE task_id=? AND node_id IN ('
         + targets.map(() => '?').join(',') + ') ORDER BY round,rowid')
-        .all(operation.taskId, ...(targets.length ? targets : [operation.nodeId])) as { node_id: string; round: number; state: string }[];
+        .all(operation.taskId, ...targets) as { node_id: string; round: number; state: string }[];
       this.block(operation.taskId, operation.nodeId, 'stalled', {
         reason: 'Three consecutive rounds made no substantial progress',
         resume: targets,
@@ -1064,16 +1108,29 @@ export class OperationLifecycle {
   }
 }
 
-export function operationSnapshots(
-  store: TaskStore,
-  taskId: string,
-  query: { after?: string; limit?: number } = {},
-) {
-  const rows = query.limit !== undefined
-    ? store.db.prepare(`SELECT * FROM operations
-        WHERE task_id=? AND rowid>COALESCE((SELECT rowid FROM operations WHERE id=?),0)
-        ORDER BY rowid LIMIT ?`).all(taskId, query.after ?? '', query.limit) as unknown as OperationDbRow[]
-    : store.db.prepare('SELECT * FROM operations WHERE task_id=? ORDER BY rowid').all(taskId) as unknown as OperationDbRow[];
+export interface OperationQuery {
+  after?: string;
+  before?: string;
+  latest?: boolean;
+  nodeId?: string;
+  limit?: number;
+}
+
+export function operationSnapshots(store: TaskStore, taskId: string, query: OperationQuery = {}) {
+  const filters = ['task_id=?'];
+  const params: (string | number)[] = [taskId];
+  if (query.nodeId !== undefined) { filters.push('node_id=?'); params.push(query.nodeId); }
+  if (query.after !== undefined || query.before !== undefined) {
+    const before = query.before !== undefined;
+    filters.push(`rowid${before ? '<' : '>'}COALESCE((SELECT rowid FROM operations WHERE task_id=? AND id=?),0)`);
+    params.push(taskId, before ? query.before! : query.after!);
+  }
+  const descending = query.before !== undefined || (query.latest && query.after === undefined);
+  const limit = query.limit === undefined ? '' : ' LIMIT ?';
+  if (query.limit !== undefined) params.push(query.limit);
+  const rows = store.db.prepare(`SELECT * FROM operations WHERE ${filters.join(' AND ')}
+    ORDER BY rowid ${descending ? 'DESC' : 'ASC'}${limit}`).all(...params) as unknown as OperationDbRow[];
+  if (descending) rows.reverse();
   return rows.map((row): OperationSnapshot => ({
     id: row.id,
     operation: operationFrom(row),
@@ -1081,6 +1138,8 @@ export function operationSnapshots(
     reserved: row.reserved,
     workerActive: Boolean(row.worker_active),
     result: row.result ? JSON.parse(row.result) as OperationResult : null,
+    dispatchedAt: row.dispatched_at,
+    settledAt: row.settled_at,
   }));
 }
 

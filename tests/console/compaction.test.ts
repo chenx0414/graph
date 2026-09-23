@@ -248,7 +248,7 @@ test('the current schema tags every invocation with a purpose and keeps completi
   const root = await temp('schema');
   const store = new TaskStore(join(root, 'tasks.sqlite'));
   cleanup.push(() => store.close());
-  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(29);
+  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(30);
   const columns = store.db.prepare('PRAGMA table_info(invocations)').all() as { name: string; dflt_value: string | null }[];
   expect(columns.find(column => column.name === 'purpose')).toMatchObject({ dflt_value: "'completion'" });
 });

@@ -168,3 +168,80 @@ test('dispatch, unknown usage, and a human answer compose in one lifecycle trans
     models_used: '["m"]',
   });
 });
+
+
+test('a third rework without subjects or loops settles as stalled with the gate attempt evidence', async () => {
+  const { store, lifecycle } = await fixture();
+  const node = { id: 'work', kind: 'program', action: 'graph.verify' };
+  const proposal = { requirementVersion: 1, summary: 'Independent review', nodes: [node], acceptance: [] };
+  store.db.prepare("UPDATE tasks SET graph_version=1 WHERE id='t'").run();
+  store.db.prepare("UPDATE nodes SET spec=?,stall_count=2 WHERE task_id='t' AND id='work'").run(canonicalJson(node));
+  store.db.prepare("INSERT INTO graph_revisions(task_id,version,spec,reason) VALUES('t',1,?,'review')").run(canonicalJson(proposal));
+  const operation = lifecycle.admit({
+    node: { id: 'work', taskId: 't', activationId: 'a' }, reservation: 0,
+    prepare: attempt => ({ ...intent(attempt), kind: 'program', action: 'graph.verify', instanceId: null }),
+  });
+  lifecycle.dispatch(operation);
+  lifecycle.report(operation.id, operation.generation, {
+    outcome: 'completed',
+    output: { kind: 'verification', outcome: 'rework', subjects: [], reports: [],
+      blockers: [{ id: 'review', reason: 'Price is incorrectly stored as zero', evidence: [] }] },
+  });
+  expect(lifecycle.get(operation.id)?.state).toBe('succeeded');
+  expect(store.db.prepare("SELECT status,stall_count FROM nodes WHERE id='work'").get())
+    .toEqual({ status: 'blocked', stall_count: 3 });
+  const question = store.db.prepare("SELECT kind,data FROM questions WHERE status='open'").get() as { kind: string; data: string };
+  expect(question.kind).toBe('stalled');
+  expect(JSON.parse(question.data)).toMatchObject({ attempts: [{ node_id: 'work', round: 1 }], resume: ['work'] });
+});
+
+
+test.each(['intent', 'dispatched', 'not_sent'])('restart restores delivered messages before adapter send (%s), once', async stage => {
+  const { store, lifecycle } = await fixture();
+  store.db.prepare("UPDATE tasks SET phase='chatting',conversation_id='c' WHERE id='t'").run();
+  store.db.prepare("INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES('c','p','t','chat',1,1)").run();
+  store.db.prepare("UPDATE nodes SET spec=? WHERE id='work'").run(canonicalJson({ id: 'work', kind: 'agent', action: 'work', role: 'master' }));
+  appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'show status', state: 'pending' });
+  const operation = lifecycle.admit({
+    node: { id: 'work', taskId: 't', activationId: 'a' }, reservation: 100,
+    prepare: attempt => ({ ...intent(attempt), accessPolicy: resolveAccessPolicy(fullAccessPolicy()) }),
+    afterIntent: op => deliverMessages(store, op.id, op.attempt, pendingMessages(store, 'c')),
+  });
+  if (stage !== 'intent') lifecycle.dispatch(operation);
+  if (stage === 'not_sent') {
+    // State left by the older full-access startup recovery, before it released messages.
+    new OperationLifecycle(store, { advance: () => undefined }).recover();
+  }
+  appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'and recent work', state: 'queued' });
+  const restored = new OperationLifecycle(store, { advance: () => undefined, canReplayBeforeSend: () => true });
+  restored.recover();
+  expect(pendingMessages(store, 'c').map(message => message.text)).toEqual(['show status', 'and recent work']);
+  expect(store.db.prepare("SELECT status FROM nodes WHERE id='work'").get()).toEqual({ status: 'pending' });
+  expect(lifecycle.get(operation.id)).toMatchObject({ state: 'not_sent', reserved: 0 });
+  restored.recover();
+  expect(pendingMessages(store, 'c')).toHaveLength(2);
+});
+
+test('legacy unsent messages stay parked if a later turn may already have acted on that context', async () => {
+  const { store, lifecycle } = await fixture();
+  store.db.prepare("UPDATE tasks SET phase='chatting',conversation_id='c' WHERE id='t'").run();
+  store.db.prepare("INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES('c','p','t','chat',1,1)").run();
+  store.db.prepare("UPDATE nodes SET spec=? WHERE id='work'").run(canonicalJson({ id: 'work', kind: 'agent', action: 'work', role: 'master' }));
+  const operations: { id: string }[] = [];
+  for (const text of ['original request', 'follow up']) {
+    appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text, state: 'pending' });
+    const op = lifecycle.admit({
+      node: { id: 'work', taskId: 't', activationId: 'a' }, reservation: 0,
+      prepare: attempt => ({ ...intent(attempt), accessPolicy: resolveAccessPolicy(fullAccessPolicy()) }),
+      afterIntent: current => deliverMessages(store, current.id, current.attempt, pendingMessages(store, 'c')),
+    });
+    lifecycle.dispatch(op);
+    new OperationLifecycle(store, { advance: () => undefined }).recover();
+    operations.push(op);
+  }
+  new OperationLifecycle(store, {
+    advance: () => undefined,
+    canReplayBeforeSend: op => op.id === operations[0]!.id,
+  }).recover();
+  expect(pendingMessages(store, 'c')).toEqual([]);
+});

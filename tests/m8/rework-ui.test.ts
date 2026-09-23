@@ -72,7 +72,7 @@ test('node records and evidence refresh from task events without leaving the pag
   await page.getByTestId('graph').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'check' }).first().click();
   const before = await page.getByTestId('node-detail').innerText();
-  expect(before).toContain('操作记录（0）');
+  expect(before).toContain('操作记录（本页 0 条）');
   expect(before).toContain('验收证据 无');
 
   await server.runtime.host.runReady();

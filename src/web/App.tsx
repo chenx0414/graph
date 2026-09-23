@@ -875,8 +875,11 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
   const limits = useLimits();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
-  const [opsLimit, setOpsLimit] = useState(20);
-  const { data: ops, reload: reloadOps } = useAsync(() => api<OperationRow[]>(`/api/tasks/${id}/operations?limit=${opsLimit}`), [id, opsLimit]);
+  const [opsBefore, setOpsBefore] = useState<string | undefined>(undefined);
+  useEffect(() => setOpsBefore(undefined), [id, selected]);
+  const { data: ops, reload: reloadOps } = useAsync(() => api<OperationRow[]>(
+    `/api/tasks/${id}/operations?limit=20&latest=true${selected ? `&nodeId=${encodeURIComponent(selected)}` : ''}${opsBefore ? `&before=${encodeURIComponent(opsBefore)}` : ''}`,
+  ), [id, selected, opsBefore]);
   const { data: view, reload: reloadView } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshAll = useCallback(() => {
@@ -984,7 +987,7 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
             <div><span className="muted">尝试次数 </span>{selectedNode.stallCount ?? 0} · 输出版本 {selectedNode.outputVersion ?? 0}</div>
             <div><span className="muted">验收证据 </span>{nodeEvidence.length ? nodeEvidence.map(item => `${item.acceptanceId}:${item.valid ? '有效' : '无效或过期'} ${item.summary}`).join(' / ') : '无'}</div>
           </div>
-          <h4 style={{ marginTop: 14 }}>操作记录（{nodeOperations.length}）</h4>
+          <h4 style={{ marginTop: 14 }}>操作记录（本页 {nodeOperations.length} 条）</h4>
           <ol className="list" data-testid="node-operations">
             {nodeOperations.map(operation => (
               <li key={operation.id} className="list-item" style={{ alignItems: 'flex-start', display: 'block' }}>
@@ -996,7 +999,11 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
               </li>
             ))}
           </ol>
-          <Button size="sm" data-testid="operations-more" onClick={() => setOpsLimit(current => current + 20)}>加载更多操作记录</Button>
+          <div className="row">
+            {opsBefore && <Button size="sm" onClick={() => setOpsBefore(undefined)}>回到最新记录</Button>}
+            <Button size="sm" data-testid="operations-more" disabled={!ops?.length || ops.length < 20}
+              onClick={() => setOpsBefore(ops?.[0]?.id)}>更早的操作记录</Button>
+          </div>
           <div style={{ marginTop: 14 }}>
             <NodeRunPanel key={`${id}:${selectedNode.id}`} taskId={id} nodeId={selectedNode.id} />
           </div>

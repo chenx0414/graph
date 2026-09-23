@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, Json, Proposal } from '../../src/core/types.ts';
 import type { ReviewReport, VerifierConfig } from '../../src/core/verification.ts';
@@ -154,4 +155,24 @@ test('a rework in progress survives process restart and still reuses the origina
   expect(completed.phase).toBe('completed');
   expect(completed.nodes.find(node => node.id === 'work')?.instanceId).toBe(instanceId);
   expect(implementations).toBe(2);
+});
+
+
+test('full access does not repeatedly dispatch a program that throws during settlement or execution', async () => {
+  const { options, runtime, taskId } = await setup({
+    check: { kind: 'program', prepare: async () => async () => { throw new Error('column index out of range'); } },
+  }, {
+    requirementVersion: 1, summary: 'Do not spin on a program failure',
+    acceptance: [{ id: 'works', description: 'Check passes', checkNode: 'check' }],
+    nodes: [{ id: 'check', kind: 'program', action: 'check' }],
+  });
+  await runtime.close();
+  const full = await openTaskRuntime({ ...options, access: () => fullAccessPolicy() });
+  cleanup.push(() => full.close());
+  for (let tick = 0; tick < 3; tick++) await full.host.runReady();
+  const view = await full.user.task(taskId).view();
+  expect(view.operations).toHaveLength(1);
+  expect(view.operations[0]).toMatchObject({ state: 'unknown' });
+  expect(view.questions).toMatchObject([{ kind: 'recovery', status: 'open' }]);
+  expect(view.nodes[0]?.status).toBe('blocked');
 });

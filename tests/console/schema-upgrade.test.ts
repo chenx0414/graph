@@ -98,7 +98,7 @@ for (const fixture of ['v13', 'v17'] as const) {
     await daemon.close();
 
     const upgraded = await inspect(dbPath);
-    expect(upgraded.version).toBe(29);
+    expect(upgraded.version).toBe(30);
     expect(upgraded.instance).toMatchObject({ budget: 20_000_000, used: 12_345, unlimited: 0, models_used: '["legacy-model"]' });
     expect(JSON.parse(upgraded.cost.cost)).toEqual({ amount: 0.001, currency: 'USD' });
     expect(upgraded.pauseColumns.sort()).toEqual(['pause_ms', 'pause_since', 'user_wait_ms', 'user_wait_since']);
@@ -150,7 +150,15 @@ test('v23 renumbers legacy handoffs before enforcing one version per task', asyn
   const dbPath = join(root, 'tasks.sqlite');
   const raw = new DatabaseSync(dbPath);
   raw.exec(`
-    CREATE TABLE tasks(id TEXT PRIMARY KEY);
+    CREATE TABLE tasks(id TEXT PRIMARY KEY,conversation_id TEXT);
+    CREATE TABLE conversations(id TEXT PRIMARY KEY,anchor_task_id TEXT);
+    CREATE TABLE nodes(task_id TEXT,spec TEXT);
+    CREATE TABLE events(cursor INTEGER PRIMARY KEY,task_id TEXT,type TEXT,data TEXT,timestamp INTEGER);
+    CREATE TABLE operations(id TEXT PRIMARY KEY,task_id TEXT,node_id TEXT,state TEXT);
+    CREATE TABLE invocations(operation_id TEXT);
+    CREATE TABLE node_capabilities(operation_id TEXT);
+    CREATE TABLE messages(operation_id TEXT,state TEXT);
+    CREATE TABLE questions(task_id TEXT,status TEXT,owner TEXT,kind TEXT,data TEXT);
     CREATE TABLE context_handoffs(id TEXT PRIMARY KEY, task_id TEXT, operation_id TEXT, version INTEGER,
       purpose TEXT, summary TEXT, package TEXT, digest TEXT, created_at INTEGER);
     CREATE TABLE budget_scopes(id TEXT PRIMARY KEY, task_id TEXT, owner_instance_id TEXT,
@@ -167,7 +175,7 @@ test('v23 renumbers legacy handoffs before enforcing one version per task', asyn
   raw.close();
   const store = new TaskStore(dbPath);
   try {
-    expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(29);
+    expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(30);
     expect(store.db.prepare('SELECT id,version FROM context_handoffs ORDER BY version').all())
       .toEqual([{ id: 'h1', version: 1 }, { id: 'h2', version: 2 }, { id: 'h3', version: 3 }]);
   } finally {

@@ -33,7 +33,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 29) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > 30) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
@@ -483,6 +483,21 @@ export class TaskStore {
         );
         CREATE INDEX IF NOT EXISTS rsi_continuations_ready ON rsi_continuations(task_id,node_id,state);
         PRAGMA user_version=29;
+      `);
+    });
+    if (version < 30) this.transaction(() => {
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS events_task_timestamp ON events(task_id,timestamp);
+        CREATE INDEX IF NOT EXISTS events_task_cursor ON events(task_id,cursor);
+        CREATE INDEX IF NOT EXISTS events_operation ON events(task_id,type,json_extract(data,'$.operationId'));
+        CREATE INDEX IF NOT EXISTS operations_task ON operations(task_id);
+        CREATE INDEX IF NOT EXISTS operations_task_node ON operations(task_id,node_id);
+        CREATE INDEX IF NOT EXISTS operations_state ON operations(state);
+        CREATE INDEX IF NOT EXISTS invocations_operation ON invocations(operation_id);
+        CREATE INDEX IF NOT EXISTS node_capabilities_operation ON node_capabilities(operation_id);
+        CREATE INDEX IF NOT EXISTS messages_operation ON messages(operation_id,state);
+        CREATE INDEX IF NOT EXISTS questions_task_status ON questions(task_id,status,owner);
+        PRAGMA user_version=30;
       `);
     });
   }
