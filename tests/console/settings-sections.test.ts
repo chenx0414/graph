@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 /* Settings.tsx is a .tsx module; the NodeNext test program cannot compile TSX,
  * so vitest transpiles it and the web project typechecks it instead. */
 // @ts-ignore -- .tsx import from a NodeNext test program
-import { ADVANCED_SETTINGS, ADVANCED_SETTING_IDS, SETTINGS_SECTIONS } from '../../src/web/Settings.tsx';
+import { ADVANCED_SETTINGS, ADVANCED_SETTING_IDS, SETTINGS_SECTIONS, defaultAdvancedOpen, isAdvancedOpen } from '../../src/web/Settings.tsx';
 
 type Section = { id: string; label: string };
 type AdvancedSetting = {
@@ -18,6 +18,8 @@ type AdvancedSetting = {
 const SECTIONS = SETTINGS_SECTIONS as readonly Section[];
 const ADVANCED = ADVANCED_SETTINGS as readonly AdvancedSetting[];
 const ADVANCED_IDS = ADVANCED_SETTING_IDS as readonly string[];
+const initialOpen = defaultAdvancedOpen as (settings?: readonly AdvancedSetting[]) => Record<string, boolean>;
+const readOpen = isAdvancedOpen as (open: Record<string, boolean>, id: string) => boolean;
 
 /**
  * B-0 settings-page tidy-up, asserted as pure data.
@@ -68,6 +70,21 @@ describe('settings navigation sections (B-0)', () => {
   it('starts every advanced region collapsed', () => {
     expect(ADVANCED.length).toBeGreaterThan(0);
     expect(ADVANCED.every(setting => setting.defaultCollapsed)).toBe(true);
+  });
+
+  it('derives a default open-state that renders every advanced region closed', () => {
+    const open = initialOpen();
+    expect(open).toEqual({});
+    for (const setting of ADVANCED) {
+      expect(readOpen(open, setting.id)).toBe(false);
+      expect(readOpen(open, setting.id)).toBeFalsy();
+    }
+  });
+
+  it('reads an explicitly opened region from the controlled map', () => {
+    expect(readOpen({ 'settings-limits': true }, 'settings-limits')).toBe(true);
+    expect(readOpen({ 'settings-limits': false }, 'settings-limits')).toBe(false);
+    expect(readOpen({}, 'settings-limits')).toBe(false);
   });
 
   it('keeps the existing concurrency-limit controls addressable', () => {

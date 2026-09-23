@@ -3065,10 +3065,13 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .settings-feature > h2 { margin: 0 0 10px; font-size: 14px; }
 .settings-feature-stack { display: flex; flex-direction: column; gap: 12px; }
 .settings-advanced-list { display: flex; flex-direction: column; gap: 10px; }
-.settings-advanced-list .advanced-setting { margin: 0; }
-.advanced-setting > summary { font-size: 13px; }
-.advanced-setting[open] > summary { color: var(--text); }
-.advanced-setting .settings-section { margin-top: 8px; }
+.settings-advanced-list .advanced-setting { margin: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-soft); padding: 8px 12px; }
+.advanced-setting-toggle { display: flex; align-items: center; gap: 6px; width: 100%; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--muted); text-align: left; cursor: pointer; }
+.advanced-setting-toggle:hover { color: var(--accent); }
+.advanced-setting-chevron { flex: none; transition: transform 0.15s ease; }
+.advanced-setting-chevron.is-open { transform: rotate(90deg); color: var(--text); }
+.advanced-setting-body { margin-top: 8px; }
+.advanced-setting-body[hidden] { display: none; }
 .subscription-strip {
   display: flex;
   align-items: center;
