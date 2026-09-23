@@ -1,204 +1,242 @@
+/**
+ * Sandbox-safe tests for the B-1 provider form logic.
+ *
+ * Everything here is pure: request construction, response/merge handling,
+ * snapshot mapping and concurrency read-back. No DOM, no sockets, no child
+ * processes — real network probing and browser behaviour are covered by the
+ * human acceptance check.
+ */
 import { describe, expect, it } from 'vitest';
 import {
-  applyMetadata,
-  decodeVendorRef,
+  FALLBACK_PLATFORMS,
+  addManualModelPick,
+  buildEntryDraft,
+  buildProbePayload,
+  customDraft,
   draftFromPlatform,
-  encodeVendorRef,
-  mergeDiscoveredModels,
-  metadataFill,
-  newModelDraft,
-  providerLabelFor,
+  draftToModelEntry,
+  fillEntryFromMetadata,
+  hasProviderErrors,
+  mergeProbeModels,
+  metadataToFields,
+  normalizePlatforms,
+  parseLimit,
+  platformById,
   readConcurrency,
-  uniqueModelId,
-  validateProviderFormDraft,
+  selectedProbeModels,
+  validateProviderDraft,
   writeConcurrency,
-  type ModelDraft,
-  type PlatformOption,
-  type ProbeModel,
+  type ConcurrencyConfig,
 } from '../../src/web/provider-form.ts';
 
-/* Pure wizard-logic tests (B-1 lane 3). No DOM, no request, no child process. */
+const preset = FALLBACK_PLATFORMS[0]!;
 
-const DEEPSEEK: PlatformOption = {
-  platformId: 'deepseek',
-  label: 'DeepSeek',
-  api: 'openai-completions',
-  baseUrl: 'https://api.deepseek.com',
-  secretRef: 'GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY',
-  configured: false,
-  supportsModelList: true,
-  credentialLabel: 'DeepSeek API Key',
-  credentialKind: 'api-key',
-  notes: [],
-  custom: false,
-};
-
-const CUSTOM: PlatformOption = {
-  platformId: 'custom',
-  label: '自定义',
-  api: 'openai-completions',
-  baseUrl: '',
-  secretRef: 'GRAPH_CUSTOM_API_KEY',
-  configured: false,
-  supportsModelList: true,
-  credentialLabel: '自定义厂商凭据',
-  credentialKind: 'api-key',
-  notes: [],
-  custom: true,
-};
-
-describe('provider draft validation (B-1)', () => {
-  it('accepts a built-in platform that only needs its credential ref', () => {
-    const result = validateProviderFormDraft(draftFromPlatform(DEEPSEEK), DEEPSEEK);
-    expect(result.ok).toBe(true);
-    expect(result.value).toMatchObject({ platformId: 'deepseek', baseUrl: 'https://api.deepseek.com' });
+describe('provider draft validation (step 1)', () => {
+  it('accepts a supported platform with just a key', () => {
+    const draft = draftFromPlatform(preset);
+    expect(validateProviderDraft(draft, { custom: false, hasKey: true })).toEqual({});
   });
 
-  it('requires vendor name, Base URL, compatibility mode and key for 自定义', () => {
-    const missing = validateProviderFormDraft({ platformId: 'custom', api: 'openai-completions', baseUrl: '', name: '', secretRef: '' }, CUSTOM);
-    expect(missing.ok).toBe(false);
-    expect(missing.errors).toMatchObject({ name: expect.any(String), baseUrl: expect.any(String), secretRef: expect.any(String) });
-
-    const badUrl = validateProviderFormDraft({ platformId: 'custom', name: 'Acme', api: 'openai-completions', baseUrl: 'not-a-url', secretRef: 'ACME_KEY' }, CUSTOM);
-    expect(badUrl.errors.baseUrl).toMatch(/http/);
-
-    const badApi = validateProviderFormDraft({ platformId: 'custom', name: 'Acme', api: 'responses' as never, baseUrl: 'https://acme.test/v1', secretRef: 'ACME_KEY' }, CUSTOM);
-    expect(badApi.errors.api).toMatch(/兼容格式/);
-
-    const good = validateProviderFormDraft({ platformId: 'custom', name: 'Acme', api: 'anthropic-messages', baseUrl: 'https://acme.test', secretRef: 'ACME_KEY' }, CUSTOM);
-    expect(good.ok).toBe(true);
-    expect(good.value).toMatchObject({ api: 'anthropic-messages', name: 'Acme' });
+  it('requires a key (or a resolvable env var) even for a supported platform', () => {
+    const errors = validateProviderDraft(draftFromPlatform(preset), { custom: false, hasKey: false });
+    expect(errors.key).toMatch(/API KEY|环境变量/);
+    expect(hasProviderErrors(errors)).toBe(true);
   });
 
-  it('rejects a credential ref that is not an environment variable name', () => {
-    const result = validateProviderFormDraft({ platformId: 'custom', name: 'Acme', api: 'openai-completions', baseUrl: 'https://acme.test', secretRef: 'not a ref' }, CUSTOM);
-    expect(result.errors.secretRef).toMatch(/环境变量名/);
+  it('requires name, base URL and compatibility for a custom provider', () => {
+    const errors = validateProviderDraft(customDraft(), { custom: true, hasKey: false });
+    expect(errors.name).toBeTruthy();
+    expect(errors.baseUrl).toMatch(/Base URL/);
+    expect(errors.key).toMatch(/API KEY/);
+  });
+
+  it('rejects a non-http base URL and an unknown compatibility mode', () => {
+    const errors = validateProviderDraft(
+      { ...customDraft(), name: '本地网关', baseUrl: 'ftp://example.com', api: 'responses' as never },
+      { custom: true, hasKey: true },
+    );
+    expect(errors.baseUrl).toMatch(/http/);
+    expect(errors.api).toMatch(/兼容格式/);
+  });
+
+  it('rejects malformed credential ids and secret refs', () => {
+    const errors = validateProviderDraft(
+      { ...customDraft(), name: '网关', baseUrl: 'https://api.example.com/v1', credentialId: 'Bad Id', secretRef: '1-bad' },
+      { custom: true, hasKey: true },
+    );
+    expect(errors.credentialId).toMatch(/凭据 id/);
+    expect(errors.secretRef).toMatch(/环境变量/);
   });
 });
 
-describe('probe result merging (B-1)', () => {
-  it('appends new models and keeps every value the user already filled', () => {
-    const handEdited: ModelDraft = {
-      id: 'deepseek:deepseek-v4-flash',
-      provider: 'deepseek',
-      modelId: 'deepseek-v4-flash',
-      grade: 'high',
-      api: 'openai-completions',
-      baseUrl: 'https://api.deepseek.com',
-      credentialId: 'deepseek',
-      contextWindow: 123_456,
-      maxTokens: 4_096,
-      cost: { input: 9, output: 9, cacheRead: 0, cacheWrite: 0 },
-    };
-    const discovered: ProbeModel[] = [
-      { id: 'deepseek-v4-flash', metadata: { contextWindow: 1_000_000, maxTokens: 384_000, cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 }, currency: 'USD', sourceUrl: 'https://models.dev/api.json' } },
-      { id: 'deepseek-v4-pro', metadata: null },
+describe('platform catalog normalization', () => {
+  it('reads { platforms } and a bare array, applying defaults', () => {
+    const payload = { platforms: [{ id: 'grok', label: 'Grok', baseUrl: 'https://api.x.ai/v1', api: 'openai-completions', secretRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' }] };
+    const [platform] = normalizePlatforms(payload);
+    expect(platform).toMatchObject({ id: 'grok', label: 'Grok', credentialId: 'grok', credentialKind: 'api-key' });
+    expect(normalizePlatforms([{ id: 'custom-compat', baseUrl: 'https://x/v1', api: 'anthropic-messages' }])[0]).toMatchObject({ api: 'anthropic-messages' });
+  });
+
+  it('drops entries without an id or base URL instead of crashing', () => {
+    expect(normalizePlatforms({ platforms: [{ id: '', baseUrl: 'https://x' }, { id: 'ok' }, null] })).toEqual([]);
+  });
+
+  it('keeps the built-in credential environment variable names aligned with usage', () => {
+    expect(platformById(FALLBACK_PLATFORMS, 'opencode-go')!.secretRef).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
+    expect(platformById(FALLBACK_PLATFORMS, 'chatgpt')!.secretRef).toBe('GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN');
+    expect(platformById(FALLBACK_PLATFORMS, 'custom')).toBeUndefined();
+  });
+});
+
+describe('probe request/response handling (step 2)', () => {
+  it('builds a probe payload that carries a credential reference, never a secret', () => {
+    const draft = { ...draftFromPlatform(preset), secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' };
+    const payload = buildProbePayload(draft, 'gpt-5');
+    expect(payload.provider).toMatchObject({ id: 'opencode-go', api: 'openai-completions', secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' });
+    expect(payload.modelId).toBe('gpt-5');
+    expect(JSON.stringify(payload)).not.toMatch(/sk-/);
+  });
+
+  it('merges a probed list without overwriting the user’s existing picks', () => {
+    const previous = [
+      { modelId: 'manual-model', selected: true, manual: true },
+      { modelId: 'gpt-5', selected: true },
     ];
-    const merged = mergeDiscoveredModels([handEdited], discovered, { provider: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com', credentialId: 'deepseek' });
-    expect(merged).toHaveLength(2);
-    // User-filled row is untouched...
-    expect(merged[0]).toMatchObject({ id: 'deepseek:deepseek-v4-flash', contextWindow: 123_456, maxTokens: 4_096, grade: 'high' });
-    // ...and the new row is added with a distinct local id.
-    expect(merged[1]).toMatchObject({ provider: 'deepseek', modelId: 'deepseek-v4-pro', credentialId: 'deepseek' });
-    expect(merged[1]!.id).not.toBe(merged[0]!.id);
+    const merged = mergeProbeModels([{ id: 'gpt-5', name: 'GPT-5' }, { id: 'o4-mini', name: 'o4-mini' }], previous);
+    expect(merged.map(pick => pick.modelId)).toEqual(['manual-model', 'gpt-5', 'o4-mini']);
+    expect(merged[0]).toMatchObject({ selected: true, manual: true });
+    expect(merged[1]).toMatchObject({ selected: true });
+    expect(merged[2]).toMatchObject({ selected: false });
+    expect(selectedProbeModels(merged).map(pick => pick.modelId)).toEqual(['manual-model', 'gpt-5']);
   });
 
-  it('suffixes a local id when the same upstream model is added twice', () => {
-    expect(uniqueModelId('deepseek', 'm', ['deepseek:m'])).toBe('deepseek:m-2');
-    const draft = newModelDraft({ provider: 'deepseek', api: 'openai-completions', baseUrl: 'https://x.test', credentialId: 'c', upstreamId: 'm', taken: ['deepseek:m'] });
-    expect(draft.id).toBe('deepseek:m-2');
-    expect(draft.modelId).toBe('m');
-  });
-
-  it('gives a second connection to the same platform its own provider label', () => {
-    const existing = [{ provider: 'deepseek', credentialId: 'deepseek' }];
-    expect(providerLabelFor('deepseek', 'deepseek', existing)).toBe('deepseek');
-    expect(providerLabelFor('deepseek', 'deepseek-2', existing)).toBe('deepseek@deepseek-2');
+  it('lets the endpoint without a model list keep manual ids', () => {
+    const first = addManualModelPick([], 'local-llama');
+    const second = addManualModelPick(first, 'local-llama');
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({ modelId: 'local-llama', selected: true, manual: true });
   });
 });
 
-describe('snapshot metadata auto-fill (B-1)', () => {
-  it('fills limits, modalities, reasoning and a known price from the snapshot', () => {
-    const filled = applyMetadata(newModelDraft({ provider: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com', credentialId: 'deepseek', upstreamId: 'deepseek-v4-flash', taken: [] }), {
-      contextWindow: 1_000_000,
-      maxTokens: 384_000,
+describe('snapshot metadata mapping', () => {
+  it('fills every field when the snapshot hits', () => {
+    const fields = metadataToFields({
+      contextWindow: 200_000,
+      maxTokens: 8_192,
       input: ['text', 'image'],
       reasoning: true,
-      thinkingLevels: ['low', 'high', 'max'],
+      thinkingLevels: ['low', 'medium', 'high'],
       defaultThinkingLevel: 'medium',
-      cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
+      grade: 'high',
+      cost: { input: 1.5, output: 6, cacheRead: 0.15, cacheWrite: 1.875 },
       currency: 'USD',
       sourceUrl: 'https://models.dev/api.json',
-      catalogRevision: 'models-dev.2026-09-23T02:39:18.984Z',
-    }, { retrievedAt: '2026-09-23' });
-    expect(filled).toMatchObject({
-      contextWindow: 1_000_000,
-      maxTokens: 384_000,
+    });
+    expect(fields).toMatchObject({
+      contextWindow: 200_000,
+      maxTokens: 8_192,
       input: ['text', 'image'],
       reasoning: true,
-      thinkingLevels: ['low', 'high', 'max'],
-      cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
-      pricing: { currency: 'USD', unit: 'per_million_tokens', status: 'known', sourceUrl: 'https://models.dev/api.json', retrievedAt: '2026-09-23', catalogRevision: 'models-dev.2026-09-23T02:39:18.984Z' },
+      thinkingLevels: ['low', 'medium', 'high'],
+      defaultThinkingLevel: 'medium',
+      grade: 'high',
+      cost: { input: 1.5, output: 6, cacheRead: 0.15, cacheWrite: 1.875 },
     });
+    expect(fields.pricing).toMatchObject({ currency: 'USD', unit: 'per_million_tokens', status: 'known' });
   });
 
-  it('leaves unmatched fields empty and marks the price unknown, never zero', () => {
-    const metadata = metadataFill(null);
-    expect(metadata.contextWindow).toBeUndefined();
-    expect(metadata.maxTokens).toBeUndefined();
-    expect(metadata.input).toBeUndefined();
-    expect(metadata.cost).toBeUndefined();
-    expect(metadata.pricing).toMatchObject({ status: 'unknown', unit: 'per_million_tokens' });
-    expect(JSON.stringify(metadata)).not.toContain('"input":0');
+  it('leaves an unmatched model blank and marks pricing unknown — never zero', () => {
+    const fields = metadataToFields(null);
+    expect(fields.contextWindow).toBeNull();
+    expect(fields.maxTokens).toBeNull();
+    expect(fields.cost).toBeNull();
+    expect(fields.pricing.status).toBe('unknown');
+    expect(fields.grade).toBeNull();
+    expect(buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'unknown-model', metadata: null })).not.toHaveProperty('cost');
+  });
 
-    const entry = applyMetadata(newModelDraft({ provider: 'custom', api: 'anthropic-messages', baseUrl: 'https://acme.test', credentialId: 'acme', upstreamId: 'acme-1', taken: [] }), null);
-    expect(entry.contextWindow).toBeUndefined();
-    expect(entry.maxTokens).toBeUndefined();
-    expect(entry.cost).toBeUndefined();
+  it('marks pricing unknown when the model matched but has no usable price', () => {
+    const fields = metadataToFields({ contextWindow: 128_000, maxTokens: 4_096, reasoning: true });
+    expect(fields.contextWindow).toBe(128_000);
+    expect(fields.cost).toBeNull();
+    expect(fields.pricing.status).toBe('unknown');
+    expect(JSON.stringify(fields)).not.toContain('"input":0');
+  });
+
+  it('never invents thinking levels that the catalog does not declare', () => {
+    const fields = metadataToFields({ reasoning: true, thinkingLevels: ['low', 'bogus'], defaultThinkingLevel: 'bogus' });
+    expect(fields.thinkingLevels).toEqual(['low']);
+    expect(fields.defaultThinkingLevel).toBeNull();
+  });
+
+  it('converts a fully known selection into the existing ModelEntry shape', () => {
+    const draft = buildEntryDraft({
+      id: 'deepseek:v3', provider: 'deepseek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', credentialId: 'deepseek',
+      modelId: 'deepseek-v3',
+      metadata: { contextWindow: 64_000, maxTokens: 8_192, input: ['text'], reasoning: true, defaultThinkingLevel: 'low', grade: 'medium', cost: { input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 }, currency: 'USD' },
+    });
+    const entry = draftToModelEntry(draft);
+    expect(entry).toMatchObject({ id: 'deepseek:v3', modelId: 'deepseek-v3', contextWindow: 64_000, maxTokens: 8_192, grade: 'medium' });
+    expect(entry.cost).toEqual({ input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 });
+    expect(entry.pricing?.status).toBe('known');
+  });
+
+  it('omits unknown context/output instead of inventing positive numbers', () => {
+    const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null });
+    const entry = draftToModelEntry(draft);
+    expect(entry).not.toHaveProperty('contextWindow');
+    expect(entry).not.toHaveProperty('maxTokens');
+    expect(entry).not.toHaveProperty('cost');
     expect(entry.pricing?.status).toBe('unknown');
   });
 
-  it('matches the built-in snapshot row when the snapshot carries a price but no modalities', () => {
-    const entry = applyMetadata(newModelDraft({ provider: 'acme', api: 'openai-completions', baseUrl: 'https://acme.test', credentialId: 'acme', upstreamId: 'acme-plain', taken: [] }), { contextWindow: 8_192, reasoning: false, currency: 'USD', sourceUrl: 'https://models.dev/api.json' });
-    expect(entry).toMatchObject({ contextWindow: 8_192, reasoning: false });
-    expect(entry.maxTokens).toBeUndefined();
-    expect(entry.input).toBeUndefined();
-    expect(entry.pricing?.status).toBe('unknown');
+  it('does not overwrite values the user already typed', () => {
+    const typed = { ...buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null }), contextWindow: 9_999, maxTokens: 1_234, manual: false };
+    const filled = fillEntryFromMetadata(typed, { contextWindow: 128_000, maxTokens: 4_096 });
+    expect(filled.contextWindow).toBe(9_999);
+    expect(filled.maxTokens).toBe(1_234);
+
+    const manual = { ...typed, manual: true };
+    const untouched = fillEntryFromMetadata(manual, { contextWindow: 128_000, maxTokens: 4_096 });
+    expect(untouched.contextWindow).toBe(9_999);
+    expect(untouched.maxTokens).toBe(1_234);
+  });
+
+  it('fills blanks from a later refresh but keeps an unknown price unknown', () => {
+    const entry = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null });
+    const filled = fillEntryFromMetadata(entry, { contextWindow: 128_000 });
+    expect(filled.contextWindow).toBe(128_000);
+    expect(filled.cost).toBeUndefined();
+    expect(filled.pricing?.status).toBe('unknown');
   });
 });
 
-describe('inline concurrency limits (B-1)', () => {
-  it('writes and reads back a per-credential cap', () => {
-    const written = writeConcurrency(undefined, undefined, 'deepseek', { credentialLimit: 3 });
-    expect(written.limits.credentials).toEqual({ deepseek: 3 });
-    expect(readConcurrency(written.limits, written.credential, 'deepseek')).toEqual({ credentialLimit: 3 });
+describe('concurrency limits inside a provider entry', () => {
+  it('reads a credential cap and its shared group from the config', () => {
+    const config: ConcurrencyConfig = {
+      credentials: { opencode: { sharedLimitGroupId: 'team-a' } },
+      limits: { credentials: { opencode: 3 }, sharedGroups: { 'team-a': 8 } },
+    };
+    expect(readConcurrency(config, 'opencode')).toEqual({ credentialLimit: '3', sharedGroupId: 'team-a', sharedGroupLimit: '8' });
+    expect(readConcurrency({}, 'missing')).toEqual({ credentialLimit: '', sharedGroupId: '', sharedGroupLimit: '' });
   });
 
-  it('keeps the shared group on the credential and its cap in the limits document', () => {
-    const written = writeConcurrency({ credentials: { deepseek: 3 }, sharedGroups: {} }, { sharedLimitGroupId: 'acme' }, 'deepseek', { credentialLimit: 3, sharedGroupId: 'acme', sharedGroupLimit: 6 });
-    expect(written.credential.sharedLimitGroupId).toBe('acme');
-    expect(written.limits.sharedGroups).toEqual({ acme: 6 });
-    expect(readConcurrency(written.limits, written.credential, 'deepseek')).toEqual({ credentialLimit: 3, sharedGroupId: 'acme', sharedGroupLimit: 6 });
+  it('writes the per-credential and shared-group caps back into the document', () => {
+    const config: ConcurrencyConfig = { credentials: { opencode: { sharedLimitGroupId: 'old' } }, limits: { credentials: {}, sharedGroups: { old: 2 } } };
+    writeConcurrency(config, 'opencode', { credentialLimit: '5', sharedGroupId: 'team-a', sharedGroupLimit: '9' });
+    expect(config.limits?.credentials).toEqual({ opencode: 5 });
+    expect(config.credentials?.opencode?.sharedLimitGroupId).toBe('team-a');
+    expect(config.limits?.sharedGroups).toEqual({ 'team-a': 9 });
   });
 
-  it('removes a cleared cap, group and group cap without touching other vendors', () => {
-    const cleared = writeConcurrency({ credentials: { deepseek: 3, other: 1 }, sharedGroups: { acme: 6, keep: 2 } }, { sharedLimitGroupId: 'acme' }, 'deepseek', { sharedGroupId: '' });
-    expect(cleared.limits.credentials).toEqual({ other: 1 });
-    expect(cleared.limits.sharedGroups).toEqual({ keep: 2 });
-    expect(cleared.credential.sharedLimitGroupId).toBeUndefined();
-    // Moving to another group drops the old group cap.
-    const moved = writeConcurrency({ credentials: {}, sharedGroups: { acme: 6 } }, { sharedLimitGroupId: 'acme' }, 'deepseek', { sharedGroupId: 'beta', sharedGroupLimit: 4 });
-    expect(moved.limits.sharedGroups).toEqual({ beta: 4 });
-    expect(readConcurrency(moved.limits, moved.credential, 'deepseek')).toEqual({ sharedGroupId: 'beta', sharedGroupLimit: 4 });
-  });
-});
-
-describe('vendor refs (B-1)', () => {
-  it('round-trips a preset id and a custom name without a schema change', () => {
-    expect(decodeVendorRef(encodeVendorRef('deepseek', 'DeepSeek'), ['deepseek', 'grok'])).toEqual({ platformId: 'deepseek', name: 'deepseek' });
-    expect(decodeVendorRef(encodeVendorRef('custom', 'My Gateway'), ['deepseek'])).toEqual({ platformId: 'custom', name: 'My Gateway' });
-    expect(decodeVendorRef(undefined, [])).toEqual({ platformId: 'custom', name: '' });
-    // An unknown legacy display name degrades to 自定义 instead of a broken preset.
-    expect(decodeVendorRef('旧名字', ['deepseek'])).toEqual({ platformId: 'custom', name: '旧名字' });
+  it('clears caps and groups when the fields are emptied or invalid', () => {
+    const config: ConcurrencyConfig = { credentials: { opencode: { sharedLimitGroupId: 'team-a' } }, limits: { credentials: { opencode: 3 }, sharedGroups: { 'team-a': 8 } } };
+    writeConcurrency(config, 'opencode', { credentialLimit: '0', sharedGroupId: '', sharedGroupLimit: 'abc' });
+    expect(config.limits?.credentials).toEqual({});
+    expect(config.credentials?.opencode?.sharedLimitGroupId).toBeUndefined();
+    expect(config.limits?.sharedGroups).toEqual({});
+    expect(parseLimit('4')).toBe(4);
+    expect(parseLimit('4.5')).toBeUndefined();
+    expect(parseLimit('-1')).toBeUndefined();
   });
 });
