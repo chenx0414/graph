@@ -93,10 +93,39 @@ test('exhausted incomplete work cannot disappear by deletion or a new instance',
   const blocked = await task.view();
   expect(blocked.questions).toMatchObject([{ kind: 'budget' }]);
   await expect(supervisor.revise({
-    baseVersion: 1, reason: 'Drop exhausted work', requestId: 'drop',
+    baseVersion: 1, reason: 'Drop exhausted work', requestId: 'drop', retire: ['work'],
     nodes: [{ id: 'replacement', kind: 'agent', action: 'work', ...coder }, { id: 'check', kind: 'program', action: 'check', dependsOn: ['replacement'] }],
   })).rejects.toMatchObject({ code: 'invalid_proposal' });
   expect((await task.view()).nodes.find(node => node.id === 'work')).toMatchObject({ instanceId: blocked.nodes[0]!.instanceId, used: 20_000_000, status: 'blocked' });
   await expect(task.resume('resume')).resolves.toMatchObject({ taskId: blocked.id });
   expect((await task.view()).questions.some(question => question.kind === 'budget' && question.status === 'open')).toBe(true);
+});
+
+test('a revision must name every node it retires instead of dropping it silently', async () => {
+  const { supervisor, task } = await setup({
+    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
+    extra: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
+    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) },
+  }, [
+    { id: 'work', kind: 'agent', action: 'work', ...coder },
+    { id: 'extra', kind: 'agent', action: 'extra', ...coder },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+  ]);
+  const base = (await task.view()).graphVersion;
+  const surviving: NodeSpec[] = [
+    { id: 'work', kind: 'agent', action: 'work', ...coder },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+  ];
+  // An incomplete list is refused and reports the ids it is missing, so nothing disappears by accident.
+  await expect(supervisor.revise({ baseVersion: base, reason: 'Forget a node', nodes: surviving, requestId: 'silent' }))
+    .rejects.toThrow(/must name every node it retires.*extra/);
+  // A typo in retire cannot silently retire nothing either.
+  await expect(supervisor.revise({ baseVersion: base, reason: 'Typo', nodes: surviving, retire: ['extras'], requestId: 'typo' }))
+    .rejects.toMatchObject({ code: 'invalid_proposal' });
+  // Naming it applies the retirement on purpose.
+  const revised = await supervisor.revise({ baseVersion: base, reason: 'Drop the sibling', nodes: surviving, retire: ['extra'], requestId: 'declared' });
+  expect(revised.graphVersion).toBe(base + 1);
+  const view = await task.view();
+  expect(view.nodes.find(node => node.id === 'extra')?.status).toBe('retired');
+  expect(view.nodes.map(node => node.id).sort()).toEqual(['check', 'extra', 'work']);
 });

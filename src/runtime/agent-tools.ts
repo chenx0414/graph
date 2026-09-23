@@ -14,7 +14,7 @@ import { describeAgentTools, type AgentToolName } from './agent-tool-definitions
 
 type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
-  revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; requestId: string }): Promise<unknown>;
+  revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
   taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
   validateProposal?(proposal: Proposal): Promise<unknown>;
@@ -331,6 +331,7 @@ export function agentTools(input: {
       const receipt = await input.supervisor!.revise({
         baseVersion: Number(body.baseVersion), reason: String(body.reason),
         nodes: JSON.parse(String(body.nodesJson)) as NodeSpec[], requestId: String(body.requestId),
+        ...(Array.isArray(body.retire) ? { retire: body.retire.map(String) } : {}),
         ...(typeof body.taskId === 'string' && body.taskId.trim() ? { taskId: body.taskId.trim() } : {}),
       });
       return text(JSON.stringify(receipt));

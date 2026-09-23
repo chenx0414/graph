@@ -1507,11 +1507,11 @@ export async function openTaskRuntime(options: {
             return { taskId, proposalVersion: version, cursor: store.event(taskId, 'proposal.created', { proposalVersion: version }) };
           });
         },
-        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string; taskId?: string }) {
+        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string; taskId?: string }) {
           ensureOpen();
           const target = revisionTarget(store, taskId, input.taskId);
-          return store.command(`supervisor:${target}`, input.requestId, { type: 'revise', target, baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, containers: input.containers, loops: input.loops }, () => {
-            const revised = applyRevision(store, target, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
+          return store.command(`supervisor:${target}`, input.requestId, { type: 'revise', target, baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, retire: input.retire ?? [], containers: input.containers, loops: input.loops }, () => {
+            const revised = applyRevision(store, target, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.retire ? { retire: input.retire } : {}), ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
             return { taskId: target, graphVersion: revised.version, cursor: revised.cursor };
           });
         },

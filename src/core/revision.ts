@@ -8,6 +8,8 @@ export interface GraphRevisionInput {
   baseVersion: number;
   reason: string;
   nodes: NodeSpec[];
+  /** Node ids this revision removes on purpose. Every omitted node must be named here. */
+  retire?: string[];
   containers?: ContainerSpec[];
   loops?: LoopSpec[];
   /** Budget policy for instances created by this revision: null = unlimited. */
@@ -69,6 +71,19 @@ export function applyRevision(store: TaskStore, taskId: string, input: GraphRevi
     }
   }
   const nextIds = new Set(next.nodes.map(node => node.id));
+  // A revision has to name every node it retires. Omission used to retire a node silently, so one
+  // forgotten line in a long node list could quietly drop work and its evidence from the graph.
+  const declared = new Set(input.retire ?? []);
+  const statusOf = (id: string) => (store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(taskId, id) as { status: string } | undefined)?.status;
+  for (const id of declared) {
+    if (!previous.nodes.has(id)) throw new RuntimeError('invalid_proposal', `Retire names a node that is not in the current graph: ${id}`);
+    if (nextIds.has(id)) throw new RuntimeError('invalid_proposal', `Retire names a node that is still part of the revision: ${id}`);
+  }
+  const undeclared = [...previous.nodes.keys()]
+    .filter(id => !nextIds.has(id) && !replacements.has(id) && !declared.has(id) && statusOf(id) !== 'retired');
+  if (undeclared.length) {
+    throw new RuntimeError('invalid_proposal', `Revision must name every node it retires: ${undeclared.join(', ')}. List them in retire to drop them deliberately, or copy them back verbatim.`);
+  }
   for (const id of previous.nodes.keys()) {
     if (nextIds.has(id) || replacements.has(id)) continue;
     const instance = store.db.prepare('SELECT used,budget,unlimited FROM instances WHERE task_id=? AND node_id=?').get(taskId, id) as { used: number; budget: number; unlimited: number } | undefined;
