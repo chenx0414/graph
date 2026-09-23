@@ -165,10 +165,25 @@ describe('④ 发送载荷：文本→text，图片→data，且剥离本地预�
     ]);
   });
 
-  test('预览 DataURL 绝不进入发送载荷', () => {
+  test('预览 DataURL 绝不进入发送载荷（新对话入口同样走 attachmentPayload）', () => {
     const payload = attachmentPayload(attachments);
     expect(JSON.stringify(payload)).not.toContain('data:image/png;base64');
-    expect(payload[1]).not.toHaveProperty('preview');
+    for (const item of payload) expect(item).not.toHaveProperty('preview');
+  });
+
+  test('图片项的 data 是纯 base64（无 data: 前缀）且 text 为空', () => {
+    const [image] = attachmentPayload([imageChip({ preview: PNG_DATA_URL })]);
+    expect(image).toBeDefined();
+    expect(image!.text).toBe('');
+    expect(image!.data).toBe(PNG_BASE64);
+    expect(image!.data!.startsWith('data:')).toBe(false);
+    expect(image!.data).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+  });
+
+  test('文本项带 text 且不带 data', () => {
+    const [text] = attachmentPayload([{ name: 'notes.md', type: 'text/markdown', size: 12, text: '# Notes\n' }]);
+    expect(text!.text).toBe('# Notes\n');
+    expect(text).not.toHaveProperty('data');
   });
 });
 
