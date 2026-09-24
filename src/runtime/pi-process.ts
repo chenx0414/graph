@@ -13,6 +13,7 @@ import type {
 import { nodeReadPaths } from './capabilities.ts';
 import { graphNodeRuntime } from './workspace-command.ts';
 import { graphApplicationRoot } from './graph-root.ts';
+import { developerPath } from './developer-path.ts';
 import { isExternallyGated } from './pi-instance.ts';
 import { acquireRestrictedExecutor } from './restricted-process.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -175,12 +176,12 @@ export async function openPiProcess(options: PiProcessOptions) {
     ...(runtime.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
   };
   if (options.env?.PATH !== undefined) {
-    helperEnv.PATH = [...new Set([
+    helperEnv.PATH = developerPath([...new Set([
       dirname(runtime.execPath),
       ...options.env.PATH.split(':').filter(Boolean),
       '/usr/bin',
       '/bin',
-    ])].join(':');
+    ])].join(':'));
   }
   const acquired = await acquireRestrictedExecutor();
   const check = (options.broker as { check?: (reservation?: number) => void }).check;

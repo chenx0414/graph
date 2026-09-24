@@ -18,6 +18,7 @@ import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import { graphApplicationRoot } from '../runtime/graph-root.ts';
 import { openRsiService, resolveRsiRoot } from '../runtime/rsi.ts';
+import { widenProcessPath } from '../runtime/developer-path.ts';
 import { graphDocumentationPaths } from '../runtime/agent-docs.ts';
 import { openGraphServer } from './host.ts';
 import { openAgentContextLibrary } from '../runtime/agent-context.ts';
@@ -124,6 +125,10 @@ function missingSecrets(config: GraphConfig, entries: ConfiguredModel[], env: Re
  * intent before any model resolves; later config/secret applies activate the
  * bindings on the same process. The CLI keeps the strict startup checks. */
 export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDaemon> {
+  // The daemon's own PATH gains the developer's toolchain locations, so the Pi processes it
+  // starts - which host the Agent's tools, the browser extension among them - resolve the
+  // same binaries the user's shell would instead of launchd's minimal set.
+  widenProcessPath();
   const log = options.log ?? (() => {});
   const index = join(options.webDir, 'index.html');
   if (!existsSync(index)) {
