@@ -39,7 +39,7 @@ export type TranscriptActivityItem =
 
 export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
-  | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean }
+  | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
@@ -206,7 +206,9 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     activityToolIndex.clear();
     if (!items.length) return;
     if (key && answered.has(key)) {
-      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, collapsed: true });
+      // A finished turn stays readable as complete narration bubbles with the
+      // tool calls interleaved; the toggle still folds the whole turn away.
+      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, collapsed: false });
       return;
     }
     pushActivityRows(rows, key, items);
@@ -261,7 +263,11 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     pushToolGroup(rows, liveTools);
     liveTools = [];
   };
-  for (const item of tail) {
+  // Only the newest live text part can still be growing: every earlier part is a
+  // complete narration bubble, exactly like a finished message, so the turn reads
+  // as full bubbles with the tool calls interleaved.
+  const lastStreamIndex = tail.reduce((last, item, index) => item.stream ? index : last, -1);
+  for (const [index, item] of tail.entries()) {
     if (item.stream) {
       flushLiveTools();
       rows.push({
@@ -269,7 +275,8 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         id: `assistant:${item.stream.entryId}:${item.stream.partId}`,
         operationId: item.stream.operationId,
         text: item.stream.text,
-        streaming: true,
+        narration: true,
+        streaming: index === lastStreamIndex,
       });
       continue;
     }

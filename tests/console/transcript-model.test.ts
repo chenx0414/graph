@@ -218,7 +218,7 @@ test('live and durable assistant rows share the turn key the reveal is paced by'
   expect(durable[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', operationId: 'op-1', streaming: false });
 });
 
-test('a finished turn collapses its narration and tool calls, in order, above the answer', () => {
+test('a finished turn keeps its narration and tool calls as an expanded block above the answer', () => {
   const rows = buildTranscriptRows({
     messages: [
       message({ id: 'user', seq: 1, role: 'user', text: '看一下', operationId: 'op-1' }),
@@ -236,7 +236,7 @@ test('a finished turn collapses its narration and tool calls, in order, above th
   expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
   const activity = rows[1];
   if (activity?.kind !== 'activity') throw new Error('expected activity block');
-  expect(activity.collapsed).toBe(true);
+  expect(activity.collapsed).toBe(false);
   expect(activity.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration', 'tool']);
   expect(activity.items.map(item => item.kind === 'narration' ? item.text : item.tool.summary))
     .toEqual(['先读代码', 'a.ts', '现在改投影', 'b.ts']);
@@ -272,6 +272,8 @@ test('the live tail interleaves a text part and a tool call by ordinal', () => {
   });
 
   expect(rows.map(row => row.kind)).toEqual(['assistant', 'tools', 'assistant']);
-  expect(rows[0]).toMatchObject({ kind: 'assistant', text: '先看一下', streaming: true });
-  expect(rows[2]).toMatchObject({ kind: 'assistant', text: '再改投影', streaming: true });
+  // The part before the tool call is already a complete narration bubble; only
+  // the newest part is still growing.
+  expect(rows[0]).toMatchObject({ kind: 'assistant', text: '先看一下', narration: true, streaming: false });
+  expect(rows[2]).toMatchObject({ kind: 'assistant', text: '再改投影', narration: true, streaming: true });
 });

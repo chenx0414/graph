@@ -136,10 +136,10 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
 
 function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration' }> }) {
   return (
-    <div className="message-row process-row narration-row" data-role="assistant" data-testid="message-narration">
+    <div className="message-row narration-row" data-role="assistant" data-testid="message-narration">
       <div className="message-stack">
-        <div className="message-author process-author"><Icon name="spark" size={12} />思考与过程</div>
-        <div className="message-content streaming-card"><Markdown text={row.text} /></div>
+        <div className="message-author"><Icon name="spark" size={12} />思考与过程</div>
+        <div className="message-content answer-card"><Markdown text={row.text} /></div>
       </div>
     </div>
   );
@@ -322,6 +322,14 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
   const visualStreaming = row.streaming || paced.revealing;
   const veils = useStreamVeils(paced.text, row.operationId, visualStreaming);
   const blocks = splitMarkdownBlocks(paced.text);
+  // A completed narration is a normal bubble; only the part still growing keeps
+  // the "生成中" label and the caret.
+  const authorLabel = visualStreaming
+    ? '思考与过程 · 生成中'
+    : author ?? (row.narration ? '思考与过程' : '主 Agent · 最终回答');
+  const testId = row.narration
+    ? (visualStreaming ? 'streaming' : 'message-narration')
+    : (visualStreaming ? 'streaming' : 'message-assistant');
   return (
     <div
       className={`message-row ${visualStreaming ? 'process-row' : 'answer-row'}`}
@@ -330,12 +338,12 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
       data-process={visualStreaming}
       data-reveal-length={paced.length}
       data-reveal-target={paced.targetLength}
-      data-testid={visualStreaming ? 'streaming' : 'message-assistant'}
+      data-testid={testId}
     >
       <div className="message-stack">
         <div className={`message-author ${visualStreaming ? 'process-author' : ''}`}>
           {visualStreaming && <Icon name="spark" size={12} />}
-          {visualStreaming ? '思考与过程 · 生成中' : author ?? '主 Agent · 最终回答'}
+          {authorLabel}
         </div>
         <div className={`message-content ${visualStreaming ? 'streaming-card' : 'answer-card'}`}>
           {markdown ? (
