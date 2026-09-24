@@ -452,13 +452,7 @@ export class RsiService {
   }
 
   private rsiDirtyError(root: string, blocked: string[]) {
-    const paths = blocked.join(' ');
-    return new RuntimeError('rsi_dirty',
-      `Uncommitted changes outside this RSI change: ${blocked.join(', ')}. `
-      + 'Checks run against the working tree, so they would verify changes that the commit does not contain. '
-      + `Commit them first, for example \`git -C ${root} add -A -- ${paths} && git -C ${root} commit -m "wip"\`, `
-      + `or revert them with \`git -C ${root} restore --staged --worktree -- ${paths}\`. `
-      + 'Files left behind by an earlier failed RSI attempt on this branch are committed instead of reported.');
+    return new RuntimeError('rsi_dirty', rsiDirtyMessage(root, blocked));
   }
 
   /** Keep queued work intact while the desktop drains existing operations. */
@@ -912,4 +906,22 @@ export function openRsiService(options: RsiServiceOptions) {
   const service = new RsiService(options);
   services.set(key, service);
   return service;
+}
+
+/**
+ * Why a dirty path outside the requested change stops an RSI write, and what to do
+ * about it. An Agent that edited the checkout by hand gets this instead of a
+ * commit, so the message has to name the supported route: RSI edits must be
+ * written by the tool, which is the only path that can attribute them to a
+ * verified commit.
+ */
+export function rsiDirtyMessage(root: string, blocked: string[]): string {
+  const paths = blocked.join(' ');
+  return `Uncommitted changes outside this RSI change: ${blocked.join(', ')}. `
+    + 'Checks run against the working tree, so they would verify changes that the commit does not contain. '
+    + 'If you edited these files by hand, revert them and pass the same edits as changes to apply_rsi_change: '
+    + 'RSI edits must be written by the tool, and a hand-committed tree cannot be attributed to a verified RSI commit. '
+    + `To keep them as ordinary work instead, commit them first, for example \`git -C ${root} add -A -- ${paths} && git -C ${root} commit -m "wip"\`, `
+    + `or revert them with \`git -C ${root} restore --staged --worktree -- ${paths}\`. `
+    + 'Files left behind by an earlier failed RSI attempt on this branch are committed instead of reported.';
 }

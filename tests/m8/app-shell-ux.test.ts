@@ -554,7 +554,10 @@ test('the composer suggestion and queue steering follow the three Enter states',
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
     return messages.some(message => message.role === 'user' && message.text === '继续检查测试覆盖和失败分支。');
   }, { timeout: 10_000 }).toBe(true);
-});
+  // This test drives a real turn through a browser; under the parallel gate it has
+  // timed out at the 15s default while passing on its own, so it uses the same
+  // budget as the other browser-driven cases in this file.
+}, 60_000);
 
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');

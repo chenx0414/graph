@@ -51,3 +51,13 @@ test('a check reaches the host toolchain an app started from the desktop would m
   const resolved = validationCommand({ command: 'node', args: ['--version'] }, { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' });
   expect(execFileSync('/usr/bin/which', ['npm'], { encoding: 'utf8', env: { PATH: resolved.env.PATH } }).trim()).toBe(npm);
 });
+
+test('the dirty-path refusal names the RSI write path an Agent must use', async () => {
+  const { rsiDirtyMessage } = await import('../../src/runtime/rsi.ts');
+  const text = rsiDirtyMessage('/repo', ['src/a.ts', 'src/b.ts']);
+  expect(text).toContain('src/a.ts, src/b.ts');
+  // The route that works: hand edits go back to the tool as changes.
+  expect(text).toContain('apply_rsi_change');
+  expect(text).toContain('revert them');
+  expect(text).toContain('must be written by the tool');
+});
