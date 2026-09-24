@@ -14,6 +14,7 @@ import {
 } from './agent-system-prompt.ts';
 import { capabilityPrompts, type CapabilityLoadFact } from './capabilities.ts';
 import { openCapabilityBundle, type CapabilityBundleOptions, type CapabilityOperation } from './capability-bundle.ts';
+import { agentSkills } from './agent-skills.ts';
 import { piNativeToolNamesForPlatform, piNativeToolPromptEntries, selectAgentToolSurface } from './pi-native-tools.ts';
 
 export interface AgentContextTool extends Omit<AgentToolPromptEntry, 'version'> {
@@ -139,7 +140,11 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     bootstrap,
     ...(input.mcpDomains ? { mcpDomains: input.mcpDomains } : {}),
     ...(input.secrets ? { secrets: input.secrets } : {}),
+    ...(input.skillFolder ? { skillFolder: input.skillFolder } : {}),
+    ...(input.skillOwnedRoots?.length ? { skillOwnedRoots: input.skillOwnedRoots } : {}),
   });
+  // The SDK's own loader reads the Agent's folder; its own formatter renders the block.
+  const skills = input.skillFolder ? agentSkills(input.skillFolder).block : '';
   const retrievalNote = input.retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : '';
   const [common, roleRules, toolGuidance, runtime, projectContext, disabledTools] = await Promise.all([
     input.library?.prompt('rules/common.md') ?? DEFAULT_COMMON_RULES,
@@ -164,6 +169,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
       })),
       capabilities,
       ...(capabilityDocs?.trim() ? { capabilityDocs } : {}),
+      ...(skills ? { skills } : {}),
       ...(workspace ? { cwd: workspace } : {}), role,
     });
     return { tools, capabilities, composed, docsRoot: docs.root };

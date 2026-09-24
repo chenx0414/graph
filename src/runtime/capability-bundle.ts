@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
+import { dirname } from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { selectAgentToolSurface } from './pi-native-tools.ts';
+import { syncAgentSkills } from './agent-skills.ts';
 import {
   capabilityPrompts,
   loadCapabilities,
@@ -24,6 +26,13 @@ export interface CapabilityBundleOptions {
   bootstrap?: { agent?: string; tool?: string };
   mcpDomains?: string[];
   secrets?: () => Record<string, string>;
+  /**
+   * The Agent's own skills folder. Bound skills are mirrored into it as symlinks and the
+   * SDK loads skills from it, so a hand-edited folder is a first-class input.
+   */
+  skillFolder?: string;
+  /** Capability roots Graph owns; links pointing into them are Graph's own to manage. */
+  skillOwnedRoots?: readonly string[];
 }
 
 export interface CapabilityOperationOptions {
@@ -57,6 +66,8 @@ export interface CapabilityOperation {
   readonly prompts: { system: string; tool: string | null };
   readonly report: LoadedCapabilities['report'];
   readonly skillPaths: readonly string[];
+  /** The Agent's skills folder the SDK loads from; null when this bundle has none. */
+  readonly skillFolder: string | null;
   readonly readRoots: readonly string[];
   readonly writeRoots: readonly string[];
   readonly env: Readonly<Record<string, string>>;
@@ -119,6 +130,17 @@ export class CapabilityBundleVersion {
 
   static async open(options: CapabilityBundleOptions) {
     const facts = await resolveCapabilityFacts(options.catalog, options.definitionVersion);
+    // Mirror this definition's bound skills into the Agent's folder before anything reads
+    // it, so the console preview and the real operation see the same folder.
+    if (options.skillFolder) {
+      syncAgentSkills({
+        dir: options.skillFolder,
+        ownedRoots: options.skillOwnedRoots ?? [],
+        links: facts.flatMap(fact => fact.kind === 'skill' && fact.path
+          ? [{ id: fact.id, target: dirname(fact.path) }]
+          : []),
+      });
+    }
     return new CapabilityBundleVersion(options, facts);
   }
 
@@ -214,6 +236,7 @@ export class CapabilityBundleVersion {
         allowUnrestrictedNetwork: loaded.allowUnrestrictedNetwork,
         allowLocalBinding: loaded.allowLocalBinding,
         unixSockets: Object.freeze([...loaded.unixSockets]),
+        skillFolder: this.input.skillFolder ?? null,
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
         piExtensionTools: Object.freeze([...piExtensionTools]),
         close: () => loaded!.close(),
