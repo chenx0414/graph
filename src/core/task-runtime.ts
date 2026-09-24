@@ -369,6 +369,9 @@ export async function openTaskRuntime(options: {
     catalog = new Catalog(store, {
       ...(options.catalog?.capabilityRoot ? { capabilityRoot: options.catalog.capabilityRoot } : {}),
       ...(options.catalog?.recipesPath ? { recipesPath: options.catalog.recipesPath } : {}),
+      // The configured projects, read on every refresh: their own `.pi`/`.agents` skill
+      // folders belong in the library view next to the global and per-Agent ones.
+      projects: () => configuredProjects() ?? [],
     });
     await catalog.refresh();
     git = new GitIntegration(store, stateDir);

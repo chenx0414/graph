@@ -44,3 +44,22 @@ test('a skill placed in an Agent folder appears in the library with its native f
   expect(byId.get('handoff')).toMatchObject({ version: '1.0.0', status: 'available' });
   expect(byId.get('handoff')?.note).toContain('disable-model-invocation');
 });
+
+test('skills in a project .pi or .agents folder appear with their project owner', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-agent-skills-project-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const project = join(root, 'checkout');
+  await mkdir(join(project, '.agents', 'skills', 'repo-skill'), { recursive: true });
+  await writeFile(join(project, '.agents', 'skills', 'repo-skill', 'SKILL.md'), '---\nname: repo-skill\ndescription: Ships with the repo.\n---\n');
+  await mkdir(join(project, '.pi', 'skills', 'pi-skill'), { recursive: true });
+  await writeFile(join(project, '.pi', 'skills', 'pi-skill', 'SKILL.md'), '---\nname: pi-skill\ndescription: Pi project skill.\n---\n');
+
+  const library = new CapabilityLibrary({ capabilityRoot, projects: () => [{ id: 'demo', root: project }] });
+  await library.refreshCapabilities();
+  const byId = new Map(library.capabilities().map(item => [item.id, item]));
+  expect(byId.get('repo-skill')).toMatchObject({
+    kind: 'skill', version: 'local', status: 'available', owner: '项目 demo（.agents）', name: 'repo-skill',
+  });
+  expect(byId.get('pi-skill')).toMatchObject({ kind: 'skill', version: 'local', owner: '项目 demo（.pi）' });
+});

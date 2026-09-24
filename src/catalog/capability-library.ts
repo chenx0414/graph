@@ -13,7 +13,7 @@ import {
   type AgentCombinationView,
 } from './agent-combinations.ts';
 import { homedir } from 'node:os';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { CONFIG_DIR_NAME, getAgentDir } from '@earendil-works/pi-coding-agent';
 import { parseCapabilityManifest, scanAgentSkills, scanCapabilities, scanNativeSkills, type CapabilityManifest } from './file-capabilities.ts';
 import type { ModelGrade } from './models.ts';
 
@@ -126,18 +126,22 @@ export interface AgentCombinationSearchInput {
 interface CapabilityLibraryOptions {
   capabilityRoot?: string;
   recipesPath?: string;
+  /** The configured projects, read at refresh time, so their own skill folders are listed. */
+  projects?: () => readonly { id: string; root: string }[];
 }
 
 /** The filesystem-backed capability library and its Agent recipes. */
 export class CapabilityLibrary {
   private readonly capabilityRoot?: string;
   private readonly recipesPath?: string;
+  private readonly projects?: () => readonly { id: string; root: string }[];
   private capabilitiesCache: CapabilityRecord[] = [];
   private recipes: AgentCombination[] = [];
   private recipesError: string | undefined;
 
   constructor(options: CapabilityLibraryOptions = {}) {
     if (options.capabilityRoot) this.capabilityRoot = options.capabilityRoot;
+    if (options.projects) this.projects = options.projects;
     if (options.recipesPath) this.recipesPath = options.recipesPath;
   }
 
@@ -146,12 +150,21 @@ export class CapabilityLibrary {
       this.capabilitiesCache = [];
       return this.capabilities();
     }
-    // Skills the user placed belong to the same library view: an Agent's own folder, and the
-    // global folders - the Pi agent directory and `.agents` - which every Agent loads.
+    // Skills the user placed belong to the same library view: an Agent's own folder, the
+    // global folders - the Pi agent directory and `.agents` - which every Agent loads, and
+    // each configured project's own `.pi`/`.agents` folders, which reach the Agents that
+    // work in it.
     const placed = await scanAgentSkills(join(dirname(this.capabilityRoot), 'agents'));
     const global = await scanNativeSkills(join(getAgentDir(), 'skills'), '全局（Pi agent 目录）');
     const agents = await scanNativeSkills(join(homedir(), '.agents', 'skills'), '全局（~/.agents）');
-    this.capabilitiesCache = [...await scanCapabilities(this.capabilityRoot), ...placed, ...global, ...agents];
+    const projects: CapabilityRecord[] = [];
+    for (const project of this.projects?.() ?? []) {
+      projects.push(...await scanNativeSkills(join(project.root, CONFIG_DIR_NAME, 'skills'), `项目 ${project.id}（.pi）`));
+      projects.push(...await scanNativeSkills(join(project.root, '.agents', 'skills'), `项目 ${project.id}（.agents）`));
+    }
+    this.capabilitiesCache = [
+      ...await scanCapabilities(this.capabilityRoot), ...placed, ...global, ...agents, ...projects,
+    ];
     return this.capabilities();
   }
 

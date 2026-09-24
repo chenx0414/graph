@@ -33,7 +33,7 @@ export interface SavedAgentCombination {
 export class Catalog {
   private readonly store: TaskStore;
   private readonly capabilityLibrary: CapabilityLibrary;
-  constructor(store: TaskStore, options: { capabilityRoot?: string; recipesPath?: string } = {}) {
+  constructor(store: TaskStore, options: { capabilityRoot?: string; recipesPath?: string; projects?: () => readonly { id: string; root: string }[] } = {}) {
     this.store = store;
     this.capabilityLibrary = new CapabilityLibrary(options);
   }
