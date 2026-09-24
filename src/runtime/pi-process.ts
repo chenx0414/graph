@@ -33,6 +33,7 @@ export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'on
   tools: PiWorkerTool[];
   nativeTools: string[];
   skillPaths: string[];
+  skillFolder?: string;
   piExtensionPaths: string[];
   piExtensionTools: string[];
   systemPrompt: string;
@@ -113,6 +114,7 @@ export async function openPiProcess(options: PiProcessOptions) {
   const workerPath = fileURLToPath(new URL('./pi-worker.ts', import.meta.url));
   const appRoot = await realpath(graphApplicationRoot());
   const skillPaths = await Promise.all((options.skillPaths ?? []).map(path => realpath(path)));
+  const skillFolder = options.skillFolder ? await realpath(options.skillFolder) : null;
   const piExtensionPaths = await Promise.all((options.piExtensionPaths ?? []).map(path => realpath(path)));
   const capabilityReadRoots = await Promise.all((options.readRoots ?? []).map(path => realpath(path)));
   const capabilityWriteRoots = await Promise.all((options.writeRoots ?? []).map(path => realpath(path)));
@@ -133,6 +135,7 @@ export async function openPiProcess(options: PiProcessOptions) {
     tools: serializedTools(tools),
     nativeTools: options.nativeTools ?? [],
     skillPaths,
+    ...(skillFolder ? { skillFolder } : {}),
     piExtensionPaths,
     piExtensionTools: options.piExtensionTools ?? [],
     systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
@@ -204,6 +207,7 @@ export async function openPiProcess(options: PiProcessOptions) {
       workspace,
       stateDir,
       ...skillPaths,
+      ...(skillFolder ? [skillFolder] : []),
       ...piExtensionPaths,
       ...capabilityReadRoots,
       ...capabilityWriteRoots,

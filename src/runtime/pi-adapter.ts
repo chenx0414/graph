@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { clampThinkingLevel, type Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
+import { agentSkillOwnedRoots, agentSkillsDir } from './agent-skills.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { thinkingLevelMapFor } from '../catalog/thinking.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
@@ -351,6 +352,7 @@ export function createPiAdapter(options: {
         } : undefined;
         try {
           const definitionId = instance.definition_version?.split('@')[0];
+          const skillCapabilityRoot = options.catalog.capabilityRootPath();
           contextAssembly = await openAgentContextAssembly({
             catalog: options.catalog,
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
@@ -368,6 +370,13 @@ export function createPiAdapter(options: {
             },
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
             ...(options.capabilitySecrets ? { secrets: options.capabilitySecrets } : {}),
+            ...(definitionId && skillCapabilityRoot ? {
+              skillFolder: agentSkillsDir(definitionId, resolve(skillCapabilityRoot, '..')),
+              skillOwnedRoots: agentSkillOwnedRoots({
+                capabilityRoot: skillCapabilityRoot,
+                stateDir: dirname(options.instancesDir),
+              }),
+            } : {}),
           });
           const bundle = contextAssembly.bundle;
           const capabilityRoot = spec.role === 'master' && options.catalog?.capabilityRootPath()
@@ -888,6 +897,7 @@ export function createPiAdapter(options: {
             tools,
             allowedToolNames: [...capabilityOperation.allowedToolNames],
             ...(capabilityOperation.skillPaths.length ? { skillPaths: [...capabilityOperation.skillPaths] } : {}),
+            ...(capabilityOperation.skillFolder ? { skillFolder: capabilityOperation.skillFolder } : {}),
             ...(capabilityOperation.readRoots.length ? { readRoots: [...capabilityOperation.readRoots] } : {}),
             ...(capabilityOperation.writeRoots.length ? { writeRoots: [...capabilityOperation.writeRoots] } : {}),
             ...(Object.keys(capabilityOperation.env).length ? { env: { ...capabilityOperation.env } } : {}),

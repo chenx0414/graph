@@ -39,6 +39,7 @@ import { invocationRows } from '../runtime/task-gate.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
 import type { AgentContextLibrary } from '../runtime/agent-context.ts';
 import { openAgentContextAssembly } from '../runtime/agent-context-assembly.ts';
+import { agentSkillOwnedRoots, agentSkillsDir } from '../runtime/agent-skills.ts';
 import { agentArtifactAccess } from '../runtime/agent-tool-definitions.ts';
 import type { RsiChangeInput, RsiService } from '../runtime/rsi.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
@@ -1257,6 +1258,13 @@ export async function openTaskRuntime(options: {
             ? { agent: options.catalog.bootstrapPrompts[definitionId]! } : {}),
           ...(options.catalog?.bootstrapToolPrompt !== undefined ? { tool: options.catalog.bootstrapToolPrompt } : {}),
         },
+        ...(definitionId && options.catalog?.capabilityRoot ? {
+          skillFolder: agentSkillsDir(definitionId, resolve(options.catalog.capabilityRoot, '..')),
+          skillOwnedRoots: agentSkillOwnedRoots({
+            capabilityRoot: options.catalog.capabilityRoot,
+            stateDir,
+          }),
+        } : {}),
       });
       const preview = await assembly.preview({
         role: 'master', run: true, fetch: true, catalog: true,
