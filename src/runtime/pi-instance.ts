@@ -62,11 +62,12 @@ export interface PiInstanceOptions {
   tools?: ToolDefinition[];
   nativeTools?: string[];
   skillPaths?: string[];
+  /** The Agent's own skills folder: the SDK loads skills from here. */
+  skillFolder?: string;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
   extensionFactories?: InlineExtension[];
   systemPrompt?: string;
-  hideSkillDescriptions?: boolean;
   activateExtensionTools?: boolean;
   allowedToolNames?: string[];
   bundleDigest?: string;
@@ -287,16 +288,12 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const extensionFactories = [...(options.extensionFactories ?? []), ...(promptTakeover ? [promptTakeover] : [])];
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
-    ...(options.skillPaths?.length ? { additionalSkillPaths: options.skillPaths } : {}),
+    ...(options.skillFolder
+      ? { additionalSkillPaths: [options.skillFolder] }
+      : options.skillPaths?.length ? { additionalSkillPaths: options.skillPaths } : {}),
     ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
     ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-    ...(options.hideSkillDescriptions ? {
-      skillsOverride: base => ({
-        ...base,
-        skills: base.skills.map(skill => ({ ...skill, disableModelInvocation: true })),
-      }),
-    } : {}),
     noExtensions: true, noSkills: true, noPromptTemplates: true,
     noThemes: true, noContextFiles: true,
   });

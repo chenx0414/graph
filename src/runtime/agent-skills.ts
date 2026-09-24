@@ -24,6 +24,12 @@ export function agentSkillsDir(agentId: string, home: string): string {
   return join(home, 'agents', agentId, 'skills');
 }
 
+/** The capability roots Graph owns, so it can tell its own links from hand-made ones. */
+export function agentSkillOwnedRoots(input: { capabilityRoot?: string | undefined; stateDir: string }): string[] {
+  return [input.capabilityRoot, join(input.stateDir, 'capabilities')]
+    .filter((path): path is string => Boolean(path));
+}
+
 function linkTarget(path: string): string {
   return resolve(dirname(path), readlinkSync(path));
 }
