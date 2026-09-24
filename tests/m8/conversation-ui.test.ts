@@ -302,7 +302,11 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   // 8. Pause, queue a message, restart the daemon on the same state, resume.
   // The primary control sends *and* resumes while paused, so the message is
   // queued through the keyboard, which leaves the conversation paused.
-  await page.getByTestId('conversation-pause').click();
+  // The composer primary control is the single pause entry point now; reach the
+  // paused state through the same endpoint it calls, then resume the same way.
+  const pausedConversationId = await page.evaluate(() => location.hash.replace('#/conversations/', ''));
+  await server.runtime.conversations.pause(pausedConversationId, 'restart-pause');
+  await page.reload();
   await includes(page, '已暂停');
   await page.getByTestId('chat-input').fill('重启后处理的消息。');
   await page.getByTestId('chat-input').press('Enter');
@@ -314,7 +318,8 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.goto(`${server.url}/#/conversations/${conversationId}`);
   await page.getByTestId('conversation').waitFor();
   await includes(page, '重启后处理的消息');
-  await page.getByTestId('conversation-resume').click();
+  await server.runtime.conversations.resume(conversationId, 'restart-resume');
+  await page.reload();
   await includes(page, '重启后也收到了这条消息。', 40_000);
   await page.screenshot({ path: join(evidence, '05-restart-resume.png'), fullPage: true });
 }, 240_000);

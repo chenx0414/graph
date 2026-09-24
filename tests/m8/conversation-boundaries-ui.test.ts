@@ -110,7 +110,7 @@ test('the conversation page surfaces master questions, live worker status, costs
 
   // ME-R04: more than one page of records still shows the newest messages and
   // keeps older history reachable.
-  await page.getByTestId('conversation-pause').click();
+  await server.runtime.conversations.pause(created.conversationId, 'paging-pause');
   for (let index = 0; index < 210; index++) {
     await server.runtime.conversations.chat(created.conversationId, { text: `paged-${String(index).padStart(3, '0')}`, requestId: `paged-${index}` });
   }
