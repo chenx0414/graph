@@ -312,13 +312,13 @@ export class Execution {
   }
 
   /**
-   * A conversation master is long-lived: it follows the latest definition of its
-   * own recipe, so editing a recipe takes effect on the next turn. A task's own
-   * nodes keep the definition version they were created with.
+   * Every Agent node follows the latest definition of its own recipe, so editing
+   * a recipe takes effect on that node's next dispatch. A node keeps its model,
+   * its work copy and its position; only the definition version moves.
    */
-  private refreshMasterDefinition(node: ExecutionNodeRow): ExecutionNodeRow {
+  private refreshDefinition(node: ExecutionNodeRow): ExecutionNodeRow {
     const spec = JSON.parse(node.spec) as NodeSpec;
-    const id = spec.role === 'master' ? spec.definitionVersion?.split('@')[0] : undefined;
+    const id = spec.definitionVersion?.split('@')[0];
     const latest = id
       ? this.catalog?.listDefinitions().filter(item => item.id === id).sort((left, right) => right.version - left.version)[0]
       : undefined;
@@ -395,7 +395,7 @@ export class Execution {
       const conversation = conversationForTask(this.store, node.task_id);
       if (!conversation || conversation.archived_at !== null) return false;
     }
-    const spec = JSON.parse(this.refreshMasterDefinition(node).spec) as NodeSpec;
+    const spec = JSON.parse(this.refreshDefinition(node).spec) as NodeSpec;
     const adapter = spec.action === 'graph.verify'
       ? graphVerifier(this.store, spec)
       : spec.action === 'graph.human_check'

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import type { NodeSpec } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -653,4 +654,83 @@ test('a conversation master follows the latest definition of its recipe on the n
   expect(view.master?.definitionVersion).toBe('master@2');
   expect(provider.requests).toHaveLength(2);
   expect(toolNames(provider.requests[1])).not.toContain('mcp_github_search_repositories');
+}, 120_000);
+
+test('a task node follows the latest definition of its own recipe on its next dispatch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-lane-definition-reload-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const capability = join(capabilityRoot, 'github');
+  await mkdir(capability, { recursive: true });
+  await copyFile(new URL('../fixtures/mcp-read-capability-server.mjs', import.meta.url), join(capability, 'server.mjs'));
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({
+    id: 'github', kind: 'mcp', version: '1.0.0', name: 'GitHub',
+    command: 'node', args: ['./server.mjs'], networkDomains: ['github.com'],
+  }, null, 2));
+
+  const briefings: string[] = [];
+  const settle = async (count: number) => {
+    for (let attempt = 0; attempt < 200 && briefings.length < count; attempt += 1) {
+      await runtime.host.runReady();
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  const provider = await openaiServer([{ text: '主 Agent 回合。' }, { text: '第一个 worker 完成。' }, { text: '第二个 worker 完成。' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'project', root }],
+    actions: {
+      worker: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
+        briefings.push(JSON.stringify(operation.context.briefing ?? {}));
+        return {
+          outcome: 'completed',
+          output: {
+            schemaVersion: 1, objective: 'run one lane', outcome: 'completed', workSummary: 'lane done',
+            changes: [], decisions: [], verification: [], knownLimits: [], openQuestions: [], nextActions: [],
+          },
+          usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 },
+        };
+      } },
+    },
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [] }, 'master-def');
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [{ id: 'github', version: '1.0.0' }] }, 'worker-v1');
+
+  const { taskId } = await runtime.user.begin({ projectId: 'project', request: '两个 worker', requestId: 'lane-begin' });
+  const task = runtime.user.task(taskId);
+  const nodes: NodeSpec[] = [
+    { id: 'worker-a', kind: 'agent', action: 'worker', role: 'worker', model: 'local', definitionVersion: 'worker@1' },
+    { id: 'worker-b', kind: 'agent', action: 'worker', role: 'worker', model: 'local', definitionVersion: 'worker@1', dependsOn: ['worker-a'] },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['worker-a', 'worker-b'] },
+  ];
+  const proposal = await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: '两个 worker',
+    acceptance: [{ id: 'works', description: '两项工作都完成', checkNode: 'check' }],
+    nodes,
+  }, 'lane-proposal');
+  await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'lane-accept' });
+
+  await settle(1);
+  // worker-a ran at its pinned definition, so its briefing listed the MCP.
+  expect(briefings).toHaveLength(1);
+  expect(briefings[0]).toContain('github@1.0.0');
+
+  // The recipe is edited while the task is still running: the next lane to be
+  // dispatched follows it.
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [] }, 'worker-v2');
+  await settle(2);
+
+  expect(briefings).toHaveLength(2);  expect(briefings[1]).not.toContain('github@1.0.0');
+  expect((await task.view()).nodes.find(node => node.id === 'worker-b')?.definitionVersion).toBe('worker@2');
 }, 120_000);
