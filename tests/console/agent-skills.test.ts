@@ -59,3 +59,23 @@ test('one skills folder per recipe links the bound skills, and hand-made entries
   expect((await lstat(join(dir, 'external'))).isSymbolicLink()).toBe(true);
   expect(agentSkills(dir).skills.map(item => item.name)).toEqual(['my-own']);
 });
+
+test('the scope loads the Agent folder plus the SDK global and project folders', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-agent-skills-scope-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  const workspace = join(root, 'project');
+  await skillDir(join(home, 'skills'), 'global-skill', 'global-skill', 'Global.');
+  await skillDir(join(workspace, '.pi', 'skills'), 'project-skill', 'project-skill', 'Project.');
+  const folder = agentSkillsDir('coder', home);
+  await skillDir(folder, 'own-skill', 'own-skill', 'Own.');
+
+  const scoped = agentSkills({ folder, cwd: workspace, agentDir: home });
+  expect(scoped.skills.map(item => item.name).sort()).toEqual(['global-skill', 'own-skill', 'project-skill']);
+  expect(scoped.block).toContain('global-skill');
+  expect(scoped.block).toContain('project-skill');
+
+  // Folders that do not exist contribute nothing.
+  const onlyOwn = agentSkills({ folder, cwd: join(root, 'nowhere'), agentDir: join(root, 'no-home') });
+  expect(onlyOwn.skills.map(item => item.name)).toEqual(['own-skill']);
+});

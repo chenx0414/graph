@@ -12,6 +12,7 @@ import {
   type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension, type PromptOptions, type RetrySettings,
 } from '@earendil-works/pi-coding-agent';
 import { canonicalJson } from '../core/store.ts';
+import { nativeSkillDirs } from './agent-skills.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface InstanceBinding {
@@ -286,11 +287,15 @@ export async function openPiInstance(options: PiInstanceOptions) {
     },
   };
   const extensionFactories = [...(options.extensionFactories ?? []), ...(promptTakeover ? [promptTakeover] : [])];
+  // The session's own view of skills must match the block Graph renders into the system
+  // prompt: the Agent's folder plus the SDK's own global and project folders.
+  const skillLoadPaths = [...new Set([
+    ...(options.skillFolder ? [options.skillFolder] : options.skillPaths ?? []),
+    ...nativeSkillDirs({ cwd: workspace }),
+  ])];
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
-    ...(options.skillFolder
-      ? { additionalSkillPaths: [options.skillFolder] }
-      : options.skillPaths?.length ? { additionalSkillPaths: options.skillPaths } : {}),
+    ...(skillLoadPaths.length ? { additionalSkillPaths: skillLoadPaths } : {}),
     ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
     ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),

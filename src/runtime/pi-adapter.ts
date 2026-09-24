@@ -5,7 +5,7 @@ import { clampThinkingLevel, type Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
-import { agentSkillOwnedRoots, agentSkillsDir } from './agent-skills.ts';
+import { agentSkillOwnedRoots, agentSkillsDir, nativeSkillDirs } from './agent-skills.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { thinkingLevelMapFor } from '../catalog/thinking.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
@@ -885,6 +885,9 @@ export function createPiAdapter(options: {
               lastCompaction,
             );
           })();
+          // The skills the session may read must match the block Graph renders: the bound
+          // snapshots plus the SDK's own global and project folders.
+          const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwd: workspace })])];
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
@@ -896,7 +899,7 @@ export function createPiAdapter(options: {
             thinkingLevel,
             tools,
             allowedToolNames: [...capabilityOperation.allowedToolNames],
-            ...(capabilityOperation.skillPaths.length ? { skillPaths: [...capabilityOperation.skillPaths] } : {}),
+            ...(skillReadPaths.length ? { skillPaths: skillReadPaths } : {}),
             ...(capabilityOperation.skillFolder ? { skillFolder: capabilityOperation.skillFolder } : {}),
             ...(capabilityOperation.readRoots.length ? { readRoots: [...capabilityOperation.readRoots] } : {}),
             ...(capabilityOperation.writeRoots.length ? { writeRoots: [...capabilityOperation.writeRoots] } : {}),
