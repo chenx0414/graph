@@ -23,7 +23,7 @@ export interface ConversationStreamRow {
   operation_id: string; conversation_id: string; entry_id: string; part_id: string;
   ordinal: number; text: string; length: number; updated_at: number;
 }
-export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
+export type MessageRole = 'user' | 'assistant' | 'tool' | 'system' | 'activity';
 export type MessageState = 'pending' | 'queued' | 'delivered' | 'done' | 'failed' | 'cancelled';
 
 export function conversationRow(store: TaskStore, conversationId: string): ConversationRow {
@@ -284,7 +284,9 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
   if (nodeSpec.role !== 'master') return;
   const conversation = conversationForTask(store, operation.taskId);
   if (!conversation) return;
-  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND kind='chat' LIMIT 1").get(operation.id)) return;
+  // The final reply is the idempotency marker: a user message also carries
+  // kind='chat', so the role has to be part of the check.
+  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='assistant' AND kind='chat' LIMIT 1").get(operation.id)) return;
   const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
     ? result.output as { [key: string]: Json }
     : undefined;
@@ -303,7 +305,7 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
     for (const record of records) {
       appendMessage(store, {
         conversationId: conversation.id,
-        role: record.kind === 'narration' ? 'assistant' : 'tool',
+        role: record.kind === 'narration' ? 'activity' : 'tool',
         kind: record.kind === 'narration' ? 'activity' : 'tool',
         text: record.text,
         ...(record.kind === 'tool' ? { data: record.data as unknown as Json } : {}),

@@ -134,6 +134,71 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
   );
 }
 
+function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration' }> }) {
+  return (
+    <div className="message-row process-row narration-row" data-role="assistant" data-testid="message-narration">
+      <div className="message-stack">
+        <div className="message-author process-author"><Icon name="spark" size={12} />思考与过程</div>
+        <div className="message-content streaming-card"><Markdown text={row.text} /></div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One finished turn's thinking and tool calls as a single collapsible block. It
+ * starts collapsed once the final answer exists, and the same button re-expands
+ * or collapses it again.
+ */
+function TurnActivity({ row }: { row: Extract<TranscriptRow, { kind: 'activity' }> }) {
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const open = manualOpen ?? !row.collapsed;
+  const tools = row.items.flatMap(item => item.kind === 'tool' ? [item.tool] : []);
+  const failed = tools.some(tool => tool.error);
+  return (
+    <section
+      className="tool-activity-group turn-activity"
+      data-testid="turn-activity"
+      data-active="false"
+      data-open={open}
+      data-error={failed}
+    >
+      <button
+        type="button"
+        className="tool-group-toggle"
+        onClick={() => setManualOpen(current => !(current ?? !row.collapsed))}
+        aria-expanded={open}
+        aria-label={open ? '收起本回合的思考与工具调用' : '展开本回合的思考与工具调用'}
+      >
+        <span className="tool-group-indicator" aria-hidden="true">
+          <Icon name={failed ? 'alert' : 'check'} size={13} />
+        </span>
+        <span className="tool-group-copy">
+          <strong>{tools.length ? toolGroupSummary(tools) : `${row.items.length} 步思考`}</strong>
+          <span>本回合 {row.items.length} 步思考与工具调用</span>
+        </span>
+        <Icon name="chevron" size={14} className="tool-group-chevron" />
+      </button>
+      <div className="tool-group-content" aria-hidden={!open}>
+        <div className="tool-group-content-inner">
+          <ol className="tool-activity-list turn-activity-list">
+            {row.items.map(item => item.kind === 'narration' ? (
+              <li key={`n:${item.id}`} data-kind="narration"><span className="turn-activity-text">{item.text}</span></li>
+            ) : (
+              <li key={`t:${item.id}`} data-error={item.tool.error} data-done={item.tool.done}>
+                <span className="tool-activity-icon"><Icon name={toolIcon(item.tool.name)} size={14} /></span>
+                <span className="tool-activity-label">{toolActionLabel(item.tool.name)}</span>
+                <span className="tool-activity-summary" title={item.tool.summary}>{item.tool.summary}</span>
+                <span className="tool-activity-state">{item.tool.error ? '失败' : item.tool.done ? '完成' : '进行中'}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function sameVeils(left: MarkdownVeil[], right: MarkdownVeil[]) {
   return left.length === right.length && left.every((veil, index) => {
     const other = right[index]!;
@@ -250,9 +315,12 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
   copyable?: string;
   markdown?: boolean;
 }) {
-  const paced = usePacedStreamText(row.text, row.id, row.streaming);
+  // Pacing and veils are keyed by the operation, not by the row id: the live row
+  // and the durable reply row are two rows of the same turn, and the reveal has
+  // to survive that handoff.
+  const paced = usePacedStreamText(row.text, row.operationId, row.streaming);
   const visualStreaming = row.streaming || paced.revealing;
-  const veils = useStreamVeils(paced.text, row.id, visualStreaming);
+  const veils = useStreamVeils(paced.text, row.operationId, visualStreaming);
   const blocks = splitMarkdownBlocks(paced.text);
   return (
     <div
@@ -323,6 +391,8 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
       : <AssistantResponse row={row} copyable={copyText(row)} markdown={markdown} />;
   }
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
+  if (row.kind === 'narration') return <NarrationRow row={row} />;
+  if (row.kind === 'activity') return <TurnActivity row={row} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;
   if (row.kind === 'thinking') {
     return (

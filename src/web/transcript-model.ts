@@ -31,9 +31,17 @@ export type TranscriptRsi = {
   report: string;
 };
 
+/** One ordered step of a finished turn: the narration the Agent wrote between
+ * tool calls, or a tool call itself. */
+export type TranscriptActivityItem =
+  | { kind: 'narration'; id: string; text: string }
+  | { kind: 'tool'; id: string; tool: TranscriptTool };
+
 export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean }
+  | { kind: 'narration'; id: string; operationId: string; text: string }
+  | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
@@ -139,67 +147,136 @@ function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
   });
 }
 
+function isActivityMessage(message: ConversationMessage) {
+  return message.role === 'tool' || message.role === 'activity';
+}
+
+/** Narration is its own record in the conversation ledger; anything else in the
+ * activity stream is a tool call. */
+function activityItem(message: ConversationMessage): TranscriptActivityItem {
+  if (message.kind === 'activity') return { kind: 'narration', id: message.id, text: message.text };
+  const tool = durableTool(message);
+  return { kind: 'tool', id: tool.id, tool };
+}
+
+/** Rows for a turn that has no final answer yet: each narration keeps its place
+ * and a contiguous run of tool calls stays one group. */
+function pushActivityRows(rows: TranscriptRow[], operationId: string, items: TranscriptActivityItem[]) {
+  let tools: TranscriptTool[] = [];
+  const flush = () => {
+    pushToolGroup(rows, tools);
+    tools = [];
+  };
+  for (const item of items) {
+    if (item.kind === 'narration') {
+      flush();
+      rows.push({ kind: 'narration', id: `narration:${item.id}`, operationId, text: item.text });
+      continue;
+    }
+    tools.push(item.tool);
+  }
+  flush();
+}
+
 /**
- * Turn the stream projection into stable visual rows. A contiguous run of
- * tool records is one group; the live tail is appended after durable history
- * so the same row survives the live-to-durable handoff.
+ * Turn the stream projection into stable visual rows. A turn keeps its own
+ * order: narration and tool calls are interleaved by the ordinal the server
+ * assigned, and a turn that already produced its final answer collapses into one
+ * activity block so the answer stays the visible outcome. The live tail is
+ * appended after durable history so the same row survives the handoff.
  */
 export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
-  let tools: TranscriptTool[] = [];
-  let toolsById = new Map<string, TranscriptTool>();
+  const answered = new Set(input.messages
+    .filter(message => message.role === 'assistant' && message.kind === 'chat' && message.operationId)
+    .map(message => message.operationId as string));
 
-  const flushTools = () => {
-    pushToolGroup(rows, tools);
-    tools = [];
-    toolsById = new Map();
+  // Durable activity is buffered per turn, so a finished turn becomes one
+  // collapsible block and a running one keeps its individual rows.
+  let activityKey: string | null = null;
+  let activityItems: TranscriptActivityItem[] = [];
+  const activityToolIndex = new Map<string, number>();
+
+  const flushActivity = () => {
+    if (activityKey === null) return;
+    const key = activityKey;
+    const items = activityItems;
+    activityKey = null;
+    activityItems = [];
+    activityToolIndex.clear();
+    if (!items.length) return;
+    if (key && answered.has(key)) {
+      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, collapsed: true });
+      return;
+    }
+    pushActivityRows(rows, key, items);
   };
 
   for (const message of input.messages) {
-    if (message.role !== 'tool') {
-      flushTools();
-      if (message.role === 'assistant') {
-        rows.push({
-          kind: 'assistant',
-          id: `assistant:${message.operationId ?? message.id}`,
-          operationId: message.operationId ?? message.id,
-          text: message.text,
-          streaming: false,
-        });
-        continue;
+    if (isActivityMessage(message)) {
+      const key = message.operationId ?? '';
+      if (activityKey !== null && activityKey !== key) flushActivity();
+      activityKey = key;
+      const incoming = activityItem(message);
+      if (incoming.kind === 'tool') {
+        // A tool call and its result are two records of the same call.
+        const index = activityToolIndex.get(incoming.id);
+        if (index !== undefined) {
+          const previous = activityItems[index]!;
+          if (previous.kind === 'tool') activityItems[index] = { ...previous, tool: mergeTool(previous.tool, incoming.tool) };
+          continue;
+        }
+        activityToolIndex.set(incoming.id, activityItems.length);
       }
-      if (message.role === 'system' && message.kind === 'rsi') {
-        rows.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) });
-        continue;
-      }
-      rows.push({ kind: 'message', id: message.id, message });
+      activityItems.push(incoming);
       continue;
     }
-    const incoming = durableTool(message);
-    const previous = toolsById.get(incoming.id);
-    const merged = mergeTool(previous, incoming);
-    toolsById.set(incoming.id, merged);
-    if (previous) {
-      const index = tools.findIndex(tool => tool.id === incoming.id);
-      if (index >= 0) tools[index] = merged;
-    } else {
-      tools.push(merged);
+    flushActivity();
+    if (message.role === 'assistant') {
+      rows.push({
+        kind: 'assistant',
+        id: `assistant:${message.operationId ?? message.id}`,
+        operationId: message.operationId ?? message.id,
+        text: message.text,
+        streaming: false,
+      });
+      continue;
     }
+    if (message.role === 'system' && message.kind === 'rsi') {
+      rows.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) });
+      continue;
+    }
+    rows.push({ kind: 'message', id: message.id, message });
   }
-  flushTools();
+  flushActivity();
 
-  if (input.liveTools.length) {
-    pushToolGroup(rows, input.liveTools.map(liveTool));
+  // The live tail is ordered by the same ordinal, so a text part emitted before
+  // a tool call stays above it while the turn is still running.
+  const tail: { ordinal: number; tool?: TranscriptTool; stream?: LiveText }[] = [
+    ...input.liveTools.map(tool => ({ ordinal: tool.ordinal, tool: liveTool(tool) })),
+    ...input.streaming.map(stream => ({ ordinal: stream.ordinal, stream })),
+  ].sort((left, right) => left.ordinal - right.ordinal);
+  let liveTools: TranscriptTool[] = [];
+  const flushLiveTools = () => {
+    pushToolGroup(rows, liveTools);
+    liveTools = [];
+  };
+  for (const item of tail) {
+    if (item.stream) {
+      flushLiveTools();
+      rows.push({
+        kind: 'assistant',
+        id: `assistant:${item.stream.entryId}:${item.stream.partId}`,
+        operationId: item.stream.operationId,
+        text: item.stream.text,
+        streaming: true,
+      });
+      continue;
+    }
+    if (item.tool) liveTools.push(item.tool);
   }
-  for (const stream of input.streaming) {
-    rows.push({
-      kind: 'assistant',
-      id: `assistant:${stream.entryId}`,
-      operationId: stream.operationId,
-      text: stream.text,
-      streaming: true,
-    });
-  }
+  flushLiveTools();
+
   if (input.busy && !input.liveTools.length && !input.streaming.length) {
     rows.push({ kind: 'thinking', id: 'thinking' });
   }

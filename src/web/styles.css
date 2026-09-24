@@ -1259,6 +1259,20 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .tool-activity-state { color: var(--faint); }
 .tool-activity-list li[data-error="true"] .tool-activity-icon,
 .tool-activity-list li[data-error="true"] .tool-activity-state { color: #b43c3c; }
+/* A finished turn's activity block keeps the narration and the tool calls in the
+   order they happened, so narration reads as a line between tool rows. */
+.turn-activity-list li[data-kind="narration"] {
+  display: block;
+  min-height: 0;
+  padding: 3px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.turn-activity-list li[data-kind="narration"] .turn-activity-text { display: block; }
+.turn-activity-list li[data-kind="narration"] + li[data-kind="tool"],
+.turn-activity-list li[data-kind="narration"] + li:not([data-kind]) { margin-top: 3px; }
 .message-content p { margin: 0; }
 .message-state { color: var(--faint); font-size: 11px; }
 .message-attachments { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }

@@ -114,7 +114,7 @@ test('a settled turn records its narration and tool calls in the order they happ
   const rows = store.db.prepare("SELECT role,kind,text FROM messages WHERE conversation_id='conversation' ORDER BY seq")
     .all();
   expect(rows).toEqual([
-    { role: 'assistant', kind: 'activity', text: '先读代码' },
+    { role: 'activity', kind: 'activity', text: '先读代码' },
     { role: 'tool', kind: 'tool', text: 'read: a.ts' },
     { role: 'tool', kind: 'tool', text: 'edit: b.ts' },
     { role: 'assistant', kind: 'chat', text: '最终回答' },

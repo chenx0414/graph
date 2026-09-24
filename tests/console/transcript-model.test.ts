@@ -88,6 +88,7 @@ function message(input: {
   id: string;
   seq: number;
   role: string;
+  kind?: string;
   text?: string;
   operationId?: string | null;
   data?: Record<string, unknown> | null;
@@ -96,7 +97,7 @@ function message(input: {
     id: input.id,
     seq: input.seq,
     role: input.role,
-    kind: 'chat',
+    kind: input.kind ?? 'chat',
     text: input.text ?? input.id,
     data: input.data ?? null,
     state: 'done',
@@ -191,14 +192,14 @@ test('duplicate tool start and end records keep one stable row and preserve fail
   expect(rows[0].tools[0]).toMatchObject({ id: 'same-tool', error: true, done: true });
 });
 
-test('live and durable assistant rows keep the same identity and operation-based block key', () => {
+test('live and durable assistant rows share the turn key the reveal is paced by', () => {
   const live = buildTranscriptRows({
     messages: [],
     liveTools: [],
     streaming: [{
       operationId: 'op-1',
-      entryId: 'op-1',
-      partId: 'text',
+      entryId: 'entry-1',
+      partId: '0',
       ordinal: 1,
       text: '第一段\n\n第二段',
       length: 9,
@@ -213,6 +214,64 @@ test('live and durable assistant rows keep the same identity and operation-based
     busy: false,
   });
 
-  expect(live[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', streaming: true });
-  expect(durable[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', streaming: false });
+  expect(live[0]).toMatchObject({ kind: 'assistant', id: 'assistant:entry-1:0', operationId: 'op-1', streaming: true });
+  expect(durable[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', operationId: 'op-1', streaming: false });
+});
+
+test('a finished turn collapses its narration and tool calls, in order, above the answer', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'user', seq: 1, role: 'user', text: '看一下', operationId: 'op-1' }),
+      message({ id: 'n1', seq: 2, role: 'activity', kind: 'activity', text: '先读代码', operationId: 'op-1' }),
+      message({ id: 't1', seq: 3, role: 'tool', text: 'a.ts', data: { toolCallId: 'tool-1', toolName: 'read' }, operationId: 'op-1' }),
+      message({ id: 'n2', seq: 4, role: 'activity', kind: 'activity', text: '现在改投影', operationId: 'op-1' }),
+      message({ id: 't2', seq: 5, role: 'tool', text: 'b.ts', data: { toolCallId: 'tool-2', toolName: 'edit' }, operationId: 'op-1' }),
+      message({ id: 'answer', seq: 6, role: 'assistant', kind: 'chat', text: '改好了', operationId: 'op-1' }),
+    ],
+    liveTools: [],
+    streaming: [],
+    busy: false,
+  });
+
+  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
+  const activity = rows[1];
+  if (activity?.kind !== 'activity') throw new Error('expected activity block');
+  expect(activity.collapsed).toBe(true);
+  expect(activity.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration', 'tool']);
+  expect(activity.items.map(item => item.kind === 'narration' ? item.text : item.tool.summary))
+    .toEqual(['先读代码', 'a.ts', '现在改投影', 'b.ts']);
+  expect(rows[2]).toMatchObject({ kind: 'assistant', text: '改好了' });
+});
+
+test('a turn without a final answer keeps narration and tools as their own rows', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'n1', seq: 1, role: 'activity', kind: 'activity', text: '先读代码', operationId: 'op-1' }),
+      message({ id: 't1', seq: 2, role: 'tool', text: 'a.ts', data: { toolCallId: 'tool-1', toolName: 'read' }, operationId: 'op-1' }),
+      message({ id: 't2', seq: 3, role: 'tool', text: 'b.ts', data: { toolCallId: 'tool-2', toolName: 'read' }, operationId: 'op-1' }),
+      message({ id: 'n2', seq: 4, role: 'activity', kind: 'activity', text: '现在改投影', operationId: 'op-1' }),
+    ],
+    liveTools: [],
+    streaming: [],
+    busy: false,
+  });
+
+  expect(rows.map(row => row.kind)).toEqual(['narration', 'tools', 'narration']);
+  expect(rows[1]).toMatchObject({ kind: 'tools', active: false });
+});
+
+test('the live tail interleaves a text part and a tool call by ordinal', () => {
+  const rows = buildTranscriptRows({
+    messages: [],
+    liveTools: [{ toolCallId: 'tool-1', operationId: 'op-1', name: 'read', summary: 'a.ts', done: false, error: false, ordinal: 2 }],
+    streaming: [
+      { operationId: 'op-1', entryId: 'entry-1', partId: '0', ordinal: 1, text: '先看一下', length: 4, updatedAt: 1 },
+      { operationId: 'op-1', entryId: 'entry-1', partId: '2', ordinal: 3, text: '再改投影', length: 4, updatedAt: 2 },
+    ],
+    busy: true,
+  });
+
+  expect(rows.map(row => row.kind)).toEqual(['assistant', 'tools', 'assistant']);
+  expect(rows[0]).toMatchObject({ kind: 'assistant', text: '先看一下', streaming: true });
+  expect(rows[2]).toMatchObject({ kind: 'assistant', text: '再改投影', streaming: true });
 });

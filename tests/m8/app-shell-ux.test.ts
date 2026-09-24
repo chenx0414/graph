@@ -663,7 +663,13 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
-  expect(await page.getByTestId('tool-activity-group').getAttribute('data-open')).toBe('false');
+  // A finished turn collapses its thinking and tool calls into one block, so the
+  // final answer stays the visible outcome.
+  const activity = page.getByTestId('turn-activity');
+  await activity.waitFor();
+  expect(await activity.getAttribute('data-open')).toBe('false');
+  expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
+  expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
   expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');

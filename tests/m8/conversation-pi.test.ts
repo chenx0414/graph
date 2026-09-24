@@ -228,7 +228,10 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   const delta = events.find(event => event.type === 'message.delta');
   expect(delta?.data).toMatchObject({
     entryId: expect.any(String),
-    partId: 'text',
+    // A live part is one text part of one assistant message, so the id is that
+    // message's content index rather than a single 'text' slot.
+    partId: expect.any(String),
+    ordinal: expect.any(Number),
     len: expect.any(Number),
     reset: true,
   });
