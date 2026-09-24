@@ -195,7 +195,9 @@ function capabilityGroups(item: AgentCombinationView) {
   return groups.filter(group => group.resources.length);
 }
 
-function CapabilityDetail({ item }: { item: CapabilityRecord }) {
+type ExtensionUpdate = { installed: string | null; latest: string | null; available: boolean };
+
+function CapabilityDetail({ item, update, onUpdate }: { item: CapabilityRecord; update?: ExtensionUpdate | undefined; onUpdate?: ((item: CapabilityRecord) => void) | undefined }) {
   return (
     <div className="stack resource-detail-sections" data-testid={`capability-detail-${item.id}`}>
       <div className="row" style={{ gap: 8 }}>
@@ -211,6 +213,15 @@ function CapabilityDetail({ item }: { item: CapabilityRecord }) {
         </p>
       ) : null}
       {item.note && <div className="recipe-main-note" data-testid={`capability-note-${item.id}`}>{item.note}</div>}
+      {item.packageSource && (
+        <p className="muted" data-testid={`capability-package-source-${item.id}`}>来源：{item.packageSource}（由 Pi SDK 解析安装）</p>
+      )}
+      {update?.available && (
+        <div className="recipe-main-note" data-testid={`capability-update-${item.id}`}>
+          <span>有可用更新：已安装 {update.installed} → {update.latest}</span>
+          <Button onClick={() => onUpdate?.(item)}>更新</Button>
+        </div>
+      )}
       {item.error && <div className="form-error">{item.error}</div>}
       <section>
         <h4>本地目录</h4>
@@ -605,6 +616,33 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
     : id === 'prompts' ? 6
     : id === 'agents' ? agentCombinations.length
       : sections.find(item => item.id === id)?.items.length ?? 0;
+  const [updates, setUpdates] = useState<Record<string, ExtensionUpdate>>({});
+  // Pi extension sources are checked once per page open; the server caches the registry answer.
+  useEffect(() => {
+    let live = true;
+    void api<{ updates: { id: string; version: string; installed: string | null; latest: string | null; available: boolean }[] }>('/api/catalog/pi-extension-updates')
+      .then(result => {
+        if (!live) return;
+        setUpdates(Object.fromEntries(result.updates.map(item => [`${item.id}@${item.version}`, item])));
+        const available = result.updates.filter(item => item.available);
+        if (available.length) toast(`有 ${available.length} 个 Pi 扩展可以更新：${available.map(item => item.id).join('、')}`);
+      })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  const updateOne = async (item: CapabilityRecord) => {
+    try {
+      const result = await api<{ updated: boolean; version: string | null }>(
+        `/api/catalog/pi-extensions/${encodeURIComponent(item.id)}/${encodeURIComponent(item.version)}/update`,
+        { method: 'POST' },
+      );
+      toast(`已更新 ${item.id}${result.version ? ` 到 ${result.version}` : ''}`, 'success');
+      setUpdates(current => ({ ...current, [`${item.id}@${item.version}`]: { installed: result.version, latest: result.version, available: false } }));
+      window.dispatchEvent(new Event('graph:settings-changed'));
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'danger');
+    }
+  };
   const refresh = () => {
     void api('/api/catalog/refresh', { method: 'POST' }).then(() => {
       window.dispatchEvent(new Event('graph:settings-changed'));
@@ -781,7 +819,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
         <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelected(null); }}>
           <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`能力详情 ${selected.name ?? selected.id}`}>
             <header className="resource-detail-head"><div><h2>{selected.name ?? selected.id}</h2><p>能力详情</p></div><button type="button" className="icon-button" data-testid="resource-detail-close" onClick={() => setSelected(null)} aria-label="关闭详情"><Icon name="close" size={16} /></button></header>
-            <div className="resource-detail-body"><CapabilityDetail item={selected} /></div>
+            <div className="resource-detail-body"><CapabilityDetail item={selected} update={updates[`${selected.id}@${selected.version}`]} onUpdate={item => void updateOne(item)} /></div>
           </aside>
         </div>,
         document.body,
