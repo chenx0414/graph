@@ -90,7 +90,9 @@ function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refres
 
 function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools' }> }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const open = manualOpen ?? row.active;
+  // Tool calls stay folded away by default, running or finished; the button opens
+  // one group when its detail is needed.
+  const open = manualOpen ?? false;
   const summary = row.active ? activeToolStatus(row.tools) : toolGroupSummary(row.tools);
   return (
     <section
@@ -103,7 +105,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
       <button
         type="button"
         className="tool-group-toggle"
-        onClick={() => setManualOpen(current => !(current ?? row.active))}
+        onClick={() => setManualOpen(current => !(current ?? false))}
         aria-expanded={open}
         aria-label={open ? '收起工具活动' : '展开工具活动'}
       >
@@ -142,49 +144,6 @@ function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration'
         <div className="message-content answer-card"><Markdown text={row.text} /></div>
       </div>
     </div>
-  );
-}
-
-/**
- * One finished turn's thinking and tool calls as a single collapsible block. It
- * starts collapsed once the final answer exists, and the same button re-expands
- * or collapses it again.
- */
-function TurnActivity({ row, markdown = true }: { row: Extract<TranscriptRow, { kind: 'activity' }>; markdown?: boolean }) {
-  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const open = manualOpen ?? !row.collapsed;
-  const tools = row.items.flatMap(item => item.kind === 'tool' ? [item.tool] : []);
-  const failed = tools.some(tool => tool.error);
-  return (
-    <section
-      className="tool-activity-group turn-activity"
-      data-testid="turn-activity"
-      data-active="false"
-      data-open={open}
-      data-error={failed}
-    >
-      <button
-        type="button"
-        className="tool-group-toggle"
-        onClick={() => setManualOpen(current => !(current ?? !row.collapsed))}
-        aria-expanded={open}
-        aria-label={open ? '收起本回合的思考与工具调用' : '展开本回合的思考与工具调用'}
-      >
-        <span className="tool-group-indicator" aria-hidden="true">
-          <Icon name={failed ? 'alert' : 'check'} size={13} />
-        </span>
-        <span className="tool-group-copy">
-          <strong>{tools.length ? toolGroupSummary(tools) : `${row.items.length} 步思考`}</strong>
-          <span>本回合 {row.items.length} 步思考与工具调用</span>
-        </span>
-        <Icon name="chevron" size={14} className="tool-group-chevron" />
-      </button>
-      <div className="tool-group-content" aria-hidden={!open}>
-        <div className="tool-group-content-inner turn-activity-inner">
-          {row.rows.map(child => <TranscriptRowView key={child.id} row={child} markdown={markdown} />)}
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -389,7 +348,6 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   }
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'narration') return <NarrationRow row={row} />;
-  if (row.kind === 'activity') return <TurnActivity row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;
   if (row.kind === 'thinking') {
     return (

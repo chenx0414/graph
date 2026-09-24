@@ -41,7 +41,6 @@ export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
-  | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
@@ -190,9 +189,6 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
  */
 export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
-  const answered = new Set(input.messages
-    .filter(message => message.role === 'assistant' && message.kind === 'chat' && message.operationId)
-    .map(message => message.operationId as string));
 
   // Durable activity is buffered per turn, so a finished turn becomes one
   // collapsible block and a running one keeps its individual rows.
@@ -208,13 +204,9 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     activityItems = [];
     activityToolIndex.clear();
     if (!items.length) return;
-    if (key && answered.has(key)) {
-      // A finished turn stays readable as complete narration bubbles with the tool
-      // calls interleaved, exactly like the turn did while it was running; the
-      // toggle still folds the whole turn away.
-      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, rows: activityRows(key, items), collapsed: false });
-      return;
-    }
+    // The turn's narration and tool calls sit directly in the transcript: the
+    // narration is a chat bubble and each run of tool calls is its own collapsed
+    // group. Nothing wraps them, so a finished turn reads like a running one.
     rows.push(...activityRows(key, items));
   };
 
@@ -267,10 +259,8 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     pushToolGroup(rows, liveTools);
     liveTools = [];
   };
-  // Only the newest live text part can still be growing: every earlier part is a
-  // complete narration bubble, exactly like a finished message, so the turn reads
-  // as full bubbles with the tool calls interleaved.
-  const lastStreamIndex = tail.reduce((last, item, index) => item.stream ? index : last, -1);
+  // A narration becomes a chat bubble as soon as it stops being the newest thing
+  // in the turn, so a finished segment never waits for its tool call to end.
   for (const [index, item] of tail.entries()) {
     if (item.stream) {
       flushLiveTools();
@@ -280,7 +270,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         operationId: item.stream.operationId,
         text: item.stream.text,
         narration: true,
-        streaming: index === lastStreamIndex,
+        streaming: index === tail.length - 1,
       });
       continue;
     }

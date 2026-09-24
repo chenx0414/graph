@@ -663,14 +663,12 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
-  // A finished turn keeps its narration bubbles and tool groups, and the toggle
-  // still folds the whole turn away.
-  const activity = page.getByTestId('turn-activity');
-  await activity.waitFor();
-  expect(await activity.getAttribute('data-open')).toBe('true');
-  // The tool activity lives inside the turn block as its own group, exactly as it
-  // rendered while the turn was running.
-  expect(await page.locator('[data-testid="turn-activity"] [data-testid="tool-activity-group"]').count()).toBe(1);
+  // A finished turn is not wrapped: its narration is a bubble and its tool calls
+  // are a collapsed group of their own, right in the transcript.
+  expect(await page.getByTestId('turn-activity').count()).toBe(0);
+  const tools = page.getByTestId('tool-activity-group');
+  await tools.waitFor();
+  expect(await tools.getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
@@ -768,7 +766,8 @@ test('live tool activity groups and streamed markdown follow the transcript tail
   const tools = page.getByTestId('tool-activity-group');
   await tools.waitFor();
   expect(await tools.getAttribute('data-active')).toBe('true');
-  expect(await tools.getAttribute('data-open')).toBe('true');
+  // Tool calls stay folded away by default, even while they are running.
+  expect(await tools.getAttribute('data-open')).toBe('false');
   expect(await tools.innerText()).toContain('正在读取 src/web/Conversation.tsx');
   await expect.poll(() => page.locator('.markdown-body h2').last().innerText()).toBe('实时输出');
   expect(await page.getByTestId('message-list').getAttribute('data-pinned')).toBe('true');

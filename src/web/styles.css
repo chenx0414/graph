@@ -1259,12 +1259,8 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .tool-activity-state { color: var(--faint); }
 .tool-activity-list li[data-error="true"] .tool-activity-icon,
 .tool-activity-list li[data-error="true"] .tool-activity-state { color: #b43c3c; }
-/* A finished turn's expanded content is the same rows the turn showed while it
-   was running: narration bubbles with the tool groups interleaved. */
-.turn-activity-inner { padding: 2px 12px 4px; }
-.turn-activity-inner .narration-row,
-.turn-activity-inner .tool-activity-group { margin: 0 0 10px; }
-.turn-activity-inner > :last-child { margin-bottom: 4px; }
+/* A finished turn is not wrapped: its narration bubbles and tool groups sit
+   directly in the transcript. */
 .message-content p { margin: 0; }
 .message-state { color: var(--faint); font-size: 11px; }
 .message-attachments { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }

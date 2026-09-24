@@ -218,7 +218,7 @@ test('live and durable assistant rows share the turn key the reveal is paced by'
   expect(durable[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', operationId: 'op-1', streaming: false });
 });
 
-test('a finished turn keeps its narration and tool calls as an expanded block above the answer', () => {
+test('a finished turn shows its narration bubbles and tool groups as ordinary rows', () => {
   const rows = buildTranscriptRows({
     messages: [
       message({ id: 'user', seq: 1, role: 'user', text: '看一下', operationId: 'op-1' }),
@@ -233,18 +233,27 @@ test('a finished turn keeps its narration and tool calls as an expanded block ab
     busy: false,
   });
 
-  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
-  const activity = rows[1];
-  if (activity?.kind !== 'activity') throw new Error('expected activity block');
-  expect(activity.collapsed).toBe(false);
-  expect(activity.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration', 'tool']);
-  expect(activity.items.map(item => item.kind === 'narration' ? item.text : item.tool.summary))
-    .toEqual(['先读代码', 'a.ts', '现在改投影', 'b.ts']);
-  // Expanded, the turn renders as ordinary rows: narration bubbles with the tool
-  // groups interleaved, not as one tool list.
-  expect(activity.rows.map(child => child.kind)).toEqual(['narration', 'tools', 'narration', 'tools']);
-  expect(activity.rows[1]).toMatchObject({ kind: 'tools', active: false });
-  expect(rows[2]).toMatchObject({ kind: 'assistant', text: '改好了' });
+  // Nothing wraps the turn: narration is a chat bubble and each run of tool calls
+  // is its own group, so a finished turn reads exactly like a running one.
+  expect(rows.map(row => row.kind)).toEqual(['message', 'narration', 'tools', 'narration', 'tools', 'assistant']);
+  expect(rows[1]).toMatchObject({ kind: 'narration', text: '先读代码' });
+  expect(rows[2]).toMatchObject({ kind: 'tools', active: false });
+  expect(rows[3]).toMatchObject({ kind: 'narration', text: '现在改投影' });
+  expect(rows[5]).toMatchObject({ kind: 'assistant', text: '改好了' });
+});
+
+test('a narration becomes a bubble as soon as a tool call follows it', () => {
+  const rows = buildTranscriptRows({
+    messages: [],
+    liveTools: [{ toolCallId: 'tool-1', operationId: 'op-1', name: 'read', summary: 'a.ts', done: false, error: false, ordinal: 2 }],
+    streaming: [{ operationId: 'op-1', entryId: 'entry-1', partId: '0', ordinal: 1, text: '先看一下', length: 4, updatedAt: 1 }],
+    busy: true,
+  });
+
+  // The tool call is the newest thing, so the narration above it is already a
+  // finished bubble while that call is still running.
+  expect(rows[0]).toMatchObject({ kind: 'assistant', narration: true, streaming: false });
+  expect(rows[1]).toMatchObject({ kind: 'tools', active: true });
 });
 
 test('a turn without a final answer keeps narration and tools as their own rows', () => {
