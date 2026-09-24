@@ -173,8 +173,16 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await expect.poll(async () => ((await (await api.get('/api/config')).json() as { config: { models: { entries: { modelId?: string }[] } } }).config.models.entries.some(entry => entry.modelId === 'stub-manual')), { timeout: 10_000 }).toBe(true);
   const savedRevision = (await (await api.get('/api/config')).json() as { revision: number }).revision;
   await openPage('常规');
-  // Hot apply: the running revision matches the saved one, with no restart prompt.
-  await expect.poll(async () => page.getByTestId('effective-revision').innerText(), { timeout: 10_000 }).toContain(String(savedRevision));
+  // Hot apply: the running build is never behind the revision saved by the time the
+  // page opened, and no restart is requested. A snapshot equality against a revision
+  // read once raced with the page's own auto-save (and a substring check could pass
+  // on a later revision), so the invariant is compared instead.
+  await expect.poll(async () => {
+    const shown = Number((await page.getByTestId('effective-revision').innerText()).trim());
+    return Number.isFinite(shown) && shown >= savedRevision;
+  }, { timeout: 15_000 }).toBe(true);
+  const revisionPill = page.getByTestId('effective-revision').locator('xpath=..');
+  await expect.poll(async () => (await revisionPill.innerText()).includes('正在同步'), { timeout: 15_000 }).toBe(false);
   expect(await page.getByTestId('restart-required').count()).toBe(0);
 
   // Persistence across a browser reload: the inline caps and the unknown price
