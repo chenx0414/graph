@@ -32,6 +32,11 @@ export interface CapabilityManifest {
   networkAccess?: 'unrestricted';
   /** Graph extension or Pi extension entry file. */
   entry?: string;
+  /**
+   * Pi extension package source resolved by the Pi SDK's own package manager instead of a
+   * vendored copy: `npm:<spec>`, a git URL, or a local path. When present, `entry` is ignored.
+   */
+  source?: string;
   tools?: { name: string; description?: string }[];
   /** Host runtime requirements for a trusted Pi extension. */
   runtime?: {
@@ -235,12 +240,17 @@ async function validateFiles(directory: string, manifest: CapabilityManifest) {
     throw new RuntimeError('invalid_capability', `${directory} is an MCP capability without command or url`);
   }
   if (manifest.kind === 'extension' || manifest.kind === 'pi-extension') {
-    const entry = manifest.entry ?? './index.mjs';
-    const path = isAbsolute(entry) ? entry : resolve(directory, entry);
-    if (path !== directory && !path.startsWith(`${directory}/`)) {
-      throw new RuntimeError('invalid_capability', `${directory} extension entry must stay inside its capability directory`);
+    // A Pi extension may declare a package source instead of a vendored entry: the SDK resolves
+    // and validates that source at load time, so there is no local entry to check here.
+    const sourced = manifest.kind === 'pi-extension' && typeof manifest.source === 'string' && manifest.source.trim().length > 0;
+    if (!sourced) {
+      const entry = manifest.entry ?? './index.mjs';
+      const path = isAbsolute(entry) ? entry : resolve(directory, entry);
+      if (path !== directory && !path.startsWith(`${directory}/`)) {
+        throw new RuntimeError('invalid_capability', `${directory} extension entry must stay inside its capability directory`);
+      }
+      if (!existsSync(path)) throw new RuntimeError('invalid_capability', `${directory} extension entry ${entry} does not exist`);
     }
-    if (!existsSync(path)) throw new RuntimeError('invalid_capability', `${directory} extension entry ${entry} does not exist`);
   }
 }
 

@@ -15,6 +15,7 @@ import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
 import { allowedDomain, normalizeDomains } from './domains.ts';
 import { externallyGated } from './pi-instance.ts';
+import { resolvePiExtensionSource } from './pi-extension-source.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 import { graphNodeRuntime } from './workspace-command.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -29,6 +30,8 @@ export interface CapabilityLoadFact {
   name?: string;
   description?: string;
   path?: string;
+  /** The declared package source when the SDK resolved the extension instead of a vendored copy. */
+  source?: string;
   tools?: string[];
   networkDomains?: string[];
   networkAccess?: 'unrestricted';
@@ -82,6 +85,7 @@ interface McpManifest {
   command?: unknown;
   args?: unknown;
   entry?: unknown;
+  source?: unknown;
   url?: unknown;
   provisioning?: unknown;
   headers?: unknown;
@@ -938,9 +942,11 @@ export async function resolveCapabilityFacts(
       continue;
     }
     if (record.kind === 'pi-extension') {
-      const entry = extensionEntry(manifest, snapshot);
-      if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} entry does not exist`);
       const declared = declaredTools(manifest);
+      // A sourced extension has no local entry: the SDK resolves the package source at load time.
+      const packageSource = typeof manifest.source === 'string' && manifest.source.trim() ? manifest.source.trim() : null;
+      const entry = packageSource ? null : extensionEntry(manifest, snapshot);
+      if (entry && !existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} entry does not exist`);
       facts.push({
         id: bound.id,
         version: bound.version,
@@ -949,10 +955,10 @@ export async function resolveCapabilityFacts(
         path: snapshot,
         digest: textDigest(canonicalJson({
           manifest: manifest as unknown as Json,
-          entry: await fileDigest(entry),
+          ...(entry ? { entry: await fileDigest(entry) } : {}),
         })),
         declaredTools: declared,
-        entry,
+        ...(entry ? { entry } : {}),
       });
       continue;
     }
@@ -1115,16 +1121,32 @@ export async function loadCapabilities(input: {
       if (record.kind === 'pi-extension') {
         if (!existsSync(snapshot)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} has no snapshot`);
         const manifest = await manifestOf(snapshot);
-        const entryValue = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry : './index.mjs';
-        const entry = isAbsolute(entryValue) ? entryValue : resolve(snapshot, entryValue);
-        if (entry !== snapshot && !entry.startsWith(`${snapshot}/`)) {
-          throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} must stay inside the snapshot`);
-        }
-        if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} does not exist`);
         const declared = declaredTools(manifest);
-        piExtensionPaths.push(entry);
+        const source = typeof manifest.source === 'string' && manifest.source.trim() ? manifest.source.trim() : null;
+        let loadedEntry: string;
+        if (source) {
+          // A declared source is installed and resolved by the Pi SDK's own package manager, so
+          // version ranges, git refs and the package's own `pi.extensions` list stay native.
+          const resolvedSource = await resolvePiExtensionSource({
+            source,
+            cwd: input.workspace,
+            agentDir: dirname(input.scratchDir),
+          });
+          piExtensionPaths.push(...resolvedSource.entries);
+          readRoots.push(...resolvedSource.readRoots);
+          loadedEntry = resolvedSource.entries[0]!;
+        } else {
+          const entryValue = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry : './index.mjs';
+          const entry = isAbsolute(entryValue) ? entryValue : resolve(snapshot, entryValue);
+          if (entry !== snapshot && !entry.startsWith(`${snapshot}/`)) {
+            throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} must stay inside the snapshot`);
+          }
+          if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} does not exist`);
+          piExtensionPaths.push(entry);
+          readRoots.push(snapshot);
+          loadedEntry = entry;
+        }
         piExtensionTools.push(...declared.map(tool => tool.name));
-        readRoots.push(snapshot);
         const runtime = await resolvePiExtensionRuntime({
           manifest,
           snapshot,
@@ -1151,7 +1173,8 @@ export async function loadCapabilities(input: {
             `独立 Pi 进程内加载；声明工具 ${declared.length} 个`,
             runtime ? `运行时声明：命令 ${runtime.env.PATH ? '已解析' : '无'}，网络 ${runtime.allowUnrestrictedNetwork ? '不受限' : runtime.networkDomains.length ? runtime.networkDomains.join(', ') : '无'}，Unix socket ${runtime.unixSockets.length}` : '',
           ].filter(Boolean).join('；'),
-          path: entry,
+          path: loadedEntry,
+          ...(source ? { source } : {}),
           ...(declared.length ? { tools: declared.map(tool => tool.name) } : {}),
           ...(runtime ? {
             runtime: {
