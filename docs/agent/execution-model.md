@@ -29,6 +29,8 @@
 
 返工、恢复和模型切换保持 instance 身份；新 Fork 或 Fresh 执行创建新的 node/instance 关系。
 
+每个 Agent node 在**每次派发**时都跟随它自己那份配方的最新 definition 版本：配方一改，下一次派发即生效。节点保留自己的模型、工作副本和位置，只有 definition version 前移；已完成的节点不会因此重跑。
+
 ## Operation
 
 所有真实外部动作都先写 operation intent，再派发，再结算。实际动作包括：

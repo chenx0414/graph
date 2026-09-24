@@ -10,7 +10,7 @@ afterEach(async () => { for (const action of cleanup.reverse()) await action(); 
 const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
 const entry = (id: string): ModelEntry => ({ id, provider: 'graph-test', grade: 'high', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1', contextWindow: 32_000, maxTokens: 256 });
 
-test('the same definition can dispatch two instances on different models, and a new version does not rebind the running instance', async () => {
+test('the same definition can dispatch two instances on different models, and both follow the newest version published before dispatch', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-def-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const runtime = await openTaskRuntime({
@@ -39,8 +39,11 @@ test('the same definition can dispatch two instances on different models, and a 
   await runtime.host.drive();
   const view = await runtime.user.task(taskId).view();
   expect(view.phase).toBe('completed');
-  expect(view.nodes.find(node => node.id === 'left')).toMatchObject({ boundDefinition: 'coder@1', selectedModel: 'one' });
-  expect(view.nodes.find(node => node.id === 'right')).toMatchObject({ boundDefinition: 'coder@1', selectedModel: 'two' });
+  // The version published before dispatch is the one both nodes run: a node
+  // follows the newest definition of its recipe, while an operation that has
+  // already been dispatched keeps the binding it started with.
+  expect(view.nodes.find(node => node.id === 'left')).toMatchObject({ boundDefinition: 'coder@2', selectedModel: 'one' });
+  expect(view.nodes.find(node => node.id === 'right')).toMatchObject({ boundDefinition: 'coder@2', selectedModel: 'two' });
   expect(view.nodes.find(node => node.id === 'left')?.instanceId).not.toBe(view.nodes.find(node => node.id === 'right')?.instanceId);
 });
 
