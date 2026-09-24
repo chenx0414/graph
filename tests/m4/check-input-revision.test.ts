@@ -4,13 +4,14 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { applyRevision } from '../../src/core/revision.ts';
 import { TaskStore } from '../../src/core/store.ts';
+import type { Proposal } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
 // The smallest graph that carries an acceptance item backed by a program check:
 // one agent lane and one graph.command check that runs a test file.
-function proposal(checkArgs: string[]) {
+function proposal(checkArgs: string[]): Proposal {
   return {
     requirementVersion: 1,
     summary: 'HB-26 fixture: a confirmed acceptance check that cannot run.',
