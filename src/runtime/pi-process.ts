@@ -314,6 +314,12 @@ export async function openPiProcess(options: PiProcessOptions) {
     async steer(text: string) {
       if (!control?.write({ operation: 'steer', text })) throw new Error('Pi process input is closed');
     },
+    /** Ask the worker to soft-stop its running turn. Idempotent: a closed or
+     * idle process accepts the request without throwing. */
+    async stop() {
+      if (closed) return;
+      control?.write({ operation: 'stop' });
+    },
     inspect() {
       return structuredClone(latestInspect ?? readyInspect!);
     },

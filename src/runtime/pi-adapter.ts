@@ -187,6 +187,14 @@ export function createPiAdapter(options: {
       const ordinal = turnOrdinals.get(operation.id)?.();
       return ordinal === undefined ? {} : { ordinal };
     },
+    /** Soft-stop the turn an operation is running: the in-flight tool call
+     * finishes, the turn ends before the next model request, and the session is
+     * retained. Idempotent when the operation has no live session. */
+    async stop(operation) {
+      const active = activeInstances.get(operation.id);
+      if (!active) return;
+      await active.stop();
+    },
     prepare: async operation => {
       if (!operation.instanceId) throw new RuntimeError('invalid_adapter', 'Agents require an instance');
       const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
