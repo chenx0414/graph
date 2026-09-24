@@ -83,7 +83,8 @@ describe('per-model thinking strengths', () => {
     expect(effectiveThinkingLevel(unknown)).toBe('high');
   });
 
-  test('the level map denies off and every unlisted level', () => {    const map = thinkingLevelMapFor(entry());
+  test('the level map denies off and every unlisted level', () => {
+    const map = thinkingLevelMapFor(entry());
     expect(map.off).toBeNull();
     expect(map.minimal).toBeNull();
     expect(map.max).toBeNull();
