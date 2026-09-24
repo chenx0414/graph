@@ -605,3 +605,52 @@ test('a bound Pi extension receives its declared command, environment, loopback 
   expect(view.questions).toEqual([]);
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Runtime probe completed');
 }, 120_000);
+
+test('a conversation master follows the latest definition of its recipe on the next turn', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-main-definition-reload-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const capability = join(capabilityRoot, 'github');
+  await mkdir(capability, { recursive: true });
+  await copyFile(new URL('../fixtures/mcp-read-capability-server.mjs', import.meta.url), join(capability, 'server.mjs'));
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({
+    id: 'github', kind: 'mcp', version: '1.0.0', name: 'GitHub',
+    command: 'node', args: ['./server.mjs'], networkDomains: ['github.com'],
+  }, null, 2));
+
+  const provider = await openaiServer([{ text: '第一回合完成。' }, { text: '第二回合完成。' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [{ id: 'github', version: '1.0.0' }] }, 'definition-v1');
+
+  const created = await runtime.conversations.create({ text: '第一回合。', requestId: 'reload-turn-1' });
+  await runtime.host.runReady();
+  const toolNames = (request: unknown) => ((request as { tools?: { function?: { name?: string } }[] }).tools ?? [])
+    .map(tool => tool.function?.name ?? '');
+  expect(toolNames(provider.requests[0])).toContain('mcp_github_search_repositories');
+
+  // The recipe is edited: a newer definition version drops the MCP capability.
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [] }, 'definition-v2');
+  await runtime.conversations.chat(created.conversationId, { text: '第二回合。', requestId: 'reload-turn-2' });
+  await runtime.host.runReady();
+
+  // A conversation master is long-lived, so it has to follow the latest
+  // definition on its next turn; a task's own nodes keep theirs.
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.questions).toEqual([]);
+  expect(view.master?.definitionVersion).toBe('master@2');
+  expect(provider.requests).toHaveLength(2);
+  expect(toolNames(provider.requests[1])).not.toContain('mcp_github_search_repositories');
+}, 120_000);

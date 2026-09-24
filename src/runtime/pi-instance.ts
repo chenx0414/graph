@@ -144,11 +144,15 @@ export async function openPiInstance(options: PiInstanceOptions) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+  // The definition version is not part of the identity check: the runtime may
+  // deliberately re-point a long-lived instance (a conversation master follows
+  // its recipe) at a newer definition, and the rebind below branches the session
+  // under the new bundle instead of discarding the conversation.
+  const definitionChanged = manifest !== undefined && manifest.binding.definitionVersion !== options.binding.definitionVersion;
   if (manifest && ((manifest.version !== 1 && manifest.version !== 2 && manifest.version !== 3) ||
     (manifest.workspace !== workspace && !options.allowWorkspaceChange) ||
     manifest.binding.instanceId !== options.binding.instanceId ||
-    manifest.binding.nodeId !== options.binding.nodeId ||
-    manifest.binding.definitionVersion !== options.binding.definitionVersion)) {
+    manifest.binding.nodeId !== options.binding.nodeId)) {
     throw new Error('Instance binding does not match persisted identity');
   }
   const persistedDigest = manifest?.capabilityDigest?.trim();
@@ -161,14 +165,14 @@ export async function openPiInstance(options: PiInstanceOptions) {
   if ((manifest?.version ?? 0) >= 3) {
     if (!persistedBundleDigest) throw new Error('Persisted v3 capability bundle has no digest');
     if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
-    if (persistedBundleDigest !== currentDigest) {
+    if (persistedBundleDigest !== currentDigest || definitionChanged) {
       rebindFromManifest = manifest;
     }
   } else if (manifest?.version === 2) {
     if (!persistedDigest) throw new Error('Persisted v2 capability bundle has no digest');
     if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
     if (!options.legacyCapabilityDigest) throw new Error('A legacy capability digest is required to restore this v2 Agent session');
-    if (persistedDigest !== options.legacyCapabilityDigest) {
+    if (persistedDigest !== options.legacyCapabilityDigest || definitionChanged) {
       // The same rule as v3: a legacy bundle change invalidates the bundle, not the conversation.
       rebindFromManifest = manifest;
     }
