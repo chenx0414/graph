@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { formatSkillsForPrompt, loadSkills, type Skill } from '@earendil-works/pi-coding-agent';
+import { CONFIG_DIR_NAME, formatSkillsForPrompt, getAgentDir, loadSkills, type Skill } from '@earendil-works/pi-coding-agent';
 
 /**
  * Skills are loaded by the Pi SDK's own loader and rendered by its own formatter.
@@ -84,16 +85,49 @@ export function syncAgentSkills(input: {
   }
 }
 
+export interface AgentSkillsScope {
+  /** The Agent's own folder: the skills its recipe binds, plus anything the user placed. */
+  folder?: string;
+  /** Working directory whose `.pi/skills` is the project-local source, as the SDK defines it. */
+  cwd?: string;
+  /** The Pi agent directory whose `skills` folder is the global source; defaults to the SDK's. */
+  agentDir?: string;
+}
+
+/**
+ * The two skill folders the Pi SDK treats as defaults: the global agent dir and the
+ * project-local config dir. Only existing folders are returned.
+ */
+export function nativeSkillDirs(input: { cwd?: string | undefined; agentDir?: string | undefined }): string[] {
+  const agentDir = input.agentDir ?? getAgentDir();
+  return [
+    join(agentDir, 'skills'),
+    ...(input.cwd ? [join(input.cwd, CONFIG_DIR_NAME, 'skills')] : []),
+  ].filter(path => existsSync(path));
+}
+
 export interface AgentSkills {
   skills: Skill[];
   diagnostics: ReturnType<typeof loadSkills>['diagnostics'];
-  /** The SDK's own prompt block; empty when the folder holds no skill. */
+  /** The SDK's own prompt block; empty when no scope holds a skill. */
   block: string;
 }
 
-/** Load one folder with the SDK's loader and render it with the SDK's formatter. */
-export function agentSkills(dir: string): AgentSkills {
-  if (!existsSync(dir)) return { skills: [], diagnostics: [], block: '' };
-  const loaded = loadSkills({ cwd: dir, agentDir: dir, skillPaths: [dir], includeDefaults: false });
+/** Load the Agent's folder plus the SDK's own global and project folders. */
+export function agentSkills(input: string | AgentSkillsScope): AgentSkills {
+  const scope: AgentSkillsScope = typeof input === 'string' ? { folder: input } : input;
+  const paths = [
+    ...(scope.folder && existsSync(scope.folder) ? [scope.folder] : []),
+    ...nativeSkillDirs(scope),
+  ];
+  if (!paths.length) return { skills: [], diagnostics: [], block: '' };
+  const cwd = scope.cwd ?? scope.folder ?? process.cwd();
+  const loaded = loadSkills({
+    cwd,
+    agentDir: scope.agentDir ?? getAgentDir(),
+    skillPaths: paths,
+    // The native folders are passed explicitly above, so no other default sneaks in.
+    includeDefaults: false,
+  });
   return { skills: loaded.skills, diagnostics: loaded.diagnostics, block: formatSkillsForPrompt(loaded.skills, 'read') };
 }
