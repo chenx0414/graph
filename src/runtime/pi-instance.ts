@@ -291,7 +291,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   // prompt: the Agent's folder plus the SDK's own global and project folders.
   const skillLoadPaths = [...new Set([
     ...(options.skillFolder ? [options.skillFolder] : options.skillPaths ?? []),
-    ...nativeSkillDirs({ cwd: workspace }),
+    ...nativeSkillDirs({ cwds: [workspace] }),
   ])];
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,

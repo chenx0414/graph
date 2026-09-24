@@ -12,6 +12,7 @@ import {
   type AgentCombination,
   type AgentCombinationView,
 } from './agent-combinations.ts';
+import { homedir } from 'node:os';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { parseCapabilityManifest, scanAgentSkills, scanCapabilities, scanNativeSkills, type CapabilityManifest } from './file-capabilities.ts';
 import type { ModelGrade } from './models.ts';
@@ -146,10 +147,11 @@ export class CapabilityLibrary {
       return this.capabilities();
     }
     // Skills the user placed belong to the same library view: an Agent's own folder, and the
-    // SDK's global skills folder, which every Agent loads.
+    // global folders - the Pi agent directory and `.agents` - which every Agent loads.
     const placed = await scanAgentSkills(join(dirname(this.capabilityRoot), 'agents'));
     const global = await scanNativeSkills(join(getAgentDir(), 'skills'), '全局（Pi agent 目录）');
-    this.capabilitiesCache = [...await scanCapabilities(this.capabilityRoot), ...placed, ...global];
+    const agents = await scanNativeSkills(join(homedir(), '.agents', 'skills'), '全局（~/.agents）');
+    this.capabilitiesCache = [...await scanCapabilities(this.capabilityRoot), ...placed, ...global, ...agents];
     return this.capabilities();
   }
 

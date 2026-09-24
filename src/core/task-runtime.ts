@@ -1250,6 +1250,7 @@ export async function openTaskRuntime(options: {
         ? runtime.agentWorkspace(view.anchorTaskId, view.master.nodeId) : view?.projectRoot ?? null;
       const assembly = await openAgentContextAssembly({
         catalog, library, workspace, action, role: 'master', retrieval: true,
+        ...(view?.projectRoot ? { skillProjectRoot: view.projectRoot } : {}),
         rsi: Boolean(options.rsi?.available) && isFullAccess(runtime.currentAccessPolicy()),
         definitionVersion: definitionVersion ?? 'main@unknown',
         fullAccess: isFullAccess(runtime.currentAccessPolicy()),

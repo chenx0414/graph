@@ -359,6 +359,7 @@ export function createPiAdapter(options: {
             action: spec.action,
             ...(spec.role ? { role: spec.role } : {}),
             workspace,
+            skillProjectRoot: project.root,
             fullAccess,
             retrieval: Boolean(retrieval),
             rsi: Boolean(channels?.rsi?.available && spec.role === 'master' && fullAccess),
@@ -887,7 +888,7 @@ export function createPiAdapter(options: {
           })();
           // The skills the session may read must match the block Graph renders: the bound
           // snapshots plus the SDK's own global and project folders.
-          const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwd: workspace })])];
+          const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),

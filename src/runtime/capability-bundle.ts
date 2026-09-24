@@ -45,10 +45,14 @@ export interface CapabilityBundleOptions {
    */
   skillFolder?: string;
   /**
-   * Working directory whose `.pi/skills` is the project-local skills source, exactly as the
-   * SDK defines it. The global source is the SDK's own agent directory.
+   * Working directory whose `.pi/skills` and `.agents/skills` are project sources, exactly
+   * as the SDK defines the first one. The global sources are the SDK's own agent directory
+   * and the home `.agents` folder.
    */
   skillCwd?: string;
+  /** The bound project's root, so its `.pi`/`.agents` skills reach every Agent, not only
+   * the one whose working directory happens to be the project root. */
+  skillProjectRoot?: string;
   /** Capability roots Graph owns; links pointing into them are Graph's own to manage. */
   skillOwnedRoots?: readonly string[];
 }
@@ -213,6 +217,7 @@ export class CapabilityBundleVersion {
       const folderSkills = agentSkills({
         ...(this.skillFolder ? { folder: this.skillFolder } : {}),
         ...(this.input.skillCwd ? { cwd: this.input.skillCwd } : {}),
+        ...(this.input.skillProjectRoot ? { projectRoot: this.input.skillProjectRoot } : {}),
       }).skills;
       const excludedSkills = new Set(folderSkills.filter(skill => skill.disableModelInvocation).map(skill => skill.name));
       const recordedSkills = new Set(loaded.report.filter(fact => fact.kind === 'skill').map(fact => fact.id));

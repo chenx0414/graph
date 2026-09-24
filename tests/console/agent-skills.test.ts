@@ -60,22 +60,29 @@ test('one skills folder per recipe links the bound skills, and hand-made entries
   expect(agentSkills(dir).skills.map(item => item.name)).toEqual(['my-own']);
 });
 
-test('the scope loads the Agent folder plus the SDK global and project folders', async () => {
+test('the scope loads the Agent folder, the global folders and the project folders', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-agent-skills-scope-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   const workspace = join(root, 'project');
-  await skillDir(join(home, 'skills'), 'global-skill', 'global-skill', 'Global.');
-  await skillDir(join(workspace, '.pi', 'skills'), 'project-skill', 'project-skill', 'Project.');
+  const other = join(root, 'other-project');
+  await skillDir(join(home, 'skills'), 'pi-global', 'pi-global', 'Pi global.');
+  await skillDir(join(home, '.agents', 'skills'), 'agents-global', 'agents-global', 'Agents global.');
+  await skillDir(join(workspace, '.pi', 'skills'), 'pi-project', 'pi-project', 'Pi project.');
+  await skillDir(join(workspace, '.agents', 'skills'), 'agents-project', 'agents-project', 'Agents project.');
+  await skillDir(join(other, '.agents', 'skills'), 'agents-other', 'agents-other', 'Other project.');
   const folder = agentSkillsDir('coder', home);
   await skillDir(folder, 'own-skill', 'own-skill', 'Own.');
 
-  const scoped = agentSkills({ folder, cwd: workspace, agentDir: home });
-  expect(scoped.skills.map(item => item.name).sort()).toEqual(['global-skill', 'own-skill', 'project-skill']);
-  expect(scoped.block).toContain('global-skill');
-  expect(scoped.block).toContain('project-skill');
+  const scoped = agentSkills({ folder, cwd: workspace, projectRoot: other, agentDir: home, home });
+  expect(scoped.skills.map(item => item.name).sort()).toEqual([
+    'agents-global', 'agents-other', 'agents-project', 'own-skill', 'pi-global', 'pi-project',
+  ]);
+  for (const name of ['agents-global', 'agents-other', 'pi-project']) expect(scoped.block).toContain(name);
 
   // Folders that do not exist contribute nothing.
-  const onlyOwn = agentSkills({ folder, cwd: join(root, 'nowhere'), agentDir: join(root, 'no-home') });
+  const onlyOwn = agentSkills({
+    folder, cwd: join(root, 'nowhere'), agentDir: join(root, 'no-home'), home: join(root, 'no-home'),
+  });
   expect(onlyOwn.skills.map(item => item.name)).toEqual(['own-skill']);
 });

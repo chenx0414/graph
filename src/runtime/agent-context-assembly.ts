@@ -143,6 +143,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     ...(input.skillFolder ? { skillFolder: input.skillFolder } : {}),
     ...(input.skillOwnedRoots?.length ? { skillOwnedRoots: input.skillOwnedRoots } : {}),
     ...(workspace ? { skillCwd: workspace } : {}),
+    ...(input.skillProjectRoot ? { skillProjectRoot: input.skillProjectRoot } : {}),
   });
   const retrievalNote = input.retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : '';
   const [common, roleRules, toolGuidance, runtime, projectContext, disabledTools] = await Promise.all([
@@ -163,6 +164,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     const skills = agentSkills({
       ...(bundle.skillFolder ? { folder: bundle.skillFolder } : {}),
       ...(workspace ? { cwd: workspace } : {}),
+      ...(input.skillProjectRoot ? { projectRoot: input.skillProjectRoot } : {}),
     }).block;
     const composed = composeAgentSystemPrompt({
       mode, identity, definitionVersion, toolGuidance,

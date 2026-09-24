@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { CONFIG_DIR_NAME, formatSkillsForPrompt, getAgentDir, loadSkills, type Skill } from '@earendil-works/pi-coding-agent';
 
@@ -88,22 +89,36 @@ export function syncAgentSkills(input: {
 export interface AgentSkillsScope {
   /** The Agent's own folder: the skills its recipe binds, plus anything the user placed. */
   folder?: string;
-  /** Working directory whose `.pi/skills` is the project-local source, as the SDK defines it. */
+  /** Working directory: its `.pi/skills` and `.agents/skills` are project sources. */
   cwd?: string;
+  /** The bound project's root, which carries the project sources for every Agent. */
+  projectRoot?: string;
+  /** Home directory holding the global `.agents/skills`; defaults to the real home. */
+  home?: string;
   /** The Pi agent directory whose `skills` folder is the global source; defaults to the SDK's. */
   agentDir?: string;
 }
 
 /**
- * The two skill folders the Pi SDK treats as defaults: the global agent dir and the
- * project-local config dir. Only existing folders are returned.
+ * Every skill folder the native loader reads, in one place: the global Pi agent folder,
+ * the global `.agents` folder, and the `.pi`/`.agents` folders of each working directory.
+ * Only folders that exist are returned.
  */
-export function nativeSkillDirs(input: { cwd?: string | undefined; agentDir?: string | undefined }): string[] {
+export function nativeSkillDirs(input: {
+  cwds?: readonly (string | undefined)[];
+  home?: string | undefined;
+  agentDir?: string | undefined;
+}): string[] {
   const agentDir = input.agentDir ?? getAgentDir();
-  return [
+  const home = input.home ?? homedir();
+  const directories = [
     join(agentDir, 'skills'),
-    ...(input.cwd ? [join(input.cwd, CONFIG_DIR_NAME, 'skills')] : []),
-  ].filter(path => existsSync(path));
+    join(home, '.agents', 'skills'),
+    ...(input.cwds ?? []).flatMap(cwd => cwd
+      ? [join(cwd, CONFIG_DIR_NAME, 'skills'), join(cwd, '.agents', 'skills')]
+      : []),
+  ];
+  return [...new Set(directories)].filter(path => existsSync(path));
 }
 
 export interface AgentSkills {
@@ -113,12 +128,16 @@ export interface AgentSkills {
   block: string;
 }
 
-/** Load the Agent's folder plus the SDK's own global and project folders. */
+/** Load the Agent's folder plus every global and project folder of the scope. */
 export function agentSkills(input: string | AgentSkillsScope): AgentSkills {
   const scope: AgentSkillsScope = typeof input === 'string' ? { folder: input } : input;
   const paths = [
     ...(scope.folder && existsSync(scope.folder) ? [scope.folder] : []),
-    ...nativeSkillDirs(scope),
+    ...nativeSkillDirs({
+      cwds: [scope.cwd, scope.projectRoot],
+      home: scope.home,
+      agentDir: scope.agentDir,
+    }),
   ];
   if (!paths.length) return { skills: [], diagnostics: [], block: '' };
   const cwd = scope.cwd ?? scope.folder ?? process.cwd();
