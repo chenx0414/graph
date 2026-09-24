@@ -1,4 +1,5 @@
 import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuation.ts';
+import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
 import { isAbsolute } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
@@ -119,6 +120,29 @@ export class Execution {
     })();
     this.pending.add(work);
     try { await work; } finally { this.pending.delete(work); }
+  }
+
+  /**
+   * Soft-stop the live master turn of a task so a pause takes effect after the
+   * in-flight tool call rather than as a hard interrupt. Only the conversation
+   * master is stopped: an in-flight worker turn is an independent unit that
+   * finishes on its own, while new dispatch is blocked by the paused check.
+   * Idempotent and best-effort - a failing stop must not fail the pause.
+   */
+  async stopActiveMasterTurns(taskId: string): Promise<number> {
+    const rows = this.store.db.prepare(`SELECT o.id,o.spec FROM operations o
+      JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+      WHERE o.task_id=? AND json_extract(n.spec,'$.role')='master'
+        AND o.state='dispatched' AND o.worker_active=1 ORDER BY o.rowid`).all(taskId) as { id: string; spec: string }[];
+    let stopped = 0;
+    for (const row of rows) {
+      const operation = JSON.parse(row.spec) as Operation;
+      const adapter = Object.hasOwn(this.actions, operation.action) ? this.actions[operation.action] : this.fallback;
+      if (!adapter?.stop) continue;
+      try { await adapter.stop(operation); stopped += 1; }
+      catch { /* a stop failure must not turn a pause into an error */ }
+    }
+    return stopped;
   }
 
   async steer(operationId: string, text: string) {
@@ -290,9 +314,10 @@ export class Execution {
   private readyNodes(): ExecutionNodeRow[] {
     if (this.stopping || this.dispatchAllowed?.() === false) return [];
     const nodes: ExecutionNodeRow[] = [];
-    const fullAccess = isFullAccess(this.access?.());
     for (const taskId of this.laneTasks()) {
-      if (!fullAccess && this.store.task(taskId).paused) continue;
+      // A pause stops every new dispatch, in full access as well; only the
+      // authorization/budget automatic gates stay bypassed there.
+      if (this.store.task(taskId).paused) continue;
       nodes.push(...this.readyNodesFor(taskId));
     }
     return nodes;
@@ -342,7 +367,7 @@ export class Execution {
   private async execute(node: ExecutionNodeRow): Promise<boolean> {
     const accessPolicy = this.access?.() ?? resolveAccessPolicy(standardAccessPolicy());
     const fullAccess = isFullAccess(accessPolicy);
-    if (this.stopping || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) return false;
+    if (this.stopping || this.dispatchAllowed?.() === false || this.store.task(node.task_id).paused) return false;
     if ((this.store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(node.task_id, node.id) as { status: string }).status !== 'pending') return false;
     if (this.store.task(node.task_id).phase === 'chatting') {
       const conversation = conversationForTask(this.store, node.task_id);
@@ -465,6 +490,7 @@ export class Execution {
           conversation = task.phase === 'chatting' ? conversationForTask(this.store, node.task_id) : undefined;
           chatMessages = conversation ? pendingMessages(this.store, conversation.id, 1) : [];
           const rsiContinuation = conversation ? pendingRsiContinuation(this.store, node.task_id, node.id) : undefined;
+          const pauseContinuation = conversation ? pendingPauseContinuation(this.store, node.task_id, node.id) : undefined;
           const graph = task.phase === 'discussing' || task.phase === 'chatting' ? undefined : loadGraph(this.store, node.task_id);
           const dependencies = graph ? graph.inputs(node.id) : {};
           const dependencySources = graph ? graph.sources(node.id) : {};
@@ -614,6 +640,7 @@ export class Execution {
           intent.context.briefing = [
             intent.context.briefing,
             rsiContinuation ? `RSI reload confirmed for ${rsiContinuation.commit} (request ${rsiContinuation.requestId}). Resume the unfinished user request from operation ${rsiContinuation.operationId} using the existing session. Completed changes and tool results remain valid. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
+            pauseContinuation ? `The user paused this task and has now resumed it (request ${pauseContinuation.requestId}). Continue the exact turn that was soft-stopped at operation ${pauseContinuation.operationId} using the existing session: the in-flight tool call finished, so do not repeat completed tool calls or restart the request. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
             renderPredecessorHandoffs(predecessor.projections),
             schemaInstruction,
           ].filter(Boolean).join('\n\n');
@@ -651,6 +678,7 @@ export class Execution {
         },
         afterIntent: admitted => {
           consumeRsiContinuation(this.store, admitted);
+          consumePauseContinuation(this.store, admitted.taskId, admitted.nodeId, admitted.id);
           const agentContext = admitted.context.agentContext;
           if (agentContext && handoffPackage) {
             freezeContextHandoff(this.store, agentContext, {
@@ -738,7 +766,7 @@ export class Execution {
     }
     const deferredContinuation = operation.context.rsiContinuation && (this.store.task(node.task_id).paused
       || conversationForTask(this.store, node.task_id)?.archived_at !== null);
-    if (this.stopping || deferredContinuation || this.dispatchAllowed?.() === false || (!fullAccess && this.store.task(node.task_id).paused)) {
+    if (this.stopping || deferredContinuation || this.dispatchAllowed?.() === false || this.store.task(node.task_id).paused) {
       this.lifecycle.cancelBeforeDispatch(operation.id);
       return false;
     }
