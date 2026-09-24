@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { DEFAULT_MAIN_TOOL_GUIDANCE, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
+import { DEFAULT_MAIN_RSI_IDENTITY, DEFAULT_MAIN_TOOL_GUIDANCE, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 
 const cleanup: string[] = [];
 afterEach(async () => {
@@ -163,4 +163,16 @@ test('unknown prompt keys and invalid tool names are refused', async () => {
   await expect(library.savePrompt('../outside.md' as never, 'x')).rejects.toThrow('Unknown Agent prompt');
   await expect(library.savePrompt('docs/INDEX.md' as never, 'x')).rejects.toThrow('Unknown Agent prompt');
   await expect(library.setDisabledTools(['bad\nname'])).rejects.toThrow('Invalid tool name');
+});
+
+// The harness identity is the only durable instruction the Main Agent gets about its own
+// improvement work, and a compacted context is exactly when it matters. These assertions pin
+// the two requirements so removing either one is a visible test failure, not a silent drift.
+test('the harness identity records a durable backlog and reports it without being asked', () => {
+  // The backlog must live outside the model context, under a named artifact.
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toContain('harness-backlog');
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/compacted/);
+  // Finishing a work item must include an unprompted report and a proposal.
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/unprompted/);
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/propose/);
 });
