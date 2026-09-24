@@ -96,6 +96,11 @@ export interface AgentSession {
    * A manual compaction may instead be followed directly by close(). */
   compact(customInstructions?: string): Promise<void>;
   steer(text: string): Promise<void>;
+  /** Soft-stop the running turn: let the in-flight tool call finish, then end
+   * the turn instead of issuing another model request. The session (and its
+   * transcript) is retained so the same conversation can be prompted again.
+   * Idempotent, including when no turn is running or the session is closed. */
+  stop(): Promise<void>;
   inspect(): AgentSessionInspect;
   close(): Promise<void>;
 }
@@ -204,6 +209,9 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
           state.beginSteer();
           await instance.steer(text);
         },
+        async stop() {
+          await instance.stop();
+        },
         inspect() {
           return instance.inspect();
         },
@@ -237,6 +245,9 @@ export function createRestrictedProcessAgentSessionTransport(): AgentSessionTran
         async steer(text) {
           state.beginSteer();
           await process.steer(text);
+        },
+        async stop() {
+          await process.stop();
         },
         inspect() {
           return process.inspect();

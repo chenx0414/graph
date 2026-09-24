@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import {
   COMPOSER_LINE_HEIGHT,
@@ -176,5 +177,39 @@ describe('⑤ queued message list after cancel', () => {
 
   test('cancelled messages never leak into the transcript', () => {
     expect(visibleTranscriptMessages(messages).map(message => message.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('⑥ pause entry points and pause/resume copy', () => {
+  const source = readFileSync(new URL('../../src/web/Conversation.tsx', import.meta.url), 'utf8');
+
+  test('the three primary states stay send / pause / resume', () => {
+    const idle = { busy: false, paused: false, pending: false, hasInput: false, queueLength: 0, hasSuggestion: false };
+    expect(composerPrimaryState({ ...idle, hasInput: true })).toEqual({ mode: 'send', action: 'send' });
+    expect(composerPrimaryState({ ...idle, busy: true })).toEqual({ mode: 'pause', action: 'pause' });
+    expect(composerPrimaryState({ ...idle, paused: true })).toEqual({ mode: 'resume', action: 'resume' });
+  });
+
+  test('the conversation header no longer repeats the pause/resume control', () => {
+    // The composer primary button is the single pause entry point now. (The
+    // paused-notice banner legitimately keeps its own `conversation-paused-notice`.)
+    expect(source).not.toMatch(/['"]conversation-pause['"]/);
+    expect(source).not.toMatch(/['"]conversation-resume['"]/);
+    expect(source).not.toContain('暂停主 Agent 的对话处理');
+    expect(source).not.toContain('继续主 Agent 的对话处理');
+  });
+
+  test('the remaining control still posts to the conversation pause and resume endpoints', () => {
+    expect(source).toContain('/api/conversations/${id}/${action}');
+    expect(source).toMatch(/const action = nextPaused \? 'pause' : 'resume'/);
+  });
+
+  test('pause and resume copy describe the soft stop and the resumed turn', () => {
+    expect(source).toContain('当前工具调用收尾后停下');
+    expect(source).toContain('不再发起新的模型请求');
+    expect(source).toContain('接着跑');
+    expect(source).toContain('被停下的那个回合');
+    // The old, now-false promise (already-issued calls merely finish) is gone.
+    expect(source).not.toContain('已发出的调用会结束');
   });
 });

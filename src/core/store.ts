@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 33;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -537,6 +537,24 @@ export class TaskStore {
       const columns = new Set((this.db.prepare('PRAGMA table_info(operations)').all() as { name: string }[]).map(row => row.name));
       if (!columns.has('replied_at')) this.db.exec('ALTER TABLE operations ADD COLUMN replied_at INTEGER;');
       this.db.exec('PRAGMA user_version=32;');
+    });
+    if (version < 33) this.transaction(() => {
+      // A pause that soft-stops a running master turn remembers the durable
+      // intent to continue that exact turn, so resume re-dispatches it once
+      // instead of waiting for a brand new user message. Same waiting/ready/
+      // consumed wake-up shape as rsi_continuations.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS pause_continuations(
+          request_id TEXT PRIMARY KEY,
+          operation_id TEXT NOT NULL REFERENCES operations(id),
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          node_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK(state IN ('waiting','ready','consumed','cancelled')),
+          resumed_operation_id TEXT REFERENCES operations(id)
+        );
+        CREATE INDEX IF NOT EXISTS pause_continuations_ready ON pause_continuations(task_id,node_id,state);
+        PRAGMA user_version=33;
+      `);
     });
   }
   transaction<T>(action: () => T): T {

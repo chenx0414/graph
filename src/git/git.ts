@@ -289,10 +289,15 @@ export function directoryFingerprint(root: string, options: { stateDir?: string 
 }
 
 export function initRepo(root: string) {
-  const result = git(root, ['init', '-b', 'main']);
+  // An empty template keeps init hermetic: the default template copies the
+  // system's `.sample` hooks from the Command Line Tools path, which a sandboxed
+  // check cannot read (`Operation not permitted`), failing every init. The
+  // template only carries inert sample hooks, so skipping it loses nothing and
+  // hooks are already neutralized via core.hooksPath in `flags`.
+  const result = git(root, ['init', '--template=', '-b', 'main']);
   if (result.code !== 0) {
     // Older Git without `-b` falls back to the configured default branch.
-    const fallback = git(root, ['init']);
+    const fallback = git(root, ['init', '--template=']);
     if (fallback.code !== 0) throw new Error(fallback.stderr || result.stderr || 'git init failed');
   }
   ensureHostExcludes(root);

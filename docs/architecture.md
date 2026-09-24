@@ -126,7 +126,7 @@ interface TaskHandle {
 
 SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会话文件负责对话上下文，不反向覆盖任务状态。大型正文和产物用内容引用保存，数据库记录摘要与适用范围。首版不要求完整 event sourcing，也不自动删除历史记录。
 
-**迁移约定**：schema 版本由 `src/core/store.ts` 的单一常量 `SCHEMA_VERSION` 表示，启动守卫与测试断言都引用它，因此加一次迁移只需改这一处加迁移体（守卫写死在旧数字上一次曾让同一进程刚建的库被自己拒绝）。迁移必须**幂等**：`ALTER TABLE … ADD COLUMN` 先取 `PRAGMA table_info(<表>)` 再判断列是否存在（见 v19 的 `budget_scope_id` 与 v32 的 `replied_at`）。因为「先把库建到最新、再把 `user_version` 降回旧值」的夹具会让迁移重放一次，重复加列会直接报 `duplicate column name` 并让整条门禁失败。
+**迁移约定**：schema 版本由 `src/core/store.ts` 的单一常量 `SCHEMA_VERSION` 表示，启动守卫与测试断言都引用它，因此加一次迁移只需改这一处加迁移体（守卫写死在旧数字上一次曾让同一进程刚建的库被自己拒绝）。迁移必须**幂等**：`ALTER TABLE … ADD COLUMN` 先取 `PRAGMA table_info(<表>)` 再判断列是否存在（见 v19 的 `budget_scope_id` 与 v32 的 `replied_at`），新表用 `CREATE TABLE IF NOT EXISTS`（见 v29 的 `rsi_continuations` 与 v33 的 `pause_continuations`）。因为「先把库建到最新、再把 `user_version` 降回旧值」的夹具会让迁移重放一次，重复加列会直接报 `duplicate column name` 并让整条门禁失败。
 
 共享产物空间是任务级不可变对象库：文件内容按 SHA-256 存放于 Graph 受保护状态目录，SQLite 保存 `Artifact` 逻辑身份、version、namespace、producer、schema、trust、生命周期和事件。正式引用使用 `artifactId + version + digest`，绝对路径仅作为本机 materialization。Agent 通过 `artifact_list/get/read/publish/retire` 发现和发布文献集、Plan、Review Report 与交付文件；Main Agent 可显式 promotion 到项目级知识。私有 worktree 继续负责代码，integration branch 继续负责最终交付。见 [ADR 0025](adr/0025-shared-artifact-workspace.md)。
 
@@ -159,7 +159,7 @@ SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会�
 
 任务视图只附最近 50 条 operation，并返回历史总数与更早记录标记；运行状态和节点预留额度始终以全部操作聚合。历史接口用 operation 游标向前或向后分页，可按节点筛选；界面先显示最近记录。事件按任务与时间、任务与游标建立索引，任务列表和增量事件流无需扫描全局历史。
 
-暂停先关门，已发调用可结束，所有在途调用停稳后才报告 paused；长工具持续运行时保留 pausing 和对应记录，时长不限不意味着能虚报暂停成功。resume 不能解除未解决的预算或权限问题。
+暂停先关门，并以软停停住正在跑的主 Agent 回合：当前工具调用收尾后不再发起新的模型请求，会话保留，回合以「被中断」收口，而已发调用（含在途 worker）结束时才报告 paused；长工具持续运行时保留 pausing 和对应记录，时长不限不意味着能虚报暂停成功。暂停不区分访问策略，完全访问下同样不再派发任何新工作（含 worker）。暂停把未完成的 master 回合记为 `pause_continuations` 的持久唤醒意图，resume 清 paused 后把该意图置 ready、master 节点置回 pending，并由既有派发循环带「继续未完成回合」提示重启同一个回合（与 `rsi_continuations` 同形）。resume 不能解除未解决的预算或权限问题。
 
 ## 能力安装与权限落实
 

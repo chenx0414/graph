@@ -364,6 +364,13 @@ export async function openPiInstance(options: PiInstanceOptions) {
     async steer(text: string) {
       await session.prompt(text, { streamingBehavior: 'steer', expandPromptTemplates: false });
     },
+    /** Soft-stop the running turn: end after the in-flight tool call finishes,
+     * before the next model request. The session stays alive (no dispose), so a
+     * later prompt continues the same conversation. Idempotent and safe when no
+     * turn is running; the next prompt clears the request. */
+    async stop() {
+      stopRequested = true;
+    },
     async setModel(model: Model<Api>) { await session.setModel(model); },
     async compact(customInstructions?: string) { return session.compact(customInstructions); },
     async navigate(entryId: string, summarize: boolean) { return session.navigateTree(entryId, { summarize }); },

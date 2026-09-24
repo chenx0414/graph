@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterEach, expect, test } from 'vitest';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Model } from '@earendil-works/pi-ai';
+import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { externallyGated, openPiInstance } from '../../src/runtime/pi-instance.ts';
 import { modelA, modelB, reply, respond, testModelRuntime } from '../fixtures/models.ts';
@@ -13,6 +14,14 @@ const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
+
+/** An assistant message that asks for exactly one tool call, like a real turn. */
+function toolCallMessage(model: Model<Api>, name: string): AssistantMessage {
+  const message = reply(model, '');
+  message.content = [{ type: 'toolCall', id: `call-${name}`, name, arguments: {} }];
+  message.stopReason = 'toolUse';
+  return message;
+}
 
 test('an empty persisted session is rejected instead of silently allocating another identity', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-session-corruption-')); directories.push(root);
@@ -320,5 +329,74 @@ test('a fork rejects a source/child context digest mismatch before any model req
     expect(modelRequests).toBe(0);
   } finally {
     SessionManager.prototype.buildSessionContext = original;
+  }
+});
+
+test('stop soft-stops the running turn: the in-flight tool finishes and no further model request is sent', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-stop-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  let instance: Awaited<ReturnType<typeof openPiInstance>> | undefined;
+  let modelRequests = 0;
+  let toolRuns = 0;
+  const probe = externallyGated({
+    name: 'probe', label: 'Probe', description: 'Stop the turn while this call is in flight.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      toolRuns += 1;
+      await instance!.stop();
+      return { content: [{ type: 'text' as const, text: 'probe finished' }], details: {} };
+    },
+  });
+  const stream: StreamFn = model => {
+    modelRequests += 1;
+    const output = createAssistantMessageEventStream();
+    const message = modelRequests === 1 ? toolCallMessage(model, 'probe') : reply(model, 'Resumed response');
+    output.push({ type: 'done', reason: message.stopReason === 'toolUse' ? 'toolUse' : 'stop', message });
+    return output;
+  };
+  instance = await openPiInstance({
+    binding: { instanceId: 'agent-stop', nodeId: 'node-stop', definitionVersion: 'coder@1' },
+    workspace, stateDir: join(root, 'state'), model: modelA, modelRuntime: await testModelRuntime(),
+    stream, tools: [probe],
+  });
+  try {
+    const sessionId = instance.inspect().sessionId;
+    await instance.prompt('Run the probe');
+    // The in-flight tool call finished, but the turn ended instead of asking the model again.
+    expect(toolRuns).toBe(1);
+    expect(modelRequests).toBe(1);
+    expect(instance.inspect().messages.at(-1)).toMatchObject({ role: 'toolResult', toolName: 'probe' });
+    // The soft stop retained the session (no dispose), so the next prompt continues it.
+    await instance.prompt('Continue after the stop');
+    expect(modelRequests).toBe(2);
+    expect(instance.inspect().sessionId).toBe(sessionId);
+    expect(instance.inspect().messages.at(-1)).toMatchObject({
+      role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Resumed response' }],
+    });
+  } finally {
+    await instance.close();
+  }
+});
+
+test('stop with no running turn is idempotent and leaves the session usable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-stop-idle-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const instance = await openPiInstance({
+    binding: { instanceId: 'agent-stop-idle', nodeId: 'node-stop-idle', definitionVersion: 'coder@1' },
+    workspace, stateDir: join(root, 'state'), model: modelA, modelRuntime: await testModelRuntime(), stream: respond,
+  });
+  try {
+    await expect(instance.stop()).resolves.toBeUndefined();
+    await expect(instance.stop()).resolves.toBeUndefined();
+    await instance.prompt('After an idle stop');
+    expect(instance.inspect().messages.at(-1)).toMatchObject({
+      role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Saved response' }],
+    });
+  } finally {
+    await instance.close();
   }
 });
