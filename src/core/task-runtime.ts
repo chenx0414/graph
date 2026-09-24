@@ -1272,7 +1272,7 @@ export async function openTaskRuntime(options: {
         }), disabledTools: assembly.disabledTools,
         docsRoot: preview.docsRoot, definitionVersion, latestDefinitionVersion,
         tools: preview.tools, capabilities: preview.capabilities,
-        preview: { sections: preview.composed.sections, text: preview.composed.text },
+        preview: { sections: preview.composed.sections, text: preview.finalText },
       };
     },
     currentAccessPolicy(): ResolvedAccessPolicy {
