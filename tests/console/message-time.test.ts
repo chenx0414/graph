@@ -69,3 +69,17 @@ test('只有回答一条、或行还在流式时，没有耗时', () => {
     .find(row => row.kind === 'assistant')!);
   expect(live.elapsedMs ?? null).toBeNull();
 });
+
+test('进行中的叙述气泡也带时间戳（该段最后一次更新的时间）', () => {
+  // Live narration renders through the same copyable row as a final answer, so
+  // it needs a stamp too; there is no recorded message yet, so the segment's own
+  // last update is the honest time to show.
+  const live = assistant(rows([], [{ operationId: 'op3', entryId: 'e1', partId: 'p1', ordinal: 1, text: '正在说…', length: 5, updatedAt: at(2026, 2, 10, 14, 2) }])
+    .find(row => row.kind === 'assistant')!);
+  expect(live.createdAt).toBe(at(2026, 2, 10, 14, 2));
+});
+
+test('不足一秒的耗时不说「0 秒」', () => {
+  expect(elapsedLabel(400)).toBe('不到 1 秒');
+  expect(elapsedLabel(0)).toBe('不到 1 秒');
+});

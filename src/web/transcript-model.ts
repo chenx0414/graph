@@ -297,6 +297,10 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         text: item.stream.text,
         narration: true,
         streaming: index === tail.length - 1,
+        // Live narration renders through the same copyable row as a final answer,
+        // so it carries a stamp too; with no recorded message yet, the segment's
+        // own last update is the honest time to show.
+        createdAt: item.stream.updatedAt,
       });
       continue;
     }

@@ -45,6 +45,7 @@ export function clockLabel(timestamp: number | null | undefined, now: number = D
 /** How long a turn took, in the coarsest units that still read as a duration. */
 export function elapsedLabel(ms: number) {
   const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds === 0) return '不到 1 秒';
   if (seconds < 60) return `耗时 ${seconds} 秒`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
