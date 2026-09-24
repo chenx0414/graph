@@ -39,7 +39,7 @@ export type TranscriptActivityItem =
 
 export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
-  | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
+  | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
@@ -188,6 +188,20 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
  * activity block so the answer stays the visible outcome. The live tail is
  * appended after durable history so the same row survives the handoff.
  */
+/**
+ * How long the turn behind one answer took: from the earliest record of the same
+ * operation to the answer itself. Null when the answer is that earliest record,
+ * so a turn with nothing to measure shows no duration instead of a fake zero.
+ */
+function turnElapsedMs(messages: ConversationMessage[], message: ConversationMessage): number | null {
+  if (!message.operationId) return null;
+  const start = messages
+    .filter(item => item.operationId === message.operationId)
+    .reduce((earliest, item) => Math.min(earliest, item.createdAt), message.createdAt);
+  const elapsed = message.createdAt - start;
+  return elapsed > 0 ? elapsed : null;
+}
+
 export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   const answered = new Set(input.messages
@@ -247,6 +261,8 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         operationId: message.operationId ?? message.id,
         text: message.text,
         streaming: false,
+        createdAt: message.createdAt,
+        elapsedMs: turnElapsedMs(input.messages, message),
       });
       continue;
     }

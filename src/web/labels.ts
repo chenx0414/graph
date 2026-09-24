@@ -21,6 +21,41 @@ export function when(timestamp: number | null) {
   return new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).toLocaleString();
 }
 
+function pad(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+/**
+ * Wall-clock label for one message: time only for today, with a date further
+ * back, so a bubble footer stays short while older history stays unambiguous.
+ */
+export function clockLabel(timestamp: number | null | undefined, now: number = Date.now()) {
+  if (!timestamp) return '—';
+  const date = new Date(timestamp);
+  const reference = new Date(now);
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (date.toDateString() === reference.toDateString()) return clock;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return `昨天 ${clock}`;
+  if (date.getFullYear() === reference.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
+}
+
+/** How long a turn took, in the coarsest units that still read as a duration. */
+export function elapsedLabel(ms: number) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `耗时 ${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    const rest = seconds % 60;
+    return rest ? `耗时 ${minutes} 分 ${rest} 秒` : `耗时 ${minutes} 分`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `耗时 ${hours} 小时 ${restMinutes} 分` : `耗时 ${hours} 小时`;
+}
+
 export function describeQuestion(kind: string) {
   return QUESTION_LABEL[kind] ?? kind;
 }

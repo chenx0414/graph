@@ -12,6 +12,7 @@ import {
   toolGroupSummary,
   type TranscriptRow,
 } from './transcript-model.ts';
+import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
 import { usePacedStreamText } from './use-paced-stream.ts';
 import { useStreamVeils } from './use-stream-veils.ts';
@@ -28,6 +29,16 @@ function CopyButton({ text }: { text: string }) {
     >
       <Icon name="copy" size={14} />
     </button>
+  );
+}
+
+function MessageMeta({ createdAt, elapsedMs }: { createdAt?: number | undefined; elapsedMs?: number | null | undefined }) {
+  if (!createdAt) return null;
+  return (
+    <span className="message-meta">
+      <span data-testid="message-time" title={new Date(createdAt).toLocaleString()}>{clockLabel(createdAt)}</span>
+      {elapsedMs ? <span data-testid="message-elapsed">{`· ${elapsedLabel(elapsedMs)}`}</span> : null}
+    </span>
   );
 }
 
@@ -55,7 +66,7 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
             )}
           </div>
           {copyable && (
-            <div className="message-actions"><CopyButton text={copyable} /></div>
+            <div className="message-actions"><CopyButton text={copyable} /><MessageMeta createdAt={message.createdAt} /></div>
           )}
         </div>
       </div>
@@ -352,7 +363,7 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
           {visualStreaming && <span className="streaming-caret" aria-hidden="true" />}
         </div>
         {copyable && (
-          <div className="message-actions"><CopyButton text={copyable} /></div>
+          <div className="message-actions"><CopyButton text={copyable} /><MessageMeta createdAt={row.createdAt} elapsedMs={row.elapsedMs} /></div>
         )}
       </div>
     </div>
