@@ -709,10 +709,13 @@ export class RsiService {
         } else {
           if (existing === undefined) throw new RuntimeError('not_found', `Cannot replace missing RSI file ${path}`);
           let content = existing;
-          for (const edit of change.edits) {
+          for (const [index, edit] of change.edits.entries()) {
             const matches = content.split(edit.oldText).length - 1;
             if (matches !== 1) {
-              throw new RuntimeError('rsi_edit_conflict', `RSI replacement in ${path} must match exactly once, found ${matches}`);
+              // A batch rolls back as a whole, so name the edit that failed: the
+              // caller has to know which oldText to correct without guessing.
+              const head = edit.oldText.split('\n')[0]!.trim().slice(0, 90);
+              throw new RuntimeError('rsi_edit_conflict', `RSI replacement in ${path} must match exactly once, found ${matches} (edit ${index + 1} of ${change.edits.length}, first line: ${head})`);
             }
             content = content.replace(edit.oldText, edit.newText);
           }
