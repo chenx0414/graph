@@ -11,7 +11,7 @@ import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { taskGate } from '../../src/runtime/task-gate.ts';
 import { tokenUsageTotal, type TokenUsage } from '../../src/runtime/call-broker.ts';
-import { TaskStore } from '../../src/core/store.ts';
+import { TaskStore, SCHEMA_VERSION } from '../../src/core/store.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -248,7 +248,7 @@ test('the current schema tags every invocation with a purpose and keeps completi
   const root = await temp('schema');
   const store = new TaskStore(join(root, 'tasks.sqlite'));
   cleanup.push(() => store.close());
-  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(31);
+  expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SCHEMA_VERSION);
   const columns = store.db.prepare('PRAGMA table_info(invocations)').all() as { name: string; dflt_value: string | null }[];
   expect(columns.find(column => column.name === 'purpose')).toMatchObject({ dflt_value: "'completion'" });
 });

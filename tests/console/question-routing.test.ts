@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { TaskStore } from '../../src/core/store.ts';
+import { TaskStore, SCHEMA_VERSION } from '../../src/core/store.ts';
 import { insertQuestion, isMasterParked, questionOwner, recoverMaster } from '../../src/core/question-routing.ts';
 import { resetIdleNode } from '../../src/core/graph.ts';
 import { OperationLifecycle } from '../../src/core/operation-lifecycle.ts';
@@ -191,7 +191,7 @@ test('upgrading reclassifies legacy internal questions so they leave the user in
   store.close();
   store = new TaskStore(path);
   cleanup.push(async () => store.close());
-  expect(store.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 31 });
+  expect(store.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
   expect(store.db.prepare('SELECT id,kind,owner FROM questions ORDER BY id').all()).toEqual([
     { id: 'perm', kind: 'permission', owner: 'user' },
     { id: 'rec', kind: 'recovery', owner: 'main' },

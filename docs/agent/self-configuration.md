@@ -18,6 +18,8 @@ Graph 把 Agent 可编辑上下文集中到固定目录：
 
 `defaults/` 保存用户点击「设为默认」后的基线。该动作同时保存当前内容；空文件也是合法默认值。后续「恢复默认」优先回到用户默认，未设置用户默认时才回到代码内置原版；存在自定义默认时，「恢复内置」会清除该文件并回到代码原版。
 
+**生效层与仓库种子的区别**：`agents/*.md`、`rules/*.md` 等 editable 文件一旦存在于 `~/.graph/prompts/`，就**整份覆盖**代码内置的默认文本（`src/runtime/agent-context-assembly.ts` 的 `input.library?.prompt(...) ?? DEFAULT_*`）。所以仓库里只有一份很短的种子：在仓库里 grep 规则编号（例如 `R18`）会一无所获，但这并不代表规则没有生效。判断一条规则是否真的生效，要看 `~/.graph/prompts/rules/<role>.md` 的实际内容（或聊天头部「Agent 上下文」的最终拼装视图），改规则也应该改那里。
+
 ## 结构化 Composer
 
 Graph 自己组装最终 system prompt，顺序为：

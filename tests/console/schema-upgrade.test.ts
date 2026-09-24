@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
-import { TaskStore } from '../../src/core/store.ts';
+import { TaskStore, SCHEMA_VERSION } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
@@ -98,7 +98,7 @@ for (const fixture of ['v13', 'v17'] as const) {
     await daemon.close();
 
     const upgraded = await inspect(dbPath);
-    expect(upgraded.version).toBe(31);
+    expect(upgraded.version).toBe(SCHEMA_VERSION);
     expect(upgraded.instance).toMatchObject({ budget: 20_000_000, used: 12_345, unlimited: 0, models_used: '["legacy-model"]' });
     expect(JSON.parse(upgraded.cost.cost)).toEqual({ amount: 0.001, currency: 'USD' });
     expect(upgraded.pauseColumns.sort()).toEqual(['pause_ms', 'pause_since', 'user_wait_ms', 'user_wait_since']);
@@ -175,7 +175,7 @@ test('v23 renumbers legacy handoffs before enforcing one version per task', asyn
   raw.close();
   const store = new TaskStore(dbPath);
   try {
-    expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(31);
+    expect((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SCHEMA_VERSION);
     expect(store.db.prepare('SELECT id,version FROM context_handoffs ORDER BY version').all())
       .toEqual([{ id: 'h1', version: 1 }, { id: 'h2', version: 2 }, { id: 'h3', version: 3 }]);
   } finally {

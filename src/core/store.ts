@@ -2,6 +2,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { EventEmitter } from 'node:events';
 import { RuntimeError } from './types.ts';
 
+/** Latest schema version this runtime writes. The startup guard and every version
+ * assertion refer to it, so adding a migration is one edit instead of five — a
+ * mismatch here once rejected the database the same process had just created. */
+export const SCHEMA_VERSION = 31;
+
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
     if (item === null || typeof item === 'string' || typeof item === 'boolean') return item;
@@ -33,7 +38,7 @@ export class TaskStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 31) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
+    if (version > SCHEMA_VERSION) { this.db.close(); throw new RuntimeError('schema_version', 'Database belongs to a newer runtime'); }
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE projects(id TEXT PRIMARY KEY, root TEXT NOT NULL, grants TEXT NOT NULL);
