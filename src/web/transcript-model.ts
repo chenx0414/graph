@@ -189,15 +189,35 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
  * appended after durable history so the same row survives the handoff.
  */
 /**
- * How long the turn behind one answer took: from the earliest record of the same
- * operation to the answer itself. Null when the answer is that earliest record,
- * so a turn with nothing to measure shows no duration instead of a fake zero.
+ * When the turn behind one answer began, as the transcript can see it: the later
+ * of the user message that asked for it and the previous answer, so a turn nobody
+ * asked for (a reload continuation) still measures itself. Only when neither is
+ * visible does it fall back to the earliest record of the same operation.
+ */
+function turnStart(messages: ConversationMessage[], message: ConversationMessage): number | null {
+  let start: number | null = null;
+  for (const item of messages) {
+    if (item.seq >= message.seq) continue;
+    if (item.role === 'user' || (item.role === 'assistant' && item.kind === 'chat')) {
+      if (start === null || item.createdAt > start) start = item.createdAt;
+    }
+  }
+  if (start !== null) return start;
+  if (!message.operationId) return null;
+  const sameOperation = messages.filter(item => item.operationId === message.operationId);
+  if (sameOperation.length < 2) return null;
+  return sameOperation.reduce((earliest, item) => Math.min(earliest, item.createdAt), message.createdAt);
+}
+
+/**
+ * How long the turn behind one answer took. Null when there is nothing to measure
+ * against, so a turn with no visible start shows no duration instead of a fake
+ * zero. A receipt written while the turn is still running is the first record of
+ * its own operation, which is why the start comes from the turn boundary.
  */
 function turnElapsedMs(messages: ConversationMessage[], message: ConversationMessage): number | null {
-  if (!message.operationId) return null;
-  const start = messages
-    .filter(item => item.operationId === message.operationId)
-    .reduce((earliest, item) => Math.min(earliest, item.createdAt), message.createdAt);
+  const start = turnStart(messages, message);
+  if (start === null) return null;
   const elapsed = message.createdAt - start;
   return elapsed > 0 ? elapsed : null;
 }

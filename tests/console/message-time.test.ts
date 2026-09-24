@@ -83,3 +83,28 @@ test('不足一秒的耗时不说「0 秒」', () => {
   expect(elapsedLabel(400)).toBe('不到 1 秒');
   expect(elapsedLabel(0)).toBe('不到 1 秒');
 });
+
+test('回执型回答从「上一轮回答与本次提问的较晚者」起算', () => {
+  // The RSI receipt is written while the turn is still running, so it is the first
+  // record of its own operation: measuring from the operation would find nothing.
+  // The turn really began when the user asked, which is after the previous answer.
+  const built = rows([
+    message({ id: 'u1', seq: 1, role: 'user', operationId: 'op1', text: '第一问', createdAt: at(2026, 2, 10, 14, 0) }),
+    message({ id: 'a1', seq: 2, role: 'assistant', kind: 'chat', operationId: 'op1', text: '第一答', createdAt: at(2026, 2, 10, 14, 2) }),
+    message({ id: 'u2', seq: 3, role: 'user', operationId: 'op2', text: '第二问', createdAt: at(2026, 2, 10, 14, 3) }),
+    message({ id: 'a2', seq: 4, role: 'assistant', kind: 'chat', operationId: 'op2', text: '回执', createdAt: at(2026, 2, 10, 14, 5) }),
+  ]);
+  const answers = built.filter(row => row.kind === 'assistant').map(row => assistant(row));
+  expect(answers[0]!.elapsedMs).toBe(120_000);
+  expect(answers[1]!.elapsedMs).toBe(120_000);
+});
+
+test('无人提问的回合（重载续跑）按上一轮回答起算', () => {
+  const built = rows([
+    message({ id: 'u1', seq: 1, role: 'user', operationId: 'op1', text: '问', createdAt: at(2026, 2, 10, 14, 0) }),
+    message({ id: 'a1', seq: 2, role: 'assistant', kind: 'chat', operationId: 'op1', text: '答', createdAt: at(2026, 2, 10, 14, 1) }),
+    message({ id: 'a2', seq: 3, role: 'assistant', kind: 'chat', operationId: 'op2', text: '续跑的回执', createdAt: at(2026, 2, 10, 14, 4) }),
+  ]);
+  const answers = built.filter(row => row.kind === 'assistant').map(row => assistant(row));
+  expect(answers[1]!.elapsedMs).toBe(180_000);
+});
