@@ -6,6 +6,7 @@ import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 import { STANDARD_ACCESS } from './access-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
 import { modelRequestHeaders, type ModelInput } from '../catalog/models.ts';
+import { defaultThinkingLevelFor } from '../catalog/models.ts';
 import { thinkingOptionLabel } from './thinking-levels.ts';
 import {
   FALLBACK_PLATFORMS,
@@ -766,8 +767,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                       </select>
                     </Field>
                     <Field label="默认思考强度">
-                      <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
-                        <option value="">未指定</option>
+                      <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? defaultThinkingLevelFor(entry.thinkingOptions ?? []) ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
                         {(entry.thinkingOptions ?? []).map(option => <option key={option.level} value={option.level}>{thinkingOptionLabel(option)}</option>)}
                         {entry.defaultThinkingLevel && !(entry.thinkingOptions ?? []).some(option => option.level === entry.defaultThinkingLevel)
                           ? <option value={entry.defaultThinkingLevel}>{entry.defaultThinkingLevel}（该模型不支持，请改选）</option>

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { defaultThinkingLevelFor } from '../../src/catalog/models.ts';
 import type { ModelEntry } from '../../src/catalog/models.ts';
 import { thinkingLevelMapFor } from '../../src/catalog/thinking.ts';
 import { effectiveThinkingLevel, thinkingOptionsFor } from '../../src/runtime/thinking.ts';
@@ -82,8 +83,7 @@ describe('per-model thinking strengths', () => {
     expect(effectiveThinkingLevel(unknown)).toBe('high');
   });
 
-  test('the level map denies off and every unlisted level', () => {
-    const map = thinkingLevelMapFor(entry());
+  test('the level map denies off and every unlisted level', () => {    const map = thinkingLevelMapFor(entry());
     expect(map.off).toBeNull();
     expect(map.minimal).toBeNull();
     expect(map.max).toBeNull();
@@ -91,5 +91,20 @@ describe('per-model thinking strengths', () => {
     expect(map.low).toBe('low');
     // A model flagged as non-reasoning is still treated as thinking-capable.
     expect(thinkingLevelMapFor(entry({ reasoning: false })).low).toBe('low');
+  });
+
+  test('the default is the second strongest level a model accepts', () => {
+    const options = (model: ModelEntry) => thinkingOptionsFor(model).map(option => option.level);
+    // low/medium/high/xhigh → high; low/high/max → high; minimal…high → medium.
+    expect(defaultThinkingLevelFor(options(entry()).map(level => ({ level })))).toBe('high');
+    const deepseek = entry({ id: 'deepseek-flash', provider: 'deepseek', modelId: 'deepseek-flash' });
+    expect(defaultThinkingLevelFor(options(deepseek).map(level => ({ level })))).toBe('high');
+    const mimo = entry({ id: 'opencode-go:mimo-v2.6-pro', provider: 'opencode-go', modelId: 'mimo-v2.6-pro' });
+    expect(defaultThinkingLevelFor(options(mimo).map(level => ({ level })))).toBe('medium');
+    // The rule is what a model with no configured default actually runs at.
+    expect(effectiveThinkingLevel(mimo)).toBe('medium');
+    // A single-level model uses the only level it has.
+    expect(defaultThinkingLevelFor([{ level: 'high' }])).toBe('high');
+    expect(defaultThinkingLevelFor([])).toBeUndefined();
   });
 });

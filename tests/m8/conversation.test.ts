@@ -302,9 +302,9 @@ test('conversation model and thinking selection applies to the next master turn'
   });
   cleanup.push(() => runtime.close());
   const created = await runtime.conversations.create({ text: '切换模型', requestId: 'model-create' });
-  // Thinking is always on, so the synthetic model (not in the catalog) gets the
-  // lowest of Pi's default levels rather than `off`.
-  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'minimal' });
+  // Thinking is always on and no default is configured, so the shared rule (the
+  // second strongest of Pi's default levels) decides.
+  expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'medium' });
 
   const selected = await runtime.conversations.selectModel(created.conversationId, {
     model: 'm2', thinkingLevel: 'high', requestId: 'model-select',

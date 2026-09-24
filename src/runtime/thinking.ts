@@ -8,6 +8,7 @@
  */
 import { clampThinkingLevel, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import type { ModelEntry, ModelThinkingLevel, ModelThinkingOption } from '../catalog/models.ts';
+import { defaultThinkingLevelFor } from '../catalog/models.ts';
 import { modelMetadataFor } from '../catalog/thinking.ts';
 import { toPiModel } from './pi-adapter.ts';
 
@@ -24,10 +25,11 @@ export function thinkingOptionsFor(entry: ModelEntry): ModelThinkingOption[] {
   }));
 }
 
-/** The level a model will actually run at: a level this model does not accept
- * falls back the way the SDK falls back (nearest stronger, then nearest
- * weaker), so thinking is always on. */
+/** The level a model will actually run at: the requested one, else the model's
+ * configured default, else the shared rule (second strongest level). A level
+ * this model does not accept falls back the way the SDK falls back (nearest
+ * stronger, then nearest weaker), so thinking is always on. */
 export function effectiveThinkingLevel(entry: ModelEntry, requested?: string): ModelThinkingLevel {
-  const wanted = (requested ?? entry.defaultThinkingLevel) as ModelThinkingLevel | undefined;
-  return clampThinkingLevel(toPiModel(entry), wanted ?? 'off');
+  const wanted = requested ?? entry.defaultThinkingLevel ?? defaultThinkingLevelFor(thinkingOptionsFor(entry));
+  return clampThinkingLevel(toPiModel(entry), (wanted ?? 'off') as ModelThinkingLevel);
 }

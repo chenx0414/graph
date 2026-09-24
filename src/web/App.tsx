@@ -4,6 +4,7 @@ import type { AgentContextView } from './AgentContext.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { attachmentPayload } from './attachments.ts';
 import { ComposerTelemetry, type ComposerTelemetryView } from './ComposerTelemetry.tsx';
+import { defaultThinkingOption } from './thinking-levels.ts';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
@@ -498,7 +499,7 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [modelId, setModelId] = useState('');
-  const [thinkingLevel, setThinkingLevel] = useState('off');
+  const [thinkingLevel, setThinkingLevel] = useState('low');
   const { data: agentContext } = useAsync(() => api<AgentContextView>('/api/agent-context'), []);
 
   useEffect(() => { setProjectId(initialProjectId); }, [initialProjectId]);
@@ -508,7 +509,7 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
     if (!settings || modelId) return;
     const selected = settings.models.find(model => model.id === settings.defaultModel) ?? settings.models[0];
     setModelId(selected?.id ?? '');
-    setThinkingLevel(selected?.reasoning === false ? 'off' : selected?.defaultThinkingLevel ?? 'off');
+    setThinkingLevel(selected?.defaultThinkingLevel ?? defaultThinkingOption(selected?.thinkingOptions ?? []) ?? 'low');
   }, [settings, modelId]);
   const selectedModel = settings?.models.find(model => model.id === modelId);
   const telemetry: ComposerTelemetryView = {

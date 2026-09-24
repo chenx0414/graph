@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { nearestLevel, thinkingLabel, thinkingOptionLabel, thinkingView, type ThinkingOptionView } from '../../src/web/thinking-levels.ts';
+import { defaultThinkingOption, nearestLevel, thinkingLabel, thinkingOptionLabel, thinkingView, type ThinkingOptionView } from '../../src/web/thinking-levels.ts';
 
 const option = (level: string, label = level): ThinkingOptionView => ({ level, label });
 
@@ -48,6 +48,15 @@ describe('thinking control view', () => {
     );
     expect(exact.level).toBe('xhigh');
     expect(exact.fallbackFrom).toBeUndefined();
+  });
+
+  test('the default option is the second strongest level', () => {
+    const options = [option('low'), option('medium'), option('high'), option('xhigh')];
+    expect(defaultThinkingOption(options)).toBe('high');
+    expect(defaultThinkingOption([option('low'), option('high'), option('max')])).toBe('high');
+    expect(defaultThinkingOption([option('minimal'), option('low'), option('medium'), option('high')])).toBe('medium');
+    expect(defaultThinkingOption([option('high')])).toBe('high');
+    expect(defaultThinkingOption([])).toBeUndefined();
   });
 
   test('levels are shown in the model own vocabulary, never translated', () => {

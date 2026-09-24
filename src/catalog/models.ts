@@ -58,6 +58,15 @@ export interface ModelEntry {
  * written back into the config document. */
 export type ModelEntryView = ModelEntry & { thinkingOptions: ModelThinkingOption[] };
 
+/** The default thinking strength a model uses when the config names none: the
+ * second strongest level the model accepts. One rule for the server, the
+ * console and every model added later, so a new model never needs the default
+ * written by hand. */
+export function defaultThinkingLevelFor(options: readonly { level: string }[]): string | undefined {
+  if (!options.length) return undefined;
+  return options[options.length - 2]?.level ?? options[options.length - 1]!.level;
+}
+
 /** Provider-required HTTP headers that must travel with every model request.
  * OpenCode Go rejects chat completions without a session identifier. */
 export function modelRequestHeaders(entry: Pick<ModelEntry, 'provider' | 'baseUrl' | 'headers'>): Record<string, string> | undefined {
