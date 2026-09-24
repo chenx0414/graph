@@ -12,7 +12,7 @@ import { graphDocumentationPaths } from './agent-docs.ts';
 import {
   composeAgentSystemPrompt, type AgentCapabilityPromptEntry, type AgentToolPromptEntry,
 } from './agent-system-prompt.ts';
-import { capabilityPrompts, type CapabilityLoadFact } from './capabilities.ts';
+import { capabilityAwareness, capabilityPrompts, type CapabilityAwarenessFact, type CapabilityLoadFact } from './capabilities.ts';
 import { openCapabilityBundle, type CapabilityBundleOptions, type CapabilityOperation } from './capability-bundle.ts';
 import { piNativeToolNamesForPlatform, piNativeToolPromptEntries, selectAgentToolSurface } from './pi-native-tools.ts';
 
@@ -152,7 +152,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
   ]);
   const docs = graphDocumentationPaths();
   const definitionVersion = input.definitionVersion ?? 'unknown@1';
-  const compose = (mode: 'preview' | 'operation', identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[]) => {
+  const compose = (mode: 'preview' | 'operation', identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[], awareness?: string) => {
     const composed = composeAgentSystemPrompt({
       mode, identity, definitionVersion, toolGuidance,
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
@@ -165,19 +165,23 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
       capabilities,
       ...(workspace ? { cwd: workspace } : {}), role,
     });
-    return { tools, capabilities, composed, docsRoot: docs.root };
+    // The session receives the composed prompt plus the awareness block; deriving
+    // both here is what makes the console preview the verbatim final prompt.
+    const finalText = [composed.text, awareness ?? ''].filter(part => part.trim().length > 0).join('\n\n');
+    return { tools, capabilities, composed, finalText, docsRoot: docs.root };
   };
   return {
     bundle,
     disabledTools,
     /** Actual operation facts remain authoritative; no settings are re-read here. */
     forOperation(operation: CapabilityOperation) {
-      return compose('operation', operation.prompts.system, loadedTools(operation), loadedCapabilities(operation.report));
+      return compose('operation', operation.prompts.system, loadedTools(operation), loadedCapabilities(operation.report), operation.prompts.appendSystem);
     },
     /** Next-operation configuration only. Historical load reports do not enter this projection. */
     async preview(features: AgentToolFeatures) {
       const declared: AgentContextTool[] = [];
       const capabilities: AgentCapabilityPromptEntry[] = [];
+      const declaredFacts: CapabilityAwarenessFact[] = [];
       let identity = bootstrap.agent ?? null;
       for (const fact of bundle.facts) {
         const record = input.catalog.capability(fact.id, fact.version);
@@ -188,6 +192,14 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
           id: fact.id, version: fact.version, kind: fact.kind, name,
           ...(record?.description ? { description: record.description } : {}),
           path: fact.path, tools: tools.map(tool => tool.name),
+          ...(fact.networkDomains?.length ? { networkDomains: [...fact.networkDomains] } : {}),
+          reason: 'Declared for the next operation; runtime availability has not been confirmed.',
+        });
+        declaredFacts.push({
+          id: fact.id, version: fact.version, kind: fact.kind, name,
+          ...(record?.description ? { description: record.description } : {}),
+          path: fact.path,
+          ...(tools.length ? { tools: tools.map(tool => tool.name) } : {}),
           ...(fact.networkDomains?.length ? { networkDomains: [...fact.networkDomains] } : {}),
           reason: 'Declared for the next operation; runtime availability has not been confirmed.',
         });
@@ -213,7 +225,10 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
         definitionVersion, action: input.action, ...(input.role ? { role: input.role } : {}),
         agentPrompt: identity, toolPrompt: null, report: [], tools: [],
       }).systemPrompt;
-      return compose('preview', system, tools, capabilities);
+      const awareness = capabilityAwareness({
+        mode: 'preview', definitionVersion, toolPrompt: null, report: declaredFacts, tools: selected.tools,
+      });
+      return compose('preview', system, tools, capabilities, awareness);
     },
   };
 }
