@@ -718,6 +718,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     agentCombinationError: runtime.catalog.agentCombinationError() ?? null,
   }));
   app.post('/api/catalog/refresh', async () => runtime.catalog.refreshCatalog());
+  app.get('/api/catalog/pi-extension-updates', async () => runtime.catalog.piExtensionUpdates());
+  app.post('/api/catalog/pi-extensions/:id/:version/update', async request => {
+    const params = request.params as { id: string; version: string };
+    return runtime.catalog.updatePiExtension(params.id, params.version);
+  });
   app.post('/api/catalog/combinations', async request => {
     const body = request.body as { combination?: AgentCombination } | undefined;
     if (!body?.combination) throw new RuntimeError('invalid_input', 'combination is required');

@@ -67,6 +67,8 @@ export interface CapabilityRecord {
   note?: string;
   /** Where the entry came from; a record without one is a capability-library entry. */
   origin?: CapabilityOrigin;
+  /** The declared Pi extension package source, when the SDK resolves it instead of a vendored copy. */
+  packageSource?: string;
   /** Same-name entries the library view folds into this one. */
   duplicates?: { id: string; version: string; source: string }[];
 }

@@ -28,6 +28,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
+import { piExtensionSourceStatus, updatePiExtensionSource } from '../runtime/pi-extension-source.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
@@ -1946,6 +1947,31 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         await catalog.refresh();
         return { capabilities: catalog.capabilities(), agentCombinations: catalog.agentCombinations() };
+      },
+      /** Pi extension sources that have a newer version than the one on disk. */
+      async piExtensionUpdates() {
+        ensureOpen();
+        const updates: Record<string, unknown>[] = [];
+        for (const record of catalog.capabilities()) {
+          const source = record.kind === 'pi-extension' && record.status === 'available' ? record.packageSource : undefined;
+          if (!source) continue;
+          const base = { id: record.id, version: record.version, source };
+          try {
+            updates.push({ ...base, ...await piExtensionSourceStatus({ source, cwd: stateDir, agentDir: stateDir }) });
+          } catch (error) {
+            updates.push({ ...base, installed: null, latest: null, available: false, error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        return { updates };
+      },
+      /** Install or upgrade one Pi extension source, then rescan the capability library. */
+      async updatePiExtension(id: string, version: string) {
+        ensureOpen();
+        const record = catalog.capability(id, version);
+        if (!record?.packageSource) throw new RuntimeError('not_found', `Pi extension ${id}@${version} has no package source`);
+        const result = await updatePiExtensionSource({ source: record.packageSource, cwd: stateDir, agentDir: stateDir });
+        await catalog.refresh();
+        return result;
       },
       preset(id: string) { ensureOpen(); return catalog.preset(id); },
       definitionSpec(id: string, version: number) { ensureOpen(); return catalog.definition(`${id}@${version}`); },

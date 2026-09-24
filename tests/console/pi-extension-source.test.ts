@@ -6,6 +6,7 @@ import { Catalog } from '../../src/catalog/catalog.ts';
 import { TaskStore, canonicalJson } from '../../src/core/store.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { openCapabilityBundle } from '../../src/runtime/capability-bundle.ts';
+import { npmSourceName, piExtensionSourceStatus } from '../../src/runtime/pi-extension-source.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -60,4 +61,20 @@ test('a Pi extension capability may declare a package source instead of a vendor
   } finally {
     await operation.close();
   }
+});
+
+test('a source reports the installed version, and only npm sources are checked for updates', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-pi-extension-status-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const packageDir = join(root, 'packages', 'pi-probe-package');
+  await mkdir(join(packageDir, 'dist', 'ext'), { recursive: true });
+  await writeFile(join(packageDir, 'package.json'), canonicalJson({ name: 'pi-probe-package', version: '1.2.3', pi: { extensions: ['./dist/ext/index.mjs'] } }));
+  await writeFile(join(packageDir, 'dist', 'ext', 'index.mjs'), 'export default function () {}\n');
+
+  // A local source has no registry to ask, so it reports what is on disk and no update.
+  expect(await piExtensionSourceStatus({ source: packageDir, cwd: root, agentDir: join(root, 'state') }))
+    .toEqual({ installed: '1.2.3', latest: null, available: false });
+  expect(npmSourceName(packageDir)).toBeNull();
+  expect(npmSourceName('npm:pi-agent-browser-native')).toBe('pi-agent-browser-native');
+  expect(npmSourceName('npm:@ff-labs/pi-fff@^0.10.0')).toBe('@ff-labs/pi-fff');
 });

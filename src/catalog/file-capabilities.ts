@@ -369,6 +369,7 @@ async function walkCapabilityDirectories(root: string, directory: string, depth:
         ...(manifest.description ? { description: manifest.description } : {}),
         ...(manifest.role ? { role: manifest.role } : {}),
         ...(note ? { note } : {}),
+        ...(manifest.kind === 'pi-extension' && manifest.source ? { packageSource: manifest.source } : {}),
       });
     } catch (error) {
       records.push({
