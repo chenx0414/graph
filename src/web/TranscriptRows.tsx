@@ -150,7 +150,7 @@ function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration'
  * starts collapsed once the final answer exists, and the same button re-expands
  * or collapses it again.
  */
-function TurnActivity({ row }: { row: Extract<TranscriptRow, { kind: 'activity' }> }) {
+function TurnActivity({ row, markdown = true }: { row: Extract<TranscriptRow, { kind: 'activity' }>; markdown?: boolean }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const open = manualOpen ?? !row.collapsed;
   const tools = row.items.flatMap(item => item.kind === 'tool' ? [item.tool] : []);
@@ -180,19 +180,8 @@ function TurnActivity({ row }: { row: Extract<TranscriptRow, { kind: 'activity' 
         <Icon name="chevron" size={14} className="tool-group-chevron" />
       </button>
       <div className="tool-group-content" aria-hidden={!open}>
-        <div className="tool-group-content-inner">
-          <ol className="tool-activity-list turn-activity-list">
-            {row.items.map(item => item.kind === 'narration' ? (
-              <li key={`n:${item.id}`} data-kind="narration"><span className="turn-activity-text">{item.text}</span></li>
-            ) : (
-              <li key={`t:${item.id}`} data-error={item.tool.error} data-done={item.tool.done}>
-                <span className="tool-activity-icon"><Icon name={toolIcon(item.tool.name)} size={14} /></span>
-                <span className="tool-activity-label">{toolActionLabel(item.tool.name)}</span>
-                <span className="tool-activity-summary" title={item.tool.summary}>{item.tool.summary}</span>
-                <span className="tool-activity-state">{item.tool.error ? '失败' : item.tool.done ? '完成' : '进行中'}</span>
-              </li>
-            ))}
-          </ol>
+        <div className="tool-group-content-inner turn-activity-inner">
+          {row.rows.map(child => <TranscriptRowView key={child.id} row={child} markdown={markdown} />)}
         </div>
       </div>
     </section>
@@ -400,7 +389,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   }
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'narration') return <NarrationRow row={row} />;
-  if (row.kind === 'activity') return <TurnActivity row={row} />;
+  if (row.kind === 'activity') return <TurnActivity row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;
   if (row.kind === 'thinking') {
     return (

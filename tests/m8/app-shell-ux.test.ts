@@ -663,12 +663,14 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
-  // A finished turn stays readable as complete narration bubbles with the tool
-  // calls interleaved, and the toggle still folds the whole turn away.
+  // A finished turn keeps its narration bubbles and tool groups, and the toggle
+  // still folds the whole turn away.
   const activity = page.getByTestId('turn-activity');
   await activity.waitFor();
   expect(await activity.getAttribute('data-open')).toBe('true');
-  expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
+  // The tool activity lives inside the turn block as its own group, exactly as it
+  // rendered while the turn was running.
+  expect(await page.locator('[data-testid="turn-activity"] [data-testid="tool-activity-group"]').count()).toBe(1);
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');

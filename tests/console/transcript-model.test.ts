@@ -240,6 +240,10 @@ test('a finished turn keeps its narration and tool calls as an expanded block ab
   expect(activity.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration', 'tool']);
   expect(activity.items.map(item => item.kind === 'narration' ? item.text : item.tool.summary))
     .toEqual(['先读代码', 'a.ts', '现在改投影', 'b.ts']);
+  // Expanded, the turn renders as ordinary rows: narration bubbles with the tool
+  // groups interleaved, not as one tool list.
+  expect(activity.rows.map(child => child.kind)).toEqual(['narration', 'tools', 'narration', 'tools']);
+  expect(activity.rows[1]).toMatchObject({ kind: 'tools', active: false });
   expect(rows[2]).toMatchObject({ kind: 'assistant', text: '改好了' });
 });
 

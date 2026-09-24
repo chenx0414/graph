@@ -41,7 +41,7 @@ export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
-  | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; collapsed: boolean }
+  | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
@@ -159,9 +159,11 @@ function activityItem(message: ConversationMessage): TranscriptActivityItem {
   return { kind: 'tool', id: tool.id, tool };
 }
 
-/** Rows for a turn that has no final answer yet: each narration keeps its place
- * and a contiguous run of tool calls stays one group. */
-function pushActivityRows(rows: TranscriptRow[], operationId: string, items: TranscriptActivityItem[]) {
+/** The rows of one turn's activity in the order it happened: a narration bubble,
+ * then the tool calls that followed it, and so on. A contiguous run of tool calls
+ * is one group, exactly as it renders while the turn is still running. */
+function activityRows(operationId: string, items: TranscriptActivityItem[]): TranscriptRow[] {
+  const rows: TranscriptRow[] = [];
   let tools: TranscriptTool[] = [];
   const flush = () => {
     pushToolGroup(rows, tools);
@@ -176,6 +178,7 @@ function pushActivityRows(rows: TranscriptRow[], operationId: string, items: Tra
     tools.push(item.tool);
   }
   flush();
+  return rows;
 }
 
 /**
@@ -206,12 +209,13 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     activityToolIndex.clear();
     if (!items.length) return;
     if (key && answered.has(key)) {
-      // A finished turn stays readable as complete narration bubbles with the
-      // tool calls interleaved; the toggle still folds the whole turn away.
-      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, collapsed: false });
+      // A finished turn stays readable as complete narration bubbles with the tool
+      // calls interleaved, exactly like the turn did while it was running; the
+      // toggle still folds the whole turn away.
+      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, rows: activityRows(key, items), collapsed: false });
       return;
     }
-    pushActivityRows(rows, key, items);
+    rows.push(...activityRows(key, items));
   };
 
   for (const message of input.messages) {
