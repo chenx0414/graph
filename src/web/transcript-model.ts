@@ -34,8 +34,9 @@ export type TranscriptRsi = {
 /** One ordered step of a finished turn: the narration the Agent wrote between
  * tool calls, or a tool call itself. */
 export type TranscriptActivityItem =
-  | { kind: 'narration'; id: string; text: string }
-  | { kind: 'tool'; id: string; tool: TranscriptTool };
+  | { kind: 'narration'; id: string; text: string; ordinal?: number }
+  | { kind: 'tool'; id: string; tool: TranscriptTool; ordinal?: number }
+  | { kind: 'steer'; id: string; message: ConversationMessage; ordinal?: number };
 
 export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
@@ -151,12 +152,33 @@ function isActivityMessage(message: ConversationMessage) {
   return message.role === 'tool' || message.role === 'activity';
 }
 
+/** The ordinal the server assigned to a text part, a tool call, or a steering
+ * message: the shared order of one turn. */
+function messageOrdinal(message: ConversationMessage): number | undefined {
+  const value = message.data?.ordinal;
+  return typeof value === 'number' ? value : undefined;
+}
+
+/** A steering message joined a turn that was already running. It carries the
+ * ordinal of the place it interrupted, so it stays there instead of at the top. */
+function isSteeredMessage(message: ConversationMessage) {
+  return message.role === 'user' && Boolean(message.operationId) && messageOrdinal(message) !== undefined;
+}
+
+/** A turn's own order is the ordinal the server assigned; records without one
+ * keep the order they were written in. */
+function sortByOrdinal(items: TranscriptActivityItem[]) {
+  if (items.length < 2 || items.some(item => item.ordinal === undefined)) return items;
+  return [...items].sort((left, right) => (left.ordinal ?? 0) - (right.ordinal ?? 0));
+}
+
 /** Narration is its own record in the conversation ledger; anything else in the
  * activity stream is a tool call. */
 function activityItem(message: ConversationMessage): TranscriptActivityItem {
-  if (message.kind === 'activity') return { kind: 'narration', id: message.id, text: message.text };
+  const ordinal = messageOrdinal(message);
+  if (message.kind === 'activity') return { kind: 'narration', id: message.id, text: message.text, ...(ordinal !== undefined ? { ordinal } : {}) };
   const tool = durableTool(message);
-  return { kind: 'tool', id: tool.id, tool };
+  return { kind: 'tool', id: tool.id, tool, ...(ordinal !== undefined ? { ordinal } : {}) };
 }
 
 /** The rows of one turn's activity in the order it happened: a narration bubble,
@@ -173,6 +195,13 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
     if (item.kind === 'narration') {
       flush();
       rows.push({ kind: 'narration', id: `narration:${item.id}`, operationId, text: item.text });
+      continue;
+    }
+    if (item.kind === 'steer') {
+      // The user's own message stays a visible bubble even when the work around
+      // it folds away.
+      flush();
+      rows.push({ kind: 'message', id: item.message.id, message: item.message });
       continue;
     }
     tools.push(item.tool);
@@ -234,6 +263,28 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   let activityItems: TranscriptActivityItem[] = [];
   const activityToolIndex = new Map<string, number>();
 
+  const emitActivity = (key: string, items: TranscriptActivityItem[]) => {
+    if (!items.length) return;
+    const ordered = sortByOrdinal(items);
+    if (key && answered.has(key)) {
+      // The turn is over: the work before an interruption folds away behind one
+      // muted line, and everything from the steering message on stays visible, so
+      // the user's own message keeps the place it interrupted.
+      const cut = ordered.findIndex(item => item.kind === 'steer');
+      const folded = cut < 0 ? ordered : ordered.slice(0, cut);
+      if (folded.length) {
+        // Opening the muted line brings back the very rows the turn showed while
+        // it was running.
+        rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: true });
+      }
+      if (cut >= 0) rows.push(...activityRows(key, ordered.slice(cut)));
+      return;
+    }
+    // A running turn is not wrapped: its narration bubbles and tool groups sit
+    // directly in the transcript.
+    rows.push(...activityRows(key, ordered));
+  };
+
   const flushActivity = () => {
     if (activityKey === null) return;
     const key = activityKey;
@@ -241,24 +292,19 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     activityKey = null;
     activityItems = [];
     activityToolIndex.clear();
-    if (!items.length) return;
-    if (key && answered.has(key)) {
-      // The turn is over: its thinking and tool calls fold away behind one muted
-      // line above the answer, and opening that line brings back the very rows the
-      // turn showed while it was running.
-      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, rows: activityRows(key, items), collapsed: true });
-      return;
-    }
-    // A running turn is not wrapped: its narration bubbles and tool groups sit
-    // directly in the transcript.
-    rows.push(...activityRows(key, items));
+    emitActivity(key, items);
   };
 
   for (const message of input.messages) {
-    if (isActivityMessage(message)) {
+    if (isActivityMessage(message) || isSteeredMessage(message)) {
       const key = message.operationId ?? '';
       if (activityKey !== null && activityKey !== key) flushActivity();
       activityKey = key;
+      if (isSteeredMessage(message)) {
+        const ordinal = messageOrdinal(message);
+        activityItems.push({ kind: 'steer', id: message.id, message, ...(ordinal !== undefined ? { ordinal } : {}) });
+        continue;
+      }
       const incoming = activityItem(message);
       if (incoming.kind === 'tool') {
         // A tool call and its result are two records of the same call.
@@ -292,14 +338,27 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     }
     rows.push({ kind: 'message', id: message.id, message });
   }
-  flushActivity();
+  // A running turn keeps its rows in the buffer until the live tail is known, so
+  // the durable rows and the live ones can share one order.
+  const pendingKey = activityKey;
+  const pendingItems = activityKey === null ? [] : sortByOrdinal(activityItems);
+  activityKey = null;
+  activityItems = [];
+  activityToolIndex.clear();
 
   // The live tail is ordered by the same ordinal, so a text part emitted before
   // a tool call stays above it while the turn is still running.
-  const tail: { ordinal: number; tool?: TranscriptTool; stream?: LiveText }[] = [
+  const tail: { ordinal: number; item?: TranscriptActivityItem; tool?: TranscriptTool; stream?: LiveText }[] = [
     ...input.liveTools.map(tool => ({ ordinal: tool.ordinal, tool: liveTool(tool) })),
     ...input.streaming.map(stream => ({ ordinal: stream.ordinal, stream })),
   ].sort((left, right) => left.ordinal - right.ordinal);
+  // A turn that is still running shows its durable rows and the live tail in one
+  // order, so a steering message stays where it interrupted instead of above the
+  // output it interrupted. Without ordinals the old order is kept.
+  const merged: { ordinal: number; item?: TranscriptActivityItem; tool?: TranscriptTool; stream?: LiveText }[] = tail.length && pendingItems.length && pendingItems.every(item => item.ordinal !== undefined)
+    ? [...pendingItems.map(item => ({ ordinal: item.ordinal ?? 0, item })), ...tail].sort((left, right) => left.ordinal - right.ordinal)
+    : tail;
+  if (!tail.length) emitActivity(pendingKey ?? '', pendingItems);
   let liveTools: TranscriptTool[] = [];
   const flushLiveTools = () => {
     pushToolGroup(rows, liveTools);
@@ -307,7 +366,28 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   };
   // A narration becomes a chat bubble as soon as it stops being the newest thing
   // in the turn, so a finished segment never waits for its tool call to end.
-  for (const [index, item] of tail.entries()) {
+  for (const [index, item] of merged.entries()) {
+    if (item.item) {
+      if (item.item.kind === 'narration') {
+        flushLiveTools();
+        rows.push({
+          kind: 'assistant',
+          id: `assistant:${item.item.id}`,
+          operationId: pendingKey ?? '',
+          text: item.item.text,
+          narration: true,
+          streaming: false,
+        });
+        continue;
+      }
+      if (item.item.kind === 'steer') {
+        flushLiveTools();
+        rows.push({ kind: 'message', id: item.item.message.id, message: item.item.message });
+        continue;
+      }
+      liveTools.push(item.item.tool);
+      continue;
+    }
     if (item.stream) {
       flushLiveTools();
       rows.push({
@@ -316,7 +396,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         operationId: item.stream.operationId,
         text: item.stream.text,
         narration: true,
-        streaming: index === tail.length - 1,
+        streaming: index === merged.length - 1,
         // Live narration renders through the same copyable row as a final answer,
         // so it carries a stamp too; with no recorded message yet, the segment's
         // own last update is the honest time to show.

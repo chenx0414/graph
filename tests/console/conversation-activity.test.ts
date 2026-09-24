@@ -26,3 +26,11 @@ test('older operations keep their plain tool activity shape', () => {
     { name: 'grep', summary: 'ordinal', toolCallId: 't9' },
   ], '')).toEqual([{ kind: 'tool', text: 'grep: ordinal', data: { tool: 'grep', toolCallId: 't9' } }]);
 });
+
+test('turn activity keeps the ordinal that orders it in the transcript', () => {
+  const records = conversationActivityRecords([
+    { type: 'narration', text: '先读代码', ordinal: 1 },
+    { name: 'read', summary: 'a.ts', toolCallId: 'call-1', state: 'done', ordinal: 2 },
+  ], '');
+  expect(records.map(record => record.ordinal)).toEqual([1, 2]);
+});

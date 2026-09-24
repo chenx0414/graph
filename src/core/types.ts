@@ -245,8 +245,10 @@ export type Reconciliation =
 export interface ActionAdapter {
   kind: NodeSpec['kind']; reserveTokens?: number; grant?: string;
   prepare(operation: Operation): Promise<() => Promise<OperationResult>>;
-  /** Deliver a steering message into an already dispatched operation. */
-  steer?(operation: Operation, text: string): Promise<void>;
+  /** Deliver a steering message into an already dispatched operation. Returns the
+   * turn ordinal the injected message was given, so the transcript can keep it at
+   * the place it interrupted instead of at the top of the turn. */
+  steer?(operation: Operation, text: string): Promise<{ ordinal?: number } | void>;
   reconcile?(operation: Operation): Promise<Reconciliation>;
   /** Durable adapter evidence that no session/send began; absence of a receipt alone is insufficient. */
   canReplayBeforeSend?(operation: Operation): boolean;

@@ -1040,11 +1040,11 @@ export async function openTaskRuntime(options: {
       const operation = JSON.parse(active.spec) as Operation;
       const combined = messages.map(steeringText).filter(Boolean).join('\n\n');
       if (!combined) throw new RuntimeError('invalid_input', 'Queued messages do not contain steerable text');
-      await execution.steer(active.id, combined);
+      const steered = await execution.steer(active.id, combined);
 
       const receipt = store.transaction(() => {
         const ids = messages.map(message => message.id);
-        deliverMessages(store, active.id, operation.attempt, messages);
+        deliverMessages(store, active.id, operation.attempt, messages, steered?.ordinal);
         const cursor = store.event(conversation.anchor_task_id, 'message.steered', {
           operationId: active.id, messageIds: ids, requestId: input.requestId,
         });

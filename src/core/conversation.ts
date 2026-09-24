@@ -123,8 +123,8 @@ export function conversationStreams(store: TaskStore, conversationId: string) {
 /** One ordered record of a master turn's activity: the narration the Agent
  * emitted between tool calls, and the tool calls themselves. */
 export type ConversationActivityRecord =
-  | { kind: 'narration'; text: string }
-  | { kind: 'tool'; text: string; data: Record<string, Json> };
+  | { kind: 'narration'; text: string; ordinal?: number }
+  | { kind: 'tool'; text: string; data: Record<string, Json>; ordinal?: number };
 
 /**
  * Decide the ordered, deduplicated activity records of one completed master
@@ -137,11 +137,14 @@ export function conversationActivityRecords(activity: unknown, reply: string): C
   const records: ConversationActivityRecord[] = [];
   for (const item of Array.isArray(activity) ? activity : []) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const entry = item as { type?: unknown; text?: unknown; name?: unknown; summary?: unknown; state?: unknown; toolCallId?: unknown };
+    const entry = item as { type?: unknown; text?: unknown; name?: unknown; summary?: unknown; state?: unknown; toolCallId?: unknown; ordinal?: unknown };
+    // The ordinal is the shared order of the turn's text parts and tool calls; the
+    // transcript needs it to keep a steering message where it interrupted.
+    const ordinal = typeof entry.ordinal === 'number' ? entry.ordinal : undefined;
     if (entry.type === 'narration') {
       const text = typeof entry.text === 'string' ? entry.text.trim() : '';
       if (!text || text === reply) continue;
-      records.push({ kind: 'narration', text });
+      records.push({ kind: 'narration', text, ...(ordinal !== undefined ? { ordinal } : {}) });
       continue;
     }
     if (typeof entry.summary !== 'string' || !entry.summary.trim()) continue;
@@ -153,6 +156,7 @@ export function conversationActivityRecords(activity: unknown, reply: string): C
         ...(typeof entry.toolCallId === 'string' ? { toolCallId: entry.toolCallId } : {}),
         ...(entry.state === 'error' ? { error: true } : {}),
       },
+      ...(ordinal !== undefined ? { ordinal } : {}),
     });
   }
   return records;
@@ -190,19 +194,28 @@ export function pendingMessages(store: TaskStore, conversationId: string, limit 
 /** Move accepted queued messages to the current end of the stream before
  * marking them delivered. This keeps a queued turn after the assistant reply
  * that preceded it instead of reusing the timestamp at which the user typed. */
-export function deliverMessages(store: TaskStore, operationId: string, turn: number, messages: MessageRow[]) {
+export function deliverMessages(store: TaskStore, operationId: string, turn: number, messages: MessageRow[], ordinal?: number) {
+  // A delivered message can carry the ordinal of the turn it joined, so a
+  // steering message keeps the place it interrupted in the transcript.
   for (const message of messages) {
+    const rowData = ordinal === undefined ? null : JSON.stringify({ ...(messageData(message) ?? {}), ordinal });
     if (message.state === 'queued') {
       const next = (store.db.prepare('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM messages').get() as { seq: number }).seq;
-      store.db.prepare(`UPDATE messages SET seq=?,state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1)
-        WHERE id=? AND state='queued'`).run(next, operationId, turn, Date.now(), message.id);
+      store.db.prepare(`UPDATE messages SET seq=?,state='delivered',operation_id=?,turn=?,data=COALESCE(?,data),updated_at=MAX(?,updated_at+1)
+        WHERE id=? AND state='queued'`).run(next, operationId, turn, rowData, Date.now(), message.id);
       store.db.prepare("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='messages'").run(next);
     } else {
-      store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,updated_at=MAX(?,updated_at+1)
-        WHERE id=? AND state='pending'`).run(operationId, turn, Date.now(), message.id);
+      store.db.prepare(`UPDATE messages SET state='delivered',operation_id=?,turn=?,data=COALESCE(?,data),updated_at=MAX(?,updated_at+1)
+        WHERE id=? AND state='pending'`).run(operationId, turn, rowData, Date.now(), message.id);
     }
     publishMessageUpdate(store, message.id);
   }
+}
+
+function messageData(message: MessageRow | undefined): Record<string, Json> | null {
+  const value = message?.data;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, Json>;
 }
 
 /** Messages bound to one operation, used by failure paths to requeue or report. */
@@ -326,7 +339,9 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
         role: record.kind === 'narration' ? 'activity' : 'tool',
         kind: record.kind === 'narration' ? 'activity' : 'tool',
         text: record.text,
-        ...(record.kind === 'tool' ? { data: record.data as unknown as Json } : {}),
+        ...(record.kind === 'tool'
+          ? { data: { ...record.data, ...(record.ordinal !== undefined ? { ordinal: record.ordinal } : {}) } as unknown as Json }
+          : record.ordinal !== undefined ? { data: { ordinal: record.ordinal } as unknown as Json } : {}),
         state: 'done',
         operationId: operation.id,
         turn: operation.attempt,

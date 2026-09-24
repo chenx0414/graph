@@ -293,3 +293,47 @@ test('the live tail interleaves a text part and a tool call by ordinal', () => {
   expect(rows[0]).toMatchObject({ kind: 'assistant', text: '先看一下', narration: true, streaming: false });
   expect(rows[2]).toMatchObject({ kind: 'assistant', text: '再改投影', narration: true, streaming: true });
 });
+
+test('a steered user message stays where it interrupted the turn', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'u1', seq: 1, role: 'user', text: '先做这个', operationId: 'op-1' }),
+      message({ id: 'n1', seq: 2, role: 'activity', kind: 'activity', text: '先读代码', operationId: 'op-1', data: { ordinal: 1 } }),
+      message({ id: 't1', seq: 3, role: 'tool', kind: 'tool', text: 'read: a.ts', operationId: 'op-1', data: { ordinal: 2, tool: 'read' } }),
+      message({ id: 'u2', seq: 4, role: 'user', text: '插队：改成 B', operationId: 'op-1', data: { ordinal: 3 } }),
+      message({ id: 'n2', seq: 5, role: 'activity', kind: 'activity', text: '改成 B 了', operationId: 'op-1', data: { ordinal: 4 } }),
+      message({ id: 'a1', seq: 6, role: 'assistant', text: '好了', operationId: 'op-1' }),
+    ],
+    liveTools: [],
+    streaming: [],
+    busy: false,
+  });
+
+  // Only the work before the interruption folds; the steered message itself stays
+  // visible and keeps the place it interrupted.
+  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'message', 'narration', 'assistant']);
+  const folded = rows[1];
+  if (folded?.kind !== 'activity') throw new Error('expected the folded activity block');
+  expect(folded.rows.map(child => child.kind)).toEqual(['narration', 'tools']);
+  const steered = rows[2];
+  if (steered?.kind !== 'message') throw new Error('expected the steered message row');
+  expect(steered.message.text).toBe('插队：改成 B');
+});
+
+test('a steered message interleaves with the running turn by ordinal', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'u1', seq: 1, role: 'user', text: '先做这个', operationId: 'op-1' }),
+      message({ id: 'n1', seq: 2, role: 'activity', kind: 'activity', text: '先读代码', operationId: 'op-1', data: { ordinal: 1 } }),
+      message({ id: 'u2', seq: 3, role: 'user', text: '插队：改成 B', operationId: 'op-1', data: { ordinal: 3 } }),
+    ],
+    liveTools: [{ toolCallId: 'tool-1', operationId: 'op-1', name: 'read', summary: 'a.ts', done: false, error: false, ordinal: 2 }],
+    streaming: [],
+    busy: true,
+  });
+
+  expect(rows.map(row => row.kind)).toEqual(['message', 'assistant', 'tools', 'message']);
+  const steered = rows[3];
+  if (steered?.kind !== 'message') throw new Error('expected the steered message row');
+  expect(steered.message.text).toBe('插队：改成 B');
+});

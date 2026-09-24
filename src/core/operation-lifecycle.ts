@@ -404,12 +404,12 @@ export class OperationLifecycle {
     });
   }
 
-  async steer(operationId: string, steer: (operation: Operation) => Promise<void>) {
+  async steer(operationId: string, steer: (operation: Operation) => Promise<{ ordinal?: number } | void>) {
     const row = this.operationRow(operationId);
     if (row.state !== 'dispatched' || !row.worker_active) {
       throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting steering messages');
     }
-    await steer(operationFrom(row));
+    return await steer(operationFrom(row));
   }
 
   /** Reconcile an unknown external outcome and apply the verified transition. */

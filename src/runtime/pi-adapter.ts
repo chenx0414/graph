@@ -164,6 +164,9 @@ export function createPiAdapter(options: {
 }): ActionAdapter {
   const transport = options.transport ?? createRestrictedProcessAgentSessionTransport();
   const activeInstances = new Map<string, AgentSession>();
+  /** The live turn's ordinal allocator, so a steering message can take its place
+   * in the order of the turn it interrupts. */
+  const turnOrdinals = new Map<string, () => number>();
   const systemChangeApplications = new Map<string, Promise<Record<string, unknown>>>();
   return {
     kind: 'agent',
@@ -179,6 +182,10 @@ export function createPiAdapter(options: {
       const active = activeInstances.get(operation.id);
       if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting steering messages');
       await active.steer(text);
+      // The injected message takes the next ordinal of the turn it interrupted, so
+      // the transcript can show it where it landed instead of above the turn.
+      const ordinal = turnOrdinals.get(operation.id)?.();
+      return ordinal === undefined ? {} : { ordinal };
     },
     prepare: async operation => {
       if (!operation.instanceId) throw new RuntimeError('invalid_adapter', 'Agents require an instance');
@@ -674,6 +681,7 @@ export function createPiAdapter(options: {
         let currentEntryId = '';
         let ordinal = 0;
         const nextOrdinal = () => { ordinal += 1; return ordinal; };
+        turnOrdinals.set(operation.id, nextOrdinal);
         const flushPart = (part: { entryId: string; partId: string; text: string; buffer: string; lastFlush: number; ordinal: number }, force: boolean) => {
           if (!conversation || !part.buffer) return;
           const now = Date.now();
@@ -701,10 +709,10 @@ export function createPiAdapter(options: {
         // happened. Narration is complete only at message_end, so its record is
         // created when the first text part starts and filled in later.
         type ActivityRecord =
-          | { type: 'narration'; text: string }
-          | { type: 'tool'; toolCallId: string; name: string; summary: string; state: 'done' | 'error' };
+          | { type: 'narration'; text: string; ordinal: number }
+          | { type: 'tool'; toolCallId: string; name: string; summary: string; state: 'done' | 'error'; ordinal: number };
         const activity: ActivityRecord[] = [];
-        const narrationByEntry = new Map<string, { type: 'narration'; text: string }>();
+        const narrationByEntry = new Map<string, { type: 'narration'; text: string; ordinal: number }>();
         const toolOrdinals = new Map<string, number>();
         const livePart = (contentIndex: number) => {
           if (!currentEntryId) { entrySeq += 1; currentEntryId = `entry-${entrySeq}`; }
@@ -714,7 +722,7 @@ export function createPiAdapter(options: {
           if (existing) return existing;
           const part = { entryId: currentEntryId, partId, text: '', buffer: '', lastFlush: 0, ordinal: nextOrdinal() };
           parts.set(key, part);
-          const narration = { type: 'narration' as const, text: '' };
+          const narration = { type: 'narration' as const, text: '', ordinal: nextOrdinal() };
           activity.push(narration);
           narrationByEntry.set(currentEntryId, narration);
           return part;
@@ -751,7 +759,11 @@ export function createPiAdapter(options: {
                 // calls, kept as one readable record of the turn.
                 const narration = narrationByEntry.get(currentEntryId);
                 if (narration) narration.text = text;
-                else { activity.push({ type: 'narration', text }); }
+                else {
+                  const record = { type: 'narration' as const, text, ordinal: nextOrdinal() };
+                  narrationByEntry.set(currentEntryId, record);
+                  activity.push(record);
+                }
               }
             }
             if (!persistEntries) {
@@ -820,7 +832,7 @@ export function createPiAdapter(options: {
             toolSummaries.set(event.toolCallId, summary);
             const callOrdinal = nextOrdinal();
             toolOrdinals.set(event.toolCallId, callOrdinal);
-            activity.push({ type: 'tool', toolCallId: event.toolCallId, name: event.toolName, summary, state: 'done' });
+            activity.push({ type: 'tool', toolCallId: event.toolCallId, name: event.toolName, summary, state: 'done', ordinal: callOrdinal });
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary, ordinal: callOrdinal });
           } else if (event.type === 'tool_execution_end') {
             const summary = toolSummaries.get(event.toolCallId) ?? event.toolName;
