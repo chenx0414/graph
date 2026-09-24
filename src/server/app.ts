@@ -352,7 +352,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const models = runtime.models();
     const defaultModel = runtime.defaultModel();
     const definitions = runtime.catalog.definitions();
-    const capabilities = runtime.catalog.capabilities();
+    const capabilities = runtime.catalog.capabilitiesView();
     const capabilityConfig = await capabilityConfigViews(capabilities, capabilitySecretValues());
     return {
       projects, models, defaultModel, definitions, capabilities, capabilityConfig,

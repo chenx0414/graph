@@ -205,6 +205,11 @@ function CapabilityDetail({ item }: { item: CapabilityRecord }) {
       </div>
       <p>{item.description || '该能力没有提供说明。'}</p>
       {item.owner && <p className="muted" data-testid={`capability-owner-${item.id}`}>来自 {item.owner} 的 skills 文件夹</p>}
+      {item.duplicates?.length ? (
+        <p className="muted" data-testid={`capability-duplicates-${item.id}`}>
+          另有 {item.duplicates.length} 个同名副本（同名只加载一个）：{item.duplicates.map(dup => dup.source).join('、')}
+        </p>
+      ) : null}
       {item.note && <div className="recipe-main-note" data-testid={`capability-note-${item.id}`}>{item.note}</div>}
       {item.error && <div className="form-error">{item.error}</div>}
       <section>

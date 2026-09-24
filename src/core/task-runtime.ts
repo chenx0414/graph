@@ -1920,6 +1920,7 @@ export async function openTaskRuntime(options: {
       definitions() { ensureOpen(); return catalog.listDefinitions(); },
       availableAgentDefinitions() { ensureOpen(); return catalog.availableAgentDefinitions(); },
       capabilities() { ensureOpen(); return catalog.capabilities(); },
+      capabilitiesView() { ensureOpen(); return catalog.capabilitiesView(); },
       capability(id: string, version?: string) { ensureOpen(); return catalog.capability(id, version); },
       capabilityRootPath() { ensureOpen(); return catalog.capabilityRootPath(); },
       agentCombinationFilePath() { ensureOpen(); return catalog.agentCombinationFilePath(); },

@@ -178,4 +178,9 @@ export class Catalog {
   capabilities() {
     return this.capabilityLibrary.capabilities();
   }
+
+  /** The list the resource library renders: one row per skill name, duplicates folded. */
+  capabilitiesView() {
+    return this.capabilityLibrary.capabilitiesView();
+  }
 }

@@ -63,3 +63,31 @@ test('skills in a project .pi or .agents folder appear with their project owner'
   });
   expect(byId.get('pi-skill')).toMatchObject({ kind: 'skill', version: 'local', owner: '项目 demo（.pi）' });
 });
+
+test('same-name skills collapse into one row that names the copies it folded', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-agent-skills-group-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  // Two library entries share a name, the way a bulk import of two parallel trees does.
+  for (const id of ['vendor-skills-notes', 'vendor-agents-skills-notes']) {
+    await mkdir(join(capabilityRoot, 'skills', id), { recursive: true });
+    await writeFile(join(capabilityRoot, 'skills', id, 'SKILL.md'), '---\nname: notes\ndescription: Take notes.\n---\n');
+    await writeFile(join(capabilityRoot, 'skills', id, 'capability.json'), JSON.stringify({ id, kind: 'skill', version: '1.0.0', name: 'notes' }));
+  }
+  // A project ships its own copy of the same name.
+  const project = join(root, 'checkout');
+  await mkdir(join(project, '.agents', 'skills', 'notes'), { recursive: true });
+  await writeFile(join(project, '.agents', 'skills', 'notes', 'SKILL.md'), '---\nname: notes\ndescription: Project notes.\n---\n');
+
+  const library = new CapabilityLibrary({ capabilityRoot, projects: () => [{ id: 'demo', root: project }] });
+  await library.refreshCapabilities();
+  const view = library.capabilitiesView().filter(item => item.kind === 'skill');
+  expect(view).toHaveLength(1);
+  const [row] = view;
+  // The bindable library entry is the row; the shortest id wins inside one origin.
+  expect(row?.id).toBe('vendor-skills-notes');
+  expect(row?.duplicates?.map(dup => dup.id)).toEqual(['vendor-agents-skills-notes', 'notes']);
+  expect(row?.duplicates?.map(dup => dup.source)).toEqual(['能力库', '项目 demo（.agents）']);
+  // Lookups still see every entry, so a bound definition keeps resolving by id.
+  expect(library.capabilities().filter(item => item.name === 'notes')).toHaveLength(3);
+});
