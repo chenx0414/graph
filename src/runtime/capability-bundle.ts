@@ -44,6 +44,11 @@ export interface CapabilityBundleOptions {
    * SDK loads skills from it, so a hand-edited folder is a first-class input.
    */
   skillFolder?: string;
+  /**
+   * Working directory whose `.pi/skills` is the project-local skills source, exactly as the
+   * SDK defines it. The global source is the SDK's own agent directory.
+   */
+  skillCwd?: string;
   /** Capability roots Graph owns; links pointing into them are Graph's own to manage. */
   skillOwnedRoots?: readonly string[];
 }
@@ -200,10 +205,15 @@ export class CapabilityBundleVersion {
       const nativeTools = Object.freeze(selected.nativeTools);
       const tools = Object.freeze(selected.tools);
       const piExtensionTools = selected.extensionTools;
-      // Skills are recorded from the Agent's own folder, which is what the SDK loads: a
-      // bound skill keeps its loaded fact and its version, and a skill the user pasted
-      // into the folder becomes a load fact of its own. Everything else stays as loaded.
-      const folderSkills = this.skillFolder ? agentSkills(this.skillFolder).skills : [];
+      // Skills are recorded from the folders the SDK loads: the Agent's own folder, which
+      // is where bound skills are mirrored and where the user pastes their own, plus the
+      // SDK's global and project folders. A bound skill keeps its loaded fact and its
+      // version, a skill found in any of those folders becomes a load fact of its own, and
+      // everything else stays as loaded.
+      const folderSkills = agentSkills({
+        ...(this.skillFolder ? { folder: this.skillFolder } : {}),
+        ...(this.input.skillCwd ? { cwd: this.input.skillCwd } : {}),
+      }).skills;
       const excludedSkills = new Set(folderSkills.filter(skill => skill.disableModelInvocation).map(skill => skill.name));
       const recordedSkills = new Set(loaded.report.filter(fact => fact.kind === 'skill').map(fact => fact.id));
       const pastedSkills = folderSkills.filter(skill => !recordedSkills.has(skill.name));

@@ -142,6 +142,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     ...(input.secrets ? { secrets: input.secrets } : {}),
     ...(input.skillFolder ? { skillFolder: input.skillFolder } : {}),
     ...(input.skillOwnedRoots?.length ? { skillOwnedRoots: input.skillOwnedRoots } : {}),
+    ...(workspace ? { skillCwd: workspace } : {}),
   });
   const retrievalNote = input.retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : '';
   const [common, roleRules, toolGuidance, runtime, projectContext, disabledTools] = await Promise.all([
@@ -156,9 +157,13 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
   const docs = graphDocumentationPaths();
   const definitionVersion = input.definitionVersion ?? 'unknown@1';
   const compose = (mode: 'preview' | 'operation', identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[], capabilityDocs?: string) => {
-    // The SDK's own loader reads the Agent's folder and its own formatter renders the
-    // block. Read it per composition, so an operation sees the folder it just mirrored.
-    const skills = bundle.skillFolder ? agentSkills(bundle.skillFolder).block : '';
+    // The SDK's own loader reads the Agent's folder plus its own global and project
+    // folders, and its own formatter renders the block. Read it per composition, so an
+    // operation sees the folder it just mirrored.
+    const skills = agentSkills({
+      ...(bundle.skillFolder ? { folder: bundle.skillFolder } : {}),
+      ...(workspace ? { cwd: workspace } : {}),
+    }).block;
     const composed = composeAgentSystemPrompt({
       mode, identity, definitionVersion, toolGuidance,
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
