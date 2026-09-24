@@ -534,12 +534,8 @@ export class TaskStore {
       // "This turn already wrote its final answer" used to be inferred from a
       // three-part message query; a column makes it a fact about the turn, so a
       // future edit to that query cannot silently drop every reply.
-      // A fixture that replays migrations over an already-current table must not
-      // fail, so the column is only added when it is missing.
-      const columns = this.db.prepare('PRAGMA table_info(operations)').all() as { name: string }[];
-      if (!columns.some(column => column.name === 'replied_at')) {
-        this.db.exec('ALTER TABLE operations ADD COLUMN replied_at INTEGER;');
-      }
+      const columns = new Set((this.db.prepare('PRAGMA table_info(operations)').all() as { name: string }[]).map(row => row.name));
+      if (!columns.has('replied_at')) this.db.exec('ALTER TABLE operations ADD COLUMN replied_at INTEGER;');
       this.db.exec('PRAGMA user_version=32;');
     });
   }

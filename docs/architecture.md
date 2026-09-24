@@ -126,6 +126,8 @@ interface TaskHandle {
 
 SQLite 保存正式状态与追加审计记录，两者同事务提交；Pi 会话文件负责对话上下文，不反向覆盖任务状态。大型正文和产物用内容引用保存，数据库记录摘要与适用范围。首版不要求完整 event sourcing，也不自动删除历史记录。
 
+**迁移约定**：schema 版本由 `src/core/store.ts` 的单一常量 `SCHEMA_VERSION` 表示，启动守卫与测试断言都引用它，因此加一次迁移只需改这一处加迁移体（守卫写死在旧数字上一次曾让同一进程刚建的库被自己拒绝）。迁移必须**幂等**：`ALTER TABLE … ADD COLUMN` 先取 `PRAGMA table_info(<表>)` 再判断列是否存在（见 v19 的 `budget_scope_id` 与 v32 的 `replied_at`）。因为「先把库建到最新、再把 `user_version` 降回旧值」的夹具会让迁移重放一次，重复加列会直接报 `duplicate column name` 并让整条门禁失败。
+
 共享产物空间是任务级不可变对象库：文件内容按 SHA-256 存放于 Graph 受保护状态目录，SQLite 保存 `Artifact` 逻辑身份、version、namespace、producer、schema、trust、生命周期和事件。正式引用使用 `artifactId + version + digest`，绝对路径仅作为本机 materialization。Agent 通过 `artifact_list/get/read/publish/retire` 发现和发布文献集、Plan、Review Report 与交付文件；Main Agent 可显式 promotion 到项目级知识。私有 worktree 继续负责代码，integration branch 继续负责最终交付。见 [ADR 0025](adr/0025-shared-artifact-workspace.md)。
 
 ## 调度与图修订
