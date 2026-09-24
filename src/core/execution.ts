@@ -123,7 +123,10 @@ export class Execution {
 
   async steer(operationId: string, text: string) {
     await this.lifecycle.steer(operationId, async operation => {
-      const adapter = Object.hasOwn(this.actions, operation.action) ? this.actions[operation.action] : undefined;
+      // Resolve the adapter exactly like dispatch does: the built-in Agent action
+      // has no entry of its own, so it is served by the fallback adapter (the Pi
+      // agent), which is also the only one that can steer a running turn.
+      const adapter = Object.hasOwn(this.actions, operation.action) ? this.actions[operation.action] : this.fallback;
       if (!adapter?.steer) throw new RuntimeError('steering_unavailable', 'The active Agent does not support steering messages');
       await adapter.steer(operation, text);
     });
