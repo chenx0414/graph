@@ -66,9 +66,31 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
       name: 'Browser',
       tools: ['browser_open'],
       networkDomains: ['example.com'],
+    }, {
+      id: 'handoff',
+      version: '1.0.0',
+      kind: 'skill',
+      name: 'Handoff',
+      tools: [],
+      description: 'Compact the conversation into a handoff document.',
+      path: '/home/me/.graph/agents/main/skills/handoff/SKILL.md',
+      reason: '技能已加载为只读文档',
     }],
     cwd: '/home/me/.graph/state/worktrees/task-1/agent-a',
     capabilityDocs: 'Read the extension doc before you call it.',
+    // The SDK renders its own skills block; Graph passes it through verbatim.
+    skills: [
+      'The following skills provide specialized instructions for specific tasks.',
+      'Read the full skill file when the task matches its description.',
+      '',
+      '<available_skills>',
+      '  <skill>',
+      '    <name>handoff</name>',
+      '    <description>Compact the conversation into a handoff document.</description>',
+      '    <location>/home/me/.graph/agents/main/skills/handoff/SKILL.md</location>',
+      '  </skill>',
+      '</available_skills>',
+    ].join('\n'),
   });
 
   expect(result.sections.map(section => section.id)).toEqual([
@@ -78,6 +100,7 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
     'docs',
     'project_context',
     'capabilities',
+    'skills',
     'cwd',
   ]);
   expect(result.sections.find(section => section.id === 'tools')?.parts.map(part => part.origin))
@@ -122,6 +145,13 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   // in <tools>, where each line also carries availability.
   expect(result.text).toContain('Read the extension doc before you call it.');
   expect(result.text).toContain('Use only the callable tools listed in <tools>.');
+  // Skills are described once, by the SDK's own block in its own section; the
+  // capability inventory no longer repeats them.
+  expect(result.text).not.toContain('skill handoff@1.0.0');
+  expect(result.sections.find(section => section.id === 'skills')?.parts.map(part => part.content))
+    .toEqual([expect.stringContaining('<available_skills>')]);
+  expect(result.text).toContain('<location>/home/me/.graph/agents/main/skills/handoff/SKILL.md</location>');
+  expect(result.text.indexOf('</available_skills>')).toBeLessThan(result.text.indexOf('<cwd>'));
   expect(result.text).not.toContain('# Capability awareness');
   expect(result.text).not.toContain('## Callable tools');
   expect(result.text).not.toContain('Definition: main@1');

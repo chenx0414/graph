@@ -17,6 +17,7 @@ export type AgentPromptSectionId =
   | 'docs'
   | 'project_context'
   | 'capabilities'
+  | 'skills'
   | 'cwd'
   | 'pi_cwd';
 
@@ -75,6 +76,11 @@ export interface ComposeAgentSystemPromptInput {
   capabilities: AgentCapabilityPromptEntry[];
   /** Text a capability itself contributes about using it (its tool.md). */
   capabilityDocs?: string;
+  /**
+   * The skills block rendered by the SDK's own formatter (`formatSkillsForPrompt`),
+   * passed through verbatim so skills keep the native shape.
+   */
+  skills?: string;
   cwd?: string;
   /** Normalized Agent role: only subagents get the worktree orientation note. */
   role?: 'main' | 'worker' | 'reviewer';
@@ -131,8 +137,10 @@ function toolInventory(input: ComposeAgentSystemPromptInput) {
 }
 
 function capabilityLines(capabilities: readonly AgentCapabilityPromptEntry[]) {
-  if (!capabilities.length) return '(none)';
-  return capabilities.map(capability => {
+  // Skills are described by the SDK's own block, in their own section.
+  const described = capabilities.filter(capability => capability.kind !== 'skill');
+  if (!described.length) return '(none)';
+  return described.map(capability => {
     const tools = capability.tools.length ? `tools=${capability.tools.join(', ')}` : 'tools=none';
     const network = capability.networkDomains?.length
       ? `; network=${capability.networkDomains.join(', ')}`
@@ -215,8 +223,8 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     origin: 'generated',
     content: [
       input.mode === 'preview'
-        ? 'Skills, MCP servers, Graph extensions and Pi extensions declared for the next Agent operation; runtime availability will be confirmed when they load:'
-        : 'Skills, MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
+        ? 'MCP servers, Graph extensions and Pi extensions declared for the next Agent operation; runtime availability will be confirmed when they load:'
+        : 'MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
       capabilityLines(input.capabilities),
       ...(input.capabilityDocs?.trim() ? ['', input.capabilityDocs.trim()] : []),
       '',
@@ -266,6 +274,14 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     docs,
     projectContext,
     capabilities,
+    // The SDK's skills block is its own section: skills are described once, by the
+    // native formatter, and never repeated as capability lines.
+    ...(input.skills?.trim() ? [section('skills', 'Skills', [{
+      id: 'skills.native',
+      title: 'Available skills',
+      origin: 'generated' as const,
+      content: input.skills.trim(),
+    }])] : []),
     cwd,
   ];
   const text = sections.map(renderedSection).join('\n\n');
