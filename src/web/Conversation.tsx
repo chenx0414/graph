@@ -704,8 +704,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       setPausedOverride(nextPaused);
       toast(
         nextPaused
-          ? '主 Agent 对话已暂停。已发出的调用会结束，新消息会排队保留。'
-          : '主 Agent 对话已继续，排队消息会开始处理。',
+          ? '主 Agent 对话已暂停：正在跑的回合会在当前工具调用收尾后停下，不再发起新的模型请求；新消息会保留并排队。'
+          : '主 Agent 对话已继续：会接着跑刚才被停下的那个回合，排队消息随后按序处理。',
         nextPaused ? 'info' : 'success',
       );
       reload();
@@ -977,18 +977,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             <span className="drawer-entry-label" data-testid="drawer-entry-label">{drawerEntryLabel(entryState)}</span>
             {(draftStatus === 'pending' || draftStatus === 'stale') && <span className="drawer-entry-dot" data-tone={draftStatus === 'stale' ? 'warn' : 'accent'} aria-hidden="true" />}
           </button>
-          <Button
-            size="sm"
-            icon={pauseAction ? 'refresh' : paused ? 'play' : 'pause'}
-            variant={paused ? 'primary' : 'default'}
-            data-testid={paused ? 'conversation-resume' : 'conversation-pause'}
-            data-busy={pauseAction ? 'true' : 'false'}
-            disabled={pauseAction !== null}
-            onClick={() => void changePaused(!paused)}
-            title={paused ? '继续主 Agent 的对话处理' : '暂停主 Agent 的对话处理，不影响正在执行的功能任务'}
-          >
-            {pauseAction === 'pause' ? '正在暂停…' : pauseAction === 'resume' ? '正在继续…' : paused ? '继续' : '暂停'}
-          </Button>
+          {/* The pause/resume control lives on the composer's primary button
+              (same action, same flag); the header no longer repeats it. */}
           <button
             type="button"
             className="icon-button drawer-toggle detail-toggle"
@@ -1037,7 +1027,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         <section className="conversation-alert" data-testid="conversation-paused-notice">
           <div className="conversation-pause-note">
             <Icon name="pause" size={15} />
-            <span><strong>主 Agent 对话已暂停。</strong> 已发出的调用会结束，新消息会保留并排队；正在执行的功能任务仍按自身状态继续。继续后会处理排队消息。</span>
+            <span><strong>主 Agent 对话已暂停。</strong> 正在跑的回合会在当前工具调用收尾后停下，不再发起新的模型请求；新消息会保留并排队。继续后会接着跑被停下的那个回合。</span>
           </div>
         </section>
       )}
