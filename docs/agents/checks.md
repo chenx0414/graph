@@ -37,6 +37,10 @@ git config core.hooksPath .githooks
 ./.githooks/pre-push
 ```
 
+## 测试夹具
+
+驱动真实任务图的测试不要重新发明夹具：`tests/fixtures/lane.ts` 提供脚本化车道（记录每条车道收到的 briefing 与工作副本、返回合规的 `result_handoff@1` 结果）与 `settle(...)` 派发轮询。三个坑写在文件头部：`user.begin` 需要 `projects`；worker 结果不合 `result_handoff@1` 会被 block 且下游永不派发；节点完成是异步结算的。
+
 ## 在 Git 工作树里验证
 
 `git worktree add` 只带出 tracked 文件，被忽略的依赖与构建产物不在其中。要在工作树里跑全量检查：
