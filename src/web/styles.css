@@ -689,7 +689,8 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   margin-top: 3px; color: var(--muted); font-size: 12px;
 }
 .conversation-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.conversation-actions > .btn,
+/* The pause/resume control now lives on the composer primary button; the header
+   keeps only the drawer-entry and detail-toggle icon buttons. */
 .conversation-actions > .icon-button { flex: 0 0 auto; }
 .detail-toggle { width: 30px; height: 30px; }
 .detail-toggle[data-open="true"] { background: var(--panel-soft); color: var(--text); }
