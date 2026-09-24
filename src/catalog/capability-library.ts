@@ -12,7 +12,7 @@ import {
   type AgentCombination,
   type AgentCombinationView,
 } from './agent-combinations.ts';
-import { parseCapabilityManifest, scanCapabilities, type CapabilityManifest } from './file-capabilities.ts';
+import { parseCapabilityManifest, scanAgentSkills, scanCapabilities, type CapabilityManifest } from './file-capabilities.ts';
 import type { ModelGrade } from './models.ts';
 
 export type CapabilityKind = 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt';
@@ -45,6 +45,10 @@ export interface CapabilityRecord {
   description?: string;
   role?: 'agent' | 'tool';
   error?: string;
+  /** The Agent recipe this entry belongs to, for skills placed in its own folder. */
+  owner?: string;
+  /** A fact worth showing next to the entry, such as an excluded skill. */
+  note?: string;
 }
 
 export interface CapabilitySearchInput {
@@ -136,7 +140,13 @@ export class CapabilityLibrary {
   }
 
   async refreshCapabilities() {
-    this.capabilitiesCache = this.capabilityRoot ? await scanCapabilities(this.capabilityRoot) : [];
+    if (!this.capabilityRoot) {
+      this.capabilitiesCache = [];
+      return this.capabilities();
+    }
+    // Skills the user placed in an Agent's own folder belong to the same library view.
+    const placed = await scanAgentSkills(join(dirname(this.capabilityRoot), 'agents'));
+    this.capabilitiesCache = [...await scanCapabilities(this.capabilityRoot), ...placed];
     return this.capabilities();
   }
 

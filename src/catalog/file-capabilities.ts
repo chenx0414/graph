@@ -244,8 +244,88 @@ async function validateFiles(directory: string, manifest: CapabilityManifest) {
   }
 }
 
-async function walkCapabilityDirectories(root: string, directory: string, depth: number, records: CapabilityRecord[]) {
-  if (depth > MAX_SCAN_DEPTH) return;
+/** The frontmatter a native skill loader needs: name, description and the invocation flag. */
+async function skillFrontmatter(directory: string) {
+  const file = join(directory, 'SKILL.md');
+  if (!existsSync(file)) return undefined;
+  const text = await readFile(file, 'utf8');
+  const block = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!block) return { name: undefined, description: undefined, disableModelInvocation: false, hasFrontmatter: false };
+  const values: Record<string, string> = {};
+  for (const line of block[1]!.split(/\r?\n/)) {
+    const parsed = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (parsed) values[parsed[1]!] = parsed[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return {
+    name: values.name || undefined,
+    description: values.description || undefined,
+    disableModelInvocation: (values['disable-model-invocation'] ?? '').toLowerCase() === 'true',
+    hasFrontmatter: true,
+  };
+}
+
+const SKILL_FRONTMATTER_ERROR = 'SKILL.md 缺少 frontmatter（name/description）：原生加载器会跳过它';
+
+/** What the library should say about a skill file, given the native loader's rules. */
+async function skillNote(directory: string): Promise<string | undefined> {
+  const front = await skillFrontmatter(directory);
+  if (!front) return undefined;
+  if (!front.hasFrontmatter) return SKILL_FRONTMATTER_ERROR;
+  if (front.disableModelInvocation) {
+    return '声明了 disable-model-invocation：不会进入系统提示（原生语义为仅显式调用）';
+  }
+  return undefined;
+}
+
+/**
+ * Skills the user placed in an Agent's own folder.
+ *
+ * Symlinked entries are the mirror of the skills a recipe already binds, and the library
+ * lists those from the capability root, so only hand-made folders are recorded here.
+ */
+export async function scanAgentSkills(agentsRoot: string): Promise<CapabilityRecord[]> {
+  let agents;
+  try {
+    agents = await readdir(agentsRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  const records: CapabilityRecord[] = [];
+  for (const agent of agents.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).sort((left, right) => left.name.localeCompare(right.name))) {
+    const skillsDir = join(agentsRoot, agent.name, 'skills');
+    let entries;
+    try {
+      entries = await readdir(skillsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue;
+      const directory = join(skillsDir, entry.name);
+      if (!existsSync(join(directory, 'SKILL.md'))) continue;
+      const front = await skillFrontmatter(directory);
+      const note = await skillNote(directory);
+      const usable = Boolean(front?.hasFrontmatter);
+      records.push({
+        id: entry.name,
+        kind: 'skill',
+        source: directory,
+        version: 'local',
+        snapshot: { path: directory },
+        status: usable ? 'available' : 'invalid',
+        ...(front?.name ? { name: front.name } : {}),
+        ...(front?.description ? { description: front.description } : {}),
+        owner: agent.name,
+        ...(note ? { note } : {}),
+        ...(usable ? {} : { error: SKILL_FRONTMATTER_ERROR }),
+      });
+    }
+  }
+  return records;
+}
+
+async function walkCapabilityDirectories(root: string, directory: string, depth: number, records: CapabilityRecord[]) {  if (depth > MAX_SCAN_DEPTH) return;
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -257,6 +337,7 @@ async function walkCapabilityDirectories(root: string, directory: string, depth:
     try {
       const manifest = await readCapabilityManifest(directory);
       await validateFiles(directory, manifest);
+      const note = manifest.kind === 'skill' ? await skillNote(directory) : undefined;
       records.push({
         id: manifest.id,
         kind: manifest.kind,
@@ -267,6 +348,7 @@ async function walkCapabilityDirectories(root: string, directory: string, depth:
         name: manifest.name,
         ...(manifest.description ? { description: manifest.description } : {}),
         ...(manifest.role ? { role: manifest.role } : {}),
+        ...(note ? { note } : {}),
       });
     } catch (error) {
       records.push({
