@@ -278,12 +278,6 @@ async function skillNote(directory: string): Promise<string | undefined> {
 }
 
 /**
- * Skills the user placed in an Agent's own folder.
- *
- * Symlinked entries are the mirror of the skills a recipe already binds, and the library
- * lists those from the capability root, so only hand-made folders are recorded here.
- */
-/**
  * Skills the user placed directly in one native skills folder: the SDK's global agent
  * folder, a project's `.pi/skills`, or an Agent's own folder.
  *
