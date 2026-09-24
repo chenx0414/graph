@@ -204,6 +204,8 @@ function CapabilityDetail({ item }: { item: CapabilityRecord }) {
         <Pill tone="neutral">v{item.version}</Pill>
       </div>
       <p>{item.description || '该能力没有提供说明。'}</p>
+      {item.owner && <p className="muted" data-testid={`capability-owner-${item.id}`}>来自 {item.owner} 的 skills 文件夹（手动粘贴）</p>}
+      {item.note && <div className="recipe-main-note" data-testid={`capability-note-${item.id}`}>{item.note}</div>}
       {item.error && <div className="form-error">{item.error}</div>}
       <section>
         <h4>本地目录</h4>
