@@ -124,6 +124,30 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.text).not.toContain('<pi_cwd>');
 });
 
+test('the worktree orientation note reaches subagents only', () => {
+  const base = {
+    identity: 'I am an Agent.',
+    definitionVersion: 'main@1',
+    toolGuidance: 'Use the tools you are given.',
+    rules: { common: 'Be honest.', role: 'Role rules.' },
+    docs: graphDocumentationPaths(),
+    tools: [],
+    capabilities: [],
+  };
+  const worktree = '/home/me/.graph/state/worktrees/task-1/agent-a';
+  const main = composeAgentSystemPrompt({ ...base, role: 'main', cwd: worktree });
+  const worker = composeAgentSystemPrompt({ ...base, role: 'worker', cwd: worktree });
+  const noWorktree = composeAgentSystemPrompt({ ...base, role: 'worker' });
+
+  // The main Agent already works in the project root; a subagent gets its own
+  // worktree and has to be told that this is what it is looking at.
+  expect(main.text).toContain(`Current working directory: ${worktree}`);
+  expect(main.text).not.toContain('own Git worktree');
+  expect(worker.text).toContain(`Current working directory: ${worktree}`);
+  expect(worker.text).toContain('own Git worktree');
+  expect(noWorktree.text).toContain('No worktree has been prepared for this conversation yet.');
+});
+
 test('the Agent context library seeds editable rules and the main tool routing rules', async () => {
   const root = await temp();
   const library = openAgentContextLibrary(root, {

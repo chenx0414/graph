@@ -163,8 +163,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
         ...tool, ...(version ? { version } : {}),
       })),
       capabilities,
-      cwd: workspace ?? 'No worktree has been prepared for this conversation yet.',
-      piCwd: workspace ?? 'No active Pi session for this conversation yet.',
+      ...(workspace ? { cwd: workspace } : {}), role,
     });
     return { tools, capabilities, composed, docsRoot: docs.root };
   };

@@ -269,11 +269,26 @@ export async function openPiInstance(options: PiInstanceOptions) {
     images: { autoResize: false },
     enableAnalytics: false, enableInstallTelemetry: false,
   });
+  // Graph owns the final system prompt. The Pi session builds its own prompt from
+  // the base Graph passes and then appends a "Current working directory:" line to
+  // it, so the composed prompt is returned from the before_agent_start hook: that
+  // replaces the built prompt for the turn instead of extending it.
+  const systemPrompt = options.systemPrompt;
+  const promptTakeover: InlineExtension | undefined = systemPrompt === undefined ? undefined : {
+    name: 'graph-system-prompt',
+    hidden: true,
+    factory: pi => {
+      pi.on('before_agent_start', () => ({
+        systemPrompt: [systemPrompt, options.appendSystemPrompt ?? ''].filter(part => part.trim().length > 0).join('\n\n'),
+      }));
+    },
+  };
+  const extensionFactories = [...(options.extensionFactories ?? []), ...(promptTakeover ? [promptTakeover] : [])];
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
     ...(options.skillPaths?.length ? { additionalSkillPaths: options.skillPaths } : {}),
     ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
-    ...(options.extensionFactories?.length ? { extensionFactories: options.extensionFactories } : {}),
+    ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
     ...(options.appendSystemPrompt ? { appendSystemPrompt: [options.appendSystemPrompt] } : {}),
     ...(options.hideSkillDescriptions ? {

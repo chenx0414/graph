@@ -73,8 +73,9 @@ export interface ComposeAgentSystemPromptInput {
   };
   tools: AgentToolPromptEntry[];
   capabilities: AgentCapabilityPromptEntry[];
-  cwd: string;
-  piCwd?: string;
+  cwd?: string;
+  /** Normalized Agent role: only subagents get the worktree orientation note. */
+  role?: 'main' | 'worker' | 'reviewer';
 }
 
 export interface ComposedAgentSystemPrompt {
@@ -226,8 +227,10 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
       ? 'No worktree has been prepared for this conversation yet.'
       : [
         `Current working directory: ${input.cwd}`,
-        '',
-        "This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree.",
+        ...(input.role === 'main' ? [] : [
+          '',
+          "This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree.",
+        ]),
       ].join('\n'),
   }]);
 
