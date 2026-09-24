@@ -1789,10 +1789,13 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(markdown).toContain('<capabilities>\n');
   expect(markdown).toContain('<cwd>\n');
   expect(markdown).not.toContain('<pi_cwd>');
-  // The panel is the final prompt, not only the Graph sections: the capability
-  // awareness block the session receives has to be in it.
-  expect(markdown).toContain('# Capability awareness');
-  expect(markdown).toContain('## Callable tools');
+  // Capabilities are described once, in the section itself. What the Agent can
+  // actually call stays the <tools> inventory, with every description intact.
+  expect(markdown).toContain('Use only the callable tools listed in <tools>.');
+  expect(markdown).not.toContain('# Capability awareness');
+  expect(markdown).not.toContain('## Callable tools');
+  const tools = markdown.slice(markdown.indexOf('<tools>'), markdown.indexOf('</tools>'));
+  expect(tools).toMatch(/- get_task_status[^:]*: \S/);
   expect(await page.locator('.agent-preview-section').count()).toBe(0);
   await page.getByTestId('agent-context-tab-prompts').click();
   expect(await page.getByTestId('agent-prompt-docs/INDEX.md').count()).toBe(0);

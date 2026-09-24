@@ -68,6 +68,7 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
       networkDomains: ['example.com'],
     }],
     cwd: '/home/me/.graph/state/worktrees/task-1/agent-a',
+    capabilityDocs: 'Read the extension doc before you call it.',
   });
 
   expect(result.sections.map(section => section.id)).toEqual([
@@ -116,6 +117,14 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.text).toContain('<project_instructions path="/work/AGENTS.md">');
   expect(result.text).toContain('<capabilities>');
   expect(result.text).toContain('- mcp browser@1.2.0 (Browser): tools=browser_open; network=example.com');
+  // One capability description, in one section: the inventory line above, the
+  // capability's own tool doc, and the send-gate rule. The tool list itself stays
+  // in <tools>, where each line also carries availability.
+  expect(result.text).toContain('Read the extension doc before you call it.');
+  expect(result.text).toContain('Use only the callable tools listed in <tools>.');
+  expect(result.text).not.toContain('# Capability awareness');
+  expect(result.text).not.toContain('## Callable tools');
+  expect(result.text).not.toContain('Definition: main@1');
   expect(result.text).toContain('<cwd>');
   // One working-directory block: the path line, then the worktree note. The Pi
   // process cwd is the same worktree, so a second block would only repeat it.

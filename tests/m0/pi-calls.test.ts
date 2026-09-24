@@ -14,7 +14,7 @@ import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provider: Awaited<ReturnType<typeof openaiServer>>) => ToolDefinition[] = () => [],
-  config: { auto?: boolean; systemPrompt?: string; appendSystemPrompt?: string; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void } = {}) {
+  config: { auto?: boolean; systemPrompt?: string; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-pi-calls-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans); cleanup.push(() => provider.close());
@@ -26,7 +26,6 @@ async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provid
     tools: tools(broker, provider), broker,
     compaction: { enabled: config.auto ?? false, reserveTokens: 256, keepRecentTokens: 1 },
     ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
-    ...(config.appendSystemPrompt ? { appendSystemPrompt: config.appendSystemPrompt } : {}),
     onEvent: event => config.onEvent?.(event, broker),
   });
   cleanup.push(() => instance.close());
@@ -35,16 +34,14 @@ async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provid
 
 test('Graph owns the final system prompt, so the Pi working-directory line is replaced instead of appended', async () => {
   const composed = '<cwd>\nCurrent working directory: /tmp/graph-worktree\n</cwd>';
-  const { instance, provider } = await fixture([{}], () => [], {
-    systemPrompt: composed, appendSystemPrompt: 'Tool awareness: read before you write.',
-  });
+  const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed });
   await instance.prompt('Hello');
   const request = provider.requests[0] as { messages: { role: string; content: string }[] };
   const system = request.messages.find(message => message.role === 'system')!.content;
   // Exact equality is the point: nothing the Pi session builds on its own (the
   // trailing "Current working directory:" line, its coding-assistant preamble)
   // may survive into the request Graph sends.
-  expect(system).toBe(`${composed}\n\nTool awareness: read before you write.`);
+  expect(system).toBe(composed);
 });
 
 test('native Pi HTTP calls pass the gate and raw cache/reasoning totals are charged once', async () => {

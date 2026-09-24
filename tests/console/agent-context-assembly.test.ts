@@ -129,15 +129,13 @@ test('preview reads declarations without importing an extension or starting an M
   expect(preview.tools.find(tool => tool.name === 'declared_probe')).toMatchObject({ runtimeAvailable: null, enabled: true });
   expect(preview.composed.text).toContain('declared_probe (not yet discovered)');
   expect(preview.capabilities.find(item => item.id === 'mcp')).toMatchObject({ tools: [] });
-  // The console tab is labelled "最终 Prompt", so the preview has to be the text
-  // the session actually receives: the Graph sections plus the capability
-  // awareness that the Pi session gets as its appended block.
-  expect(preview.finalText.startsWith(`${preview.composed.text}\n\n`)).toBe(true);
-  expect(preview.finalText).toContain('# Capability awareness');
-  expect(preview.finalText).toContain('## Callable tools\n');
-  expect(preview.finalText).toContain('- declared_probe: Declared probe');
-  expect(preview.finalText).toContain('declared for the next Agent operation');
-  expect(preview.finalText).not.toContain('loaded for this Agent process');
+  // One capability description, in the Graph section itself: the console preview
+  // is the final prompt by construction, and no second block is appended.
+  expect(preview.composed.text).toContain('Use only the callable tools listed in <tools>.');
+  expect(preview.composed.text).toContain('declared_probe');
+  expect(preview.composed.text).not.toContain('# Capability awareness');
+  expect(preview.composed.text).not.toContain('## Callable tools');
+  expect(preview.composed.text).not.toContain('loaded for this Agent process');
   expect(existsSync(marker)).toBe(false);
   expect(await readFile(join(capabilityRoot, 'extension/index.mjs'), 'utf8')).toContain('unexpected');
 });

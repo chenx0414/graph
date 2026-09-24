@@ -73,6 +73,8 @@ export interface ComposeAgentSystemPromptInput {
   };
   tools: AgentToolPromptEntry[];
   capabilities: AgentCapabilityPromptEntry[];
+  /** Text a capability itself contributes about using it (its tool.md). */
+  capabilityDocs?: string;
   cwd?: string;
   /** Normalized Agent role: only subagents get the worktree orientation note. */
   role?: 'main' | 'worker' | 'reviewer';
@@ -216,6 +218,9 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
         ? 'Skills, MCP servers, Graph extensions and Pi extensions declared for the next Agent operation; runtime availability will be confirmed when they load:'
         : 'Skills, MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
       capabilityLines(input.capabilities),
+      ...(input.capabilityDocs?.trim() ? ['', input.capabilityDocs.trim()] : []),
+      '',
+      'Use only the callable tools listed in <tools>. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
     ].join('\n'),
   }]);
 
