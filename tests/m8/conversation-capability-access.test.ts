@@ -731,6 +731,7 @@ test('a task node follows the latest definition of its own recipe on its next di
   runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [] }, 'worker-v2');
   await settle(2);
 
-  expect(briefings).toHaveLength(2);  expect(briefings[1]).not.toContain('github@1.0.0');
+  expect(briefings).toHaveLength(2);
+  expect(briefings[1]).not.toContain('github@1.0.0');
   expect((await task.view()).nodes.find(node => node.id === 'worker-b')?.definitionVersion).toBe('worker@2');
 }, 120_000);
