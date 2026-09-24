@@ -227,7 +227,8 @@ test('full access keeps the work copy and bound capability readable inside Graph
   expect((await call('read', { path: join(stateDir, 'tasks.sqlite') })).content[0]).toMatchObject({ text: 'formal' });
 });
 
-test('the main Agent cannot author composer suggestions as part of its reply', async () => {  const root = await mkdtemp(join(tmpdir(), 'graph-tools-suggestion-'));
+test('the main Agent cannot author composer suggestions as part of its reply', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-suggestion-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const tools = agentTools({
     workspace: root,
