@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 31;
+export const SCHEMA_VERSION = 32;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -529,6 +529,12 @@ export class TaskStore {
         CREATE INDEX IF NOT EXISTS conversation_streams_scope ON conversation_streams(conversation_id, updated_at);
         PRAGMA user_version=31;
       `);
+    });
+    if (version < 32) this.transaction(() => {
+      // "This turn already wrote its final answer" used to be inferred from a
+      // three-part message query; a column makes it a fact about the turn, so a
+      // future edit to that query cannot silently drop every reply.
+      this.db.exec('ALTER TABLE operations ADD COLUMN replied_at INTEGER; PRAGMA user_version=32;');
     });
   }
   transaction<T>(action: () => T): T {

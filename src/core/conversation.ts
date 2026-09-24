@@ -277,6 +277,23 @@ export function turnFailureReason(result: OperationResult): { reason: string; ki
 
 /** Persist the durable side of one master turn: its assistant reply and the
  * summarized tool activity. Idempotent per operation. */
+/** Whether one turn already recorded its final answer. The marker lives on the
+ * operation, so it cannot be confused with a user message that shares the
+ * operation id and the kind. */
+export function operationReplied(store: TaskStore, operationId: string | null | undefined) {
+  if (!operationId) return false;
+  const row = store.db.prepare('SELECT replied_at FROM operations WHERE id=?').get(operationId) as { replied_at: number | null } | undefined;
+  // The row object is always truthy, so the marker itself has to be inspected.
+  return typeof row?.replied_at === 'number';
+}
+
+/** Mark one turn as answered. Callers write it in the same transaction as the
+ * reply, so the marker and the reply become durable together. */
+export function markOperationReplied(store: TaskStore, operationId: string | null | undefined) {
+  if (!operationId) return;
+  store.db.prepare('UPDATE operations SET replied_at=COALESCE(replied_at,?) WHERE id=?').run(Date.now(), operationId);
+}
+
 export function recordConversationOutput(store: TaskStore, operation: Operation, result: OperationResult) {
   if (operation.kind !== 'agent') return;
   const nodeSpec = JSON.parse((store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
@@ -284,9 +301,10 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
   if (nodeSpec.role !== 'master') return;
   const conversation = conversationForTask(store, operation.taskId);
   if (!conversation) return;
-  // The final reply is the idempotency marker: a user message also carries
-  // kind='chat', so the role has to be part of the check.
-  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='assistant' AND kind='chat' LIMIT 1").get(operation.id)) return;
+  // The marker is an explicit fact about the turn: a user message carries the same
+  // operation id and kind='chat', so a message query cannot be trusted to decide
+  // whether this turn already answered.
+  if (operationReplied(store, operation.id)) return;
   const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
     ? result.output as { [key: string]: Json }
     : undefined;
@@ -325,6 +343,7 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
         turn: operation.attempt,
         ...(suggestedPrompt ? { data: { suggestedPrompt } } : {}),
       });
+      markOperationReplied(store, operation.id);
     }
   } else if (result.outcome === 'failed') {
     const failure = turnFailureReason(result);
@@ -355,7 +374,8 @@ export function recordConversationInterruption(store: TaskStore, operation: Oper
   // A turn that already delivered its reply was not lost, even if the process died
   // afterwards (a reload can close it right after the receipt became durable), so a
   // second notice would only contradict what the user read.
-  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND (role='assistant' OR (role='system' AND kind='error')) LIMIT 1").get(operation.id)) return;
+  if (operationReplied(store, operation.id)) return;
+  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='system' AND kind='error' LIMIT 1").get(operation.id)) return;
   appendMessage(store, {
     conversationId: conversation.id,
     role: 'system',

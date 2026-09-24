@@ -5,7 +5,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { appendMessage, conversationForTask, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
+import { appendMessage, conversationForTask, markOperationReplied, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import type { TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { checkedOutBranch, detectRepo, git, revParse } from '../git/git.ts';
@@ -887,6 +887,7 @@ export class RsiService {
           state: 'done',
           operationId: context.operationId ?? null,
         });
+        markOperationReplied(context.store, context.operationId);
       }
     });
   }

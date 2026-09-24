@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { conversationStreams, publishConversationDelta, recordConversationInterruption, recordConversationOutput } from '../../src/core/conversation.ts';
+import { appendMessage, conversationStreams, publishConversationDelta, recordConversationInterruption, recordConversationOutput } from '../../src/core/conversation.ts';
 import { TaskStore } from '../../src/core/store.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -140,4 +140,23 @@ test('an interrupted operation that already delivered its reply adds no error no
 
   expect(store.db.prepare("SELECT role,kind FROM messages WHERE conversation_id='conversation' ORDER BY seq").all())
     .toEqual([{ role: 'assistant', kind: 'chat' }]);
+});
+
+test('the reply marker is explicit on the operation, not inferred from message rows', async () => {
+  const store = await fixture();
+  const operation = { id: 'op', taskId: 'task', nodeId: 'master', attempt: 1, kind: 'agent' } as unknown as Parameters<typeof recordConversationOutput>[1];
+  const result = { outcome: 'completed', output: { text: '收到。' } } as unknown as Parameters<typeof recordConversationOutput>[2];
+
+  // A user message carries the same operation id and the same kind='chat', which is
+  // exactly how a narrowed message query once decided every turn was already
+  // answered and silently stopped writing every reply. The marker has to be a fact
+  // about the turn, not a query over message rows.
+  appendMessage(store, { conversationId: 'conversation', role: 'user', kind: 'chat', text: '问', state: 'done', operationId: 'op' });
+  recordConversationOutput(store, operation, result);
+  expect(store.db.prepare('SELECT replied_at FROM operations WHERE id=?').get('op')).toEqual({ replied_at: expect.any(Number) });
+
+  // Re-recording the same turn stays idempotent through the explicit marker.
+  recordConversationOutput(store, operation, result);
+  expect(store.db.prepare("SELECT COUNT(*) AS count FROM messages WHERE operation_id='op' AND role='assistant' AND kind='chat'").get())
+    .toEqual({ count: 1 });
 });
