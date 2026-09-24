@@ -35,7 +35,7 @@ async function capability(root: string, id: string, manifest: Record<string, unk
 
 // Cross the HTTP and real Pi seams: neither side supplies a manually assembled
 // expected inventory, so this catches a newly added or changed tool drifting.
-test('the next-operation preview matches the real master tools and context at its pinned definition', async () => {
+test('the next-operation preview matches the real master tools and context at the definition it will run', async () => {
   const { root, capabilityRoot, workspace, library } = await fixture();
   await capability(capabilityRoot, 'identity-one', { kind: 'prompt', role: 'agent' }, { 'agent.md': 'BOUND IDENTITY ONE\n' });
   await capability(capabilityRoot, 'identity-two', { kind: 'prompt', role: 'agent' }, { 'agent.md': 'BOUND IDENTITY TWO\n' });
@@ -69,12 +69,12 @@ test('the next-operation preview matches the real master tools and context at it
   const response = await server.app.inject({ method: 'GET', url: `/api/agent-context?conversationId=${created.conversationId}`, headers });
   expect(response.statusCode, response.body).toBe(200);
   const preview = response.json<Awaited<ReturnType<typeof server.runtime.agentContextPreview>>>();
-  expect(preview.definitionVersion).toBe('guide@1');
+  expect(preview.definitionVersion).toBe('guide@2');
   expect(preview.latestDefinitionVersion).toBe('guide@2');
   expect(preview.prompts.find(prompt => prompt.key === 'runtime/worker.md')?.content).toContain('{{retrievalNote}}');
   expect(preview.prompts.find(prompt => prompt.key === 'runtime/worker.md')?.defaultContent).toContain('{{retrievalNote}}');
-  expect(preview.preview.text).toContain('BOUND IDENTITY ONE');
-  expect(preview.preview.text).not.toContain('BOUND IDENTITY TWO');
+  expect(preview.preview.text).toContain('BOUND IDENTITY TWO');
+  expect(preview.preview.text).not.toContain('BOUND IDENTITY ONE');
   expect(preview.preview.text).not.toContain('EDITABLE GUIDE IDENTITY');
   expect(preview.preview.text).toContain('SELECTED PROJECT INSTRUCTIONS');
   expect(preview.preview.text).not.toContain('LOWER PRIORITY');

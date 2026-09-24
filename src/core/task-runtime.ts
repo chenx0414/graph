@@ -1232,7 +1232,17 @@ export async function openTaskRuntime(options: {
       const definitions = catalog.listDefinitions();
       const latest = definitions.find(item => item.id === 'main') ?? definitions.find(item => item.id === 'master');
       const latestDefinitionVersion = masterDefinitionVersion() ?? (latest ? `${latest.id}@${latest.version}` : null);
-      const definitionVersion = view?.master?.definitionVersion ?? latestDefinitionVersion;
+      // The master follows the latest definition of its own recipe on the next turn
+      // (see Execution.refreshMasterDefinition), so the preview has to describe that
+      // same version instead of the one the instance last ran.
+      const masterVersion = view?.master?.definitionVersion;
+      const masterId = masterVersion?.split('@')[0];
+      const masterLatest = masterId
+        ? definitions.filter(item => item.id === masterId).sort((left, right) => right.version - left.version)[0]
+        : undefined;
+      const definitionVersion = masterLatest && masterId
+        ? `${masterId}@${masterLatest.version}`
+        : (masterVersion ?? latestDefinitionVersion);
       const definitionId = definitionVersion?.split('@')[0];
       const action = options.master?.action ?? 'master';
       const workspace = view?.master && view.anchorTaskId
