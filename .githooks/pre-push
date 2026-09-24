@@ -6,4 +6,15 @@ set -eu
 # either fail ("must be run in a work tree") or act on the repository being pushed.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX
 
-exec node --run check
+# Keep the gate quiet: git prints the push phase (including a network failure such as
+# "RPC failed ... HTTP/2 framing layer") right after this hook, and a wall of test output
+# buries that reason outside the visible tail. The full log always goes to a file.
+log="${TMPDIR:-/tmp}/graph-pre-push-check.log"
+if node --run check >"$log" 2>&1; then
+  echo "pre-push gate passed (full log: $log)"
+  exit 0
+fi
+
+echo "pre-push gate failed; full log: $log" >&2
+tail -40 "$log" >&2
+exit 1
