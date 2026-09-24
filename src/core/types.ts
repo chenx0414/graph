@@ -249,6 +249,10 @@ export interface ActionAdapter {
    * turn ordinal the injected message was given, so the transcript can keep it at
    * the place it interrupted instead of at the top of the turn. */
   steer?(operation: Operation, text: string): Promise<{ ordinal?: number } | void>;
+  /** Soft-stop the turn an operation is running: finish the in-flight tool call,
+   * then end the turn before the next model request, keeping the session. No-op
+   * when the operation has no live session. */
+  stop?(operation: Operation): Promise<void>;
   reconcile?(operation: Operation): Promise<Reconciliation>;
   /** Durable adapter evidence that no session/send began; absence of a receipt alone is insufficient. */
   canReplayBeforeSend?(operation: Operation): boolean;

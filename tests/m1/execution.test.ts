@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { TaskStore } from '../../src/core/store.ts';
+import { taskGate } from '../../src/runtime/task-gate.ts';
 import { fullAccessPolicy, standardAccessPolicy, type AccessPolicy } from '../../src/core/access-policy.ts';
-import type { ActionAdapter } from '../../src/core/types.ts';
+import { RuntimeError, type ActionAdapter } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -82,13 +84,15 @@ async function singleAgent(actions: Record<string, ActionAdapter>, access?: () =
   return { runtime, task, options, taskId };
 }
 
-test('pause during preparation prevents the actual send, and pause after send drains before reporting paused', async () => {
+test('pause during preparation prevents the send, and a running worker drains instead of being soft-stopped', async () => {
   const preparing = deferred<void>();
   const prepared = deferred<void>();
   const sent = deferred<void>();
   const finish = deferred<void>();
   let sends = 0;
+  let stopCalls = 0;
   const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
+    stop: async () => { stopCalls += 1; },
     prepare: async () => { preparing.resolve(); await prepared.promise; return async () => {
       sends++; sent.resolve(); await finish.promise;
       return { outcome: 'continue', output: null, usage: { input: 20, output: 10, cacheRead: 0, cacheWrite: 0 } };
@@ -107,6 +111,10 @@ test('pause during preparation prevents the actual send, and pause after send dr
   const second = runtime.host.runReady();
   await sent.promise;
   await task.pause('pause-2');
+  // Soft stop is reserved for the conversation master turn; a worker turn is an
+  // independent unit that drains untouched, so pause blocks new dispatch but
+  // does not interrupt it (stop is never asked).
+  expect(stopCalls).toBe(0);
   expect(await task.view()).toMatchObject({ status: 'pausing' });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
   finish.resolve();
@@ -337,8 +345,8 @@ test('full access auto-approves a grant requested by an operation result and ret
   expect(sends).toBe(2);
 });
 
-test('full access bypasses pause, budget and unknown usage while retaining the operation journal', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-execution-full-bypass-'));
+test('full access no longer bypasses pause, but still bypasses budget and unknown usage', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-execution-full-pause-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const artifact = join(root, 'artifact.txt');
   let sends = 0;
@@ -367,12 +375,22 @@ test('full access bypasses pause, budget and unknown usage while retaining the o
   }, () => fullAccessPolicy());
 
   await task.pause('pause-full-access');
+  // The pause now applies in full access too: nothing new is dispatched until
+  // resume, even for a worker node.
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect(sends).toBe(0);
+  expect(await task.view()).toMatchObject({ status: 'paused' });
+
+  await task.resume('resume-full-access');
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
   const view = await task.view();
   expect(view.phase).toBe('completed');
   expect(view.questions).toEqual([]);
   expect(view.operations).toHaveLength(2);
+  // Budget and unknown-usage automatic gates stay bypassed under full access:
+  // the reservation exceeds the cap yet the operation still succeeded.
   expect(view.nodes[0]).toMatchObject({ used: 0, reserved: 0, status: 'succeeded' });
   expect(sends).toBe(1);
 });
@@ -452,3 +470,98 @@ test('exactly exhausted quota blocks even a zero-reservation call after restart'
   expect(sends).toBe(0);
   expect((await restored.user.task(taskId).view()).nodes[0]).toMatchObject({ used: 20_000_000, budget: 20_000_000, status: 'blocked' });
 });
+
+test.each(['standard', 'full'] as const)('pause soft-stops the running master turn and a single resume continues it (%s access)', async mode => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-pause-master-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const stateDir = join(root, 'state');
+  await mkdir(stateDir, { recursive: true });
+  // A second connection to the runtime database lets the scripted adapter use
+  // the real send gate, so the first provider send is recorded as an invocation
+  // exactly like a live master turn (and the pause refusal settles interrupted).
+  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  const tool = deferred<void>();
+  const partial = join(root, 'partial.txt');
+  let sends = 0;
+  let stopCalls = 0;
+  let stopped = false;
+  const entry = {
+    id: 'm', modelId: 'm', provider: 'p', grade: 'high' as const, api: 'openai-completions' as const,
+    baseUrl: 'https://master.example/v1', contextWindow: 32_000, maxTokens: 256, credentialId: 'c',
+  };
+  const adapter: ActionAdapter = {
+    kind: 'agent', reserveTokens: 100,
+    stop: async () => { stopCalls += 1; stopped = true; tool.resolve(); },
+    prepare: async operation => async () => {
+      sends += 1;
+      if (sends === 1) {
+        // The first provider send already happened and is durable; then the
+        // in-flight tool call runs and the pause refuses the next send.
+        const gate = taskGate(store, { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId }, entry);
+        gate.dispatch('inv-1', 0, () => 'sent');
+        gate.settle('inv-1', { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 });
+        await writeFile(partial, 'completed tool effect');
+        await tool.promise;
+        // Standard access refuses the next send at the pause gate; full access
+        // has no such gate, so the soft stop simply ends the turn normally.
+        if (stopped && mode === 'standard') throw new RuntimeError('paused', 'Instance paused');
+        return { outcome: 'completed', output: { text: 'first' }, usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } };
+      }
+      // The resumed turn runs on the same session/instance and finishes.
+      return { outcome: 'completed', output: { text: 'continued' }, usage: { input: 20, output: 5, cacheRead: 0, cacheWrite: 0 } };
+    },
+  };
+  const runtime = await openTaskRuntime({
+    stateDir,
+    actions: { master: adapter },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    ...(mode === 'full' ? { access: () => fullAccessPolicy() } : {}),
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '第一问', requestId: 'create' });
+  const driving = runtime.host.runReady();
+  await expect.poll(async () => (await runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('running');
+  const instanceId = (await runtime.user.task(created.taskId).view()).nodes.find(node => node.id === 'master')!.instanceId;
+
+  await runtime.conversations.pause(created.conversationId, 'pause');
+  await driving;
+
+  // The pause soft-stopped the live master turn in both access modes: the
+  // in-flight tool effect is retained and the turn closed.
+  expect(stopCalls).toBe(1);
+  // The pause recorded a durable wake-up for the unfinished turn.
+  expect(store.db.prepare('SELECT state FROM pause_continuations').all()).toEqual([{ state: 'waiting' }]);
+  expect(await readFile(partial, 'utf8')).toBe('completed tool effect');
+  const paused = await runtime.user.task(created.taskId).view();
+  expect(paused).toMatchObject({ status: 'paused', operations: [{ workerActive: false }] });
+  if (mode === 'standard') {
+    // The pause gate refused the next send, so the turn closed interrupted and
+    // the node is queued for the continuation.
+    expect(paused.operations[0]!.state).toBe('interrupted');
+    expect(paused.nodes.find(node => node.id === 'master')?.status).toBe('pending');
+  } else {
+    // Full access has no pause gate: the soft stop ends the turn as completed
+    // and the durable wake-up puts the node back on the queue at resume.
+    expect(paused.operations[0]!.state).toBe('succeeded');
+    expect(paused.nodes.find(node => node.id === 'master')?.status).toBe('succeeded');
+  }
+  // Nothing new is dispatched while paused, in full access too.
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+
+  await runtime.conversations.resume(created.conversationId, 'resume');
+  // Resume turned the waiting wake-up into a dispatchable one.
+  expect(store.db.prepare('SELECT state FROM pause_continuations').all()).toEqual([{ state: 'ready' }]);
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  // The durable wake-up was consumed and the turn ran once on the same instance.
+  const continued = await runtime.user.task(created.taskId).view();
+  expect(continued.nodes.find(node => node.id === 'master')).toMatchObject({ status: 'succeeded', instanceId });
+  expect(store.db.prepare('SELECT state FROM pause_continuations').all()).toEqual([{ state: 'consumed' }]);
+  // The completed tool effect survived the stop and the continuation.
+  expect(await readFile(partial, 'utf8')).toBe('completed tool effect');
+  expect(sends).toBe(2);
+  // A consumed wake-up is never replayed by another resume.
+  await runtime.conversations.resume(created.conversationId, 'resume-again');
+  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+  expect(sends).toBe(2);
+}, 30_000);

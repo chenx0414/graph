@@ -232,6 +232,10 @@ async function main() {
       void session.steer(command.text).catch(error => {
         process.stderr.write(`Pi steer failed: ${String(error)}\n`);
       });
+    } else if (command.operation === 'stop') {
+      void session.stop().catch(error => {
+        process.stderr.write(`Pi stop failed: ${String(error)}\n`);
+      });
     } else if (command.operation === 'close') {
       await finish();
     }

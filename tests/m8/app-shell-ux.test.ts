@@ -160,11 +160,13 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await expect.poll(() => page.getByTestId('drawer-entry-label').innerText()).toContain('草稿 v2');
   expect(await page.getByTestId('drawer-entry-label').innerText()).toContain('待确认');
   expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
-  const pauseBox = await page.getByTestId('conversation-pause').boundingBox();
+  // The header carries the drawer entry and the detail toggle; the pause control
+  // lives in the composer now.
+  const headerDrawerBox = await page.getByTestId('drawer-entry').boundingBox();
   const detailBox = await page.getByTestId('detail-toggle').boundingBox();
-  expect(pauseBox).not.toBeNull();
+  expect(headerDrawerBox).not.toBeNull();
   expect(detailBox).not.toBeNull();
-  expect(detailBox!.x).toBeGreaterThanOrEqual(pauseBox!.x + pauseBox!.width);
+  expect(detailBox!.x).toBeGreaterThanOrEqual(headerDrawerBox!.x + headerDrawerBox!.width);
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
   const beforeMain = await page.locator('.conversation-main').boundingBox();
@@ -417,15 +419,19 @@ test('conversation pause and resume use one stateful action with visible feedbac
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
 
-  await page.getByTestId('conversation-pause').click();
-  await page.getByTestId('conversation-resume').waitFor();
-  await page.getByTestId('conversation-paused-notice').waitFor();
+  // The composer primary control is the single pause entry point, so the header
+  // no longer repeats it. Reach the paused state through the same endpoint the
+  // composer calls, then resume through the composer button itself.
   expect(await page.getByTestId('conversation-pause').count()).toBe(0);
-  expect(await page.getByTestId('toasts').innerText()).toContain('主 Agent 对话已暂停');
-  expect(await page.getByTestId('conversation-paused-notice').innerText()).toContain('正在执行的功能任务仍按自身状态继续');
+  expect(await page.getByTestId('conversation-resume').count()).toBe(0);
+  await server.runtime.conversations.pause(created.conversationId, 'pause-feedback-pause');
+  await page.reload();
+  await page.getByTestId('conversation-paused-notice').waitFor();
+  expect(await page.getByTestId('conversation-paused-notice').innerText()).toContain('当前工具调用收尾后停下');
+  await expect.poll(() => page.getByTestId('master-status').innerText()).toContain('已暂停');
 
-  await page.getByTestId('conversation-resume').click();
-  await page.getByTestId('conversation-pause').waitFor();
+  // Empty composer while paused: the primary button is the resume action.
+  await page.getByTestId('chat-send').click();
   await page.getByTestId('conversation-paused-notice').waitFor({ state: 'detached' });
   expect(await page.getByTestId('toasts').innerText()).toContain('主 Agent 对话已继续');
 });

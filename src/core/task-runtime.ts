@@ -21,6 +21,7 @@ import { Execution } from './execution.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
+import { awaitPauseContinuation, resumePauseContinuations } from './pause-continuation.ts';
 import { acquireOwner } from './owner.ts';
 import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
@@ -515,20 +516,43 @@ export async function openTaskRuntime(options: {
     },
     task(taskId: string) {
       ensureOpen(); store.task(taskId);
-      const setPaused = (paused: boolean, requestId: string): Receipt => {
+      const setPaused = (paused: boolean, requestId: string): { receipt: Receipt; stoppedMaster: boolean } => {
         ensureOpen();
-        return store.command('user', requestId, { type: paused ? 'pause' : 'resume', taskId }, () => {
+        let stoppedMaster = false;
+        const receipt = store.command('user', requestId, { type: paused ? 'pause' : 'resume', taskId }, () => {
           store.db.prepare('UPDATE tasks SET paused=? WHERE id=?').run(Number(paused), taskId);
           // Pause/resume are explicit state boundaries: accumulate the ledger
           // here instead of inferring durations from event or message times.
-          if (paused) openPause(store, taskId);
-          else closePause(store, taskId);
+          if (paused) {
+            openPause(store, taskId);
+            // Remember the live master turn so a later resume continues it
+            // instead of waiting for a new user message.
+            const active = store.db.prepare(`SELECT o.id FROM operations o
+              JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+              WHERE o.task_id=? AND json_extract(n.spec,'$.role')='master'
+                AND o.state='dispatched' AND o.worker_active=1 ORDER BY o.rowid DESC LIMIT 1`).get(taskId) as { id: string } | undefined;
+            if (active) stoppedMaster = awaitPauseContinuation(store, requestId, taskId, active.id);
+          } else {
+            closePause(store, taskId);
+            resumePauseContinuations(store, taskId);
+          }
           return { taskId, cursor: store.event(taskId, paused ? 'task.pause_requested' : 'task.resumed', {}) };
         });
+        return { receipt, stoppedMaster };
       };
       return {
-        async pause(requestId: string) { return setPaused(true, requestId); },
-        async resume(requestId: string) { return setPaused(false, requestId); },
+        async pause(requestId: string) {
+          const { receipt, stoppedMaster } = setPaused(true, requestId);
+          // Soft-stop the running master turn after the in-flight tool call;
+          // the flag and the durable wake-up are already committed above.
+          if (stoppedMaster) await execution.stopActiveMasterTurns(taskId);
+          return receipt;
+        },
+        async resume(requestId: string) {
+          const { receipt } = setPaused(false, requestId);
+          if (options.autoWake) execution.kick();
+          return receipt;
+        },
         /** Stop the task for good, releasing the active slot to the queue. */
         async abandon(requestId: string, reason?: string): Promise<Receipt> {
           ensureOpen();
