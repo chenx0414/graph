@@ -123,6 +123,10 @@ export function workspaceCommandNode(input: {
           ...(operation.accessPolicy ? { access: operation.accessPolicy } : {}),
           ...(extraReads.length ? { readPaths: extraReads } : {}),
           env: { ...(input.program?.env ?? {}), TMPDIR: input.program?.env?.TMPDIR ?? checkScratch },
+          // Tests a check runs create their own repositories under TMPDIR (inside
+          // this scratch), so the check may write Git metadata there; the workspace
+          // and every other repository stay protected.
+          gitMetadataWritesInsideScratch: true,
         });
         try {
           const result = await runner.run(command.command as string, command.args as string[]);

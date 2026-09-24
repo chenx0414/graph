@@ -107,6 +107,8 @@ export async function openWorkspaceCommandRunner(input: {
   env?: Record<string, string>;
   localNetwork?: boolean;
   access?: ResolvedAccessPolicy;
+  /** Let a host-mode command write Git metadata inside its own scratch directory only. */
+  gitMetadataWritesInsideScratch?: boolean;
 }) {
   const workspace = await realpath(input.workspace);
   let acquired: Awaited<ReturnType<typeof acquireRestrictedExecutor>> | undefined;
@@ -132,6 +134,7 @@ export async function openWorkspaceCommandRunner(input: {
           allowAllUnixSockets: input.access?.piExtensions.unixSockets === 'all',
           allowAppleEvents: input.access?.piExtensions.appleEvents === true,
           allowGitMetadataWritesAll: input.access?.filesystem.gitMetadata === 'writable',
+          ...(input.gitMetadataWritesInsideScratch ? { gitMetadataWritesInsideScratch: true } : {}),
         } : {}),
         timeoutMs: 120_000,
         ...(Object.keys(environment).length ? { env: environment } : {}),

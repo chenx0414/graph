@@ -269,6 +269,9 @@ export interface RestrictedCommand {
   denyWrite?: string[];
   /** Graph-managed caches may contain their own VCS metadata. */
   allowGitMetadataWrites?: string[];
+  // Host-mode commands may write Git metadata inside their own scratch directory
+  // while every repository outside it stays protected (every check opts in).
+  gitMetadataWritesInsideScratch?: boolean;
   /** High-risk full-access switch that allows host Git metadata writes. */
   allowGitMetadataWritesAll?: boolean;
   timeoutMs?: number;
@@ -490,13 +493,25 @@ export async function openRestrictedExecutor() {
         !protectedReadPathExceptions.some(exception => exception === path || exception.startsWith(`${path}/`)));
       const strictProtectedWritePaths = protectedPaths.filter(path =>
         !protectedPathExceptions.some(exception => exception === path || exception.startsWith(`${path}/`)));
-      const gitPaths = hostFilesystem ? [] : await gitMetadataPaths(writePaths, scratchDir, allowGitMetadataWrites);
+      // A command that opts in (every check) may write Git metadata inside its own
+      // scratch directory, so the blanket regex below is replaced by denies for the
+      // repositories that exist outside it: the scan skips the scratch, and a deny
+      // in this sandbox always beats a later allow, so the blanket form also blocked
+      // the temporary repository the check had just created itself.
+      const gitPaths = hostFilesystem
+        ? (command.gitMetadataWritesInsideScratch ? await gitMetadataPaths(writePaths, scratchDir, allowGitMetadataWrites) : [])
+        : await gitMetadataPaths(writePaths, scratchDir, allowGitMetadataWrites);
       const profile = hostFilesystem
         ? [
             '(allow file-read-metadata)',
             ...(command.allowGitMetadataWritesAll ? [] : [
               '(deny file-read* (regex #"(^|/)\\.git(/|$)"))',
-              '(deny file-write* (regex #"(^|/)\\.git(/|$)"))',
+              ...(command.gitMetadataWritesInsideScratch
+                ? gitPaths.flatMap(path => [
+                    `(deny file-write* (literal ${JSON.stringify(path)}))`,
+                    `(deny file-write* (subpath ${JSON.stringify(path)}))`,
+                  ])
+                : ['(deny file-write* (regex #"(^|/)\\.git(/|$)"))']),
             ]),
             ...protectedPaths.flatMap(path => [
               `(deny file-read* (literal ${JSON.stringify(path)}))`,
