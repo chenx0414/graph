@@ -342,6 +342,9 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
 
 /** Record one plain-language interruption for a master turn whose outcome is
  * uncertain and which will therefore not reach recordConversationOutput. */
+/** What a turn says when it committed a change and a reload is now pending. */
+export const RSI_RELOAD_RECEIPT = 'RSI 改动已提交，等待重载。当前回合已结束；重载确认后会自动继续，并将报告更新为“已生效”。';
+
 export function recordConversationInterruption(store: TaskStore, operation: Operation, reason: string, kind: TurnFailureKind = 'run') {
   if (operation.kind !== 'agent') return;
   const nodeSpec = JSON.parse((store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
@@ -349,7 +352,10 @@ export function recordConversationInterruption(store: TaskStore, operation: Oper
   if (nodeSpec.role !== 'master') return;
   const conversation = conversationForTask(store, operation.taskId);
   if (!conversation) return;
-  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='system' AND kind='error' LIMIT 1").get(operation.id)) return;
+  // A turn that already delivered its reply was not lost, even if the process died
+  // afterwards (a reload can close it right after the receipt became durable), so a
+  // second notice would only contradict what the user read.
+  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND (role='assistant' OR (role='system' AND kind='error')) LIMIT 1").get(operation.id)) return;
   appendMessage(store, {
     conversationId: conversation.id,
     role: 'system',

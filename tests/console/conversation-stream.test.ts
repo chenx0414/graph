@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { conversationStreams, publishConversationDelta, recordConversationOutput } from '../../src/core/conversation.ts';
+import { conversationStreams, publishConversationDelta, recordConversationInterruption, recordConversationOutput } from '../../src/core/conversation.ts';
 import { TaskStore } from '../../src/core/store.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -124,4 +124,20 @@ test('a settled turn records its narration and tool calls in the order they happ
   recordConversationOutput(store, operation, result);
   expect(store.db.prepare("SELECT COUNT(*) AS count FROM messages WHERE conversation_id='conversation'").get())
     .toEqual({ count: 4 });
+});
+
+test('an interrupted operation that already delivered its reply adds no error notice', async () => {
+  const store = await fixture();
+  const operation = { id: 'op', taskId: 'task', nodeId: 'master', attempt: 1, kind: 'agent' } as unknown as Parameters<typeof recordConversationOutput>[1];
+  recordConversationOutput(store, operation, {
+    outcome: 'completed',
+    output: { text: 'RSI 改动已提交，等待重载。当前回合已结束。' },
+  } as unknown as Parameters<typeof recordConversationOutput>[2]);
+
+  // The reload can kill the process after the reply is durable; the turn did
+  // deliver its answer, so a second notice would only contradict it.
+  recordConversationInterruption(store, operation, 'Error: Pi process input is closed');
+
+  expect(store.db.prepare("SELECT role,kind FROM messages WHERE conversation_id='conversation' ORDER BY seq").all())
+    .toEqual([{ role: 'assistant', kind: 'chat' }]);
 });

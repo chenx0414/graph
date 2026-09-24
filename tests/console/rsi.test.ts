@@ -114,6 +114,24 @@ test('an activation that commits nothing new does not schedule a reload', async 
   expect(receipt.report).toContain('无需重载');
 });
 
+test('an activation writes the turn receipt into the conversation before the reload', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const receipt = await service(root, dir).apply({
+    title: 'Land a change', problem: 'The receipt has to survive the reload.',
+    changes: [{ path: 'src/receipt.ts', action: 'write', content: 'export const receipt = true;\n' }],
+    activate: true,
+  }, { store, taskId, conversationId });
+  expect(receipt.restartRequired).toBe(true);
+
+  // The reload drains the daemon and can kill the turn before it settles, so the
+  // visible receipt must already be durable when the reload is scheduled: the
+  // user must never have to ask for it again.
+  const reply = store.db.prepare("SELECT role,kind,text FROM messages WHERE conversation_id=? AND role='assistant' AND kind='chat'")
+    .get(conversationId) as { role: string; kind: string; text: string } | undefined;
+  expect(reply?.text).toContain('等待重载');
+});
+
 test('status reports an available checkout and its branch', async () => {
   const root = await repo();
   const real = await realpath(root);
@@ -153,8 +171,9 @@ test('apply writes files, commits to an rsi branch and schedules a reload', asyn
   const restart = JSON.parse(await readFile(join(dir, 'rsi', 'restart.json'), 'utf8')) as { id: string; commit: string };
   expect(restart.id).toBe(receipt.id);
   expect(restart.commit).toBe(receipt.commit);
-  // The change is reported to the user as a durable conversation message.
-  const message = store.db.prepare('SELECT role,kind,data FROM messages WHERE conversation_id=? ORDER BY seq DESC LIMIT 1').get(conversationId) as { role: string; kind: string; data: string };
+  // The change is reported to the user as a durable conversation message, and the
+  // turn's visible receipt follows it (see the receipt test below).
+  const message = store.db.prepare("SELECT role,kind,data FROM messages WHERE conversation_id=? AND kind='rsi' ORDER BY seq DESC LIMIT 1").get(conversationId) as { role: string; kind: string; data: string };
   expect(message.role).toBe('system');
   expect(message.kind).toBe('rsi');
   expect((JSON.parse(message.data) as { status: string }).status).toBe('applied');

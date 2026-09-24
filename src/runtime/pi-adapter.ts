@@ -17,7 +17,7 @@ import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
 import { isFullAccess } from '../core/access-policy.ts';
 import { agentTools } from './agent-tools.ts';
-import { conversationForTask, publishConversationDelta } from '../core/conversation.ts';
+import { conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityPermissionRequest } from './capabilities.ts';
 import type { CapabilityOperation } from './capability-bundle.ts';
@@ -979,7 +979,7 @@ export function createPiAdapter(options: {
             if (reloadReceipt) {
               return {
                 outcome: 'completed',
-                output: { text: `RSI 改动已提交，等待重载。当前回合已结束；重载确认后会自动继续，并将报告更新为“已生效”。`, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}) },
+                output: { text: RSI_RELOAD_RECEIPT, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}) },
                 usage: gate.total(),
               };
             }

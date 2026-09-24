@@ -5,7 +5,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { appendMessage, conversationForTask } from '../core/conversation.ts';
+import { appendMessage, conversationForTask, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import type { TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { checkedOutBranch, detectRepo, git, revParse } from '../git/git.ts';
@@ -869,6 +869,22 @@ export class RsiService {
         data: receipt as unknown as Json,
         state: 'done',
       });
+      // Scheduling a reload drains the daemon, which can close the Agent process
+      // before the turn settles. The turn's visible receipt is therefore written
+      // here, while the reload is only requested, so the user always sees the
+      // outcome of the change and never has to ask for it again. The adapter
+      // returns the same text, and recordConversationOutput is idempotent per
+      // operation, so a turn that does settle adds nothing twice.
+      if (receipt.restartRequired) {
+        appendMessage(context.store, {
+          conversationId: conversation.id,
+          role: 'assistant',
+          kind: 'chat',
+          text: RSI_RELOAD_RECEIPT,
+          state: 'done',
+          operationId: context.operationId ?? null,
+        });
+      }
     });
   }
 }
