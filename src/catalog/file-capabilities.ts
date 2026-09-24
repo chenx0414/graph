@@ -283,6 +283,47 @@ async function skillNote(directory: string): Promise<string | undefined> {
  * Symlinked entries are the mirror of the skills a recipe already binds, and the library
  * lists those from the capability root, so only hand-made folders are recorded here.
  */
+/**
+ * Skills the user placed directly in one native skills folder: the SDK's global agent
+ * folder, a project's `.pi/skills`, or an Agent's own folder.
+ *
+ * Symlinked entries are the mirror of the skills a recipe already binds, and the library
+ * lists those from the capability root, so only hand-made folders are recorded here.
+ */
+export async function scanNativeSkills(skillsDir: string, owner: string): Promise<CapabilityRecord[]> {
+  let entries;
+  try {
+    entries = await readdir(skillsDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  const records: CapabilityRecord[] = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue;
+    const directory = join(skillsDir, entry.name);
+    if (!existsSync(join(directory, 'SKILL.md'))) continue;
+    const front = await skillFrontmatter(directory);
+    const note = await skillNote(directory);
+    const usable = Boolean(front?.hasFrontmatter);
+    records.push({
+      id: entry.name,
+      kind: 'skill',
+      source: directory,
+      version: 'local',
+      snapshot: { path: directory },
+      status: usable ? 'available' : 'invalid',
+      ...(front?.name ? { name: front.name } : {}),
+      ...(front?.description ? { description: front.description } : {}),
+      owner,
+      ...(note ? { note } : {}),
+      ...(usable ? {} : { error: SKILL_FRONTMATTER_ERROR }),
+    });
+  }
+  return records;
+}
+
+/** Skills the user placed in any Agent's own folder. */
 export async function scanAgentSkills(agentsRoot: string): Promise<CapabilityRecord[]> {
   let agents;
   try {
@@ -293,34 +334,7 @@ export async function scanAgentSkills(agentsRoot: string): Promise<CapabilityRec
   }
   const records: CapabilityRecord[] = [];
   for (const agent of agents.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).sort((left, right) => left.name.localeCompare(right.name))) {
-    const skillsDir = join(agentsRoot, agent.name, 'skills');
-    let entries;
-    try {
-      entries = await readdir(skillsDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue;
-      const directory = join(skillsDir, entry.name);
-      if (!existsSync(join(directory, 'SKILL.md'))) continue;
-      const front = await skillFrontmatter(directory);
-      const note = await skillNote(directory);
-      const usable = Boolean(front?.hasFrontmatter);
-      records.push({
-        id: entry.name,
-        kind: 'skill',
-        source: directory,
-        version: 'local',
-        snapshot: { path: directory },
-        status: usable ? 'available' : 'invalid',
-        ...(front?.name ? { name: front.name } : {}),
-        ...(front?.description ? { description: front.description } : {}),
-        owner: agent.name,
-        ...(note ? { note } : {}),
-        ...(usable ? {} : { error: SKILL_FRONTMATTER_ERROR }),
-      });
-    }
+    records.push(...await scanNativeSkills(join(agentsRoot, agent.name, 'skills'), agent.name));
   }
   return records;
 }
