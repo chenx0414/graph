@@ -523,10 +523,16 @@ test('the composer suggestion and queue steering follow the three Enter states',
   }, { timeout: 10_000 }).toBe('queued');
 
   // State 3: an empty composer with a queued message sends that queue as steering.
+  // Assert the two conditions the Enter handler itself branches on - the app knows the
+  // master is busy (while it outputs the primary control is pause, by design) and the
+  // queued chip above proves it knows the queue - instead of pressing Enter into the dark.
+  await expect.poll(() => input.inputValue()).toBe('');
+  await expect.poll(() => page.getByTestId('chat-send').getAttribute('data-mode'), { timeout: 30_000 }).toBe('pause');
   await input.press('Enter');
-  // Under the full parallel gate a request that travels UI → HTTP → runtime can
-  // take longer than the default one-second poll.
-  await expect.poll(() => steered.length, { timeout: 10_000 }).toBe(1);
+  // Under the full parallel gate a request that travels UI → HTTP → runtime can take far
+  // longer than the default one-second poll. The budget is deliberately generous: the
+  // preconditions above, not the budget, are what makes this assertion meaningful.
+  await expect.poll(() => steered.length, { timeout: 30_000 }).toBe(1);
   expect(steered[0]).toContain('优先检查失败分支。');
   await expect.poll(async () => {
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
