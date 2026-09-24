@@ -325,7 +325,8 @@ export async function scanAgentSkills(agentsRoot: string): Promise<CapabilityRec
   return records;
 }
 
-async function walkCapabilityDirectories(root: string, directory: string, depth: number, records: CapabilityRecord[]) {  if (depth > MAX_SCAN_DEPTH) return;
+async function walkCapabilityDirectories(root: string, directory: string, depth: number, records: CapabilityRecord[]) {
+  if (depth > MAX_SCAN_DEPTH) return;
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });

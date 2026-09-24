@@ -203,9 +203,10 @@ export class CapabilityBundleVersion {
       // Skills are recorded from the Agent's own folder, which is what the SDK loads: a
       // bound skill keeps its loaded fact and its version, and a skill the user pasted
       // into the folder becomes a load fact of its own. Everything else stays as loaded.
+      const folderSkills = this.skillFolder ? agentSkills(this.skillFolder).skills : [];
+      const excludedSkills = new Set(folderSkills.filter(skill => skill.disableModelInvocation).map(skill => skill.name));
       const recordedSkills = new Set(loaded.report.filter(fact => fact.kind === 'skill').map(fact => fact.id));
-      const pastedSkills = (this.skillFolder ? agentSkills(this.skillFolder).skills : [])
-        .filter(skill => !recordedSkills.has(skill.name));
+      const pastedSkills = folderSkills.filter(skill => !recordedSkills.has(skill.name));
       const report = [
         ...loaded.report,
         ...pastedSkills.map((skill): CapabilityLoadFact => ({
@@ -219,9 +220,14 @@ export class CapabilityBundleVersion {
           executable: false,
           reason: '原生 skills 注入：模型按需读取 SKILL.md',
         })),
-      ].map(fact => fact.tools
-        ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) }
-        : fact);
+      ].map(fact => {
+        const kept = fact.tools ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) } : fact;
+        // The native formatter drops a skill that declares disable-model-invocation, so the
+        // fact must say that instead of claiming the model can read it.
+        return kept.kind === 'skill' && excludedSkills.has(kept.name ?? kept.id)
+          ? { ...kept, reason: '声明了 disable-model-invocation：不会进入系统提示（原生语义为仅显式调用）' }
+          : kept;
+      });
       const prompts = capabilityPrompts({
         definitionVersion: this.definitionVersion ?? 'unknown@1',
         action: options.action,
