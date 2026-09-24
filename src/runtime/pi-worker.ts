@@ -157,7 +157,6 @@ async function main() {
     piExtensionTools: config.piExtensionTools,
     extensionFactories: [capabilityGate],
     systemPrompt: config.systemPrompt,
-    ...(config.appendSystemPrompt ? { appendSystemPrompt: config.appendSystemPrompt } : {}),
     hideSkillDescriptions: true,
     activateExtensionTools: true,
     allowedToolNames: config.allowedToolNames,

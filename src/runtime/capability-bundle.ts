@@ -54,7 +54,7 @@ export interface CapabilityOperation {
   readonly tools: readonly ToolDefinition[];
   readonly nativeTools: readonly string[];
   readonly allowedToolNames: readonly string[];
-  readonly prompts: { system: string; appendSystem: string };
+  readonly prompts: { system: string; tool: string | null };
   readonly report: LoadedCapabilities['report'];
   readonly skillPaths: readonly string[];
   readonly readRoots: readonly string[];
@@ -158,7 +158,6 @@ export class CapabilityBundleVersion {
         action: options.action,
         ...(options.role ? { role: options.role } : {}),
         agentPrompt: loaded.prompts.agent,
-        toolPrompt: loaded.prompts.tool,
         report,
         tools,
       });
@@ -204,7 +203,7 @@ export class CapabilityBundleVersion {
         allowedToolNames,
         prompts: {
           system: prompts.systemPrompt,
-          appendSystem: prompts.appendSystemPrompt,
+          tool: loaded.prompts.tool,
         },
         report,
         skillPaths: Object.freeze([...loaded.skillPaths]),

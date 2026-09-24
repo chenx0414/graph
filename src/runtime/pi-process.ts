@@ -36,7 +36,6 @@ export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'on
   piExtensionPaths: string[];
   piExtensionTools: string[];
   systemPrompt: string;
-  appendSystemPrompt: string;
   allowedToolNames: string[];
 };
 
@@ -137,7 +136,6 @@ export async function openPiProcess(options: PiProcessOptions) {
     piExtensionPaths,
     piExtensionTools: options.piExtensionTools ?? [],
     systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
-    appendSystemPrompt: options.appendSystemPrompt ?? '',
     allowedToolNames: [...(options.allowedToolNames ?? [
       ...tools.map(tool => tool.name),
       ...(options.piExtensionTools ?? []),

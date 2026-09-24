@@ -66,7 +66,6 @@ export interface PiInstanceOptions {
   piExtensionTools?: string[];
   extensionFactories?: InlineExtension[];
   systemPrompt?: string;
-  appendSystemPrompt?: string;
   hideSkillDescriptions?: boolean;
   activateExtensionTools?: boolean;
   allowedToolNames?: string[];
@@ -278,9 +277,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
     name: 'graph-system-prompt',
     hidden: true,
     factory: pi => {
-      pi.on('before_agent_start', () => ({
-        systemPrompt: [systemPrompt, options.appendSystemPrompt ?? ''].filter(part => part.trim().length > 0).join('\n\n'),
-      }));
+      pi.on('before_agent_start', () => ({ systemPrompt }));
     },
   };
   const extensionFactories = [...(options.extensionFactories ?? []), ...(promptTakeover ? [promptTakeover] : [])];
@@ -290,7 +287,6 @@ export async function openPiInstance(options: PiInstanceOptions) {
     ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
     ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-    ...(options.appendSystemPrompt ? { appendSystemPrompt: [options.appendSystemPrompt] } : {}),
     ...(options.hideSkillDescriptions ? {
       skillsOverride: base => ({
         ...base,

@@ -1303,66 +1303,13 @@ export async function loadCapabilities(input: {
   };
 }
 
-/** Build the identity and capability-awareness prompts from the exact loaded bundle.
+/** Build the identity prompt from the exact loaded bundle.
  * The generated tool section is authoritative even when a tool.md capability is bound. */
-export interface CapabilityAwarenessFact {
-  id: string;
-  version: string;
-  kind: string | null;
-  name?: string | null | undefined;
-  path?: string | null | undefined;
-  description?: string | null | undefined;
-  reason?: string | null | undefined;
-  tools?: readonly string[] | null | undefined;
-  networkAccess?: string | null | undefined;
-  networkDomains?: readonly string[] | null | undefined;
-}
-
-/**
- * The block the Agent session receives after the composed Graph prompt. Loaded
- * facts and declared facts render through this one function, so the console
- * preview and the real session cannot drift apart.
- */
-export function capabilityAwareness(input: {
-  definitionVersion: string;
-  toolPrompt?: string | null;
-  report: readonly CapabilityAwarenessFact[];
-  tools: readonly { name: string; description: string }[];
-  mode?: 'preview' | 'operation';
-}): string {
-  const byKind = (kind: string) => input.report.filter(item => item.kind === kind);
-  const skillLines = byKind('skill').map(item => `- ${item.name ?? item.id} (${item.id}@${item.version})${item.path ? ` at ${item.path}` : ''}${item.description ? `: ${item.description}` : item.reason ? `: ${item.reason}` : ''}`);
-  const piExtensionLines = byKind('pi-extension').map(item => `- ${item.id}@${item.version}${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}${item.reason ? ` (${item.reason})` : ''}`);
-  const bridgeLines = [...byKind('mcp'), ...byKind('extension')].map(item => {
-    const network = item.networkAccess === 'unrestricted'
-      ? 'network: unrestricted'
-      : item.networkDomains?.length
-        ? `network: ${item.networkDomains.join(', ')}`
-        : 'network: none';
-    return `- ${item.id}@${item.version} [${network}]${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}`;
-  });
-  const toolLines = input.tools.map(tool => `- ${tool.name}: ${tool.description}`);
-  return [
-    input.toolPrompt?.trim() ?? '',
-    '# Capability awareness',
-    `Definition: ${input.definitionVersion}`,
-    input.mode === 'preview'
-      ? 'The following inventory is declared for the next Agent operation; runtime availability will be confirmed when it loads.'
-      : 'The following inventory is generated from the exact capability bundle loaded for this Agent process.',
-    skillLines.length ? `\n## Skills\n${skillLines.join('\n')}` : '',
-    piExtensionLines.length ? `\n## Pi extensions\n${piExtensionLines.join('\n')}` : '',
-    bridgeLines.length ? `\n## Graph/MCP bridge capabilities\n${bridgeLines.join('\n')}` : '',
-    toolLines.length ? `\n## Callable tools\n${toolLines.join('\n')}` : '',
-    '\nUse only the callable tools listed above. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
-  ].filter(Boolean).join('\n');
-}
-
 export function capabilityPrompts(input: {
   definitionVersion: string;
   action: string;
   role?: string;
   agentPrompt: string | null;
-  toolPrompt: string | null;
   report: CapabilityLoadFact[];
   tools: readonly ToolDefinition[];
 }) {
@@ -1371,18 +1318,13 @@ export function capabilityPrompts(input: {
     'Work only within the confirmed task and the capabilities listed in tool.md.',
     'Use tools for evidence. Do not claim a tool result that did not happen.',
   ].join('\n');
-  const toolAwareness = capabilityAwareness({
-    definitionVersion: input.definitionVersion, toolPrompt: input.toolPrompt,
-    report: input.report, tools: input.tools,
-  });
   const digest = createHash('sha256').update(canonicalJson({
     definitionVersion: input.definitionVersion,
     action: input.action,
     role: input.role ?? null,
     systemPrompt,
-    appendSystemPrompt: toolAwareness,
     report: input.report.map(stableFact) as unknown as Json,
     tools: input.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as unknown as Json })),
   })).digest('hex');
-  return { systemPrompt, appendSystemPrompt: toolAwareness, digest };
+  return { systemPrompt, digest };
 }

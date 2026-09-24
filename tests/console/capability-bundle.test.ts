@@ -95,7 +95,7 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
     expect(first.piExtensionPaths).toEqual([join(await realpath(extension), 'index.ts')]);
     expect(first.piExtensionTools).toEqual(['extension_probe']);
     expect(first.prompts.system).toBe('You are the bundle test Agent.');
-    expect(first.prompts.appendSystem).toContain('Use only the declared capability bundle.');
+    expect(first.prompts.tool).toContain('Use only the declared capability bundle.');
     expect(first.report).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'skill-read', kind: 'skill', loaded: true }),
       expect.objectContaining({ id: 'pi-probe', kind: 'pi-extension', loaded: true, tools: ['extension_probe'] }),
@@ -158,8 +158,6 @@ test('disabled tools are removed from the operation, allowlist and generated pro
     expect(operation.tools).toEqual([]);
     expect(operation.piExtensionTools).toEqual([]);
     expect(operation.allowedToolNames).toEqual([]);
-    expect(operation.prompts.appendSystem).not.toContain('read:');
-    expect(operation.prompts.appendSystem).not.toContain('extension_probe');
     expect(operation.report.find(item => item.id === 'pi-probe')?.tools).toEqual([]);
   } finally {
     await operation.close();

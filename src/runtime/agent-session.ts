@@ -74,7 +74,6 @@ export interface AgentSessionRequest {
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
   systemPrompt?: string;
-  appendSystemPrompt?: string;
   allowedToolNames?: string[];
   bundleDigest: string;
   legacyCapabilityDigest?: string;
@@ -175,7 +174,6 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
         ...(request.piExtensionPaths?.length ? { piExtensionPaths: request.piExtensionPaths } : {}),
         ...(request.piExtensionTools?.length ? { piExtensionTools: request.piExtensionTools } : {}),
         ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
-        ...(request.appendSystemPrompt ? { appendSystemPrompt: request.appendSystemPrompt } : {}),
         ...(request.allowedToolNames ? { allowedToolNames: request.allowedToolNames } : {}),
         hideSkillDescriptions: true,
         activateExtensionTools: true,
