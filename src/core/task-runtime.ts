@@ -28,7 +28,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
-import { piExtensionSourceStatus, updatePiExtensionSource } from '../runtime/pi-extension-source.ts';
+import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
@@ -1951,7 +1951,7 @@ export async function openTaskRuntime(options: {
       /** Pi extension sources that have a newer version than the one on disk. */
       async piExtensionUpdates() {
         ensureOpen();
-        const updates: Record<string, unknown>[] = [];
+        const updates: PiExtensionUpdate[] = [];
         for (const record of catalog.capabilities()) {
           const source = record.kind === 'pi-extension' && record.status === 'available' ? record.packageSource : undefined;
           if (!source) continue;

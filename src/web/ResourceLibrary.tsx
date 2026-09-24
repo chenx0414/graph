@@ -617,6 +617,26 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
     : id === 'agents' ? agentCombinations.length
       : sections.find(item => item.id === id)?.items.length ?? 0;
   const [updates, setUpdates] = useState<Record<string, ExtensionUpdate>>({});
+  const [autoUpdate, setAutoUpdate] = useState(false);
+  // The switch is a daemon setting, so it lives in the config file rather than browser preferences.
+  useEffect(() => {
+    let live = true;
+    void api<{ revision: number; config?: { piExtensionAutoUpdate?: boolean } }>('/api/config')
+      .then(result => { if (live) setAutoUpdate(Boolean(result.config?.piExtensionAutoUpdate)); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  const saveAutoUpdate = async (value: boolean) => {
+    setAutoUpdate(value);
+    try {
+      const current = await api<{ revision: number; config: Record<string, unknown> }>('/api/config');
+      await api('/api/config', { method: 'POST', body: JSON.stringify({ expectedRevision: current.revision, document: { ...current.config, piExtensionAutoUpdate: value } }) });
+      toast(value ? '已开启 Pi 扩展自动更新' : '已关闭 Pi 扩展自动更新', 'success');
+    } catch (cause) {
+      setAutoUpdate(!value);
+      toast(cause instanceof Error ? cause.message : String(cause), 'danger');
+    }
+  };
   // Pi extension sources are checked once per page open; the server caches the registry answer.
   useEffect(() => {
     let live = true;
@@ -768,7 +788,15 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
               <div className="architecture-list" data-testid="architecture-library">{GRAPH_ARCHITECTURES.map(item => <article className="architecture-item" key={item.name}><div className="architecture-flow mono">{item.flow}</div><div><strong>{item.name}</strong><p>{item.description}</p></div></article>)}</div>
             ) : active.items.length ? (
               <>
-                <div className="resource-section-toolbar"><p>{active.description}</p><label className="resource-search"><Icon name="search" size={15} /><input value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} placeholder="搜索能力或路径" data-testid="resource-catalog-search" /><span className="faint">{filtered.length}</span></label></div>
+                <div className="resource-section-toolbar"><p>{active.description}</p>{active.id === 'pi-extensions' && (
+                  <label className="preference-item" data-testid="pi-extension-auto-update">
+                    <span className="preference-copy">
+                      <strong>自动更新</strong>
+                      <span className="muted">守护进程启动时安装可用的 Pi 扩展更新；关闭时只在资源库里提示。</span>
+                    </span>
+                    <input type="checkbox" className="preference-toggle" data-testid="pi-extension-auto-update-toggle" checked={autoUpdate} onChange={event => void saveAutoUpdate(event.target.checked)} />
+                  </label>
+                )}<label className="resource-search"><Icon name="search" size={15} /><input value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} placeholder="搜索能力或路径" data-testid="resource-catalog-search" /><span className="faint">{filtered.length}</span></label></div>
                 <div className="resource-split-toggle" role="group" aria-label="按配置状态筛选" data-testid={`resource-filter-${active.id}`}>
                   {LIBRARY_FILTERS.map(option => (
                     <button

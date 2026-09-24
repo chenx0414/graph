@@ -7,6 +7,7 @@ import { TaskStore, canonicalJson } from '../../src/core/store.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { openCapabilityBundle } from '../../src/runtime/capability-bundle.ts';
 import { npmSourceName, piExtensionSourceStatus } from '../../src/runtime/pi-extension-source.ts';
+import { parseGraphConfig } from '../../src/server/config.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -77,4 +78,16 @@ test('a source reports the installed version, and only npm sources are checked f
   expect(npmSourceName(packageDir)).toBeNull();
   expect(npmSourceName('npm:pi-agent-browser-native')).toBe('pi-agent-browser-native');
   expect(npmSourceName('npm:@ff-labs/pi-fff@^0.10.0')).toBe('@ff-labs/pi-fff');
+});
+
+test('the Pi extension auto-update setting survives a config round trip', () => {
+  const base = {
+    version: 1,
+    projects: [],
+    credentials: {},
+    limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
+    access: {},
+  };
+  expect(parseGraphConfig(base, '/tmp/graph.config.json').piExtensionAutoUpdate).toBe(false);
+  expect(parseGraphConfig({ ...base, piExtensionAutoUpdate: true }, '/tmp/graph.config.json').piExtensionAutoUpdate).toBe(true);
 });

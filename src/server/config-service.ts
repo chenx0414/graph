@@ -16,6 +16,7 @@ export function sanitizeConfig(config: GraphConfig, env: Record<string, string |
   return {
     path: config.path,
     configured: config.configured,
+    piExtensionAutoUpdate: config.piExtensionAutoUpdate,
     projects: config.projects,
     models: config.models
       ? { ...config.models, entries: config.models.entries.map(entry => ({ ...entry, thinkingOptions: thinkingOptionsFor(entry) })) }

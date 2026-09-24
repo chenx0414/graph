@@ -239,7 +239,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     if (options.mode !== 'execute' && !options.dynamic) return;
     server.startDrive();
     server.runtime.host.recoverMasters();
-  };
+  }
   // Bootstrap prompts are immutable Graph runtime content, not user capabilities.
   let presetsAvailable = false;
   let publishDefinitions = () => {};
@@ -442,6 +442,22 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     },
   });
   graphServer = server;
+  // Pi extension sources are resolved by the Pi SDK when an Agent loads them, so an available
+  // update only has to be installed here; the next operation picks the new version up.
+  if (config.piExtensionAutoUpdate) {
+    void (async () => {
+      try {
+        const { updates } = await server.runtime.catalog.piExtensionUpdates();
+        for (const update of updates) {
+          if (!update.available) continue;
+          await server.runtime.catalog.updatePiExtension(update.id, update.version);
+          log(`Pi extension ${update.id} updated: ${update.installed ?? '?'} -> ${update.latest ?? '?'}`);
+        }
+      } catch (error) {
+        log(`Pi extension auto-update failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    })();
+  }
   const presetResult = publishBootstrap(server.runtime.catalog, bootstrap, log);
   presetsAvailable = presetResult.available;
   publishDefinitions = () => {

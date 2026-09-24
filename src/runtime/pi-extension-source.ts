@@ -49,6 +49,14 @@ export interface PiExtensionSourceStatus {
   available: boolean;
 }
 
+/** One source-bearing capability plus what its registry says about it. */
+export interface PiExtensionUpdate extends PiExtensionSourceStatus {
+  id: string;
+  version: string;
+  source: string;
+  error?: string;
+}
+
 const run = promisify(execFile);
 const statusCache = new Map<string, { at: number; status: PiExtensionSourceStatus }>();
 const STATUS_CACHE_MS = 60_000;

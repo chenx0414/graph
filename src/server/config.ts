@@ -32,6 +32,8 @@ export interface GraphConfig {
   credentials: Record<string, CredentialConfig>;
   limits: LimitsConfig;
   access: AccessPolicy;
+  /** Install available Pi extension source updates when the daemon starts. */
+  piExtensionAutoUpdate: boolean;
 }
 
 const GRADES: ModelGrade[] = ['low', 'medium', 'high', 'highest'];
@@ -46,6 +48,7 @@ export function emptyGraphConfig(): GraphConfig {
     credentials: {},
     limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
     access: defaultAccessPolicy(),
+    piExtensionAutoUpdate: false,
   };
 }
 
@@ -280,6 +283,7 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
     credentials,
     limits,
     access: parseAccessPolicy(root.access, 'access'),
+    piExtensionAutoUpdate: optionalBoolean(root.piExtensionAutoUpdate, 'piExtensionAutoUpdate') ?? false,
   };
 }
 
