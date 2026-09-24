@@ -1788,7 +1788,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(markdown).toContain('<project_context>\n');
   expect(markdown).toContain('<capabilities>\n');
   expect(markdown).toContain('<cwd>\n');
-  expect(markdown).toContain('<pi_cwd>\nCurrent working directory:');
+  expect(markdown).not.toContain('<pi_cwd>');
   expect(await page.locator('.agent-preview-section').count()).toBe(0);
   await page.getByTestId('agent-context-tab-prompts').click();
   expect(await page.getByTestId('agent-prompt-docs/INDEX.md').count()).toBe(0);

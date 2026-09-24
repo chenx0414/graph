@@ -80,8 +80,6 @@ export interface ComposeAgentSystemPromptInput {
 export interface ComposedAgentSystemPrompt {
   sections: AgentPromptSection[];
   text: string;
-  previewSections: AgentPromptSection[];
-  previewText: string;
 }
 
 function section(
@@ -224,11 +222,13 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     id: 'cwd.worktree',
     title: 'Git worktree',
     origin: 'generated',
-    content: [
-      input.cwd,
-      '',
-      'This is the Git worktree assigned to the current Agent operation. Relative paths resolve here; it is not necessarily the project root or another Agent worktree.',
-    ].join('\n'),
+    content: input.cwd === undefined
+      ? 'No worktree has been prepared for this conversation yet.'
+      : [
+        `Current working directory: ${input.cwd}`,
+        '',
+        "This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree.",
+      ].join('\n'),
   }]);
 
   const sections = [
@@ -261,19 +261,5 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     cwd,
   ];
   const text = sections.map(renderedSection).join('\n\n');
-  const piCwd = input.piCwd
-    ? section('pi_cwd', 'Pi generated working directory', [{
-        id: 'pi_cwd.current',
-        title: 'Pi Current working directory',
-        origin: 'pi',
-        content: `Current working directory: ${input.piCwd}`,
-      }])
-    : undefined;
-  const previewSections = piCwd ? [...sections, piCwd] : sections;
-  return {
-    sections,
-    text,
-    previewSections,
-    previewText: previewSections.map(renderedSection).join('\n\n'),
-  };
+  return { sections, text };
 }

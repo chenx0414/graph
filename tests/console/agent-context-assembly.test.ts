@@ -95,7 +95,7 @@ test('the next-operation preview matches the real master tools and context at it
     expect(Object.keys(actual.get(tool.name)!.parameters.properties).sort()).toEqual(tool.parameters);
   }
   const system = sent.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
-  for (const section of preview.preview.sections.filter(section => !['capabilities', 'pi_cwd'].includes(section.id))) {
+  for (const section of preview.preview.sections.filter(section => section.id !== 'capabilities')) {
     expect(system).toContain(`<${section.id}>\n${section.parts.map(part => part.content.trim()).filter(Boolean).join('\n\n')}\n</${section.id}>`);
   }
   // The preview follows next-operation settings, while the previous request is
@@ -127,7 +127,7 @@ test('preview reads declarations without importing an extension or starting an M
   const assembly = await openAgentContextAssembly({ catalog, library, workspace, definitionVersion: 'main@1', action: 'master', role: 'master' });
   const preview = await assembly.preview({ role: 'master' });
   expect(preview.tools.find(tool => tool.name === 'declared_probe')).toMatchObject({ runtimeAvailable: null, enabled: true });
-  expect(preview.composed.previewText).toContain('declared_probe (not yet discovered)');
+  expect(preview.composed.text).toContain('declared_probe (not yet discovered)');
   expect(preview.capabilities.find(item => item.id === 'mcp')).toMatchObject({ tools: [] });
   expect(existsSync(marker)).toBe(false);
   expect(await readFile(join(capabilityRoot, 'extension/index.mjs'), 'utf8')).toContain('unexpected');
@@ -157,7 +157,7 @@ test('the Main Agent identity explains harness self-improvement only when RSI is
   });
   expect(rsiPreview.composed.sections.find(section => section.id === 'identity')?.parts.map(part => part.id))
     .toContain('identity.harness');
-  expect(rsiPreview.composed.previewText).toContain('apply_rsi_change');
+  expect(rsiPreview.composed.text).toContain('apply_rsi_change');
   expect(rsiPreview.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['inspect_rsi_status', 'apply_rsi_change']));
 
   const withoutRsi = await openAgentContextAssembly({

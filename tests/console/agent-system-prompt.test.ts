@@ -68,7 +68,6 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
       networkDomains: ['example.com'],
     }],
     cwd: '/home/me/.graph/state/worktrees/task-1/agent-a',
-    piCwd: '/home/me/.graph/state/worktrees/task-1/agent-a',
   });
 
   expect(result.sections.map(section => section.id)).toEqual([
@@ -118,13 +117,11 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.text).toContain('<capabilities>');
   expect(result.text).toContain('- mcp browser@1.2.0 (Browser): tools=browser_open; network=example.com');
   expect(result.text).toContain('<cwd>');
-  expect(result.text).toContain('/home/me/.graph/state/worktrees/task-1/agent-a');
+  // One working-directory block: the path line, then the worktree note. The Pi
+  // process cwd is the same worktree, so a second block would only repeat it.
+  expect(result.text).toContain('Current working directory: /home/me/.graph/state/worktrees/task-1/agent-a');
+  expect(result.text).toContain("This directory is this operation's own Git worktree");
   expect(result.text).not.toContain('<pi_cwd>');
-  expect(result.previewSections.at(-1)).toMatchObject({
-    id: 'pi_cwd',
-    parts: [{ origin: 'pi', content: 'Current working directory: /home/me/.graph/state/worktrees/task-1/agent-a' }],
-  });
-  expect(result.previewText).toContain('<pi_cwd>');
 });
 
 test('the Agent context library seeds editable rules and the main tool routing rules', async () => {
