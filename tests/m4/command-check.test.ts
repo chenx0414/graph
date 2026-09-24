@@ -93,6 +93,32 @@ test('a graph.command node refuses an unallowed command instead of running it', 
   expect(view.evidence.every(item => item.artifact.digest !== hash)).toBe(true);
 });
 
+test('a graph.command check can write inside its own TMPDIR', async () => {
+  const root = await repo();
+  // The check runs in the OS sandbox, which grants writes only under the
+  // workspace and the check's own scratch directory. A check whose TMPDIR points
+  // at the host temporary directory cannot create a file at all, which is exactly
+  // what broke a real check that ran the m1 suite (git init writes .git/config
+  // inside its temporary repository).
+  const probe: ActionAdapter = {
+    kind: 'agent', reserveTokens: 100,
+    prepare: async operation => async () => {
+      await writeFile(join(operation.workspace!, 'tmpdir-probe.js'), [
+        "import { writeFileSync } from 'node:fs';",
+        "import { join } from 'node:path';",
+        "writeFileSync(join(process.env.TMPDIR, 'probe.txt'), 'ok');",
+        "console.log('wrote', process.env.TMPDIR);",
+      ].join('\n'));
+      return { outcome: 'completed', output: null, usage };
+    },
+  };
+  const { runtime, task } = await start(root, { work: probe }, nodes, { command: 'node', args: ['tmpdir-probe.js'] });
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.questions).toEqual([]);
+  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+});
+
 test('a graph.command check can bind loopback for a local application test', async () => {
   const root = await repo();
   const localAction: ActionAdapter = {
