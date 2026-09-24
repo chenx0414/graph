@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { NodeSpec } from '../../src/core/types.ts';
+import { scriptedLane, settle } from '../fixtures/lane.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -668,31 +669,13 @@ test('a task node follows the latest definition of its own recipe on its next di
     command: 'node', args: ['./server.mjs'], networkDomains: ['github.com'],
   }, null, 2));
 
-  const briefings: string[] = [];
-  const settle = async (count: number) => {
-    for (let attempt = 0; attempt < 200 && briefings.length < count; attempt += 1) {
-      await runtime.host.runReady();
-      await new Promise(resolve => setTimeout(resolve, 20));
-    }
-  };
+  const lane = scriptedLane();
   const provider = await openaiServer([{ text: '主 Agent 回合。' }, { text: '第一个 worker 完成。' }, { text: '第二个 worker 完成。' }]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
     projects: [{ id: 'project', root }],
-    actions: {
-      worker: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        briefings.push(JSON.stringify(operation.context.briefing ?? {}));
-        return {
-          outcome: 'completed',
-          output: {
-            schemaVersion: 1, objective: 'run one lane', outcome: 'completed', workSummary: 'lane done',
-            changes: [], decisions: [], verification: [], knownLimits: [], openQuestions: [], nextActions: [],
-          },
-          usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 },
-        };
-      } },
-    },
+    actions: { worker: lane.action },
     catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
     models: {
       entries: [{
@@ -721,17 +704,17 @@ test('a task node follows the latest definition of its own recipe on its next di
   }, 'lane-proposal');
   await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'lane-accept' });
 
-  await settle(1);
+  await settle(() => lane.briefings.length >= 1, () => runtime.host.runReady());
   // worker-a ran at its pinned definition, so its briefing listed the MCP.
-  expect(briefings).toHaveLength(1);
-  expect(briefings[0]).toContain('github@1.0.0');
+  expect(lane.briefings).toHaveLength(1);
+  expect(lane.briefings[0]).toContain('github@1.0.0');
 
   // The recipe is edited while the task is still running: the next lane to be
   // dispatched follows it.
   runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [] }, 'worker-v2');
-  await settle(2);
+  await settle(() => lane.briefings.length >= 2, () => runtime.host.runReady());
 
-  expect(briefings).toHaveLength(2);
-  expect(briefings[1]).not.toContain('github@1.0.0');
+  expect(lane.briefings).toHaveLength(2);
+  expect(lane.briefings[1]).not.toContain('github@1.0.0');
   expect((await task.view()).nodes.find(node => node.id === 'worker-b')?.definitionVersion).toBe('worker@2');
 }, 120_000);
