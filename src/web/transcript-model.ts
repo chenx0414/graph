@@ -41,6 +41,7 @@ export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
+  | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
@@ -189,6 +190,9 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
  */
 export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
+  const answered = new Set(input.messages
+    .filter(message => message.role === 'assistant' && message.kind === 'chat' && message.operationId)
+    .map(message => message.operationId as string));
 
   // Durable activity is buffered per turn, so a finished turn becomes one
   // collapsible block and a running one keeps its individual rows.
@@ -204,9 +208,15 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     activityItems = [];
     activityToolIndex.clear();
     if (!items.length) return;
-    // The turn's narration and tool calls sit directly in the transcript: the
-    // narration is a chat bubble and each run of tool calls is its own collapsed
-    // group. Nothing wraps them, so a finished turn reads like a running one.
+    if (key && answered.has(key)) {
+      // The turn is over: its thinking and tool calls fold away behind one muted
+      // line above the answer, and opening that line brings back the very rows the
+      // turn showed while it was running.
+      rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items, rows: activityRows(key, items), collapsed: true });
+      return;
+    }
+    // A running turn is not wrapped: its narration bubbles and tool groups sit
+    // directly in the transcript.
     rows.push(...activityRows(key, items));
   };
 

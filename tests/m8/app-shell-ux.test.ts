@@ -663,12 +663,12 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
-  // A finished turn is not wrapped: its narration is a bubble and its tool calls
-  // are a collapsed group of their own, right in the transcript.
-  expect(await page.getByTestId('turn-activity').count()).toBe(0);
-  const tools = page.getByTestId('tool-activity-group');
-  await tools.waitFor();
-  expect(await tools.getAttribute('data-open')).toBe('false');
+  // A finished turn folds its thinking and tool calls behind one muted line, so the
+  // answer is what the reader sees.
+  const folded = page.getByTestId('collapsed-turn');
+  await folded.waitFor();
+  expect(await folded.getAttribute('data-open')).toBe('false');
+  expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');

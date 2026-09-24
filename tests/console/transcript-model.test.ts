@@ -218,7 +218,7 @@ test('live and durable assistant rows share the turn key the reveal is paced by'
   expect(durable[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', operationId: 'op-1', streaming: false });
 });
 
-test('a finished turn shows its narration bubbles and tool groups as ordinary rows', () => {
+test('a finished turn folds its thinking and tool calls above the answer', () => {
   const rows = buildTranscriptRows({
     messages: [
       message({ id: 'user', seq: 1, role: 'user', text: '看一下', operationId: 'op-1' }),
@@ -233,13 +233,16 @@ test('a finished turn shows its narration bubbles and tool groups as ordinary ro
     busy: false,
   });
 
-  // Nothing wraps the turn: narration is a chat bubble and each run of tool calls
-  // is its own group, so a finished turn reads exactly like a running one.
-  expect(rows.map(row => row.kind)).toEqual(['message', 'narration', 'tools', 'narration', 'tools', 'assistant']);
-  expect(rows[1]).toMatchObject({ kind: 'narration', text: '先读代码' });
-  expect(rows[2]).toMatchObject({ kind: 'tools', active: false });
-  expect(rows[3]).toMatchObject({ kind: 'narration', text: '现在改投影' });
-  expect(rows[5]).toMatchObject({ kind: 'assistant', text: '改好了' });
+  // The turn folds away: the answer is what the reader sees, and opening the line
+  // brings back the very rows the turn showed while it was running.
+  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
+  const activity = rows[1];
+  if (activity?.kind !== 'activity') throw new Error('expected a folded turn');
+  expect(activity.collapsed).toBe(true);
+  expect(activity.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration', 'tool']);
+  expect(activity.rows.map(child => child.kind)).toEqual(['narration', 'tools', 'narration', 'tools']);
+  expect(activity.rows[1]).toMatchObject({ kind: 'tools', active: false });
+  expect(rows[2]).toMatchObject({ kind: 'assistant', text: '改好了' });
 });
 
 test('a narration becomes a bubble as soon as a tool call follows it', () => {

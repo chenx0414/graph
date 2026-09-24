@@ -147,6 +147,35 @@ function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration'
   );
 }
 
+/**
+ * One finished turn's thinking and tool calls, folded behind a single muted line
+ * above the final answer. Opening it brings back the same rows the turn showed
+ * while it was running: narration bubbles with the tool groups interleaved.
+ */
+function CollapsedTurn({ row, markdown = true }: { row: Extract<TranscriptRow, { kind: 'activity' }>; markdown?: boolean }) {
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const open = manualOpen ?? !row.collapsed;
+  return (
+    <div className="collapsed-turn" data-testid="collapsed-turn" data-open={open}>
+      <button
+        type="button"
+        className="collapsed-turn-toggle"
+        onClick={() => setManualOpen(current => !(current ?? !row.collapsed))}
+        aria-expanded={open}
+        aria-label={open ? '收起这一轮的思考与工具调用' : '展开这一轮的思考与工具调用'}
+      >
+        <span>{`上方 ${row.items.length} 步思考与工具调用`}</span>
+        <Icon name="chevron" size={13} className="collapsed-turn-chevron" />
+      </button>
+      {open && (
+        <div className="collapsed-turn-body">
+          {row.rows.map(child => <TranscriptRowView key={child.id} row={child} markdown={markdown} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function sameVeils(left: MarkdownVeil[], right: MarkdownVeil[]) {
   return left.length === right.length && left.every((veil, index) => {
     const other = right[index]!;
@@ -348,6 +377,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   }
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'narration') return <NarrationRow row={row} />;
+  if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;
   if (row.kind === 'thinking') {
     return (

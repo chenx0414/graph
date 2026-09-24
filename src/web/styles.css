@@ -1259,8 +1259,28 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .tool-activity-state { color: var(--faint); }
 .tool-activity-list li[data-error="true"] .tool-activity-icon,
 .tool-activity-list li[data-error="true"] .tool-activity-state { color: #b43c3c; }
-/* A finished turn is not wrapped: its narration bubbles and tool groups sit
-   directly in the transcript. */
+/* A finished turn folds its thinking and tool calls behind one muted line, so the
+   final answer is what the reader sees. */
+.collapsed-turn { width: 100%; margin: 0 0 12px; }
+.collapsed-turn-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.collapsed-turn-toggle:hover { background: var(--panel-soft); color: var(--muted); }
+.collapsed-turn-chevron { flex: 0 0 auto; transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
+.collapsed-turn[data-open="true"] .collapsed-turn-chevron { transform: rotate(90deg); }
+.collapsed-turn-body { margin-top: 8px; }
+.collapsed-turn-body .narration-row,
+.collapsed-turn-body .tool-activity-group { margin: 0 0 10px; }
 .message-content p { margin: 0; }
 .message-state { color: var(--faint); font-size: 11px; }
 .message-attachments { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
