@@ -326,7 +326,7 @@ test('the Main Agent recipe compiles its capabilities into the conversation mast
   const skill = join(capabilityRoot, 'main-research');
   await mkdir(project, { recursive: true });
   await mkdir(skill, { recursive: true });
-  await writeFile(join(skill, 'SKILL.md'), '# Main research\n\nInvestigate before proposing a graph.\n');
+  await writeFile(join(skill, 'SKILL.md'), '---\nname: main-research\ndescription: Investigate before proposing a graph.\n---\n\n# Main research\n\nInvestigate before proposing a graph.\n');
   await writeFile(join(skill, 'capability.json'), JSON.stringify({
     id: 'main-research',
     kind: 'skill',

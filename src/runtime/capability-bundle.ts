@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { selectAgentToolSurface } from './pi-native-tools.ts';
-import { agentSkills, syncAgentSkills } from './agent-skills.ts';
+import { agentSkills, agentSkillsDir, syncAgentSkills } from './agent-skills.ts';
 import {
   capabilityPrompts,
   loadCapabilities,
@@ -19,6 +19,18 @@ import type { SendGate } from './controlled-openai.ts';
 
 function digest(value: unknown) {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
+/**
+ * The Agent's skills folder. The caller may point it somewhere else, but by default it is
+ * the recipe's own folder next to the capability library, so a definition with skills
+ * always has one.
+ */
+function skillFolderFor(options: CapabilityBundleOptions): string | null {
+  const agentId = options.definitionVersion?.split('@')[0];
+  const capabilityRoot = options.catalog.capabilityRootPath();
+  return options.skillFolder
+    ?? (agentId && capabilityRoot ? agentSkillsDir(agentId, resolve(capabilityRoot, '..')) : null);
 }
 
 export interface CapabilityBundleOptions {
@@ -87,6 +99,8 @@ export class CapabilityBundleVersion {
   readonly toolPolicyDigest: string;
   readonly runtimePolicyDigest: string;
   readonly facts: readonly ResolvedCapabilityFact[];
+  /** The Agent's skills folder the SDK loads from; null when there is no capability root. */
+  readonly skillFolder: string | null;
   private readonly input: CapabilityBundleOptions;
 
   private constructor(
@@ -95,6 +109,7 @@ export class CapabilityBundleVersion {
   ) {
     this.input = input;
     this.definitionVersion = input.definitionVersion ?? null;
+    this.skillFolder = skillFolderFor(input);
     this.facts = Object.freeze(facts.map(fact => structuredClone(fact)));
     const staticToolPolicy = {
       piExtensionTools: this.facts.flatMap(fact =>
@@ -133,9 +148,10 @@ export class CapabilityBundleVersion {
     const facts = await resolveCapabilityFacts(options.catalog, options.definitionVersion);
     // Mirror this definition's bound skills into the Agent's folder before anything reads
     // it, so the console preview and the real operation see the same folder.
-    if (options.skillFolder) {
+    const skillFolder = skillFolderFor(options);
+    if (skillFolder) {
       syncAgentSkills({
-        dir: options.skillFolder,
+        dir: skillFolder,
         ownedRoots: options.skillOwnedRoots ?? [],
         links: facts.flatMap(fact => fact.kind === 'skill' && fact.path
           ? [{ id: fact.id, target: dirname(fact.path) }]
@@ -163,6 +179,17 @@ export class CapabilityBundleVersion {
         ...(options.access ? { access: options.access } : {}),
       });
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
+      // A bound skill's path only exists in the load facts, so mirror them here as well:
+      // this is the folder the SDK and the prompt read for this operation.
+      if (this.skillFolder) {
+        syncAgentSkills({
+          dir: this.skillFolder,
+          ownedRoots: this.input.skillOwnedRoots ?? [],
+          links: loaded.report.flatMap(fact => fact.kind === 'skill' && fact.path
+            ? [{ id: fact.id, target: dirname(fact.path) }]
+            : []),
+        });
+      }
       const disabledTools = new Set((options.disabledTools ?? []).map(name => name.trim()).filter(Boolean));
       const selected = selectAgentToolSurface({
         tools: [...options.hostTools({ readRoots }), ...loaded.tools],
@@ -177,7 +204,7 @@ export class CapabilityBundleVersion {
       // bound skill keeps its loaded fact and its version, and a skill the user pasted
       // into the folder becomes a load fact of its own. Everything else stays as loaded.
       const recordedSkills = new Set(loaded.report.filter(fact => fact.kind === 'skill').map(fact => fact.id));
-      const pastedSkills = (this.input.skillFolder ? agentSkills(this.input.skillFolder).skills : [])
+      const pastedSkills = (this.skillFolder ? agentSkills(this.skillFolder).skills : [])
         .filter(skill => !recordedSkills.has(skill.name));
       const report = [
         ...loaded.report,
@@ -256,7 +283,7 @@ export class CapabilityBundleVersion {
         allowUnrestrictedNetwork: loaded.allowUnrestrictedNetwork,
         allowLocalBinding: loaded.allowLocalBinding,
         unixSockets: Object.freeze([...loaded.unixSockets]),
-        skillFolder: this.input.skillFolder ?? null,
+        skillFolder: this.skillFolder,
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
         piExtensionTools: Object.freeze([...piExtensionTools]),
         close: () => loaded!.close(),
