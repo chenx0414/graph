@@ -145,7 +145,7 @@ type ConversationView = {
   createdAt: number; requirementVersion: number; paused: boolean;
   messages: ConversationMessage[]; messageCount: number;
   streams: {
-    operationId: string; entryId: string; partId: string; text: string; length: number; updatedAt: number;
+    operationId: string; entryId: string; partId: string; ordinal: number; text: string; length: number; updatedAt: number;
   }[];
   questions: AnchorQuestion[];
   proposal: ProposalDetail | null;

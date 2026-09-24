@@ -19,6 +19,9 @@ export interface LiveTool {
   summary: string;
   done: boolean;
   error: boolean;
+  /** Position of this activity inside its turn, so the transcript can interleave
+   * text parts and tool calls in the order they happened. */
+  ordinal: number;
 }
 
 export interface LiveText {
@@ -28,6 +31,19 @@ export interface LiveText {
   text: string;
   length: number;
   updatedAt: number;
+  /** Same ordering domain as LiveTool.ordinal. */
+  ordinal: number;
+}
+
+/** A live text part is identified by its operation, its assistant message and
+ * the index of the part inside that message, so text emitted before and after a
+ * tool call stays two records instead of one merged block. */
+export function streamKey(operationId: string, entryId: string, partId: string) {
+  return `${operationId}\u0000${entryId}\u0000${partId}`;
+}
+
+function dropOperationStreams(liveText: Record<string, LiveText>, operationId: string) {
+  return Object.fromEntries(Object.entries(liveText).filter(([, item]) => item.operationId !== operationId));
 }
 
 export interface ConversationProjectionState {
@@ -50,6 +66,7 @@ export interface ConversationProjectionEvent {
     text?: string;
     entryId?: string;
     partId?: string;
+    ordinal?: number;
     len?: number;
     reset?: boolean;
     message?: ConversationMessage;
@@ -157,16 +174,17 @@ export function observeConversationView(
   view: {
     messages: ConversationMessage[];
     messageCount: number;
-    streams?: { operationId: string; entryId: string; partId: string; text: string; length: number; updatedAt: number }[];
+    streams?: { operationId: string; entryId: string; partId: string; ordinal: number; text: string; length: number; updatedAt: number }[];
   },
 ) {
   const records = mergeRecords(state.records, view.messages);
   const sequences = view.messages.map(message => message.seq);
   const liveText = { ...state.liveText };
   for (const stream of view.streams ?? []) {
-    const previous = liveText[stream.operationId];
+    const key = streamKey(stream.operationId, stream.entryId, stream.partId);
+    const previous = liveText[key];
     if (state.streamNeedsResync || !previous || stream.text.startsWith(previous.text) || stream.length > previous.length) {
-      liveText[stream.operationId] = stream;
+      liveText[key] = stream;
     }
   }
   return {
@@ -187,22 +205,24 @@ export function applyConversationEvent(
   const data = event.data;
   if (event.type === 'message.delta' && data?.text) {
     const operationId = data.operationId ?? 'stream';
-    const previous = state.liveText[operationId];
-    const entryId = data.entryId ?? previous?.entryId ?? operationId;
-    const partId = data.partId ?? previous?.partId ?? 'text';
+    const entryId = data.entryId ?? 'entry';
+    const partId = data.partId ?? 'text';
+    const key = streamKey(operationId, entryId, partId);
+    const previous = state.liveText[key];
     const length = data.len ?? (previous?.length ?? 0) + data.text.length;
     const reset = data.reset === true || !previous;
     const appendable = Boolean(previous && previous.length + data.text.length === length);
     if (!reset && !appendable && data.len !== undefined) {
       return { ...state, streamNeedsResync: true };
     }
+    const ordinal = data.ordinal ?? previous?.ordinal ?? 0;
     return {
       ...state,
       liveText: {
         ...state.liveText,
-        [operationId]: reset
-          ? { operationId, entryId, partId, text: data.text, length, updatedAt: Date.now() }
-          : { ...previous!, text: previous!.text + data.text, length, updatedAt: Date.now() },
+        [key]: reset
+          ? { operationId, entryId, partId, ordinal, text: data.text, length, updatedAt: Date.now() }
+          : { ...previous!, ordinal, text: previous!.text + data.text, length, updatedAt: Date.now() },
       },
       streamNeedsResync: false,
     };
@@ -219,17 +239,16 @@ export function applyConversationEvent(
           summary: data.summary ?? '',
           done: data.phase === 'end',
           error: data.isError === true,
+          ordinal: data.ordinal ?? 0,
         },
       },
     };
   }
   if (TERMINAL_OPERATION_EVENTS.has(event.type) && data?.operationId) {
-    const liveText = { ...state.liveText };
-    delete liveText[data.operationId];
     const liveTools = Object.fromEntries(
       Object.entries(state.liveTools).filter(([, tool]) => tool.operationId !== data.operationId),
     );
-    return { ...state, liveText, liveTools, streamNeedsResync: false };
+    return { ...state, liveText: dropOperationStreams(state.liveText, data.operationId), liveTools, streamNeedsResync: false };
   }
   const message = data?.message;
   if (!message || (event.type !== 'message.created' && event.type !== 'message.updated')) return state;
@@ -238,7 +257,11 @@ export function applyConversationEvent(
     ? mergeRecords(state.records, [message])
     : state.records;
   const liveText = { ...state.liveText };
-  if (message.role === 'assistant' && message.operationId) delete liveText[message.operationId];
+  if (message.role === 'assistant' && message.operationId) {
+    for (const key of Object.keys(liveText)) {
+      if (liveText[key]!.operationId === message.operationId) delete liveText[key];
+    }
+  }
   const liveTools = { ...state.liveTools };
   if (message.role === 'tool' && typeof message.data?.toolCallId === 'string') {
     delete liveTools[message.data.toolCallId];

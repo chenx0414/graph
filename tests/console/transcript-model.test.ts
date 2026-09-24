@@ -136,6 +136,7 @@ test('live activity stays open and is followed by streamed markdown text', () =>
     summary: 'src/web/Conversation.tsx',
     done: false,
     error: false,
+    ordinal: 1,
   };
   const rows = buildTranscriptRows({
     messages: [],
@@ -144,6 +145,7 @@ test('live activity stays open and is followed by streamed markdown text', () =>
       operationId: 'op-live',
       entryId: 'op-live',
       partId: 'text',
+      ordinal: 2,
       text: '## 进度\n\n正在整理结果',
       length: 14,
       updatedAt: 1,
@@ -197,6 +199,7 @@ test('live and durable assistant rows keep the same identity and operation-based
       operationId: 'op-1',
       entryId: 'op-1',
       partId: 'text',
+      ordinal: 1,
       text: '第一段\n\n第二段',
       length: 9,
       updatedAt: 1,

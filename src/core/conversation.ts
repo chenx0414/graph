@@ -21,7 +21,7 @@ export interface MessageRow {
 }
 export interface ConversationStreamRow {
   operation_id: string; conversation_id: string; entry_id: string; part_id: string;
-  text: string; length: number; updated_at: number;
+  ordinal: number; text: string; length: number; updated_at: number;
 }
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 export type MessageState = 'pending' | 'queued' | 'delivered' | 'done' | 'failed' | 'cancelled';
@@ -56,12 +56,13 @@ export function publishConversationDelta(store: TaskStore, input: {
   operationId: string;
   entryId: string;
   partId: string;
+  ordinal: number;
   delta: string;
   text: string;
   length: number;
 }) {
-  const previous = store.db.prepare('SELECT * FROM conversation_streams WHERE operation_id=?')
-    .get(input.operationId) as ConversationStreamRow | undefined;
+  const previous = store.db.prepare('SELECT * FROM conversation_streams WHERE operation_id=? AND entry_id=? AND part_id=?')
+    .get(input.operationId, input.entryId, input.partId) as ConversationStreamRow | undefined;
   const appendable = Boolean(
     previous
     && input.text.startsWith(previous.text)
@@ -71,12 +72,11 @@ export function publishConversationDelta(store: TaskStore, input: {
   const text = reset ? input.text : input.delta;
   store.transaction(() => {
     store.db.prepare(`INSERT INTO conversation_streams(
-      operation_id,conversation_id,entry_id,part_id,text,length,updated_at
-    ) VALUES(?,?,?,?,?,?,?)
-    ON CONFLICT(operation_id) DO UPDATE SET
+      operation_id,conversation_id,entry_id,part_id,ordinal,text,length,updated_at
+    ) VALUES(?,?,?,?,?,?,?,?)
+    ON CONFLICT(operation_id,entry_id,part_id) DO UPDATE SET
       conversation_id=excluded.conversation_id,
-      entry_id=excluded.entry_id,
-      part_id=excluded.part_id,
+      ordinal=excluded.ordinal,
       text=excluded.text,
       length=excluded.length,
       updated_at=excluded.updated_at`).run(
@@ -84,6 +84,7 @@ export function publishConversationDelta(store: TaskStore, input: {
       input.conversationId,
       input.entryId,
       input.partId,
+      input.ordinal,
       input.text,
       input.length,
       Date.now(),
@@ -92,6 +93,7 @@ export function publishConversationDelta(store: TaskStore, input: {
       operationId: input.operationId,
       entryId: input.entryId,
       partId: input.partId,
+      ordinal: input.ordinal,
       text,
       len: input.length,
       reset,
@@ -107,14 +109,53 @@ export function conversationStreams(store: TaskStore, conversationId: string) {
   return (store.db.prepare(`SELECT s.* FROM conversation_streams s
     JOIN operations o ON o.id=s.operation_id
     WHERE s.conversation_id=? AND o.state IN ('intent','dispatched')
-    ORDER BY s.updated_at`).all(conversationId) as unknown as ConversationStreamRow[]).map(row => ({
+    ORDER BY s.ordinal, s.updated_at`).all(conversationId) as unknown as ConversationStreamRow[]).map(row => ({
     operationId: row.operation_id,
     entryId: row.entry_id,
     partId: row.part_id,
+    ordinal: row.ordinal,
     text: row.text,
     length: row.length,
     updatedAt: row.updated_at,
   }));
+}
+
+/** One ordered record of a master turn's activity: the narration the Agent
+ * emitted between tool calls, and the tool calls themselves. */
+export type ConversationActivityRecord =
+  | { kind: 'narration'; text: string }
+  | { kind: 'tool'; text: string; data: Record<string, Json> };
+
+/**
+ * Decide the ordered, deduplicated activity records of one completed master
+ * turn. The final reply is written separately, so a narration whose text is the
+ * reply itself is dropped instead of appearing twice. Older operations carry
+ * only tool activity, without a `type`. Pure, so the rule is testable without a
+ * store.
+ */
+export function conversationActivityRecords(activity: unknown, reply: string): ConversationActivityRecord[] {
+  const records: ConversationActivityRecord[] = [];
+  for (const item of Array.isArray(activity) ? activity : []) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const entry = item as { type?: unknown; text?: unknown; name?: unknown; summary?: unknown; state?: unknown; toolCallId?: unknown };
+    if (entry.type === 'narration') {
+      const text = typeof entry.text === 'string' ? entry.text.trim() : '';
+      if (!text || text === reply) continue;
+      records.push({ kind: 'narration', text });
+      continue;
+    }
+    if (typeof entry.summary !== 'string' || !entry.summary.trim()) continue;
+    records.push({
+      kind: 'tool',
+      text: typeof entry.name === 'string' ? `${entry.name}: ${entry.summary}` : entry.summary,
+      data: {
+        tool: typeof entry.name === 'string' ? entry.name : 'tool',
+        ...(typeof entry.toolCallId === 'string' ? { toolCallId: entry.toolCallId } : {}),
+        ...(entry.state === 'error' ? { error: true } : {}),
+      },
+    });
+  }
+  return records;
 }
 
 /** Append one durable message and publish it on the conversation stream. */
@@ -243,13 +284,34 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
   if (nodeSpec.role !== 'master') return;
   const conversation = conversationForTask(store, operation.taskId);
   if (!conversation) return;
-  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND role='assistant' LIMIT 1").get(operation.id)) return;
+  if (store.db.prepare("SELECT id FROM messages WHERE operation_id=? AND kind='chat' LIMIT 1").get(operation.id)) return;
   const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
     ? result.output as { [key: string]: Json }
     : undefined;
   if (result.outcome === 'completed') {
     const reply = typeof output?.text === 'string' ? output.text.trim() : '';
     const suggestedPrompt = typeof output?.suggestedPrompt === 'string' ? output.suggestedPrompt.trim().slice(0, 500) : '';
+    // The turn's activity keeps its own order: the narration the Agent emitted
+    // between tool calls and the tool calls themselves, written before the reply
+    // so the transcript reads in the order it happened. Rewritten on a retry
+    // instead of duplicated, and the final reply stays the idempotency marker.
+    const activity = Array.isArray(output?.activity) ? output.activity : output?.toolActivity;
+    const records = conversationActivityRecords(activity, reply);
+    if (records.length) {
+      store.db.prepare("DELETE FROM messages WHERE operation_id=? AND kind='activity'").run(operation.id);
+    }
+    for (const record of records) {
+      appendMessage(store, {
+        conversationId: conversation.id,
+        role: record.kind === 'narration' ? 'assistant' : 'tool',
+        kind: record.kind === 'narration' ? 'activity' : 'tool',
+        text: record.text,
+        ...(record.kind === 'tool' ? { data: record.data as unknown as Json } : {}),
+        state: 'done',
+        operationId: operation.id,
+        turn: operation.attempt,
+      });
+    }
     if (reply) {
       appendMessage(store, {
         conversationId: conversation.id,
@@ -260,25 +322,6 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
         operationId: operation.id,
         turn: operation.attempt,
         ...(suggestedPrompt ? { data: { suggestedPrompt } } : {}),
-      });
-    }
-    const activity = Array.isArray(output?.toolActivity) ? output.toolActivity : [];
-    for (const item of activity) {
-      const entry = item as { name?: unknown; summary?: unknown; state?: unknown; toolCallId?: unknown };
-      if (typeof entry.summary !== 'string' || !entry.summary.trim()) continue;
-      appendMessage(store, {
-        conversationId: conversation.id,
-        role: 'tool',
-        kind: 'tool',
-        text: typeof entry.name === 'string' ? `${entry.name}: ${entry.summary}` : entry.summary,
-        data: {
-          tool: typeof entry.name === 'string' ? entry.name : 'tool',
-          ...(typeof entry.toolCallId === 'string' ? { toolCallId: entry.toolCallId } : {}),
-          ...(entry.state === 'error' ? { error: true } : {}),
-        },
-        state: 'done',
-        operationId: operation.id,
-        turn: operation.attempt,
       });
     }
   } else if (result.outcome === 'failed') {

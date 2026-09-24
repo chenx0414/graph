@@ -664,50 +664,101 @@ export function createPiAdapter(options: {
           runtimePolicyDigest: capabilityOperation.runtimePolicyDigest,
         });
         // Live conversation text and tool activity are separate from the final
-        // message: deltas are coalesced for reconnect, the durable assistant
-        // record is written by the kernel when the operation settles.
-        const streamed = { text: '', buffer: '', lastFlush: 0 };
-        const flushDeltas = (force: boolean) => {
-          if (!conversation || !streamed.buffer) return;
+        // message: deltas are coalesced for reconnect, the durable record is
+        // written by the kernel when the operation settles. One live part is one
+        // text part of one assistant message, so text emitted before and after a
+        // tool call stays apart and keeps its place in the turn; `ordinal` is the
+        // shared order of text parts and tool calls.
+        const parts = new Map<string, { entryId: string; partId: string; text: string; buffer: string; lastFlush: number; ordinal: number }>();
+        let entrySeq = 0;
+        let currentEntryId = '';
+        let ordinal = 0;
+        const nextOrdinal = () => { ordinal += 1; return ordinal; };
+        const flushPart = (part: { entryId: string; partId: string; text: string; buffer: string; lastFlush: number; ordinal: number }, force: boolean) => {
+          if (!conversation || !part.buffer) return;
           const now = Date.now();
-          if (!force && now - streamed.lastFlush < CONVERSATION_DELTA_FLUSH_MS) return;
-          const text = streamed.buffer;
-          streamed.buffer = '';
-          streamed.lastFlush = now;
+          if (!force && now - part.lastFlush < CONVERSATION_DELTA_FLUSH_MS) return;
+          const text = part.buffer;
+          part.buffer = '';
+          part.lastFlush = now;
           publishConversationDelta(options.store, {
             taskId: operation.taskId,
             conversationId: conversation.id,
             operationId: operation.id,
-            entryId: operation.id,
-            partId: 'text',
+            entryId: part.entryId,
+            partId: part.partId,
+            ordinal: part.ordinal,
             delta: text,
-            text: streamed.text,
-            length: streamed.text.length,
+            text: part.text,
+            length: part.text.length,
           });
         };
+        const flushDeltas = (force: boolean) => { for (const part of parts.values()) flushPart(part, force); };
         const toolSummaries = new Map<string, string>();
         const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
+        // Ordered turn activity for a conversation transcript: the narration
+        // between tool calls and the tool calls themselves, in the order they
+        // happened. Narration is complete only at message_end, so its record is
+        // created when the first text part starts and filled in later.
+        type ActivityRecord =
+          | { type: 'narration'; text: string }
+          | { type: 'tool'; toolCallId: string; name: string; summary: string; state: 'done' | 'error' };
+        const activity: ActivityRecord[] = [];
+        const narrationByEntry = new Map<string, { type: 'narration'; text: string }>();
+        const toolOrdinals = new Map<string, number>();
+        const livePart = (contentIndex: number) => {
+          if (!currentEntryId) { entrySeq += 1; currentEntryId = `entry-${entrySeq}`; }
+          const partId = String(contentIndex);
+          const key = `${currentEntryId}\u0000${partId}`;
+          const existing = parts.get(key);
+          if (existing) return existing;
+          const part = { entryId: currentEntryId, partId, text: '', buffer: '', lastFlush: 0, ordinal: nextOrdinal() };
+          parts.set(key, part);
+          const narration = { type: 'narration' as const, text: '' };
+          activity.push(narration);
+          narrationByEntry.set(currentEntryId, narration);
+          return part;
+        };
         const persistEntries = !conversation;
         let sawAssistantMessageEnd = false;
         const onEvent = (event: AgentSessionEvent) => {
-          if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
-            streamed.text += event.assistantMessageEvent.delta;
-            streamed.buffer += event.assistantMessageEvent.delta;
-            flushDeltas(false);
+          if (event.type === 'message_start') {
+            entrySeq += 1;
+            currentEntryId = `entry-${entrySeq}`;
             return;
           }
-          if (persistEntries && event.type === 'message_end') {
+          if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
+            const part = livePart(event.assistantMessageEvent.contentIndex);
+            part.text += event.assistantMessageEvent.delta;
+            part.buffer += event.assistantMessageEvent.delta;
+            flushPart(part, false);
+            return;
+          }
+          if (event.type === 'message_end') {
             // Real assistant message from the Pi session, not a fabricated
             // summary of the final output.
             const message = (event as unknown as { message?: { role?: string; content?: { type?: string; text?: string }[] } }).message;
             const text = (message?.content ?? []).filter(part => part.type === 'text' && typeof part.text === 'string').map(part => part.text!).join('');
             if (message?.role === 'assistant' && text.trim()) {
-              sawAssistantMessageEnd = true;
-              appendNodeEntry(options.store, {
-                taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
-                activationId: operation.activationId, operationId: operation.id, role: 'assistant', kind: 'message', text,
-              });
+              if (persistEntries) {
+                sawAssistantMessageEnd = true;
+                appendNodeEntry(options.store, {
+                  taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
+                  activationId: operation.activationId, operationId: operation.id, role: 'assistant', kind: 'message', text,
+                });
+              } else {
+                // The same narration a subagent window shows between its tool
+                // calls, kept as one readable record of the turn.
+                const narration = narrationByEntry.get(currentEntryId);
+                if (narration) narration.text = text;
+                else { activity.push({ type: 'narration', text }); }
+              }
             }
+            if (!persistEntries) {
+              flushDeltas(true);
+              currentEntryId = '';
+            }
+            return;
           }
           if (persistEntries && event.type === 'tool_execution_start') {
             appendNodeEntry(options.store, {
@@ -767,11 +818,16 @@ export function createPiAdapter(options: {
           if (event.type === 'tool_execution_start') {
             const summary = summarizeToolCall(event.toolName, event.args);
             toolSummaries.set(event.toolCallId, summary);
-            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary });
+            const callOrdinal = nextOrdinal();
+            toolOrdinals.set(event.toolCallId, callOrdinal);
+            activity.push({ type: 'tool', toolCallId: event.toolCallId, name: event.toolName, summary, state: 'done' });
+            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary, ordinal: callOrdinal });
           } else if (event.type === 'tool_execution_end') {
             const summary = toolSummaries.get(event.toolCallId) ?? event.toolName;
             toolActivity.push({ toolCallId: event.toolCallId, name: event.toolName, summary, state: event.isError ? 'error' : 'done' });
-            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError });
+            const record = activity.find(item => item.type === 'tool' && item.toolCallId === event.toolCallId);
+            if (record && record.type === 'tool') record.state = event.isError ? 'error' : 'done';
+            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError, ordinal: toolOrdinals.get(event.toolCallId) ?? nextOrdinal() });
           }
         };
         try {
@@ -923,7 +979,7 @@ export function createPiAdapter(options: {
             if (reloadReceipt) {
               return {
                 outcome: 'completed',
-                output: { text: `RSI 改动已提交，等待重载。当前回合已结束；重载确认后会自动继续，并将报告更新为“已生效”。`, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}) },
+                output: { text: `RSI 改动已提交，等待重载。当前回合已结束；重载确认后会自动继续，并将报告更新为“已生效”。`, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}) },
                 usage: gate.total(),
               };
             }
@@ -958,7 +1014,7 @@ export function createPiAdapter(options: {
               };
             }
             const text = result.finalAssistantText;
-            const reply = text.trim() ? text : streamed.text;
+            const reply = text.trim() ? text : [...parts.values()].map(part => part.text).join('');
             flushDeltas(true);
             if (persistEntries && !sawAssistantMessageEnd && reply.trim()) {
               appendNodeEntry(options.store, {
@@ -1006,7 +1062,7 @@ export function createPiAdapter(options: {
             // The conversation output always carries the visible reply; worker
             // output keeps its existing submitted-or-text shape.
             const output: Json = conversation
-              ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
+              ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
               : (submitted ?? { text });
             const resultHandoff = resultHandoffFromSubmission(submitted);
             return {

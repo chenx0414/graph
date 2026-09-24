@@ -500,6 +500,31 @@ export class TaskStore {
         PRAGMA user_version=30;
       `);
     });
+    if (version < 31) this.transaction(() => {
+      // A live conversation stream is one text part, not one operation: a single
+      // assistant message can emit text, call a tool and emit text again, and the
+      // transcript has to keep those parts apart and in the order they happened.
+      // ordinal is that order, shared with the live tool activity.
+      this.db.exec(`
+        CREATE TABLE conversation_streams_next(
+          operation_id TEXT NOT NULL,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id),
+          entry_id TEXT NOT NULL,
+          part_id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL DEFAULT 0,
+          text TEXT NOT NULL,
+          length INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY(operation_id, entry_id, part_id)
+        );
+        INSERT INTO conversation_streams_next(operation_id,conversation_id,entry_id,part_id,ordinal,text,length,updated_at)
+          SELECT operation_id,conversation_id,entry_id,part_id,0,text,length,updated_at FROM conversation_streams;
+        DROP TABLE conversation_streams;
+        ALTER TABLE conversation_streams_next RENAME TO conversation_streams;
+        CREATE INDEX IF NOT EXISTS conversation_streams_scope ON conversation_streams(conversation_id, updated_at);
+        PRAGMA user_version=31;
+      `);
+    });
   }
   transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');

@@ -263,6 +263,7 @@ test('length-checked append deltas extend in place and recover from a snapshot a
       operationId: 'op',
       entryId: 'op',
       partId: 'text',
+      ordinal: 0,
       text: '权威快照',
       length: 4,
       updatedAt: 20,
@@ -272,4 +273,52 @@ test('length-checked append deltas extend in place and recover from a snapshot a
     streamNeedsResync: false,
     streaming: [{ operationId: 'op', text: '权威快照', length: 4 }],
   });
+});
+
+test('a live turn keeps its two text parts apart, in the order they happened', () => {
+  let state = createConversationProjection();
+  state = applyConversationEvent(state, {
+    type: 'message.delta',
+    data: { operationId: 'op', entryId: 'entry-1', partId: '0', ordinal: 1, text: '先看一下', len: 4, reset: true },
+  });
+  state = applyConversationEvent(state, {
+    type: 'message.tool',
+    data: { operationId: 'op', toolCallId: 'tool-1', toolName: 'read', summary: 'a.ts', phase: 'start', ordinal: 2 },
+  });
+  state = applyConversationEvent(state, {
+    type: 'message.delta',
+    data: { operationId: 'op', entryId: 'entry-1', partId: '2', ordinal: 3, text: '再改投影', len: 5, reset: true },
+  });
+  const snapshot = conversationProjectionSnapshot(state, { busy: true });
+  expect(snapshot.streaming.map(item => [item.partId, item.text, item.ordinal]))
+    .toEqual([['0', '先看一下', 1], ['2', '再改投影', 3]]);
+  expect(snapshot.liveTools.map(tool => [tool.toolCallId, tool.ordinal])).toEqual([['tool-1', 2]]);
+});
+
+test('a reconnect keeps every part and its ordinal', () => {
+  let state = createConversationProjection();
+  state = observeConversationView(state, {
+    messageCount: 0,
+    messages: [],
+    streams: [
+      { operationId: 'op', entryId: 'entry-1', partId: '0', ordinal: 1, text: '前', length: 1, updatedAt: 10 },
+      { operationId: 'op', entryId: 'entry-1', partId: '2', ordinal: 3, text: '后', length: 1, updatedAt: 20 },
+    ],
+  });
+  expect(conversationProjectionSnapshot(state, { busy: true }).streaming.map(item => [item.partId, item.ordinal]))
+    .toEqual([['0', 1], ['2', 3]]);
+});
+
+test('a settled operation drops every live part, not just the first', () => {
+  let state = createConversationProjection();
+  state = applyConversationEvent(state, {
+    type: 'message.delta',
+    data: { operationId: 'op', entryId: 'entry-1', partId: '0', ordinal: 1, text: '前', len: 1, reset: true },
+  });
+  state = applyConversationEvent(state, {
+    type: 'message.delta',
+    data: { operationId: 'op', entryId: 'entry-1', partId: '2', ordinal: 3, text: '后', len: 1, reset: true },
+  });
+  state = applyConversationEvent(state, { type: 'operation.unknown', data: { operationId: 'op' } });
+  expect(conversationProjectionSnapshot(state, { busy: true }).streaming).toEqual([]);
 });

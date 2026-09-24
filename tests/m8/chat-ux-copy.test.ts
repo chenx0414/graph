@@ -19,7 +19,7 @@ function message(overrides: Partial<ConversationMessage> & { id: string; role: s
 
 function rowsFrom(input: {
   messages?: ConversationMessage[];
-  streaming?: { operationId: string; entryId: string; partId: string; text: string; length: number; updatedAt: number }[];
+  streaming?: { operationId: string; entryId: string; partId: string; ordinal: number; text: string; length: number; updatedAt: number }[];
 }) {
   return buildTranscriptRows({
     messages: input.messages ?? [],
@@ -51,7 +51,7 @@ test('用户行的复制内容等于原始输入文本', () => {
 
 test('streaming 中的 Agent 行不可复制', () => {
   const rows = rowsFrom({
-    streaming: [{ operationId: 'op2', entryId: 'e1', partId: 'p1', text: '正在生成…', length: 5, updatedAt: 0 }],
+    streaming: [{ operationId: 'op2', entryId: 'e1', partId: 'p1', ordinal: 1, text: '正在生成…', length: 5, updatedAt: 0 }],
   });
   const assistant = rows.find(row => row.kind === 'assistant');
   expect(assistant).toBeDefined();
