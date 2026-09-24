@@ -1108,7 +1108,7 @@ export async function loadCapabilities(input: {
         readRoots.push(snapshot);
         report.push({
           id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: false,
-          reason: '技能已加载为只读文档', path: skillFile, ...metadata,
+          reason: '原生 skills 注入：模型按需读取 SKILL.md', path: skillFile, ...metadata,
         });
         continue;
       }

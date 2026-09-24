@@ -5,11 +5,12 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { selectAgentToolSurface } from './pi-native-tools.ts';
-import { syncAgentSkills } from './agent-skills.ts';
+import { agentSkills, syncAgentSkills } from './agent-skills.ts';
 import {
   capabilityPrompts,
   loadCapabilities,
   resolveCapabilityFacts,
+  type CapabilityLoadFact,
   type CapabilityPermissionRequest,
   type LoadedCapabilities,
   type ResolvedCapabilityFact,
@@ -172,7 +173,26 @@ export class CapabilityBundleVersion {
       const nativeTools = Object.freeze(selected.nativeTools);
       const tools = Object.freeze(selected.tools);
       const piExtensionTools = selected.extensionTools;
-      const report = loaded.report.map(fact => fact.tools
+      // Skills are recorded from the Agent's own folder, which is what the SDK loads: a
+      // bound skill keeps its loaded fact and its version, and a skill the user pasted
+      // into the folder becomes a load fact of its own. Everything else stays as loaded.
+      const recordedSkills = new Set(loaded.report.filter(fact => fact.kind === 'skill').map(fact => fact.id));
+      const pastedSkills = (this.input.skillFolder ? agentSkills(this.input.skillFolder).skills : [])
+        .filter(skill => !recordedSkills.has(skill.name));
+      const report = [
+        ...loaded.report,
+        ...pastedSkills.map((skill): CapabilityLoadFact => ({
+          id: skill.name,
+          version: 'local',
+          kind: 'skill',
+          name: skill.name,
+          description: skill.description,
+          path: skill.filePath,
+          loaded: true,
+          executable: false,
+          reason: '原生 skills 注入：模型按需读取 SKILL.md',
+        })),
+      ].map(fact => fact.tools
         ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) }
         : fact);
       const prompts = capabilityPrompts({
