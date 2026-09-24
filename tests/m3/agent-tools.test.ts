@@ -227,8 +227,7 @@ test('full access keeps the work copy and bound capability readable inside Graph
   expect((await call('read', { path: join(stateDir, 'tasks.sqlite') })).content[0]).toMatchObject({ text: 'formal' });
 });
 
-test('the main Agent cannot author composer suggestions as part of its reply', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-tools-suggestion-'));
+test('the main Agent cannot author composer suggestions as part of its reply', async () => {  const root = await mkdtemp(join(tmpdir(), 'graph-tools-suggestion-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const tools = agentTools({
     workspace: root,
@@ -236,6 +235,33 @@ test('the main Agent cannot author composer suggestions as part of its reply', a
     supervisor: { propose: async () => ({}), revise: async () => ({}) },
   });
   expect(tools.map(tool => tool.name)).not.toContain('suggest_prompt');
+});
+
+// Withdrawing a draft is a lifecycle operation the user asks for in chat ("作废 vN"), so the
+// master needs it as a tool; a role without the supervisor channel must never see it.
+test('only a master with the supervisor channel can withdraw a draft', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-withdraw-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const calls: unknown[] = [];
+  const tools = agentTools({
+    workspace: root,
+    role: 'master',
+    supervisor: {
+      propose: async () => ({}),
+      revise: async () => ({}),
+      withdrawDraft: async input => { calls.push(input); return { withdrawnVersion: input.proposalVersion, nextProposalVersion: input.proposalVersion + 1 }; },
+    },
+  });
+  const tool = tools.find(item => item.name === 'withdraw_draft');
+  expect(tool).toBeTruthy();
+  const result = await (tool!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>)('probe', { proposalVersion: 7, reason: '方向已变', requestId: 'w-1' });
+  expect(calls).toEqual([{ proposalVersion: 7, reason: '方向已变', requestId: 'w-1' }]);
+  expect(result.content[0]?.text).toContain('withdrawnVersion');
+
+  const worker = agentTools({ workspace: root, role: 'worker' });
+  expect(worker.map(item => item.name)).not.toContain('withdraw_draft');
+  const bare = agentTools({ workspace: root, role: 'master', supervisor: { propose: async () => ({}), revise: async () => ({}) } });
+  expect(bare.map(item => item.name)).not.toContain('withdraw_draft');
 });
 
 test('only the master receives read-only resource and system inventory tools', async () => {

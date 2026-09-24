@@ -14,6 +14,7 @@ import { describeAgentTools, type AgentToolName } from './agent-tool-definitions
 
 type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
+  withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
   revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
   taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
@@ -326,6 +327,15 @@ export function agentTools(input: {
       const receipt = await input.supervisor!.propose(proposal, String(body.requestId));
       return text(JSON.stringify(receipt));
     },
+    withdraw_draft: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      const receipt = await input.supervisor!.withdrawDraft!({
+        proposalVersion: Number(body.proposalVersion),
+        reason: String(body.reason ?? ''),
+        requestId: String(body.requestId),
+      });
+      return text(JSON.stringify(receipt));
+    },
     revise_graph: async (_id, params) => {
       const body = fields(params);
       const receipt = await input.supervisor!.revise({
@@ -529,6 +539,7 @@ export function agentTools(input: {
       taskStatus: Boolean(input.supervisor.taskStatus),
       listProjects: Boolean(input.supervisor.listProjects),
       bindProject: Boolean(input.supervisor.bindProject),
+      withdrawDraft: Boolean(input.supervisor.withdrawDraft),
       listProblems: Boolean(input.supervisor.listProblems),
       resolveProblem: Boolean(input.supervisor.resolveProblem),
     } } : {}),

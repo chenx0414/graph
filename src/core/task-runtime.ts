@@ -1229,7 +1229,7 @@ export async function openTaskRuntime(options: {
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
-          bindProject: true, listProblems: true, resolveProblem: true,
+          bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true,
         },
         ...(options.systemContext ? { systemContext: {
           systemSummary: Boolean(options.systemContext.systemSummary),
@@ -1517,6 +1517,38 @@ export async function openTaskRuntime(options: {
               .run(taskId, version, proposal.requirementVersion, canonicalJson(proposal), snapshot);
             store.db.prepare('UPDATE tasks SET latest_proposal=? WHERE id=?').run(version, taskId);
             return { taskId, proposalVersion: version, cursor: store.event(taskId, 'proposal.created', { proposalVersion: version }) };
+          });
+        },
+        /**
+         * Withdraw the current unconfirmed draft. The version is retired instead
+         * of deleted, so chat and console can still show what was proposed, and
+         * `latest_proposal` advances to the next free number: the digest then
+         * reports no draft, confirmation is refused as stale, and a later
+         * propose keeps a monotonic version. Setting it back to 0 would make the
+         * next propose reuse version 1 and fail the proposals primary key.
+         */
+        async withdrawDraft(input: { proposalVersion: number; reason?: string; requestId: string }) {
+          ensureOpen();
+          return store.command(`supervisor:${taskId}`, input.requestId, { type: 'withdraw', proposalVersion: input.proposalVersion }, () => {
+            const task = store.task(taskId);
+            const row = store.db.prepare('SELECT version FROM proposals WHERE task_id=? AND version=?').get(taskId, input.proposalVersion) as { version: number } | undefined;
+            if (!row) throw new RuntimeError('not_found', 'That draft does not exist');
+            if (task.latest_proposal !== input.proposalVersion) throw new RuntimeError('stale_proposal', 'Only the current draft can be withdrawn');
+            if (task.accepted_proposal !== null) throw new RuntimeError('requirements_locked', 'A confirmed draft cannot be withdrawn');
+            const conversation = conversationForTask(store, taskId);
+            if (conversation && store.db.prepare('SELECT proposal_version FROM conversation_acceptances WHERE conversation_id=? AND proposal_version=?').get(conversation.id, input.proposalVersion)) {
+              throw new RuntimeError('already_accepted', 'This draft was already confirmed');
+            }
+            const next = input.proposalVersion + 1;
+            store.db.prepare('UPDATE tasks SET latest_proposal=? WHERE id=?').run(next, taskId);
+            const reason = (input.reason ?? '').trim();
+            if (conversation) appendMessage(store, {
+              conversationId: conversation.id, role: 'system', kind: 'project', state: 'done',
+              text: reason
+                ? `草稿 v${input.proposalVersion} 已作废：${reason}。请重新调查后生成新草稿。`
+                : `草稿 v${input.proposalVersion} 已作废，请重新调查后生成新草稿。`,
+            });
+            return { taskId, withdrawnVersion: input.proposalVersion, nextProposalVersion: next, cursor: store.event(taskId, 'proposal.withdrawn', { proposalVersion: input.proposalVersion, reason }) };
           });
         },
         async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string; taskId?: string }) {

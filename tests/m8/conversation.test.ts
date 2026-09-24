@@ -1493,3 +1493,54 @@ test.each(['before_session', 'session_opened', 'model_sent'])('restart resumes o
     expect(view.master?.status).toBe('failed');
   }
 });
+
+test('the master can withdraw its own unconfirmed draft without losing it', async () => {
+  const root = await temp('withdraw-draft');
+  const project = join(root, 'project');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(project, { recursive: true });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'draft ready' }, usage })) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '做一个最小可用版', requestId: 'create' });
+  await runtime.host.runReady();
+  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  const draft = {
+    requirementVersion: 1, summary: '被取代的方案',
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  };
+  await runtime.supervisor(anchorTaskId).propose(draft, 'draft-1');
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+
+  // Only a draft that exists and is still the current one can be withdrawn.
+  await expect(runtime.supervisor(anchorTaskId).withdrawDraft({ proposalVersion: 7, requestId: 'w-none' }))
+    .rejects.toMatchObject({ code: 'not_found' });
+
+  const receipt = await runtime.supervisor(anchorTaskId).withdrawDraft({ proposalVersion: 1, reason: '方向已变', requestId: 'w-1' });
+  expect(receipt).toMatchObject({ withdrawnVersion: 1, nextProposalVersion: 2 });
+
+  // The user-visible outcome: the draft is gone from the conversation view (the same source the
+  // briefing digest reads), its history stays readable, the user is told, and the confirmation
+  // entry is refused instead of confirming something that was withdrawn.
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.proposal).toBeNull();
+  expect(view.proposalHistory.map(item => item.version)).toContain(1);
+  expect(view.messages.some(message => message.role === 'system' && message.text.includes('已作废：方向已变'))).toBe(true);
+  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-withdrawn' }))
+    .rejects.toMatchObject({ code: 'stale_proposal' });
+
+  // Withdrawing again is refused, and the next draft keeps a monotonic version: the withdrawn
+  // number and the retired one are both skipped, so v1 → v3.
+  await expect(runtime.supervisor(anchorTaskId).withdrawDraft({ proposalVersion: 1, requestId: 'w-again' }))
+    .rejects.toMatchObject({ code: 'stale_proposal' });
+  await runtime.supervisor(anchorTaskId).propose({ ...draft, summary: '新方案' }, 'draft-2');
+  expect((await runtime.conversations.view(created.conversationId)).proposal?.version).toBe(3);
+});

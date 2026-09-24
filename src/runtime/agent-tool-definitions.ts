@@ -9,7 +9,7 @@ export interface AgentToolFeatures {
   fetch?: boolean;
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
-  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem', boolean>>;
+  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange' | 'requestModelAccess', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
 }
@@ -177,6 +177,12 @@ function declarations(features: AgentToolFeatures) {
       name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson is a JSON object with requirementVersion, summary, acceptance[{id,description,checkNode}], nodes[NodeSpec], optional containers, loops and decisions. Agent nodes require definitionVersion and model; every acceptance checkNode must reference a mandatory program node. Keep decisions current: they are frozen with this draft version and passed to workers after confirmation.',
       parameters: Type.Object({ proposalJson: Type.String(), requestId: Type.String() }),
       available: main && Boolean(features.supervisor),
+      externallyGated: false,
+    },
+    withdraw_draft: {
+      name: 'withdraw_draft', label: 'Withdraw draft', description: 'Withdraw the current unconfirmed graph draft of this conversation, so the briefing reports no draft and the next propose_graph keeps a fresh version number. Use it when the user drops the plan or the draft no longer matches reality. It retires the version instead of deleting it (history stays readable), refuses a draft that is not the current one and refuses a confirmed one. reason is optional and is shown to the user.',
+      parameters: Type.Object({ proposalVersion: Type.Number(), reason: Type.Optional(Type.String()), requestId: Type.String() }),
+      available: main && Boolean(features.supervisor?.withdrawDraft),
       externallyGated: false,
     },
     revise_graph: {
