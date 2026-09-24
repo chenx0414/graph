@@ -1104,13 +1104,13 @@ export async function openTaskRuntime(options: {
         return { conversationId, taskId: conversation.anchor_task_id, changed: true, invalidatedDrafts: invalidated, cursor: store.event(conversation.anchor_task_id, 'conversation.bound', { projectId: input.projectId, previous }) };
       });
     },
-    async confirm(conversationId: string, input: { proposalVersion: number; targetBranch: string; requestId: string }) {
+    async confirm(conversationId: string, input: { proposalVersion: number; targetBranch: string; requestId: string; attestation?: { actor: 'agent'; onBehalfOf: 'user'; instruction: string } }) {
       ensureOpen();
       const bound = conversationRow(store, conversationId);
       if (!bound.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
       if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
       git.requireTargetBranch(bound.project_id, input.targetBranch);
-      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'confirm', proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }, () => {
+      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'confirm', proposalVersion: input.proposalVersion, targetBranch: input.targetBranch, ...(input.attestation ? { actor: input.attestation.actor, onBehalfOf: input.attestation.onBehalfOf, instruction: input.attestation.instruction } : {}) }, () => {
         const conversation = conversationRow(store, conversationId);
         if (!conversation.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
         if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
@@ -1253,7 +1253,7 @@ export async function openTaskRuntime(options: {
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
-          bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true,
+          bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true, confirmDraft: true,
         },
         ...(options.systemContext ? { systemContext: {
           systemSummary: Boolean(options.systemContext.systemSummary),
@@ -1513,6 +1513,21 @@ export async function openTaskRuntime(options: {
       ensureOpen(); store.task(taskId);
       // Give workers this scoped object, never the user or host runtime object.
       return {
+        /** The user asked in chat for this confirmation, so the record must show who
+         * really acted and carry their words: the console click and this call stay
+         * distinguishable in the command log. */
+        async confirmDraft(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }) {
+          ensureOpen();
+          if (!input.instruction.trim()) throw new RuntimeError('invalid_input', 'An instruction is required: record the words that authorised this confirmation');
+          const conversationId = store.task(taskId).conversation_id;
+          if (!conversationId) throw new RuntimeError('invalid_input', 'This task has no conversation to confirm');
+          return runtime.conversations.confirm(conversationId, {
+            proposalVersion: input.proposalVersion,
+            targetBranch: input.targetBranch,
+            requestId: input.requestId,
+            attestation: { actor: 'agent', onBehalfOf: 'user', instruction: input.instruction.trim() },
+          });
+        },
         async propose(proposal: Proposal, requestId: string): Promise<ProposalReceipt> {
           ensureOpen();
           return store.command(`supervisor:${taskId}`, requestId, { type: 'propose', proposal }, () => {

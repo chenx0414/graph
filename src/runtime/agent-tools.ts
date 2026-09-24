@@ -3,7 +3,7 @@ import { extname, isAbsolute, sep } from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { CapabilityRecord, Catalog } from '../catalog/catalog.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
-import type { Json, NodeSpec, Proposal } from '../core/types.ts';
+import { RuntimeError, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import { isHostRead, isHostWrite, type ResolvedAccessPolicy } from '../core/access-policy.ts';
 import type { ArtifactPage, ArtifactRecord, ArtifactTrust, PublishArtifactInput } from '../core/artifact-workspace.ts';
 import {
@@ -15,6 +15,7 @@ import { describeAgentTools, type AgentToolName } from './agent-tool-definitions
 type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
   withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
+  confirmDraft?(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }): Promise<unknown>;
   revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
   taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
@@ -336,6 +337,21 @@ export function agentTools(input: {
       });
       return text(JSON.stringify(receipt));
     },
+    confirm_draft: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      // The confirmation card is a mechanism gate, not a judgement gate: the
+      // user's own words are the authorisation, so they are required here and
+      // passed through verbatim for the command log.
+      const instruction = String(body.instruction ?? '').trim();
+      if (!instruction) throw new RuntimeError('invalid_input', 'An instruction is required: record the words that authorised this confirmation');
+      const receipt = await input.supervisor!.confirmDraft!({
+        proposalVersion: Number(body.proposalVersion),
+        targetBranch: String(body.targetBranch ?? ''),
+        instruction,
+        requestId: String(body.requestId),
+      });
+      return text(JSON.stringify(receipt));
+    },
     revise_graph: async (_id, params) => {
       const body = fields(params);
       const receipt = await input.supervisor!.revise({
@@ -540,6 +556,7 @@ export function agentTools(input: {
       listProjects: Boolean(input.supervisor.listProjects),
       bindProject: Boolean(input.supervisor.bindProject),
       withdrawDraft: Boolean(input.supervisor.withdrawDraft),
+      confirmDraft: Boolean(input.supervisor.confirmDraft),
       listProblems: Boolean(input.supervisor.listProblems),
       resolveProblem: Boolean(input.supervisor.resolveProblem),
     } } : {}),
