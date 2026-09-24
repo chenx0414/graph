@@ -7,6 +7,7 @@ import { ComposerTelemetry, type ComposerTelemetryView } from './ComposerTelemet
 import { defaultThinkingOption } from './thinking-levels.ts';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
+import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { NodeRunPanel } from './NodeDetail.tsx';
 import { ConversationPanel, type ConversationSummary, type GraphAgentDetail } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
@@ -876,6 +877,7 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
   const limits = useLimits();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
+  const [chatNode, setChatNode] = useState<string | null>(null);
   const [opsBefore, setOpsBefore] = useState<string | undefined>(undefined);
   useEffect(() => setOpsBefore(undefined), [id, selected]);
   const { data: ops, reload: reloadOps } = useAsync(() => api<OperationRow[]>(
@@ -894,6 +896,7 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
   if (error && !graph) return <ErrorBox message={error} onRetry={reload} />;
   if (!graph) return <Card><Spinner /></Card>;
   const selectedNode = graph.nodes.find(node => node.id === selected);
+  const chatTarget = chatNode ? graph.nodes.find(node => node.id === chatNode) : undefined;
   const nodeEvidence = view?.evidence?.filter(item => item.nodeId === selected) ?? [];
   const nodeOperations = (ops ?? []).filter(item => item.nodeId === selected);
   const nodeWaiting = selectedNode ? waitingForSlot(selectedNode, settings, limits, startup?.limitAliases) : false;
@@ -928,7 +931,12 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
 
       {selectedNode && (
         <Card testid="node-detail" title={`节点 ${selectedNode.id}`} icon="box"
-          actions={<Button size="sm" variant="ghost" onClick={() => setSelected(null)}>关闭</Button>}>
+          actions={<>
+            {selectedNode.kind === 'agent' && selectedNode.agent && (
+              <Button size="sm" icon="message" data-testid="open-agent-chat" onClick={() => setChatNode(selectedNode.id)}>对话</Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => setSelected(null)}>关闭</Button>
+          </>}>
           <div className="row" style={{ marginBottom: 10 }}>
             <Pill tone={NODE_TONE[selectedNode.status] ?? 'neutral'}>{NODE_LABEL[selectedNode.status] ?? selectedNode.status}（{selectedNode.status}）</Pill>
             {nodeWaiting && <Pill tone="warn">等待 API 名额</Pill>}
@@ -1001,6 +1009,17 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
             <NodeRunPanel key={`${id}:${selectedNode.id}`} taskId={id} nodeId={selectedNode.id} />
           </div>
         </Card>
+      )}
+
+      {/* Any task's Agent node opens its own read-only transcript here, not only
+          from the anchor conversation's graph inspector. */}
+      {chatTarget?.agent && (
+        <AgentNodeChat
+          taskId={id}
+          nodeId={chatTarget.id}
+          agentName={chatTarget.agent.name}
+          onClose={() => setChatNode(null)}
+        />
       )}
     </div>
   );

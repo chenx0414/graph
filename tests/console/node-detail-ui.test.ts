@@ -104,6 +104,14 @@ test('node detail renders real entries, operations and a program command, and st
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '发送' }).count()).toBe(0);
   expect(await page.getByTestId('node-run-work').getByRole('button', { name: '答复' }).count()).toBe(0);
 
+  // HB-8: a node's own chat is reachable from the task page too, not only from
+  // the anchor conversation's graph inspector.
+  expect(await page.getByTestId('open-agent-chat').count()).toBe(1);
+  await page.getByTestId('open-agent-chat').click();
+  const nodeChat = page.getByTestId('graph-agent-chat');
+  await nodeChat.waitFor();
+  expect(await nodeChat.innerText()).toContain('Read the note');
+
   // A direct node link restores the same projection and shows the program command.
   await page.goto(`${server.url}/#/tasks/${taskId}/nodes/work`);
   await page.getByTestId('node-run-work').waitFor();
@@ -111,6 +119,8 @@ test('node detail renders real entries, operations and a program command, and st
   await page.goto(`${server.url}/#/tasks/${taskId}/nodes/check`);
   await page.getByTestId('node-run-check').waitFor();
   expect(await page.getByTestId('program-input').innerText()).toContain('"node"');
+  // A program node has no Agent transcript, so it offers no chat entry.
+  expect(await page.getByTestId('open-agent-chat').count()).toBe(0);
 }, 120_000);
 
 test('two interleaved nodes with more than 500 entries stay fully reachable in the UI', async () => {
