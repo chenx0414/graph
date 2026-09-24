@@ -3,7 +3,7 @@ import { readdir, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { normalizeDomainPattern } from '../core/domains.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
-import type { CapabilityKind, CapabilityRecord } from './capability-library.ts';
+import type { CapabilityKind, CapabilityOrigin, CapabilityRecord } from './capability-library.ts';
 
 export interface CapabilityManifest {
   id: string;
@@ -284,7 +284,7 @@ async function skillNote(directory: string): Promise<string | undefined> {
  * Symlinked entries are the mirror of the skills a recipe already binds, and the library
  * lists those from the capability root, so only hand-made folders are recorded here.
  */
-export async function scanNativeSkills(skillsDir: string, owner: string): Promise<CapabilityRecord[]> {
+export async function scanNativeSkills(skillsDir: string, owner: string, origin: CapabilityOrigin): Promise<CapabilityRecord[]> {
   let entries;
   try {
     entries = await readdir(skillsDir, { withFileTypes: true });
@@ -310,6 +310,7 @@ export async function scanNativeSkills(skillsDir: string, owner: string): Promis
       ...(front?.name ? { name: front.name } : {}),
       ...(front?.description ? { description: front.description } : {}),
       owner,
+      origin,
       ...(note ? { note } : {}),
       ...(usable ? {} : { error: SKILL_FRONTMATTER_ERROR }),
     });
@@ -328,7 +329,7 @@ export async function scanAgentSkills(agentsRoot: string): Promise<CapabilityRec
   }
   const records: CapabilityRecord[] = [];
   for (const agent of agents.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).sort((left, right) => left.name.localeCompare(right.name))) {
-    records.push(...await scanNativeSkills(join(agentsRoot, agent.name, 'skills'), agent.name));
+    records.push(...await scanNativeSkills(join(agentsRoot, agent.name, 'skills'), agent.name, 'agent'));
   }
   return records;
 }

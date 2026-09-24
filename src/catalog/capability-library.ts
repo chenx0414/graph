@@ -19,6 +19,20 @@ import type { ModelGrade } from './models.ts';
 
 export type CapabilityKind = 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt';
 
+/**
+ * Where a skill entry came from. The order matters: it decides which of several entries
+ * that share a name the library shows.
+ *
+ * A library entry comes first because it is the only one that can be bound, and binding
+ * mirrors it into the Agent's own folder, which is where the native loader looks first - so
+ * the bound copy is the one that actually reaches the model. A hand-placed entry in the
+ * Agent's folder comes next (it wins while nothing is bound), then the global folders and
+ * finally the project's own folders.
+ */
+export type CapabilityOrigin = 'library' | 'agent' | 'global' | 'project';
+
+const ORIGIN_ORDER: Record<CapabilityOrigin, number> = { library: 0, agent: 1, global: 2, project: 3 };
+
 export interface CapabilityBinding {
   id: string;
   version: string;
@@ -51,6 +65,10 @@ export interface CapabilityRecord {
   owner?: string;
   /** A fact worth showing next to the entry, such as an excluded skill. */
   note?: string;
+  /** Where the entry came from; a record without one is a capability-library entry. */
+  origin?: CapabilityOrigin;
+  /** Same-name entries the library view folds into this one. */
+  duplicates?: { id: string; version: string; source: string }[];
 }
 
 export interface CapabilitySearchInput {
@@ -130,6 +148,54 @@ interface CapabilityLibraryOptions {
   projects?: () => readonly { id: string; root: string }[];
 }
 
+/** What the library view calls one entry's source. */
+export function capabilitySourceLabel(record: CapabilityRecord): string {
+  if (record.owner) return record.owner;
+  return record.origin === undefined || record.origin === 'library' ? '能力库' : record.origin;
+}
+
+/**
+ * One row per skill name: several entries that share a name resolve to a single skill for the
+ * native loader, so the library shows the one that decides the outcome and lists the rest.
+ *
+ * `ORIGIN_ORDER` picks the entry; within one origin the shortest id wins, then the alphabet,
+ * so the result never depends on scan order.
+ */
+export function groupCapabilitiesByName(records: readonly CapabilityRecord[]): CapabilityRecord[] {
+  const groups = new Map<string, CapabilityRecord[]>();
+  const grouped: CapabilityRecord[] = [];
+  for (const record of records) {
+    if (record.kind !== 'skill') {
+      grouped.push(record);
+      continue;
+    }
+    const key = record.name ?? record.id;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(record);
+    else groups.set(key, [record]);
+  }
+  const rank = (record: CapabilityRecord) => ORIGIN_ORDER[record.origin ?? 'library'];
+  for (const bucket of groups.values()) {
+    const [winner, ...rest] = [...bucket].sort((left, right) =>
+      rank(left) - rank(right)
+      || left.id.length - right.id.length
+      || left.id.localeCompare(right.id));
+    if (!rest.length) {
+      grouped.push(winner!);
+      continue;
+    }
+    grouped.push({
+      ...winner!,
+      duplicates: rest.map(record => ({
+        id: record.id,
+        version: record.version,
+        source: capabilitySourceLabel(record),
+      })),
+    });
+  }
+  return grouped;
+}
+
 /** The filesystem-backed capability library and its Agent recipes. */
 export class CapabilityLibrary {
   private readonly capabilityRoot?: string;
@@ -155,12 +221,12 @@ export class CapabilityLibrary {
     // each configured project's own `.pi`/`.agents` folders, which reach the Agents that
     // work in it.
     const placed = await scanAgentSkills(join(dirname(this.capabilityRoot), 'agents'));
-    const global = await scanNativeSkills(join(getAgentDir(), 'skills'), '全局（Pi agent 目录）');
-    const agents = await scanNativeSkills(join(homedir(), '.agents', 'skills'), '全局（~/.agents）');
+    const global = await scanNativeSkills(join(getAgentDir(), 'skills'), '全局（Pi agent 目录）', 'global');
+    const agents = await scanNativeSkills(join(homedir(), '.agents', 'skills'), '全局（~/.agents）', 'global');
     const projects: CapabilityRecord[] = [];
     for (const project of this.projects?.() ?? []) {
-      projects.push(...await scanNativeSkills(join(project.root, CONFIG_DIR_NAME, 'skills'), `项目 ${project.id}（.pi）`));
-      projects.push(...await scanNativeSkills(join(project.root, '.agents', 'skills'), `项目 ${project.id}（.agents）`));
+      projects.push(...await scanNativeSkills(join(project.root, CONFIG_DIR_NAME, 'skills'), `项目 ${project.id}（.pi）`, 'project'));
+      projects.push(...await scanNativeSkills(join(project.root, '.agents', 'skills'), `项目 ${project.id}（.agents）`, 'project'));
     }
     this.capabilitiesCache = [
       ...await scanCapabilities(this.capabilityRoot), ...placed, ...global, ...agents, ...projects,
@@ -188,6 +254,11 @@ export class CapabilityLibrary {
 
   capabilities(): CapabilityRecord[] {
     return this.capabilitiesCache.map(item => ({ ...item }));
+  }
+
+  /** The list the resource library renders: one row per skill name, duplicates folded. */
+  capabilitiesView(): CapabilityRecord[] {
+    return groupCapabilitiesByName(this.capabilitiesCache);
   }
 
   capability(id: string, version?: string): CapabilityRecord | undefined {
