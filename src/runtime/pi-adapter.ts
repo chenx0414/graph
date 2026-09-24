@@ -109,7 +109,7 @@ function summarizeToolCall(name: string, args: unknown) {
         : name === 'artifact_list' ? target('namespace') ?? target('prefix') ?? name
     : name === 'run_command' ? [target('command'), ...(Array.isArray(body.args) ? (body.args as unknown[]).map(String) : [])].filter(Boolean).join(' ')
       : name === 'fetch' ? target('url') ?? name
-        : name === 'propose_graph' ? 'draft'
+        : name === 'propose_graph' || name === 'confirm_draft' ? 'draft'
           : name === 'validate_proposal' ? 'validation'
             : name === 'get_graph_state' ? 'current graph'
               : name === 'get_task_status' ? 'task status'

@@ -61,6 +61,7 @@ export const DEFAULT_COMMON_RULES = [
 
 export const DEFAULT_MAIN_RULES = [
   '- Recipe names use a readable identity plus role, such as `Bob_coder` or `Alice_reviewer`; preserve that name when presenting an Agent and pair it with the stable recipe id.',
+  '- Testing level (highest first): E2E, black box or golden file regression, then unit tests of a module or component with complete outward behaviour, and only last a fine-grained single-function unit. A "unit" is never a single function: never write one unit test per function, and never mock a crowd of dependencies to isolate one function. A golden file compares only the final output, and a snapshot change must be deliberate and justified. Unit tests assert outward behaviour only - never a private variable, an internal function or an implementation detail. A tautological test that restates the production logic is forbidden, and a test that stays green while the behaviour is wrong is not a test. Hold yourself to this: renaming, splitting or restructuring internals keeps the suite green without rewriting tests.',
 ].join('\n');
 
 export const DEFAULT_WORKER_RULES = [
@@ -68,6 +69,7 @@ export const DEFAULT_WORKER_RULES = [
   'Read the task graph and predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node.',
   'Run the checks assigned to the node and submit structured results only when the work and evidence are complete.',
   'Prefer task-scoped changes; modify shared Graph state, credentials, or another Agent worktree only when the request explicitly requires it.',
+  'Choose the highest test level that can prove the behaviour: E2E, black box or golden file regression first, then unit tests of a module or component with complete outward behaviour, and a fine-grained single-function unit only when nothing higher can prove it. Never write one unit test per function and never mock a crowd of dependencies to isolate one function. A golden file compares only the final output, and a snapshot change must be deliberate and justified. Unit tests assert outward behaviour only - never a private variable, an internal function or an implementation detail - and a tautological test that restates the production logic is forbidden. A refactor of internals must keep the suite green without rewriting tests; if it forces a large rewrite, the tests were written against implementation details.',
 ].join('\n');
 
 export const DEFAULT_REVIEWER_RULES = [
@@ -75,6 +77,7 @@ export const DEFAULT_REVIEWER_RULES = [
   'Look for defects, regressions, unsupported claims, and acceptance gaps before stylistic suggestions.',
   'Show file paths, evidence, and concrete impact for every finding.',
   'Do not modify implementation files. Return an independent verdict that the verifier can evaluate.',
+  'Judge the level of the tests too: E2E, black box or golden file regression first, then units of a whole module or component, and a single-function unit only when nothing higher can prove the behaviour. Flag as defects: one unit test per function, heavy dependency mocking to isolate one function, assertions on private variables, internal functions or implementation details, and tautological tests that restate the production logic. A golden file must compare only the final output, and every snapshot change must be deliberate and justified.',
 ].join('\n');
 
 /**
