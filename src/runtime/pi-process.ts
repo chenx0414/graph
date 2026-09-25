@@ -41,6 +41,56 @@ export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'on
   allowedToolNames: string[];
 };
 
+/**
+ * The worker config, as the file the Pi worker process reads. Kept apart from
+ * spawning so the mapping from a session request to worker options stays
+ * testable: a field dropped here disappears from the session without a trace.
+ */
+export function piWorkerConfig(options: PiProcessOptions, resolved: {
+  workspace: string;
+  stateDir: string;
+  skillPaths: string[];
+  skillFolder?: string | null;
+  piExtensionPaths: string[];
+  forkFrom?: { sessionFile: string; leafId?: string };
+}): PiWorkerConfig {
+  const { workspace, stateDir, skillPaths, skillFolder, piExtensionPaths, forkFrom } = resolved;
+  const tools = options.tools ?? [];
+  return {
+    binding: options.binding,
+    workspace,
+    stateDir,
+    model: options.model,
+    thinkingLevel: options.thinkingLevel ?? 'off',
+    tools: serializedTools(tools),
+    nativeTools: options.nativeTools ?? [],
+    skillPaths,
+    ...(skillFolder ? { skillFolder } : {}),
+    piExtensionPaths,
+    piExtensionTools: options.piExtensionTools ?? [],
+    // The adapter can only register the servers a session request carries, so
+    // this line is the whole reason a bound MCP capability reaches the model.
+    ...(options.mcpAdapterServers?.length ? { mcpAdapterServers: options.mcpAdapterServers.map(server => ({ ...server })) } : {}),
+    systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
+    allowedToolNames: [...(options.allowedToolNames ?? [
+      ...tools.map(tool => tool.name),
+      ...(options.piExtensionTools ?? []),
+    ])].sort(),
+    bundleDigest: options.bundleDigest.trim(),
+    ...(options.legacyCapabilityDigest ? { legacyCapabilityDigest: options.legacyCapabilityDigest } : {}),
+    toolPolicyDigest: options.toolPolicyDigest.trim(),
+    runtimePolicyDigest: options.runtimePolicyDigest.trim(),
+    ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
+    ...(options.filesystemAccess ? { filesystemAccess: options.filesystemAccess } : {}),
+    ...(options.protectedPaths?.length ? { protectedPaths: options.protectedPaths } : {}),
+    ...(options.allowGitMetadataWritesAll ? { allowGitMetadataWritesAll: true } : {}),
+    ...(options.freshSession ? { freshSession: true } : {}),
+    ...(forkFrom ? { forkFrom } : {}),
+    ...(options.compaction ? { compaction: options.compaction } : {}),
+    ...(options.retry ? { retry: options.retry } : {}),
+  };
+}
+
 export type PiWorkerInspect = AgentSessionInspect & { processId: number };
 
 interface PiWorkerResult {
@@ -127,36 +177,14 @@ export async function openPiProcess(options: PiProcessOptions) {
     ? { sessionFile: forkSource, ...(options.forkFrom?.leafId ? { leafId: options.forkFrom.leafId } : {}) }
     : undefined;
   const tools = options.tools ?? [];
-  const config: PiWorkerConfig = {
-    binding: options.binding,
+  const config = piWorkerConfig(options, {
     workspace,
     stateDir,
-    model: options.model,
-    thinkingLevel: options.thinkingLevel ?? 'off',
-    tools: serializedTools(tools),
-    nativeTools: options.nativeTools ?? [],
     skillPaths,
-    ...(skillFolder ? { skillFolder } : {}),
+    skillFolder,
     piExtensionPaths,
-    piExtensionTools: options.piExtensionTools ?? [],
-    systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
-    allowedToolNames: [...(options.allowedToolNames ?? [
-      ...tools.map(tool => tool.name),
-      ...(options.piExtensionTools ?? []),
-    ])].sort(),
-    bundleDigest: options.bundleDigest.trim(),
-    ...(options.legacyCapabilityDigest ? { legacyCapabilityDigest: options.legacyCapabilityDigest } : {}),
-    toolPolicyDigest: options.toolPolicyDigest.trim(),
-    runtimePolicyDigest: options.runtimePolicyDigest.trim(),
-    ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
-    ...(options.filesystemAccess ? { filesystemAccess: options.filesystemAccess } : {}),
-    ...(options.protectedPaths?.length ? { protectedPaths: options.protectedPaths } : {}),
-    ...(options.allowGitMetadataWritesAll ? { allowGitMetadataWritesAll: true } : {}),
-    ...(options.freshSession ? { freshSession: true } : {}),
     ...(forkFrom ? { forkFrom } : {}),
-    ...(options.compaction ? { compaction: options.compaction } : {}),
-    ...(options.retry ? { retry: options.retry } : {}),
-  };
+  });
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
 
   const hostedTools = Object.fromEntries(tools.map(tool => [tool.name, gatedTool(tool, options.broker)]));

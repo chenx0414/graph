@@ -155,6 +155,7 @@ async function main() {
     ...(config.skillPaths.length ? { skillPaths: config.skillPaths } : {}),
     ...(config.skillFolder ? { skillFolder: config.skillFolder } : {}),
     ...(config.piExtensionPaths.length ? { piExtensionPaths: config.piExtensionPaths } : {}),
+    ...(config.mcpAdapterServers?.length ? { mcpAdapterServers: config.mcpAdapterServers } : {}),
     piExtensionTools: config.piExtensionTools,
     extensionFactories: [capabilityGate],
     systemPrompt: config.systemPrompt,

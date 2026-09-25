@@ -75,6 +75,8 @@ export interface AgentSessionRequest {
   allowAppleEvents?: boolean;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
+  /** MCP servers the adapter registers for this session; dropping them leaves the gateway empty. */
+  mcpAdapterServers?: { name: string; definition: unknown }[];
   systemPrompt?: string;
   allowedToolNames?: string[];
   bundleDigest: string;
@@ -176,6 +178,7 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
         ...(request.skillFolder ? { skillFolder: request.skillFolder } : {}),
         ...(request.piExtensionPaths?.length ? { piExtensionPaths: request.piExtensionPaths } : {}),
         ...(request.piExtensionTools?.length ? { piExtensionTools: request.piExtensionTools } : {}),
+        ...(request.mcpAdapterServers?.length ? { mcpAdapterServers: request.mcpAdapterServers } : {}),
         ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
         ...(request.allowedToolNames ? { allowedToolNames: request.allowedToolNames } : {}),
         activateExtensionTools: true,
