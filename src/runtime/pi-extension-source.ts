@@ -147,10 +147,12 @@ const RUNTIME_CONDITIONS = new Set(['node', 'import', 'require', 'default', 'mod
 
 /**
  * Every top-level package in one install root that declares an entry point it does not ship.
- * **Diagnostic only, never a rebuild trigger**: a published package may declare a root entry it
- * does not ship (`@modelcontextprotocol/sdk@1.30.1` declares `dist/esm/index.js` and the official
- * tarball has no such file), so a static gap is not evidence of damage. Compare an install against
- * its own snapshot instead — see `installRootDamaged`.
+ * **Diagnostic only**: neither a gap nor a snapshot difference proves damage — a published package
+ * may declare a root entry it never ships (`@modelcontextprotocol/sdk@1.30.1` declares
+ * `dist/esm/index.js` and the official tarball has no such file), and a change in that tree can be
+ * another source's legitimate update. The install root is shared by every temporary npm source, so
+ * resolving one source must never remove it: installs are serialized per agent directory instead
+ * (see `withExtensionInstall`).
  */
 export async function installRootGaps(root: string): Promise<string[]> {
   const nodeModules = join(root, 'node_modules');
@@ -173,8 +175,8 @@ export async function installRootGaps(root: string): Promise<string[]> {
 const INSTALL_SNAPSHOT_FILE = '.graph-install.json';
 
 /**
- * One digest per installed package: the sorted list of its files. Recorded right after an install
- * and compared later, so "installed file disappeared" is the only thing that counts as damage.
+ * One digest per installed package: the sorted list of its files. A diagnostic snapshot, recorded
+ * after an install so a test can show that a later resolution left a sibling package untouched.
  */
 async function installTree(root: string): Promise<Record<string, string>> {
   const nodeModules = join(root, 'node_modules');
@@ -196,19 +198,9 @@ async function installTree(root: string): Promise<Record<string, string>> {
   return tree;
 }
 
-/** Record what is installed now, so a later disappearance can be told apart from an upstream quirk. */
+/** Record what is installed now; a diagnostic baseline, never a trigger for deleting anything. */
 export async function recordInstallSnapshot(root: string): Promise<void> {
   await writeFile(join(root, INSTALL_SNAPSHOT_FILE), JSON.stringify(await installTree(root)));
-}
-
-/** True when a package changed or vanished since the recorded snapshot; false when there is none. */
-export async function installRootDamaged(root: string): Promise<boolean> {
-  const snapshot = join(root, INSTALL_SNAPSHOT_FILE);
-  if (!existsSync(snapshot)) return false;
-  let previous: Record<string, string>;
-  try { previous = JSON.parse(await readFile(snapshot, 'utf8')) as Record<string, string>; } catch { return false; }
-  const current = await installTree(root);
-  return Object.entries(previous).some(([name, digest]) => current[name] !== digest);
 }
 
 /**

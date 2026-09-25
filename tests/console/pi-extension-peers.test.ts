@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { canonicalJson } from '../../src/core/store.ts';
-import { ensureRequiredPeers, installRootDamaged, installRootGaps, packageGaps, recordInstallSnapshot } from '../../src/runtime/pi-extension-source.ts';
+import { ensureRequiredPeers, installRootGaps, packageGaps } from '../../src/runtime/pi-extension-source.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -109,8 +109,8 @@ test('a damaged dependency anywhere in the install root is reported as a gap', a
   expect(gaps.join('\n')).not.toContain('healthy');
 });
 
-test('a package whose declared entry is not published at all does not make the install look damaged', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-install-snapshot-'));
+test('a declared root entry the publisher never shipped is still reported, but is only a diagnostic', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-install-diagnostic-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const nodeModules = join(root, 'node_modules');
   const pkg = join(nodeModules, '@modelcontextprotocol', 'sdk');
@@ -121,15 +121,10 @@ test('a package whose declared entry is not published at all does not make the i
     exports: { '.': { import: './dist/esm/index.js' } },
   }));
 
-  // The published package declares a root entry it does not ship (verified against `npm pack`),
-  // so a static gap is not evidence of damage — it must not trigger a rebuild.
-  expect((await installRootGaps(root)).length).toBeGreaterThan(0);
-  await recordInstallSnapshot(root);
-  expect(await installRootDamaged(root)).toBe(false);
-
-  // A file that was installed and then disappeared is damage, and that is what rebuilds.
-  await rm(join(pkg, 'dist', 'esm', 'inMemory.js'));
-  expect(await installRootDamaged(root)).toBe(true);
+  // `npm pack @modelcontextprotocol/sdk@1.30.1` declares this entry and ships no such file, so a
+  // gap is a published-package quirk — it must stay a diagnostic, never a reason to delete or
+  // rebuild the shared install root. See `shared-extension-install-2026-09-25.md`.
+  expect((await installRootGaps(root)).join('\n')).toContain('@modelcontextprotocol/sdk');
 });
 
 test('a peer that declares a bare relative main is still checked', async () => {

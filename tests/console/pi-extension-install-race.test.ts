@@ -47,6 +47,13 @@ test('a failed installation releases the queue for the next source', async () =>
   const { input } = await fixture();
   vi.spyOn(DefaultPackageManager.prototype, 'resolveExtensionSources').mockRejectedValueOnce(new Error('npm failed'));
   const results = await Promise.allSettled([resolvePiExtensionSource(input), resolvePiExtensionSource(input)]);
-  expect(results[0]).toMatchObject({ status: 'rejected', reason: { message: 'npm failed' } });
-  expect(results[1]).toMatchObject({ status: 'fulfilled', value: { version: '1.0.0' } });
+  // Which caller becomes the queue head depends on which `realpath` resolves first, so assert the
+  // invariant rather than the order: the failure reaches exactly one caller, and the queue keeps
+  // serving the other.
+  const rejected = results.filter(result => result.status === 'rejected');
+  const fulfilled = results.filter(result => result.status === 'fulfilled');
+  expect(rejected).toHaveLength(1);
+  expect(rejected[0]).toMatchObject({ status: 'rejected', reason: { message: 'npm failed' } });
+  expect(fulfilled).toHaveLength(1);
+  expect(fulfilled[0]).toMatchObject({ status: 'fulfilled', value: { version: '1.0.0' } });
 });
