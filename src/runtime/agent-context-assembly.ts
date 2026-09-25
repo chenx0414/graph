@@ -157,28 +157,13 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
   ]);
   const docs = graphDocumentationPaths();
   const definitionVersion = input.definitionVersion ?? 'unknown@1';
-  const compose = (mode: 'preview' | 'operation', identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[], capabilityDocs?: string) => {
-    // The SDK's own loader reads the Agent's folder plus its own global and project
-    // folders, and its own formatter renders the block. Read it per composition, so an
-    // operation sees the folder it just mirrored.
-    const skills = agentSkills({
-      ...(bundle.skillFolder ? { folder: bundle.skillFolder } : {}),
-      ...(workspace ? { cwd: workspace } : {}),
-      ...(input.skillProjectRoot ? { projectRoot: input.skillProjectRoot } : {}),
-    }).block;
+  const compose = (identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[]) => {
     const composed = composeAgentSystemPrompt({
-      mode, identity, definitionVersion, toolGuidance,
+      identity, definitionVersion, toolGuidance, role,
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
       ...(input.rsi && role === 'main' ? { harnessContext: DEFAULT_MAIN_RSI_IDENTITY } : {}),
       rules: { common, role: roleRules, ...(runtime === undefined ? {} : { runtime }) },
-      docs, ...(projectContext ? { projectContext } : {}),
-      tools: tools.filter(tool => tool.enabled && (mode === 'operation' || tool.available)).map(({ version, ...tool }) => ({
-        ...tool, ...(version ? { version } : {}),
-      })),
-      capabilities,
-      ...(capabilityDocs?.trim() ? { capabilityDocs } : {}),
-      ...(skills ? { skills } : {}),
-      ...(workspace ? { cwd: workspace } : {}), role,
+      docs,
     });
     return { tools, capabilities, composed, docsRoot: docs.root };
   };
@@ -187,7 +172,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     disabledTools,
     /** Actual operation facts remain authoritative; no settings are re-read here. */
     forOperation(operation: CapabilityOperation) {
-      return compose('operation', operation.prompts.system, loadedTools(operation), loadedCapabilities(operation.report), operation.prompts.tool ?? undefined);
+      return compose(operation.prompts.system, loadedTools(operation), loadedCapabilities(operation.report));
     },
     /** Next-operation configuration only. Historical load reports do not enter this projection. */
     async preview(features: AgentToolFeatures) {
@@ -224,11 +209,9 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
       const tools = [...unique.values()].map(tool => ({
         ...tool, enabled: !disabled.has(tool.name), available: enabled.has(tool.name),
       })).sort((left, right) => left.name.localeCompare(right.name));
-      const system = capabilityPrompts({
-        definitionVersion, action: input.action, ...(input.role ? { role: input.role } : {}),
-        agentPrompt: identity, report: [], tools: [],
-      }).systemPrompt;
-      return compose('preview', system, tools, capabilities, bootstrap.tool);
+      // The next-operation view carries facts only: what a send really composes is
+      // asserted where it is produced, in the provider request.
+      return { tools, capabilities, docsRoot: docs.root };
     },
   };
 }

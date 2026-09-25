@@ -1703,31 +1703,15 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
     (await page.locator('.agent-context-tabs [role="tab"]').allInnerTexts()).map(label => label.split('\n')[0]!.trim()),
   ).toEqual(['实际发出的 Prompt', '可编辑来源', '工具与能力']);
 
-  // 组装是否正确属于产生组装结果的那一层：接口返回的预览文本（不再由界面重渲染）。
+  // 组装正确性属于产生它的那一层（provider 请求）；接口只给事实：工具、能力、可编辑来源。
   const payload = await page.evaluate(async (conversationId: string) => {
     const response = await fetch(`/api/agent-context?conversationId=${conversationId}`, { credentials: 'include' });
-    return await response.json() as { preview: { text: string }; sent: unknown };
+    return await response.json() as { preview?: unknown; sent: unknown; tools: unknown[]; prompts: unknown[] };
   }, created.conversationId);
   expect(payload.sent).toBeNull();
-  const preview = payload.preview.text;
-  expect(preview).toContain('<identity>');
-  expect(preview).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
-  expect(preview).toContain('<rules>');
-  expect(preview).not.toContain('<workflow>');
-  expect(preview).toContain('<docs>');
-  // Graph composes identity, rules and docs only. Tools travel in the provider
-  // request, and the Pi session adds project context, its skills block and the
-  // working directory, so none of them may appear in Graph's own composition.
-  for (const native of [
-    '<tools>', '<capabilities>', '<project_context>', '<skills>', '<available_skills>',
-    '<cwd>', '<pi_cwd>', 'Current working directory:',
-    '- read: Read file contents', '- powershell:', '- get_graph_state:', '- artifact_list:',
-  ]) {
-    expect(preview).not.toContain(native);
-  }
-  expect(preview).toContain('Use only the tools listed in the provider request.');
-  expect(preview).not.toContain('# Capability awareness');
-  expect(preview).not.toContain('## Callable tools');
+  expect(payload.preview).toBeUndefined();
+  expect(payload.tools.length).toBeGreaterThan(0);
+  expect(payload.prompts.length).toBeGreaterThan(0);
   await page.getByTestId('agent-context-tab-prompts').click();
   expect(await page.getByTestId('agent-prompt-docs/INDEX.md').count()).toBe(0);
   await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();

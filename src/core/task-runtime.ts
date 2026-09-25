@@ -1296,7 +1296,6 @@ export async function openTaskRuntime(options: {
         }), disabledTools: assembly.disabledTools,
         docsRoot: preview.docsRoot, definitionVersion, latestDefinitionVersion,
         tools: preview.tools, capabilities: preview.capabilities,
-        preview: { sections: preview.composed.sections, text: preview.composed.text },
         // The exact string one real send carried, or null when this conversation has not sent yet.
         sent: view?.anchorTaskId ? store.conversationSystemPrompt(view.anchorTaskId) : null,
       };

@@ -35,62 +35,8 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
       main: '/app/docs/agent/README.md',
       examples: '/app/examples',
     },
-    projectContext: {
-      path: '/work/AGENTS.md',
-      content: 'Keep project-specific conventions.',
-    },
-    tools: [
-      {
-        name: 'read',
-        description: 'Read file contents',
-        source: 'Pi',
-        group: 'pi_native',
-        order: 0,
-        parameters: ['path'],
-        permission: 'workspace read',
-        available: true,
-      },
-      {
-        name: 'artifact_list',
-        description: 'List published artifacts.',
-        source: 'Graph',
-        parameters: [],
-        permission: 'task artifact workspace',
-        available: true,
-      },
-    ],
-    capabilities: [{
-      id: 'browser',
-      version: '1.2.0',
-      kind: 'mcp',
-      name: 'Browser',
-      tools: ['browser_open'],
-      networkDomains: ['example.com'],
-    }, {
-      id: 'handoff',
-      version: '1.0.0',
-      kind: 'skill',
-      name: 'Handoff',
-      tools: [],
-      description: 'Compact the conversation into a handoff document.',
-      path: '/home/me/.graph/agents/main/skills/handoff/SKILL.md',
-      reason: '技能已加载为只读文档',
-    }],
-    cwd: '/home/me/.graph/state/worktrees/task-1/agent-a',
-    capabilityDocs: 'Read the extension doc before you call it.',
-    // The SDK renders its own skills block; Graph passes it through verbatim.
-    skills: [
-      'The following skills provide specialized instructions for specific tasks.',
-      'Read the full skill file when the task matches its description.',
-      '',
-      '<available_skills>',
-      '  <skill>',
-      '    <name>handoff</name>',
-      '    <description>Compact the conversation into a handoff document.</description>',
-      '    <location>/home/me/.graph/agents/main/skills/handoff/SKILL.md</location>',
-      '  </skill>',
-      '</available_skills>',
-    ].join('\n'),
+    // A tool list, a skill block, a cwd or the project context are never inputs:
+    // the provider request and the Pi session supply them.
   });
 
   // Graph renders only what Graph owns: identity, rules, docs. Tools travel in
@@ -127,13 +73,19 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   ]) {
     expect(result.text).not.toContain(native);
   }
-  expect(result.text).not.toContain('- mcp browser@1.2.0');
-  expect(result.text).not.toContain('skill handoff@1.0.0');
-  expect(result.text).not.toContain('Read the extension doc before you call it.');
-  expect(result.text).not.toContain('parameters:');
-  expect(result.text).not.toContain('Definition: main@7');
-  expect(result.text).not.toContain('# Capability awareness');
-  expect(result.text).not.toContain('## Callable tools');
+});
+
+test('the harness self-improvement paragraph appears only when the host supplies it', () => {
+  const base = {
+    identity: 'You are the Main Agent.', definitionVersion: 'main@7',
+    toolGuidance: 'Use the smallest tool that can prove the claim.',
+    rules: { common: 'Common rule.', role: 'Submit a graph draft before dispatching work.' },
+    docs: { root: '/app/docs/agent', main: '/app/docs/agent/README.md', examples: '/app/examples' },
+  };
+  const withRsi = composeAgentSystemPrompt({ ...base, harnessContext: 'HARNESS SELF-MODEL SENTINEL' });
+  expect(withRsi.text).toContain('HARNESS SELF-MODEL SENTINEL');
+  const without = composeAgentSystemPrompt(base);
+  expect(without.text).not.toContain('HARNESS SELF-MODEL SENTINEL');
 });
 
 test('the worktree orientation note reaches subagents only', () => {
@@ -143,12 +95,12 @@ test('the worktree orientation note reaches subagents only', () => {
     toolGuidance: 'Use the tools you are given.',
     rules: { common: 'Be honest.', role: 'Role rules.' },
     docs: graphDocumentationPaths(),
-    tools: [],
-    capabilities: [],
+    // (no tool list, skill block, cwd or project context: the Pi session supplies them)
+    // (no tool list, skill block, cwd or project context: the Pi session supplies them)
   };
   const worktree = '/home/me/.graph/state/worktrees/task-1/agent-a';
-  const main = composeAgentSystemPrompt({ ...base, role: 'main', cwd: worktree });
-  const worker = composeAgentSystemPrompt({ ...base, role: 'worker', cwd: worktree });
+  const main = composeAgentSystemPrompt({ ...base, role: 'main' });
+  const worker = composeAgentSystemPrompt({ ...base, role: 'worker' });
   const noWorktree = composeAgentSystemPrompt({ ...base, role: 'worker' });
 
   // The main Agent already works in the project root; a subagent gets its own

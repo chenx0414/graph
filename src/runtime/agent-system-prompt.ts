@@ -53,12 +53,15 @@ export interface AgentCapabilityPromptEntry {
   reason?: string;
 }
 
+/**
+ * The composer renders only what Graph itself owns: the identity, the rules and
+ * the documentation paths. Tools travel in the provider request, and the Pi
+ * session adds the project context, its skills block and the working directory,
+ * so none of them is an input here.
+ */
 export interface ComposeAgentSystemPromptInput {
-  mode?: 'preview' | 'operation';
   identity: string;
-  /** Host-generated identity context such as the active access policy. */
   identityContext?: string;
-  /** Host-generated context for changing the Graph harness itself. */
   harnessContext?: string;
   definitionVersion: string;
   toolGuidance: string;
@@ -68,21 +71,6 @@ export interface ComposeAgentSystemPromptInput {
     runtime?: string;
   };
   docs: GraphDocumentationPaths;
-  projectContext?: {
-    path: string;
-    content: string;
-  };
-  tools: AgentToolPromptEntry[];
-  capabilities: AgentCapabilityPromptEntry[];
-  /** Text a capability itself contributes about using it (its tool.md). */
-  capabilityDocs?: string;
-  /**
-   * The skills block rendered by the SDK's own formatter (`formatSkillsForPrompt`),
-   * passed through verbatim so skills keep the native shape.
-   */
-  skills?: string;
-  cwd?: string;
-  /** Normalized Agent role: only subagents get the worktree orientation note. */
   role?: 'main' | 'worker' | 'reviewer';
 }
 
