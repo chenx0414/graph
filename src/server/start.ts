@@ -447,6 +447,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       try {
         const { updates } = await server.runtime.catalog.piExtensionUpdates();
         for (const update of updates) {
+          // Read-only diagnostic: report declared entry points this shared install root does not
+          // ship, so an upstream quirk is visible and never mistaken for a damaged install.
+          if (update.installGaps.length) {
+            log(`Pi extension ${update.id} install gaps (diagnostic only, nothing was changed): ${update.installGaps.join('; ')}`);
+          }
           if (!update.available) continue;
           await server.runtime.catalog.updatePiExtension(update.id, update.version);
           log(`Pi extension ${update.id} updated: ${update.installed ?? '?'} -> ${update.latest ?? '?'}`);

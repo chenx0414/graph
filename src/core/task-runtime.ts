@@ -1960,7 +1960,7 @@ export async function openTaskRuntime(options: {
           try {
             updates.push({ ...base, ...await piExtensionSourceStatus({ source, cwd: stateDir, agentDir: piExtensionCacheDir(catalog) }) });
           } catch (error) {
-            updates.push({ ...base, installed: null, latest: null, available: false, error: error instanceof Error ? error.message : String(error) });
+            updates.push({ ...base, installed: null, latest: null, available: false, installGaps: [], error: error instanceof Error ? error.message : String(error) });
           }
         }
         return { updates };

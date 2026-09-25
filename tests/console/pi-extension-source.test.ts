@@ -64,6 +64,30 @@ test('a Pi extension capability may declare a package source instead of a vendor
   }
 });
 
+test('a source reports the declared entries its install root does not ship, as a diagnostic', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-pi-source-gaps-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const install = join(root, 'install');
+  const pkg = join(install, 'node_modules', 'pi-probe-gaps');
+  const healthy = join(install, 'node_modules', 'healthy-dep');
+  const quirky = join(install, 'node_modules', 'quirky-dep');
+  await Promise.all([pkg, healthy, quirky].map(path => mkdir(path, { recursive: true })));
+  await writeFile(join(pkg, 'index.mjs'), 'export default function () {}\n');
+  await writeFile(join(pkg, 'package.json'), canonicalJson({ name: 'pi-probe-gaps', version: '1.0.0', pi: { extensions: ['./index.mjs'] } }));
+  // `healthy-dep` ships everything it declares; `quirky-dep` declares a root entry and ships no
+  // such file — exactly the upstream quirk (`@modelcontextprotocol/sdk@1.30.1`) that used to be
+  // mistaken for a damaged install.
+  await writeFile(join(healthy, 'index.js'), 'export const value = 1;\n');
+  await writeFile(join(healthy, 'package.json'), canonicalJson({ name: 'healthy-dep', version: '1.0.0', main: './index.js' }));
+  await writeFile(join(quirky, 'package.json'), canonicalJson({ name: 'quirky-dep', version: '1.0.0', exports: { '.': { import: './dist/index.js' } } }));
+
+  const status = await piExtensionSourceStatus({ source: pkg, cwd: root, agentDir: join(root, 'agent') });
+  expect(status.installGaps.join('\n')).toContain('quirky-dep');
+  expect(status.installGaps.join('\n')).not.toContain('healthy-dep');
+  // Reporting is all it does: the diagnostic must not change what the source resolves to.
+  expect(status.installed).toBe('1.0.0');
+});
+
 test('a source reports the installed version, and only npm sources are checked for updates', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pi-extension-status-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -74,7 +98,7 @@ test('a source reports the installed version, and only npm sources are checked f
 
   // A local source has no registry to ask, so it reports what is on disk and no update.
   expect(await piExtensionSourceStatus({ source: packageDir, cwd: root, agentDir: join(root, 'state') }))
-    .toEqual({ installed: '1.2.3', latest: null, available: false });
+    .toEqual({ installed: '1.2.3', latest: null, available: false, installGaps: [] });
   // The same resolve also reports the version the source provides, so the manifest can follow it.
   const resolved = await resolvePiExtensionSource({ source: packageDir, cwd: root, agentDir: join(root, 'state') });
   expect(resolved.version).toBe('1.2.3');

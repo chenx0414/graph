@@ -195,7 +195,7 @@ function capabilityGroups(item: AgentCombinationView) {
   return groups.filter(group => group.resources.length);
 }
 
-type ExtensionUpdate = { installed: string | null; latest: string | null; available: boolean };
+type ExtensionUpdate = { installed: string | null; latest: string | null; available: boolean; installGaps?: string[] };
 type OfficialPackage = { name: string; version: string; description: string; publisher: string | null; weeklyDownloads: number | null; url: string | null };
 
 function CapabilityDetail({ item, update, onUpdate }: { item: CapabilityRecord; update?: ExtensionUpdate | undefined; onUpdate?: ((item: CapabilityRecord) => void) | undefined }) {
@@ -219,6 +219,11 @@ function CapabilityDetail({ item, update, onUpdate }: { item: CapabilityRecord; 
       {item.packageSource && (
         <p className="muted" data-testid={`capability-package-source-${item.id}`}>来源：{item.packageSource}（由 Pi SDK 解析安装）</p>
       )}
+      {update?.installGaps?.length ? (
+        <p className="muted" data-testid={`capability-install-gaps-${item.id}`}>
+          安装根里有声明的入口缺失（只报告，不做任何处理）：{update.installGaps.join('；')}
+        </p>
+      ) : null}
       {update?.available && (
         <div className="recipe-main-note" data-testid={`capability-update-${item.id}`}>
           <span>有可用更新：已安装 {update.installed} → {update.latest}</span>

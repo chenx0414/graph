@@ -255,6 +255,12 @@ export interface PiExtensionSourceStatus {
   /** The newest version the declared source resolves to, or null when the source is not npm. */
   latest: string | null;
   available: boolean;
+  /**
+   * Declared entry points missing from this source's install root. A diagnostic only: a published
+   * package may declare an entry it never ships (`@modelcontextprotocol/sdk@1.30.1`), and the root
+   * is shared by every temporary npm source. Nothing is ever deleted or rebuilt because of this.
+   */
+  installGaps: string[];
 }
 
 /** One source-bearing capability plus what its registry says about it. */
@@ -326,10 +332,16 @@ export async function piExtensionSourceStatus(input: { source: string; cwd: stri
   const name = npmSourceName(input.source);
   const installed = await packageVersionAt(resolved.entries[0]!, name);
   const latest = name ? await npmLatest(input.source.slice(4).trim(), input.cwd) : null;
+  const root = installRootFor(resolved.entries[0]!);
+  let installGaps: string[] = [];
+  // Best effort on purpose: a diagnostic that throws would turn "we could not look" into "the
+  // extension is broken".
+  if (root) { try { installGaps = await installRootGaps(root); } catch { installGaps = []; } }
   const status: PiExtensionSourceStatus = {
     installed,
     latest,
     available: Boolean(name && installed && latest && installed !== latest),
+    installGaps,
   };
   statusCache.set(input.source, { at: Date.now(), status });
   return status;
