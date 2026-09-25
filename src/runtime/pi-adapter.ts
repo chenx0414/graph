@@ -29,6 +29,7 @@ import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { COMPACTION_INSTRUCTIONS, isCompactionNoop, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
+import { guardHandoffResponses } from './handoff-response.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
@@ -747,6 +748,7 @@ export function createPiAdapter(options: {
         };
         const persistEntries = !conversation;
         let sawAssistantMessageEnd = false;
+        let compacting = false;
         const onEvent = (event: AgentSessionEvent) => {
           if (event.type === 'message_start') {
             entrySeq += 1;
@@ -808,6 +810,7 @@ export function createPiAdapter(options: {
           // invocations it emits while compacting, then record the summary as
           // its own line without touching the conversation/tool entries.
           if (event.type === 'compaction_start') {
+            compacting = true;
             gate.setPurpose('compaction');
             options.store.event(operation.taskId, 'session.compaction_started', {
               nodeId: operation.nodeId, operationId: operation.id, reason: event.reason,
@@ -815,6 +818,7 @@ export function createPiAdapter(options: {
             return;
           }
           if (event.type === 'compaction_end') {
+            compacting = false;
             gate.setPurpose('completion');
             if (!event.aborted && event.result) {
               const data = {
@@ -896,9 +900,14 @@ export function createPiAdapter(options: {
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry),
-            stream: controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
+            stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
               ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+            }), {
+              enabled: () => Boolean(conversation) && !compacting,
+              onRecovery: status => options.store.event(operation.taskId, 'session.handoff_response', {
+                operationId: operation.id, nodeId: operation.nodeId, status,
+              }),
             }),
             thinkingLevel,
             tools,
