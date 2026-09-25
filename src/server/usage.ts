@@ -290,10 +290,14 @@ function platformAccountCredentials(config: GraphConfig | null, env: Record<stri
   const accounts: Credential[] = [];
   for (const [id, credential] of Object.entries(config?.credentials ?? {})) {
     if (credential.platform !== platform) continue;
-    const value = env[credential.secretRef]?.trim();
-    if (!value) continue;
+    const value = env[credential.secretRef]?.trim() ?? '';
     const displayName = credential.displayName?.trim() || id;
-    accounts.push({ id, secretRef: credential.secretRef, configured: true, value, source: `Graph 账户 · ${displayName}`, displayName });
+    // An account the operator configured must never vanish from 用量 just because
+    // its key is not resolvable in this process; it shows up as waiting for a key.
+    accounts.push({
+      id, secretRef: credential.secretRef, configured: Boolean(value), value,
+      source: `Graph 账户 · ${displayName}`, displayName,
+    });
   }
   return accounts;
 }
@@ -1088,7 +1092,7 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
           planId: `${platform}#${account.id}`,
           account: { id: account.id, name: account.displayName?.trim() || account.id },
           credential: account,
-          run: () => runners[platform](account),
+          run: () => account.value ? runners[platform](account) : Promise.resolve(basePlan(platform)),
         });
       }
     }
