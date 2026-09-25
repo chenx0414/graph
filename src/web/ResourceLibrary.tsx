@@ -205,8 +205,10 @@ function CapabilityDetail({ item, update, onUpdate }: { item: CapabilityRecord; 
         <Pill tone={item.status === 'available' ? 'success' : 'danger'}>{item.status === 'available' ? '可用' : '清单有误'}</Pill>
         <Pill tone="neutral">{capabilityKindLabel(item)}</Pill>
         <Pill tone="neutral">v{item.version}</Pill>
+        {item.base && <Pill tone="success">基础能力</Pill>}
       </div>
       <p>{item.description || '该能力没有提供说明。'}</p>
+      {item.base && <p className="muted" data-testid={`capability-base-${item.id}`}>基础能力：每个 Agent 都会自动获得，无需在配方里绑定。</p>}
       {item.owner && <p className="muted" data-testid={`capability-owner-${item.id}`}>来自 {item.owner} 的 skills 文件夹</p>}
       {item.duplicates?.length ? (
         <p className="muted" data-testid={`capability-duplicates-${item.id}`}>
