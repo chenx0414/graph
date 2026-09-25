@@ -889,6 +889,9 @@ export function createPiAdapter(options: {
           // The skills the session may read must match the block Graph renders: the bound
           // snapshots plus the SDK's own global and project folders.
           const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
+          const mcpAdapterExtensionPaths = capabilityOperation.mcpAdapterServers.length
+            ? [...capabilityOperation.piExtensionPaths]
+            : [];
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
@@ -917,6 +920,10 @@ export function createPiAdapter(options: {
               allowGitMetadataWritesAll: accessPolicy.filesystem.gitMetadata === 'writable',
             } : {}),
             ...(capabilityOperation.piExtensionPaths.length ? { piExtensionPaths: [...capabilityOperation.piExtensionPaths] } : {}),
+            ...(capabilityOperation.mcpAdapterServers.length ? {
+              mcpAdapterServers: [...capabilityOperation.mcpAdapterServers],
+              ...(mcpAdapterExtensionPaths.length ? { mcpAdapterExtensionPaths } : {}),
+            } : {}),
             piExtensionTools: [...capabilityOperation.piExtensionTools],
             systemPrompt: composedPrompt.text,
             bundleDigest: capabilityOperation.bundleDigest,
