@@ -276,11 +276,18 @@ export function normalizePlatforms(payload: unknown): PlatformPreset[] {
  * saving the platform must keep the name that already works. */
 export function draftFromPlatformWithCredential(
   platform: PlatformPreset,
-  credentials: Record<string, { secretRef?: string } | undefined> | undefined,
+  credentials: Record<string, { secretRef?: string; displayName?: string } | undefined> | undefined,
 ): ProviderDraft {
   const draft = draftFromPlatform(platform);
-  const existing = credentials?.[draft.credentialId]?.secretRef?.trim();
-  return existing && existing !== draft.credentialRef ? { ...draft, credentialRef: existing } : draft;
+  const stored = credentials?.[draft.credentialId];
+  const existing = stored?.secretRef?.trim();
+  const label = stored?.displayName?.trim();
+  return {
+    ...draft,
+    // An account keeps the name its operator gave it; the platform label is only the default.
+    ...(label ? { label } : {}),
+    ...(existing && existing !== draft.credentialRef ? { credentialRef: existing } : {}),
+  };
 }
 
 /** The slice of a config document the model step needs: the credentials that

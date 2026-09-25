@@ -534,6 +534,17 @@ describe('concurrency limits inside a provider entry', () => {
   });
 });
 
+describe('an account keeps the name its operator gave it', () => {
+  it('shows the stored name instead of the platform label', () => {
+    const platform = preset;
+    expect(draftFromPlatformWithCredential(platform, { [platform.id]: { secretRef: platform.credentialRef, displayName: '账户 2' } }).label).toBe('账户 2');
+    // No name stored yet, or only whitespace: fall back to the platform label.
+    expect(draftFromPlatformWithCredential(platform, { [platform.id]: { secretRef: platform.credentialRef } }).label).toBe(platform.label);
+    expect(draftFromPlatformWithCredential(platform, { [platform.id]: { secretRef: platform.credentialRef, displayName: '   ' } }).label).toBe(platform.label);
+    expect(draftFromPlatformWithCredential(platform, undefined).label).toBe(platform.label);
+  });
+});
+
 describe('one platform, several accounts', () => {
   const zen = preset;
 
