@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, realpath, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, basename, join, sep } from 'node:path';
+import { dirname, basename, join, sep, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { DefaultPackageManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
@@ -27,21 +27,23 @@ export async function resolvePiExtensionSource(input: {
   cwd: string;
   agentDir: string;
 }): Promise<ResolvedPiExtensionSource> {
-  const resolved = await resolveSourceOnce(input);
-  const root = installRootFor(resolved.entries[0]!);
-  if (!root) return resolved;
-  if (await installRootDamaged(root)) {
-    // Files that were installed and then disappeared are damage — a partial npm extraction did
-    // exactly that on 2026-09-25. Rebuild the whole install once so no damaged package, dependency
-    // or peer, can reach a session.
-    await rm(root, { recursive: true, force: true });
-    const rebuilt = await resolveSourceOnce(input);
-    const rebuiltRoot = installRootFor(rebuilt.entries[0]!);
-    if (rebuiltRoot) await recordInstallSnapshot(rebuiltRoot);
-    return rebuilt;
-  }
-  await recordInstallSnapshot(root);
-  return resolved;
+  // Every temporary npm source shares the SDK's install root. A snapshot change
+  // can be another package's legitimate update, not corruption. Never remove
+  // that shared tree while resolving one source or refreshing catalog status.
+  return withExtensionInstall(input.agentDir, () => resolveSourceOnce(input));
+}
+
+// The daemon owns source resolution and updates. Serialize all of its npm
+// mutations by agent directory, not package name, including background refresh.
+const extensionInstalls = new Map<string, Promise<void>>();
+async function withExtensionInstall<T>(agentDir: string, action: () => Promise<T>): Promise<T> {
+  const key = await realpath(agentDir).catch(() => resolve(agentDir));
+  const previous = extensionInstalls.get(key) ?? Promise.resolve();
+  const result = previous.then(action);
+  const settled = result.then(() => undefined, () => undefined);
+  extensionInstalls.set(key, settled);
+  try { return await result; }
+  finally { if (extensionInstalls.get(key) === settled) extensionInstalls.delete(key); }
 }
 
 async function resolveSourceOnce(input: {
@@ -346,14 +348,16 @@ export async function piExtensionSourceStatus(input: { source: string; cwd: stri
  * spec, an open range or a bare name moves to the newest one.
  */
 export async function updatePiExtensionSource(input: { source: string; cwd: string; agentDir: string }): Promise<{ updated: boolean; version: string | null }> {
-  const resolved = await resolvePiExtensionSource(input);
-  const entry = resolved.entries[0]!;
-  const root = installRootOf(entry);
-  if (!root) throw new RuntimeError('capability_unavailable', `Pi extension source ${input.source} has no npm install root to update`);
-  const spec = input.source.slice(4).trim();
-  const name = npmSourceName(input.source);
-  const target = name && spec.length > name.length ? spec : `${name ?? spec}@latest`;
-  await run('npm', ['install', target], { cwd: root, env: process.env, timeout: 300_000 });
-  statusCache.delete(input.source);
-  return { updated: true, version: await packageVersionAt(entry, name) };
+  return withExtensionInstall(input.agentDir, async () => {
+    const resolved = await resolveSourceOnce(input);
+    const entry = resolved.entries[0]!;
+    const root = installRootOf(entry);
+    if (!root) throw new RuntimeError('capability_unavailable', `Pi extension source ${input.source} has no npm install root to update`);
+    const spec = input.source.slice(4).trim();
+    const name = npmSourceName(input.source);
+    const target = name && spec.length > name.length ? spec : `${name ?? spec}@latest`;
+    await run('npm', ['install', target], { cwd: root, env: process.env, timeout: 300_000 });
+    statusCache.delete(input.source);
+    return { updated: true, version: await packageVersionAt(entry, name) };
+  });
 }
