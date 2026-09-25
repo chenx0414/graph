@@ -106,7 +106,7 @@ function declarations(features: AgentToolFeatures) {
     artifact_retire: {
       name: 'artifact_retire',
       label: 'Retire shared artifact version',
-      description: 'Retire one published artifact version without deleting its immutable bytes. Use only when a version is superseded or withdrawn; existing evidence and handoff references remain explainable.',
+      description: 'Retire one published artifact version without deleting its immutable bytes; only when a version is superseded or withdrawn.',
       parameters: Type.Object({ artifactId: Type.String(), version: Type.Number(), reason: Type.String(), requestId: Type.String() }),
       available: Boolean(features.artifacts?.canPromote),
       externallyGated: false,
@@ -131,37 +131,11 @@ function declarations(features: AgentToolFeatures) {
       available: Boolean(features.run && !features.readOnly),
       externallyGated: true,
     },
-    git_status: {
-      name: 'git_status', label: 'Git status', description: 'Read the current work copy branch and working-tree status. This is read-only.',
-      parameters: Type.Object({}),
-      available: Boolean(features.run && !features.readOnly),
-      externallyGated: true,
-    },
-    git_diff: {
-      name: 'git_diff', label: 'Git diff', description: 'Read the current work copy diff. Optionally select staged changes, a base revision, a path or summary/stat output. This is read-only.',
+    git: {
+      name: 'git', label: 'Git (read-only)', description: 'Run one read-only git command in the current work copy. Output is capped at 20000 characters: a longer diff or log falls back to a --stat summary. Allowed subcommands: status, log, diff, show, blame, describe, rev-parse, ls-files, shortlog, grep, rev-list.',
       parameters: Type.Object({
-        staged: Type.Optional(Type.Boolean()),
-        base: Type.Optional(Type.String()),
-        path: Type.Optional(Type.String()),
-        stat: Type.Optional(Type.Boolean()),
-      }),
-      available: Boolean(features.run && !features.readOnly),
-      externallyGated: true,
-    },
-    git_log: {
-      name: 'git_log', label: 'Git log', description: 'Read recent commits from the current work copy. This is read-only.',
-      parameters: Type.Object({
-        limit: Type.Optional(Type.Number()),
-        path: Type.Optional(Type.String()),
-      }),
-      available: Boolean(features.run && !features.readOnly),
-      externallyGated: true,
-    },
-    git_show: {
-      name: 'git_show', label: 'Git show', description: 'Read one commit or object from the current work copy. Optionally request summary/stat output or limit to one path. This is read-only.',
-      parameters: Type.Object({
-        ref: Type.Optional(Type.String()),
-        stat: Type.Optional(Type.Boolean()),
+        subcommand: Type.String(),
+        args: Type.Optional(Type.Array(Type.String())),
         path: Type.Optional(Type.String()),
       }),
       available: Boolean(features.run && !features.readOnly),
@@ -180,13 +154,13 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     confirm_draft: {
-      name: 'confirm_draft', label: 'Confirm draft', description: 'Confirm the current conversation draft on the user behalf and start the feature task, exactly like the confirmation card. Call it only when the user explicitly asked you to confirm (for example 确认 / 开始 / 建这个任务), and pass their words verbatim as instruction: the command log records actor agent, onBehalfOf user and that instruction, so the transcript and the log agree. targetBranch is required and must be the branch the user named; ask before using anything other than the project convention.',
+      name: 'confirm_draft', label: 'Confirm draft', description: 'Confirm the current conversation draft on the user behalf and start the feature task, exactly like the confirmation card. Call it only when the user explicitly asked you to confirm, and pass their words verbatim as instruction. targetBranch is required and must be the branch the user named.',
       parameters: Type.Object({ proposalVersion: Type.Number(), targetBranch: Type.String(), instruction: Type.String(), requestId: Type.String() }),
       available: main && Boolean(features.supervisor?.confirmDraft),
       externallyGated: false,
     },
     withdraw_draft: {
-      name: 'withdraw_draft', label: 'Withdraw draft', description: 'Withdraw the current unconfirmed graph draft of this conversation, so the briefing reports no draft and the next propose_graph keeps a fresh version number. Use it when the user drops the plan or the draft no longer matches reality. It retires the version instead of deleting it (history stays readable), refuses a draft that is not the current one and refuses a confirmed one. reason is optional and is shown to the user.',
+      name: 'withdraw_draft', label: 'Withdraw draft', description: 'Withdraw the current unconfirmed draft of this conversation, so the briefing reports no draft and the next propose_graph keeps a fresh version. Retires the version instead of deleting it, and refuses a draft that is not the current one or is already confirmed. reason is optional and is shown to the user.',
       parameters: Type.Object({ proposalVersion: Type.Number(), reason: Type.Optional(Type.String()), requestId: Type.String() }),
       available: main && Boolean(features.supervisor?.withdrawDraft),
       externallyGated: false,
@@ -198,13 +172,13 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     validate_proposal: {
-      name: 'validate_proposal', label: 'Validate graph proposal', description: 'Validate one task graph proposal against the current requirement version and Graph structural rules without creating a draft or dispatching work. Returns valid:true or a concrete validation error.',
+      name: 'validate_proposal', label: 'Validate graph proposal', description: 'Validate a task graph proposal against the current requirement version and Graph structural rules, without creating a draft or dispatching work.',
       parameters: Type.Object({ proposalJson: Type.String() }),
       available: main && Boolean(features.supervisor?.validateProposal),
       externallyGated: false,
     },
     get_graph_state: {
-      name: 'get_graph_state', label: 'Get graph state', description: 'Read the current proposal, graph revision, phase, node statuses, evidence, worktrees and internal problems for this conversation. Use this instead of guessing progress from chat history or the injected briefing.',
+      name: 'get_graph_state', label: 'Get graph state', description: 'Read the graph state of this conversation: proposal, revision, phase, node statuses, evidence, worktrees and internal problems.',
       parameters: Type.Object({}),
       available: main && Boolean(features.supervisor?.graphState),
       externallyGated: false,
@@ -221,13 +195,13 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     list_projects: {
-      name: 'list_projects', label: 'List projects', description: 'List the projects currently configured in Graph, including their preparation state. Use this before asking the user to choose a project.',
+      name: 'list_projects', label: 'List projects', description: 'List the configured projects with their preparation state.',
       parameters: Type.Object({}),
       available: main && Boolean(features.supervisor?.listProjects),
       externallyGated: false,
     },
     bind_project: {
-      name: 'bind_project', label: 'Bind project', description: 'Bind this conversation to one configured and prepared project. Binding a different project invalidates the current graph draft and requires a fresh investigation.',
+      name: 'bind_project', label: 'Bind project', description: 'Bind this conversation to a configured and prepared project. Binding another project invalidates the current draft.',
       parameters: Type.Object({ projectId: Type.String(), requestId: Type.String() }),
       available: main && Boolean(features.supervisor?.bindProject),
       externallyGated: false,
@@ -281,7 +255,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     propose_system_change: {
-      name: 'propose_system_change', label: 'Propose system change', description: 'Propose a Graph system optimization for explicit user approval. This does not change configuration. Include the exact machine-readable change. Supported change.kind is currently "capability" with change.capability = { manifest, files?, overwrite? }. Use it when the user asks to install/update a capability or when diagnostics reveal a system defect.',
+      name: 'propose_system_change', label: 'Propose system change', description: 'Propose a Graph system change for explicit user approval. Include the exact machine-readable change; see docs/agent/self-configuration.md for the supported shapes.',
       parameters: Type.Object({
         title: Type.String(),
         problem: Type.String(),
@@ -293,7 +267,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     apply_system_change: {
-      name: 'apply_system_change', label: 'Apply approved system change', description: 'Apply one previously proposed system change only after the user approved its system_change question. Approval and proposal data are checked by the host; this tool cannot bypass the user decision.',
+      name: 'apply_system_change', label: 'Apply approved system change', description: 'Apply one previously proposed system change, and only after the user approved its question.',
       parameters: Type.Object({ proposalId: Type.String() }),
       available: main && Boolean(features.systemContext?.applySystemChange),
       externallyGated: false,
