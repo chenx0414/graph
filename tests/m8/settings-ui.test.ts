@@ -368,3 +368,26 @@ test('settings imports detected subscription credentials without exposing their 
   });
   expect(JSON.stringify(payload)).not.toContain('subscription-test-key');
 }, 60_000);
+
+test('a supported platform offers an editable account name', async () => {
+  const dir = await temp('account-name');
+  const stub = await stubProvider();
+  const path = await configFile(dir, stub.baseUrl);
+  const daemon = await start(dir, path);
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/settings`);
+  await page.getByTestId('settings-page').waitFor();
+
+  // The vendor card lives under 模型, and only appears once a platform is chosen.
+  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+  await page.getByTestId('provider-platform-opencode-go').click();
+  const name = page.getByTestId('provider-label');
+  await name.waitFor();
+  // A supported platform is named by its label, and the operator may rename it.
+  expect(await name.inputValue()).toBe('OpenCode Go');
+  expect(await name.isEditable()).toBe(true);
+  await name.fill('账户 2');
+  expect(await name.inputValue()).toBe('账户 2');
+}, 60_000);

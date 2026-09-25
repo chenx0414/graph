@@ -416,7 +416,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   const [custom, setCustom] = useState<ProviderDraft>(customDraft);
   // One platform may hold several accounts, so its credential id and variable name
   // can be overridden without retargeting the platform itself.
-  const [account, setAccount] = useState<{ credentialId?: string; credentialRef?: string }>({});
+  const [account, setAccount] = useState<{ credentialId?: string; credentialRef?: string; label?: string }>({});
   const [key, setKey] = useState('');
   const [errors, setErrors] = useState<ProviderDraftErrors>({});
   const [busy, setBusy] = useState(false);
@@ -446,7 +446,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   const isCustom = isCustomPlatform(platformId) || selected?.custom === true;
   const base: ProviderDraft = !isCustom && selected ? draftFromPlatformWithCredential(selected, draft.credentials) : custom;
   const active: ProviderDraft = { ...base, ...account };
-  const editAccount = (next: { credentialId?: string; credentialRef?: string }) => {
+  const editAccount = (next: { credentialId?: string; credentialRef?: string; label?: string }) => {
     if (isCustom) setCustom(current => ({ ...current, ...next }));
     else setAccount(current => ({ ...current, ...next }));
   };
@@ -659,7 +659,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
           <div className="card-grid">
             {isCustom ? (
               <>
-                <Field label="厂商名" error={fieldError('label')}><input className="input" data-testid="provider-label" data-invalid={mark('label')} value={custom.label} onChange={event => setCustom({ ...custom, label: event.target.value })} placeholder="例如 本地网关" /></Field>
                 <Field label="Base URL" error={fieldError('baseUrl')}><input className="input" data-testid="provider-baseUrl" data-invalid={mark('baseUrl')} value={custom.baseUrl} onChange={event => setCustom({ ...custom, baseUrl: event.target.value })} placeholder="https://gateway.example.com/v1" /></Field>
                 <Field label="兼容格式" error={fieldError('api')}>
                   <select className="select" data-testid="provider-api" data-invalid={mark('api')} value={custom.api} onChange={event => setCustom({ ...custom, api: event.target.value as ProviderDraft['api'] })}>
@@ -673,6 +672,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                 <Field label="兼容格式"><input className="input" value={PROVIDER_COMPATIBILITIES.find(item => item.id === active.api)?.label ?? active.api} readOnly data-testid="provider-api" /></Field>
               </>
             )}
+            <Field label="名称" hint="用量页与模型列表显示这个名字；支持自定义" error={fieldError('label')}><input className="input" data-testid="provider-label" data-invalid={mark('label')} value={active.label} onChange={event => editAccount({ label: event.target.value })} placeholder={isCustom ? '例如 本地网关' : undefined} /></Field>
             <Field label="凭据 id" hint={isCustom ? undefined : '同一平台可配置多个账户：id 不同即不同账户'} data-testid="provider-credentialId-field"><input className="input" data-testid="provider-credentialId" data-invalid={mark('credentialId')} value={active.credentialId} onChange={event => editAccount({ credentialId: event.target.value })} /></Field>
             <Field label="环境变量（credentialRef）" hint="配置文件只保存这个名字" error={fieldError('credentialRef')}><input className="input" data-testid="provider-credentialRef" data-invalid={mark('credentialRef')} value={active.credentialRef} onChange={event => editAccount({ credentialRef: event.target.value })} /></Field>
           </div>
