@@ -176,6 +176,14 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   expect(view.messages.filter(message => message.role === 'assistant').map(message => message.text)).toContain('本轮完成');
   expect(view.tasks).toEqual([]);
 
+  // The console has to show the exact string the provider received, not a re-render of the facts.
+  const sent = await runtime.agentContextPreview(created.conversationId);
+  const sentSystem = provider.requests
+    .map(request => request.messages.find(message => message.role === 'system')?.content)
+    .find((content): content is string => typeof content === 'string');
+  expect(typeof sentSystem).toBe('string');
+  expect(sent.sent?.text).toBe(sentSystem);
+
   // 2. Bind the project, discuss, and let the master draft.
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
   await runtime.conversations.chat(created.conversationId, { text: '就用这个项目，先做最小可用版。', requestId: 'chat' });

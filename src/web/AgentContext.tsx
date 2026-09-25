@@ -68,6 +68,8 @@ export interface AgentContextView {
     sections: AgentPromptSectionView[];
     text: string;
   };
+  /** The exact system prompt the newest master turn sent, recorded at the provider call. */
+  sent: { operationId: string; at: number; text: string } | null;
 }
 
 const GROUP_LABELS: Record<AgentPromptView['group'], string> = {
@@ -336,6 +338,15 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                 </button>
               </nav>
               {error && <div className="form-error">{error}</div>}
+              <div className="agent-preview-panel" data-testid="agent-context-sent">
+                <div className="agent-preview-meta">
+                  <strong>实际发出（最近一次模型请求）</strong>
+                  <span>{data?.sent ? `${data.sent.text.length.toLocaleString()} 字符` : '本次会话尚未记录到已发出的请求'}</span>
+                </div>
+                {data?.sent && (
+                  <pre data-testid="agent-context-sent-text" style={{ maxHeight: 320, overflow: 'auto' }}>{data.sent.text}</pre>
+                )}
+              </div>
               {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'preview' ? (
                 <div className="agent-preview-panel" data-testid="agent-context-preview">
                   <div className="agent-preview-meta">

@@ -900,6 +900,9 @@ export function createPiAdapter(options: {
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
               ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+              onSend: systemPrompt => {
+                if (systemPrompt !== null) options.store.recordOperationSystemPrompt(operation.id, systemPrompt);
+              },
             }), {
               enabled: () => Boolean(conversation) && !compacting,
               onRecovery: status => options.store.event(operation.taskId, 'session.handoff_response', {

@@ -14,7 +14,7 @@ import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provider: Awaited<ReturnType<typeof openaiServer>>) => ToolDefinition[] = () => [],
-  config: { auto?: boolean; systemPrompt?: string; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void } = {}) {
+  config: { auto?: boolean; systemPrompt?: string; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void; onSend?: (systemPrompt: string | null) => void } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-pi-calls-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans); cleanup.push(() => provider.close());
@@ -22,7 +22,7 @@ async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provid
   const instance = await openPiInstance({
     binding: { instanceId: 'agent-1', nodeId: 'node-1', definitionVersion: 'coder@1' },
     workspace: root, stateDir: join(root, 'session'), model: provider.model, modelRuntime: provider.runtime,
-    stream: controlledOpenAIStream(broker, 'scripted-local-key'),
+    stream: controlledOpenAIStream(broker, 'scripted-local-key', undefined, 'openai-completions', config.onSend ? { onSend: config.onSend } : {}),
     tools: tools(broker, provider), broker,
     compaction: { enabled: config.auto ?? false, reserveTokens: 256, keepRecentTokens: 1 },
     ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
@@ -42,6 +42,20 @@ test('Graph owns the final system prompt, so the Pi working-directory line is re
   // trailing "Current working directory:" line, its coding-assistant preamble)
   // may survive into the request Graph sends.
   expect(system).toBe(composed);
+});
+
+test('the exact system prompt sent to the provider is reported back to the caller', async () => {
+  const composed = '<cwd>\nCurrent working directory: /tmp/graph-worktree\n</cwd>';
+  const reported: (string | null)[] = [];
+  const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed, onSend: value => reported.push(value) });
+  await instance.prompt('Hello');
+  const request = provider.requests[0] as { messages: { role: string; content: string }[] };
+  const system = request.messages.find(message => message.role === 'system')!.content;
+
+  // The console must show what the model really received, so the report has to be the same string
+  // the provider got — not a second rendering of the same facts.
+  expect(reported).toEqual([composed]);
+  expect(reported[0]).toBe(system);
 });
 
 test('native Pi HTTP calls pass the gate and raw cache/reasoning totals are charged once', async () => {
