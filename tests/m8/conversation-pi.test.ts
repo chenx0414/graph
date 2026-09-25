@@ -176,14 +176,6 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   expect(view.messages.filter(message => message.role === 'assistant').map(message => message.text)).toContain('本轮完成');
   expect(view.tasks).toEqual([]);
 
-  // The console has to show the exact string the provider received, not a re-render of the facts.
-  const sent = await runtime.agentContextPreview(created.conversationId);
-  const sentSystem = provider.requests
-    .map(request => request.messages.find(message => message.role === 'system')?.content)
-    .find((content): content is string => typeof content === 'string');
-  expect(typeof sentSystem).toBe('string');
-  expect(sent.sent?.text).toBe(sentSystem);
-
   // 2. Bind the project, discuss, and let the master draft.
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
   await runtime.conversations.chat(created.conversationId, { text: '就用这个项目，先做最小可用版。', requestId: 'chat' });
@@ -460,8 +452,17 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
     agentContext,
   });
   cleanup.push(() => runtime.close());
-  await runtime.conversations.create({ text: '测试可编辑上下文', requestId: 'editable-context' });
+  const editable = await runtime.conversations.create({ text: '测试可编辑上下文', requestId: 'editable-context' });
   await runtime.host.runReady();
+
+  // The console shows the exact string the model received, read back through the same path it uses.
+  const sentPreview = await runtime.agentContextPreview(editable.conversationId);
+  const sentSystem = (provider.requests as { messages?: { role?: string; content?: unknown }[] }[])
+    // The transport may carry the system prompt as `system` or as the newer `developer` role.
+    .map(entry => (entry.messages ?? []).find(message => message.role === 'system' || message.role === 'developer')?.content)
+    .find((content): content is string => typeof content === 'string');
+  expect(typeof sentSystem).toBe('string');
+  expect(sentPreview.sent?.text).toBe(sentSystem);
 
   const request = provider.requests[0] as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] };
   const toolNames = (request.tools ?? []).map(tool => tool.function?.name ?? '');
