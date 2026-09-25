@@ -93,42 +93,26 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
     ].join('\n'),
   });
 
-  expect(result.sections.map(section => section.id)).toEqual([
-    'identity',
-    'tools',
-    'rules',
-    'docs',
-    'project_context',
-    'capabilities',
-    'skills',
-    'cwd',
-  ]);
-  expect(result.sections.find(section => section.id === 'tools')?.parts.map(part => part.origin))
-    .toEqual(['generated', 'editable']);
+  // Graph renders only what Graph owns: identity, rules, docs. Tools travel in
+  // the provider request, and project context, skills and the working directory
+  // are appended by the Pi SDK when it builds the prompt, so Graph must not
+  // render any of them itself.
+  expect(result.sections.map(section => section.id)).toEqual(['identity', 'rules', 'docs']);
   expect(result.text).toContain('<identity>\nYou are the Main Agent.\n\nFull access is active for this operation.\n</identity>');
   expect(result.sections.find(section => section.id === 'identity')?.parts).toEqual([
     expect.objectContaining({ id: 'identity.agent', origin: 'editable' }),
     expect.objectContaining({ id: 'identity.access', origin: 'generated', content: 'Full access is active for this operation.' }),
   ]);
-  expect(result.text).toContain('<tools>');
-  expect(result.text).toContain([
-    '- read: Read file contents',
-    '',
-    'In addition to the tools above, you may have access to the following Graph tools for main@7:',
-    '- artifact_list: List published artifacts.',
-  ].join('\n'));
-  expect(result.text).toContain('Use the smallest tool that can prove the claim.');
-  expect(result.text).not.toContain('parameters:');
-  expect(result.text).not.toContain('Definition: main@7');
-  expect(result.text.indexOf('- read: Read file contents'))
-    .toBeLessThan(result.text.indexOf('following Graph tools for main@7'));
-  expect(result.text.indexOf('following Graph tools for main@7'))
-    .toBeLessThan(result.text.indexOf('- artifact_list: List published artifacts.'));
   expect(result.text).toContain('<rules>');
   expect(result.text).toContain('Common rule.');
   expect(result.text).toContain('Submit a graph draft before dispatching work.');
   expect(result.text).toContain('Current requirement version: 3.');
-  expect(result.text).not.toContain('<workflow>');
+  // Tool guidance and the send gate stay Graph rules, with their own editable
+  // source, instead of being part of a capability inventory.
+  expect(result.text).toContain('Use the smallest tool that can prove the claim.');
+  expect(result.text).toContain('Every model, command, MCP and extension call passes the Graph send gate');
+  expect(result.sections.find(section => section.id === 'rules')?.parts.map(part => part.source))
+    .toEqual(['rules/common.md', 'rules/<role>.md', 'runtime/*.md', 'tools/<role>.md', undefined, undefined]);
   expect(result.text).toContain('<docs>');
   expect(result.text).toContain('Graph documentation (read when the user asks about Graph itself');
   expect(result.text).toContain('- Main documentation: /app/docs/agent/README.md');
@@ -136,31 +120,20 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.text).toContain('- Examples: /app/examples');
   expect(result.text).toContain('resolve topic paths under Additional docs');
   expect(result.text).not.toContain('.graph/prompts/docs');
-  expect(result.text).toContain('<project_context>');
-  expect(result.text).toContain('<project_instructions path="/work/AGENTS.md">');
-  expect(result.text).toContain('<capabilities>');
-  expect(result.text).toContain('- mcp browser@1.2.0 (Browser): tools=browser_open; network=example.com');
-  // One capability description, in one section: the inventory line above, the
-  // capability's own tool doc, and the send-gate rule. The tool list itself stays
-  // in <tools>, where each line also carries availability.
-  expect(result.text).toContain('Read the extension doc before you call it.');
-  expect(result.text).toContain('Use only the callable tools listed in <tools>.');
-  // Skills are described once, by the SDK's own block in its own section; the
-  // capability inventory no longer repeats them.
+  // Nothing native is re-rendered here, in any spelling.
+  for (const native of [
+    '<tools>', '<capabilities>', '<project_context>', '<project_instructions', '<skills>',
+    '<available_skills>', '<cwd>', '<pi_cwd>', '<workflow>', 'Current working directory:',
+  ]) {
+    expect(result.text).not.toContain(native);
+  }
+  expect(result.text).not.toContain('- mcp browser@1.2.0');
   expect(result.text).not.toContain('skill handoff@1.0.0');
-  expect(result.sections.find(section => section.id === 'skills')?.parts.map(part => part.content))
-    .toEqual([expect.stringContaining('<available_skills>')]);
-  expect(result.text).toContain('<location>/home/me/.graph/agents/main/skills/handoff/SKILL.md</location>');
-  expect(result.text.indexOf('</available_skills>')).toBeLessThan(result.text.indexOf('<cwd>'));
+  expect(result.text).not.toContain('Read the extension doc before you call it.');
+  expect(result.text).not.toContain('parameters:');
+  expect(result.text).not.toContain('Definition: main@7');
   expect(result.text).not.toContain('# Capability awareness');
   expect(result.text).not.toContain('## Callable tools');
-  expect(result.text).not.toContain('Definition: main@1');
-  expect(result.text).toContain('<cwd>');
-  // One working-directory block: the path line, then the worktree note. The Pi
-  // process cwd is the same worktree, so a second block would only repeat it.
-  expect(result.text).toContain('Current working directory: /home/me/.graph/state/worktrees/task-1/agent-a');
-  expect(result.text).toContain("This directory is this operation's own Git worktree");
-  expect(result.text).not.toContain('<pi_cwd>');
 });
 
 test('the worktree orientation note reaches subagents only', () => {
@@ -179,12 +152,11 @@ test('the worktree orientation note reaches subagents only', () => {
   const noWorktree = composeAgentSystemPrompt({ ...base, role: 'worker' });
 
   // The main Agent already works in the project root; a subagent gets its own
-  // worktree and has to be told that this is what it is looking at.
-  expect(main.text).toContain(`Current working directory: ${worktree}`);
+  // worktree and has to be told that this is what it is looking at. The path line
+  // itself is the Pi SDK's, so Graph only carries the orientation note.
   expect(main.text).not.toContain('own Git worktree');
-  expect(worker.text).toContain(`Current working directory: ${worktree}`);
   expect(worker.text).toContain('own Git worktree');
-  expect(noWorktree.text).toContain('No worktree has been prepared for this conversation yet.');
+  for (const result of [main, worker, noWorktree]) expect(result.text).not.toContain('Current working directory:');
 });
 
 test('the Agent context library seeds editable rules and the main tool routing rules', async () => {

@@ -76,7 +76,9 @@ test('the next-operation preview matches the real master tools and context at th
   expect(preview.preview.text).toContain('BOUND IDENTITY TWO');
   expect(preview.preview.text).not.toContain('BOUND IDENTITY ONE');
   expect(preview.preview.text).not.toContain('EDITABLE GUIDE IDENTITY');
-  expect(preview.preview.text).toContain('SELECTED PROJECT INSTRUCTIONS');
+  // Project instructions are injected by the Pi session itself, so the composition
+  // Graph previews does not repeat them.
+  expect(preview.preview.text).not.toContain('SELECTED PROJECT INSTRUCTIONS');
   expect(preview.preview.text).not.toContain('LOWER PRIORITY');
   expect(preview.tools.filter(tool => tool.name === 'read')).toHaveLength(1);
   expect(preview.tools.find(tool => tool.name === 'read')).toMatchObject({ enabled: false, available: false });
@@ -95,9 +97,14 @@ test('the next-operation preview matches the real master tools and context at th
     expect(Object.keys(actual.get(tool.name)!.parameters.properties).sort()).toEqual(tool.parameters);
   }
   const system = sent.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
-  for (const section of preview.preview.sections.filter(section => section.id !== 'capabilities')) {
+  for (const section of preview.preview.sections) {
     expect(system).toContain(`<${section.id}>\n${section.parts.map(part => part.content.trim()).filter(Boolean).join('\n\n')}\n</${section.id}>`);
   }
+  // Project context, the skills block and the working directory are the Pi
+  // session's own additions: they reach the request, never the preview.
+  expect(system).toContain('<project_context>');
+  expect(system).toContain('SELECTED PROJECT INSTRUCTIONS');
+  expect(system).toContain('Current working directory:');
   // The preview follows next-operation settings, while the previous request is
   // unchanged. No new model call or historical load fact is needed to refresh.
   access = standardAccessPolicy();
@@ -127,12 +134,13 @@ test('preview reads declarations without importing an extension or starting an M
   const assembly = await openAgentContextAssembly({ catalog, library, workspace, definitionVersion: 'main@1', action: 'master', role: 'master' });
   const preview = await assembly.preview({ role: 'master' });
   expect(preview.tools.find(tool => tool.name === 'declared_probe')).toMatchObject({ runtimeAvailable: null, enabled: true });
-  expect(preview.composed.text).toContain('declared_probe (not yet discovered)');
+  // A tool reaches the model through the provider request, so the composed prompt
+  // never carries a tool line - declared or otherwise.
+  expect(preview.composed.text).not.toContain('declared_probe');
   expect(preview.capabilities.find(item => item.id === 'mcp')).toMatchObject({ tools: [] });
   // One capability description, in the Graph section itself: the console preview
   // is the final prompt by construction, and no second block is appended.
-  expect(preview.composed.text).toContain('Use only the callable tools listed in <tools>.');
-  expect(preview.composed.text).toContain('declared_probe');
+  expect(preview.composed.text).toContain('Use only the tools listed in the provider request.');
   expect(preview.composed.text).not.toContain('# Capability awareness');
   expect(preview.composed.text).not.toContain('## Callable tools');
   expect(preview.composed.text).not.toContain('loaded for this Agent process');
@@ -164,7 +172,6 @@ test('the Main Agent identity explains harness self-improvement only when RSI is
   });
   expect(rsiPreview.composed.sections.find(section => section.id === 'identity')?.parts.map(part => part.id))
     .toContain('identity.harness');
-  expect(rsiPreview.composed.text).toContain('apply_rsi_change');
   expect(rsiPreview.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['inspect_rsi_status', 'apply_rsi_change']));
 
   const withoutRsi = await openAgentContextAssembly({

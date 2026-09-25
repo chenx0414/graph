@@ -32,29 +32,30 @@ async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provid
   return { instance, broker, provider };
 }
 
-test('Graph owns the final system prompt, so the Pi working-directory line is replaced instead of appended', async () => {
-  const composed = '<cwd>\nCurrent working directory: /tmp/graph-worktree\n</cwd>';
+test('Graph supplies the custom prompt and the Pi session keeps its own native additions', async () => {
+  const composed = '<identity>\nAgent\n</identity>';
   const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed });
   await instance.prompt('Hello');
   const request = provider.requests[0] as { messages: { role: string; content: string }[] };
-  const system = request.messages.find(message => message.role === 'system')!.content;
-  // Exact equality is the point: nothing the Pi session builds on its own (the
-  // trailing "Current working directory:" line, its coding-assistant preamble)
-  // may survive into the request Graph sends.
-  expect(system).toBe(composed);
+  const system = request.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
+  // Graph no longer replaces the built prompt: its text is the session's custom
+  // prompt and the Pi session appends its own parts itself, which is how the
+  // working-directory line reaches the model.
+  expect(system.startsWith(composed)).toBe(true);
+  expect(system).toContain('Current working directory:');
 });
 
 test('the exact system prompt sent to the provider is reported back to the caller', async () => {
-  const composed = '<cwd>\nCurrent working directory: /tmp/graph-worktree\n</cwd>';
+  const composed = '<identity>\nAgent\n</identity>';
   const reported: (string | null)[] = [];
   const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed, onSend: value => reported.push(value) });
   await instance.prompt('Hello');
   const request = provider.requests[0] as { messages: { role: string; content: string }[] };
-  const system = request.messages.find(message => message.role === 'system')!.content;
+  const system = request.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
 
   // The console must show what the model really received, so the report has to be the same string
   // the provider got — not a second rendering of the same facts.
-  expect(reported).toEqual([composed]);
+  expect(reported).toHaveLength(1);
   expect(reported[0]).toBe(system);
 });
 

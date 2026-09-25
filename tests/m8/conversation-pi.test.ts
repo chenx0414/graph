@@ -472,18 +472,18 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   const user = JSON.stringify((request.messages ?? []).filter(message => message.role === 'user'));
   expect(providerRequest).toContain('<identity>');
   expect(providerRequest).toContain('MAIN IDENTITY SENTINEL');
-  expect(providerRequest).toContain('<tools>');
-  expect(providerRequest).toContain('- read: Read file contents');
-  expect(providerRequest).toContain('following Graph tools for');
-  expect(providerRequest).not.toContain('- ls:');
-  expect(providerRequest).not.toContain('- write:');
   expect(providerRequest).toContain('<rules>');
   expect(providerRequest).not.toContain('<workflow>');
   expect(providerRequest).not.toContain('CONVERSATION SENTINEL');
   expect(providerRequest).toContain('<docs>');
-  expect(providerRequest).toContain('<project_context>');
-  expect(providerRequest).toContain('<capabilities>');
-  expect(providerRequest).toContain('<cwd>');
+  // What the model can call travels in the request's tool list, and the Pi session
+  // appends the project context, its skills block and the working directory. Graph
+  // must not re-render any of them inside its own prompt text.
+  expect(toolNames).toEqual(expect.arrayContaining(['read']));
+  for (const native of ['<tools>', '<capabilities>', '<skills>', '<available_skills>', '<cwd>']) {
+    expect(providerRequest).not.toContain(native);
+  }
+  expect(providerRequest).not.toContain('- read: Read file contents');
   expect(providerRequest).toContain('Current working directory:');
   expect(user).not.toContain('CONVERSATION SENTINEL');
 }, 120_000);

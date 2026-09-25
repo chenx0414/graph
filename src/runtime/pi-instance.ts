@@ -277,19 +277,11 @@ export async function openPiInstance(options: PiInstanceOptions) {
     images: { autoResize: false },
     enableAnalytics: false, enableInstallTelemetry: false,
   });
-  // Graph owns the final system prompt. The Pi session builds its own prompt from
-  // the base Graph passes and then appends a "Current working directory:" line to
-  // it, so the composed prompt is returned from the before_agent_start hook: that
-  // replaces the built prompt for the turn instead of extending it.
-  const systemPrompt = options.systemPrompt;
-  const promptTakeover: InlineExtension | undefined = systemPrompt === undefined ? undefined : {
-    name: 'graph-system-prompt',
-    hidden: true,
-    factory: pi => {
-      pi.on('before_agent_start', () => ({ systemPrompt }));
-    },
-  };
-  const extensionFactories = [...(options.extensionFactories ?? []), ...(promptTakeover ? [promptTakeover] : [])];
+  // Graph's prompt is the loader's custom prompt, so the Pi session keeps its own
+  // native composition: it appends the project context files, its skills block
+  // and the working directory to whatever Graph supplies. Graph must not replace
+  // the built prompt, or those native parts would be dropped here.
+  const extensionFactories = [...(options.extensionFactories ?? [])];
   if (options.mcpAdapterServers?.length) {
     // The adapter lives in the same session, so a registration it refuses is
     // otherwise invisible: record it where the instance can be inspected.
@@ -312,7 +304,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
     ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
     noExtensions: true, noSkills: true, noPromptTemplates: true,
-    noThemes: true, noContextFiles: true,
+    noThemes: true,
   });
   await loader.reload();
   if (options.tools?.some(tool => !isExternallyGated(tool)) && !options.broker) throw new Error('Tools require a call broker');

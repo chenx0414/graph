@@ -107,68 +107,7 @@ function renderedSection(sectionValue: AgentPromptSection) {
   return `<${sectionValue.id}>\n${content}\n</${sectionValue.id}>`;
 }
 
-function toolLine(tool: AgentToolPromptEntry) {
-  const description = tool.description.replace(/\s+/g, ' ').trim();
-  const availability = tool.runtimeAvailable === null ? ' (not yet discovered)' : tool.available ? '' : ' (unavailable)';
-  return `- ${tool.name}${availability}: ${description}`;
-}
-
-function toolInventory(input: ComposeAgentSystemPromptInput) {
-  const native = input.tools
-    .filter(tool => tool.group === 'pi_native')
-    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
-  const graph = input.tools
-    .filter(tool => tool.group !== 'pi_native')
-    .sort((left, right) => left.name.localeCompare(right.name));
-  if (!native.length && !graph.length) return '(none)';
-
-  const blocks: string[] = [];
-  if (native.length) blocks.push(native.map(toolLine).join('\n'));
-  if (graph.length) {
-    const transition = native.length
-      ? `In addition to the tools above, you may have access to the following Graph tools for ${input.definitionVersion}:`
-      : `The following Graph tools are available for ${input.definitionVersion}:`;
-    blocks.push([
-      transition,
-      graph.map(toolLine).join('\n'),
-    ].join('\n'));
-  }
-  return blocks.join('\n\n');
-}
-
-function capabilityLines(capabilities: readonly AgentCapabilityPromptEntry[]) {
-  // Skills are described by the SDK's own block, in their own section.
-  const described = capabilities.filter(capability => capability.kind !== 'skill');
-  if (!described.length) return '(none)';
-  return described.map(capability => {
-    const tools = capability.tools.length ? `tools=${capability.tools.join(', ')}` : 'tools=none';
-    const network = capability.networkDomains?.length
-      ? `; network=${capability.networkDomains.join(', ')}`
-      : '';
-    const path = capability.path ? `; path=${capability.path}` : '';
-    const reason = capability.reason ? `; ${capability.reason}` : '';
-    const description = capability.description ? `: ${capability.description}` : '';
-    return `- ${capability.kind} ${capability.id}@${capability.version} (${capability.name})${description}: ${tools}${network}${path}${reason}`;
-  }).join('\n');
-}
-
 export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): ComposedAgentSystemPrompt {
-  const tools = section('tools', 'Tools', [
-    {
-      id: 'tools.inventory',
-      title: 'Available tools',
-      origin: 'generated',
-      content: toolInventory(input),
-    },
-    {
-      id: 'tools.guidance',
-      title: 'Tool guidance',
-      origin: 'editable',
-      content: input.toolGuidance,
-      source: 'tools/<role>.md',
-    },
-  ]);
-
   const rules = section('rules', 'Rules', [
     {
       id: 'rules.common',
@@ -191,6 +130,25 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
       content: input.rules.runtime,
       source: 'runtime/*.md',
     }] : []),
+    {
+      id: 'rules.tools',
+      title: 'Tool guidance',
+      origin: 'editable',
+      content: input.toolGuidance,
+      source: 'tools/<role>.md',
+    },
+    {
+      id: 'rules.send_gate',
+      title: 'Send gate',
+      origin: 'generated',
+      content: 'Use only the tools listed in the provider request. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
+    },
+    ...(input.role === 'main' ? [] : [{
+      id: 'rules.worktree',
+      title: 'Worktree',
+      origin: 'generated' as const,
+      content: "This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree.",
+    }]),
   ]);
 
   const docs = section('docs', 'Documentation', [{
@@ -201,89 +159,32 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     source: 'docs/agent/README.md',
   }]);
 
-  const projectContext = section('project_context', 'Project context', [{
-    id: 'project_context.instructions',
-    title: 'Project instructions',
-    origin: 'generated',
-    content: input.projectContext
-      ? [
-          'Project-specific instructions and guidelines:',
-          '',
-          `<project_instructions path="${input.projectContext.path}">`,
-          input.projectContext.content.trim(),
-          '</project_instructions>',
-        ].join('\n')
-      : 'No project-specific AGENTS.md or equivalent instruction file was found in this worktree.',
-    ...(input.projectContext ? { source: input.projectContext.path } : {}),
-  }]);
-
-  const capabilities = section('capabilities', 'Capabilities', [{
-    id: 'capabilities.inventory',
-    title: input.mode === 'preview' ? 'Declared capabilities' : 'Loaded capabilities',
-    origin: 'generated',
-    content: [
-      input.mode === 'preview'
-        ? 'MCP servers, Graph extensions and Pi extensions declared for the next Agent operation; runtime availability will be confirmed when they load:'
-        : 'MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
-      capabilityLines(input.capabilities),
-      ...(input.capabilityDocs?.trim() ? ['', input.capabilityDocs.trim()] : []),
-      '',
-      'Use only the callable tools listed in <tools>. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
-    ].join('\n'),
-  }]);
-
-  const cwd = section('cwd', 'Working directory', [{
-    id: 'cwd.worktree',
-    title: 'Git worktree',
-    origin: 'generated',
-    content: input.cwd === undefined
-      ? 'No worktree has been prepared for this conversation yet.'
-      : [
-        `Current working directory: ${input.cwd}`,
-        ...(input.role === 'main' ? [] : [
-          '',
-          "This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree.",
-        ]),
-      ].join('\n'),
-  }]);
-
-  const sections = [
-    section('identity', 'Identity', [
-      {
-        id: 'identity.agent',
-        title: 'Agent identity',
-        origin: 'editable',
-        content: input.identity,
-        source: 'agents/<definition-id>.md',
-      },
-      ...(input.identityContext?.trim() ? [{
-        id: 'identity.access',
-        title: 'Access policy',
-        origin: 'generated' as const,
-        content: input.identityContext.trim(),
-      }] : []),
-      ...(input.harnessContext?.trim() ? [{
-        id: 'identity.harness',
-        title: 'Harness self-improvement',
-        origin: 'generated' as const,
-        content: input.harnessContext.trim(),
-      }] : []),
-    ]),
-    tools,
-    rules,
-    docs,
-    projectContext,
-    capabilities,
-    // The SDK's skills block is its own section: skills are described once, by the
-    // native formatter, and never repeated as capability lines.
-    ...(input.skills?.trim() ? [section('skills', 'Skills', [{
-      id: 'skills.native',
-      title: 'Available skills',
+  const identity = section('identity', 'Identity', [
+    {
+      id: 'identity.agent',
+      title: 'Agent identity',
+      origin: 'editable',
+      content: input.identity,
+      source: 'agents/<definition-id>.md',
+    },
+    ...(input.identityContext?.trim() ? [{
+      id: 'identity.access',
+      title: 'Access policy',
       origin: 'generated' as const,
-      content: input.skills.trim(),
-    }])] : []),
-    cwd,
-  ];
+      content: input.identityContext.trim(),
+    }] : []),
+    ...(input.harnessContext?.trim() ? [{
+      id: 'identity.harness',
+      title: 'Harness self-improvement',
+      origin: 'generated' as const,
+      content: input.harnessContext.trim(),
+    }] : []),
+  ]);
+
+  // Native concerns are never rendered here: the Pi SDK appends the project
+  // context, its own skills block and the working directory to this text, and
+  // the provider request carries the tools.
+  const sections = [identity, rules, docs];
   const text = sections.map(renderedSection).join('\n\n');
   return { sections, text };
 }

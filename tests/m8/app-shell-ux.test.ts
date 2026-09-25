@@ -1712,43 +1712,22 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   const preview = payload.preview.text;
   expect(preview).toContain('<identity>');
   expect(preview).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
-  expect(preview).toContain('<tools>');
   expect(preview).toContain('<rules>');
   expect(preview).not.toContain('<workflow>');
   expect(preview).toContain('<docs>');
-  expect(preview).toContain('<project_context>');
-  expect(preview).toContain('<capabilities>');
-  expect(preview).toContain('<cwd>');
-  expect(preview).toContain('- read: Read file contents');
-  expect(preview).not.toContain('- powershell:');
-  expect(preview).toContain('- get_graph_state:');
-  expect(preview).toContain('- list_projects:');
-  expect(preview).toContain('- git_status:');
-  expect(preview).not.toContain('- artifact_get:');
-  expect(preview).not.toContain('- compile_agent_combination:');
-  expect(preview).not.toContain('- submit_result:');
-  expect(preview.indexOf('- read: Read file contents'))
-    .toBeLessThan(preview.indexOf('following Graph tools'));
-  expect(preview.indexOf('following Graph tools'))
-    .toBeLessThan(preview.indexOf('- artifact_list:'));
-  const markdown = preview;
-  expect(markdown).toContain('<identity>\n');
-  expect(markdown).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
-  expect(markdown).toContain('<tools>\n');
-  expect(markdown).toContain('<rules>\n');
-  expect(markdown).not.toContain('<workflow>\n');
-  expect(markdown).toContain('<docs>\n');
-  expect(markdown).toContain('<project_context>\n');
-  expect(markdown).toContain('<capabilities>\n');
-  expect(markdown).toContain('<cwd>\n');
-  expect(markdown).not.toContain('<pi_cwd>');
-  // Capabilities are described once, in the section itself. What the Agent can
-  // actually call stays the <tools> inventory, with every description intact.
-  expect(markdown).toContain('Use only the callable tools listed in <tools>.');
-  expect(markdown).not.toContain('# Capability awareness');
-  expect(markdown).not.toContain('## Callable tools');
-  const tools = markdown.slice(markdown.indexOf('<tools>'), markdown.indexOf('</tools>'));
-  expect(tools).toMatch(/- get_task_status[^:]*: \S/);
+  // Graph composes identity, rules and docs only. Tools travel in the provider
+  // request, and the Pi session adds project context, its skills block and the
+  // working directory, so none of them may appear in Graph's own composition.
+  for (const native of [
+    '<tools>', '<capabilities>', '<project_context>', '<skills>', '<available_skills>',
+    '<cwd>', '<pi_cwd>', 'Current working directory:',
+    '- read: Read file contents', '- powershell:', '- get_graph_state:', '- artifact_list:',
+  ]) {
+    expect(preview).not.toContain(native);
+  }
+  expect(preview).toContain('Use only the tools listed in the provider request.');
+  expect(preview).not.toContain('# Capability awareness');
+  expect(preview).not.toContain('## Callable tools');
   await page.getByTestId('agent-context-tab-prompts').click();
   expect(await page.getByTestId('agent-prompt-docs/INDEX.md').count()).toBe(0);
   await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();
