@@ -22,6 +22,7 @@
 | `permissions-and-recovery.md` | 需要解释权限、预算、暂停、用量、问题所有权和未知结果 |
 | `artifacts-and-git.md` | 需要理解 worktree、handoff、artifact、evidence、integration 和 merge |
 | `self-configuration.md` | 需要查看或修改 Agent prompt、工具选择和系统能力 |
+| `models-and-providers.md` | 需要配置模型厂商/订阅凭据、新增或调整模型及其参数、排查模型不可用 |
 | `troubleshooting.md` | 任务卡住、工具失败、模型不可用、恢复不确定或用户报告异常 |
 
 ## 事实优先级
