@@ -197,6 +197,15 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 5. 写完密钥后确认 `pendingSecretRefs` 已清空，才说「已持久化」。
 5. 删模型前确认没有未完成任务在用（否则 `config_in_use`）。
 
+## 需要的模型或凭据不可用时
+
+主 Agent 没有「申请模型授权」工具（已按奥卡姆剃刀移除），缺能力时按本节操作：
+
+1. **先看缺什么**：`GET /api/config` 的 `credentials.<id>.configured`（谁没值）、`GET /api/usage`（额度是否用尽）、`GET /api/startup`（`modelCount` vs `enabledModelCount`，有差值就说明有模型未启用）。
+2. **凭据缺失**：优先请使用者提供密钥。使用者给出密钥后走桌面端通道落盘：`POST /api/app/secret {ref, value}`（带 `x-graph-app-token`）——守护进程立即可用，桌面端几秒内写入钥匙串，并在下次启动时注入进程环境。
+3. **模型条目缺失/不可用**：按上文「一次配置的完整动作」改文档并提交，或按「同一平台的多个账户」加账户；改完用 `POST /api/config/test {modelId}` 真发一次请求确认（返回 `ok:true` 才算通过）。
+4. **绝不静默替换**成无关模型；先说明缺什么、影响哪个节点。
+
 ## 不要宣称
 
 - 不要只看「文件改完了」就说生效：用 `GET /api/config` 的 `watch` 字段确认（`lastReason` 为 null 且 `fileRevision` 是你写的值）。

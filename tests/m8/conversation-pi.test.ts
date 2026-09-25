@@ -123,7 +123,7 @@ async function systemContextProvider() {
     if (step === 1) return call('c1', 'read_system_capabilities', {});
     if (step === 2) return call('c2', 'list_agent_combinations', { query: '审查' });
     if (step === 3) return call('c3', 'search_resources', { query: 'reviewer', kind: 'prompt', role: 'agent' });
-    if (step === 4) return call('c4', 'request_model_access', { modelId: 'missing-model', reason: '需要独立审查模型', planId: 'opencode-go' });
+    if (step === 4) return call('c4', 'get_graph_state', {});
     chunk({ role: 'assistant', content: '已打开模型授权问题。' }, null);
     end('stop');
   });
@@ -240,7 +240,7 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   expect(view.streams).toEqual([]);
 }, 120_000);
 
-test('the real Pi master can search the resource library and open a model-access question', async () => {
+test('the real Pi master can search the resource library and read graph state', async () => {
   const root = await temp('system-context');
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
@@ -290,9 +290,9 @@ test('the real Pi master can search the resource library and open a model-access
 
   expect(provider.requests[0]!.tools).toEqual(expect.arrayContaining([
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
-    'save_agent_combination', 'update_agent_combination_description', 'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
+    'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
     'read_system_capabilities', 'inspect_graph_system',
-    'propose_system_change', 'apply_system_change', 'request_model_access',
+    'propose_system_change', 'apply_system_change',
   ]));
   expect(provider.requests[0]!.tools).not.toEqual(expect.arrayContaining([
     'artifact_get', 'compile_agent_combination', 'submit_result',
@@ -306,17 +306,10 @@ test('the real Pi master can search the resource library and open a model-access
   const briefingContext = JSON.stringify(provider.requests.flatMap(request => request.messages));
   expect(briefingContext).toContain('review@1');
   expect(briefingContext).not.toContain('retired@1');
-  expect(view.questions).toEqual(expect.arrayContaining([
-    expect.objectContaining({
-      kind: 'waiting',
-      status: 'open',
-      data: expect.objectContaining({
-        requestType: 'model_access',
-        modelId: 'missing-model',
-        planId: 'opencode-go',
-      }),
-    }),
-  ]));
+  // The model-access question tool is gone (Occam), so the scripted turn must not
+  // leave a waiting question behind; missing models are handled through the
+  // documented configuration flow instead.
+  expect(view.questions ?? []).toEqual([]);
 }, 120_000);
 
 test('the Main Agent recipe compiles its capabilities into the conversation master bundle', async () => {

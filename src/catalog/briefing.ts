@@ -2,7 +2,7 @@ import type { NodeSpec, Operation } from '../core/types.ts';
 import { isImageAttachment } from '../core/attachments.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
-export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attempt'>, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[]; agentCombinations?: { id: string; name: string; description: string; recommendedGrade: string; status: string }[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean } }) {
+export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attempt'>, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[]; agentCombinations?: { id: string; name: string; description: string; recommendedGrade: string; status: string }[] }; graph?: NodeSpec[]; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean } }) {
   const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact =>
     `${artifact.uri ?? artifact.path} (${artifact.digest})`)));
   const catalogDefinitions = extra.catalog?.definitions ?? [];
@@ -38,13 +38,12 @@ export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attem
           ...catalogAgentCombinations.map(item => `- Agent recipe ${item.id} (${item.name}, ${item.recommendedGrade}, ${item.status}): ${item.description}`),
         ].join('\n')}`
       : '',
-    extra.systemContext && (extra.systemContext.resources || extra.systemContext.agentCombinations || extra.systemContext.systemSummary || extra.systemContext.requestModelAccess)
+    extra.systemContext && (extra.systemContext.resources || extra.systemContext.agentCombinations || extra.systemContext.systemSummary)
       ? [
           'System context (read-only; query before planning instead of guessing):',
           extra.systemContext.resources ? '- search_resources / get_resource: the user capability directory of Skills, MCP servers, Pi extensions, Graph extensions and prompt identities. get_resource accepts id or id@version. Search is discovery only; definition-bound capabilities are available under the default capability-bypass runtime policy.' : '',
-          extra.systemContext.agentCombinations ? '- list_agent_combinations / get_agent_combination / save_agent_combination / update_agent_combination_description: recipe descriptions summarize intended use and should guide subagent selection; save_agent_combination validates and compiles the full recipe, while update_agent_combination_description edits only the description and saves it immediately. Use get_agent_combination with the recipe id (for example coder), not get_resource with a definition version (for example coder@5).' : '',
+          extra.systemContext.agentCombinations ? '- list_agent_combinations / get_agent_combination: recipe descriptions summarize intended use and should guide subagent selection; use get_agent_combination with the recipe id (for example coder), not get_resource with a definition version (for example coder@5). Creating, editing or deleting a recipe goes through the console HTTP routes documented in docs/agent/agent-recipes.md.' : '',
           extra.systemContext.systemSummary ? '- read_system_capabilities: configured subscription plans, configured models, Agent definitions, graph architectures and quota windows (secrets excluded).' : '',
-          extra.systemContext.requestModelAccess ? '- request_model_access: ask the user to configure a needed model or subscription; it never changes configuration or grants permission itself.' : '',
         ].filter(Boolean).join('\n')
       : '',
     extra.graph?.length

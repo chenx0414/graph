@@ -21,6 +21,7 @@ Topic bodies stay out of the prompt and are read on demand.
 - [Artifacts and Git](artifacts-and-git.md)
 - [Self configuration](self-configuration.md)
 - [Models and providers](models-and-providers.md)
+- [Agent recipes](agent-recipes.md)
 - [Troubleshooting](troubleshooting.md)
 
 ## Reading Rules
