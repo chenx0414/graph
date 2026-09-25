@@ -68,8 +68,6 @@ export interface PiInstanceOptions {
   skillFolder?: string;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
-  /** pi-mcp-adapter's module path, resolved from the capability library by the caller. */
-  mcpAdapterExtensionPaths?: string[];
   /** MCP servers this session registers with pi-mcp-adapter. */
   mcpAdapterServers?: readonly { name: string; definition: unknown }[];
   extensionFactories?: InlineExtension[];
@@ -302,7 +300,6 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
     ...(skillLoadPaths.length ? { additionalSkillPaths: skillLoadPaths } : {}),
-    ...(options.mcpAdapterExtensionPaths?.length ? { additionalExtensionPaths: options.mcpAdapterExtensionPaths } : {}),
     ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
     ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
