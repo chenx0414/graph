@@ -14,6 +14,7 @@ import {
 import { canonicalJson } from '../core/store.ts';
 import { nativeSkillDirs } from './agent-skills.ts';
 import { mcpAdapterBridge } from './mcp-adapter-bridge.ts';
+import { toolResultHook } from './tool-results.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface InstanceBinding {
@@ -351,6 +352,14 @@ export async function openPiInstance(options: PiInstanceOptions) {
   session.agent.beforeToolCall = async (context, signal) => stopRequested
     ? { block: true, terminate: true, reason: 'The operation has completed; continue after the pending reload.' }
     : beforeToolCall?.(context, signal);
+  // One seam for every tool result, Graph's own and Pi's built-ins alike: a large result
+  // that the same call already produced twice is spilled to disk and answered with a
+  // bounded summary that names the handle. Smaller results and first views pass through
+  // untouched, and only `content` is ever replaced, so `details` and `terminate` survive.
+  session.agent.afterToolCall = toolResultHook({
+    scopeId: options.binding.instanceId,
+    spillDir: join(stateDir, 'tool-results'),
+  });
   session.agent.subscribe(event => {
     if (event.type === 'tool_execution_end' && event.result.terminate === true) stopRequested = true;
   });

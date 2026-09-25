@@ -9,6 +9,11 @@
  *  - the summary is deterministic: the same result yields the same text
  *  - changed params, or a changed result for the same params, count as new keys
  *  - nothing is truncated silently: the summary names the handle and how to read it
+ *  - the agent-loop hook leaves a small result, a first or second view, or a
+ *    text-free result completely untouched (no content override at all)
+ *  - the hook never fabricates a terminate or details override
+ *  - the hook keeps non-text parts, replaces the first text part and drops the rest
+ *  - counts are per scope: another conversation never inherits them
  */
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,6 +25,7 @@ import {
   createToolResultTracker,
   renderToolResult,
   summarizeToolResult,
+  toolResultHook,
   toolResultKey,
 } from '../../src/runtime/tool-results.ts';
 
@@ -34,10 +40,13 @@ async function scratch() {
 
 const call = (text: string, params: Record<string, unknown> = { path: 'a.txt' }) => ({ conversationId: 'conv-1', tool: 'read', params, text });
 
-function body(input: string) {
-  const marker = '\n---\n';
-  return input.includes(marker) ? input.slice(input.indexOf(marker) + marker.length) : input;
-}
+/** One tool result as the agent loop hands it to the hook. */
+const context = (text: string, params: Record<string, unknown> = { path: 'a.txt' }) => ({
+  toolCall: { name: 'read' }, args: params, result: { content: [{ type: 'text' as const, text }] },
+});
+
+const partsOf = (result: { content?: readonly { type: string; text?: string }[] }) =>
+  [...(result.content ?? [])] as { type: string; text?: string; mimeType?: string }[];
 
 test('a small result is passed through unchanged', async () => {
   const spillDir = await scratch();
@@ -101,6 +110,10 @@ test('the summary is deterministic and always says how to get the rest', async (
   expect(first).toContain('line-399');
   expect(first).toContain('handle: /tmp/handle-1');
   expect(first).toContain('read');
+  // A single huge line still reports what it dropped, byte-wise.
+  const oneLine = summarizeToolResult({ text: 'p'.repeat(TOOL_RESULT_LIMIT * 2), handle: '/tmp/handle-2' });
+  expect(oneLine).toContain('omitted');
+  expect(oneLine).not.toContain('p'.repeat(TOOL_RESULT_LIMIT));
 });
 
 test('the key is stable for identical input and separates real differences', () => {
@@ -112,4 +125,72 @@ test('the key is stable for identical input and separates real differences', () 
   expect(toolResultKey({ ...call('same'), conversationId: 'conv-2' })).not.toBe(base);
   // Parameter order must not matter.
   expect(toolResultKey({ ...call('same'), params: { a: 1, b: 2 } })).toBe(toolResultKey({ ...call('same'), params: { b: 2, a: 1 } }));
+});
+
+test('the hook leaves small results visibly untouched, however often they repeat', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-hook-small', spillDir });
+  const small = 'x'.repeat(TOOL_RESULT_LIMIT);
+  for (let round = 0; round < 4; round += 1) {
+    expect(await hook(context(small))).toBeUndefined();
+  }
+});
+
+test('the hook answers the third large result with a summary and a readable handle', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-hook-large', spillDir });
+  const big = 'y'.repeat(TOOL_RESULT_LIMIT + 20);
+
+  expect(await hook(context(big))).toBeUndefined();
+  expect(await hook(context(big))).toBeUndefined();
+  const third = await hook(context(big));
+  expect(third).toBeTruthy();
+
+  const parts = partsOf(third!);
+  expect(parts).toHaveLength(1);
+  const summary = parts[0]!.text ?? '';
+  expect(summary.length).toBeLessThanOrEqual(SUMMARY_LIMIT);
+  const handle = /handle: (\S+)/.exec(summary)?.[1];
+  expect(handle).toBeTruthy();
+  expect(await readFile(handle!, 'utf8')).toBe(big);
+  // Only content may be overridden: the tool's own terminate hint and details survive.
+  expect('terminate' in third!).toBe(false);
+  expect('details' in third!).toBe(false);
+});
+
+test('the hook keeps non-text parts, summarises at the first text part and drops the rest', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-hook-parts', spillDir });
+  const big = 'z'.repeat(TOOL_RESULT_LIMIT + 5);
+  const image = { type: 'image' as const, data: 'AAAA', mimeType: 'image/png' };
+  const call = {
+    toolCall: { name: 'read' }, args: { path: 'a.txt' },
+    result: { content: [image, { type: 'text' as const, text: big }, { type: 'text' as const, text: 'tail' }] },
+  };
+  await hook(call);
+  await hook(call);
+  const third = await hook(call);
+  const parts = partsOf(third!);
+  expect(parts.map(part => part.type)).toEqual(['image', 'text']);
+  expect(parts[0]!.mimeType).toBe('image/png');
+  expect(parts[1]!.text).toContain('omitted');
+});
+
+test('a text-free result is left alone and counts never leak between scopes', async () => {
+  const spillDir = await scratch();
+  const imageOnly = {
+    toolCall: { name: 'read' }, args: {},
+    result: { content: [{ type: 'image' as const, data: 'AAAA', mimeType: 'image/png' }] },
+  };
+  expect(await toolResultHook({ scopeId: 'conv-hook-none', spillDir })(imageOnly)).toBeUndefined();
+
+  const big = 'w'.repeat(TOOL_RESULT_LIMIT + 1);
+  const first = toolResultHook({ scopeId: 'conv-hook-scope-a', spillDir });
+  const other = toolResultHook({ scopeId: 'conv-hook-scope-b', spillDir });
+  expect(await first(context(big))).toBeUndefined();
+  expect(await first(context(big))).toBeUndefined();
+  // Another conversation never inherits this count, and the count itself persists
+  // across hook objects because the daemon keeps one tracker per scope.
+  expect(await other(context(big))).toBeUndefined();
+  expect(await first(context(big))).toBeTruthy();
 });

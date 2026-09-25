@@ -2,22 +2,37 @@
  * Tool-result lazy loading: keep the prompt small without losing data (backlog v81).
  *
  * A result below TOOL_RESULT_LIMIT is returned untouched. A larger one is returned
- * whole for its first two occurrences per (conversation, tool, params, content) key;
- * from the third the caller gets a bounded, deterministic summary plus a handle - a
- * path on disk that still holds every byte, readable with the existing read tool.
+ * whole for its first two occurrences per (scope, tool, params, content) key; from the
+ * third the caller gets a bounded, deterministic summary plus a handle - a path on disk
+ * that still holds every byte, readable with the existing read tool.
  *
- * The summary always states how many bytes were left out, counted from what the
- * final text actually dropped, so a single huge line cannot hide the omission.
+ * The summary always states how many bytes were left out, counted from what the final
+ * text actually dropped, so a single huge line cannot hide the omission.
+ *
+ * `toolResultHook` is the single seam: Pi's agent loop calls it for every tool result,
+ * Graph's own tools and Pi's built-ins alike. It overrides `content` only, so a tool's
+ * own `details` and `terminate` hint always survive.
  */
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { AfterToolCallResult } from '@earendil-works/pi-agent-core';
 
 export const TOOL_RESULT_LIMIT = 4_000;
 export const SUMMARY_LIMIT = 1_024;
 
 /** Head and tail lines the summary prefers before the byte budget bites. */
 const SUMMARY_LINES = 12;
+
+type ContentPart = NonNullable<AfterToolCallResult['content']>[number];
+type ResultPart = { type: string; text?: string };
+
+/** The part of an agent-loop tool result this seam reads. */
+export type ToolResultHookContext = {
+  toolCall: { name: string };
+  args: unknown;
+  result: { content: readonly ResultPart[] };
+};
 
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
@@ -84,4 +99,55 @@ export async function renderToolResult(input: {
   await mkdir(input.spillDir, { recursive: true });
   await writeFile(handle, input.text, { mode: 0o600 });
   return summarizeToolResult({ text: input.text, handle });
+}
+
+/** One occurrence count per scope, kept for the life of the daemon so a re-read of the
+ * same result across turns is still recognised for what it is. */
+const trackers = new Map<string, { record: (key: string) => number }>();
+
+function trackerFor(scopeId: string) {
+  const existing = trackers.get(scopeId);
+  if (existing) return existing;
+  const created = createToolResultTracker();
+  trackers.set(scopeId, created);
+  return created;
+}
+
+/**
+ * Build the agent loop's `afterToolCall` hook. It returns `undefined` whenever the
+ * result should reach the model exactly as the tool produced it - a small result, a
+ * first or second view of a large one, or a result with no text at all - so nothing
+ * but a genuinely repeated large result is ever rewritten.
+ */
+export function toolResultHook(input: { scopeId: string; spillDir: string }) {
+  return async (context: ToolResultHookContext): Promise<AfterToolCallResult | undefined> => {
+    const parts = context?.result?.content;
+    if (!Array.isArray(parts)) return undefined;
+    const texts = parts.filter(part => part.type === 'text').map(part => part.text ?? '');
+    if (!texts.length) return undefined;
+    const text = texts.join('\n');
+    if (text.length <= TOOL_RESULT_LIMIT) return undefined;
+    const rendered = await renderToolResult({
+      text,
+      conversationId: input.scopeId,
+      tool: context.toolCall?.name ?? 'unknown',
+      params: context.args,
+      spillDir: input.spillDir,
+      tracker: trackerFor(input.scopeId),
+    });
+    // Still a full view: leave the tool's own result object completely untouched.
+    if (rendered === text) return undefined;
+    const content: ContentPart[] = [];
+    let summarised = false;
+    for (const part of parts) {
+      if (part.type !== 'text') {
+        content.push(part as ContentPart);
+        continue;
+      }
+      if (summarised) continue;
+      content.push({ type: 'text', text: rendered });
+      summarised = true;
+    }
+    return { content };
+  };
 }

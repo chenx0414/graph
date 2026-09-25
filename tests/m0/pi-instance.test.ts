@@ -403,3 +403,52 @@ test('stop with no running turn is idempotent and leaves the session usable', as
     await instance.close();
   }
 });
+
+test('a large tool result reaches the model in full twice and as a readable summary with a handle afterwards', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-tool-results-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const big = `head-marker\n${'line\n'.repeat(4_000)}tail-marker`;
+  let modelRequests = 0;
+  const probe = externallyGated({
+    name: 'probe', label: 'Probe', description: 'Return a large result every time.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => ({ content: [{ type: 'text' as const, text: big }], details: {} }),
+  });
+  const stream: StreamFn = model => {
+    modelRequests += 1;
+    const output = createAssistantMessageEventStream();
+    const message = modelRequests <= 3 ? toolCallMessage(model, 'probe') : reply(model, 'Done');
+    output.push({ type: 'done', reason: message.stopReason === 'toolUse' ? 'toolUse' : 'stop', message });
+    return output;
+  };
+  const instance = await openPiInstance({
+    binding: { instanceId: 'agent-tool-results', nodeId: 'node-tool-results', definitionVersion: 'coder@1' },
+    workspace, stateDir: join(root, 'state'), model: modelA, modelRuntime: await testModelRuntime(),
+    stream, tools: [probe],
+  });
+  try {
+    await instance.prompt('Run the probe three times');
+    expect(modelRequests).toBe(4);
+    const results = instance.inspect().messages.filter(message => message.role === 'toolResult');
+    expect(results).toHaveLength(3);
+    const textOf = (message: (typeof results)[number]) =>
+      (message.content as { type: string; text?: string }[]).map(part => part.text ?? '').join('');
+
+    // The first two views are the tool's own result, byte for byte.
+    expect(textOf(results[0]!)).toBe(big);
+    expect(textOf(results[1]!)).toBe(big);
+
+    // The third is bounded, still shows the head, and names a readable handle.
+    const third = textOf(results[2]!);
+    expect(third.length).toBeLessThanOrEqual(1_024);
+    expect(third).toContain('head-marker');
+    expect(third).toContain('omitted');
+    const handle = /handle: (\S+)/.exec(third)?.[1];
+    expect(handle).toBeTruthy();
+    expect(await readFile(handle!, 'utf8')).toBe(big);
+  } finally {
+    await instance.close();
+  }
+});
