@@ -257,12 +257,8 @@ function CapabilityConfigPanel({ items, filter, onFilterChange }: { items: Capab
         }
         window.dispatchEvent(new Event('graph:settings-changed'));
       }
-      const result = await api<{ ok: boolean; message: string; tools?: string[] }>(
-        `/api/capabilities/${encodeURIComponent(item.id)}/${encodeURIComponent(item.version)}/test`,
-        { method: 'POST', body: JSON.stringify({ values: supplied }) },
-      );
-      setResults(current => ({ ...current, [key]: result }));
-      if (result.ok) toast(`${item.name} 可用${result.tools?.length ? `，发现 ${result.tools.length} 个工具` : ''}`, 'success');
+      setResults(current => ({ ...current, [key]: { ok: true, message: '已保存。MCP 连接由 pi-mcp-adapter 在会话内建立。' } }));
+      toast(`${item.name} 凭据已保存`, 'success');
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setResults(current => ({ ...current, [key]: { ok: false, message } }));
@@ -305,9 +301,9 @@ function CapabilityConfigPanel({ items, filter, onFilterChange }: { items: Capab
               })}
             </div>
             <div className="capability-config-actions">
-              <span className="muted">{bridge ? '保存到本机钥匙串，并立即验证连接。' : '浏览器模式：请先设置对应环境变量。'}</span>
+              <span className="muted">{bridge ? '保存到本机钥匙串；连接由 pi-mcp-adapter 在会话内验证。' : '浏览器模式：请先设置对应环境变量。'}</span>
               <Button size="sm" icon="check" disabled={busy === key} onClick={() => void saveAndTest(item)}>
-                {busy === key ? '验证中…' : '保存并验证'}
+                {busy === key ? '保存中…' : '保存凭据'}
               </Button>
             </div>
             {result && (

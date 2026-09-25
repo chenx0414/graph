@@ -29,7 +29,6 @@ export interface AppServices {
   refreshPrices?(expectedRevision: number): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number; results: { modelId: string; provider: string; status: string; sourceUrl?: string; reason?: string }[] }>;
   capabilityConfig?: {
     secretValues(): Record<string, string>;
-    verify(record: CapabilityRecord, values?: Record<string, string>): Promise<CapabilityCheckResult>;
   };
   /** Host-side view of the RSI restart queue, polled by the desktop app. */
   rsi?: {

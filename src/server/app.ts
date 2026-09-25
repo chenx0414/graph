@@ -27,7 +27,6 @@ import type { UsageService } from './usage.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { DefinitionSpec } from '../catalog/catalog.ts';
 import { capabilityConfigViews } from '../catalog/capability-config.ts';
-import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import { searchPiPackages } from '../runtime/pi-package-search.ts';
 import type { AgentContextLibrary, AgentPromptKey } from '../runtime/agent-context.ts';
 
@@ -366,17 +365,6 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   app.get('/api/capabilities/config', async () => ({
     items: await capabilityConfigViews(runtime.catalog.capabilities(), capabilitySecretValues()),
   }));
-  app.post('/api/capabilities/:id/:version/test', async request => {
-    const params = request.params as { id: string; version: string };
-    const record = runtime.catalog.capability(params.id, params.version);
-    if (!record) throw new RuntimeError('not_found', `Unknown capability ${params.id}@${params.version}`);
-    const body = request.body as { values?: unknown } | undefined;
-    const supplied = body?.values && typeof body.values === 'object' && !Array.isArray(body.values)
-      ? Object.fromEntries(Object.entries(body.values).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-      : {};
-    const verify = options.appServices?.capabilityConfig?.verify ?? verifyMcpCapability;
-    return verify(record, { ...capabilitySecretValues(), ...supplied });
-  });
   app.get('/api/tasks', async () => runtime.user.list());
   app.get('/api/inbox', async request => {
     const query = request.query as { limit?: string };

@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { RuntimeError } from '../core/types.ts';
 
 /** Secret values a capability declaration may reference through ${VAR} or $VAR. */
@@ -120,4 +121,16 @@ export function mcpAdapterServerDefinition(
     ...(env ? { env } : {}),
     inheritEnv: false,
   };
+}
+
+/** Resolve one manifest argument: ${VAR} and $VAR from secrets/process env, else a snapshot-relative path. */
+export function resolveManifestArg(snapshot: string, value: string, env: Record<string, string> = {}): string {
+  const reference = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(value)?.[1]
+    ?? (/^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(value)?.[1]);
+  if (reference) {
+    const resolved = env[reference] ?? process.env[reference];
+    if (resolved === undefined) throw new Error(`Environment variable ${reference} is not set`);
+    return resolved;
+  }
+  return value.startsWith('./') || value.startsWith('../') ? join(snapshot, value) : value;
 }

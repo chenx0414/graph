@@ -538,57 +538,6 @@ export interface CapabilityCheckResult {
   message: string;
 }
 
-/** Verify one credential-bound MCP without mutating task or capability state. */
-export async function verifyMcpCapability(record: CapabilityRecord, secrets: CapabilitySecrets = {}): Promise<CapabilityCheckResult> {
-  if (record.kind !== 'mcp') return { ok: false, tools: [], message: 'Only MCP capabilities can be verified here' };
-  const snapshot = snapshotPath(record);
-  const manifest = await manifestOf(snapshot);
-  const gate: SendGate = { dispatch: (_id, _reservation, send) => send(), settle: () => undefined };
-  let release: (() => Promise<void>) | undefined;
-  let workspace: string | undefined;
-  try {
-    let connection: McpExchange;
-    if (typeof manifest.command === 'string') {
-      workspace = await mkdtemp(join(tmpdir(), 'graph-capability-check-'));
-      const scratch = join(workspace, 'scratch');
-      await mkdir(scratch, { recursive: true, mode: 0o700 });
-      const domains = manifestNetworkDomains(manifest, [], secrets);
-      const provisioning = await ensureMcpProvisioned({
-        gate,
-        manifest,
-        snapshot,
-        workspace,
-        scratchDir: scratch,
-        ...(secrets ? { secrets } : {}),
-        ...(domains.length ? { runtimeDomains: domains } : {}),
-      });
-      const acquired = await acquireRestrictedExecutor();
-      release = acquired.release;
-      connection = await localConnection({
-        executor: acquired.executor,
-        gate,
-        manifest,
-        snapshot,
-        workspace,
-        scratchDir: scratch,
-        secrets,
-        ...(provisioning ? { provisioning: { plan: provisioning, phase: 'runtime' } } : {}),
-        ...(domains.length ? { networkDomains: domains } : {}),
-        ...(manifest.networkAccess === 'unrestricted' ? { allowUnrestrictedNetwork: true } : {}),
-      });
-    } else {
-      connection = remoteConnection(manifest, gate, [], secrets);
-    }
-    const tools = await listMcpTools(connection);
-    return { ok: true, tools: tools.map(tool => tool.name), message: `连接成功，发现 ${tools.length} 个工具` };
-  } catch (error) {
-    return { ok: false, tools: [], message: error instanceof Error ? error.message : String(error) };
-  } finally {
-    await release?.().catch(() => undefined);
-    if (workspace) await rm(workspace, { recursive: true, force: true });
-  }
-}
-
 /** Read paths a sandboxed helper needs to start the Node runtime itself.
  * Inside a packaged Electron app `process.execPath` is the bundle binary, and
  * loading it needs the sibling `Frameworks` directory, not just `MacOS`. */

@@ -15,7 +15,6 @@ import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
 import { graphHome as resolveGraphHome } from '../catalog/graph-home.ts';
 import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefreshResult, type PriceSnapshot } from '../catalog/price-snapshot.ts';
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
-import { verifyMcpCapability } from '../runtime/capabilities.ts';
 import { graphApplicationRoot } from '../runtime/graph-root.ts';
 import { openRsiService, resolveRsiRoot } from '../runtime/rsi.ts';
 import { widenProcessPath } from '../runtime/developer-path.ts';
@@ -428,7 +427,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       refreshPrices: (expectedRevision: number) => refreshPrices(expectedRevision),
       capabilityConfig: {
         secretValues: capabilitySecretValues,
-        verify: (record, values = {}) => verifyMcpCapability(record, values),
       },
       appToken,
       rsi: {
