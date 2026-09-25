@@ -57,6 +57,17 @@ Activation 区分同一节点的新一轮执行。回环返回到原节点时：
 
 汇合节点绑定本轮分支集合、activation 和输入版本。旧轮次成功不能错误满足新轮次。
 
+## 工具返回与大结果
+
+每个工具结果都要经过 agent loop 的 `afterToolCall` 接缝（`src/runtime/tool-results.ts`），它只替换 `content`，工具的 `details` 与 `terminate` 提示照旧存活：
+
+- 小于 `TOOL_RESULT_LIMIT`（4,000 字符）的结果原样交给模型；
+- 大于该阈值的结果，同一会话/工具/参数/内容的**前两次**仍全量返回，**第三次起**换为不超过 `SUMMARY_LIMIT`（1,024 字符）的首尾视图；
+- `bash` 另有 `SHELL_OUTPUT_LIMIT`（20,000 字符）封顶，与只读 `git` 同口径，从第一次视图就生效；
+- 被压缩的结果总是形如 `[large tool result: N bytes, M lines]` … `... omitted X of N bytes ...` … `handle: <路径>` … `Read the whole result with the read tool (offset/limit) on that path.`。句柄是 `<instance>/tool-results/<key>.txt`，仍然包含逐字节完整的原文。
+
+**工具返回不是证据**，因此压缩不影响验收；但「按需拉全」必须真的可行：需要完整内容时用 `read` 读句柄路径（`offset`/`limit` 分段），不要凭摘要下结论。上游 `read`/`bash` 自带的上限与 `offset` 继续读、完整输出临时文件路径照旧保留，本接缝不重复实现；`read` 与 `edit` 不在 Graph 侧封顶（`edit` 的模型可见内容本来就只有一行）。
+
 ## 并发
 
 整个任务图共享 Agent 并发名额，Main Agent 也计入。等待依赖或用户时会释放名额；恢复执行前重新获取。Program node 不占 Agent 名额，但工具进程仍可受宿主资源控制。对话阶段的主管在会话未归档时，由待处理消息、显式恢复、问题答复或执行续轮触发调度。消息已消费且队列为空的异常回合不会自动重试；空队列不阻止显式恢复或答复后的继续执行。
