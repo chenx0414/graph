@@ -6,10 +6,12 @@ import { join } from 'node:path';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
-import { emptyGraphConfig, loadGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
+import { emptyGraphConfig, loadGraphConfig, parseGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
 import { modelRequestHeaders } from '../catalog/models.ts';
 import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
+import { createConfigWatch, type ConfigWatch } from './config-watch.ts';
+import { createSecretPersist } from './secret-persist.ts';
 import { loadPresetBootstrap, publishBootstrap } from '../catalog/presets.ts';
 import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
 import { graphHome as resolveGraphHome } from '../catalog/graph-home.ts';
@@ -375,6 +377,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     const main = graphServer?.runtime.catalog.definitions().find(item => item.id === 'main');
     return main ? `main@${main.version}` : 'master@1';
   };
+  // Secrets the Agent wrote through the bridge wait here until the desktop app
+  // has stored them; the watcher is created once the server exists, because an
+  // applied change has to reach the same side effects a saved config does.
+  const secretPersist = createSecretPersist();
+  let configWatch: ConfigWatch | null = null;
   const server = await openGraphServer({
     stateDir,
     projects: config.projects,
@@ -423,7 +430,9 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     agentContext,
     appServices: {
       applyConfig: (document, expectedRevision) => applyConfig(document, expectedRevision),
-      pushSecret: (ref, value) => pushSecret(ref, value),
+      pushSecret: (ref, value, persisted) => pushSecret(ref, value, persisted),
+      pendingSecretRequests: () => secretPersist.list(),
+      configWatch: () => configWatch?.report() ?? null,
       refreshPrices: (expectedRevision: number) => refreshPrices(expectedRevision),
       capabilityConfig: {
         secretValues: capabilitySecretValues,
@@ -517,22 +526,25 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     configQueue = run.then(() => undefined, () => undefined);
     return run;
   };
+  /** The one candidate rule: a config the daemon would not activate must never
+   * reach the file, and a hand-edited file must not reach the bindings either. */
+  const approveConfigCandidate = (candidate: GraphConfig, revision: number) => {
+    const liveResult = live.check(candidate, revision);
+    if (!liveResult.applied) return liveResult;
+    try {
+      server.runtime.host.checkProjects(candidate.projects ?? []);
+      return { applied: true };
+    } catch (error) {
+      return { applied: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+  };
   const applyConfigNow = async (document: unknown, expectedRevision: number): Promise<ApplyConfigResult> => {
     if (!configStore) throw new RuntimeError('invalid_config', 'The daemon was started without a configuration file');
     // Validate against the merged view (env + APP-pushed secrets - revoked
     // refs) and approve the live candidate *before* touching the file.
-    const saved = await configStore.save(document, expectedRevision, options.env, (candidate, revision) => {
-      const liveResult = live.check(candidate, revision);
-      if (!liveResult.applied) return liveResult;
-      // Project root/in-flight checks belong to the candidate phase: a known
-      // rejection must not reach the file or the active bindings.
-      try {
-        server.runtime.host.checkProjects(candidate.projects ?? []);
-        return { applied: true };
-      } catch (error) {
-        return { applied: false, reason: error instanceof Error ? error.message : String(error) };
-      }
-    });
+    // Project root/in-flight checks belong to the candidate phase: a known
+    // rejection must not reach the file or the active bindings.
+    const saved = await configStore.save(document, expectedRevision, options.env, approveConfigCandidate);
     if (!saved.applied) {
       return {
         revision: saved.revision,
@@ -562,7 +574,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       enabledModelCount: live.status().enabledModelCount,
     };
   };
-  const pushSecretNow = async (ref: string, value: string | null): Promise<ApplyConfigResult> => {
+  const pushSecretNow = async (ref: string, value: string | null, persisted = false): Promise<ApplyConfigResult> => {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) throw new RuntimeError('invalid_input', 'secretRef must be an environment variable name');
     if (value !== null && (!value.trim() || value.length > 8_192)) throw new RuntimeError('invalid_input', 'A nonempty bounded secret value is required');
     const revoking = value === null || value.trim() === '';
@@ -584,6 +596,11 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }
     const result = live.pushSecret(ref, revoking ? null : value.trim());
     if (!result.applied && !sameSet) await persistRevoked(previousRevoked).catch(() => undefined);
+    // A push from the Agent is applied here but not stored: the keychain is the
+    // only durable store and the desktop app owns it. The push that merely
+    // confirms the keychain now holds the value clears the request instead.
+    if (persisted) secretPersist.confirmed(ref);
+    else if (result.applied) secretPersist.mark(ref, revoking ? null : value.trim());
     if (result.applied) {
       await syncProviders();
       scheduler.wake();
@@ -637,7 +654,40 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   };
 
   const applyConfig = (document: unknown, expectedRevision: number) => serialized(() => applyConfigNow(document, expectedRevision));
-  const pushSecret = (ref: string, value: string | null) => serialized(() => pushSecretNow(ref, value));
+  const pushSecret = (ref: string, value: string | null, persisted = false) => serialized(() => pushSecretNow(ref, value, persisted));
+  // Watching the file is what makes a hand edit take effect without a restart.
+  configWatch = options.configPath
+    ? createConfigWatch({
+        path: options.configPath,
+        log,
+        parse: text => {
+          const raw = JSON.parse(text) as { revision?: unknown };
+          return { config: parseGraphConfig(raw, options.configPath!), revision: typeof raw.revision === 'number' ? raw.revision : null };
+        },
+        apply: (candidate, revision) => {
+          // A hand edit rarely bumps the revision, so the effective revision never
+          // moves backwards; the content, not the number, decides that it changed.
+          const effective = Math.max(revision, live.revision());
+          const verdict = approveConfigCandidate(candidate, effective);
+          if (!verdict.applied) return verdict;
+          const result = live.apply(candidate, effective);
+          if (result.applied) {
+            void (async () => {
+              try {
+                await syncProviders();
+                server.runtime.host.syncProjects();
+                scheduler.wake();
+                publishDefinitions();
+                activateDispatch(server);
+              } catch (error) {
+                log(`Configuration applied but activation failed: ${String(error)}`);
+              }
+            })();
+          }
+          return result;
+        },
+      })
+    : null;
   const refreshPrices = (expectedRevision: number) => serialized(() => refreshPricesNow(expectedRevision));
 
   return {

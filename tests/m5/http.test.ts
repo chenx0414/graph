@@ -195,6 +195,7 @@ test('the app bridge exposes the RSI restart queue behind the app token', async 
     appToken: 'rsi-token',
     applyConfig: async () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
     pushSecret: async () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
+    pendingSecretRequests: () => [],
     snapshot: () => ({ revision: 1, effectiveRevision: 1, applied: true, configured: true, modelCount: 0, enabledModelCount: 0 }),
     rsi: {
       status: async () => ({ available: true, root, branch: 'main', pendingRestart: { id: 'rsi-1', root, branch: 'rsi/x', commit: 'c'.repeat(40), requestedAt: 1 }, activeOperations: 0, canRestart: true }),

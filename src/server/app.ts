@@ -282,11 +282,19 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   app.post(PROVIDER_ROUTES.probe, async request => runProviderProbe(request.body));
   app.post('/api/app/secret', async request => {
     if (!options.appServices) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');
-    const body = request.body as { ref?: unknown; value?: unknown };
+    const body = request.body as { ref?: unknown; value?: unknown; persisted?: unknown };
     if (typeof body.ref !== 'string') throw new RuntimeError('invalid_input', 'secretRef is required');
     if (body.value !== null && typeof body.value !== 'string') throw new RuntimeError('invalid_input', 'The secret value must be a string or null');
-    return options.appServices.pushSecret(body.ref, body.value as string | null);
+    // `persisted: true` says the keychain now holds this value, which clears the
+    // Agent's pending write instead of creating one.
+    return options.appServices.pushSecret(body.ref, body.value as string | null, body.persisted === true);
   });
+  // Secret writes the keychain does not hold yet, for the desktop app to store.
+  // Only values the Agent pushed appear here; a keychain-only secret never
+  // travels back out of the daemon.
+  app.get('/api/app/secret-requests', async () => ({
+    requests: options.appServices ? options.appServices.pendingSecretRequests() : [],
+  }));
   app.get('/api/app/rsi/status', async () => {
     if (!options.appServices?.rsi) return { available: false, pendingRestart: null, canRestart: false };
     return options.appServices.rsi.status();
@@ -306,6 +314,10 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
         revision,
         ...(status ? { effectiveRevision: status.effectiveRevision, configured: status.configured } : {}),
         config: sanitizeConfig(config, providerSecrets()),
+        // What the daemon knows on top of the file: secret writes waiting for the
+        // keychain, and the file watcher's last outcome.
+        pendingSecretRefs: options.appServices?.pendingSecretRequests().map(request => request.ref) ?? [],
+        watch: options.appServices?.configWatch?.() ?? null,
       };
     });
     app.post('/api/config', async request => {

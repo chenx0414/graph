@@ -110,9 +110,11 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 ### 生效语义
 
-- **`POST /api/config` 是热生效路径**：以磁盘原子替换 + revision 前移生效，响应里 `restartRequired: false`。
-- **没有配置文件 watcher**：直接改 `graph.config.json` **不会**热生效，只有重启守护进程才会被读到（且绕过上面全部守卫与候选校验）。
+- **两条路都会热生效**：①`POST /api/config`（原子替换磁盘 + revision 前移，响应 `restartRequired: false`）；②**直接改文件**——守护进程在监听它，改动会被读入并生效，不必重启。
+- **改文件时由「内容」决定是否变化，不由 `revision`**：手改一般不会去动那个数字，所以 `revision` 只是并发保存的乐观锁，不参与「有没有变化」的判断；守护进程自己保存后 watcher 会看到同一份内容并**忽略**（不会重复生效）。
+- 手改的文档若解析或校验失败，**上一份配置继续生效**，并被记录原因（见下）。
 - `applied: false` 的候选不会落盘，也不会改变生效版本。
+- **`GET /api/config` 会汇报**：`watch`（`watching` / `events` / `applied` / `ignored` / `lastReason` / `fileRevision`）与 `pendingSecretRefs`（见下）。改完文件后，用这两个字段确认你的改动真的生效了，而不是假定。
 
 ---
 
@@ -148,8 +150,9 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 - 运行时看到的密钥是**合并视图**：进程环境 + App/钥匙串推送 − 显式撤销（`<stateDir>/revoked-secrets.json` 跨重启保留）。
 - App 桥接口（仅安装 App 桥的守护进程提供）：
   `POST /api/app/secret`，头必须带 `x-graph-app-token`（值从 `<stateDir>/app-token` 读取，权限 0600），体 `{ "ref": "<环境变量名>", "value": "<密钥>" }`；`value: null` 表示**撤销**该密钥。缺令牌返回 403。
-  该接口**只改变当前守护进程的视图**：推送的值不会写进钥匙串，守护进程重启后失效。要持久化，必须由用户在 App 窗口保存（钥匙串由桌面端 `safeStorage` 管理；`secrets.json` 由桌面端读写，守护进程不碰）。
-- 因此：**可以**用 App 桥临时注入密钥完成一次配置与验证；**不可以**声称"已永久保存"，除非用户已在 App 窗口保存。
+- **写入即持久化（走反向通道，不需要用户操作）**：密钥立刻在守护进程生效，同时被登记为「等待落盘」；桌面 App 会轮询 `GET /api/app/secret-requests`（同样需要 app token），用与「保存密钥」相同的 `safeStorage` 写进钥匙串，然后回推 `persisted: true` 清掉等待标记。钥匙串是唯一的持久存储，而它只由桌面端持有 —— 所以是**桌面端来取**（守护进程从来不直接写密钥文件）。
+- **你如何确认已持久化**：`GET /api/config` 的 `pendingSecretRefs` **不再包含**该 ref。若仍包含，说明桌面端还没取走（App 未运行，或钥匙串不可用），此时**不要**声称已保存。
+- `GET /api/app/secret-requests` 只列出**由 Agent 推送、尚未落盘**的值；用户在 App 窗口保存的钥匙串密钥永远不会经这个接口回流（其值不出守护进程）。
 
 ---
 
@@ -167,12 +170,13 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 1. 用 `/api/config` 读到**最新** revision，不是记忆里的值。
 2. `credentialId` 在 `credentials` 里存在；新凭据的 `secretRef` 名字与运行时合并视图里的变量名一致。
 3. 写请求带本地 `Origin`；cookie 是刚 `GET /` 拿的。
-4. `applied: true` **且** `/api/config/test` 通过，才算成功。
+4. `applied: true` **且** `/api/config/test` 通过，才算成功；手改文件则看 `watch.lastReason` 与 `watch.fileRevision`。
+5. 写完密钥后确认 `pendingSecretRefs` 已清空，才说「已持久化」。
 5. 删模型前确认没有未完成任务在用（否则 `config_in_use`）。
 
 ## 不要宣称
 
-- 不要声称改过 `graph.config.json` 文件就等于配置已生效（没有 watcher）。
-- 不要把 `applied: true` 当作模型可用。
-- 不要声称已经永久保存了密钥（除非用户已在 App 窗口保存）。
+- 不要只看「文件改完了」就说生效：用 `GET /api/config` 的 `watch` 字段确认（`lastReason` 为 null 且 `fileRevision` 是你写的值）。
+- 不要把 `applied: true` 当作模型可用（要跑 `/api/config/test`）。
+- 不要在看到 `pendingSecretRefs` 仍含该 ref 时声称密钥已永久保存。
 - 不要为 `command-goat` 之类仓库未声明文档的厂商编造凭据获取步骤。
