@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, join, sep } from 'node:path';
+import { dirname, basename, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { DefaultPackageManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
@@ -36,12 +36,57 @@ export async function resolvePiExtensionSource(input: {
   if (!entries.length) {
     throw new RuntimeError('capability_unavailable', `Pi extension source ${input.source} resolved no extension entry`);
   }
+  await installRequiredPeers(entries[0]!);
   const readRoots = [...new Set([
     ...resolved.extensions.map(resource => resource.metadata.baseDir).filter((value): value is string => typeof value === 'string' && value.length > 0),
     ...entries.map(entry => dirname(entry)),
   ])];
   const version = await packageVersionAt(entries[0]!, npmSourceName(input.source));
   return { entries, readRoots, version };
+}
+
+/** The install root npm used for a temporary source: `<root>/node_modules/<pkg>/…`. */
+function installRootFor(entry: string): string | undefined {
+  let current = dirname(entry);
+  while (current !== dirname(current)) {
+    if (basename(current) === 'node_modules') return dirname(current);
+    current = dirname(current);
+  }
+  return undefined;
+}
+
+/** The nearest package.json at or above one path. */
+async function packageManifestAt(start: string): Promise<Record<string, unknown> | undefined> {
+  let current = start;
+  while (current !== dirname(current)) {
+    const file = join(current, 'package.json');
+    if (existsSync(file)) {
+      try { return JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>; }
+      catch { return undefined; }
+    }
+    current = dirname(current);
+  }
+  return undefined;
+}
+
+/**
+ * The Pi SDK installs a source with `--omit=peer`, and the host supplies only
+ * `@earendil-works/*` to loaded extensions, so a plain non-optional peer such as
+ * zod would never resolve and the extension could not load at all. Install just
+ * those peers into the same root; an already complete install is a no-op.
+ */
+async function installRequiredPeers(entry: string): Promise<void> {
+  const root = installRootFor(entry);
+  if (!root) return;
+  const manifest = await packageManifestAt(dirname(entry));
+  const peers = (manifest?.peerDependencies ?? {}) as Record<string, string>;
+  const meta = (manifest?.peerDependenciesMeta ?? {}) as Record<string, { optional?: boolean }>;
+  const missing = Object.entries(peers)
+    .filter(([name]) => meta[name]?.optional !== true && !name.startsWith('@earendil-works/'))
+    .filter(([name]) => !existsSync(join(root, 'node_modules', name)))
+    .map(([name, range]) => `${name}@${range}`);
+  if (!missing.length) return;
+  await run('npm', ['install', ...missing, '--prefix', root, '--omit=dev', '--no-save', '--no-audit', '--no-fund'], { timeout: 300_000 });
 }
 
 export interface PiExtensionSourceStatus {
