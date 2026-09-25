@@ -11,6 +11,7 @@ import { normalizeDomainPattern } from '../core/domains.ts';
 import { isLocalMcpCommand, LOCAL_MCP_COMMANDS } from '../core/mcp-commands.ts';
 import { canonicalJson } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
+import { environmentValues, headerValues } from './mcp-adapter-server.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
 import { allowedDomain, normalizeDomains } from './domains.ts';
@@ -413,44 +414,6 @@ function skillMetadata(text: string) {
 }
 
 export type CapabilitySecrets = Record<string, string>;
-
-function headerValues(headers: unknown, headersEnv: unknown, secrets: CapabilitySecrets = {}) {
-  const values: Record<string, string> = {};
-  const merge = (source: unknown, resolveValue: (value: string) => string, label: string) => {
-    if (source === undefined) return;
-    if (!source || typeof source !== 'object' || Array.isArray(source) || Object.values(source).some(value => typeof value !== 'string')) {
-      throw new RuntimeError('capability_unavailable', `${label} must be a string map`);
-    }
-    for (const [header, value] of Object.entries(source as Record<string, string>)) values[header] = resolveValue(value);
-  };
-  merge(headers, value => value, 'MCP manifest headers');
-  merge(headersEnv, name => {
-    const value = secrets[name] ?? process.env[name];
-    if (!value) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
-    return value;
-  }, 'MCP manifest headersEnv');
-  return values;
-}
-
-function environmentValues(env: unknown, secrets: CapabilitySecrets = {}) {
-  if (env === undefined) return undefined;
-  if (!env || typeof env !== 'object' || Array.isArray(env) || Object.values(env).some(value => typeof value !== 'string')) {
-    throw new RuntimeError('capability_unavailable', 'MCP manifest env must be a string map');
-  }
-  const values: Record<string, string> = {};
-  for (const [name, rawValue] of Object.entries(env as Record<string, string>)) {
-    const reference = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(rawValue)?.[1]
-      ?? (/^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(rawValue)?.[1]);
-    if (reference) {
-      const value = secrets[reference] ?? process.env[reference];
-      if (value === undefined) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${reference}`);
-      values[name] = value;
-    } else {
-      values[name] = rawValue;
-    }
-  }
-  return values;
-}
 
 function resolveManifestDomains(declared: unknown, label: string, granted: string[] = [], secrets: CapabilitySecrets = {}) {
   if (declared === undefined) return normalizeDomains(granted);
