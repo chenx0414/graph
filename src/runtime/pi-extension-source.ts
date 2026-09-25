@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { existsSync, readdirSync } from 'node:fs';
+import { readFile, rm } from 'node:fs/promises';
 import { dirname, basename, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { DefaultPackageManager, SettingsManager } from '@earendil-works/pi-coding-agent';
@@ -22,6 +22,21 @@ export interface ResolvedPiExtensionSource {
  * vendors a copy nor hand-writes the entry file.
  */
 export async function resolvePiExtensionSource(input: {
+  source: string;
+  cwd: string;
+  agentDir: string;
+}): Promise<ResolvedPiExtensionSource> {
+  const resolved = await resolveSourceOnce(input);
+  const root = installRootFor(resolved.entries[0]!);
+  if (!root || !(await installRootGaps(root)).length) return resolved;
+  // A partial npm extraction inside Graph's own extension cache is exactly what broke a session on
+  // 2026-09-25 (a peer of `pi-mcp-adapter` lost its `v4/` directory). Rebuild the whole install once
+  // so no damaged package — dependency or peer — can reach a session.
+  await rm(root, { recursive: true, force: true });
+  return await resolveSourceOnce(input);
+}
+
+async function resolveSourceOnce(input: {
   source: string;
   cwd: string;
   agentDir: string;
@@ -81,7 +96,7 @@ async function packageManifestAt(start: string): Promise<Record<string, unknown>
  * directory, so completeness has to be checked per declared target. Type declarations are
  * ignored here: a package may legitimately ship none, and a missing `.d.ts` never stops a load.
  */
-export async function packageGaps(dir: string): Promise<string[]> {
+export async function packageGaps(dir: string, options: { rootOnly?: boolean } = {}): Promise<string[]> {
   const manifest = (await packageManifestAt(dir)) as Record<string, unknown> | null;
   if (!manifest || typeof manifest !== 'object') return ['package.json'];
   const targets = new Set<string>();
@@ -91,7 +106,17 @@ export async function packageGaps(dir: string): Promise<string[]> {
       return;
     }
     if (Array.isArray(value)) { for (const item of value) collect(item); return; }
-    if (value && typeof value === 'object') { for (const item of Object.values(value)) collect(item); }
+    if (!value || typeof value !== 'object') return;
+    for (const [key, item] of Object.entries(value)) {
+      // A subpath export (`"./v4/classic/external.js"`) is a real file the package must ship; a
+      // custom condition name (`"standard-schema-spec"`) is not a runtime entry for us and may
+      // legitimately point at sources the published package leaves out.
+      const subpath = key.startsWith('.');
+      if (!subpath && !RUNTIME_CONDITIONS.has(key)) continue;
+      // `"."` is the package's own root entry, not a subpath: a dependency only has to satisfy it.
+      if (options.rootOnly && subpath && key !== '.') continue;
+      collect(item);
+    }
   };
   collect(manifest.main);
   collect(manifest.module);
@@ -100,6 +125,32 @@ export async function packageGaps(dir: string): Promise<string[]> {
   for (const target of targets) {
     if (!target.startsWith('./')) continue;
     if (!targetExists(dir, target.slice(2))) gaps.push(target.slice(2));
+  }
+  return gaps;
+}
+
+/** Export conditions that name a runtime entry point; anything else is a publisher's own dialect. */
+const RUNTIME_CONDITIONS = new Set(['node', 'import', 'require', 'default', 'module']);
+
+/**
+ * Every top-level package in one install root that declares an entry point it does not ship.
+ * A peer is checked as a whole; a plain dependency only has to satisfy its root entry, because its
+ * deep subpaths are the publisher's business and a guess there would rebuild healthy trees.
+ */
+export async function installRootGaps(root: string): Promise<string[]> {
+  const nodeModules = join(root, 'node_modules');
+  if (!existsSync(nodeModules)) return [];
+  const gaps: string[] = [];
+  for (const entry of readdirSync(nodeModules)) {
+    if (entry.startsWith('.')) continue;
+    const names = entry.startsWith('@')
+      ? readdirSync(join(nodeModules, entry)).map(name => `${entry}/${name}`)
+      : [entry];
+    for (const name of names) {
+      const dir = join(nodeModules, name);
+      const missing = await packageGaps(dir, { rootOnly: true });
+      if (missing.length) gaps.push(`${name}: ${missing.join(', ')}`);
+    }
   }
   return gaps;
 }

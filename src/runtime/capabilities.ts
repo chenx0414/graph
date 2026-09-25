@@ -1039,11 +1039,20 @@ export async function loadCapabilities(input: {
   }; } // Unpublished definitions keep briefing-only behavior.
   try {
     const bindings = definitionBindings(definition, input.catalog);
+    // Bindings the definition declares itself are a promise to the user, so they stay fail-closed.
+    // The rest come from base capabilities: a convenience layer nobody asked for, which must never
+    // be able to stop a session (see the 2026-09-25 incident).
+    const declaredKeys = new Set<string>([
+      ...(definition.capabilities ?? []).map(binding => bindingKey(binding, 'capability')),
+      ...(definition.prompts?.agent ? [bindingKey(definition.prompts.agent, 'agent')] : []),
+      ...(definition.prompts?.tool ? [bindingKey(definition.prompts.tool, 'tool')] : []),
+    ]);
     const seen = new Set<string>();
     for (const { bound, role } of bindings) {
       const seenKey = bindingKey(bound, role);
       if (seen.has(seenKey)) continue;
       seen.add(seenKey);
+      try {
       const record = input.catalog.capability(bound.id, bound.version);
       if (!record || record.status !== 'available') {
         throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not available in the capability directory`);
@@ -1259,6 +1268,15 @@ export async function loadCapabilities(input: {
           },
         } : {}),
       });
+      } catch (error) {
+        if (declaredKeys.has(seenKey)) throw error;
+        let kind: string | null = null;
+        try { kind = input.catalog.capability(bound.id, bound.version)?.kind ?? null; } catch { kind = null; }
+        report.push({
+          id: bound.id, version: bound.version, kind, loaded: false, executable: false,
+          reason: `基础能力加载失败，已跳过（它不在本 Agent 的配方里）：${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
     }
   } catch (error) {
     await close();

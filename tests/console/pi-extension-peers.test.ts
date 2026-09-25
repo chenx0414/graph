@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { canonicalJson } from '../../src/core/store.ts';
-import { ensureRequiredPeers, packageGaps } from '../../src/runtime/pi-extension-source.ts';
+import { ensureRequiredPeers, installRootGaps, packageGaps } from '../../src/runtime/pi-extension-source.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -71,6 +71,42 @@ test('a package that declares an extension-less main is not mistaken for a trunc
   await writeFile(join(root, 'index.js'), 'module.exports = () => {};\n');
 
   expect(await packageGaps(root)).toEqual([]);
+});
+
+test('a custom export condition pointing at a source file is not a gap', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-peer-custom-condition-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  // `@standard-schema/spec` ships only its built output while declaring a custom condition that
+  // points at `./src/index.ts`. That condition is not a runtime entry here, so it is not a gap.
+  await mkdir(join(root, 'dist'), { recursive: true });
+  await writeFile(join(root, 'dist', 'index.js'), 'export const spec = 1;\n');
+  await writeFile(join(root, 'package.json'), canonicalJson({
+    name: '@standard-schema/spec', version: '1.0.0',
+    exports: { '.': { 'standard-schema-spec': './src/index.ts', import: { types: './dist/index.d.ts', default: './dist/index.js' } } },
+  }));
+
+  expect(await packageGaps(root)).toEqual([]);
+});
+
+test('a damaged dependency anywhere in the install root is reported as a gap', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-install-root-gaps-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const nodeModules = join(root, 'node_modules');
+  const healthy = join(nodeModules, 'healthy');
+  const damaged = join(nodeModules, '@scope', 'damaged');
+  await Promise.all([healthy, damaged].map(path => mkdir(path, { recursive: true })));
+  for (const [dir, name] of [[healthy, 'healthy'], [damaged, 'damaged']] as const) {
+    await writeFile(join(dir, 'index.js'), 'export const value = 1;\n');
+    await writeFile(join(dir, 'package.json'), canonicalJson({
+      name, version: '1.0.0', main: './index.js', exports: { '.': { import: './dist/index.js' } },
+    }));
+  }
+  await mkdir(join(healthy, 'dist'), { recursive: true });
+  await writeFile(join(healthy, 'dist', 'index.js'), 'export const value = 1;\n');
+
+  const gaps = await installRootGaps(root);
+  expect(gaps.join('\n')).toContain('@scope/damaged');
+  expect(gaps.join('\n')).not.toContain('healthy');
 });
 
 /** An extension entry whose declared peer `zod` exists but is missing its `v4` directory. */
