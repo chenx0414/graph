@@ -196,6 +196,7 @@ function capabilityGroups(item: AgentCombinationView) {
 }
 
 type ExtensionUpdate = { installed: string | null; latest: string | null; available: boolean };
+type OfficialPackage = { name: string; version: string; description: string; publisher: string | null; weeklyDownloads: number | null; url: string | null };
 
 function CapabilityDetail({ item, update, onUpdate }: { item: CapabilityRecord; update?: ExtensionUpdate | undefined; onUpdate?: ((item: CapabilityRecord) => void) | undefined }) {
   return (
@@ -618,6 +619,30 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
       : sections.find(item => item.id === id)?.items.length ?? 0;
   const [updates, setUpdates] = useState<Record<string, ExtensionUpdate>>({});
   const [autoUpdate, setAutoUpdate] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseQuery, setBrowseQuery] = useState('');
+  const [browseHits, setBrowseHits] = useState<OfficialPackage[]>([]);
+  const [browseBusy, setBrowseBusy] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+  // Read-only: this browses the official channel, it never writes a capability.
+  const loadBrowse = async () => {
+    setBrowseBusy(true);
+    setBrowseError(null);
+    try {
+      const result = await api<{ packages: OfficialPackage[] }>(`/api/catalog/pi-packages?q=${encodeURIComponent(browseQuery.trim())}`);
+      setBrowseHits(result.packages);
+    } catch (cause) {
+      setBrowseError(cause instanceof Error ? cause.message : String(cause));
+      setBrowseHits([]);
+    } finally {
+      setBrowseBusy(false);
+    }
+  };
+  const toggleBrowse = async () => {
+    const next = !browseOpen;
+    setBrowseOpen(next);
+    if (next && !browseHits.length) await loadBrowse();
+  };
   // The switch is a daemon setting, so it lives in the config file rather than browser preferences.
   useEffect(() => {
     let live = true;
@@ -797,6 +822,34 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
                     <input type="checkbox" className="preference-toggle" data-testid="pi-extension-auto-update-toggle" checked={autoUpdate} onChange={event => void saveAutoUpdate(event.target.checked)} />
                   </label>
                 )}<label className="resource-search"><Icon name="search" size={15} /><input value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} placeholder="搜索能力或路径" data-testid="resource-catalog-search" /><span className="faint">{filtered.length}</span></label></div>
+                {active.id === 'pi-extensions' && (
+                  <div className="browse-official" data-testid="pi-package-browser">
+                    <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Button onClick={() => void toggleBrowse()}>{browseOpen ? '收起官方扩展库' : '浏览官方扩展库'}</Button>
+                      <span className="muted">官方渠道是 npm（关键字 pi-package）；这里只浏览，加入请让主 Agent 来做</span>
+                    </div>
+                    {browseOpen && (
+                      <div className="stack" style={{ gap: 8, marginTop: 8 }}>
+                        <div className="row" style={{ gap: 8 }}>
+                          <input value={browseQuery} onChange={event => setBrowseQuery(event.target.value)} placeholder="搜索官方 Pi 包（名称或关键字；留空看最新）" data-testid="pi-package-query" style={{ flex: 1 }} />
+                          <Button onClick={() => void loadBrowse()} disabled={browseBusy}>{browseBusy ? '检索中…' : '搜索'}</Button>
+                        </div>
+                        {browseError && <p className="form-error" data-testid="pi-package-error">{browseError}</p>}
+                        {!browseBusy && !browseError && !browseHits.length && <p className="muted" data-testid="pi-package-empty">没有匹配的 Pi 包。</p>}
+                        {browseHits.length > 0 && (
+                          <ul className="stack" style={{ gap: 6, listStyle: 'none', padding: 0, margin: 0 }} data-testid="pi-package-results">
+                            {browseHits.map(hit => (
+                              <li key={hit.name} className="resource-candidate-copy" data-testid={`pi-package-${hit.name}`} style={{ padding: '6px 0' }}>
+                                <span><strong>{hit.name}</strong> <span className="faint">v{hit.version}</span>{hit.weeklyDownloads !== null ? <span className="faint"> · 周下载 {hit.weeklyDownloads}</span> : null}{hit.publisher ? <span className="faint"> · {hit.publisher}</span> : null}</span>
+                                <small>{hit.description}</small>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="resource-split-toggle" role="group" aria-label="按配置状态筛选" data-testid={`resource-filter-${active.id}`}>
                   {LIBRARY_FILTERS.map(option => (
                     <button

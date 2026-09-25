@@ -28,6 +28,7 @@ import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { DefinitionSpec } from '../catalog/catalog.ts';
 import { capabilityConfigViews } from '../catalog/capability-config.ts';
 import { verifyMcpCapability } from '../runtime/capabilities.ts';
+import { searchPiPackages } from '../runtime/pi-package-search.ts';
 import type { AgentContextLibrary, AgentPromptKey } from '../runtime/agent-context.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
@@ -719,6 +720,18 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   }));
   app.post('/api/catalog/refresh', async () => runtime.catalog.refreshCatalog());
   app.get('/api/catalog/pi-extension-updates', async () => runtime.catalog.piExtensionUpdates());
+  // Browsing the official Pi package channel is read-only: npm, filtered by the `pi-package`
+  // keyword the Pi documentation names. Adding a package stays a deliberate request to the Main Agent.
+  app.get('/api/catalog/pi-packages', async request => {
+    const query = request.query as { q?: string; limit?: string };
+    const limit = Number.parseInt(query.limit ?? '', 10);
+    return {
+      packages: await searchPiPackages({
+        ...(query.q?.trim() ? { query: query.q } : {}),
+        ...(Number.isFinite(limit) ? { limit } : {}),
+      }),
+    };
+  });
   app.post('/api/catalog/pi-extensions/:id/:version/update', async request => {
     const params = request.params as { id: string; version: string };
     return runtime.catalog.updatePiExtension(params.id, params.version);
