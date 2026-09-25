@@ -40,6 +40,10 @@ export async function resolvePiExtensionSource(input: {
   const readRoots = [...new Set([
     ...resolved.extensions.map(resource => resource.metadata.baseDir).filter((value): value is string => typeof value === 'string' && value.length > 0),
     ...entries.map(entry => dirname(entry)),
+    // The restricted worker reads the extension in a sandbox, and a sourced package's own
+    // dependencies (its peers and its node_modules) are siblings of the package directory, so
+    // the install root has to be readable as well or the extension cannot resolve them.
+    ...(installRootFor(entries[0]!) ? [installRootFor(entries[0]!)!] : []),
   ])];
   const version = await packageVersionAt(entries[0]!, npmSourceName(input.source));
   return { entries, readRoots, version };
