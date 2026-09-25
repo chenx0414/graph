@@ -107,10 +107,25 @@ function renderedSection(sectionValue: AgentPromptSection) {
   return `<${sectionValue.id}>\n${content}\n</${sectionValue.id}>`;
 }
 
+/** The opening sentence of a description, collapsed and capped: the inventory is an index, not a copy. */
+function toolSnippet(description: string) {
+  const collapsed = description.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return '';
+  const stop = collapsed.search(/\.\s|\.$/);
+  const sentence = stop === -1 ? collapsed : collapsed.slice(0, stop + 1);
+  return sentence.length > 96 ? `${sentence.slice(0, 93).trimEnd()}...` : sentence;
+}
+
+/**
+ * One line per tool: name, availability, and a one-sentence snippet.
+ *
+ * A tool's full description already travels with the tool definition the model receives, so
+ * repeating it here only duplicates the same text inside the system prompt.
+ */
 function toolLine(tool: AgentToolPromptEntry) {
-  const description = tool.description.replace(/\s+/g, ' ').trim();
   const availability = tool.runtimeAvailable === null ? ' (not yet discovered)' : tool.available ? '' : ' (unavailable)';
-  return `- ${tool.name}${availability}: ${description}`;
+  const snippet = toolSnippet(tool.description);
+  return snippet ? `- ${tool.name}${availability}: ${snippet}` : `- ${tool.name}${availability}`;
 }
 
 function toolInventory(input: ComposeAgentSystemPromptInput) {
