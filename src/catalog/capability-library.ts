@@ -264,9 +264,12 @@ export class CapabilityLibrary {
   }
 
   capability(id: string, version?: string): CapabilityRecord | undefined {
-    return version
-      ? this.capabilitiesCache.find(item => item.id === id && item.version === version)
-      : [...this.capabilitiesCache].reverse().find(item => item.id === id);
+    if (!version) return [...this.capabilitiesCache].reverse().find(item => item.id === id);
+    const exact = this.capabilitiesCache.find(item => item.id === id && item.version === version);
+    if (exact) return exact;
+    // A capability that declares a package source holds whatever version the source resolved to,
+    // so a binding's version is not a pin for it: match by id instead of failing the definition.
+    return [...this.capabilitiesCache].reverse().find(item => item.id === id && item.packageSource);
   }
 
   search(input: CapabilitySearchInput = {}): CapabilitySearchResult {

@@ -338,6 +338,22 @@ async function resolvePiExtensionRuntime(input: {
   };
 }
 
+/**
+ * A capability that declares a package source reports the version the source actually resolved to:
+ * the manifest's `version` follows the source instead of decaying into a stale pin.
+ */
+export async function syncCapabilityVersion(snapshot: string, version: string | null) {
+  if (!version) return;
+  const file = join(snapshot, 'capability.json');
+  try {
+    const manifest = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    if (manifest.version === version) return;
+    await writeFile(file, `${canonicalJson({ ...manifest, version })}\n`);
+  } catch {
+    // A manifest we cannot rewrite must never fail the load that triggered it.
+  }
+}
+
 async function manifestOf(snapshot: string) {
   try { return JSON.parse(await readFile(join(snapshot, 'capability.json'), 'utf8')) as McpManifest; }
   catch (error) { throw new RuntimeError('capability_unavailable', `Capability manifest is unreadable: ${String(error)}`); }
@@ -1135,6 +1151,7 @@ export async function loadCapabilities(input: {
           piExtensionPaths.push(...resolvedSource.entries);
           readRoots.push(...resolvedSource.readRoots);
           loadedEntry = resolvedSource.entries[0]!;
+          await syncCapabilityVersion(snapshot, resolvedSource.version);
         } else {
           const entryValue = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry : './index.mjs';
           const entry = isAbsolute(entryValue) ? entryValue : resolve(snapshot, entryValue);

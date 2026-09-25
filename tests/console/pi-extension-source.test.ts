@@ -6,7 +6,7 @@ import { Catalog } from '../../src/catalog/catalog.ts';
 import { TaskStore, canonicalJson } from '../../src/core/store.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { openCapabilityBundle } from '../../src/runtime/capability-bundle.ts';
-import { npmSourceName, piExtensionSourceStatus } from '../../src/runtime/pi-extension-source.ts';
+import { npmSourceName, piExtensionSourceStatus, resolvePiExtensionSource } from '../../src/runtime/pi-extension-source.ts';
 import { parseGraphConfig } from '../../src/server/config.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -75,6 +75,9 @@ test('a source reports the installed version, and only npm sources are checked f
   // A local source has no registry to ask, so it reports what is on disk and no update.
   expect(await piExtensionSourceStatus({ source: packageDir, cwd: root, agentDir: join(root, 'state') }))
     .toEqual({ installed: '1.2.3', latest: null, available: false });
+  // The same resolve also reports the version the source provides, so the manifest can follow it.
+  const resolved = await resolvePiExtensionSource({ source: packageDir, cwd: root, agentDir: join(root, 'state') });
+  expect(resolved.version).toBe('1.2.3');
   expect(npmSourceName(packageDir)).toBeNull();
   expect(npmSourceName('npm:pi-agent-browser-native')).toBe('pi-agent-browser-native');
   expect(npmSourceName('npm:@ff-labs/pi-fff@^0.10.0')).toBe('@ff-labs/pi-fff');
@@ -88,6 +91,8 @@ test('the Pi extension auto-update setting survives a config round trip', () => 
     limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
     access: {},
   };
-  expect(parseGraphConfig(base, '/tmp/graph.config.json').piExtensionAutoUpdate).toBe(false);
+  // The switch defaults to on, and an explicit value always wins.
+  expect(parseGraphConfig(base, '/tmp/graph.config.json').piExtensionAutoUpdate).toBe(true);
+  expect(parseGraphConfig({ ...base, piExtensionAutoUpdate: false }, '/tmp/graph.config.json').piExtensionAutoUpdate).toBe(false);
   expect(parseGraphConfig({ ...base, piExtensionAutoUpdate: true }, '/tmp/graph.config.json').piExtensionAutoUpdate).toBe(true);
 });

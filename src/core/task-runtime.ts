@@ -29,6 +29,7 @@ import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
+import { syncCapabilityVersion } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
@@ -1970,6 +1971,7 @@ export async function openTaskRuntime(options: {
         const record = catalog.capability(id, version);
         if (!record?.packageSource) throw new RuntimeError('not_found', `Pi extension ${id}@${version} has no package source`);
         const result = await updatePiExtensionSource({ source: record.packageSource, cwd: stateDir, agentDir: stateDir });
+        await syncCapabilityVersion(record.source, result.version);
         await catalog.refresh();
         return result;
       },

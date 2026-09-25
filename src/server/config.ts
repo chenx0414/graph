@@ -48,7 +48,7 @@ export function emptyGraphConfig(): GraphConfig {
     credentials: {},
     limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
     access: defaultAccessPolicy(),
-    piExtensionAutoUpdate: false,
+    piExtensionAutoUpdate: true,
   };
 }
 
@@ -283,7 +283,7 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
     credentials,
     limits,
     access: parseAccessPolicy(root.access, 'access'),
-    piExtensionAutoUpdate: optionalBoolean(root.piExtensionAutoUpdate, 'piExtensionAutoUpdate') ?? false,
+    piExtensionAutoUpdate: optionalBoolean(root.piExtensionAutoUpdate, 'piExtensionAutoUpdate') ?? true,
   };
 }
 

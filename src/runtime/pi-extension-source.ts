@@ -11,6 +11,8 @@ export interface ResolvedPiExtensionSource {
   entries: string[];
   /** Directories the loaded extension needs to read (install root plus each entry's folder). */
   readRoots: string[];
+  /** The version the resolved package currently has on disk. */
+  version: string | null;
 }
 
 /**
@@ -38,7 +40,8 @@ export async function resolvePiExtensionSource(input: {
     ...resolved.extensions.map(resource => resource.metadata.baseDir).filter((value): value is string => typeof value === 'string' && value.length > 0),
     ...entries.map(entry => dirname(entry)),
   ])];
-  return { entries, readRoots };
+  const version = await packageVersionAt(entries[0]!, npmSourceName(input.source));
+  return { entries, readRoots, version };
 }
 
 export interface PiExtensionSourceStatus {
