@@ -38,6 +38,8 @@ export interface CapabilityManifest {
    */
   source?: string;
   tools?: { name: string; description?: string }[];
+  /** Every Agent definition receives this capability without binding it. */
+  base?: boolean;
   /** Host runtime requirements for a trusted Pi extension. */
   runtime?: {
     commands?: string[];
@@ -77,6 +79,8 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
   const description = raw.description === undefined ? undefined : text(raw.description, `${path}.description`);
   const role = raw.role === undefined ? undefined : text(raw.role, `${path}.role`) as 'agent' | 'tool';
   if (role && role !== 'agent' && role !== 'tool') throw new RuntimeError('invalid_capability', `${path}.role must be agent or tool`);
+  if (raw.base !== undefined && typeof raw.base !== 'boolean') throw new RuntimeError('invalid_capability', `${path}.base must be a boolean`);
+  const base = raw.base === true;
   if (kind === 'prompt' && !role) throw new RuntimeError('invalid_capability', `${path}.role is required for prompt capabilities`);
   const stringMap = (value: unknown, label: string) => {
     if (value === undefined) return undefined;
@@ -199,6 +203,7 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
     name,
     ...(description ? { description } : {}),
     ...(role ? { role } : {}),
+    ...(base ? { base: true } : {}),
     ...(command ? { command } : {}),
     ...(args ? { args } : {}),
     ...(url ? { url } : {}),
@@ -370,6 +375,7 @@ async function walkCapabilityDirectories(root: string, directory: string, depth:
         ...(manifest.role ? { role: manifest.role } : {}),
         ...(note ? { note } : {}),
         ...(manifest.kind === 'pi-extension' && manifest.source ? { packageSource: manifest.source } : {}),
+        ...(manifest.base ? { base: true } : {}),
       });
     } catch (error) {
       records.push({

@@ -822,6 +822,28 @@ function capabilityTools(
  * the runtime's granted domains. Every tool call passes the same send gate as
  * model calls.
  */
+/**
+ * The bindings one Agent definition resolves: its own declarations, then every
+ * available capability marked `base`. A base capability therefore reaches every
+ * Agent without being bound anywhere, and dispatch, the console preview and the
+ * tests agree by construction. An explicit binding of the same id wins.
+ */
+function definitionBindings(
+  definition: { capabilities?: CapabilityBinding[]; prompts?: { agent?: CapabilityBinding; tool?: CapabilityBinding } },
+  catalog: Catalog,
+): { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] {
+  const declared = definition.capabilities ?? [];
+  const bound = new Set(declared.map(binding => binding.id));
+  return [
+    ...declared.map(binding => ({ bound: binding, role: 'capability' as const })),
+    ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
+    ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
+    ...catalog.capabilities()
+      .filter(record => record.base === true && record.status === 'available' && !bound.has(record.id))
+      .map(record => ({ bound: { id: record.id, version: record.version }, role: 'capability' as const })),
+  ];
+}
+
 export async function resolveCapabilityFacts(
   catalog: Catalog,
   definitionVersion?: string,
@@ -830,11 +852,7 @@ export async function resolveCapabilityFacts(
   let definition: ReturnType<Catalog['definition']>;
   try { definition = catalog.definition(definitionVersion); }
   catch { return []; }
-  const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
-    ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
-    ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
-    ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
-  ];
+  const bindings = definitionBindings(definition, catalog);
   const facts: ResolvedCapabilityFact[] = [];
   const seen = new Set<string>();
   for (const { bound, role } of bindings) {
@@ -1020,11 +1038,7 @@ export async function loadCapabilities(input: {
     tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report,
   }; } // Unpublished definitions keep briefing-only behavior.
   try {
-    const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
-      ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
-      ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
-      ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
-    ];
+    const bindings = definitionBindings(definition, input.catalog);
     const seen = new Set<string>();
     for (const { bound, role } of bindings) {
       const seenKey = bindingKey(bound, role);

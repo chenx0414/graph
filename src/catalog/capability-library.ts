@@ -70,6 +70,8 @@ export interface CapabilityRecord {
   origin?: CapabilityOrigin;
   /** The declared Pi extension package source, when the SDK resolves it instead of a vendored copy. */
   packageSource?: string;
+  /** Every Agent definition receives this capability without binding it. */
+  base?: boolean;
   /** Same-name entries the library view folds into this one. */
   duplicates?: { id: string; version: string; source: string }[];
 }
