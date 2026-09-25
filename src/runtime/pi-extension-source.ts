@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, basename, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { DefaultPackageManager, SettingsManager } from '@earendil-works/pi-coding-agent';
@@ -28,12 +29,19 @@ export async function resolvePiExtensionSource(input: {
 }): Promise<ResolvedPiExtensionSource> {
   const resolved = await resolveSourceOnce(input);
   const root = installRootFor(resolved.entries[0]!);
-  if (!root || !(await installRootGaps(root)).length) return resolved;
-  // A partial npm extraction inside Graph's own extension cache is exactly what broke a session on
-  // 2026-09-25 (a peer of `pi-mcp-adapter` lost its `v4/` directory). Rebuild the whole install once
-  // so no damaged package — dependency or peer — can reach a session.
-  await rm(root, { recursive: true, force: true });
-  return await resolveSourceOnce(input);
+  if (!root) return resolved;
+  if (await installRootDamaged(root)) {
+    // Files that were installed and then disappeared are damage — a partial npm extraction did
+    // exactly that on 2026-09-25. Rebuild the whole install once so no damaged package, dependency
+    // or peer, can reach a session.
+    await rm(root, { recursive: true, force: true });
+    const rebuilt = await resolveSourceOnce(input);
+    const rebuiltRoot = installRootFor(rebuilt.entries[0]!);
+    if (rebuiltRoot) await recordInstallSnapshot(rebuiltRoot);
+    return rebuilt;
+  }
+  await recordInstallSnapshot(root);
+  return resolved;
 }
 
 async function resolveSourceOnce(input: {
@@ -123,8 +131,11 @@ export async function packageGaps(dir: string, options: { rootOnly?: boolean } =
   collect(manifest.exports);
   const gaps: string[] = [];
   for (const target of targets) {
-    if (!target.startsWith('./')) continue;
-    if (!targetExists(dir, target.slice(2))) gaps.push(target.slice(2));
+    // `main` is often written without a `./` prefix (`ajv` ships `dist/ajv.js`, `cross-spawn`
+    // ships `index.js`); only absolute paths and URLs are outside the package.
+    if (target.startsWith('/') || /^[a-zA-Z]+:/.test(target)) continue;
+    const relative = target.startsWith('./') ? target.slice(2) : target;
+    if (!targetExists(dir, relative)) gaps.push(relative);
   }
   return gaps;
 }
@@ -134,8 +145,10 @@ const RUNTIME_CONDITIONS = new Set(['node', 'import', 'require', 'default', 'mod
 
 /**
  * Every top-level package in one install root that declares an entry point it does not ship.
- * A peer is checked as a whole; a plain dependency only has to satisfy its root entry, because its
- * deep subpaths are the publisher's business and a guess there would rebuild healthy trees.
+ * **Diagnostic only, never a rebuild trigger**: a published package may declare a root entry it
+ * does not ship (`@modelcontextprotocol/sdk@1.30.1` declares `dist/esm/index.js` and the official
+ * tarball has no such file), so a static gap is not evidence of damage. Compare an install against
+ * its own snapshot instead — see `installRootDamaged`.
  */
 export async function installRootGaps(root: string): Promise<string[]> {
   const nodeModules = join(root, 'node_modules');
@@ -153,6 +166,47 @@ export async function installRootGaps(root: string): Promise<string[]> {
     }
   }
   return gaps;
+}
+
+const INSTALL_SNAPSHOT_FILE = '.graph-install.json';
+
+/**
+ * One digest per installed package: the sorted list of its files. Recorded right after an install
+ * and compared later, so "installed file disappeared" is the only thing that counts as damage.
+ */
+async function installTree(root: string): Promise<Record<string, string>> {
+  const nodeModules = join(root, 'node_modules');
+  if (!existsSync(nodeModules)) return {};
+  const tree: Record<string, string> = {};
+  for (const entry of readdirSync(nodeModules)) {
+    if (entry.startsWith('.')) continue;
+    const names = entry.startsWith('@')
+      ? readdirSync(join(nodeModules, entry)).map(name => `${entry}/${name}`)
+      : [entry];
+    for (const name of names) {
+      const files = readdirSync(join(nodeModules, name), { recursive: true, withFileTypes: true })
+        .filter(item => item.isFile())
+        .map(item => join(item.parentPath, item.name).slice(join(nodeModules, name).length + 1))
+        .sort();
+      tree[name] = createHash('sha256').update(files.join('\n')).digest('hex');
+    }
+  }
+  return tree;
+}
+
+/** Record what is installed now, so a later disappearance can be told apart from an upstream quirk. */
+export async function recordInstallSnapshot(root: string): Promise<void> {
+  await writeFile(join(root, INSTALL_SNAPSHOT_FILE), JSON.stringify(await installTree(root)));
+}
+
+/** True when a package changed or vanished since the recorded snapshot; false when there is none. */
+export async function installRootDamaged(root: string): Promise<boolean> {
+  const snapshot = join(root, INSTALL_SNAPSHOT_FILE);
+  if (!existsSync(snapshot)) return false;
+  let previous: Record<string, string>;
+  try { previous = JSON.parse(await readFile(snapshot, 'utf8')) as Record<string, string>; } catch { return false; }
+  const current = await installTree(root);
+  return Object.entries(previous).some(([name, digest]) => current[name] !== digest);
 }
 
 /**

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { canonicalJson } from '../../src/core/store.ts';
-import { ensureRequiredPeers, installRootGaps, packageGaps } from '../../src/runtime/pi-extension-source.ts';
+import { ensureRequiredPeers, installRootDamaged, installRootGaps, packageGaps, recordInstallSnapshot } from '../../src/runtime/pi-extension-source.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -107,6 +107,41 @@ test('a damaged dependency anywhere in the install root is reported as a gap', a
   const gaps = await installRootGaps(root);
   expect(gaps.join('\n')).toContain('@scope/damaged');
   expect(gaps.join('\n')).not.toContain('healthy');
+});
+
+test('a package whose declared entry is not published at all does not make the install look damaged', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-install-snapshot-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const nodeModules = join(root, 'node_modules');
+  const pkg = join(nodeModules, '@modelcontextprotocol', 'sdk');
+  await mkdir(join(pkg, 'dist', 'esm'), { recursive: true });
+  await writeFile(join(pkg, 'dist', 'esm', 'inMemory.js'), 'export const memory = 1;\n');
+  await writeFile(join(pkg, 'package.json'), canonicalJson({
+    name: '@modelcontextprotocol/sdk', version: '1.30.1',
+    exports: { '.': { import: './dist/esm/index.js' } },
+  }));
+
+  // The published package declares a root entry it does not ship (verified against `npm pack`),
+  // so a static gap is not evidence of damage — it must not trigger a rebuild.
+  expect((await installRootGaps(root)).length).toBeGreaterThan(0);
+  await recordInstallSnapshot(root);
+  expect(await installRootDamaged(root)).toBe(false);
+
+  // A file that was installed and then disappeared is damage, and that is what rebuilds.
+  await rm(join(pkg, 'dist', 'esm', 'inMemory.js'));
+  expect(await installRootDamaged(root)).toBe(true);
+});
+
+test('a peer that declares a bare relative main is still checked', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-peer-bare-main-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  // `ajv` and `cross-spawn` declare `main` without a `./` prefix.
+  await mkdir(join(root, 'dist'), { recursive: true });
+  await writeFile(join(root, 'package.json'), canonicalJson({ name: 'ajv', version: '8.17.1', main: 'dist/ajv.js' }));
+
+  expect(await packageGaps(root)).toContain('dist/ajv.js');
+  await writeFile(join(root, 'dist', 'ajv.js'), 'module.exports = () => {};\n');
+  expect(await packageGaps(root)).toEqual([]);
 });
 
 /** An extension entry whose declared peer `zod` exists but is missing its `v4` directory. */
