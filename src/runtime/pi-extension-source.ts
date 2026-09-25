@@ -36,7 +36,7 @@ export async function resolvePiExtensionSource(input: {
   if (!entries.length) {
     throw new RuntimeError('capability_unavailable', `Pi extension source ${input.source} resolved no extension entry`);
   }
-  await installRequiredPeers(entries[0]!);
+  await ensureRequiredPeers(entries[0]!);
   const readRoots = [...new Set([
     ...resolved.extensions.map(resource => resource.metadata.baseDir).filter((value): value is string => typeof value === 'string' && value.length > 0),
     ...entries.map(entry => dirname(entry)),
@@ -74,23 +74,70 @@ async function packageManifestAt(start: string): Promise<Record<string, unknown>
 }
 
 /**
+ * Relative paths a package declares as its own runtime entry points but does not have on disk.
+ * A truncated install — the incident this exists for: `zod` was present under
+ * `node_modules` while its whole `v4/` directory was missing, so `pi-mcp-adapter` died with
+ * `Cannot find module './v4/classic/external.js'` — is invisible to `existsSync` on the
+ * directory, so completeness has to be checked per declared target. Type declarations are
+ * ignored here: a package may legitimately ship none, and a missing `.d.ts` never stops a load.
+ */
+export async function packageGaps(dir: string): Promise<string[]> {
+  const manifest = (await packageManifestAt(dir)) as Record<string, unknown> | null;
+  if (!manifest || typeof manifest !== 'object') return ['package.json'];
+  const targets = new Set<string>();
+  const collect = (value: unknown): void => {
+    if (typeof value === 'string') {
+      if (!value.includes('*') && !/\.d\.(ts|mts|cts)$/.test(value)) targets.add(value);
+      return;
+    }
+    if (Array.isArray(value)) { for (const item of value) collect(item); return; }
+    if (value && typeof value === 'object') { for (const item of Object.values(value)) collect(item); }
+  };
+  collect(manifest.main);
+  collect(manifest.module);
+  collect(manifest.exports);
+  const gaps: string[] = [];
+  for (const target of targets) {
+    if (!target.startsWith('./')) continue;
+    const relative = target.slice(2);
+    // A directory target (a folder with its own index) is a valid export; only files are checked.
+    if (!existsSync(join(dir, relative)) && !existsSync(join(dir, relative, 'package.json'))) gaps.push(relative);
+  }
+  return gaps;
+}
+
+/**
  * The Pi SDK installs a source with `--omit=peer`, and the host supplies only
  * `@earendil-works/*` to loaded extensions, so a plain non-optional peer such as
- * zod would never resolve and the extension could not load at all. Install just
- * those peers into the same root; an already complete install is a no-op.
+ * `zod` would never resolve and the extension could not load at all. Install those
+ * peers into the same root and verify them afterwards; an already complete peer is a no-op.
+ * A peer that is still incomplete fails loudly rather than letting the session start with an
+ * extension that cannot load.
  */
-async function installRequiredPeers(entry: string): Promise<void> {
+export async function ensureRequiredPeers(entry: string): Promise<void> {
   const root = installRootFor(entry);
   if (!root) return;
   const manifest = await packageManifestAt(dirname(entry));
   const peers = (manifest?.peerDependencies ?? {}) as Record<string, string>;
   const meta = (manifest?.peerDependenciesMeta ?? {}) as Record<string, { optional?: boolean }>;
-  const missing = Object.entries(peers)
-    .filter(([name]) => meta[name]?.optional !== true && !name.startsWith('@earendil-works/'))
-    .filter(([name]) => !existsSync(join(root, 'node_modules', name)))
-    .map(([name, range]) => `${name}@${range}`);
-  if (!missing.length) return;
-  await run('npm', ['install', ...missing, '--prefix', root, '--omit=dev', '--no-save', '--no-audit', '--no-fund'], { timeout: 300_000 });
+  const required = Object.keys(peers)
+    .filter(name => meta[name]?.optional !== true && !name.startsWith('@earendil-works/'));
+  if (!required.length) return;
+  const incomplete = async (name: string) => {
+    const dir = join(root, 'node_modules', name);
+    return !existsSync(dir) || (await packageGaps(dir)).length > 0;
+  };
+  const broken: string[] = [];
+  for (const name of required) if (await incomplete(name)) broken.push(name);
+  if (!broken.length) return;
+  // `--prefer-online` keeps a stale entry in npm's own cache from handing back the very tree
+  // that made the peer unloadable.
+  await run('npm', ['install', ...broken.map(name => `${name}@${peers[name]}`), '--prefix', root, '--omit=dev', '--no-save', '--no-audit', '--no-fund', '--prefer-online'], { timeout: 300_000 });
+  const stillBroken: string[] = [];
+  for (const name of broken) if (await incomplete(name)) stillBroken.push(name);
+  if (stillBroken.length) {
+    throw new RuntimeError('capability_unavailable', `Pi extension source ${entry} cannot load: peer ${stillBroken.join(', ')} is still incomplete after reinstalling (remove ${join(root, 'node_modules', stillBroken[0]!)} and let Graph install it again)`);
+  }
 }
 
 export interface PiExtensionSourceStatus {
