@@ -5,6 +5,7 @@ import { clampThinkingLevel, type Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
+import { reportPromptIntegrity } from './prompt-integrity.ts';
 import { agentSkillOwnedRoots, agentSkillsDir, nativeSkillDirs } from './agent-skills.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { thinkingLevelMapFor } from '../catalog/thinking.ts';
@@ -910,6 +911,10 @@ export function createPiAdapter(options: {
               ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
               onSend: systemPrompt => {
                 if (systemPrompt !== null) options.store.recordOperationSystemPrompt(operation.id, systemPrompt);
+                // The site that records the truth also reports when a part of it is
+                // gone: reporting only, a send is never blocked or rewritten.
+                void reportPromptIntegrity(join(options.instancesDir, operation.instanceId!), operation.id, systemPrompt)
+                  .catch(() => undefined);
               },
             }), {
               enabled: () => Boolean(conversation) && !compacting,
