@@ -93,6 +93,8 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 - `platform` 是**显式声明**：没有它，用量服务只能从「哪些模型用了这份凭据」反推平台，因此**没有绑定任何模型的账户不会出现在用量页**。
 - 用量页**每个账户一张卡**：平台自己的凭据（环境变量 / 厂商配置 / 模型反推）是第一张（id 仍是平台 id），每个带 `platform` 的账户各占一张（id 为 `<平台>#<凭据 id>`），summary 也按账户计数。
 - 调度**不做隐式切换**：模型用哪个账户，由 `models.entries[].credentialId` 显式决定；本轮不按剩余额度自动改派。
+- **一个 `provider` 标签只能挂一个 `credentialId`**（保存时守卫：`provider "X" must use one credentialId across its models`）。要让第二个账户能跑模型，就给它的模型条目一个**独立的 provider 标签**（例如 `opencode-go-3`）——只要 `baseUrl` 仍是 `opencode.ai/zen/go`，网关所需的 `x-opencode-session` 头会自动带上，无需手写 `headers`。
+- **平台凭据必须能解析出值**，否则会出两种错：平台自己的模型停留在「未启用」，而且平台那张卡会被**某个账户顶替**（解析顺序是 `env` → 配置里的凭据 → CLI 配置；`configCredential` 取第一个「能解析出值」的匹配条目）。真实案例：`credentials.opencode-go.secretRef` 指向的变量不在守护进程环境里时，一个新加的账户条目会占住平台卡，看起来像「账户吞了平台」。
 - 同一把密钥写进两个 credential 仍然要 `sharedLimitGroupId`（那是「别名」语义，与上面的「多账户」是两件相反的事，别混用）。
 - 设置页「① 配置厂商」里，用**同一平台再加一个账户**按钮：它给新账户生成新的凭据 id 与环境变量名（`…_2`），所以不会覆盖已工作的那把密钥。
 
