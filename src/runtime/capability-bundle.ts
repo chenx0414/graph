@@ -5,6 +5,7 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { selectAgentToolSurface } from './pi-native-tools.ts';
+import { MCP_ADAPTER_PROXY_TOOL } from './mcp-adapter-bridge.ts';
 import { agentSkills, agentSkillsDir, syncAgentSkills } from './agent-skills.ts';
 import {
   capabilityPrompts,
@@ -71,6 +72,8 @@ export interface CapabilityOperationOptions {
   access?: ResolvedAccessPolicy;
   /** User-selected main-Agent tools that must not be offered to this operation. */
   disabledTools?: readonly string[];
+  /** MCP servers resolved from this definition's bound capabilities, registered with pi-mcp-adapter. */
+  mcpAdapterServers?: readonly { name: string; definition: unknown }[];
   /** Pi-native tools enabled for this operation. Host tools with the same name are not registered. */
   nativeTools?: readonly string[];
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
@@ -99,6 +102,8 @@ export interface CapabilityOperation {
   readonly unixSockets: readonly string[];
   readonly piExtensionPaths: readonly string[];
   readonly piExtensionTools: readonly string[];
+  /** MCP servers the Pi session should register with pi-mcp-adapter. */
+  readonly mcpAdapterServers: readonly { name: string; definition: unknown }[];
   close(): Promise<void>;
 }
 
@@ -278,10 +283,14 @@ export class CapabilityBundleVersion {
           unixSockets: loaded.unixSockets,
         },
       });
+      const serverNames = (options.mcpAdapterServers ?? []).map(server => server.name.trim()).filter(Boolean);
       const allowedToolNames = Object.freeze([...new Set([
         ...tools.map(tool => tool.name),
         ...nativeTools,
         ...piExtensionTools,
+        // pi-mcp-adapter exposes runtime-registered servers through its own
+        // gateway tool, so it has to be allowed in the session.
+        ...(serverNames.length ? [MCP_ADAPTER_PROXY_TOOL] : []),
       ])].sort());
       const operation: CapabilityOperation = {
         bundleDigest: this.digest,
@@ -307,6 +316,7 @@ export class CapabilityBundleVersion {
         skillFolder: this.skillFolder,
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
         piExtensionTools: Object.freeze([...piExtensionTools]),
+        mcpAdapterServers: Object.freeze((options.mcpAdapterServers ?? []).map(server => ({ ...server }))),
         close: () => loaded!.close(),
       };
       return Object.freeze(operation);
