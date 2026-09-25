@@ -278,8 +278,19 @@ export function draftFromPlatformWithCredential(
   platform: PlatformPreset,
   credentials: Record<string, { secretRef?: string; displayName?: string } | undefined> | undefined,
 ): ProviderDraft {
-  const draft = draftFromPlatform(platform);
-  const stored = credentials?.[draft.credentialId];
+  return draftForCredential(platform, credentials, platform.id);
+}
+
+/** The card for one credential of a platform. A platform may hold several accounts,
+ * so the name and variable come from the credential the operator selected; an id
+ * nothing has stored yet keeps the platform defaults. */
+export function draftForCredential(
+  platform: PlatformPreset,
+  credentials: Record<string, { secretRef?: string; displayName?: string } | undefined> | undefined,
+  credentialId: string,
+): ProviderDraft {
+  const draft = { ...draftFromPlatform(platform), credentialId };
+  const stored = credentials?.[credentialId];
   const existing = stored?.secretRef?.trim();
   const label = stored?.displayName?.trim();
   return {
