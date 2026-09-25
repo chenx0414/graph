@@ -5,7 +5,7 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { selectAgentToolSurface } from './pi-native-tools.ts';
-import { MCP_ADAPTER_PROXY_TOOL } from './mcp-adapter-bridge.ts';
+import { MCP_ADAPTER_PROXY_TOOL, mcpAdapterServers } from './mcp-adapter-bridge.ts';
 import { agentSkills, agentSkillsDir, syncAgentSkills } from './agent-skills.ts';
 import {
   capabilityPrompts,
@@ -72,8 +72,6 @@ export interface CapabilityOperationOptions {
   access?: ResolvedAccessPolicy;
   /** User-selected main-Agent tools that must not be offered to this operation. */
   disabledTools?: readonly string[];
-  /** MCP servers resolved from this definition's bound capabilities, registered with pi-mcp-adapter. */
-  mcpAdapterServers?: readonly { name: string; definition: unknown }[];
   /** Pi-native tools enabled for this operation. Host tools with the same name are not registered. */
   nativeTools?: readonly string[];
   onPermissionRequired?: (request: CapabilityPermissionRequest) => void;
@@ -192,6 +190,18 @@ export class CapabilityBundleVersion {
         ...(options.onPermissionRequired ? { onPermissionRequired: options.onPermissionRequired } : {}),
         ...(options.access ? { access: options.access } : {}),
       });
+      // MCP capabilities are handed to pi-mcp-adapter, which owns the connection and
+      // tool surface; Graph only resolves the declaration and the bound credentials.
+      const adapterServers = mcpAdapterServers(
+        this.facts.map(fact => ({
+          id: fact.id,
+          version: fact.version,
+          kind: fact.kind,
+          ...(fact.path ? { path: fact.path } : {}),
+          ...(fact.role ? { role: fact.role } : {}),
+        })),
+        this.input.secrets ? this.input.secrets() : {},
+      );
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
       // A bound skill's path only exists in the load facts, so mirror them here as well:
       // this is the folder the SDK and the prompt read for this operation.
@@ -283,7 +293,7 @@ export class CapabilityBundleVersion {
           unixSockets: loaded.unixSockets,
         },
       });
-      const serverNames = (options.mcpAdapterServers ?? []).map(server => server.name.trim()).filter(Boolean);
+      const serverNames = adapterServers.map(server => server.name.trim()).filter(Boolean);
       const allowedToolNames = Object.freeze([...new Set([
         ...tools.map(tool => tool.name),
         ...nativeTools,
@@ -316,7 +326,7 @@ export class CapabilityBundleVersion {
         skillFolder: this.skillFolder,
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
         piExtensionTools: Object.freeze([...piExtensionTools]),
-        mcpAdapterServers: Object.freeze((options.mcpAdapterServers ?? []).map(server => ({ ...server }))),
+        mcpAdapterServers: Object.freeze(adapterServers.map(server => ({ ...server }))),
         close: () => loaded!.close(),
       };
       return Object.freeze(operation);

@@ -13,6 +13,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { canonicalJson } from '../core/store.ts';
 import { nativeSkillDirs } from './agent-skills.ts';
+import { mcpAdapterBridge } from './mcp-adapter-bridge.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface InstanceBinding {
@@ -67,6 +68,10 @@ export interface PiInstanceOptions {
   skillFolder?: string;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
+  /** pi-mcp-adapter's module path, resolved from the capability library by the caller. */
+  mcpAdapterExtensionPaths?: string[];
+  /** MCP servers this session registers with pi-mcp-adapter. */
+  mcpAdapterServers?: readonly { name: string; definition: unknown }[];
   extensionFactories?: InlineExtension[];
   systemPrompt?: string;
   activateExtensionTools?: boolean;
@@ -287,6 +292,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
     },
   };
   const extensionFactories = [...(options.extensionFactories ?? []), ...(promptTakeover ? [promptTakeover] : [])];
+  if (options.mcpAdapterServers?.length) extensionFactories.push(mcpAdapterBridge(options.mcpAdapterServers));
   // The session's own view of skills must match the block Graph renders into the system
   // prompt: the Agent's folder plus the SDK's own global and project folders.
   const skillLoadPaths = [...new Set([
@@ -296,6 +302,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
     ...(skillLoadPaths.length ? { additionalSkillPaths: skillLoadPaths } : {}),
+    ...(options.mcpAdapterExtensionPaths?.length ? { additionalExtensionPaths: options.mcpAdapterExtensionPaths } : {}),
     ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
     ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
