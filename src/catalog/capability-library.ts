@@ -15,6 +15,7 @@ import {
 import { homedir } from 'node:os';
 import { CONFIG_DIR_NAME, getAgentDir } from '@earendil-works/pi-coding-agent';
 import { parseCapabilityManifest, scanAgentSkills, scanCapabilities, scanNativeSkills, type CapabilityManifest } from './file-capabilities.ts';
+import { selectCapabilityRecord } from './capability-select.ts';
 import type { ModelGrade } from './models.ts';
 
 export type CapabilityKind = 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt';
@@ -264,12 +265,7 @@ export class CapabilityLibrary {
   }
 
   capability(id: string, version?: string): CapabilityRecord | undefined {
-    if (!version) return [...this.capabilitiesCache].reverse().find(item => item.id === id);
-    const exact = this.capabilitiesCache.find(item => item.id === id && item.version === version);
-    if (exact) return exact;
-    // A capability that declares a package source holds whatever version the source resolved to,
-    // so a binding's version is not a pin for it: match by id instead of failing the definition.
-    return [...this.capabilitiesCache].reverse().find(item => item.id === id && item.packageSource);
+    return selectCapabilityRecord(this.capabilitiesCache, id, version);
   }
 
   search(input: CapabilitySearchInput = {}): CapabilitySearchResult {
