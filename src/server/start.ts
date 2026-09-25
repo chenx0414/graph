@@ -163,10 +163,25 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     ? [...new Set(Object.values(config.credentials).map(credential => credential.secretRef))]
     : revocation.refs;
   if (revocation.failure) log(`Revocation file unusable (${revocation.failure}); all configured credentials start revoked. Disable or restore a connection to repair it.`);
+  // Filled in once the live config exists; until then the usage service reads the
+  // plain process environment, exactly as it did before.
+  let liveSecrets: () => Record<string, string> = () => ({});
+  let liveRevoked: () => readonly string[] = () => [];
   const usageService = createUsageService({
     env: options.env,
     home: options.env.HOME,
-    ...(configStore ? { loadConfig: async () => ({ config: (await configStore.snapshot()).config, env: options.env }) } : {}),
+    ...(configStore ? {
+      loadConfig: async () => {
+        // Secrets the Agent pushed (and the desktop app then persisted) live in the
+        // daemon, not in this process environment, so 用量 has to see them too:
+        // otherwise a freshly added account stays invisible until the next restart.
+        // The holder is empty until the live config exists, because the credential
+        // import below runs first and must keep reading the plain environment.
+        const merged: Record<string, string | undefined> = { ...options.env, ...liveSecrets() };
+        for (const ref of liveRevoked()) delete merged[ref];
+        return { config: (await configStore.snapshot()).config, env: merged };
+      },
+    } : {}),
   });
   // Import credentials owned by OpenCode/Codex/Grok CLIs without sending their
   // values to the browser or writing them into graph.config.json.
@@ -178,6 +193,10 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     secrets: importedSecrets,
     revoked: revokedRefs,
   });
+
+  // From here on, 用量 also sees the pushed/keychain secrets, not just the environment.
+  liveSecrets = () => live.secrets();
+  liveRevoked = () => live.revoked();
   /** Atomic multi-ref revocation persistence: a temp file plus rename means a
    * crash never leaves a half-written list, and errors reach the caller. */
   const persistRevoked = async (refs: string[]) => {

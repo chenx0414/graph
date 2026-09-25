@@ -44,6 +44,33 @@ function grokPayload(percent: number) {
   return new Response(bytes, { status: 200, headers: { 'content-type': 'application/grpc-web+proto' } });
 }
 
+test('an account whose key cannot be resolved stays visible as unconfigured', async () => {
+  const home = await temp('missing-account-key');
+  const config: GraphConfig = {
+    projects: [],
+    path: join(home, 'graph.config.json'), configured: true,
+    access: defaultAccessPolicy(), piExtensionAutoUpdate: false,
+    credentials: {
+      'opencode-go-2': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_GO_ACCOUNT_2', displayName: '账户 2' },
+    },
+    models: { preferences: {}, entries: [{ id: 'zen', provider: 'opencode-go', grade: 'high', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 1_000_000, maxTokens: 384_000, credentialId: 'opencode-go-2' }] },
+    limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
+  };
+  const env = { HOME: home };
+  let calls = 0;
+  const fetchImpl = async (input: string | URL) => { calls += 1; return new Response('not found', { status: 404 }); };
+  const service = createUsageService({ home, fetch: fetchImpl, env, pricingPath: join(home, 'model-pricing.json'), loadConfig: async () => ({ config, env }) });
+
+  const snapshot = await service.get(true);
+  const cards = snapshot.plans.filter(plan => plan.platform === 'opencode-go');
+  // A configured account must never vanish just because its key is not visible here.
+  expect(cards).toHaveLength(2);
+  expect(cards[1]).toMatchObject({ id: 'opencode-go#opencode-go-2', account: { id: 'opencode-go-2', name: '账户 2' }, configured: false, status: 'unconfigured' });
+  expect(cards[1]?.error).toBeNull();
+  // Nothing is asked upstream with an empty key.
+  expect(calls).toBe(0);
+});
+
 test('a platform with several accounts reports every account with its own quota', async () => {
   const home = await temp('accounts');
   const config: GraphConfig = {
