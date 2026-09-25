@@ -42,6 +42,7 @@ if (!app.requestSingleInstanceLock()) {
   let smokeLogged = false;
   let notificationState = { primed: false, questions: {}, status: {} };
   let taskPoll = null;
+  let secretPoll = null;
   let rsiPoll = null;
   let rsiRestarting = false;
   let tray = null;
@@ -129,6 +130,44 @@ if (!app.requestSingleInstanceLock()) {
     return absolutePaths(sourceRoot
       ? resolveAppPaths({ appPath, isPackaged: app.isPackaged, userData: app.getPath('userData'), sourceRoot })
       : base);
+  }
+
+  /**
+   * Secrets the Agent wrote through the bridge live only in the daemon until the
+   * keychain has them. The desktop is the only writer of the keychain, so it asks
+   * the daemon on a short interval and stores what the Agent requested.
+   */
+  async function pollSecretRequests() {
+    if (!readyUrl || !secretsPath) return;
+    try {
+      const token = readFileSync(join(currentPaths().stateDir, 'app-token'), 'utf8').trim();
+      const response = await fetch(`${readyUrl}/api/app/secret-requests`, {
+        headers: { 'x-graph-app-token': token, origin: readyUrl },
+      });
+      if (!response.ok) return;
+      const body = await response.json().catch(() => ({}));
+      for (const request of Array.isArray(body.requests) ? body.requests : []) {
+        const outcome = applySecretRequest(secrets, request?.ref, request?.value ?? null);
+        if (!outcome.ok) continue;
+        const codec = {
+          isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+          encryptString: input => safeStorage.encryptString(input),
+          decryptString: input => safeStorage.decryptString(input),
+        };
+        const stored = saveSecrets(secretsPath, codec, outcome.secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
+        // Without a keychain the request stays pending and visible instead of
+        // being reported as stored; the next interval tries again.
+        if (!stored) continue;
+        secrets = outcome.secrets;
+        await fetch(`${readyUrl}/api/app/secret`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-graph-app-token': token, origin: readyUrl },
+          body: JSON.stringify({ ref: request.ref, value: request.value ?? null, persisted: true }),
+        });
+      }
+    } catch {
+      // The daemon may be restarting; the next interval retries.
+    }
   }
 
   function startDaemon() {
@@ -432,6 +471,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     clearInterval(taskPoll);
     clearInterval(rsiPoll);
+    clearInterval(secretPoll);
     void Promise.race([stopDaemon(), new Promise(resolveStop => setTimeout(resolveStop, 7_000))]).then(() => app.exit(0));
   });
 
@@ -441,5 +481,8 @@ if (!app.requestSingleInstanceLock()) {
     startDaemon();
     taskPoll = setInterval(pollTasks, 4_000);
     rsiPoll = setInterval(pollRsi, 5_000);
+    // One interval for the whole app run: a restart only changes `readyUrl`, and
+    // a second interval per restart would leak one poll per reload.
+    secretPoll = setInterval(() => { void pollSecretRequests(); }, 1_500);
   });
 }
