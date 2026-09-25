@@ -537,8 +537,10 @@ test('the composer suggestion and queue steering follow the three Enter states',
   await input.press('Enter');
   // Under the full parallel gate a request that travels UI → HTTP → runtime can take far
   // longer than the default one-second poll. The budget is deliberately generous: the
-  // preconditions above, not the budget, are what makes this assertion meaningful.
-  await expect.poll(() => steered.length, { timeout: 30_000 }).toBe(1);
+  // preconditions above, not the budget, are what makes this assertion meaningful. It is
+  // also the only assertion here whose latency grows with the number of capabilities the
+  // master bundle resolves, which is why 60s and not 30s.
+  await expect.poll(() => steered.length, { timeout: 60_000 }).toBe(1);
   expect(steered[0]).toContain('优先检查失败分支。');
   await expect.poll(async () => {
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
