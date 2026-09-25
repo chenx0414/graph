@@ -77,7 +77,7 @@ export function mcpAdapterServers(facts: readonly {
       ...(declaration.headers !== undefined ? { headers: declaration.headers } : {}),
       ...(declaration.headersEnv !== undefined ? { headersEnv: declaration.headersEnv } : {}),
       ...(declaration.env !== undefined ? { env: declaration.env } : {}),
-    }, secrets);
+    }, secrets, fact.path);
     if (!definition) continue;
     servers.push({ name: mcpAdapterServerName(fact.id), definition });
   }

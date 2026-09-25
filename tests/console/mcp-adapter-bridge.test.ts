@@ -26,7 +26,10 @@ test('bound MCP capabilities become adapter servers with resolved secrets', asyn
   ], { GITHUB_TOKEN: 'gh-secret' });
   expect(servers).toEqual([
     { name: 'cloudflare-docs', definition: { url: 'https://docs.mcp.cloudflare.com/mcp' } },
-    { name: 'github', definition: { command: 'node', args: ['./node_modules/server/index.js'], env: { GITHUB_TOKEN: 'gh-secret' }, inheritEnv: false } },
+    // The declared arg means "inside the capability": the adapter runs the
+    // command from the worker cwd, so passing it through verbatim would launch
+    // a path that does not exist there.
+    { name: 'github', definition: { command: 'node', args: [join(local, 'node_modules/server/index.js')], env: { GITHUB_TOKEN: 'gh-secret' }, inheritEnv: false } },
   ]);
 });
 

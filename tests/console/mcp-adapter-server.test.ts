@@ -6,13 +6,29 @@ test('a stdio declaration becomes a minimal-environment command server', () => {
     command: 'node',
     args: ['./node_modules/server/dist/index.js'],
     env: { GITHUB_TOKEN: '${GH_TOKEN}', MODE: 'stdio' },
-  }, { GH_TOKEN: 'secret-value' });
+  }, { GH_TOKEN: 'secret-value' }, '/capabilities/mcp/github');
   expect(definition).toEqual({
     command: 'node',
-    args: ['./node_modules/server/dist/index.js'],
+    // A relative arg means "inside the capability", exactly as the host broker
+    // resolves it, because the adapter runs the command from another cwd.
+    args: ['/capabilities/mcp/github/node_modules/server/dist/index.js'],
     env: { GITHUB_TOKEN: 'secret-value', MODE: 'stdio' },
     inheritEnv: false,
   });
+});
+
+test('a declared ${VAR} arg is resolved from secrets before the adapter sees it', () => {
+  const definition = mcpAdapterServerDefinition(
+    { command: 'node', args: ['${SERVER_ENTRY}'] },
+    { SERVER_ENTRY: '/opt/server/index.js' },
+    '/capabilities/mcp/example',
+  );
+  expect(definition?.args).toEqual(['/opt/server/index.js']);
+});
+
+test('a relative arg without a capability directory is refused instead of run from the wrong place', () => {
+  expect(() => mcpAdapterServerDefinition({ command: 'node', args: ['./node_modules/server/index.js'] }, {}, ''))
+    .toThrow(/capability directory/);
 });
 
 test('a remote declaration keeps literals and resolves headersEnv from secrets', () => {

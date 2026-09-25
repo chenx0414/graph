@@ -96,6 +96,7 @@ export function mcpAdapterServerName(id: string): string {
 export function mcpAdapterServerDefinition(
   declaration: McpAdapterServerDeclaration,
   secrets: McpSecretValues = {},
+  capabilityDir = '',
 ): McpAdapterServerDefinition | undefined {
   const url = typeof declaration.url === 'string' && declaration.url.trim() ? declaration.url.trim() : undefined;
   if (url) {
@@ -112,15 +113,33 @@ export function mcpAdapterServerDefinition(
   const command = typeof declaration.command === 'string' && declaration.command.trim() ? declaration.command.trim() : undefined;
   if (!command) return undefined;
   const args = stringList(declaration.args, 'MCP manifest args');
+  const resolvedArgs = args?.map(value => declaredArg(capabilityDir, value, secrets));
   const env = environmentValues(declaration.env, secrets);
   // inheritEnv: false keeps the MCP child on declared values only, matching the
   // environment Graph used to build for the server instead of the whole host env.
   return {
     command,
-    ...(args ? { args } : {}),
+    ...(resolvedArgs ? { args: resolvedArgs } : {}),
     ...(env ? { env } : {}),
     inheritEnv: false,
   };
+}
+
+/**
+ * One declared argument, resolved the way the host broker resolves it: a
+ * capability-relative path stays relative to the capability, never to whatever
+ * cwd the adapter happens to run the command from.
+ */
+function declaredArg(capabilityDir: string, value: string, secrets: McpSecretValues): string {
+  const relative = value.startsWith('./') || value.startsWith('../');
+  if (relative && !capabilityDir) {
+    throw new RuntimeError('capability_unavailable', 'MCP manifest declares a capability directory-relative arg but the capability directory is unknown');
+  }
+  try {
+    return resolveManifestArg(capabilityDir, value, secrets);
+  } catch (error) {
+    throw new RuntimeError('capability_unavailable', error instanceof Error ? error.message : String(error));
+  }
 }
 
 /** Resolve one manifest argument: ${VAR} and $VAR from secrets/process env, else a snapshot-relative path. */
