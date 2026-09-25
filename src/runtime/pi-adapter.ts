@@ -314,7 +314,6 @@ export function createPiAdapter(options: {
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
-        let modelAccessQuestion: Json | undefined;
         let reloadReceipt: Record<string, unknown> | undefined;
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
@@ -1048,17 +1047,6 @@ export function createPiAdapter(options: {
               return {
                 outcome: 'waiting', output: { permission: { grant: permissionRequest.grant, capabilityId: permissionRequest.capabilityId, tool: permissionRequest.tool } },
                 question: { prompt: `Remote MCP tool ${permissionRequest.tool} requires the user grant ${permissionRequest.grant} in this task`, grant: permissionRequest.grant },
-                usage: gate.total(),
-              };
-            }
-            if (modelAccessQuestion) {
-              return {
-                outcome: 'waiting',
-                output: { question: modelAccessQuestion },
-                question: {
-                  prompt: String((modelAccessQuestion as { prompt?: string }).prompt ?? 'Model access is required'),
-                  data: modelAccessQuestion,
-                },
                 usage: gate.total(),
               };
             }
