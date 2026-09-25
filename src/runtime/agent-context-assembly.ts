@@ -14,6 +14,7 @@ import {
 } from './agent-system-prompt.ts';
 import { capabilityPrompts, type CapabilityLoadFact } from './capabilities.ts';
 import { openCapabilityBundle, type CapabilityBundleOptions, type CapabilityOperation } from './capability-bundle.ts';
+import { agentSkills } from './agent-skills.ts';
 import { piNativeToolNamesForPlatform, piNativeToolPromptEntries, selectAgentToolSurface } from './pi-native-tools.ts';
 
 export interface AgentContextTool extends Omit<AgentToolPromptEntry, 'version'> {
@@ -139,6 +140,10 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     bootstrap,
     ...(input.mcpDomains ? { mcpDomains: input.mcpDomains } : {}),
     ...(input.secrets ? { secrets: input.secrets } : {}),
+    ...(input.skillFolder ? { skillFolder: input.skillFolder } : {}),
+    ...(input.skillOwnedRoots?.length ? { skillOwnedRoots: input.skillOwnedRoots } : {}),
+    ...(workspace ? { skillCwd: workspace } : {}),
+    ...(input.skillProjectRoot ? { skillProjectRoot: input.skillProjectRoot } : {}),
   });
   const retrievalNote = input.retrieval ? ' The fetch tool reads HTTP documents from granted domains.' : '';
   const [common, roleRules, toolGuidance, runtime, projectContext, disabledTools] = await Promise.all([
@@ -152,19 +157,13 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
   ]);
   const docs = graphDocumentationPaths();
   const definitionVersion = input.definitionVersion ?? 'unknown@1';
-  const compose = (mode: 'preview' | 'operation', identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[]) => {
+  const compose = (identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[]) => {
     const composed = composeAgentSystemPrompt({
-      mode, identity, definitionVersion, toolGuidance,
+      identity, definitionVersion, toolGuidance, role,
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
       ...(input.rsi && role === 'main' ? { harnessContext: DEFAULT_MAIN_RSI_IDENTITY } : {}),
       rules: { common, role: roleRules, ...(runtime === undefined ? {} : { runtime }) },
-      docs, ...(projectContext ? { projectContext } : {}),
-      tools: tools.filter(tool => tool.enabled && (mode === 'operation' || tool.available)).map(({ version, ...tool }) => ({
-        ...tool, ...(version ? { version } : {}),
-      })),
-      capabilities,
-      cwd: workspace ?? 'No worktree has been prepared for this conversation yet.',
-      piCwd: workspace ?? 'No active Pi session for this conversation yet.',
+      docs,
     });
     return { tools, capabilities, composed, docsRoot: docs.root };
   };
@@ -173,7 +172,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     disabledTools,
     /** Actual operation facts remain authoritative; no settings are re-read here. */
     forOperation(operation: CapabilityOperation) {
-      return compose('operation', operation.prompts.system, loadedTools(operation), loadedCapabilities(operation.report));
+      return compose(operation.prompts.system, loadedTools(operation), loadedCapabilities(operation.report));
     },
     /** Next-operation configuration only. Historical load reports do not enter this projection. */
     async preview(features: AgentToolFeatures) {
@@ -210,11 +209,9 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
       const tools = [...unique.values()].map(tool => ({
         ...tool, enabled: !disabled.has(tool.name), available: enabled.has(tool.name),
       })).sort((left, right) => left.name.localeCompare(right.name));
-      const system = capabilityPrompts({
-        definitionVersion, action: input.action, ...(input.role ? { role: input.role } : {}),
-        agentPrompt: identity, toolPrompt: null, report: [], tools: [],
-      }).systemPrompt;
-      return compose('preview', system, tools, capabilities);
+      // The next-operation view carries facts only: what a send really composes is
+      // asserted where it is produced, in the provider request.
+      return { tools, capabilities, docsRoot: docs.root };
     },
   };
 }

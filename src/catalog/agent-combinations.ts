@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { RuntimeError, type Json } from '../core/types.ts';
 import type { CapabilityRecord, DefinitionSpec } from './capability-library.ts';
+import { selectCapabilityRecord } from './capability-select.ts';
 import type { ModelGrade } from './models.ts';
 
 export type AgentCombinationResourceRole = 'identity' | 'tool' | 'skill' | 'mcp' | 'pi-extension' | 'extension';
@@ -154,10 +155,7 @@ function expectedKind(role: AgentCombinationResourceRole): CapabilityRecord['kin
 }
 
 function selectCapability(members: CapabilityRecord[], member: AgentCombinationResource) {
-  const candidates = members.filter(item => item.id === member.resourceId && item.status === 'available'
-    && (!member.version || item.version === member.version));
-  if (!candidates.length) return undefined;
-  return candidates[candidates.length - 1];
+  return selectCapabilityRecord(members.filter(item => item.status === 'available'), member.resourceId, member.version);
 }
 
 function roleMatches(record: CapabilityRecord, role: AgentCombinationResourceRole) {

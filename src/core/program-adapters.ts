@@ -107,14 +107,26 @@ export function workspaceCommandNode(input: {
         const extraReads = (await Promise.all([...(input.program?.readPaths ?? []), ...(modules ? [modules] : [])]
           .map(path => realpath(path).catch(() => undefined))))
           .filter((path): path is string => path !== undefined);
+        // The check runs in the OS sandbox, which grants writes only under the
+        // workspace and this scratch directory, so its temporary files must live
+        // there too: a host TMPDIR such as /var/folders is denied even in host
+        // mode, and any test that creates a temporary directory would fail (a real
+        // check failed exactly this way when git init tried to write .git/config
+        // inside its temporary repository). A caller-declared TMPDIR still wins,
+        // because the sandbox spreads command.env over its computed TMPDIR.
+        const checkScratch = join(input.scratchRoot ?? workspace, 'checks', operation.id);
         const runner = await openWorkspaceCommandRunner({
           workspace,
-          scratchDir: join(input.scratchRoot ?? workspace, 'checks', operation.id),
+          scratchDir: checkScratch,
           gate,
           localNetwork: true,
           ...(operation.accessPolicy ? { access: operation.accessPolicy } : {}),
           ...(extraReads.length ? { readPaths: extraReads } : {}),
-          ...(input.program?.env ? { env: input.program.env } : {}),
+          env: { ...(input.program?.env ?? {}), TMPDIR: input.program?.env?.TMPDIR ?? checkScratch },
+          // Tests a check runs create their own repositories under TMPDIR (inside
+          // this scratch), so the check may write Git metadata there; the workspace
+          // and every other repository stay protected.
+          gitMetadataWritesInsideScratch: true,
         });
         try {
           const result = await runner.run(command.command as string, command.args as string[]);

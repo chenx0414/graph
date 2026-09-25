@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, test } from 'vitest';
-import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
+import { InMemoryCredentialStore, normalizeContext } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
 import { openGraphServer } from '../../src/server/host.ts';
@@ -269,7 +269,7 @@ test('a retry re-acquires the slot only after releasing it for the backoff', asy
   const slot = { acquire: (signal?: AbortSignal) => scheduler.acquire({ credentialId: 'cred', limit: 1 }, signal) };
   const stream = controlledOpenAIStream(broker, 'key', slot);
   const running = (async () => {
-    const events = await stream(model, { messages: [{ role: 'user', content: 'x', timestamp: Date.now() }] });
+    const events = await stream(model, normalizeContext({ messages: [{ role: 'user', content: 'x', timestamp: Date.now() }] }));
     await events.result();
   })();
   // During the first backoff the slot must be free for another acquisition.

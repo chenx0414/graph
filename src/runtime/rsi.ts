@@ -11,6 +11,7 @@ import { RuntimeError, type Json } from '../core/types.ts';
 import { checkedOutBranch, detectRepo, git, revParse } from '../git/git.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { RUNTIME_NODE_ENV } from './workspace-command.ts';
+import { developerPath } from './developer-path.ts';
 
 const execFileAsync = promisify(execFile);
 // Only the report is bounded: it is what gets persisted in the conversation and
@@ -159,21 +160,7 @@ export function failureDigest(validation: RsiValidationResult[], limit = 3_000, 
   return lines.length ? ['- 失败摘要：', ...lines] : [];
 }
 
-/** Locations a developer's shell puts on `PATH` but a desktop launch does not. */
-const DEVELOPER_PATH_DIRECTORIES = ['/opt/homebrew/bin', '/usr/local/bin', '/opt/homebrew/sbin', '/usr/local/sbin'];
-
-/** Keep the inherited order, then append the standard developer locations that
- * exist on this host. An app started from the desktop inherits launchd's minimal
- * `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), where a check needing the developer's
- * own toolchain - `npm`, a package runner, a browser - fails before the work it
- * validates even starts. */
-export function developerPath(inherited: string | undefined, exists: (path: string) => boolean = existsSync): string {
-  const directories = (inherited ?? '').split(':').filter(Boolean);
-  for (const directory of DEVELOPER_PATH_DIRECTORIES) {
-    if (!directories.includes(directory) && exists(directory)) directories.push(directory);
-  }
-  return directories.join(':');
-}
+export { developerPath };
 
 /** Command line and environment for one check. Checks run outside the sandbox in
  * the user's own checkout, so they keep the inherited environment - except

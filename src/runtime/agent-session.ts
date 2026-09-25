@@ -59,6 +59,8 @@ export interface AgentSessionRequest {
   tools?: ToolDefinition[];
   nativeTools?: string[];
   skillPaths?: string[];
+  /** The Agent's own skills folder: the SDK loads skills from here. */
+  skillFolder?: string;
   readRoots?: string[];
   writeRoots?: string[];
   filesystemAccess?: 'bounded' | 'host';
@@ -73,8 +75,9 @@ export interface AgentSessionRequest {
   allowAppleEvents?: boolean;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
+  /** MCP servers the adapter registers for this session; dropping them leaves the gateway empty. */
+  mcpAdapterServers?: { name: string; definition: unknown }[];
   systemPrompt?: string;
-  appendSystemPrompt?: string;
   allowedToolNames?: string[];
   bundleDigest: string;
   legacyCapabilityDigest?: string;
@@ -172,12 +175,12 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
         ...(request.tools ? { tools: request.tools } : {}),
         ...(request.nativeTools?.length ? { nativeTools: request.nativeTools } : {}),
         ...(request.skillPaths?.length ? { skillPaths: request.skillPaths } : {}),
+        ...(request.skillFolder ? { skillFolder: request.skillFolder } : {}),
         ...(request.piExtensionPaths?.length ? { piExtensionPaths: request.piExtensionPaths } : {}),
         ...(request.piExtensionTools?.length ? { piExtensionTools: request.piExtensionTools } : {}),
+        ...(request.mcpAdapterServers?.length ? { mcpAdapterServers: request.mcpAdapterServers } : {}),
         ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
-        ...(request.appendSystemPrompt ? { appendSystemPrompt: request.appendSystemPrompt } : {}),
         ...(request.allowedToolNames ? { allowedToolNames: request.allowedToolNames } : {}),
-        hideSkillDescriptions: true,
         activateExtensionTools: true,
         bundleDigest: request.bundleDigest,
         ...(request.legacyCapabilityDigest ? { legacyCapabilityDigest: request.legacyCapabilityDigest } : {}),

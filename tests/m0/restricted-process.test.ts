@@ -675,8 +675,9 @@ test('the real Pi SDK runs in the OS sandbox while the host owns its provider cr
     });
     expect(result.code, result.stderr).toBe(0);
     const snapshot = JSON.parse(result.stdout);
-    expect(snapshot.messages).toHaveLength(2);
-    expect(snapshot.messages[1]).toMatchObject({ role: 'assistant', stopReason: 'stop' });
+    expect(snapshot.messages[0]).toMatchObject({ role: 'system' });
+    expect(snapshot.messages).toHaveLength(3);
+    expect(snapshot.messages[2]).toMatchObject({ role: 'assistant', stopReason: 'stop' });
     expect(provider.requests).toHaveLength(1);
     expect(gate.inspect().used).toBe(50);
   } finally { gate.close(); await provider.close(); }

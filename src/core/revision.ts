@@ -47,7 +47,15 @@ export function applyRevision(store: TaskStore, taskId: string, input: GraphRevi
       throw new RuntimeError('invalid_proposal', 'Revision cannot change confirmed verification rules');
     }
     if (canonicalJson(nextNode.input ?? null) !== canonicalJson(confirmed.input ?? null)) {
-      throw new RuntimeError('invalid_proposal', 'Revision cannot change the confirmed input of an acceptance check');
+      // A check that has never produced valid evidence has not proved its
+      // acceptance item, so a reasoned revision may re-point it: a check that
+      // cannot even execute (a sandbox or environment failure, never an
+      // assertion) would otherwise be unfixable, while the acceptance item, the
+      // check action and its verification rules all stay unchanged. Once the
+      // check has proved its item its input is frozen again, so a passing check
+      // can never be loosened.
+      const proved = store.db.prepare('SELECT 1 FROM evidence WHERE task_id=? AND acceptance_id=? AND valid=1 LIMIT 1').get(taskId, item.id);
+      if (proved) throw new RuntimeError('invalid_proposal', 'Revision cannot change the confirmed input of an acceptance check that already proved its item');
     }
     for (const dependency of prior.dependsOn ?? []) {
       if (!(nextNode.dependsOn ?? []).includes(dependency)) throw new RuntimeError('invalid_proposal', 'Revision cannot remove a confirmed check dependency');

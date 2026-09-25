@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt } from '@earendil-works/pi-ai';
 import { reply, modelA } from '../fixtures/models.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { controlledOpenAIStream, type SendGate } from '../../src/runtime/controlled-openai.ts';
@@ -27,13 +27,13 @@ test('different subagents run in independent Pi processes with their own capabil
   const gates = [new CallBroker(join(root, 'gate-a.sqlite'), 'agent-a'), new CallBroker(join(root, 'gate-b.sqlite'), 'agent-b')];
   cleanup.push(() => gates[0]!.close());
   cleanup.push(() => gates[1]!.close());
-  const open = (id: string, gate: CallBroker, identity: string, awareness: string) => openPiProcess({
+  const open = (id: string, gate: CallBroker, identity: string) => openPiProcess({
     binding: { instanceId: id, nodeId: id, definitionVersion: `${id}@1` },
     workspace: project,
     stateDir: join(root, id),
     model: modelA,
     stream: (_model, context) => {
-      prompts.set(id, context.systemPrompt ?? '');
+      prompts.set(id, getCurrentSystemPrompt(context.messages));
       const stream = createAssistantMessageEventStream();
       stream.push({ type: 'done', reason: 'stop', message: reply(modelA, id) });
       return stream;
@@ -41,23 +41,21 @@ test('different subagents run in independent Pi processes with their own capabil
     tools: [],
     broker: gate,
     systemPrompt: identity,
-    appendSystemPrompt: awareness,
     bundleDigest: id === 'agent-a' ? 'a'.repeat(64) : 'b'.repeat(64),
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),
     readOnly: true,
   });
-  const first = await open('agent-a', gates[0]!, 'Identity A', 'Capability A');
-  const second = await open('agent-b', gates[1]!, 'Identity B', 'Capability B');
+  const first = await open('agent-a', gates[0]!, 'Identity A');
+  const second = await open('agent-b', gates[1]!, 'Identity B');
   const [one, two] = await Promise.all([first.prompt('one'), second.prompt('two')]);
   expect(one.processId).not.toBe(process.pid);
   expect(two.processId).not.toBe(process.pid);
   expect(one.processId).not.toBe(two.processId);
   expect(prompts.get('agent-a')).toContain('Identity A');
-  expect(prompts.get('agent-a')).toContain('Capability A');
   expect(prompts.get('agent-a')).not.toContain('Identity B');
   expect(prompts.get('agent-b')).toContain('Identity B');
-  expect(prompts.get('agent-b')).not.toContain('Capability A');
+  expect(prompts.get('agent-b')).not.toContain('Identity A');
   await first.close();
   await second.close();
 }, 120_000);
@@ -104,7 +102,6 @@ test('a bound Pi extension registers its declared tool inside the isolated Agent
     piExtensionPaths: [extension],
     piExtensionTools: ['extension_probe'],
     systemPrompt: 'Use the bound extension when asked.',
-    appendSystemPrompt: 'extension_probe is declared by the bound Pi extension.',
     bundleDigest: 'c'.repeat(64),
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),
@@ -165,7 +162,6 @@ test('a bound Pi extension can load sibling modules from its capability director
     piExtensionPaths: [join(extensionRoot, 'index.mjs')],
     piExtensionTools: ['extension_import_probe'],
     systemPrompt: 'Use the bound extension when asked.',
-    appendSystemPrompt: 'extension_import_probe is declared by the bound Pi extension.',
     bundleDigest: 'f'.repeat(64),
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),
@@ -222,7 +218,6 @@ test('a bound Pi extension remains readable when its capability directory is ins
     piExtensionPaths: [join(entryDirectory, 'index.mjs')],
     piExtensionTools: ['protected_extension_probe'],
     systemPrompt: 'Use the protected extension.',
-    appendSystemPrompt: 'protected_extension_probe is declared by the bound extension.',
     bundleDigest: 'd'.repeat(64),
     toolPolicyDigest: '1'.repeat(64),
     runtimePolicyDigest: '2'.repeat(64),

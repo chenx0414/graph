@@ -35,7 +35,7 @@ async function capability(root: string, id: string, manifest: Record<string, unk
 
 // Cross the HTTP and real Pi seams: neither side supplies a manually assembled
 // expected inventory, so this catches a newly added or changed tool drifting.
-test('the next-operation preview matches the real master tools and context at its pinned definition', async () => {
+test('the next-operation preview matches the real master tools and context at the definition it will run', async () => {
   const { root, capabilityRoot, workspace, library } = await fixture();
   await capability(capabilityRoot, 'identity-one', { kind: 'prompt', role: 'agent' }, { 'agent.md': 'BOUND IDENTITY ONE\n' });
   await capability(capabilityRoot, 'identity-two', { kind: 'prompt', role: 'agent' }, { 'agent.md': 'BOUND IDENTITY TWO\n' });
@@ -69,15 +69,16 @@ test('the next-operation preview matches the real master tools and context at it
   const response = await server.app.inject({ method: 'GET', url: `/api/agent-context?conversationId=${created.conversationId}`, headers });
   expect(response.statusCode, response.body).toBe(200);
   const preview = response.json<Awaited<ReturnType<typeof server.runtime.agentContextPreview>>>();
-  expect(preview.definitionVersion).toBe('guide@1');
+  expect(preview.definitionVersion).toBe('guide@2');
   expect(preview.latestDefinitionVersion).toBe('guide@2');
   expect(preview.prompts.find(prompt => prompt.key === 'runtime/worker.md')?.content).toContain('{{retrievalNote}}');
   expect(preview.prompts.find(prompt => prompt.key === 'runtime/worker.md')?.defaultContent).toContain('{{retrievalNote}}');
-  expect(preview.preview.text).toContain('BOUND IDENTITY ONE');
-  expect(preview.preview.text).not.toContain('BOUND IDENTITY TWO');
-  expect(preview.preview.text).not.toContain('EDITABLE GUIDE IDENTITY');
-  expect(preview.preview.text).toContain('SELECTED PROJECT INSTRUCTIONS');
-  expect(preview.preview.text).not.toContain('LOWER PRIORITY');
+  // The next-operation view carries facts (tools, capabilities, prompts), never a
+  // second rendering of the prompt: what a send really composes is asserted where it
+  // is produced, in the provider request (tests/m8/conversation-pi.test.ts).
+  expect(preview).not.toHaveProperty('preview');
+  // Which identity a send uses follows from the definition version it will run.
+  expect(preview.definitionVersion).toBe('guide@2');
   expect(preview.tools.filter(tool => tool.name === 'read')).toHaveLength(1);
   expect(preview.tools.find(tool => tool.name === 'read')).toMatchObject({ enabled: false, available: false });
   expect(preview.tools.find(tool => tool.name === 'artifact_publish')?.parameters).toEqual(expect.arrayContaining(['requestId', 'expectedVersion']));
@@ -95,16 +96,24 @@ test('the next-operation preview matches the real master tools and context at it
     expect(Object.keys(actual.get(tool.name)!.parameters.properties).sort()).toEqual(tool.parameters);
   }
   const system = sent.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
-  for (const section of preview.preview.sections.filter(section => !['capabilities', 'pi_cwd'].includes(section.id))) {
-    expect(system).toContain(`<${section.id}>\n${section.parts.map(part => part.content.trim()).filter(Boolean).join('\n\n')}\n</${section.id}>`);
-  }
+  // Graph's own sections reach the request: the identity, the rules and the docs
+  // are composed once, at the send, and asserted here on the real request.
+  expect(system).toContain('<identity>');
+  expect(system).toContain('<rules>');
+  expect(system).toContain('<docs>');
+  // Project context, the skills block and the working directory are the Pi
+  // session's own additions: they reach the request, never the preview.
+  expect(system).toContain('<project_context>');
+  expect(system).toContain('SELECTED PROJECT INSTRUCTIONS');
+  expect(system).toContain('<cwd>');
   // The preview follows next-operation settings, while the previous request is
   // unchanged. No new model call or historical load fact is needed to refresh.
   access = standardAccessPolicy();
   await library.savePrompt('rules/common.md', 'NEXT OPERATION RULE');
   const next = await server.runtime.agentContextPreview(created.conversationId);
-  expect(next.preview.text).toContain('NEXT OPERATION RULE');
-  expect(next.preview.text).not.toContain('Full access is active for this operation');
+  // The next-operation view carries the rule text it would compose, read fresh, and
+  // refreshes without a model call.
+  expect(next.prompts.find(prompt => prompt.key === 'rules/common.md')?.content).toBe('NEXT OPERATION RULE');
   expect(system).not.toContain('NEXT OPERATION RULE');
   expect(provider.requests).toHaveLength(1);
 }, 120_000);
@@ -127,7 +136,6 @@ test('preview reads declarations without importing an extension or starting an M
   const assembly = await openAgentContextAssembly({ catalog, library, workspace, definitionVersion: 'main@1', action: 'master', role: 'master' });
   const preview = await assembly.preview({ role: 'master' });
   expect(preview.tools.find(tool => tool.name === 'declared_probe')).toMatchObject({ runtimeAvailable: null, enabled: true });
-  expect(preview.composed.previewText).toContain('declared_probe (not yet discovered)');
   expect(preview.capabilities.find(item => item.id === 'mcp')).toMatchObject({ tools: [] });
   expect(existsSync(marker)).toBe(false);
   expect(await readFile(join(capabilityRoot, 'extension/index.mjs'), 'utf8')).toContain('unexpected');
@@ -155,16 +163,11 @@ test('the Main Agent identity explains harness self-improvement only when RSI is
     role: 'master', run: true,
     rsi: { status: true, apply: true },
   });
-  expect(rsiPreview.composed.sections.find(section => section.id === 'identity')?.parts.map(part => part.id))
-    .toContain('identity.harness');
-  expect(rsiPreview.composed.previewText).toContain('apply_rsi_change');
   expect(rsiPreview.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['inspect_rsi_status', 'apply_rsi_change']));
 
   const withoutRsi = await openAgentContextAssembly({
     catalog, library, workspace, definitionVersion: 'main@1', action: 'master', role: 'master', fullAccess: true,
   });
   const plainPreview = await withoutRsi.preview({ role: 'master', run: true });
-  expect(plainPreview.composed.sections.find(section => section.id === 'identity')?.parts.map(part => part.id))
-    .not.toContain('identity.harness');
   expect(plainPreview.tools.map(tool => tool.name)).not.toContain('apply_rsi_change');
 });

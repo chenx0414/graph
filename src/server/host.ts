@@ -19,9 +19,17 @@ export interface StartupInfo {
   limitAliases?: Record<string, string>;
 }
 
+import type { ConfigWatchReport } from './config-watch.ts';
+import type { SecretPersistRequest } from './secret-persist.ts';
+
 export interface AppServices {
   applyConfig(document: unknown, expectedRevision: number): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number }>;
-  pushSecret(ref: string, value: string | null): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number }>;
+  /** `persisted` marks a push that only confirms the keychain now holds the value. */
+  pushSecret(ref: string, value: string | null, persisted?: boolean): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number }>;
+  /** Secret writes the keychain does not hold yet; the desktop app polls for them. */
+  pendingSecretRequests(): SecretPersistRequest[];
+  /** The configuration file watcher's last outcome, or null when none runs. */
+  configWatch?(): ConfigWatchReport | null;
   appToken: string;
   snapshot(): { revision: number; effectiveRevision: number; applied: boolean; configured: boolean; modelCount: number; enabledModelCount: number };
   /** Explicit price snapshot refresh (C01): re-verify archived entries against
@@ -29,7 +37,6 @@ export interface AppServices {
   refreshPrices?(expectedRevision: number): Promise<{ revision: number; effectiveRevision: number; applied: boolean; reason?: string | undefined; configured: boolean; modelCount: number; enabledModelCount: number; results: { modelId: string; provider: string; status: string; sourceUrl?: string; reason?: string }[] }>;
   capabilityConfig?: {
     secretValues(): Record<string, string>;
-    verify(record: CapabilityRecord, values?: Record<string, string>): Promise<CapabilityCheckResult>;
   };
   /** Host-side view of the RSI restart queue, polled by the desktop app. */
   rsi?: {

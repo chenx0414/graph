@@ -41,6 +41,13 @@ test('a minimal desktop PATH gains the standard developer toolchain locations', 
   // An inherited directory keeps its position and is never added twice.
   expect(developerPath('/opt/homebrew/bin:/usr/bin', exists)).toBe('/opt/homebrew/bin:/usr/bin:/usr/local/bin');
   expect(developerPath(undefined, () => false)).toBe('');
+
+  // The daemon widens its own environment in place, so the children it starts inherit it.
+  const { widenProcessPath } = await import('../../src/runtime/developer-path.ts');
+  expect(widenProcessPath({ PATH: '/usr/bin:/bin' }, exists).PATH)
+    .toBe('/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin');
+  expect(widenProcessPath({ PATH: '/opt/homebrew/bin:/usr/bin:/usr/local/bin' }, exists).PATH)
+    .toBe('/opt/homebrew/bin:/usr/bin:/usr/local/bin');
 });
 
 test('a check reaches the host toolchain an app started from the desktop would miss', async () => {

@@ -9,7 +9,7 @@ export interface AgentToolFeatures {
   fetch?: boolean;
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
-  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft', boolean>>;
+  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange' | 'requestModelAccess', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
 }
@@ -177,6 +177,12 @@ function declarations(features: AgentToolFeatures) {
       name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson is a JSON object with requirementVersion, summary, acceptance[{id,description,checkNode}], nodes[NodeSpec], optional containers, loops and decisions. Agent nodes require definitionVersion and model; every acceptance checkNode must reference a mandatory program node. Keep decisions current: they are frozen with this draft version and passed to workers after confirmation.',
       parameters: Type.Object({ proposalJson: Type.String(), requestId: Type.String() }),
       available: main && Boolean(features.supervisor),
+      externallyGated: false,
+    },
+    confirm_draft: {
+      name: 'confirm_draft', label: 'Confirm draft', description: 'Confirm the current conversation draft on the user behalf and start the feature task, exactly like the confirmation card. Call it only when the user explicitly asked you to confirm (for example 确认 / 开始 / 建这个任务), and pass their words verbatim as instruction: the command log records actor agent, onBehalfOf user and that instruction, so the transcript and the log agree. targetBranch is required and must be the branch the user named; ask before using anything other than the project convention.',
+      parameters: Type.Object({ proposalVersion: Type.Number(), targetBranch: Type.String(), instruction: Type.String(), requestId: Type.String() }),
+      available: main && Boolean(features.supervisor?.confirmDraft),
       externallyGated: false,
     },
     withdraw_draft: {

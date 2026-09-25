@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, type AssistantMessage, type Context, type Model, type TranscriptContext } from '@earendil-works/pi-ai';
 import { streamSimple as openaiStreamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import { streamSimple as anthropicStreamSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
 import { estimateContextTokens, estimateTextTokens } from '@earendil-works/pi-ai/utils/estimate';
@@ -270,7 +270,7 @@ export interface StreamSlot {
 
 export interface AccountUsageDeltaInput {
   model: Model<ModelApi>;
-  context: Context;
+  context: TranscriptContext;
   /** A fresh clone owned by the callback; it may be consumed. */
   response: Response;
 }
@@ -280,6 +280,11 @@ export interface ControlledStreamUsageOptions {
   estimateMissing?: boolean;
   /** Provider adapter hook. It must return the account-level delta attributable to this send. */
   accountUsageDelta?: (input: AccountUsageDeltaInput) => Promise<TokenUsage | null> | TokenUsage | null;
+  /**
+   * Reports the exact system prompt one send carries. The console shows what the model really
+   * received, so this must be the string the transport sends — never a re-render of the same facts.
+   */
+  onSend?: (systemPrompt: string | null) => void;
 }
 
 function textFromContent(value: unknown): string {
@@ -317,7 +322,7 @@ function anthropicOutputText(body: unknown, contentType: string): string {
   return '';
 }
 
-async function estimateMissingUsage(response: Response, api: 'openai-completions' | 'anthropic-messages', context: Context): Promise<TokenUsage | null> {
+async function estimateMissingUsage(response: Response, api: 'openai-completions' | 'anthropic-messages', context: TranscriptContext): Promise<TokenUsage | null> {
   if (!response.ok) return null;
   const reader = response.body?.getReader();
   if (!reader) return null;
@@ -389,6 +394,7 @@ export function controlledOpenAIStream(
       try {
         if (model.api !== api) throw new Error('Unverified model transport');
         let sent = false;
+        let reported = false;
         // Resolve the credential at actual send time so a key rotation that
         // happened while this request waited applies to unsent calls.
         const key = typeof apiKey === 'function' ? apiKey() : apiKey;
@@ -406,6 +412,13 @@ export function controlledOpenAIStream(
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
             if (sent) throw new Error('Unexpected provider retry; use a new controlled invocation');
             sent = true;
+            if (!reported) {
+              reported = true;
+              // A diagnostic must never break a send: the model call is what matters.
+              // The provider now receives a normalized transcript: the current prompt is
+              // what every system message in it replays to, never a plain field.
+              try { usageOptions.onSend?.(getCurrentSystemPrompt(context.messages) || null); } catch { /* ignored on purpose */ }
+            }
             // The slot is acquired per attempt inside gatedProviderFetch, so a
             // retry re-queues and re-passes the gate after releasing capacity.
             return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {

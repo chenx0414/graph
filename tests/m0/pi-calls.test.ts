@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { Type } from '@earendil-works/pi-ai';
+import { Type, normalizeContext } from '@earendil-works/pi-ai';
 import type { ToolDefinition, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from '../../src/runtime/pi-instance.ts';
 import { CallBroker, type TokenUsage } from '../../src/runtime/call-broker.ts';
@@ -14,7 +14,7 @@ import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provider: Awaited<ReturnType<typeof openaiServer>>) => ToolDefinition[] = () => [],
-  config: { auto?: boolean; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void } = {}) {
+  config: { auto?: boolean; systemPrompt?: string; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void; onSend?: (systemPrompt: string | null) => void } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-pi-calls-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans); cleanup.push(() => provider.close());
@@ -22,14 +22,42 @@ async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provid
   const instance = await openPiInstance({
     binding: { instanceId: 'agent-1', nodeId: 'node-1', definitionVersion: 'coder@1' },
     workspace: root, stateDir: join(root, 'session'), model: provider.model, modelRuntime: provider.runtime,
-    stream: controlledOpenAIStream(broker, 'scripted-local-key'),
+    stream: controlledOpenAIStream(broker, 'scripted-local-key', undefined, 'openai-completions', config.onSend ? { onSend: config.onSend } : {}),
     tools: tools(broker, provider), broker,
     compaction: { enabled: config.auto ?? false, reserveTokens: 256, keepRecentTokens: 1 },
+    ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
     onEvent: event => config.onEvent?.(event, broker),
   });
   cleanup.push(() => instance.close());
   return { instance, broker, provider };
 }
+
+test('Graph supplies the custom prompt and the Pi session keeps its own native additions', async () => {
+  const composed = '<identity>\nAgent\n</identity>';
+  const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed });
+  await instance.prompt('Hello');
+  const request = provider.requests[0] as { messages: { role: string; content: string }[] };
+  const system = request.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
+  // Graph no longer replaces the built prompt: its text is the session's custom
+  // prompt and the Pi session appends its own parts itself, which is how the
+  // working-directory line reaches the model.
+  expect(system.startsWith(composed)).toBe(true);
+  expect(system).toMatch(/<cwd>\n[^\n]+\n<\/cwd>/);
+});
+
+test('the exact system prompt sent to the provider is reported back to the caller', async () => {
+  const composed = '<identity>\nAgent\n</identity>';
+  const reported: (string | null)[] = [];
+  const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed, onSend: value => reported.push(value) });
+  await instance.prompt('Hello');
+  const request = provider.requests[0] as { messages: { role: string; content: string }[] };
+  const system = request.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
+
+  // The console must show what the model really received, so the report has to be the same string
+  // the provider got — not a second rendering of the same facts.
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toBe(system);
+});
 
 test('native Pi HTTP calls pass the gate and raw cache/reasoning totals are charged once', async () => {
   const { instance, broker, provider } = await fixture([{}]);
@@ -76,7 +104,7 @@ test('an LLM request made inside a tool cannot bypass a pause', async () => {
     name: 'ask_model', label: 'Ask model', description: 'Nested model call', parameters: Type.Object({}),
     execute: async () => {
       gate.pause();
-      const stream = await controlledOpenAIStream(gate, 'local-key')(service.model, { messages: [{ role: 'user', content: 'Nested request', timestamp: Date.now() }] });
+      const stream = await controlledOpenAIStream(gate, 'local-key')(service.model, normalizeContext({ messages: [{ role: 'user', content: 'Nested request', timestamp: Date.now() }] }));
       nestedStopReason = (await stream.result()).stopReason;
       return { content: [{ type: 'text', text: 'Nested request was stopped' }], details: {} };
     },
@@ -176,7 +204,7 @@ test('a connection reset after the request was sent is not resent and holds unkn
     reasoning: false, input: ['text' as const], contextWindow: 32_000, maxTokens: 256,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
-  const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] });
+  const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, normalizeContext({ messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] }));
   expect((await stream.result()).stopReason).toBe('error');
   expect(attempts).toBe(1);
   expect(broker.inspect()).toMatchObject({ used: 0, hold: 'unknown usage', status: 'blocked', calls: [{ state: 'unknown' }] });

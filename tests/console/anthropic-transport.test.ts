@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, test } from 'vitest';
-import { createAssistantMessageEventStream, type AssistantMessageEventStream, type Model } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, normalizeContext, type AssistantMessageEventStream, type Model } from '@earendil-works/pi-ai';
 import type { Context } from '@earendil-works/pi-ai';
 import { controlledOpenAIStream, type SendGate } from '../../src/runtime/controlled-openai.ts';
 import type { TokenUsage } from '../../src/runtime/call-broker.ts';
@@ -86,7 +86,7 @@ function bounded<T>(promise: Promise<T>, milliseconds: number, label: string) {
 test('the anthropic Messages transport sends the native request shape and normalizes cache usage', async () => {
   const server = await anthropicServer();
   const { gate, settled, dispatches } = collectingGate();
-  const context: Context = { messages: [{ role: 'user', content: 'hi', timestamp: 1 }] };
+  const context = normalizeContext({ messages: [{ role: 'user', content: 'hi', timestamp: 1 }] });
   const stream = controlledOpenAIStream(gate, () => 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), context, { apiKey: 'ignored', maxTokens: 64 });
   const events = await consume(stream);
   expect(events.some(event => event.type === 'error')).toBe(false);
@@ -107,7 +107,7 @@ test('a missing anthropic usage event settles as unknown instead of zero', async
     'event: message_stop\ndata: {"type":"message_stop"}\n\n',
   ] });
   const { gate, settled } = collectingGate();
-  const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), { messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }, { apiKey: 'ignored', maxTokens: 64 });
+  const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), normalizeContext({ messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }), { apiKey: 'ignored', maxTokens: 64 });
   await consume(stream);
   expect(settled).toEqual([null]);
 }, 60_000);
@@ -115,7 +115,7 @@ test('a missing anthropic usage event settles as unknown instead of zero', async
 test('a completed anthropic SSE response settles before the server closes the connection', async () => {
   const server = await anthropicServer({ holdOpen: true });
   const { gate, settled } = collectingGate();
-  const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), { messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }, { apiKey: 'ignored', maxTokens: 64 });
+  const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), normalizeContext({ messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }), { apiKey: 'ignored', maxTokens: 64 });
   const events = await bounded(consume(stream), 1_000, 'completed anthropic response');
   expect(events.some(event => event.type === 'error')).toBe(false);
   expect(settled).toEqual([{ input: 25, output: 7, cacheRead: 10, cacheWrite: 5, usageSource: 'authoritative' }]);
@@ -126,7 +126,7 @@ test('an anthropic error response is a transport failure, not a provider success
   const { gate, settled } = collectingGate();
   let threw = false;
   try {
-    const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), { messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }, { apiKey: 'ignored', maxTokens: 64 });
+    const stream = controlledOpenAIStream(gate, 'key-one', undefined, 'anthropic-messages')(anthropicModel(server.baseUrl), normalizeContext({ messages: [{ role: 'user', content: 'hi', timestamp: 1 }] }), { apiKey: 'ignored', maxTokens: 64 });
     for await (const event of await stream) { if (event.type === 'error') break; }
   } catch { threw = true; }
   // The SDK reports the HTTP error inside the stream error event; either way the

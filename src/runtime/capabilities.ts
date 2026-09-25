@@ -11,10 +11,12 @@ import { normalizeDomainPattern } from '../core/domains.ts';
 import { isLocalMcpCommand, LOCAL_MCP_COMMANDS } from '../core/mcp-commands.ts';
 import { canonicalJson } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
+import { environmentValues, headerValues } from './mcp-adapter-server.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
 import { allowedDomain, normalizeDomains } from './domains.ts';
 import { externallyGated } from './pi-instance.ts';
+import { resolvePiExtensionSource } from './pi-extension-source.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 import { graphNodeRuntime } from './workspace-command.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -29,6 +31,8 @@ export interface CapabilityLoadFact {
   name?: string;
   description?: string;
   path?: string;
+  /** The declared package source when the SDK resolved the extension instead of a vendored copy. */
+  source?: string;
   tools?: string[];
   networkDomains?: string[];
   networkAccess?: 'unrestricted';
@@ -82,6 +86,7 @@ interface McpManifest {
   command?: unknown;
   args?: unknown;
   entry?: unknown;
+  source?: unknown;
   url?: unknown;
   provisioning?: unknown;
   headers?: unknown;
@@ -334,6 +339,32 @@ async function resolvePiExtensionRuntime(input: {
   };
 }
 
+/**
+ * Where the SDK installs Pi extension sources. One cache per Graph home rather than per state
+ * directory: the install is a download cache for the declared source, so a second daemon (or a
+ * test) reuses it instead of installing the same package again.
+ */
+export function piExtensionCacheDir(catalog: Catalog) {
+  const root = catalog.capabilityRootPath();
+  return root ? join(dirname(root), 'extensions') : join(tmpdir(), 'graph-pi-extensions');
+}
+
+/**
+ * A capability that declares a package source reports the version the source actually resolved to:
+ * the manifest's `version` follows the source instead of decaying into a stale pin.
+ */
+export async function syncCapabilityVersion(snapshot: string, version: string | null) {
+  if (!version) return;
+  const file = join(snapshot, 'capability.json');
+  try {
+    const manifest = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    if (manifest.version === version) return;
+    await writeFile(file, `${canonicalJson({ ...manifest, version })}\n`);
+  } catch {
+    // A manifest we cannot rewrite must never fail the load that triggered it.
+  }
+}
+
 async function manifestOf(snapshot: string) {
   try { return JSON.parse(await readFile(join(snapshot, 'capability.json'), 'utf8')) as McpManifest; }
   catch (error) { throw new RuntimeError('capability_unavailable', `Capability manifest is unreadable: ${String(error)}`); }
@@ -383,44 +414,6 @@ function skillMetadata(text: string) {
 }
 
 export type CapabilitySecrets = Record<string, string>;
-
-function headerValues(headers: unknown, headersEnv: unknown, secrets: CapabilitySecrets = {}) {
-  const values: Record<string, string> = {};
-  const merge = (source: unknown, resolveValue: (value: string) => string, label: string) => {
-    if (source === undefined) return;
-    if (!source || typeof source !== 'object' || Array.isArray(source) || Object.values(source).some(value => typeof value !== 'string')) {
-      throw new RuntimeError('capability_unavailable', `${label} must be a string map`);
-    }
-    for (const [header, value] of Object.entries(source as Record<string, string>)) values[header] = resolveValue(value);
-  };
-  merge(headers, value => value, 'MCP manifest headers');
-  merge(headersEnv, name => {
-    const value = secrets[name] ?? process.env[name];
-    if (!value) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${name}`);
-    return value;
-  }, 'MCP manifest headersEnv');
-  return values;
-}
-
-function environmentValues(env: unknown, secrets: CapabilitySecrets = {}) {
-  if (env === undefined) return undefined;
-  if (!env || typeof env !== 'object' || Array.isArray(env) || Object.values(env).some(value => typeof value !== 'string')) {
-    throw new RuntimeError('capability_unavailable', 'MCP manifest env must be a string map');
-  }
-  const values: Record<string, string> = {};
-  for (const [name, rawValue] of Object.entries(env as Record<string, string>)) {
-    const reference = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(rawValue)?.[1]
-      ?? (/^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(rawValue)?.[1]);
-    if (reference) {
-      const value = secrets[reference] ?? process.env[reference];
-      if (value === undefined) throw new RuntimeError('capability_unavailable', `MCP manifest requires environment variable ${reference}`);
-      values[name] = value;
-    } else {
-      values[name] = rawValue;
-    }
-  }
-  return values;
-}
 
 function resolveManifestDomains(declared: unknown, label: string, granted: string[] = [], secrets: CapabilitySecrets = {}) {
   if (declared === undefined) return normalizeDomains(granted);
@@ -543,57 +536,6 @@ export interface CapabilityCheckResult {
   ok: boolean;
   tools: string[];
   message: string;
-}
-
-/** Verify one credential-bound MCP without mutating task or capability state. */
-export async function verifyMcpCapability(record: CapabilityRecord, secrets: CapabilitySecrets = {}): Promise<CapabilityCheckResult> {
-  if (record.kind !== 'mcp') return { ok: false, tools: [], message: 'Only MCP capabilities can be verified here' };
-  const snapshot = snapshotPath(record);
-  const manifest = await manifestOf(snapshot);
-  const gate: SendGate = { dispatch: (_id, _reservation, send) => send(), settle: () => undefined };
-  let release: (() => Promise<void>) | undefined;
-  let workspace: string | undefined;
-  try {
-    let connection: McpExchange;
-    if (typeof manifest.command === 'string') {
-      workspace = await mkdtemp(join(tmpdir(), 'graph-capability-check-'));
-      const scratch = join(workspace, 'scratch');
-      await mkdir(scratch, { recursive: true, mode: 0o700 });
-      const domains = manifestNetworkDomains(manifest, [], secrets);
-      const provisioning = await ensureMcpProvisioned({
-        gate,
-        manifest,
-        snapshot,
-        workspace,
-        scratchDir: scratch,
-        ...(secrets ? { secrets } : {}),
-        ...(domains.length ? { runtimeDomains: domains } : {}),
-      });
-      const acquired = await acquireRestrictedExecutor();
-      release = acquired.release;
-      connection = await localConnection({
-        executor: acquired.executor,
-        gate,
-        manifest,
-        snapshot,
-        workspace,
-        scratchDir: scratch,
-        secrets,
-        ...(provisioning ? { provisioning: { plan: provisioning, phase: 'runtime' } } : {}),
-        ...(domains.length ? { networkDomains: domains } : {}),
-        ...(manifest.networkAccess === 'unrestricted' ? { allowUnrestrictedNetwork: true } : {}),
-      });
-    } else {
-      connection = remoteConnection(manifest, gate, [], secrets);
-    }
-    const tools = await listMcpTools(connection);
-    return { ok: true, tools: tools.map(tool => tool.name), message: `连接成功，发现 ${tools.length} 个工具` };
-  } catch (error) {
-    return { ok: false, tools: [], message: error instanceof Error ? error.message : String(error) };
-  } finally {
-    await release?.().catch(() => undefined);
-    if (workspace) await rm(workspace, { recursive: true, force: true });
-  }
 }
 
 /** Read paths a sandboxed helper needs to start the Node runtime itself.
@@ -880,6 +822,28 @@ function capabilityTools(
  * the runtime's granted domains. Every tool call passes the same send gate as
  * model calls.
  */
+/**
+ * The bindings one Agent definition resolves: its own declarations, then every
+ * available capability marked `base`. A base capability therefore reaches every
+ * Agent without being bound anywhere, and dispatch, the console preview and the
+ * tests agree by construction. An explicit binding of the same id wins.
+ */
+function definitionBindings(
+  definition: { capabilities?: CapabilityBinding[]; prompts?: { agent?: CapabilityBinding; tool?: CapabilityBinding } },
+  catalog: Catalog,
+): { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] {
+  const declared = definition.capabilities ?? [];
+  const bound = new Set(declared.map(binding => binding.id));
+  return [
+    ...declared.map(binding => ({ bound: binding, role: 'capability' as const })),
+    ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
+    ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
+    ...catalog.capabilities()
+      .filter(record => record.base === true && record.status === 'available' && !bound.has(record.id))
+      .map(record => ({ bound: { id: record.id, version: record.version }, role: 'capability' as const })),
+  ];
+}
+
 export async function resolveCapabilityFacts(
   catalog: Catalog,
   definitionVersion?: string,
@@ -888,11 +852,7 @@ export async function resolveCapabilityFacts(
   let definition: ReturnType<Catalog['definition']>;
   try { definition = catalog.definition(definitionVersion); }
   catch { return []; }
-  const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
-    ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
-    ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
-    ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
-  ];
+  const bindings = definitionBindings(definition, catalog);
   const facts: ResolvedCapabilityFact[] = [];
   const seen = new Set<string>();
   for (const { bound, role } of bindings) {
@@ -938,9 +898,11 @@ export async function resolveCapabilityFacts(
       continue;
     }
     if (record.kind === 'pi-extension') {
-      const entry = extensionEntry(manifest, snapshot);
-      if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} entry does not exist`);
       const declared = declaredTools(manifest);
+      // A sourced extension has no local entry: the SDK resolves the package source at load time.
+      const packageSource = typeof manifest.source === 'string' && manifest.source.trim() ? manifest.source.trim() : null;
+      const entry = packageSource ? null : extensionEntry(manifest, snapshot);
+      if (entry && !existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} entry does not exist`);
       facts.push({
         id: bound.id,
         version: bound.version,
@@ -949,10 +911,10 @@ export async function resolveCapabilityFacts(
         path: snapshot,
         digest: textDigest(canonicalJson({
           manifest: manifest as unknown as Json,
-          entry: await fileDigest(entry),
+          ...(entry ? { entry: await fileDigest(entry) } : {}),
         })),
         declaredTools: declared,
-        entry,
+        ...(entry ? { entry } : {}),
       });
       continue;
     }
@@ -1076,16 +1038,21 @@ export async function loadCapabilities(input: {
     tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report,
   }; } // Unpublished definitions keep briefing-only behavior.
   try {
-    const bindings: { bound: CapabilityBinding; role: 'capability' | 'agent' | 'tool' }[] = [
-      ...(definition.capabilities ?? []).map(bound => ({ bound, role: 'capability' as const })),
-      ...(definition.prompts?.agent ? [{ bound: definition.prompts.agent, role: 'agent' as const }] : []),
-      ...(definition.prompts?.tool ? [{ bound: definition.prompts.tool, role: 'tool' as const }] : []),
-    ];
+    const bindings = definitionBindings(definition, input.catalog);
+    // Bindings the definition declares itself are a promise to the user, so they stay fail-closed.
+    // The rest come from base capabilities: a convenience layer nobody asked for, which must never
+    // be able to stop a session (see the 2026-09-25 incident).
+    const declaredKeys = new Set<string>([
+      ...(definition.capabilities ?? []).map(binding => bindingKey(binding, 'capability')),
+      ...(definition.prompts?.agent ? [bindingKey(definition.prompts.agent, 'agent')] : []),
+      ...(definition.prompts?.tool ? [bindingKey(definition.prompts.tool, 'tool')] : []),
+    ]);
     const seen = new Set<string>();
     for (const { bound, role } of bindings) {
       const seenKey = bindingKey(bound, role);
       if (seen.has(seenKey)) continue;
       seen.add(seenKey);
+      try {
       const record = input.catalog.capability(bound.id, bound.version);
       if (!record || record.status !== 'available') {
         throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not available in the capability directory`);
@@ -1108,23 +1075,40 @@ export async function loadCapabilities(input: {
         readRoots.push(snapshot);
         report.push({
           id: bound.id, version: bound.version, kind: record.kind, loaded: true, executable: false,
-          reason: '技能已加载为只读文档', path: skillFile, ...metadata,
+          reason: '原生 skills 注入：模型按需读取 SKILL.md', path: skillFile, ...metadata,
         });
         continue;
       }
       if (record.kind === 'pi-extension') {
         if (!existsSync(snapshot)) throw new RuntimeError('capability_unavailable', `Pi extension ${bound.id}@${bound.version} has no snapshot`);
         const manifest = await manifestOf(snapshot);
-        const entryValue = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry : './index.mjs';
-        const entry = isAbsolute(entryValue) ? entryValue : resolve(snapshot, entryValue);
-        if (entry !== snapshot && !entry.startsWith(`${snapshot}/`)) {
-          throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} must stay inside the snapshot`);
-        }
-        if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} does not exist`);
         const declared = declaredTools(manifest);
-        piExtensionPaths.push(entry);
+        const source = typeof manifest.source === 'string' && manifest.source.trim() ? manifest.source.trim() : null;
+        let loadedEntry: string;
+        if (source) {
+          // A declared source is installed and resolved by the Pi SDK's own package manager, so
+          // version ranges, git refs and the package's own `pi.extensions` list stay native.
+          const resolvedSource = await resolvePiExtensionSource({
+            source,
+            cwd: input.workspace,
+            agentDir: piExtensionCacheDir(input.catalog),
+          });
+          piExtensionPaths.push(...resolvedSource.entries);
+          readRoots.push(...resolvedSource.readRoots);
+          loadedEntry = resolvedSource.entries[0]!;
+          await syncCapabilityVersion(snapshot, resolvedSource.version);
+        } else {
+          const entryValue = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry : './index.mjs';
+          const entry = isAbsolute(entryValue) ? entryValue : resolve(snapshot, entryValue);
+          if (entry !== snapshot && !entry.startsWith(`${snapshot}/`)) {
+            throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} must stay inside the snapshot`);
+          }
+          if (!existsSync(entry)) throw new RuntimeError('capability_unavailable', `Pi extension entry ${entryValue} does not exist`);
+          piExtensionPaths.push(entry);
+          readRoots.push(snapshot);
+          loadedEntry = entry;
+        }
         piExtensionTools.push(...declared.map(tool => tool.name));
-        readRoots.push(snapshot);
         const runtime = await resolvePiExtensionRuntime({
           manifest,
           snapshot,
@@ -1151,7 +1135,8 @@ export async function loadCapabilities(input: {
             `独立 Pi 进程内加载；声明工具 ${declared.length} 个`,
             runtime ? `运行时声明：命令 ${runtime.env.PATH ? '已解析' : '无'}，网络 ${runtime.allowUnrestrictedNetwork ? '不受限' : runtime.networkDomains.length ? runtime.networkDomains.join(', ') : '无'}，Unix socket ${runtime.unixSockets.length}` : '',
           ].filter(Boolean).join('；'),
-          path: entry,
+          path: loadedEntry,
+          ...(source ? { source } : {}),
           ...(declared.length ? { tools: declared.map(tool => tool.name) } : {}),
           ...(runtime ? {
             runtime: {
@@ -1283,6 +1268,15 @@ export async function loadCapabilities(input: {
           },
         } : {}),
       });
+      } catch (error) {
+        if (declaredKeys.has(seenKey)) throw error;
+        let kind: string | null = null;
+        try { kind = input.catalog.capability(bound.id, bound.version)?.kind ?? null; } catch { kind = null; }
+        report.push({
+          id: bound.id, version: bound.version, kind, loaded: false, executable: false,
+          reason: `基础能力加载失败，已跳过（它不在本 Agent 的配方里）：${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
     }
   } catch (error) {
     await close();
@@ -1303,14 +1297,13 @@ export async function loadCapabilities(input: {
   };
 }
 
-/** Build the identity and capability-awareness prompts from the exact loaded bundle.
+/** Build the identity prompt from the exact loaded bundle.
  * The generated tool section is authoritative even when a tool.md capability is bound. */
 export function capabilityPrompts(input: {
   definitionVersion: string;
   action: string;
   role?: string;
   agentPrompt: string | null;
-  toolPrompt: string | null;
   report: CapabilityLoadFact[];
   tools: readonly ToolDefinition[];
 }) {
@@ -1319,37 +1312,13 @@ export function capabilityPrompts(input: {
     'Work only within the confirmed task and the capabilities listed in tool.md.',
     'Use tools for evidence. Do not claim a tool result that did not happen.',
   ].join('\n');
-  const byKind = (kind: string) => input.report.filter(item => item.kind === kind);
-  const skillLines = byKind('skill').map(item => `- ${item.name ?? item.id} (${item.id}@${item.version})${item.path ? ` at ${item.path}` : ''}${item.description ? `: ${item.description}` : item.reason ? `: ${item.reason}` : ''}`);
-  const piExtensionLines = byKind('pi-extension').map(item => `- ${item.id}@${item.version}${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}${item.reason ? ` (${item.reason})` : ''}`);
-  const bridgeLines = [...byKind('mcp'), ...byKind('extension')].map(item => {
-    const network = item.networkAccess === 'unrestricted'
-      ? 'network: unrestricted'
-      : item.networkDomains?.length
-        ? `network: ${item.networkDomains.join(', ')}`
-        : 'network: none';
-    return `- ${item.id}@${item.version} [${network}]${item.tools?.length ? `: ${item.tools.join(', ')}` : ''}`;
-  });
-  const toolLines = input.tools.map(tool => `- ${tool.name}: ${tool.description}`);
-  const toolAwareness = [
-    input.toolPrompt?.trim() ?? '',
-    '# Capability awareness',
-    `Definition: ${input.definitionVersion}`,
-    'The following inventory is generated from the exact capability bundle loaded for this Agent process.',
-    skillLines.length ? `\n## Skills\n${skillLines.join('\n')}` : '',
-    piExtensionLines.length ? `\n## Pi extensions\n${piExtensionLines.join('\n')}` : '',
-    bridgeLines.length ? `\n## Graph/MCP bridge capabilities\n${bridgeLines.join('\n')}` : '',
-    toolLines.length ? `\n## Callable tools\n${toolLines.join('\n')}` : '',
-    '\nUse only the callable tools listed above. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
-  ].filter(Boolean).join('\n');
   const digest = createHash('sha256').update(canonicalJson({
     definitionVersion: input.definitionVersion,
     action: input.action,
     role: input.role ?? null,
     systemPrompt,
-    appendSystemPrompt: toolAwareness,
     report: input.report.map(stableFact) as unknown as Json,
     tools: input.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as unknown as Json })),
   })).digest('hex');
-  return { systemPrompt, appendSystemPrompt: toolAwareness, digest };
+  return { systemPrompt, digest };
 }

@@ -326,7 +326,7 @@ test('the Main Agent recipe compiles its capabilities into the conversation mast
   const skill = join(capabilityRoot, 'main-research');
   await mkdir(project, { recursive: true });
   await mkdir(skill, { recursive: true });
-  await writeFile(join(skill, 'SKILL.md'), '# Main research\n\nInvestigate before proposing a graph.\n');
+  await writeFile(join(skill, 'SKILL.md'), '---\nname: main-research\ndescription: Investigate before proposing a graph.\n---\n\n# Main research\n\nInvestigate before proposing a graph.\n');
   await writeFile(join(skill, 'capability.json'), JSON.stringify({
     id: 'main-research',
     kind: 'skill',
@@ -452,8 +452,17 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
     agentContext,
   });
   cleanup.push(() => runtime.close());
-  await runtime.conversations.create({ text: '测试可编辑上下文', requestId: 'editable-context' });
+  const editable = await runtime.conversations.create({ text: '测试可编辑上下文', requestId: 'editable-context' });
   await runtime.host.runReady();
+
+  // The console shows the exact string the model received, read back through the same path it uses.
+  const sentPreview = await runtime.agentContextPreview(editable.conversationId);
+  const sentSystem = (provider.requests as { messages?: { role?: string; content?: unknown }[] }[])
+    // The transport may carry the system prompt as `system` or as the newer `developer` role.
+    .map(entry => (entry.messages ?? []).find(message => message.role === 'system' || message.role === 'developer')?.content)
+    .find((content): content is string => typeof content === 'string');
+  expect(typeof sentSystem).toBe('string');
+  expect(sentPreview.sent?.text).toBe(sentSystem);
 
   const request = provider.requests[0] as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] };
   const toolNames = (request.tools ?? []).map(tool => tool.function?.name ?? '');
@@ -463,18 +472,20 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   const user = JSON.stringify((request.messages ?? []).filter(message => message.role === 'user'));
   expect(providerRequest).toContain('<identity>');
   expect(providerRequest).toContain('MAIN IDENTITY SENTINEL');
-  expect(providerRequest).toContain('<tools>');
-  expect(providerRequest).toContain('- read: Read file contents');
-  expect(providerRequest).toContain('following Graph tools for');
-  expect(providerRequest).not.toContain('- ls:');
-  expect(providerRequest).not.toContain('- write:');
   expect(providerRequest).toContain('<rules>');
   expect(providerRequest).not.toContain('<workflow>');
   expect(providerRequest).not.toContain('CONVERSATION SENTINEL');
   expect(providerRequest).toContain('<docs>');
-  expect(providerRequest).toContain('<project_context>');
-  expect(providerRequest).toContain('<capabilities>');
+  // What the model can call travels in the request's tool list, and the Pi session
+  // appends the project context, its skills block and the working directory. Graph
+  // must not re-render any of them inside its own prompt text.
+  expect(toolNames).toEqual(expect.arrayContaining(['read']));
+  // <cwd> is the working directory the Pi session appends itself since 0.86, so it
+  // belongs on the native side of this list rather than in the forbidden one.
+  for (const native of ['<tools>', '<capabilities>', '<skills>']) {
+    expect(providerRequest).not.toContain(native);
+  }
+  expect(providerRequest).not.toContain('- read: Read file contents');
   expect(providerRequest).toContain('<cwd>');
-  expect(providerRequest).toContain('Current working directory:');
   expect(user).not.toContain('CONVERSATION SENTINEL');
 }, 120_000);

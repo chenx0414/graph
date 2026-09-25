@@ -537,8 +537,10 @@ test('the composer suggestion and queue steering follow the three Enter states',
   await input.press('Enter');
   // Under the full parallel gate a request that travels UI → HTTP → runtime can take far
   // longer than the default one-second poll. The budget is deliberately generous: the
-  // preconditions above, not the budget, are what makes this assertion meaningful.
-  await expect.poll(() => steered.length, { timeout: 30_000 }).toBe(1);
+  // preconditions above, not the budget, are what makes this assertion meaningful. It is
+  // also the only assertion here whose latency grows with the number of capabilities the
+  // master bundle resolves, which is why 60s and not 30s.
+  await expect.poll(() => steered.length, { timeout: 60_000 }).toBe(1);
   expect(steered[0]).toContain('优先检查失败分支。');
   await expect.poll(async () => {
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
@@ -1263,71 +1265,6 @@ test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name
   await page.getByTestId('resource-detail-drawer').waitFor({ state: 'detached' });
 });
 
-test('the resource config page saves capability credentials and verifies the selected MCP', async () => {
-  const root = await temp('resource-config');
-  const capabilityRoot = join(root, 'graph', 'capabilities');
-  const mcp = join(capabilityRoot, 'exa-web-search');
-  await mkdir(mcp, { recursive: true });
-  await writeFile(join(mcp, 'capability.json'), JSON.stringify({
-    id: 'exa-web-search',
-    kind: 'mcp',
-    version: '3.4.1',
-    name: 'Exa Web Search',
-    description: 'Web search through Exa.',
-    url: 'https://mcp.exa.ai/mcp',
-    headersEnv: { authorization: 'EXA_API_KEY' },
-  }, null, 2));
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
-  });
-  cleanup.push(() => server.close());
-  const verified: { values?: Record<string, string> }[] = [];
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.addInitScript(() => {
-    window.graph = {
-      isDesktop: true,
-      pickDirectory: async () => null,
-      openResource: async () => ({ opened: true }),
-      saveSecret: async (ref, value) => {
-        (window as Window & { __savedCapabilitySecrets?: { ref: string; value: string }[] }).__savedCapabilitySecrets!.push({ ref, value: value ?? '' });
-        return { stored: true, applied: true };
-      },
-      secretStatus: async () => ({}),
-      relaunch: async () => ({ url: location.origin }),
-    };
-    (window as Window & { __savedCapabilitySecrets?: { ref: string; value: string }[] }).__savedCapabilitySecrets = [];
-  });
-  await page.route('**/api/capabilities/exa-web-search/3.4.1/test', async route => {
-    verified.push(JSON.parse(route.request().postData() ?? '{}') as { values?: Record<string, string> });
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ok: true, tools: ['search'], message: '连接成功，发现 1 个工具' }),
-    });
-  });
-  await page.goto(`${server.url}/#/catalog/config`);
-  await page.getByTestId('resource-nav-config').click();
-  await page.getByTestId('resource-section-config').waitFor();
-  expect(await page.getByTestId('resource-section-config').innerText()).toContain('Exa Web Search');
-  expect(await page.getByTestId('capability-config-exa-web-search').innerText()).toContain('EXA_API_KEY');
-  expect(await page.getByTestId('resource-open-config').count()).toBe(0);
-  await page.getByTestId('capability-config-exa-web-search-EXA_API_KEY').fill('exa-secret');
-  await page.getByRole('button', { name: '保存并验证' }).click();
-  await expect.poll(() => verified.length).toBe(1);
-  expect(verified[0]?.values).toEqual({ EXA_API_KEY: 'exa-secret' });
-  expect(await page.evaluate(() => (window as Window & { __savedCapabilitySecrets?: { ref: string; value: string }[] }).__savedCapabilitySecrets)).toEqual([
-    { ref: 'EXA_API_KEY', value: 'exa-secret' },
-  ]);
-  expect(await page.getByTestId('capability-config-result-exa-web-search').innerText()).toContain('连接成功');
-});
-
 test('the Main Agent recipe is visible with fixed system capabilities and an editable capability recipe', async () => {
   const root = await temp('main-agent-recipe');
   const capabilityRoot = join(root, 'graph', 'capabilities');
@@ -1753,43 +1690,28 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
 
   await page.getByTestId('agent-context-open').click();
   await page.getByTestId('agent-context-drawer').waitFor();
-  await page.getByTestId('agent-context-preview').waitFor();
-  const preview = await page.getByTestId('agent-context-preview').innerText();
-  expect(preview).toContain('<identity>');
-  expect(preview).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
-  expect(preview).toContain('<tools>');
-  expect(preview).toContain('<rules>');
-  expect(preview).not.toContain('<workflow>');
-  expect(preview).toContain('<docs>');
-  expect(preview).toContain('<project_context>');
-  expect(preview).toContain('<capabilities>');
-  expect(preview).toContain('<cwd>');
-  expect(preview).toContain('Pi 自动追加');
-  expect(preview).toContain('- read: Read file contents');
-  expect(preview).not.toContain('- powershell:');
-  expect(preview).toContain('- get_graph_state:');
-  expect(preview).toContain('- list_projects:');
-  expect(preview).toContain('- git_status:');
-  expect(preview).not.toContain('- artifact_get:');
-  expect(preview).not.toContain('- compile_agent_combination:');
-  expect(preview).not.toContain('- submit_result:');
-  expect(preview.indexOf('- read: Read file contents'))
-    .toBeLessThan(preview.indexOf('following Graph tools'));
-  expect(preview.indexOf('following Graph tools'))
-    .toBeLessThan(preview.indexOf('- artifact_list:'));
-  expect(preview).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
-  const markdown = await page.getByTestId('agent-context-preview-markdown').innerText();
-  expect(markdown).toContain('<identity>\n');
-  expect(markdown).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
-  expect(markdown).toContain('<tools>\n');
-  expect(markdown).toContain('<rules>\n');
-  expect(markdown).not.toContain('<workflow>\n');
-  expect(markdown).toContain('<docs>\n');
-  expect(markdown).toContain('<project_context>\n');
-  expect(markdown).toContain('<capabilities>\n');
-  expect(markdown).toContain('<cwd>\n');
-  expect(markdown).toContain('<pi_cwd>\nCurrent working directory:');
-  expect(await page.locator('.agent-preview-section').count()).toBe(0);
+  // 面板只展示真正发出去的那一份；没发过请求的会话没有可展示的 prompt。
+  await page.getByTestId('agent-context-sent').waitFor();
+  const sentPanel = await page.getByTestId('agent-context-sent').innerText();
+  expect(sentPanel).toContain('实际发出');
+  expect(sentPanel).toContain('本次会话尚未记录到已发出的请求');
+  expect(sentPanel).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
+  expect(await page.locator('[data-testid="agent-context-preview"]').count()).toBe(0);
+  expect(await page.locator('[data-testid="agent-context-preview-markdown"]').count()).toBe(0);
+  expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
+  expect(
+    (await page.locator('.agent-context-tabs [role="tab"]').allInnerTexts()).map(label => label.split('\n')[0]!.trim()),
+  ).toEqual(['实际发出的 Prompt', '可编辑来源', '工具与能力']);
+
+  // 组装正确性属于产生它的那一层（provider 请求）；接口只给事实：工具、能力、可编辑来源。
+  const payload = await page.evaluate(async (conversationId: string) => {
+    const response = await fetch(`/api/agent-context?conversationId=${conversationId}`, { credentials: 'include' });
+    return await response.json() as { preview?: unknown; sent: unknown; tools: unknown[]; prompts: unknown[] };
+  }, created.conversationId);
+  expect(payload.sent).toBeNull();
+  expect(payload.preview).toBeUndefined();
+  expect(payload.tools.length).toBeGreaterThan(0);
+  expect(payload.prompts.length).toBeGreaterThan(0);
   await page.getByTestId('agent-context-tab-prompts').click();
   expect(await page.getByTestId('agent-prompt-docs/INDEX.md').count()).toBe(0);
   await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();

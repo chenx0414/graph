@@ -27,7 +27,7 @@ import type { UsageService } from './usage.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
 import type { DefinitionSpec } from '../catalog/catalog.ts';
 import { capabilityConfigViews } from '../catalog/capability-config.ts';
-import { verifyMcpCapability } from '../runtime/capabilities.ts';
+import { searchPiPackages } from '../runtime/pi-package-search.ts';
 import type { AgentContextLibrary, AgentPromptKey } from '../runtime/agent-context.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
@@ -282,11 +282,19 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   app.post(PROVIDER_ROUTES.probe, async request => runProviderProbe(request.body));
   app.post('/api/app/secret', async request => {
     if (!options.appServices) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');
-    const body = request.body as { ref?: unknown; value?: unknown };
+    const body = request.body as { ref?: unknown; value?: unknown; persisted?: unknown };
     if (typeof body.ref !== 'string') throw new RuntimeError('invalid_input', 'secretRef is required');
     if (body.value !== null && typeof body.value !== 'string') throw new RuntimeError('invalid_input', 'The secret value must be a string or null');
-    return options.appServices.pushSecret(body.ref, body.value as string | null);
+    // `persisted: true` says the keychain now holds this value, which clears the
+    // Agent's pending write instead of creating one.
+    return options.appServices.pushSecret(body.ref, body.value as string | null, body.persisted === true);
   });
+  // Secret writes the keychain does not hold yet, for the desktop app to store.
+  // Only values the Agent pushed appear here; a keychain-only secret never
+  // travels back out of the daemon.
+  app.get('/api/app/secret-requests', async () => ({
+    requests: options.appServices ? options.appServices.pendingSecretRequests() : [],
+  }));
   app.get('/api/app/rsi/status', async () => {
     if (!options.appServices?.rsi) return { available: false, pendingRestart: null, canRestart: false };
     return options.appServices.rsi.status();
@@ -306,6 +314,10 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
         revision,
         ...(status ? { effectiveRevision: status.effectiveRevision, configured: status.configured } : {}),
         config: sanitizeConfig(config, providerSecrets()),
+        // What the daemon knows on top of the file: secret writes waiting for the
+        // keychain, and the file watcher's last outcome.
+        pendingSecretRefs: options.appServices?.pendingSecretRequests().map(request => request.ref) ?? [],
+        watch: options.appServices?.configWatch?.() ?? null,
       };
     });
     app.post('/api/config', async request => {
@@ -352,7 +364,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const models = runtime.models();
     const defaultModel = runtime.defaultModel();
     const definitions = runtime.catalog.definitions();
-    const capabilities = runtime.catalog.capabilities();
+    const capabilities = runtime.catalog.capabilitiesView();
     const capabilityConfig = await capabilityConfigViews(capabilities, capabilitySecretValues());
     return {
       projects, models, defaultModel, definitions, capabilities, capabilityConfig,
@@ -365,17 +377,6 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   app.get('/api/capabilities/config', async () => ({
     items: await capabilityConfigViews(runtime.catalog.capabilities(), capabilitySecretValues()),
   }));
-  app.post('/api/capabilities/:id/:version/test', async request => {
-    const params = request.params as { id: string; version: string };
-    const record = runtime.catalog.capability(params.id, params.version);
-    if (!record) throw new RuntimeError('not_found', `Unknown capability ${params.id}@${params.version}`);
-    const body = request.body as { values?: unknown } | undefined;
-    const supplied = body?.values && typeof body.values === 'object' && !Array.isArray(body.values)
-      ? Object.fromEntries(Object.entries(body.values).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-      : {};
-    const verify = options.appServices?.capabilityConfig?.verify ?? verifyMcpCapability;
-    return verify(record, { ...capabilitySecretValues(), ...supplied });
-  });
   app.get('/api/tasks', async () => runtime.user.list());
   app.get('/api/inbox', async request => {
     const query = request.query as { limit?: string };
@@ -718,6 +719,23 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     agentCombinationError: runtime.catalog.agentCombinationError() ?? null,
   }));
   app.post('/api/catalog/refresh', async () => runtime.catalog.refreshCatalog());
+  app.get('/api/catalog/pi-extension-updates', async () => runtime.catalog.piExtensionUpdates());
+  // Browsing the official Pi package channel is read-only: npm, filtered by the `pi-package`
+  // keyword the Pi documentation names. Adding a package stays a deliberate request to the Main Agent.
+  app.get('/api/catalog/pi-packages', async request => {
+    const query = request.query as { q?: string; limit?: string };
+    const limit = Number.parseInt(query.limit ?? '', 10);
+    return {
+      packages: await searchPiPackages({
+        ...(query.q?.trim() ? { query: query.q } : {}),
+        ...(Number.isFinite(limit) ? { limit } : {}),
+      }),
+    };
+  });
+  app.post('/api/catalog/pi-extensions/:id/:version/update', async request => {
+    const params = request.params as { id: string; version: string };
+    return runtime.catalog.updatePiExtension(params.id, params.version);
+  });
   app.post('/api/catalog/combinations', async request => {
     const body = request.body as { combination?: AgentCombination } | undefined;
     if (!body?.combination) throw new RuntimeError('invalid_input', 'combination is required');

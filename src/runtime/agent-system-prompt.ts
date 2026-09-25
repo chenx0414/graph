@@ -17,6 +17,7 @@ export type AgentPromptSectionId =
   | 'docs'
   | 'project_context'
   | 'capabilities'
+  | 'skills'
   | 'cwd'
   | 'pi_cwd';
 
@@ -52,12 +53,15 @@ export interface AgentCapabilityPromptEntry {
   reason?: string;
 }
 
+/**
+ * The composer renders only what Graph itself owns: the identity, the rules and
+ * the documentation paths. Tools travel in the provider request, and the Pi
+ * session adds the project context, its skills block and the working directory,
+ * so none of them is an input here.
+ */
 export interface ComposeAgentSystemPromptInput {
-  mode?: 'preview' | 'operation';
   identity: string;
-  /** Host-generated identity context such as the active access policy. */
   identityContext?: string;
-  /** Host-generated context for changing the Graph harness itself. */
   harnessContext?: string;
   definitionVersion: string;
   toolGuidance: string;
@@ -67,21 +71,12 @@ export interface ComposeAgentSystemPromptInput {
     runtime?: string;
   };
   docs: GraphDocumentationPaths;
-  projectContext?: {
-    path: string;
-    content: string;
-  };
-  tools: AgentToolPromptEntry[];
-  capabilities: AgentCapabilityPromptEntry[];
-  cwd: string;
-  piCwd?: string;
+  role?: 'main' | 'worker' | 'reviewer';
 }
 
 export interface ComposedAgentSystemPrompt {
   sections: AgentPromptSection[];
   text: string;
-  previewSections: AgentPromptSection[];
-  previewText: string;
 }
 
 function section(
@@ -100,66 +95,7 @@ function renderedSection(sectionValue: AgentPromptSection) {
   return `<${sectionValue.id}>\n${content}\n</${sectionValue.id}>`;
 }
 
-function toolLine(tool: AgentToolPromptEntry) {
-  const description = tool.description.replace(/\s+/g, ' ').trim();
-  const availability = tool.runtimeAvailable === null ? ' (not yet discovered)' : tool.available ? '' : ' (unavailable)';
-  return `- ${tool.name}${availability}: ${description}`;
-}
-
-function toolInventory(input: ComposeAgentSystemPromptInput) {
-  const native = input.tools
-    .filter(tool => tool.group === 'pi_native')
-    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
-  const graph = input.tools
-    .filter(tool => tool.group !== 'pi_native')
-    .sort((left, right) => left.name.localeCompare(right.name));
-  if (!native.length && !graph.length) return '(none)';
-
-  const blocks: string[] = [];
-  if (native.length) blocks.push(native.map(toolLine).join('\n'));
-  if (graph.length) {
-    const transition = native.length
-      ? `In addition to the tools above, you may have access to the following Graph tools for ${input.definitionVersion}:`
-      : `The following Graph tools are available for ${input.definitionVersion}:`;
-    blocks.push([
-      transition,
-      graph.map(toolLine).join('\n'),
-    ].join('\n'));
-  }
-  return blocks.join('\n\n');
-}
-
-function capabilityLines(capabilities: readonly AgentCapabilityPromptEntry[]) {
-  if (!capabilities.length) return '(none)';
-  return capabilities.map(capability => {
-    const tools = capability.tools.length ? `tools=${capability.tools.join(', ')}` : 'tools=none';
-    const network = capability.networkDomains?.length
-      ? `; network=${capability.networkDomains.join(', ')}`
-      : '';
-    const path = capability.path ? `; path=${capability.path}` : '';
-    const reason = capability.reason ? `; ${capability.reason}` : '';
-    const description = capability.description ? `: ${capability.description}` : '';
-    return `- ${capability.kind} ${capability.id}@${capability.version} (${capability.name})${description}: ${tools}${network}${path}${reason}`;
-  }).join('\n');
-}
-
 export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): ComposedAgentSystemPrompt {
-  const tools = section('tools', 'Tools', [
-    {
-      id: 'tools.inventory',
-      title: 'Available tools',
-      origin: 'generated',
-      content: toolInventory(input),
-    },
-    {
-      id: 'tools.guidance',
-      title: 'Tool guidance',
-      origin: 'editable',
-      content: input.toolGuidance,
-      source: 'tools/<role>.md',
-    },
-  ]);
-
   const rules = section('rules', 'Rules', [
     {
       id: 'rules.common',
@@ -182,6 +118,25 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
       content: input.rules.runtime,
       source: 'runtime/*.md',
     }] : []),
+    {
+      id: 'rules.tools',
+      title: 'Tool guidance',
+      origin: 'editable',
+      content: input.toolGuidance,
+      source: 'tools/<role>.md',
+    },
+    {
+      id: 'rules.send_gate',
+      title: 'Send gate',
+      origin: 'generated',
+      content: 'Use only the tools listed in the provider request. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
+    },
+    ...(input.role === 'main' ? [] : [{
+      id: 'rules.worktree',
+      title: 'Worktree',
+      origin: 'generated' as const,
+      content: "This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree.",
+    }]),
   ]);
 
   const docs = section('docs', 'Documentation', [{
@@ -192,88 +147,32 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     source: 'docs/agent/README.md',
   }]);
 
-  const projectContext = section('project_context', 'Project context', [{
-    id: 'project_context.instructions',
-    title: 'Project instructions',
-    origin: 'generated',
-    content: input.projectContext
-      ? [
-          'Project-specific instructions and guidelines:',
-          '',
-          `<project_instructions path="${input.projectContext.path}">`,
-          input.projectContext.content.trim(),
-          '</project_instructions>',
-        ].join('\n')
-      : 'No project-specific AGENTS.md or equivalent instruction file was found in this worktree.',
-    ...(input.projectContext ? { source: input.projectContext.path } : {}),
-  }]);
+  const identity = section('identity', 'Identity', [
+    {
+      id: 'identity.agent',
+      title: 'Agent identity',
+      origin: 'editable',
+      content: input.identity,
+      source: 'agents/<definition-id>.md',
+    },
+    ...(input.identityContext?.trim() ? [{
+      id: 'identity.access',
+      title: 'Access policy',
+      origin: 'generated' as const,
+      content: input.identityContext.trim(),
+    }] : []),
+    ...(input.harnessContext?.trim() ? [{
+      id: 'identity.harness',
+      title: 'Harness self-improvement',
+      origin: 'generated' as const,
+      content: input.harnessContext.trim(),
+    }] : []),
+  ]);
 
-  const capabilities = section('capabilities', 'Capabilities', [{
-    id: 'capabilities.inventory',
-    title: input.mode === 'preview' ? 'Declared capabilities' : 'Loaded capabilities',
-    origin: 'generated',
-    content: [
-      input.mode === 'preview'
-        ? 'Skills, MCP servers, Graph extensions and Pi extensions declared for the next Agent operation; runtime availability will be confirmed when they load:'
-        : 'Skills, MCP servers, Graph extensions and Pi extensions loaded for this Agent operation:',
-      capabilityLines(input.capabilities),
-    ].join('\n'),
-  }]);
-
-  const cwd = section('cwd', 'Working directory', [{
-    id: 'cwd.worktree',
-    title: 'Git worktree',
-    origin: 'generated',
-    content: [
-      input.cwd,
-      '',
-      'This is the Git worktree assigned to the current Agent operation. Relative paths resolve here; it is not necessarily the project root or another Agent worktree.',
-    ].join('\n'),
-  }]);
-
-  const sections = [
-    section('identity', 'Identity', [
-      {
-        id: 'identity.agent',
-        title: 'Agent identity',
-        origin: 'editable',
-        content: input.identity,
-        source: 'agents/<definition-id>.md',
-      },
-      ...(input.identityContext?.trim() ? [{
-        id: 'identity.access',
-        title: 'Access policy',
-        origin: 'generated' as const,
-        content: input.identityContext.trim(),
-      }] : []),
-      ...(input.harnessContext?.trim() ? [{
-        id: 'identity.harness',
-        title: 'Harness self-improvement',
-        origin: 'generated' as const,
-        content: input.harnessContext.trim(),
-      }] : []),
-    ]),
-    tools,
-    rules,
-    docs,
-    projectContext,
-    capabilities,
-    cwd,
-  ];
+  // Native concerns are never rendered here: the Pi SDK appends the project
+  // context, its own skills block and the working directory to this text, and
+  // the provider request carries the tools.
+  const sections = [identity, rules, docs];
   const text = sections.map(renderedSection).join('\n\n');
-  const piCwd = input.piCwd
-    ? section('pi_cwd', 'Pi generated working directory', [{
-        id: 'pi_cwd.current',
-        title: 'Pi Current working directory',
-        origin: 'pi',
-        content: `Current working directory: ${input.piCwd}`,
-      }])
-    : undefined;
-  const previewSections = piCwd ? [...sections, piCwd] : sections;
-  return {
-    sections,
-    text,
-    previewSections,
-    previewText: previewSections.map(renderedSection).join('\n\n'),
-  };
+  return { sections, text };
 }

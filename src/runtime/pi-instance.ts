@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -12,6 +12,8 @@ import {
   type ModelRuntime, type ToolDefinition, type AgentSessionEvent, type InlineExtension, type PromptOptions, type RetrySettings,
 } from '@earendil-works/pi-coding-agent';
 import { canonicalJson } from '../core/store.ts';
+import { nativeSkillDirs } from './agent-skills.ts';
+import { mcpAdapterBridge } from './mcp-adapter-bridge.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface InstanceBinding {
@@ -62,12 +64,14 @@ export interface PiInstanceOptions {
   tools?: ToolDefinition[];
   nativeTools?: string[];
   skillPaths?: string[];
+  /** The Agent's own skills folder: the SDK loads skills from here. */
+  skillFolder?: string;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
+  /** MCP servers this session registers with pi-mcp-adapter. */
+  mcpAdapterServers?: readonly { name: string; definition: unknown }[];
   extensionFactories?: InlineExtension[];
   systemPrompt?: string;
-  appendSystemPrompt?: string;
-  hideSkillDescriptions?: boolean;
   activateExtensionTools?: boolean;
   allowedToolNames?: string[];
   bundleDigest?: string;
@@ -145,11 +149,15 @@ export async function openPiInstance(options: PiInstanceOptions) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+  // The definition version is not part of the identity check: the runtime may
+  // deliberately re-point a long-lived instance (a conversation master follows
+  // its recipe) at a newer definition, and the rebind below branches the session
+  // under the new bundle instead of discarding the conversation.
+  const definitionChanged = manifest !== undefined && manifest.binding.definitionVersion !== options.binding.definitionVersion;
   if (manifest && ((manifest.version !== 1 && manifest.version !== 2 && manifest.version !== 3) ||
     (manifest.workspace !== workspace && !options.allowWorkspaceChange) ||
     manifest.binding.instanceId !== options.binding.instanceId ||
-    manifest.binding.nodeId !== options.binding.nodeId ||
-    manifest.binding.definitionVersion !== options.binding.definitionVersion)) {
+    manifest.binding.nodeId !== options.binding.nodeId)) {
     throw new Error('Instance binding does not match persisted identity');
   }
   const persistedDigest = manifest?.capabilityDigest?.trim();
@@ -162,14 +170,14 @@ export async function openPiInstance(options: PiInstanceOptions) {
   if ((manifest?.version ?? 0) >= 3) {
     if (!persistedBundleDigest) throw new Error('Persisted v3 capability bundle has no digest');
     if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
-    if (persistedBundleDigest !== currentDigest) {
+    if (persistedBundleDigest !== currentDigest || definitionChanged) {
       rebindFromManifest = manifest;
     }
   } else if (manifest?.version === 2) {
     if (!persistedDigest) throw new Error('Persisted v2 capability bundle has no digest');
     if (!currentDigest) throw new Error('A capability bundle digest is required to restore this Agent session');
     if (!options.legacyCapabilityDigest) throw new Error('A legacy capability digest is required to restore this v2 Agent session');
-    if (persistedDigest !== options.legacyCapabilityDigest) {
+    if (persistedDigest !== options.legacyCapabilityDigest || definitionChanged) {
       // The same rule as v3: a legacy bundle change invalidates the bundle, not the conversation.
       rebindFromManifest = manifest;
     }
@@ -269,21 +277,34 @@ export async function openPiInstance(options: PiInstanceOptions) {
     images: { autoResize: false },
     enableAnalytics: false, enableInstallTelemetry: false,
   });
+  // Graph's prompt is the loader's custom prompt, so the Pi session keeps its own
+  // native composition: it appends the project context files, its skills block
+  // and the working directory to whatever Graph supplies. Graph must not replace
+  // the built prompt, or those native parts would be dropped here.
+  const extensionFactories = [...(options.extensionFactories ?? [])];
+  if (options.mcpAdapterServers?.length) {
+    // The adapter lives in the same session, so a registration it refuses is
+    // otherwise invisible: record it where the instance can be inspected.
+    const adapterLog = join(options.stateDir, 'mcp-adapter.log');
+    extensionFactories.push(mcpAdapterBridge(options.mcpAdapterServers, message => {
+      try { appendFileSync(adapterLog, `${new Date().toISOString()} ${message}\n`); }
+      catch { /* a diagnostic must never break a session */ }
+    }));
+  }
+  // The session's own view of skills must match the block Graph renders into the system
+  // prompt: the Agent's folder plus the SDK's own global and project folders.
+  const skillLoadPaths = [...new Set([
+    ...(options.skillFolder ? [options.skillFolder] : options.skillPaths ?? []),
+    ...nativeSkillDirs({ cwds: [workspace] }),
+  ])];
   const loader = new DefaultResourceLoader({
     cwd: workspace, agentDir: stateDir, settingsManager: settings,
-    ...(options.skillPaths?.length ? { additionalSkillPaths: options.skillPaths } : {}),
+    ...(skillLoadPaths.length ? { additionalSkillPaths: skillLoadPaths } : {}),
     ...(options.piExtensionPaths?.length ? { additionalExtensionPaths: options.piExtensionPaths } : {}),
-    ...(options.extensionFactories?.length ? { extensionFactories: options.extensionFactories } : {}),
+    ...(extensionFactories.length ? { extensionFactories } : {}),
     ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-    ...(options.appendSystemPrompt ? { appendSystemPrompt: [options.appendSystemPrompt] } : {}),
-    ...(options.hideSkillDescriptions ? {
-      skillsOverride: base => ({
-        ...base,
-        skills: base.skills.map(skill => ({ ...skill, disableModelInvocation: true })),
-      }),
-    } : {}),
     noExtensions: true, noSkills: true, noPromptTemplates: true,
-    noThemes: true, noContextFiles: true,
+    noThemes: true,
   });
   await loader.reload();
   if (options.tools?.some(tool => !isExternallyGated(tool)) && !options.broker) throw new Error('Tools require a call broker');

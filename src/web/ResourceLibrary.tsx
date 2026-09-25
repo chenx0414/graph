@@ -195,15 +195,41 @@ function capabilityGroups(item: AgentCombinationView) {
   return groups.filter(group => group.resources.length);
 }
 
-function CapabilityDetail({ item }: { item: CapabilityRecord }) {
+type ExtensionUpdate = { installed: string | null; latest: string | null; available: boolean; installGaps?: string[] };
+type OfficialPackage = { name: string; version: string; description: string; publisher: string | null; weeklyDownloads: number | null; url: string | null };
+
+function CapabilityDetail({ item, update, onUpdate }: { item: CapabilityRecord; update?: ExtensionUpdate | undefined; onUpdate?: ((item: CapabilityRecord) => void) | undefined }) {
   return (
     <div className="stack resource-detail-sections" data-testid={`capability-detail-${item.id}`}>
       <div className="row" style={{ gap: 8 }}>
         <Pill tone={item.status === 'available' ? 'success' : 'danger'}>{item.status === 'available' ? '可用' : '清单有误'}</Pill>
         <Pill tone="neutral">{capabilityKindLabel(item)}</Pill>
         <Pill tone="neutral">v{item.version}</Pill>
+        {item.base && <Pill tone="success">基础能力</Pill>}
       </div>
       <p>{item.description || '该能力没有提供说明。'}</p>
+      {item.base && <p className="muted" data-testid={`capability-base-${item.id}`}>基础能力：每个 Agent 都会自动获得，无需在配方里绑定。</p>}
+      {item.owner && <p className="muted" data-testid={`capability-owner-${item.id}`}>来自 {item.owner} 的 skills 文件夹</p>}
+      {item.duplicates?.length ? (
+        <p className="muted" data-testid={`capability-duplicates-${item.id}`}>
+          另有 {item.duplicates.length} 个同名副本（同名只加载一个）：{item.duplicates.map(dup => dup.source).join('、')}
+        </p>
+      ) : null}
+      {item.note && <div className="recipe-main-note" data-testid={`capability-note-${item.id}`}>{item.note}</div>}
+      {item.packageSource && (
+        <p className="muted" data-testid={`capability-package-source-${item.id}`}>来源：{item.packageSource}（由 Pi SDK 解析安装）</p>
+      )}
+      {update?.installGaps?.length ? (
+        <p className="muted" data-testid={`capability-install-gaps-${item.id}`}>
+          安装根里有声明的入口缺失（只报告，不做任何处理）：{update.installGaps.join('；')}
+        </p>
+      ) : null}
+      {update?.available && (
+        <div className="recipe-main-note" data-testid={`capability-update-${item.id}`}>
+          <span>有可用更新：已安装 {update.installed} → {update.latest}</span>
+          <Button onClick={() => onUpdate?.(item)}>更新</Button>
+        </div>
+      )}
       {item.error && <div className="form-error">{item.error}</div>}
       <section>
         <h4>本地目录</h4>
@@ -238,12 +264,8 @@ function CapabilityConfigPanel({ items, filter, onFilterChange }: { items: Capab
         }
         window.dispatchEvent(new Event('graph:settings-changed'));
       }
-      const result = await api<{ ok: boolean; message: string; tools?: string[] }>(
-        `/api/capabilities/${encodeURIComponent(item.id)}/${encodeURIComponent(item.version)}/test`,
-        { method: 'POST', body: JSON.stringify({ values: supplied }) },
-      );
-      setResults(current => ({ ...current, [key]: result }));
-      if (result.ok) toast(`${item.name} 可用${result.tools?.length ? `，发现 ${result.tools.length} 个工具` : ''}`, 'success');
+      setResults(current => ({ ...current, [key]: { ok: true, message: '已保存。MCP 连接由 pi-mcp-adapter 在会话内建立。' } }));
+      toast(`${item.name} 凭据已保存`, 'success');
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setResults(current => ({ ...current, [key]: { ok: false, message } }));
@@ -286,9 +308,9 @@ function CapabilityConfigPanel({ items, filter, onFilterChange }: { items: Capab
               })}
             </div>
             <div className="capability-config-actions">
-              <span className="muted">{bridge ? '保存到本机钥匙串，并立即验证连接。' : '浏览器模式：请先设置对应环境变量。'}</span>
+              <span className="muted">{bridge ? '保存到本机钥匙串；连接由 pi-mcp-adapter 在会话内验证。' : '浏览器模式：请先设置对应环境变量。'}</span>
               <Button size="sm" icon="check" disabled={busy === key} onClick={() => void saveAndTest(item)}>
-                {busy === key ? '验证中…' : '保存并验证'}
+                {busy === key ? '保存中…' : '保存凭据'}
               </Button>
             </div>
             {result && (
@@ -598,6 +620,77 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
     : id === 'prompts' ? 6
     : id === 'agents' ? agentCombinations.length
       : sections.find(item => item.id === id)?.items.length ?? 0;
+  const [updates, setUpdates] = useState<Record<string, ExtensionUpdate>>({});
+  const [autoUpdate, setAutoUpdate] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseQuery, setBrowseQuery] = useState('');
+  const [browseHits, setBrowseHits] = useState<OfficialPackage[]>([]);
+  const [browseBusy, setBrowseBusy] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+  // Read-only: this browses the official channel, it never writes a capability.
+  const loadBrowse = async () => {
+    setBrowseBusy(true);
+    setBrowseError(null);
+    try {
+      const result = await api<{ packages: OfficialPackage[] }>(`/api/catalog/pi-packages?q=${encodeURIComponent(browseQuery.trim())}`);
+      setBrowseHits(result.packages);
+    } catch (cause) {
+      setBrowseError(cause instanceof Error ? cause.message : String(cause));
+      setBrowseHits([]);
+    } finally {
+      setBrowseBusy(false);
+    }
+  };
+  const toggleBrowse = async () => {
+    const next = !browseOpen;
+    setBrowseOpen(next);
+    if (next && !browseHits.length) await loadBrowse();
+  };
+  // The switch is a daemon setting, so it lives in the config file rather than browser preferences.
+  useEffect(() => {
+    let live = true;
+    void api<{ revision: number; config?: { piExtensionAutoUpdate?: boolean } }>('/api/config')
+      .then(result => { if (live) setAutoUpdate(Boolean(result.config?.piExtensionAutoUpdate)); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  const saveAutoUpdate = async (value: boolean) => {
+    setAutoUpdate(value);
+    try {
+      const current = await api<{ revision: number; config: Record<string, unknown> }>('/api/config');
+      await api('/api/config', { method: 'POST', body: JSON.stringify({ expectedRevision: current.revision, document: { ...current.config, piExtensionAutoUpdate: value } }) });
+      toast(value ? '已开启 Pi 扩展自动更新' : '已关闭 Pi 扩展自动更新', 'success');
+    } catch (cause) {
+      setAutoUpdate(!value);
+      toast(cause instanceof Error ? cause.message : String(cause), 'danger');
+    }
+  };
+  // Pi extension sources are checked once per page open; the server caches the registry answer.
+  useEffect(() => {
+    let live = true;
+    void api<{ updates: { id: string; version: string; installed: string | null; latest: string | null; available: boolean }[] }>('/api/catalog/pi-extension-updates')
+      .then(result => {
+        if (!live) return;
+        setUpdates(Object.fromEntries(result.updates.map(item => [`${item.id}@${item.version}`, item])));
+        const available = result.updates.filter(item => item.available);
+        if (available.length) toast(`有 ${available.length} 个 Pi 扩展可以更新：${available.map(item => item.id).join('、')}`);
+      })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  const updateOne = async (item: CapabilityRecord) => {
+    try {
+      const result = await api<{ updated: boolean; version: string | null }>(
+        `/api/catalog/pi-extensions/${encodeURIComponent(item.id)}/${encodeURIComponent(item.version)}/update`,
+        { method: 'POST' },
+      );
+      toast(`已更新 ${item.id}${result.version ? ` 到 ${result.version}` : ''}`, 'success');
+      setUpdates(current => ({ ...current, [`${item.id}@${item.version}`]: { installed: result.version, latest: result.version, available: false } }));
+      window.dispatchEvent(new Event('graph:settings-changed'));
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'danger');
+    }
+  };
   const refresh = () => {
     void api('/api/catalog/refresh', { method: 'POST' }).then(() => {
       window.dispatchEvent(new Event('graph:settings-changed'));
@@ -723,7 +816,43 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
               <div className="architecture-list" data-testid="architecture-library">{GRAPH_ARCHITECTURES.map(item => <article className="architecture-item" key={item.name}><div className="architecture-flow mono">{item.flow}</div><div><strong>{item.name}</strong><p>{item.description}</p></div></article>)}</div>
             ) : active.items.length ? (
               <>
-                <div className="resource-section-toolbar"><p>{active.description}</p><label className="resource-search"><Icon name="search" size={15} /><input value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} placeholder="搜索能力或路径" data-testid="resource-catalog-search" /><span className="faint">{filtered.length}</span></label></div>
+                <div className="resource-section-toolbar"><p>{active.description}</p>{active.id === 'pi-extensions' && (
+                  <label className="preference-item" data-testid="pi-extension-auto-update">
+                    <span className="preference-copy">
+                      <strong>自动更新</strong>
+                      <span className="muted">守护进程启动时安装可用的 Pi 扩展更新；关闭时只在资源库里提示。</span>
+                    </span>
+                    <input type="checkbox" className="preference-toggle" data-testid="pi-extension-auto-update-toggle" checked={autoUpdate} onChange={event => void saveAutoUpdate(event.target.checked)} />
+                  </label>
+                )}<label className="resource-search"><Icon name="search" size={15} /><input value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} placeholder="搜索能力或路径" data-testid="resource-catalog-search" /><span className="faint">{filtered.length}</span></label></div>
+                {active.id === 'pi-extensions' && (
+                  <div className="browse-official" data-testid="pi-package-browser">
+                    <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Button onClick={() => void toggleBrowse()}>{browseOpen ? '收起官方扩展库' : '浏览官方扩展库'}</Button>
+                      <span className="muted">官方渠道是 npm（关键字 pi-package）；这里只浏览，加入请让主 Agent 来做</span>
+                    </div>
+                    {browseOpen && (
+                      <div className="stack" style={{ gap: 8, marginTop: 8 }}>
+                        <div className="row" style={{ gap: 8 }}>
+                          <input value={browseQuery} onChange={event => setBrowseQuery(event.target.value)} placeholder="搜索官方 Pi 包（名称或关键字；留空看最新）" data-testid="pi-package-query" style={{ flex: 1 }} />
+                          <Button onClick={() => void loadBrowse()} disabled={browseBusy}>{browseBusy ? '检索中…' : '搜索'}</Button>
+                        </div>
+                        {browseError && <p className="form-error" data-testid="pi-package-error">{browseError}</p>}
+                        {!browseBusy && !browseError && !browseHits.length && <p className="muted" data-testid="pi-package-empty">没有匹配的 Pi 包。</p>}
+                        {browseHits.length > 0 && (
+                          <ul className="stack" style={{ gap: 6, listStyle: 'none', padding: 0, margin: 0 }} data-testid="pi-package-results">
+                            {browseHits.map(hit => (
+                              <li key={hit.name} className="resource-candidate-copy" data-testid={`pi-package-${hit.name}`} style={{ padding: '6px 0' }}>
+                                <span><strong>{hit.name}</strong> <span className="faint">v{hit.version}</span>{hit.weeklyDownloads !== null ? <span className="faint"> · 周下载 {hit.weeklyDownloads}</span> : null}{hit.publisher ? <span className="faint"> · {hit.publisher}</span> : null}</span>
+                                <small>{hit.description}</small>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="resource-split-toggle" role="group" aria-label="按配置状态筛选" data-testid={`resource-filter-${active.id}`}>
                   {LIBRARY_FILTERS.map(option => (
                     <button
@@ -774,7 +903,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
         <div className="resource-detail-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSelected(null); }}>
           <aside className="resource-detail-drawer" data-testid="resource-detail-drawer" role="dialog" aria-modal="true" aria-label={`能力详情 ${selected.name ?? selected.id}`}>
             <header className="resource-detail-head"><div><h2>{selected.name ?? selected.id}</h2><p>能力详情</p></div><button type="button" className="icon-button" data-testid="resource-detail-close" onClick={() => setSelected(null)} aria-label="关闭详情"><Icon name="close" size={16} /></button></header>
-            <div className="resource-detail-body"><CapabilityDetail item={selected} /></div>
+            <div className="resource-detail-body"><CapabilityDetail item={selected} update={updates[`${selected.id}@${selected.version}`]} onUpdate={item => void updateOne(item)} /></div>
           </aside>
         </div>,
         document.body,

@@ -43,6 +43,7 @@ test('configured model headers reach the provider on a real dispatch', async () 
 
   const daemon = await startGraphDaemon({
     configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute',
+    graphHome: join(root, 'graph'),
     env: { GRAPH_HEADER_KEY: 'header-key' }, log: () => undefined,
   });
   cleanup.push(() => daemon.close());
@@ -118,6 +119,7 @@ test('OpenCode Go adds its routing header to connection tests and real dispatche
   }, null, 2));
   const daemon = await startGraphDaemon({
     configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute',
+    graphHome: join(root, 'graph'),
     env: { GRAPH_OPENCODE_GO_KEY: 'opencode-go-key' }, log: () => undefined,
   });
   cleanup.push(() => daemon.close());
@@ -180,6 +182,7 @@ test('an unresolved credential only disables its own model, not dispatch for oth
 
   const daemon = await startGraphDaemon({
     configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute',
+    graphHome: join(root, 'graph'),
     env: { GRAPH_USABLE_KEY: 'usable-key' }, log: () => undefined,
   });
   cleanup.push(() => daemon.close());
@@ -240,14 +243,14 @@ test('tasks created while dispatch was disabled are recovered on the next execut
     credentials: { local: { secretRef: 'GRAPH_RECOVERY_KEY' } },
     limits: {},
   }, null, 2));
-  const view = await startGraphDaemon({ configPath: viewConfig, stateDir: join(root, 'state'), webDir, port: 0, mode: 'view', env: {}, log: () => undefined });
+  const view = await startGraphDaemon({ configPath: viewConfig, stateDir: join(root, 'state'), webDir, port: 0, mode: 'view', graphHome: join(root, 'graph'), env: {}, log: () => undefined });
   const { taskId } = await view.server.runtime.user.begin({ projectId: 'p', request: 'queued while view-only', requestId: 'begin' });
   const gone = await view.server.runtime.user.begin({ projectId: 'gone', request: 'removed project', requestId: 'begin-gone' });
   expect((await view.server.runtime.user.task(taskId).view()).nodes).toHaveLength(0);
   await view.close();
 
   // Execute: the master is backfilled, becomes active and dispatches.
-  const execute = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute', env: { GRAPH_RECOVERY_KEY: 'recovery-key' }, log: () => undefined });
+  const execute = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute', graphHome: join(root, 'graph'), env: { GRAPH_RECOVERY_KEY: 'recovery-key' }, log: () => undefined });
   cleanup.push(() => execute.close());
   for (let attempt = 0; attempt < 100; attempt += 1) {
     await execute.server.runtime.host.runReady();

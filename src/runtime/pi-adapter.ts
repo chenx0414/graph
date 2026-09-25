@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { clampThinkingLevel, type Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
+import { reportPromptIntegrity } from './prompt-integrity.ts';
+import { agentSkillOwnedRoots, agentSkillsDir, nativeSkillDirs } from './agent-skills.ts';
 import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { thinkingLevelMapFor } from '../catalog/thinking.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
@@ -110,7 +112,7 @@ function summarizeToolCall(name: string, args: unknown) {
         : name === 'artifact_list' ? target('namespace') ?? target('prefix') ?? name
     : name === 'run_command' ? [target('command'), ...(Array.isArray(body.args) ? (body.args as unknown[]).map(String) : [])].filter(Boolean).join(' ')
       : name === 'fetch' ? target('url') ?? name
-        : name === 'propose_graph' ? 'draft'
+        : name === 'propose_graph' || name === 'confirm_draft' ? 'draft'
           : name === 'validate_proposal' ? 'validation'
             : name === 'get_graph_state' ? 'current graph'
               : name === 'get_task_status' ? 'task status'
@@ -352,12 +354,14 @@ export function createPiAdapter(options: {
         } : undefined;
         try {
           const definitionId = instance.definition_version?.split('@')[0];
+          const skillCapabilityRoot = options.catalog.capabilityRootPath();
           contextAssembly = await openAgentContextAssembly({
             catalog: options.catalog,
             ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
             action: spec.action,
             ...(spec.role ? { role: spec.role } : {}),
             workspace,
+            skillProjectRoot: project.root,
             fullAccess,
             retrieval: Boolean(retrieval),
             rsi: Boolean(channels?.rsi?.available && spec.role === 'master' && fullAccess),
@@ -369,6 +373,13 @@ export function createPiAdapter(options: {
             },
             ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
             ...(options.capabilitySecrets ? { secrets: options.capabilitySecrets } : {}),
+            ...(definitionId && skillCapabilityRoot ? {
+              skillFolder: agentSkillsDir(definitionId, resolve(skillCapabilityRoot, '..')),
+              skillOwnedRoots: agentSkillOwnedRoots({
+                capabilityRoot: skillCapabilityRoot,
+                stateDir: dirname(options.instancesDir),
+              }),
+            } : {}),
           });
           const bundle = contextAssembly.bundle;
           const capabilityRoot = spec.role === 'master' && options.catalog?.capabilityRootPath()
@@ -755,8 +766,16 @@ export function createPiAdapter(options: {
           if (event.type === 'message_end') {
             // Real assistant message from the Pi session, not a fabricated
             // summary of the final output.
-            const message = (event as unknown as { message?: { role?: string; content?: { type?: string; text?: string }[] } }).message;
-            const text = (message?.content ?? []).filter(part => part.type === 'text' && typeof part.text === 'string').map(part => part.text!).join('');
+            const message = (event as unknown as { message?: { role?: string; content?: unknown } }).message;
+            // Since 0.86 a system or user message carries plain string content
+            // (types.d.ts: content: string | TextContent[]), so the role has to be
+            // checked before the array shape is assumed.
+            const content = message?.content;
+            const text = message?.role !== 'assistant' ? ''
+              : typeof content === 'string' ? content
+              : Array.isArray(content)
+                ? (content as { type?: string; text?: string }[]).filter(part => part.type === 'text' && typeof part.text === 'string').map(part => part.text!).join('')
+                : '';
             if (message?.role === 'assistant' && text.trim()) {
               if (persistEntries) {
                 sawAssistantMessageEnd = true;
@@ -880,6 +899,9 @@ export function createPiAdapter(options: {
               lastCompaction,
             );
           })();
+          // The skills the session may read must match the block Graph renders: the bound
+          // snapshots plus the SDK's own global and project folders.
+          const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
@@ -887,6 +909,13 @@ export function createPiAdapter(options: {
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
               ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+              onSend: systemPrompt => {
+                if (systemPrompt !== null) options.store.recordOperationSystemPrompt(operation.id, systemPrompt);
+                // The site that records the truth also reports when a part of it is
+                // gone: reporting only, a send is never blocked or rewritten.
+                void reportPromptIntegrity(join(options.instancesDir, operation.instanceId!), operation.id, systemPrompt)
+                  .catch(() => undefined);
+              },
             }), {
               enabled: () => Boolean(conversation) && !compacting,
               onRecovery: status => options.store.event(operation.taskId, 'session.handoff_response', {
@@ -896,7 +925,8 @@ export function createPiAdapter(options: {
             thinkingLevel,
             tools,
             allowedToolNames: [...capabilityOperation.allowedToolNames],
-            ...(capabilityOperation.skillPaths.length ? { skillPaths: [...capabilityOperation.skillPaths] } : {}),
+            ...(skillReadPaths.length ? { skillPaths: skillReadPaths } : {}),
+            ...(capabilityOperation.skillFolder ? { skillFolder: capabilityOperation.skillFolder } : {}),
             ...(capabilityOperation.readRoots.length ? { readRoots: [...capabilityOperation.readRoots] } : {}),
             ...(capabilityOperation.writeRoots.length ? { writeRoots: [...capabilityOperation.writeRoots] } : {}),
             ...(Object.keys(capabilityOperation.env).length ? { env: { ...capabilityOperation.env } } : {}),
@@ -912,6 +942,7 @@ export function createPiAdapter(options: {
               allowGitMetadataWritesAll: accessPolicy.filesystem.gitMetadata === 'writable',
             } : {}),
             ...(capabilityOperation.piExtensionPaths.length ? { piExtensionPaths: [...capabilityOperation.piExtensionPaths] } : {}),
+            ...(capabilityOperation.mcpAdapterServers.length ? { mcpAdapterServers: [...capabilityOperation.mcpAdapterServers] } : {}),
             piExtensionTools: [...capabilityOperation.piExtensionTools],
             systemPrompt: composedPrompt.text,
             bundleDigest: capabilityOperation.bundleDigest,

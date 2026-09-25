@@ -81,6 +81,31 @@ export interface OperationNode {
 
 export type OperationIntent = Omit<Operation, 'id' | 'generation' | 'attempt'>;
 
+/**
+ * What an `operation.intent` event carries: enough to identify the operation in a timeline,
+ * and nothing else.
+ *
+ * The `operations` row already stores the whole operation as its spec - including the input,
+ * the dependency snapshot and the frozen context, which are the large parts - so writing the
+ * same object into the event log stored every spec twice. `specRef` names where the rest of
+ * it lives, for a reader that needs more than the identity.
+ */
+export function operationIntentEvent(operation: Operation): Record<string, unknown> {
+  return {
+    operationId: operation.id,
+    taskId: operation.taskId,
+    nodeId: operation.nodeId,
+    instanceId: operation.instanceId,
+    generation: operation.generation,
+    attempt: operation.attempt,
+    kind: operation.kind,
+    action: operation.action,
+    proposalVersion: operation.proposalVersion,
+    requirementVersion: operation.requirementVersion,
+    specRef: 'operations.spec',
+  };
+}
+
 export interface OperationSnapshot {
   id: string;
   operation: Operation;
@@ -317,7 +342,7 @@ export class OperationLifecycle {
         .run(canonicalJson(operation.inputVersions), operation.activationId);
       this.store.db.prepare("UPDATE nodes SET status='preparing' WHERE task_id=? AND id=?")
         .run(operation.taskId, operation.nodeId);
-      this.store.event(operation.taskId, 'operation.intent', operation);
+      this.store.event(operation.taskId, 'operation.intent', operationIntentEvent(operation));
       return operation;
     });
   }

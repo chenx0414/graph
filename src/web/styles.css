@@ -875,46 +875,6 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   line-height: 1.45;
 }
 .agent-preview-notice code { color: inherit; font-size: 10.5px; }
-.agent-preview-section-map {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 8px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-soft);
-}
-.agent-preview-origin-legend,
-.agent-preview-section-source {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.agent-preview-origin-legend {
-  padding-right: 8px;
-  border-right: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 10px;
-}
-.agent-preview-origin-legend i {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--faint);
-}
-.agent-preview-origin-legend i[data-origin="editable"] { background: var(--accent); }
-.agent-preview-origin-legend i[data-origin="generated"] { background: var(--info); }
-.agent-preview-origin-legend i[data-origin="pi"] { background: var(--warn); }
-.agent-preview-section-source {
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel);
-}
-.agent-preview-section-source code { color: var(--text); font-size: 9.5px; }
-.agent-preview-section-source small { color: var(--muted); font-size: 9.5px; }
 .agent-preview-markdown {
   flex: 1;
   min-height: 0;

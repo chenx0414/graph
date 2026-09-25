@@ -13,6 +13,7 @@ import type {
 import { nodeReadPaths } from './capabilities.ts';
 import { graphNodeRuntime } from './workspace-command.ts';
 import { graphApplicationRoot } from './graph-root.ts';
+import { developerPath } from './developer-path.ts';
 import { isExternallyGated } from './pi-instance.ts';
 import { acquireRestrictedExecutor } from './restricted-process.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -33,12 +34,62 @@ export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'on
   tools: PiWorkerTool[];
   nativeTools: string[];
   skillPaths: string[];
+  skillFolder?: string;
   piExtensionPaths: string[];
   piExtensionTools: string[];
   systemPrompt: string;
-  appendSystemPrompt: string;
   allowedToolNames: string[];
 };
+
+/**
+ * The worker config, as the file the Pi worker process reads. Kept apart from
+ * spawning so the mapping from a session request to worker options stays
+ * testable: a field dropped here disappears from the session without a trace.
+ */
+export function piWorkerConfig(options: PiProcessOptions, resolved: {
+  workspace: string;
+  stateDir: string;
+  skillPaths: string[];
+  skillFolder?: string | null;
+  piExtensionPaths: string[];
+  forkFrom?: { sessionFile: string; leafId?: string };
+}): PiWorkerConfig {
+  const { workspace, stateDir, skillPaths, skillFolder, piExtensionPaths, forkFrom } = resolved;
+  const tools = options.tools ?? [];
+  return {
+    binding: options.binding,
+    workspace,
+    stateDir,
+    model: options.model,
+    thinkingLevel: options.thinkingLevel ?? 'off',
+    tools: serializedTools(tools),
+    nativeTools: options.nativeTools ?? [],
+    skillPaths,
+    ...(skillFolder ? { skillFolder } : {}),
+    piExtensionPaths,
+    piExtensionTools: options.piExtensionTools ?? [],
+    // The adapter can only register the servers a session request carries, so
+    // this line is the whole reason a bound MCP capability reaches the model.
+    ...(options.mcpAdapterServers?.length ? { mcpAdapterServers: options.mcpAdapterServers.map(server => ({ ...server })) } : {}),
+    systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
+    allowedToolNames: [...(options.allowedToolNames ?? [
+      ...tools.map(tool => tool.name),
+      ...(options.piExtensionTools ?? []),
+    ])].sort(),
+    bundleDigest: options.bundleDigest.trim(),
+    ...(options.legacyCapabilityDigest ? { legacyCapabilityDigest: options.legacyCapabilityDigest } : {}),
+    toolPolicyDigest: options.toolPolicyDigest.trim(),
+    runtimePolicyDigest: options.runtimePolicyDigest.trim(),
+    ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
+    ...(options.filesystemAccess ? { filesystemAccess: options.filesystemAccess } : {}),
+    ...(options.protectedPaths?.length ? { protectedPaths: options.protectedPaths } : {}),
+    ...(options.allowGitMetadataWritesAll ? { allowGitMetadataWritesAll: true } : {}),
+    ...(options.freshSession ? { freshSession: true } : {}),
+    ...(forkFrom ? { forkFrom } : {}),
+    ...(options.compaction ? { compaction: options.compaction } : {}),
+    ...(options.retry ? { retry: options.retry } : {}),
+  };
+}
 
 export type PiWorkerInspect = AgentSessionInspect & { processId: number };
 
@@ -114,6 +165,7 @@ export async function openPiProcess(options: PiProcessOptions) {
   const workerPath = fileURLToPath(new URL('./pi-worker.ts', import.meta.url));
   const appRoot = await realpath(graphApplicationRoot());
   const skillPaths = await Promise.all((options.skillPaths ?? []).map(path => realpath(path)));
+  const skillFolder = options.skillFolder ? await realpath(options.skillFolder) : null;
   const piExtensionPaths = await Promise.all((options.piExtensionPaths ?? []).map(path => realpath(path)));
   const capabilityReadRoots = await Promise.all((options.readRoots ?? []).map(path => realpath(path)));
   const capabilityWriteRoots = await Promise.all((options.writeRoots ?? []).map(path => realpath(path)));
@@ -125,36 +177,14 @@ export async function openPiProcess(options: PiProcessOptions) {
     ? { sessionFile: forkSource, ...(options.forkFrom?.leafId ? { leafId: options.forkFrom.leafId } : {}) }
     : undefined;
   const tools = options.tools ?? [];
-  const config: PiWorkerConfig = {
-    binding: options.binding,
+  const config = piWorkerConfig(options, {
     workspace,
     stateDir,
-    model: options.model,
-    thinkingLevel: options.thinkingLevel ?? 'off',
-    tools: serializedTools(tools),
-    nativeTools: options.nativeTools ?? [],
     skillPaths,
+    skillFolder,
     piExtensionPaths,
-    piExtensionTools: options.piExtensionTools ?? [],
-    systemPrompt: options.systemPrompt ?? `You are the ${options.binding.nodeId} Agent in Graph.`,
-    appendSystemPrompt: options.appendSystemPrompt ?? '',
-    allowedToolNames: [...(options.allowedToolNames ?? [
-      ...tools.map(tool => tool.name),
-      ...(options.piExtensionTools ?? []),
-    ])].sort(),
-    bundleDigest: options.bundleDigest.trim(),
-    ...(options.legacyCapabilityDigest ? { legacyCapabilityDigest: options.legacyCapabilityDigest } : {}),
-    toolPolicyDigest: options.toolPolicyDigest.trim(),
-    runtimePolicyDigest: options.runtimePolicyDigest.trim(),
-    ...(options.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
-    ...(options.filesystemAccess ? { filesystemAccess: options.filesystemAccess } : {}),
-    ...(options.protectedPaths?.length ? { protectedPaths: options.protectedPaths } : {}),
-    ...(options.allowGitMetadataWritesAll ? { allowGitMetadataWritesAll: true } : {}),
-    ...(options.freshSession ? { freshSession: true } : {}),
     ...(forkFrom ? { forkFrom } : {}),
-    ...(options.compaction ? { compaction: options.compaction } : {}),
-    ...(options.retry ? { retry: options.retry } : {}),
-  };
+  });
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
 
   const hostedTools = Object.fromEntries(tools.map(tool => [tool.name, gatedTool(tool, options.broker)]));
@@ -174,12 +204,12 @@ export async function openPiProcess(options: PiProcessOptions) {
     ...(runtime.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
   };
   if (options.env?.PATH !== undefined) {
-    helperEnv.PATH = [...new Set([
+    helperEnv.PATH = developerPath([...new Set([
       dirname(runtime.execPath),
       ...options.env.PATH.split(':').filter(Boolean),
       '/usr/bin',
       '/bin',
-    ])].join(':');
+    ])].join(':'));
   }
   const acquired = await acquireRestrictedExecutor();
   const check = (options.broker as { check?: (reservation?: number) => void }).check;
@@ -206,6 +236,7 @@ export async function openPiProcess(options: PiProcessOptions) {
       workspace,
       stateDir,
       ...skillPaths,
+      ...(skillFolder ? [skillFolder] : []),
       ...piExtensionPaths,
       ...capabilityReadRoots,
       ...capabilityWriteRoots,

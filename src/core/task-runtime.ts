@@ -28,6 +28,8 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
+import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
+import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
@@ -39,6 +41,7 @@ import { invocationRows } from '../runtime/task-gate.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
 import type { AgentContextLibrary } from '../runtime/agent-context.ts';
 import { openAgentContextAssembly } from '../runtime/agent-context-assembly.ts';
+import { agentSkillOwnedRoots, agentSkillsDir } from '../runtime/agent-skills.ts';
 import { agentArtifactAccess } from '../runtime/agent-tool-definitions.ts';
 import type { RsiChangeInput, RsiService } from '../runtime/rsi.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
@@ -368,6 +371,9 @@ export async function openTaskRuntime(options: {
     catalog = new Catalog(store, {
       ...(options.catalog?.capabilityRoot ? { capabilityRoot: options.catalog.capabilityRoot } : {}),
       ...(options.catalog?.recipesPath ? { recipesPath: options.catalog.recipesPath } : {}),
+      // The configured projects, read on every refresh: their own `.pi`/`.agents` skill
+      // folders belong in the library view next to the global and per-Agent ones.
+      projects: () => configuredProjects() ?? [],
     });
     await catalog.refresh();
     git = new GitIntegration(store, stateDir);
@@ -1104,13 +1110,13 @@ export async function openTaskRuntime(options: {
         return { conversationId, taskId: conversation.anchor_task_id, changed: true, invalidatedDrafts: invalidated, cursor: store.event(conversation.anchor_task_id, 'conversation.bound', { projectId: input.projectId, previous }) };
       });
     },
-    async confirm(conversationId: string, input: { proposalVersion: number; targetBranch: string; requestId: string }) {
+    async confirm(conversationId: string, input: { proposalVersion: number; targetBranch: string; requestId: string; attestation?: { actor: 'agent'; onBehalfOf: 'user'; instruction: string } }) {
       ensureOpen();
       const bound = conversationRow(store, conversationId);
       if (!bound.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
       if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
       git.requireTargetBranch(bound.project_id, input.targetBranch);
-      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'confirm', proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }, () => {
+      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'confirm', proposalVersion: input.proposalVersion, targetBranch: input.targetBranch, ...(input.attestation ? { actor: input.attestation.actor, onBehalfOf: input.attestation.onBehalfOf, instruction: input.attestation.instruction } : {}) }, () => {
         const conversation = conversationRow(store, conversationId);
         if (!conversation.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
         if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
@@ -1232,13 +1238,24 @@ export async function openTaskRuntime(options: {
       const definitions = catalog.listDefinitions();
       const latest = definitions.find(item => item.id === 'main') ?? definitions.find(item => item.id === 'master');
       const latestDefinitionVersion = masterDefinitionVersion() ?? (latest ? `${latest.id}@${latest.version}` : null);
-      const definitionVersion = view?.master?.definitionVersion ?? latestDefinitionVersion;
+      // The master follows the latest definition of its own recipe on the next turn
+      // (see Execution.refreshMasterDefinition), so the preview has to describe that
+      // same version instead of the one the instance last ran.
+      const masterVersion = view?.master?.definitionVersion;
+      const masterId = masterVersion?.split('@')[0];
+      const masterLatest = masterId
+        ? definitions.filter(item => item.id === masterId).sort((left, right) => right.version - left.version)[0]
+        : undefined;
+      const definitionVersion = masterLatest && masterId
+        ? `${masterId}@${masterLatest.version}`
+        : (masterVersion ?? latestDefinitionVersion);
       const definitionId = definitionVersion?.split('@')[0];
       const action = options.master?.action ?? 'master';
       const workspace = view?.master && view.anchorTaskId
         ? runtime.agentWorkspace(view.anchorTaskId, view.master.nodeId) : view?.projectRoot ?? null;
       const assembly = await openAgentContextAssembly({
         catalog, library, workspace, action, role: 'master', retrieval: true,
+        ...(view?.projectRoot ? { skillProjectRoot: view.projectRoot } : {}),
         rsi: Boolean(options.rsi?.available) && isFullAccess(runtime.currentAccessPolicy()),
         definitionVersion: definitionVersion ?? 'main@unknown',
         fullAccess: isFullAccess(runtime.currentAccessPolicy()),
@@ -1247,13 +1264,20 @@ export async function openTaskRuntime(options: {
             ? { agent: options.catalog.bootstrapPrompts[definitionId]! } : {}),
           ...(options.catalog?.bootstrapToolPrompt !== undefined ? { tool: options.catalog.bootstrapToolPrompt } : {}),
         },
+        ...(definitionId && options.catalog?.capabilityRoot ? {
+          skillFolder: agentSkillsDir(definitionId, resolve(options.catalog.capabilityRoot, '..')),
+          skillOwnedRoots: agentSkillOwnedRoots({
+            capabilityRoot: options.catalog.capabilityRoot,
+            stateDir,
+          }),
+        } : {}),
       });
       const preview = await assembly.preview({
         role: 'master', run: true, fetch: true, catalog: true,
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
-          bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true,
+          bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true, confirmDraft: true,
         },
         ...(options.systemContext ? { systemContext: {
           systemSummary: Boolean(options.systemContext.systemSummary),
@@ -1272,7 +1296,8 @@ export async function openTaskRuntime(options: {
         }), disabledTools: assembly.disabledTools,
         docsRoot: preview.docsRoot, definitionVersion, latestDefinitionVersion,
         tools: preview.tools, capabilities: preview.capabilities,
-        preview: { sections: preview.composed.previewSections, text: preview.composed.previewText },
+        // The exact string one real send carried, or null when this conversation has not sent yet.
+        sent: view?.anchorTaskId ? store.conversationSystemPrompt(view.anchorTaskId) : null,
       };
     },
     currentAccessPolicy(): ResolvedAccessPolicy {
@@ -1513,6 +1538,21 @@ export async function openTaskRuntime(options: {
       ensureOpen(); store.task(taskId);
       // Give workers this scoped object, never the user or host runtime object.
       return {
+        /** The user asked in chat for this confirmation, so the record must show who
+         * really acted and carry their words: the console click and this call stay
+         * distinguishable in the command log. */
+        async confirmDraft(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }) {
+          ensureOpen();
+          if (!input.instruction.trim()) throw new RuntimeError('invalid_input', 'An instruction is required: record the words that authorised this confirmation');
+          const conversationId = store.task(taskId).conversation_id;
+          if (!conversationId) throw new RuntimeError('invalid_input', 'This task has no conversation to confirm');
+          return runtime.conversations.confirm(conversationId, {
+            proposalVersion: input.proposalVersion,
+            targetBranch: input.targetBranch,
+            requestId: input.requestId,
+            attestation: { actor: 'agent', onBehalfOf: 'user', instruction: input.instruction.trim() },
+          });
+        },
         async propose(proposal: Proposal, requestId: string): Promise<ProposalReceipt> {
           ensureOpen();
           return store.command(`supervisor:${taskId}`, requestId, { type: 'propose', proposal }, () => {
@@ -1883,6 +1923,7 @@ export async function openTaskRuntime(options: {
       definitions() { ensureOpen(); return catalog.listDefinitions(); },
       availableAgentDefinitions() { ensureOpen(); return catalog.availableAgentDefinitions(); },
       capabilities() { ensureOpen(); return catalog.capabilities(); },
+      capabilitiesView() { ensureOpen(); return catalog.capabilitiesView(); },
       capability(id: string, version?: string) { ensureOpen(); return catalog.capability(id, version); },
       capabilityRootPath() { ensureOpen(); return catalog.capabilityRootPath(); },
       agentCombinationFilePath() { ensureOpen(); return catalog.agentCombinationFilePath(); },
@@ -1908,6 +1949,32 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         await catalog.refresh();
         return { capabilities: catalog.capabilities(), agentCombinations: catalog.agentCombinations() };
+      },
+      /** Pi extension sources that have a newer version than the one on disk. */
+      async piExtensionUpdates() {
+        ensureOpen();
+        const updates: PiExtensionUpdate[] = [];
+        for (const record of catalog.capabilities()) {
+          const source = record.kind === 'pi-extension' && record.status === 'available' ? record.packageSource : undefined;
+          if (!source) continue;
+          const base = { id: record.id, version: record.version, source };
+          try {
+            updates.push({ ...base, ...await piExtensionSourceStatus({ source, cwd: stateDir, agentDir: piExtensionCacheDir(catalog) }) });
+          } catch (error) {
+            updates.push({ ...base, installed: null, latest: null, available: false, installGaps: [], error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        return { updates };
+      },
+      /** Install or upgrade one Pi extension source, then rescan the capability library. */
+      async updatePiExtension(id: string, version: string) {
+        ensureOpen();
+        const record = catalog.capability(id, version);
+        if (!record?.packageSource) throw new RuntimeError('not_found', `Pi extension ${id}@${version} has no package source`);
+        const result = await updatePiExtensionSource({ source: record.packageSource, cwd: stateDir, agentDir: piExtensionCacheDir(catalog) });
+        await syncCapabilityVersion(record.source, result.version);
+        await catalog.refresh();
+        return result;
       },
       preset(id: string) { ensureOpen(); return catalog.preset(id); },
       definitionSpec(id: string, version: number) { ensureOpen(); return catalog.definition(`${id}@${version}`); },

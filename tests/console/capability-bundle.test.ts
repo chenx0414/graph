@@ -1,4 +1,6 @@
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -95,7 +97,7 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
     expect(first.piExtensionPaths).toEqual([join(await realpath(extension), 'index.ts')]);
     expect(first.piExtensionTools).toEqual(['extension_probe']);
     expect(first.prompts.system).toBe('You are the bundle test Agent.');
-    expect(first.prompts.appendSystem).toContain('Use only the declared capability bundle.');
+    expect(first.prompts.tool).toContain('Use only the declared capability bundle.');
     expect(first.report).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'skill-read', kind: 'skill', loaded: true }),
       expect.objectContaining({ id: 'pi-probe', kind: 'pi-extension', loaded: true, tools: ['extension_probe'] }),
@@ -111,6 +113,85 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
   } finally {
     await first.close();
     await second.close();
+  }
+});
+
+/** A local Streamable-HTTP MCP stub, so binding an MCP capability never needs the network. */
+async function mcpStub() {
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const request = JSON.parse(Buffer.concat(chunks).toString()) as { id?: number; method?: string };
+    if (request.method === 'notifications/initialized') { res.writeHead(202); res.end(); return; }
+    let result: unknown;
+    if (request.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'stub', version: '1' } };
+    else if (request.method === 'tools/list') result = { tools: [{ name: 'echo', description: 'Echo text', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } }] };
+    else { res.writeHead(500); res.end(); return; }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+  cleanup.push(() => new Promise<void>((resolve, reject) => { server.closeAllConnections(); server.close(error => error ? reject(error) : resolve()); }));
+  return `http://127.0.0.1:${port}/mcp`;
+}
+
+test('a bound MCP capability becomes an adapter server and adds the gateway tool to the allowlist', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-mcp-adapter-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const capabilityRoot = join(root, 'capabilities');
+  const docs = join(capabilityRoot, 'cloudflare-docs');
+  await Promise.all([workspace, docs].map(path => mkdir(path, { recursive: true })));
+  const stubUrl = await mcpStub();
+  await writeFile(join(docs, 'capability.json'), canonicalJson({
+    id: 'cloudflare-docs', kind: 'mcp', version: '1.0.0', name: 'Cloudflare docs',
+    url: stubUrl,
+  }));
+
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot });
+  await catalog.refresh();
+  catalog.publishDefinition('mcp-agent', { recommendedGrade: 'medium', capabilities: [{ id: 'cloudflare-docs', version: '1.0.0' }] });
+
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'mcp-agent');
+  cleanup.push(() => gate.close());
+  const bundle = await openCapabilityBundle({ catalog, definitionVersion: 'mcp-agent@1' });
+  const operation = await bundle.openOperation({ workspace, scratchDir: join(root, 'scratch'), gate, action: 'work', hostTools: () => [] });
+  try {
+    expect(operation.mcpAdapterServers).toEqual([
+      { name: 'cloudflare-docs', definition: { url: stubUrl } },
+    ]);
+    expect(operation.allowedToolNames).toContain('mcp');
+  } finally {
+    await operation.close();
+  }
+});
+
+test('a definition without MCP capabilities neither registers a server nor allows the gateway tool', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-mcp-none-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const capabilityRoot = join(root, 'capabilities');
+  const skill = join(capabilityRoot, 'skill');
+  await Promise.all([workspace, skill].map(path => mkdir(path, { recursive: true })));
+  await writeFile(join(skill, 'SKILL.md'), '# Skill\n\nRead the project before editing.\n');
+  await writeFile(join(skill, 'capability.json'), canonicalJson({ id: 'skill-read', kind: 'skill', version: '1.0.0', name: 'Read skill' }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot });
+  await catalog.refresh();
+  catalog.publishDefinition('plain-agent', { recommendedGrade: 'medium', capabilities: [{ id: 'skill-read', version: '1.0.0' }] });
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'plain-agent');
+  cleanup.push(() => gate.close());
+  const bundle = await openCapabilityBundle({ catalog, definitionVersion: 'plain-agent@1' });
+  const operation = await bundle.openOperation({ workspace, scratchDir: join(root, 'scratch'), gate, action: 'work', hostTools: () => [] });
+  try {
+    expect(operation.mcpAdapterServers).toEqual([]);
+    expect(operation.allowedToolNames).not.toContain('mcp');
+  } finally {
+    await operation.close();
   }
 });
 
@@ -158,8 +239,6 @@ test('disabled tools are removed from the operation, allowlist and generated pro
     expect(operation.tools).toEqual([]);
     expect(operation.piExtensionTools).toEqual([]);
     expect(operation.allowedToolNames).toEqual([]);
-    expect(operation.prompts.appendSystem).not.toContain('read:');
-    expect(operation.prompts.appendSystem).not.toContain('extension_probe');
     expect(operation.report.find(item => item.id === 'pi-probe')?.tools).toEqual([]);
   } finally {
     await operation.close();

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
+import { normalizeContext } from '@earendil-works/pi-ai';
 import type { Api, Model, Context } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { RestrictedGate } from './restricted-process.ts';
@@ -32,7 +33,7 @@ export function createWorkerRequests(options: {
           ...(Array.isArray(candidate.tools) ? { tools: candidate.tools } : {}),
         };
       }
-      const stream = await options.stream(options.model, context);
+      const stream = await options.stream(options.model, normalizeContext(context));
       if (request.events === true) {
         // Every event carries the shared live `partial` message, so the raw
         // event list is quadratic in the response length. Send compact frames

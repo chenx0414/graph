@@ -53,7 +53,10 @@ test.each(['write', 'crash'])('a process exit preserves the exact session (%s)',
   }
   const after = JSON.parse((await run('read')).stdout);
   expect(after).toEqual(before);
-  expect(after.messages).toHaveLength(mode === 'crash' ? 1 : 2);
+  // Since 0.86 the prompt is the transcript's leading system message: it is stored
+  // with the session and survives a process exit exactly like the turns do.
+  expect(after.messages[0]).toMatchObject({ role: 'system' });
+  expect(after.messages).toHaveLength(mode === 'crash' ? 2 : 3);
 });
 
 test('separate instances isolate context and model switching preserves instance identity', async () => {
@@ -72,7 +75,7 @@ test('separate instances isolate context and model switching preserves instance 
     await first.setModel(modelB);
     await first.prompt('Continue with another model');
     expect(first.inspect()).toMatchObject({ binding: before.binding, sessionId: before.sessionId, model: modelB.id });
-    expect(first.inspect().messages).toHaveLength(4);
+    expect(first.inspect().messages).toHaveLength(5);
     expect(second.inspect().messages).toEqual([]);
     await expect(openPiInstance({
       binding: { instanceId: 'different', nodeId: 'one', definitionVersion: 'coder@1' },
@@ -102,7 +105,7 @@ test('reopening an Agent instance restores its exact session and transcript', as
       binding: options.binding, sessionId: before.sessionId,
       sessionFile: before.sessionFile, messages: before.messages,
     });
-    expect(restored.inspect().messages).toHaveLength(2);
+    expect(restored.inspect().messages).toHaveLength(3);
   } finally {
     await restored.close();
   }

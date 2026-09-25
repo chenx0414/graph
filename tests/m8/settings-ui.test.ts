@@ -210,7 +210,11 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   const restarted = await start(dir, path, 0);
   const restartedApi = await session(restarted.url);
   const configText = await (await restartedApi.get('/api/config')).text();
-  expect(JSON.parse(configText)).toMatchObject({ revision: savedRevision, config: { projects: [{ id: 'sample' }] } });
+  // The settings page auto-saves, so a further save can land after the read above; what must
+  // hold is that the save persisted and the revision never went backwards.
+  const restartedConfig = JSON.parse(configText) as { revision: number };
+  expect(restartedConfig.revision).toBeGreaterThanOrEqual(savedRevision);
+  expect(JSON.parse(configText)).toMatchObject({ config: { projects: [{ id: 'sample' }] } });
   expect(configText).not.toContain(SECRET);
   const persisted = (JSON.parse(configText) as {
     revision: number;
@@ -221,7 +225,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
     };
   }).config;
   const afterRestart = JSON.parse(configText) as { revision: number };
-  expect(afterRestart.revision).toBe(savedRevision);
+  expect(afterRestart.revision).toBeGreaterThanOrEqual(savedRevision);
   // ④ only the reference is stored, never the secret value.
   expect(persisted.credentials.local?.secretRef).toBe('GRAPH_SYNTH_KEY');
   // ② an id added without snapshot metadata is persisted as unknown, not as 0.

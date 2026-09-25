@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { externallyGated, openPiInstance } from '../../src/runtime/pi-instance.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { DatabaseSync } from 'node:sqlite';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
 import { reply } from '../fixtures/models.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -32,7 +32,7 @@ async function replay(texts: string[], enabled = true) {
     onRecovery: status => notices.push(status),
   });
   const events = [];
-  const context = { messages: [{ role: 'user' as const, content: 'Fix the failing test.', timestamp: 1 }] };
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Fix the failing test.', timestamp: 1 }] });
   for await (const event of await stream(server.model, context, {})) events.push(structuredClone(event));
   return { events, sends, settlements, notices, requests: server.requests, context };
 }
@@ -85,7 +85,7 @@ test('cancellation at the handoff boundary remains an abort and does not send a 
     return events;
   }, { enabled: () => true, onRecovery() {} });
   let last;
-  for await (const event of await stream(server.model, { messages: [] }, { signal: controller.signal })) last = event;
+  for await (const event of await stream(server.model, normalizeContext({ messages: [] }), { signal: controller.signal })) last = event;
   expect(sends).toBe(1);
   expect(last).toMatchObject({ type: 'error', reason: 'aborted', error: { content: [], stopReason: 'aborted' } });
 });
@@ -102,7 +102,7 @@ test('a previously persisted bad handoff is excluded from model input without ch
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
   };
   const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} });
-  for await (const _event of await stream(server.model, { messages: [bad, { role: 'user', content: 'continue', timestamp: 2 }] }, {})) { /* drain */ }
+  for await (const _event of await stream(server.model, normalizeContext({ messages: [bad, { role: 'user', content: 'continue', timestamp: 2 }] }), {})) { /* drain */ }
   expect(JSON.stringify(server.requests)).not.toContain('private-history-marker');
   expect(bad.content[0]!.text).toBe(handoff);
 });
@@ -113,7 +113,7 @@ test('the correction allowance is shared across requests in the same operation',
   const notices: string[] = [];
   const gate: SendGate = { dispatch(_id, _r, send) { return send(); }, settle() {} };
   const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery: s => notices.push(s) });
-  const context = { messages: [{ role: 'user' as const, content: 'Fix it.', timestamp: 1 }] };
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Fix it.', timestamp: 1 }] });
   for await (const _event of await stream(server.model, context, {})) { /* drain */ }
   const events = [];
   for await (const event of await stream(server.model, context, {})) events.push(event);

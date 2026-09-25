@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
+import { dirname, resolve } from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { canonicalJson } from '../core/store.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { selectAgentToolSurface } from './pi-native-tools.ts';
+import { MCP_ADAPTER_PROXY_TOOL, mcpAdapterServers } from './mcp-adapter-bridge.ts';
+import { agentSkills, agentSkillsDir, syncAgentSkills } from './agent-skills.ts';
 import {
   capabilityPrompts,
   loadCapabilities,
   resolveCapabilityFacts,
+  type CapabilityLoadFact,
   type CapabilityPermissionRequest,
   type LoadedCapabilities,
   type ResolvedCapabilityFact,
@@ -18,12 +22,40 @@ function digest(value: unknown) {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
 
+/**
+ * The Agent's skills folder. The caller may point it somewhere else, but by default it is
+ * the recipe's own folder next to the capability library, so a definition with skills
+ * always has one.
+ */
+function skillFolderFor(options: CapabilityBundleOptions): string | null {
+  const agentId = options.definitionVersion?.split('@')[0];
+  const capabilityRoot = options.catalog.capabilityRootPath();
+  return options.skillFolder
+    ?? (agentId && capabilityRoot ? agentSkillsDir(agentId, resolve(capabilityRoot, '..')) : null);
+}
+
 export interface CapabilityBundleOptions {
   catalog: Catalog;
   definitionVersion?: string;
   bootstrap?: { agent?: string; tool?: string };
   mcpDomains?: string[];
   secrets?: () => Record<string, string>;
+  /**
+   * The Agent's own skills folder. Bound skills are mirrored into it as symlinks and the
+   * SDK loads skills from it, so a hand-edited folder is a first-class input.
+   */
+  skillFolder?: string;
+  /**
+   * Working directory whose `.pi/skills` and `.agents/skills` are project sources, exactly
+   * as the SDK defines the first one. The global sources are the SDK's own agent directory
+   * and the home `.agents` folder.
+   */
+  skillCwd?: string;
+  /** The bound project's root, so its `.pi`/`.agents` skills reach every Agent, not only
+   * the one whose working directory happens to be the project root. */
+  skillProjectRoot?: string;
+  /** Capability roots Graph owns; links pointing into them are Graph's own to manage. */
+  skillOwnedRoots?: readonly string[];
 }
 
 export interface CapabilityOperationOptions {
@@ -54,9 +86,11 @@ export interface CapabilityOperation {
   readonly tools: readonly ToolDefinition[];
   readonly nativeTools: readonly string[];
   readonly allowedToolNames: readonly string[];
-  readonly prompts: { system: string; appendSystem: string };
+  readonly prompts: { system: string; tool: string | null };
   readonly report: LoadedCapabilities['report'];
   readonly skillPaths: readonly string[];
+  /** The Agent's skills folder the SDK loads from; null when this bundle has none. */
+  readonly skillFolder: string | null;
   readonly readRoots: readonly string[];
   readonly writeRoots: readonly string[];
   readonly env: Readonly<Record<string, string>>;
@@ -66,6 +100,8 @@ export interface CapabilityOperation {
   readonly unixSockets: readonly string[];
   readonly piExtensionPaths: readonly string[];
   readonly piExtensionTools: readonly string[];
+  /** MCP servers the Pi session should register with pi-mcp-adapter. */
+  readonly mcpAdapterServers: readonly { name: string; definition: unknown }[];
   close(): Promise<void>;
 }
 
@@ -75,6 +111,8 @@ export class CapabilityBundleVersion {
   readonly toolPolicyDigest: string;
   readonly runtimePolicyDigest: string;
   readonly facts: readonly ResolvedCapabilityFact[];
+  /** The Agent's skills folder the SDK loads from; null when there is no capability root. */
+  readonly skillFolder: string | null;
   private readonly input: CapabilityBundleOptions;
 
   private constructor(
@@ -83,6 +121,7 @@ export class CapabilityBundleVersion {
   ) {
     this.input = input;
     this.definitionVersion = input.definitionVersion ?? null;
+    this.skillFolder = skillFolderFor(input);
     this.facts = Object.freeze(facts.map(fact => structuredClone(fact)));
     const staticToolPolicy = {
       piExtensionTools: this.facts.flatMap(fact =>
@@ -119,6 +158,18 @@ export class CapabilityBundleVersion {
 
   static async open(options: CapabilityBundleOptions) {
     const facts = await resolveCapabilityFacts(options.catalog, options.definitionVersion);
+    // Mirror this definition's bound skills into the Agent's folder before anything reads
+    // it, so the console preview and the real operation see the same folder.
+    const skillFolder = skillFolderFor(options);
+    if (skillFolder) {
+      syncAgentSkills({
+        dir: skillFolder,
+        ownedRoots: options.skillOwnedRoots ?? [],
+        links: facts.flatMap(fact => fact.kind === 'skill' && fact.path
+          ? [{ id: fact.id, target: dirname(fact.path) }]
+          : []),
+      });
+    }
     return new CapabilityBundleVersion(options, facts);
   }
 
@@ -139,7 +190,30 @@ export class CapabilityBundleVersion {
         ...(options.onPermissionRequired ? { onPermissionRequired: options.onPermissionRequired } : {}),
         ...(options.access ? { access: options.access } : {}),
       });
+      // MCP capabilities are handed to pi-mcp-adapter, which owns the connection and
+      // tool surface; Graph only resolves the declaration and the bound credentials.
+      const adapterServers = mcpAdapterServers(
+        this.facts.map(fact => ({
+          id: fact.id,
+          version: fact.version,
+          kind: fact.kind,
+          ...(fact.path ? { path: fact.path } : {}),
+          role: fact.role ?? 'tool',
+        })),
+        this.input.secrets ? this.input.secrets() : {},
+      );
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
+      // A bound skill's path only exists in the load facts, so mirror them here as well:
+      // this is the folder the SDK and the prompt read for this operation.
+      if (this.skillFolder) {
+        syncAgentSkills({
+          dir: this.skillFolder,
+          ownedRoots: this.input.skillOwnedRoots ?? [],
+          links: loaded.report.flatMap(fact => fact.kind === 'skill' && fact.path
+            ? [{ id: fact.id, target: dirname(fact.path) }]
+            : []),
+        });
+      }
       const disabledTools = new Set((options.disabledTools ?? []).map(name => name.trim()).filter(Boolean));
       const selected = selectAgentToolSurface({
         tools: [...options.hostTools({ readRoots }), ...loaded.tools],
@@ -150,15 +224,45 @@ export class CapabilityBundleVersion {
       const nativeTools = Object.freeze(selected.nativeTools);
       const tools = Object.freeze(selected.tools);
       const piExtensionTools = selected.extensionTools;
-      const report = loaded.report.map(fact => fact.tools
-        ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) }
-        : fact);
+      // Skills are recorded from the folders the SDK loads: the Agent's own folder, which
+      // is where bound skills are mirrored and where the user pastes their own, plus the
+      // SDK's global and project folders. A bound skill keeps its loaded fact and its
+      // version, a skill found in any of those folders becomes a load fact of its own, and
+      // everything else stays as loaded.
+      const folderSkills = agentSkills({
+        ...(this.skillFolder ? { folder: this.skillFolder } : {}),
+        ...(this.input.skillCwd ? { cwd: this.input.skillCwd } : {}),
+        ...(this.input.skillProjectRoot ? { projectRoot: this.input.skillProjectRoot } : {}),
+      }).skills;
+      const excludedSkills = new Set(folderSkills.filter(skill => skill.disableModelInvocation).map(skill => skill.name));
+      const recordedSkills = new Set(loaded.report.filter(fact => fact.kind === 'skill').map(fact => fact.id));
+      const pastedSkills = folderSkills.filter(skill => !recordedSkills.has(skill.name));
+      const report = [
+        ...loaded.report,
+        ...pastedSkills.map((skill): CapabilityLoadFact => ({
+          id: skill.name,
+          version: 'local',
+          kind: 'skill',
+          name: skill.name,
+          description: skill.description,
+          path: skill.filePath,
+          loaded: true,
+          executable: false,
+          reason: '原生 skills 注入：模型按需读取 SKILL.md',
+        })),
+      ].map(fact => {
+        const kept = fact.tools ? { ...fact, tools: fact.tools.filter(name => !disabledTools.has(name)) } : fact;
+        // The native formatter drops a skill that declares disable-model-invocation, so the
+        // fact must say that instead of claiming the model can read it.
+        return kept.kind === 'skill' && excludedSkills.has(kept.name ?? kept.id)
+          ? { ...kept, reason: '声明了 disable-model-invocation：不会进入系统提示（原生语义为仅显式调用）' }
+          : kept;
+      });
       const prompts = capabilityPrompts({
         definitionVersion: this.definitionVersion ?? 'unknown@1',
         action: options.action,
         ...(options.role ? { role: options.role } : {}),
         agentPrompt: loaded.prompts.agent,
-        toolPrompt: loaded.prompts.tool,
         report,
         tools,
       });
@@ -189,10 +293,14 @@ export class CapabilityBundleVersion {
           unixSockets: loaded.unixSockets,
         },
       });
+      const serverNames = adapterServers.map(server => server.name.trim()).filter(Boolean);
       const allowedToolNames = Object.freeze([...new Set([
         ...tools.map(tool => tool.name),
         ...nativeTools,
         ...piExtensionTools,
+        // pi-mcp-adapter exposes runtime-registered servers through its own
+        // gateway tool, so it has to be allowed in the session.
+        ...(serverNames.length ? [MCP_ADAPTER_PROXY_TOOL] : []),
       ])].sort());
       const operation: CapabilityOperation = {
         bundleDigest: this.digest,
@@ -204,7 +312,7 @@ export class CapabilityBundleVersion {
         allowedToolNames,
         prompts: {
           system: prompts.systemPrompt,
-          appendSystem: prompts.appendSystemPrompt,
+          tool: loaded.prompts.tool,
         },
         report,
         skillPaths: Object.freeze([...loaded.skillPaths]),
@@ -215,8 +323,10 @@ export class CapabilityBundleVersion {
         allowUnrestrictedNetwork: loaded.allowUnrestrictedNetwork,
         allowLocalBinding: loaded.allowLocalBinding,
         unixSockets: Object.freeze([...loaded.unixSockets]),
+        skillFolder: this.skillFolder,
         piExtensionPaths: Object.freeze([...loaded.piExtensionPaths]),
         piExtensionTools: Object.freeze([...piExtensionTools]),
+        mcpAdapterServers: Object.freeze(adapterServers.map(server => ({ ...server }))),
         close: () => loaded!.close(),
       };
       return Object.freeze(operation);

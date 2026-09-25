@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, test } from 'vitest';
+import { normalizeContext } from '@earendil-works/pi-ai';
 import type { Model } from '@earendil-works/pi-ai';
 import { controlledOpenAIStream } from '../../src/runtime/controlled-openai.ts';
 import { createModelScheduler, type SlotRequest } from '../../src/runtime/model-scheduler.ts';
@@ -84,7 +85,7 @@ function slotFor(scheduler: ReturnType<typeof createModelScheduler>, request: Sl
 }
 
 async function send(stream: ReturnType<typeof controlledOpenAIStream>, model: Model<'openai-completions'>) {
-  const events = await stream(model, { messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }] });
+  const events = await stream(model, normalizeContext({ messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }] }));
   const result = await events.result();
   return result.stopReason;
 }

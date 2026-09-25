@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 33;
+export const SCHEMA_VERSION = 34;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -556,7 +556,28 @@ export class TaskStore {
         PRAGMA user_version=33;
       `);
     });
+    if (version < 34) this.transaction(() => {
+      // The console must be able to show the system prompt the model actually received. Fresh and
+      // existing databases both take the column from this ALTER, as every other added column does.
+      // Existing rows stay NULL (= not recorded), which the console reports as such.
+      this.db.exec('ALTER TABLE operations ADD COLUMN system_prompt TEXT; PRAGMA user_version=34;');
+    });
   }
+  /** The exact system prompt of the newest master turn that sent one, for the console. */
+  conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string } | null {
+    const row = this.db.prepare(`SELECT id, settled_at, dispatched_at, system_prompt FROM operations
+      WHERE task_id = ? AND node_id = 'master' AND system_prompt IS NOT NULL
+      ORDER BY rowid DESC LIMIT 1`).get(anchorTaskId) as
+      { id: string; settled_at: number | null; dispatched_at: number | null; system_prompt: string } | undefined;
+    if (!row) return null;
+    return { operationId: row.id, at: row.settled_at ?? row.dispatched_at ?? 0, text: row.system_prompt };
+  }
+
+  /** Record the exact system prompt one send carried; the first send of an operation wins. */
+  recordOperationSystemPrompt(operationId: string, text: string): void {
+    this.db.prepare('UPDATE operations SET system_prompt = ? WHERE id = ? AND system_prompt IS NULL').run(text, operationId);
+  }
+
   transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     let result: T;

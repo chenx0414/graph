@@ -311,6 +311,28 @@ export class Execution {
     return chatting;
   }
 
+  /**
+   * Every Agent node follows the latest definition of its own recipe, so editing
+   * a recipe takes effect on that node's next dispatch. A node keeps its model,
+   * its work copy and its position; only the definition version moves.
+   */
+  private refreshDefinition(node: ExecutionNodeRow): ExecutionNodeRow {
+    const spec = JSON.parse(node.spec) as NodeSpec;
+    const id = spec.definitionVersion?.split('@')[0];
+    const latest = id
+      ? this.catalog?.listDefinitions().filter(item => item.id === id).sort((left, right) => right.version - left.version)[0]
+      : undefined;
+    const definitionVersion = latest ? `${id}@${latest.version}` : undefined;
+    if (!definitionVersion || definitionVersion === spec.definitionVersion) return node;
+    spec.definitionVersion = definitionVersion;
+    const specText = canonicalJson(spec);
+    this.store.db.prepare('UPDATE nodes SET spec=? WHERE task_id=? AND id=?').run(specText, node.task_id, node.id);
+    if (node.instance_id) {
+      this.store.db.prepare('UPDATE instances SET definition_version=? WHERE id=?').run(definitionVersion, node.instance_id);
+    }
+    return { ...node, spec: specText };
+  }
+
   private readyNodes(): ExecutionNodeRow[] {
     if (this.stopping || this.dispatchAllowed?.() === false) return [];
     const nodes: ExecutionNodeRow[] = [];
@@ -373,7 +395,7 @@ export class Execution {
       const conversation = conversationForTask(this.store, node.task_id);
       if (!conversation || conversation.archived_at !== null) return false;
     }
-    const spec = JSON.parse(node.spec) as NodeSpec;
+    const spec = JSON.parse(this.refreshDefinition(node).spec) as NodeSpec;
     const adapter = spec.action === 'graph.verify'
       ? graphVerifier(this.store, spec)
       : spec.action === 'graph.human_check'

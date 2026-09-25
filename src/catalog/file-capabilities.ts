@@ -3,7 +3,7 @@ import { readdir, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { normalizeDomainPattern } from '../core/domains.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
-import type { CapabilityKind, CapabilityRecord } from './capability-library.ts';
+import type { CapabilityKind, CapabilityOrigin, CapabilityRecord } from './capability-library.ts';
 
 export interface CapabilityManifest {
   id: string;
@@ -32,7 +32,14 @@ export interface CapabilityManifest {
   networkAccess?: 'unrestricted';
   /** Graph extension or Pi extension entry file. */
   entry?: string;
+  /**
+   * Pi extension package source resolved by the Pi SDK's own package manager instead of a
+   * vendored copy: `npm:<spec>`, a git URL, or a local path. When present, `entry` is ignored.
+   */
+  source?: string;
   tools?: { name: string; description?: string }[];
+  /** Every Agent definition receives this capability without binding it. */
+  base?: boolean;
   /** Host runtime requirements for a trusted Pi extension. */
   runtime?: {
     commands?: string[];
@@ -72,6 +79,8 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
   const description = raw.description === undefined ? undefined : text(raw.description, `${path}.description`);
   const role = raw.role === undefined ? undefined : text(raw.role, `${path}.role`) as 'agent' | 'tool';
   if (role && role !== 'agent' && role !== 'tool') throw new RuntimeError('invalid_capability', `${path}.role must be agent or tool`);
+  if (raw.base !== undefined && typeof raw.base !== 'boolean') throw new RuntimeError('invalid_capability', `${path}.base must be a boolean`);
+  const base = raw.base === true;
   if (kind === 'prompt' && !role) throw new RuntimeError('invalid_capability', `${path}.role is required for prompt capabilities`);
   const stringMap = (value: unknown, label: string) => {
     if (value === undefined) return undefined;
@@ -194,6 +203,7 @@ export function parseCapabilityManifest(value: unknown, path: string): Capabilit
     name,
     ...(description ? { description } : {}),
     ...(role ? { role } : {}),
+    ...(base ? { base: true } : {}),
     ...(command ? { command } : {}),
     ...(args ? { args } : {}),
     ...(url ? { url } : {}),
@@ -235,13 +245,108 @@ async function validateFiles(directory: string, manifest: CapabilityManifest) {
     throw new RuntimeError('invalid_capability', `${directory} is an MCP capability without command or url`);
   }
   if (manifest.kind === 'extension' || manifest.kind === 'pi-extension') {
-    const entry = manifest.entry ?? './index.mjs';
-    const path = isAbsolute(entry) ? entry : resolve(directory, entry);
-    if (path !== directory && !path.startsWith(`${directory}/`)) {
-      throw new RuntimeError('invalid_capability', `${directory} extension entry must stay inside its capability directory`);
+    // A Pi extension may declare a package source instead of a vendored entry: the SDK resolves
+    // and validates that source at load time, so there is no local entry to check here.
+    const sourced = manifest.kind === 'pi-extension' && typeof manifest.source === 'string' && manifest.source.trim().length > 0;
+    if (!sourced) {
+      const entry = manifest.entry ?? './index.mjs';
+      const path = isAbsolute(entry) ? entry : resolve(directory, entry);
+      if (path !== directory && !path.startsWith(`${directory}/`)) {
+        throw new RuntimeError('invalid_capability', `${directory} extension entry must stay inside its capability directory`);
+      }
+      if (!existsSync(path)) throw new RuntimeError('invalid_capability', `${directory} extension entry ${entry} does not exist`);
     }
-    if (!existsSync(path)) throw new RuntimeError('invalid_capability', `${directory} extension entry ${entry} does not exist`);
   }
+}
+
+/** The frontmatter a native skill loader needs: name, description and the invocation flag. */
+async function skillFrontmatter(directory: string) {
+  const file = join(directory, 'SKILL.md');
+  if (!existsSync(file)) return undefined;
+  const text = await readFile(file, 'utf8');
+  const block = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!block) return { name: undefined, description: undefined, disableModelInvocation: false, hasFrontmatter: false };
+  const values: Record<string, string> = {};
+  for (const line of block[1]!.split(/\r?\n/)) {
+    const parsed = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (parsed) values[parsed[1]!] = parsed[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return {
+    name: values.name || undefined,
+    description: values.description || undefined,
+    disableModelInvocation: (values['disable-model-invocation'] ?? '').toLowerCase() === 'true',
+    hasFrontmatter: true,
+  };
+}
+
+const SKILL_FRONTMATTER_ERROR = 'SKILL.md 缺少 frontmatter（name/description）：原生加载器会跳过它';
+
+/** What the library should say about a skill file, given the native loader's rules. */
+async function skillNote(directory: string): Promise<string | undefined> {
+  const front = await skillFrontmatter(directory);
+  if (!front) return undefined;
+  if (!front.hasFrontmatter) return SKILL_FRONTMATTER_ERROR;
+  if (front.disableModelInvocation) {
+    return '声明了 disable-model-invocation：不会进入系统提示（原生语义为仅显式调用）';
+  }
+  return undefined;
+}
+
+/**
+ * Skills the user placed directly in one native skills folder: the SDK's global agent
+ * folder, a project's `.pi/skills`, or an Agent's own folder.
+ *
+ * Symlinked entries are the mirror of the skills a recipe already binds, and the library
+ * lists those from the capability root, so only hand-made folders are recorded here.
+ */
+export async function scanNativeSkills(skillsDir: string, owner: string, origin: CapabilityOrigin): Promise<CapabilityRecord[]> {
+  let entries;
+  try {
+    entries = await readdir(skillsDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  const records: CapabilityRecord[] = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue;
+    const directory = join(skillsDir, entry.name);
+    if (!existsSync(join(directory, 'SKILL.md'))) continue;
+    const front = await skillFrontmatter(directory);
+    const note = await skillNote(directory);
+    const usable = Boolean(front?.hasFrontmatter);
+    records.push({
+      id: entry.name,
+      kind: 'skill',
+      source: directory,
+      version: 'local',
+      snapshot: { path: directory },
+      status: usable ? 'available' : 'invalid',
+      ...(front?.name ? { name: front.name } : {}),
+      ...(front?.description ? { description: front.description } : {}),
+      owner,
+      origin,
+      ...(note ? { note } : {}),
+      ...(usable ? {} : { error: SKILL_FRONTMATTER_ERROR }),
+    });
+  }
+  return records;
+}
+
+/** Skills the user placed in any Agent's own folder. */
+export async function scanAgentSkills(agentsRoot: string): Promise<CapabilityRecord[]> {
+  let agents;
+  try {
+    agents = await readdir(agentsRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  const records: CapabilityRecord[] = [];
+  for (const agent of agents.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).sort((left, right) => left.name.localeCompare(right.name))) {
+    records.push(...await scanNativeSkills(join(agentsRoot, agent.name, 'skills'), agent.name, 'agent'));
+  }
+  return records;
 }
 
 async function walkCapabilityDirectories(root: string, directory: string, depth: number, records: CapabilityRecord[]) {
@@ -257,6 +362,7 @@ async function walkCapabilityDirectories(root: string, directory: string, depth:
     try {
       const manifest = await readCapabilityManifest(directory);
       await validateFiles(directory, manifest);
+      const note = manifest.kind === 'skill' ? await skillNote(directory) : undefined;
       records.push({
         id: manifest.id,
         kind: manifest.kind,
@@ -267,6 +373,9 @@ async function walkCapabilityDirectories(root: string, directory: string, depth:
         name: manifest.name,
         ...(manifest.description ? { description: manifest.description } : {}),
         ...(manifest.role ? { role: manifest.role } : {}),
+        ...(note ? { note } : {}),
+        ...(manifest.kind === 'pi-extension' && manifest.source ? { packageSource: manifest.source } : {}),
+        ...(manifest.base ? { base: true } : {}),
       });
     } catch (error) {
       records.push({

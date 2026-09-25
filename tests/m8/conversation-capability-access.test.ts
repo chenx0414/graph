@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import type { NodeSpec } from '../../src/core/types.ts';
+import { scriptedLane, settle } from '../fixtures/lane.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -604,4 +606,115 @@ test('a bound Pi extension receives its declared command, environment, loopback 
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.questions).toEqual([]);
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Runtime probe completed');
+}, 120_000);
+
+test('a conversation master follows the latest definition of its recipe on the next turn', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-main-definition-reload-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const capability = join(capabilityRoot, 'github');
+  await mkdir(capability, { recursive: true });
+  await copyFile(new URL('../fixtures/mcp-read-capability-server.mjs', import.meta.url), join(capability, 'server.mjs'));
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({
+    id: 'github', kind: 'mcp', version: '1.0.0', name: 'GitHub',
+    command: 'node', args: ['./server.mjs'], networkDomains: ['github.com'],
+  }, null, 2));
+
+  const provider = await openaiServer([{ text: '第一回合完成。' }, { text: '第二回合完成。' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [{ id: 'github', version: '1.0.0' }] }, 'definition-v1');
+
+  const created = await runtime.conversations.create({ text: '第一回合。', requestId: 'reload-turn-1' });
+  await runtime.host.runReady();
+  const toolNames = (request: unknown) => ((request as { tools?: { function?: { name?: string } }[] }).tools ?? [])
+    .map(tool => tool.function?.name ?? '');
+  expect(toolNames(provider.requests[0])).toContain('mcp_github_search_repositories');
+
+  // The recipe is edited: a newer definition version drops the MCP capability.
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [] }, 'definition-v2');
+  await runtime.conversations.chat(created.conversationId, { text: '第二回合。', requestId: 'reload-turn-2' });
+  await runtime.host.runReady();
+
+  // A conversation master is long-lived, so it has to follow the latest
+  // definition on its next turn; a task's own nodes keep theirs.
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.questions).toEqual([]);
+  expect(view.master?.definitionVersion).toBe('master@2');
+  expect(provider.requests).toHaveLength(2);
+  expect(toolNames(provider.requests[1])).not.toContain('mcp_github_search_repositories');
+}, 120_000);
+
+test('a task node follows the latest definition of its own recipe on its next dispatch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-lane-definition-reload-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const capability = join(capabilityRoot, 'github');
+  await mkdir(capability, { recursive: true });
+  await copyFile(new URL('../fixtures/mcp-read-capability-server.mjs', import.meta.url), join(capability, 'server.mjs'));
+  await writeFile(join(capability, 'capability.json'), JSON.stringify({
+    id: 'github', kind: 'mcp', version: '1.0.0', name: 'GitHub',
+    command: 'node', args: ['./server.mjs'], networkDomains: ['github.com'],
+  }, null, 2));
+
+  const lane = scriptedLane();
+  const provider = await openaiServer([{ text: '主 Agent 回合。' }, { text: '第一个 worker 完成。' }, { text: '第二个 worker 完成。' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'project', root }],
+    actions: { worker: lane.action },
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    models: {
+      entries: [{
+        id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
+      }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high', capabilities: [] }, 'master-def');
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [{ id: 'github', version: '1.0.0' }] }, 'worker-v1');
+
+  const { taskId } = await runtime.user.begin({ projectId: 'project', request: '两个 worker', requestId: 'lane-begin' });
+  const task = runtime.user.task(taskId);
+  const nodes: NodeSpec[] = [
+    { id: 'worker-a', kind: 'agent', action: 'worker', role: 'worker', model: 'local', definitionVersion: 'worker@1' },
+    { id: 'worker-b', kind: 'agent', action: 'worker', role: 'worker', model: 'local', definitionVersion: 'worker@1', dependsOn: ['worker-a'] },
+    { id: 'check', kind: 'program', action: 'check', dependsOn: ['worker-a', 'worker-b'] },
+  ];
+  const proposal = await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: '两个 worker',
+    acceptance: [{ id: 'works', description: '两项工作都完成', checkNode: 'check' }],
+    nodes,
+  }, 'lane-proposal');
+  await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'lane-accept' });
+
+  await settle(() => lane.briefings.length >= 1, () => runtime.host.runReady());
+  // worker-a ran at its pinned definition, so its briefing listed the MCP.
+  expect(lane.briefings).toHaveLength(1);
+  expect(lane.briefings[0]).toContain('github@1.0.0');
+
+  // The recipe is edited while the task is still running: the next lane to be
+  // dispatched follows it.
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [] }, 'worker-v2');
+  await settle(() => lane.briefings.length >= 2, () => runtime.host.runReady());
+
+  expect(lane.briefings).toHaveLength(2);
+  expect(lane.briefings[1]).not.toContain('github@1.0.0');
+  expect((await task.view()).nodes.find(node => node.id === 'worker-b')?.definitionVersion).toBe('worker@2');
 }, 120_000);
