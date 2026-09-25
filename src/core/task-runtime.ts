@@ -29,7 +29,7 @@ import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
-import { syncCapabilityVersion } from '../runtime/capabilities.ts';
+import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
@@ -1958,7 +1958,7 @@ export async function openTaskRuntime(options: {
           if (!source) continue;
           const base = { id: record.id, version: record.version, source };
           try {
-            updates.push({ ...base, ...await piExtensionSourceStatus({ source, cwd: stateDir, agentDir: stateDir }) });
+            updates.push({ ...base, ...await piExtensionSourceStatus({ source, cwd: stateDir, agentDir: piExtensionCacheDir(catalog) }) });
           } catch (error) {
             updates.push({ ...base, installed: null, latest: null, available: false, error: error instanceof Error ? error.message : String(error) });
           }
@@ -1970,7 +1970,7 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         const record = catalog.capability(id, version);
         if (!record?.packageSource) throw new RuntimeError('not_found', `Pi extension ${id}@${version} has no package source`);
-        const result = await updatePiExtensionSource({ source: record.packageSource, cwd: stateDir, agentDir: stateDir });
+        const result = await updatePiExtensionSource({ source: record.packageSource, cwd: stateDir, agentDir: piExtensionCacheDir(catalog) });
         await syncCapabilityVersion(record.source, result.version);
         await catalog.refresh();
         return result;

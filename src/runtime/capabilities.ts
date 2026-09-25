@@ -339,6 +339,16 @@ async function resolvePiExtensionRuntime(input: {
 }
 
 /**
+ * Where the SDK installs Pi extension sources. One cache per Graph home rather than per state
+ * directory: the install is a download cache for the declared source, so a second daemon (or a
+ * test) reuses it instead of installing the same package again.
+ */
+export function piExtensionCacheDir(catalog: Catalog) {
+  const root = catalog.capabilityRootPath();
+  return root ? join(dirname(root), 'extensions') : join(tmpdir(), 'graph-pi-extensions');
+}
+
+/**
  * A capability that declares a package source reports the version the source actually resolved to:
  * the manifest's `version` follows the source instead of decaying into a stale pin.
  */
@@ -1146,7 +1156,7 @@ export async function loadCapabilities(input: {
           const resolvedSource = await resolvePiExtensionSource({
             source,
             cwd: input.workspace,
-            agentDir: dirname(input.scratchDir),
+            agentDir: piExtensionCacheDir(input.catalog),
           });
           piExtensionPaths.push(...resolvedSource.entries);
           readRoots.push(...resolvedSource.readRoots);
