@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadSecrets,
+  absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadRawSecretEntries, loadSecrets,
   parseBannerAddress, resolveAppPaths, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
@@ -154,7 +154,12 @@ if (!app.requestSingleInstanceLock()) {
           encryptString: input => safeStorage.encryptString(input),
           decryptString: input => safeStorage.decryptString(input),
         };
-        const stored = saveSecrets(secretsPath, codec, outcome.secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
+        // Read-modify-write: an entry this instance cannot decrypt is still the
+        // user's entry, and rewriting the file from the in-memory map would erase it.
+        const stored = saveSecrets(secretsPath, codec, outcome.secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }), {
+          raw: loadRawSecretEntries(secretsPath, path => readFileSync(path, 'utf8')),
+          touched: [request.ref],
+        });
         // Without a keychain the request stays pending and visible instead of
         // being reported as stored; the next interval tries again.
         if (!stored) continue;
@@ -293,7 +298,11 @@ if (!app.requestSingleInstanceLock()) {
       secrets = request.secrets;
       // Keep a revocation in the encrypted map too (it removes the entry), and
       // make the daemon state authoritative for the "revoked" gate.
-      const stored = saveSecrets(secretsPath, codec, secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
+      const stored = saveSecrets(secretsPath, codec, secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }), {
+        // Same read-modify-write rule as the poller: only this ref may change.
+        raw: loadRawSecretEntries(secretsPath, path => readFileSync(path, 'utf8')),
+        touched: [ref],
+      });
       let applied = false;
       let message;
       if (readyUrl) {

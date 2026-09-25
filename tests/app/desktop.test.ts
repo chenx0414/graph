@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   appRootFilePath, applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
-  resolveDaemonMode, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications,
+  loadRawSecretEntries, resolveDaemonMode, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications,
   trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
@@ -124,6 +124,31 @@ describe('keychain secrets file', () => {
     expect(saveSecrets('/secrets.json', unavailable, { A: 'x' }, () => { throw new Error('must not write'); })).toBe(false);
     expect(loadSecrets('/secrets.json', codec, () => 'not json')).toEqual({});
     expect(loadSecrets('/secrets.json', codec, () => '{"version":1,"entries":{"A":"%%%"}}')).toEqual({});
+  });
+
+  test('a save preserves store entries the caller never touched', () => {
+    const files = new Map<string, string>();
+    // One entry this app instance cannot decrypt is still an entry the user
+    // saved; a write for another ref must not erase it.
+    files.set('/secrets.json', JSON.stringify({ version: 1, entries: { STALE_KEY: 'not-base64', GRAPH_A_KEY: codec.encryptString('sk-a').toString('base64') } }));
+    expect(saveSecrets('/secrets.json', codec, { GRAPH_A_KEY: 'sk-a', GRAPH_B_KEY: 'sk-b' }, (path, data) => files.set(path, data), {
+      raw: loadRawSecretEntries('/secrets.json', path => files.get(path)!),
+      touched: ['GRAPH_B_KEY'],
+    })).toBe(true);
+    const written = JSON.parse(files.get('/secrets.json')!) as { entries: Record<string, string> };
+    expect(Object.keys(written.entries).sort()).toEqual(['GRAPH_A_KEY', 'GRAPH_B_KEY', 'STALE_KEY']);
+    expect(written.entries.STALE_KEY).toBe('not-base64');
+  });
+
+  test('an explicit revocation still removes its entry even when it cannot be decrypted', () => {
+    const files = new Map<string, string>();
+    files.set('/secrets.json', JSON.stringify({ version: 1, entries: { STALE_KEY: 'not-base64', GRAPH_A_KEY: codec.encryptString('sk-a').toString('base64') } }));
+    expect(saveSecrets('/secrets.json', codec, { GRAPH_A_KEY: 'sk-a' }, (path, data) => files.set(path, data), {
+      raw: loadRawSecretEntries('/secrets.json', path => files.get(path)!),
+      touched: ['STALE_KEY'],
+    })).toBe(true);
+    const written = JSON.parse(files.get('/secrets.json')!) as { entries: Record<string, string> };
+    expect(Object.keys(written.entries)).toEqual(['GRAPH_A_KEY']);
   });
 
   test('tails logs for bounded dialogs', () => {

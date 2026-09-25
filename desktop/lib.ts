@@ -185,14 +185,38 @@ export function loadSecrets(path: string, codec: SecretCodec, readFile: (path: s
   return result;
 }
 
+/**
+ * The store's raw entries, still encrypted. A write is a read-modify-write
+ * because an entry this app instance cannot decrypt is still an entry the user
+ * saved: rewriting the file from the in-memory map alone would erase it.
+ */
+export function loadRawSecretEntries(path: string, readFile: (path: string) => string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(readFile(path)) as { entries?: unknown } | null;
+    const entries = parsed?.entries;
+    if (!entries || typeof entries !== 'object') return {};
+    const result: Record<string, string> = {};
+    for (const [ref, value] of Object.entries(entries as Record<string, unknown>)) {
+      if (typeof value === 'string') result[ref] = value;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 export function saveSecrets(
   path: string,
   codec: SecretCodec,
   secrets: Record<string, string>,
   writeFile: (path: string, data: string) => void,
+  /** `raw` is the file as it is now; `touched` are the refs this call means to
+   * write or revoke. Anything else in `raw` is carried over untouched. */
+  preserve?: { raw: Record<string, string>; touched: string[] },
 ): boolean {
   if (!codec.isEncryptionAvailable()) return false;
-  const entries: Record<string, string> = {};
+  const entries: Record<string, string> = { ...(preserve?.raw ?? {}) };
+  for (const ref of preserve?.touched ?? []) delete entries[ref];
   for (const [ref, value] of Object.entries(secrets)) {
     entries[ref] = codec.encryptString(value).toString('base64');
   }
