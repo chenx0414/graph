@@ -1,4 +1,6 @@
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -114,6 +116,26 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
   }
 });
 
+/** A local Streamable-HTTP MCP stub, so binding an MCP capability never needs the network. */
+async function mcpStub() {
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const request = JSON.parse(Buffer.concat(chunks).toString()) as { id?: number; method?: string };
+    if (request.method === 'notifications/initialized') { res.writeHead(202); res.end(); return; }
+    let result: unknown;
+    if (request.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'stub', version: '1' } };
+    else if (request.method === 'tools/list') result = { tools: [{ name: 'echo', description: 'Echo text', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } }] };
+    else { res.writeHead(500); res.end(); return; }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+  cleanup.push(() => new Promise<void>((resolve, reject) => { server.closeAllConnections(); server.close(error => error ? reject(error) : resolve()); }));
+  return `http://127.0.0.1:${port}/mcp`;
+}
+
 test('a bound MCP capability becomes an adapter server and adds the gateway tool to the allowlist', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-capability-mcp-adapter-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -121,9 +143,10 @@ test('a bound MCP capability becomes an adapter server and adds the gateway tool
   const capabilityRoot = join(root, 'capabilities');
   const docs = join(capabilityRoot, 'cloudflare-docs');
   await Promise.all([workspace, docs].map(path => mkdir(path, { recursive: true })));
+  const stubUrl = await mcpStub();
   await writeFile(join(docs, 'capability.json'), canonicalJson({
     id: 'cloudflare-docs', kind: 'mcp', version: '1.0.0', name: 'Cloudflare docs',
-    url: 'https://docs.mcp.cloudflare.com/mcp',
+    url: stubUrl,
   }));
 
   const store = new TaskStore(join(root, 'tasks.sqlite'));
@@ -138,7 +161,7 @@ test('a bound MCP capability becomes an adapter server and adds the gateway tool
   const operation = await bundle.openOperation({ workspace, scratchDir: join(root, 'scratch'), gate, action: 'work', hostTools: () => [] });
   try {
     expect(operation.mcpAdapterServers).toEqual([
-      { name: 'cloudflare-docs', definition: { url: 'https://docs.mcp.cloudflare.com/mcp' } },
+      { name: 'cloudflare-docs', definition: { url: stubUrl } },
     ]);
     expect(operation.allowedToolNames).toContain('mcp');
   } finally {
