@@ -14,12 +14,17 @@
  *  - the hook never fabricates a terminate or details override
  *  - the hook keeps non-text parts, replaces the first text part and drops the rest
  *  - counts are per scope: another conversation never inherits them
+ *  - a shell result over the shell ceiling is bounded from its very first view, with
+ *    a handle that still holds every byte
+ *  - read and edit keep their upstream behaviour: this seam never caps them
+ *  - an explicit limit is honoured by the summary itself
  */
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import {
+  SHELL_OUTPUT_LIMIT,
   SUMMARY_LIMIT,
   TOOL_RESULT_LIMIT,
   createToolResultTracker,
@@ -193,4 +198,54 @@ test('a text-free result is left alone and counts never leak between scopes', as
   // across hook objects because the daemon keeps one tracker per scope.
   expect(await other(context(big))).toBeUndefined();
   expect(await first(context(big))).toBeTruthy();
+});
+
+test('a shell result over the shell ceiling is bounded from its first view, with a readable handle', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-hook-shell', spillDir });
+  const big = `${'q'.repeat(25_000)}\nlast-line`;
+  const shell = {
+    toolCall: { name: 'bash' }, args: { command: 'cat big.log' },
+    result: { content: [{ type: 'text' as const, text: big }] },
+  };
+
+  const first = await hook(shell);
+  expect(first).toBeTruthy();
+  const summary = partsOf(first!)[0]!.text ?? '';
+  expect(summary.length).toBeLessThanOrEqual(SHELL_OUTPUT_LIMIT);
+  expect(summary).toContain('omitted');
+  expect(summary).toContain('last-line');
+  const handle = /handle: (\S+)/.exec(summary)?.[1];
+  expect(handle).toBeTruthy();
+  expect(await readFile(handle!, 'utf8')).toBe(big);
+});
+
+test('the shell ceiling is exact, and read and edit are never capped by this seam', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-hook-ceiling', spillDir });
+  const run = (name: string, text: string, args: Record<string, unknown> = {}) =>
+    hook({ toolCall: { name }, args, result: { content: [{ type: 'text' as const, text }] } });
+
+  // Exactly at the ceiling the output is still the tool's own.
+  expect(await run('bash', 'r'.repeat(SHELL_OUTPUT_LIMIT), { command: 'x' })).toBeUndefined();
+  // read and edit keep their upstream bounds: no Graph-side cap, so the first two
+  // views stay full and only a repeated third view is bounded.
+  const read = 'r'.repeat(25_000);
+  expect(await run('read', read)).toBeUndefined();
+  expect(await run('read', read)).toBeUndefined();
+  expect(await run('read', read)).toBeTruthy();
+  const edit = 'r'.repeat(25_000);
+  expect(await run('edit', edit, { path: 'a.txt' })).toBeUndefined();
+  expect(await run('edit', edit, { path: 'a.txt' })).toBeUndefined();
+});
+
+test('the summary honours an explicit limit', () => {
+  const text = Array.from({ length: 2_000 }, (_, index) => `line-${index}`).join('\n');
+  const bounded = summarizeToolResult({ text, handle: '/tmp/handle-3', limit: SHELL_OUTPUT_LIMIT });
+  expect(bounded.length).toBeLessThanOrEqual(SHELL_OUTPUT_LIMIT);
+  expect(bounded).toContain('2000 lines');
+  expect(bounded).toContain(String(text.length));
+  expect(bounded).toContain('line-0');
+  expect(bounded).toContain('line-1999');
+  expect(bounded).toContain('handle: /tmp/handle-3');
 });

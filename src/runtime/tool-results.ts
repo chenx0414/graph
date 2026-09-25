@@ -11,7 +11,9 @@
  *
  * `toolResultHook` is the single seam: Pi's agent loop calls it for every tool result,
  * Graph's own tools and Pi's built-ins alike. It overrides `content` only, so a tool's
- * own `details` and `terminate` hint always survive.
+ * own `details` and `terminate` hint always survive. Two rules live here: the lazy rule
+ * for any large result that repeats, and a ceiling for shell output (SHELL_OUTPUT_LIMIT),
+ * which is stricter than the upstream bound and applies from the first view.
  */
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -20,9 +22,16 @@ import type { AfterToolCallResult } from '@earendil-works/pi-agent-core';
 
 export const TOOL_RESULT_LIMIT = 4_000;
 export const SUMMARY_LIMIT = 1_024;
+/** Graph's own ceiling for shell output, deliberately the same order as the read-only
+ * git surface: a longer result keeps a head/tail view that names its handle. */
+export const SHELL_OUTPUT_LIMIT = 20_000;
 
-/** Head and tail lines the summary prefers before the byte budget bites. */
-const SUMMARY_LINES = 12;
+/**
+ * Per-tool ceilings on the model-visible text. Only `bash` is listed: upstream `read`
+ * already continues with `offset` and upstream `edit` already answers in one line, so a
+ * cap here would fight behaviour that is already the right shape.
+ */
+const TOOL_TEXT_LIMITS: Record<string, number> = { bash: SHELL_OUTPUT_LIMIT };
 
 type ContentPart = NonNullable<AfterToolCallResult['content']>[number];
 type ResultPart = { type: string; text?: string };
@@ -65,24 +74,48 @@ export function createToolResultTracker(): { record: (key: string) => number } {
   };
 }
 
-/** Deterministic head/tail summary: same input, same text, no model call. */
-export function summarizeToolResult(input: { text: string; handle: string }): string {
-  const lines = input.text.split('\n');
-  const head = lines.slice(0, SUMMARY_LINES);
-  const tail = lines.slice(Math.max(head.length, lines.length - SUMMARY_LINES));
-  const header = `[large tool result: ${input.text.length} bytes, ${lines.length} lines]`;
+/** Deterministic head/tail summary: same input, same text, no model call. Whole lines are
+ * taken from each end while the budget allows, so a short tail - the line that carries a
+ * failure - is never lost to one enormous leading line. */
+export function summarizeToolResult(input: { text: string; handle: string; limit?: number }): string {
+  const limit = input.limit ?? SUMMARY_LIMIT;
+  const lineCount = input.text.split('\n').length;
+  const header = `[large tool result: ${input.text.length} bytes, ${lineCount} lines]`;
   const trailer = `handle: ${input.handle}\nRead the whole result with the read tool (offset/limit) on that path.`;
-  const body = [...head, ...(tail.length ? ['...'] : []), ...tail].join('\n');
-  const budget = Math.max(0, SUMMARY_LIMIT - header.length - trailer.length - 64);
-  const kept = body.length <= budget ? body : body.slice(0, budget);
+  const room = Math.max(0, limit - header.length - trailer.length - 64);
+  const tailBudget = Math.floor(room / 3);
+  const head = boundSide(input.text, room - tailBudget, false);
+  const tail = boundSide(input.text, tailBudget, true);
   // Counted from what this summary really dropped, so a single huge line still
   // reports its omission instead of looking complete.
-  const dropped = Math.max(0, input.text.length - kept.length);
+  const dropped = Math.max(0, input.text.length - head.length - tail.length);
   const marker = `... omitted ${dropped} of ${input.text.length} bytes ...`;
-  return `${[header, kept, marker, trailer].join('\n')}`.slice(0, SUMMARY_LIMIT);
+  return `${[header, head, marker, tail, trailer].join('\n')}`.slice(0, limit);
 }
 
-/** The seam every tool result goes through. */
+/** Whole lines up to `budget`, from the start or the end; a single line larger than the
+ * whole budget is cut instead of dropped. */
+function boundSide(text: string, budget: number, fromEnd: boolean): string {
+  if (budget <= 0) return '';
+  const lines = text.split('\n');
+  const ordered = fromEnd ? [...lines].reverse() : lines;
+  const picked: string[] = [];
+  let used = 0;
+  for (const line of ordered) {
+    const cost = line.length + (picked.length ? 1 : 0);
+    if (used + cost > budget) {
+      if (!picked.length) picked.push(fromEnd ? line.slice(-budget) : line.slice(0, budget));
+      break;
+    }
+    picked.push(line);
+    used += cost;
+  }
+  return (fromEnd ? picked.reverse() : picked).join('\n');
+}
+
+/** The seam every tool result goes through. `limit` forces a bounded view at that
+ * ceiling on every occurrence; without it the lazy rule applies - full for the first two
+ * occurrences of a large result, a summary from the third. */
 export async function renderToolResult(input: {
   text: string;
   conversationId: string;
@@ -90,15 +123,15 @@ export async function renderToolResult(input: {
   params: unknown;
   spillDir: string;
   tracker: { record: (key: string) => number };
+  limit?: number;
 }): Promise<string> {
-  if (input.text.length <= TOOL_RESULT_LIMIT) return input.text;
+  if (input.limit === undefined && input.text.length <= TOOL_RESULT_LIMIT) return input.text;
   const key = toolResultKey(input);
-  const occurrence = input.tracker.record(key);
-  if (occurrence <= 2) return input.text;
+  if (input.limit === undefined && input.tracker.record(key) <= 2) return input.text;
   const handle = join(input.spillDir, `${key}.txt`);
   await mkdir(input.spillDir, { recursive: true });
   await writeFile(handle, input.text, { mode: 0o600 });
-  return summarizeToolResult({ text: input.text, handle });
+  return summarizeToolResult({ text: input.text, handle, ...(input.limit === undefined ? {} : { limit: input.limit }) });
 }
 
 /** One occurrence count per scope, kept for the life of the daemon so a re-read of the
@@ -125,15 +158,19 @@ export function toolResultHook(input: { scopeId: string; spillDir: string }) {
     if (!Array.isArray(parts)) return undefined;
     const texts = parts.filter(part => part.type === 'text').map(part => part.text ?? '');
     if (!texts.length) return undefined;
+    const name = context.toolCall?.name ?? 'unknown';
     const text = texts.join('\n');
-    if (text.length <= TOOL_RESULT_LIMIT) return undefined;
+    const ceiling = TOOL_TEXT_LIMITS[name];
+    const limit = ceiling !== undefined && text.length > ceiling ? ceiling : undefined;
+    if (limit === undefined && text.length <= TOOL_RESULT_LIMIT) return undefined;
     const rendered = await renderToolResult({
       text,
       conversationId: input.scopeId,
-      tool: context.toolCall?.name ?? 'unknown',
+      tool: name,
       params: context.args,
       spillDir: input.spillDir,
       tracker: trackerFor(input.scopeId),
+      ...(limit === undefined ? {} : { limit }),
     });
     // Still a full view: leave the tool's own result object completely untouched.
     if (rendered === text) return undefined;
