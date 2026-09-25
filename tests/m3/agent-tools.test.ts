@@ -161,18 +161,19 @@ test('read-only Git tools expose status, diff, log and show without a shell', as
   const execute = (name: string, params: Record<string, unknown>) =>
     (tools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>)('probe', params);
 
-  await execute('git_status', {});
-  await execute('git_diff', { staged: true, base: 'main', path: 'src/app.ts', stat: true });
-  await execute('git_log', { limit: 5, path: 'README.md' });
-  await execute('git_show', { ref: 'HEAD~1', stat: true, path: 'README.md' });
+  await execute('git', { subcommand: 'status' });
+  await execute('git', { subcommand: 'diff', args: ['--staged'], path: 'src/app.ts' });
+  await execute('git', { subcommand: 'log', args: ['-n', '5', '--oneline'], path: 'README.md' });
+  await execute('git', { subcommand: 'show', args: ['HEAD~1', '--stat'], path: 'README.md' });
+  await expect(execute('git', { subcommand: 'push' })).rejects.toThrow(/read-only git subcommands/);
 
   expect(calls).toEqual([
-    { command: 'git', args: ['status', '--short', '--branch'] },
-    { command: 'git', args: ['diff', '--staged', '--stat', 'main', '--', 'src/app.ts'] },
+    { command: 'git', args: ['status'] },
+    { command: 'git', args: ['diff', '--staged', '--', 'src/app.ts'] },
     { command: 'git', args: ['log', '-n', '5', '--oneline', '--', 'README.md'] },
     { command: 'git', args: ['show', 'HEAD~1', '--stat', '--', 'README.md'] },
   ]);
-  expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['git_status', 'git_diff', 'git_log', 'git_show']));
+  expect(tools.map(tool => tool.name).filter(name => name.startsWith('git'))).toEqual(['git']);
 });
 
 test('full access reads and writes host paths including Graph state', async () => {

@@ -158,9 +158,13 @@ export function agentTools(input: {
     ...(protectedReadPathExceptions.length ? { protectedReadPathExceptions } : {}),
     ...(protectedWritePathExceptions.length ? { protectedWritePathExceptions } : {}),
   };
-  const runGit = async (args: string[]) => {
+  // One read-only git surface: a whitelisted subcommand, no shell, and a hard output
+  // cap so a huge diff cannot flood the context — over the cap it re-reads --stat.
+  const GIT_READ_SUBCOMMANDS = ['status', 'log', 'diff', 'show', 'blame', 'describe', 'rev-parse', 'ls-files', 'shortlog', 'grep', 'rev-list'];
+  const GIT_OUTPUT_LIMIT = 20_000;
+  const gitText = async (args: string[]) => {
     const result = await input.run!('git', args);
-    return text(`exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`);
+    return `exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`;
   };
   const handlers: Record<AgentToolName, ToolDefinition['execute']> = {
     read: async (_id, params) => {
@@ -285,40 +289,21 @@ export function agentTools(input: {
       const result = await input.run!(String(body.command), Array.isArray(body.args) ? body.args.map(String) : []);
       return text(`exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`);
     },
-    git_status: async () => runGit(['status', '--short', '--branch']),
-    git_diff: async (_id: string, params: unknown) => {
+    git: async (_id, params) => {
       const body = fields(params);
-      const args = ['diff'];
-      if (body.staged === true) args.push('--staged');
-      if (body.stat === true) args.push('--stat');
-      const base = typeof body.base === 'string' ? body.base.trim() : '';
-      if (base) {
-        if (base.startsWith('-') || base.length > 200 || /[\0\r\n]/.test(base)) throw new Error('Invalid Git base revision');
-        args.push(base);
-      }
+      const subcommand = String(body.subcommand ?? '').trim();
+      if (!GIT_READ_SUBCOMMANDS.includes(subcommand)) throw new Error(`Only read-only git subcommands: ${GIT_READ_SUBCOMMANDS.join(', ')}`);
+      const raw = Array.isArray(body.args) ? body.args : [];
+      const args = raw.map(value => String(value));
+      if (args.some(value => value.length > 200 || /[\0\r\n]/.test(value))) throw new Error('Invalid git argument');
+      if (args.some(value => value === '--output' || value.startsWith('--exec') || value.startsWith('--no-index'))) throw new Error('Unsupported git argument');
       const path = typeof body.path === 'string' ? body.path.trim() : '';
-      if (path) args.push('--', path);
-      return runGit(args);
-    },
-    git_log: async (_id: string, params: unknown) => {
-      const body = fields(params);
-      const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0
-        ? Math.min(Math.floor(body.limit), 100)
-        : 20;
-      const args = ['log', '-n', String(limit), '--oneline'];
-      const path = typeof body.path === 'string' ? body.path.trim() : '';
-      if (path) args.push('--', path);
-      return runGit(args);
-    },
-    git_show: async (_id: string, params: unknown) => {
-      const body = fields(params);
-      const ref = typeof body.ref === 'string' && body.ref.trim() ? body.ref.trim() : 'HEAD';
-      if (ref.startsWith('-') || ref.length > 200 || /[\0\r\n]/.test(ref)) throw new Error('Invalid Git ref');
-      const args = ['show', ref];
-      if (body.stat === true) args.push('--stat');
-      const path = typeof body.path === 'string' ? body.path.trim() : '';
-      if (path) args.push('--', path);
-      return runGit(args);
+      if (path && (path.startsWith('-') || /[\0\r\n]/.test(path))) throw new Error('Invalid git path');
+      const base = [subcommand, ...args];
+      const full = await gitText(path ? [...base, '--', path] : base);
+      if (full.length <= GIT_OUTPUT_LIMIT) return text(full);
+      const summary = await gitText(path ? [subcommand, '--stat', ...args, '--', path] : [subcommand, '--stat', ...args]);
+      return text(`output exceeded ${GIT_OUTPUT_LIMIT} characters; --stat summary follows\n\n${summary.slice(0, GIT_OUTPUT_LIMIT)}`);
     },
     fetch: async (_id, params) => text(JSON.stringify(await input.fetch!(String(fields(params).url)))),
     propose_graph: async (_id: string, params: unknown) => {

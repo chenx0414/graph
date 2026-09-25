@@ -131,37 +131,11 @@ function declarations(features: AgentToolFeatures) {
       available: Boolean(features.run && !features.readOnly),
       externallyGated: true,
     },
-    git_status: {
-      name: 'git_status', label: 'Git status', description: 'Read the current work copy branch and working-tree status. This is read-only.',
-      parameters: Type.Object({}),
-      available: Boolean(features.run && !features.readOnly),
-      externallyGated: true,
-    },
-    git_diff: {
-      name: 'git_diff', label: 'Git diff', description: 'Read the current work copy diff. Optionally select staged changes, a base revision, a path or summary/stat output. This is read-only.',
+    git: {
+      name: 'git', label: 'Git (read-only)', description: 'Run one read-only git command in the current work copy. Output is capped at 20000 characters: a longer diff or log falls back to a --stat summary. Allowed subcommands: status, log, diff, show, blame, describe, rev-parse, ls-files, shortlog, grep, rev-list.',
       parameters: Type.Object({
-        staged: Type.Optional(Type.Boolean()),
-        base: Type.Optional(Type.String()),
-        path: Type.Optional(Type.String()),
-        stat: Type.Optional(Type.Boolean()),
-      }),
-      available: Boolean(features.run && !features.readOnly),
-      externallyGated: true,
-    },
-    git_log: {
-      name: 'git_log', label: 'Git log', description: 'Read recent commits from the current work copy. This is read-only.',
-      parameters: Type.Object({
-        limit: Type.Optional(Type.Number()),
-        path: Type.Optional(Type.String()),
-      }),
-      available: Boolean(features.run && !features.readOnly),
-      externallyGated: true,
-    },
-    git_show: {
-      name: 'git_show', label: 'Git show', description: 'Read one commit or object from the current work copy. Optionally request summary/stat output or limit to one path. This is read-only.',
-      parameters: Type.Object({
-        ref: Type.Optional(Type.String()),
-        stat: Type.Optional(Type.Boolean()),
+        subcommand: Type.String(),
+        args: Type.Optional(Type.Array(Type.String())),
         path: Type.Optional(Type.String()),
       }),
       available: Boolean(features.run && !features.readOnly),
