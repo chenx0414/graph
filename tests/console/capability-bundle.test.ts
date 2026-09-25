@@ -114,6 +114,64 @@ test('a definition version resolves Skills, Pi extensions and agent/tool prompts
   }
 });
 
+test('a bound MCP capability becomes an adapter server and adds the gateway tool to the allowlist', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-mcp-adapter-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const capabilityRoot = join(root, 'capabilities');
+  const docs = join(capabilityRoot, 'cloudflare-docs');
+  await Promise.all([workspace, docs].map(path => mkdir(path, { recursive: true })));
+  await writeFile(join(docs, 'capability.json'), canonicalJson({
+    id: 'cloudflare-docs', kind: 'mcp', version: '1.0.0', name: 'Cloudflare docs',
+    url: 'https://docs.mcp.cloudflare.com/mcp',
+  }));
+
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot });
+  await catalog.refresh();
+  catalog.publishDefinition('mcp-agent', { recommendedGrade: 'medium', capabilities: [{ id: 'cloudflare-docs', version: '1.0.0' }] });
+
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'mcp-agent');
+  cleanup.push(() => gate.close());
+  const bundle = await openCapabilityBundle({ catalog, definitionVersion: 'mcp-agent@1' });
+  const operation = await bundle.openOperation({ workspace, scratchDir: join(root, 'scratch'), gate, action: 'work', hostTools: () => [] });
+  try {
+    expect(operation.mcpAdapterServers).toEqual([
+      { name: 'cloudflare-docs', definition: { url: 'https://docs.mcp.cloudflare.com/mcp' } },
+    ]);
+    expect(operation.allowedToolNames).toContain('mcp');
+  } finally {
+    await operation.close();
+  }
+});
+
+test('a definition without MCP capabilities neither registers a server nor allows the gateway tool', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-capability-mcp-none-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const capabilityRoot = join(root, 'capabilities');
+  const skill = join(capabilityRoot, 'skill');
+  await Promise.all([workspace, skill].map(path => mkdir(path, { recursive: true })));
+  await writeFile(join(skill, 'SKILL.md'), '# Skill\n\nRead the project before editing.\n');
+  await writeFile(join(skill, 'capability.json'), canonicalJson({ id: 'skill-read', kind: 'skill', version: '1.0.0', name: 'Read skill' }));
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  const catalog = new Catalog(store, { capabilityRoot });
+  await catalog.refresh();
+  catalog.publishDefinition('plain-agent', { recommendedGrade: 'medium', capabilities: [{ id: 'skill-read', version: '1.0.0' }] });
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'plain-agent');
+  cleanup.push(() => gate.close());
+  const bundle = await openCapabilityBundle({ catalog, definitionVersion: 'plain-agent@1' });
+  const operation = await bundle.openOperation({ workspace, scratchDir: join(root, 'scratch'), gate, action: 'work', hostTools: () => [] });
+  try {
+    expect(operation.mcpAdapterServers).toEqual([]);
+    expect(operation.allowedToolNames).not.toContain('mcp');
+  } finally {
+    await operation.close();
+  }
+});
+
 test('disabled tools are removed from the operation, allowlist and generated prompt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-capability-tools-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

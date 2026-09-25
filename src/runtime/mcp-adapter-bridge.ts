@@ -66,7 +66,8 @@ export function mcpAdapterServers(facts: readonly {
 }[], secrets: McpSecretValues = {}): { name: string; definition: unknown }[] {
   const servers: { name: string; definition: unknown }[] = [];
   for (const fact of facts) {
-    if (fact.kind !== 'mcp' || fact.role !== 'tool' || !fact.path || !fact.id.trim()) continue;
+    // A bound capability carries no role; only prompt bindings are marked agent/tool.
+    if (fact.kind !== 'mcp' || (fact.role && fact.role !== 'tool') || !fact.path || !fact.id.trim()) continue;
     const manifest = JSON.parse(readFileSync(join(fact.path, 'capability.json'), 'utf8')) as unknown;
     const declaration = manifest && typeof manifest === 'object' ? manifest as Record<string, unknown> : {};
     const definition = mcpAdapterServerDefinition({

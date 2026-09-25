@@ -198,7 +198,7 @@ export class CapabilityBundleVersion {
           version: fact.version,
           kind: fact.kind,
           ...(fact.path ? { path: fact.path } : {}),
-          ...(fact.role ? { role: fact.role } : {}),
+          role: fact.role ?? 'tool',
         })),
         this.input.secrets ? this.input.secrets() : {},
       );

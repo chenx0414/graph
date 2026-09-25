@@ -21,8 +21,8 @@ test('bound MCP capabilities become adapter servers with resolved secrets', asyn
   const remote = await capability('cloudflare-docs', { url: 'https://docs.mcp.cloudflare.com/mcp' });
   const local = await capability('github', { command: 'node', args: ['./node_modules/server/index.js'], env: { GITHUB_TOKEN: '${GITHUB_TOKEN}' } });
   const servers = mcpAdapterServers([
-    { id: 'cloudflare-docs', version: '1.0.0', kind: 'mcp', path: remote, role: 'tool' },
-    { id: 'github', version: '1.0.0', kind: 'mcp', path: local, role: 'tool' },
+    { id: 'cloudflare-docs', version: '1.0.0', kind: 'mcp', path: remote },
+    { id: 'github', version: '1.0.0', kind: 'mcp', path: local },
   ], { GITHUB_TOKEN: 'gh-secret' });
   expect(servers).toEqual([
     { name: 'cloudflare-docs', definition: { url: 'https://docs.mcp.cloudflare.com/mcp' } },
@@ -30,18 +30,18 @@ test('bound MCP capabilities become adapter servers with resolved secrets', asyn
   ]);
 });
 
-test('only tool-role MCP capabilities are registered, and one without transport is skipped', async () => {
+test('only MCP capabilities are registered, and one without transport is skipped', async () => {
   const half = await capability('half', { url: '' });
   const servers = mcpAdapterServers([
-    { id: 'half', version: '1.0.0', kind: 'mcp', path: half, role: 'tool' },
-    { id: 'not-mcp', version: '1.0.0', kind: 'pi-extension', path: half, role: 'tool' },
-    { id: 'agent-role', version: '1.0.0', kind: 'mcp', path: half, role: 'agent' },
+    { id: 'half', version: '1.0.0', kind: 'mcp', path: half },
+    { id: 'not-mcp', version: '1.0.0', kind: 'pi-extension', path: half },
+    { id: 'agent-prompt', version: '1.0.0', kind: 'prompt', path: half, role: 'agent' },
   ], {});
   expect(servers).toEqual([]);
 });
 
 test('a missing credential stops the server list instead of registering an empty one', async () => {
   const local = await capability('github', { command: 'node', args: [], env: { GITHUB_TOKEN: '${ABSENT_TOKEN}' } });
-  expect(() => mcpAdapterServers([{ id: 'github', version: '1.0.0', kind: 'mcp', path: local, role: 'tool' }], {}))
+  expect(() => mcpAdapterServers([{ id: 'github', version: '1.0.0', kind: 'mcp', path: local }], {}))
     .toThrow(/ABSENT_TOKEN/);
 });
