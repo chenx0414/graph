@@ -1690,8 +1690,26 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
 
   await page.getByTestId('agent-context-open').click();
   await page.getByTestId('agent-context-drawer').waitFor();
-  await page.getByTestId('agent-context-preview').waitFor();
-  const preview = await page.getByTestId('agent-context-preview').innerText();
+  // 面板只展示真正发出去的那一份；没发过请求的会话没有可展示的 prompt。
+  await page.getByTestId('agent-context-sent').waitFor();
+  const sentPanel = await page.getByTestId('agent-context-sent').innerText();
+  expect(sentPanel).toContain('实际发出');
+  expect(sentPanel).toContain('本次会话尚未记录到已发出的请求');
+  expect(sentPanel).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
+  expect(await page.locator('[data-testid="agent-context-preview"]').count()).toBe(0);
+  expect(await page.locator('[data-testid="agent-context-preview-markdown"]').count()).toBe(0);
+  expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
+  expect(
+    (await page.locator('.agent-context-tabs [role="tab"]').allInnerTexts()).map(label => label.split('\n')[0]!.trim()),
+  ).toEqual(['实际发出的 Prompt', '可编辑来源', '工具与能力']);
+
+  // 组装是否正确属于产生组装结果的那一层：接口返回的预览文本（不再由界面重渲染）。
+  const payload = await page.evaluate(async (conversationId: string) => {
+    const response = await fetch(`/api/agent-context?conversationId=${conversationId}`, { credentials: 'include' });
+    return await response.json() as { preview: { text: string }; sent: unknown };
+  }, created.conversationId);
+  expect(payload.sent).toBeNull();
+  const preview = payload.preview.text;
   expect(preview).toContain('<identity>');
   expect(preview).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
   expect(preview).toContain('<tools>');
@@ -1701,7 +1719,6 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(preview).toContain('<project_context>');
   expect(preview).toContain('<capabilities>');
   expect(preview).toContain('<cwd>');
-  expect(preview).toContain('Pi 自动追加');
   expect(preview).toContain('- read: Read file contents');
   expect(preview).not.toContain('- powershell:');
   expect(preview).toContain('- get_graph_state:');
@@ -1714,8 +1731,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
     .toBeLessThan(preview.indexOf('following Graph tools'));
   expect(preview.indexOf('following Graph tools'))
     .toBeLessThan(preview.indexOf('- artifact_list:'));
-  expect(preview).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
-  const markdown = await page.getByTestId('agent-context-preview-markdown').innerText();
+  const markdown = preview;
   expect(markdown).toContain('<identity>\n');
   expect(markdown).toContain(DEFAULT_MAIN_FULL_ACCESS_IDENTITY);
   expect(markdown).toContain('<tools>\n');
@@ -1733,7 +1749,6 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(markdown).not.toContain('## Callable tools');
   const tools = markdown.slice(markdown.indexOf('<tools>'), markdown.indexOf('</tools>'));
   expect(tools).toMatch(/- get_task_status[^:]*: \S/);
-  expect(await page.locator('.agent-preview-section').count()).toBe(0);
   await page.getByTestId('agent-context-tab-prompts').click();
   expect(await page.getByTestId('agent-prompt-docs/INDEX.md').count()).toBe(0);
   await page.getByTestId('agent-prompt-runtime/main-conversation.md').click();

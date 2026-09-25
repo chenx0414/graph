@@ -79,12 +79,6 @@ const GROUP_LABELS: Record<AgentPromptView['group'], string> = {
   runtime: '运行时',
 };
 
-const ORIGIN_LABELS: Record<PromptOrigin, string> = {
-  editable: '可编辑',
-  generated: '动态生成',
-  pi: 'Pi 自动追加',
-};
-
 function availabilityText(tool: AgentToolView) {
   if (!tool.enabled) return '已关闭';
   if (!tool.available) return '当前不可用';
@@ -94,7 +88,7 @@ function availabilityText(tool: AgentToolView) {
 
 export function AgentContextBar({ conversationId }: { conversationId: string }) {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<'preview' | 'prompts' | 'tools'>('preview');
+  const [tab, setTab] = useState<'sent' | 'prompts' | 'tools'>('sent');
   const [data, setData] = useState<AgentContextView | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
@@ -271,11 +265,11 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
   }
 
   async function copyPrompt() {
-    const text = data?.preview.text;
+    const text = data?.sent?.text;
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      toast('完整 Agent Prompt 已复制', 'success');
+      toast('实际发出的 Prompt 已复制', 'success');
     } catch (reason) {
       toast(`复制失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
     }
@@ -321,14 +315,14 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
             <header className="agent-context-head">
               <div>
                 <h2>Agent 上下文</h2>
-                <p>完整预览、可编辑来源和实际工具视图共用同一套组装规则；保存后从下一轮生效。</p>
+                <p>这里展示模型实际收到的 system prompt（在发出请求时记录，不做二次渲染），以及可编辑来源与实际工具视图；保存后从下一轮生效。</p>
               </div>
               <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label="关闭"><Icon name="close" size={16} /></button>
             </header>
             <div className="agent-context-body">
               <nav className="agent-context-tabs" role="tablist" aria-label="Agent 上下文页面">
-                <button type="button" role="tab" data-testid="agent-context-tab-preview" data-active={tab === 'preview'} aria-selected={tab === 'preview'} onClick={() => setTab('preview')}>
-                  最终 Prompt <span>{data?.preview.sections.length ?? 0}</span>
+                <button type="button" role="tab" data-testid="agent-context-tab-sent" data-active={tab === 'sent'} aria-selected={tab === 'sent'} onClick={() => setTab('sent')}>
+                  实际发出的 Prompt
                 </button>
                 <button type="button" role="tab" data-testid="agent-context-tab-prompts" data-active={tab === 'prompts'} aria-selected={tab === 'prompts'} onClick={() => setTab('prompts')}>
                   可编辑来源 <span>{data?.prompts.length ?? 0}</span>
@@ -341,44 +335,28 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
               <div className="agent-preview-panel" data-testid="agent-context-sent">
                 <div className="agent-preview-meta">
                   <strong>实际发出（最近一次模型请求）</strong>
+                  <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
+                  {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
+                  <span>源码 Docs <code>{data?.docsRoot}</code></span>
                   <span>{data?.sent ? `${data.sent.text.length.toLocaleString()} 字符` : '本次会话尚未记录到已发出的请求'}</span>
+                  <Button size="sm" icon="file" disabled={!data?.sent} onClick={() => void copyPrompt()}>
+                    复制 Prompt
+                  </Button>
                 </div>
-                {data?.sent && (
-                  <pre data-testid="agent-context-sent-text" style={{ maxHeight: 320, overflow: 'auto' }}>{data.sent.text}</pre>
+                {definitionChanged && (
+                  <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
+                    当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。
+                  </div>
+                )}
+                {data?.sent ? (
+                  <pre className="agent-preview-markdown" data-testid="agent-context-sent-text">{data.sent.text}</pre>
+                ) : (
+                  <p className="agent-preview-notice" data-testid="agent-context-sent-empty">
+                    本次会话尚未记录到已发出的请求：只有真正发起过模型请求的会话才有这一份。
+                  </p>
                 )}
               </div>
-              {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'preview' ? (
-                <div className="agent-preview-panel" data-testid="agent-context-preview">
-                  <div className="agent-preview-meta">
-                    <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
-                    {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
-                    <span>源码 Docs <code>{data?.docsRoot}</code></span>
-                    <span>{data?.preview.text.length.toLocaleString() ?? 0} 字符</span>
-                    <Button size="sm" icon="file" disabled={!data?.preview.text} onClick={() => void copyPrompt()}>
-                      复制完整 Prompt
-                    </Button>
-                  </div>
-                  {definitionChanged && (
-                    <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
-                      当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。
-                    </div>
-                  )}
-                  <div className="agent-preview-section-map" aria-label="Prompt section sources" data-testid="agent-preview-section-map">
-                    <span className="agent-preview-origin-legend">
-                      <i data-origin="editable" />可编辑
-                      <i data-origin="generated" />动态生成
-                      <i data-origin="pi" />Pi 自动追加
-                    </span>
-                    {data?.preview.sections.map(section => (
-                      <span className="agent-preview-section-source" key={section.id}>
-                        <code>&lt;{section.id}&gt;</code>
-                        <small>{[...new Set(section.parts.map(part => ORIGIN_LABELS[part.origin]))].join(' + ')}</small>
-                      </span>
-                    ))}
-                  </div>
-                  <pre className="agent-preview-markdown" data-testid="agent-context-preview-markdown">{data?.preview.text ?? ''}</pre>
-                </div>
-              ) : tab === 'prompts' ? (
+              {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'prompts' ? (
                 <div className="agent-prompt-layout">
                   <div className="agent-prompt-list" data-testid="agent-prompt-list">
                     {[...groupedPrompts.entries()].map(([group, prompts]) => (
