@@ -176,6 +176,33 @@ test('read-only Git tools expose status, diff, log and show without a shell', as
   expect(tools.map(tool => tool.name).filter(name => name.startsWith('git'))).toEqual(['git']);
 });
 
+test('the git tool caps a huge diff and falls back to a --stat summary', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tools-git-cap-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const calls: { command: string; args: string[] }[] = [];
+  const tools = agentTools({
+    workspace: root,
+    run: async (command, args) => {
+      calls.push({ command, args });
+      // A diff far larger than the cap, then a short --stat summary for the retry.
+      const stdout = args.includes('--stat') ? 'src/app.ts | 1 +\n' : 'x'.repeat(30_000);
+      return { code: 0, stdout, stderr: '' };
+    },
+  });
+  const execute = (name: string, params: Record<string, unknown>) =>
+    (tools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>)('probe', params);
+
+  const body = (await execute('git', { subcommand: 'diff' })).content[0]!.text!;
+  // The point of the cap: a huge diff never reaches the context, and the Agent is
+  // told what happened instead of silently losing it.
+  expect(body).toContain('--stat summary follows');
+  expect(body.length).toBeLessThan(21_000);
+  expect(calls).toEqual([
+    { command: 'git', args: ['diff'] },
+    { command: 'git', args: ['diff', '--stat'] },
+  ]);
+});
+
 test('full access reads and writes host paths including Graph state', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-tools-full-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
