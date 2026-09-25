@@ -21,6 +21,7 @@ import {
   customDraft,
   draftFromModelVendor,
   accountCredentialEntry,
+  draftForCredential,
   draftFromPlatform,
   draftFromPlatformWithCredential,
   nextAccountDraft,
@@ -531,6 +532,22 @@ describe('concurrency limits inside a provider entry', () => {
     expect(draftFromPlatformWithCredential(platform!, { 'opencode-go': { secretRef: '   ' } }).credentialRef).toBe(platform!.credentialRef);
     expect(draftFromPlatformWithCredential(platform!, {}).credentialRef).toBe(platform!.credentialRef);
     expect(draftFromPlatformWithCredential(platform!, undefined).credentialRef).toBe(platform!.credentialRef);
+  });
+});
+
+describe('the card follows the selected credential', () => {
+  it('names the account the operator selected, not the platform', () => {
+    const platform = preset;
+    const credentials = {
+      [platform.id]: { secretRef: platform.credentialRef, displayName: 'OpenCode Go' },
+      'opencode-go-3': { secretRef: 'GRAPH_OPENCODE_GO_ACCOUNT_3', displayName: '账户 2' },
+    };
+    const account = draftForCredential(platform, credentials, 'opencode-go-3');
+    expect(account).toMatchObject({ credentialId: 'opencode-go-3', credentialRef: 'GRAPH_OPENCODE_GO_ACCOUNT_3', label: '账户 2' });
+    // The platform's own card still shows the platform credential.
+    expect(draftForCredential(platform, credentials, platform.id)).toMatchObject({ credentialRef: platform.credentialRef, label: 'OpenCode Go' });
+    // A brand new id keeps the platform defaults until it is saved.
+    expect(draftForCredential(platform, credentials, 'opencode-go-9')).toMatchObject({ credentialRef: platform.credentialRef, label: platform.label });
   });
 });
 

@@ -19,6 +19,7 @@ import {
   draftFromModelVendor,
   draftFromPlatform,
   accountCredentialEntry,
+  draftForCredential,
   draftFromPlatformWithCredential,
   nextAccountDraft,
   draftToModelEntry,
@@ -444,7 +445,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
 
   const selected = platformById(platforms, platformId);
   const isCustom = isCustomPlatform(platformId) || selected?.custom === true;
-  const base: ProviderDraft = !isCustom && selected ? draftFromPlatformWithCredential(selected, draft.credentials) : custom;
+  // The selected credential, not the platform, decides the name and variable: that is
+  // what lets an existing account of the platform be renamed here.
+  const base: ProviderDraft = !isCustom && selected ? draftForCredential(selected, draft.credentials, account.credentialId ?? selected.id) : custom;
   const active: ProviderDraft = { ...base, ...account };
   const editAccount = (next: { credentialId?: string; credentialRef?: string; label?: string }) => {
     if (isCustom) setCustom(current => ({ ...current, ...next }));

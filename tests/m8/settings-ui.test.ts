@@ -48,13 +48,13 @@ async function stubProvider() {
   return { requests, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1` };
 }
 
-async function configFile(dir: string, baseUrl: string) {
+async function configFile(dir: string, baseUrl: string, extra: Record<string, unknown> = {}) {
   const path = join(dir, 'graph.config.json');
   await writeFile(path, JSON.stringify({
     version: 1,
     projects: [{ id: 'sample', root: dir }],
     models: { entries: [{ id: 'local', provider: 'stub', grade: 'medium', api: 'openai-completions', baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] },
-    credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' } },
+    credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' }, ...(extra.credentials ?? {}) },
     limits: { credentials: { local: 1 } },
   }, null, 2));
   return path;
@@ -372,7 +372,9 @@ test('settings imports detected subscription credentials without exposing their 
 test('a supported platform offers an editable account name', async () => {
   const dir = await temp('account-name');
   const stub = await stubProvider();
-  const path = await configFile(dir, stub.baseUrl);
+  const path = await configFile(dir, stub.baseUrl, {
+    credentials: { 'opencode-go-3': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_GO_ACCOUNT_3', displayName: '账户 2' } },
+  });
   const daemon = await start(dir, path);
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -388,6 +390,15 @@ test('a supported platform offers an editable account name', async () => {
   // A supported platform is named by its label, and the operator may rename it.
   expect(await name.inputValue()).toBe('OpenCode Go');
   expect(await name.isEditable()).toBe(true);
-  await name.fill('账户 2');
+
+  // Switching the credential id to an account shows that account's own name and
+  // variable, so an existing account can be renamed instead of silently keeping
+  // the platform's credential in the form.
+  await page.getByTestId('provider-credentialId').fill('opencode-go-3');
+  await expect.poll(async () => page.getByTestId('provider-credentialRef').inputValue(), { timeout: 10_000 }).toBe('GRAPH_OPENCODE_GO_ACCOUNT_3');
   expect(await name.inputValue()).toBe('账户 2');
+
+  // And the operator may overwrite it.
+  await name.fill('账户 2 · 工作');
+  expect(await name.inputValue()).toBe('账户 2 · 工作');
 }, 60_000);
