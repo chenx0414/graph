@@ -51,13 +51,26 @@ test('a required peer that is present but incomplete is reinstalled before the e
   expect(existsSync(join(peer, 'v4', 'classic', 'external.js'))).toBe(true);
 });
 
-test('a peer that stays incomplete after reinstalling fails loudly instead of loading a broken extension', async () => {
+test('a peer that stays incomplete after reinstalling is still handed to the load, never blocked by the guess', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-peer-still-broken-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const { entry } = await truncatedPeerFixture(root);
-  await stubNpm(root, { heal: false });
+  const calls = await stubNpm(root, { heal: false });
 
-  await expect(ensureRequiredPeers(entry)).rejects.toThrow(/zod/);
+  // The repair runs, but a static gap check must never become a new way to stop a session: the
+  // extension load itself is the authority on whether the installed tree works.
+  await expect(ensureRequiredPeers(entry)).resolves.toBeUndefined();
+  expect(calls()).toContain('zod@^4.0.0');
+});
+
+test('a package that declares an extension-less main is not mistaken for a truncated one', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-peer-extensionless-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  // `ms` ships `index.js` while declaring `main: "./index"`.
+  await writeFile(join(root, 'package.json'), canonicalJson({ name: 'ms', version: '2.1.3', main: './index' }));
+  await writeFile(join(root, 'index.js'), 'module.exports = () => {};\n');
+
+  expect(await packageGaps(root)).toEqual([]);
 });
 
 /** An extension entry whose declared peer `zod` exists but is missing its `v4` directory. */

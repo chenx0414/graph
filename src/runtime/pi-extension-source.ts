@@ -99,11 +99,23 @@ export async function packageGaps(dir: string): Promise<string[]> {
   const gaps: string[] = [];
   for (const target of targets) {
     if (!target.startsWith('./')) continue;
-    const relative = target.slice(2);
-    // A directory target (a folder with its own index) is a valid export; only files are checked.
-    if (!existsSync(join(dir, relative)) && !existsSync(join(dir, relative, 'package.json'))) gaps.push(relative);
+    if (!targetExists(dir, target.slice(2))) gaps.push(target.slice(2));
   }
   return gaps;
+}
+
+/**
+ * The same resolution Node itself applies to a plain path: the exact file, the file with a
+ * runtime extension, or the directory's index. Declaring `main: "./index"` while shipping
+ * `index.js` is perfectly normal (`ms` does exactly that), and a gap check that called such a
+ * package broken would reinstall a healthy tree — and, worse, could be mistaken for a reason to
+ * block a load.
+ */
+function targetExists(dir: string, relative: string): boolean {
+  for (const suffix of ['', '.js', '.mjs', '.cjs', '.json', '/index.js', '/index.mjs', '/index.cjs', '/index.json']) {
+    if (existsSync(join(dir, `${relative}${suffix}`))) return true;
+  }
+  return false;
 }
 
 /**
@@ -111,8 +123,9 @@ export async function packageGaps(dir: string): Promise<string[]> {
  * `@earendil-works/*` to loaded extensions, so a plain non-optional peer such as
  * `zod` would never resolve and the extension could not load at all. Install those
  * peers into the same root and verify them afterwards; an already complete peer is a no-op.
- * A peer that is still incomplete fails loudly rather than letting the session start with an
- * extension that cannot load.
+ * A partial npm extraction in that shared root is the real failure this guards: the incident left
+ * `zod` present but stripped of its whole `v4/` directory, with another package's declared entry
+ * missing in the same tree, so the presence of a directory proves nothing.
  */
 export async function ensureRequiredPeers(entry: string): Promise<void> {
   const root = installRootFor(entry);
@@ -130,14 +143,11 @@ export async function ensureRequiredPeers(entry: string): Promise<void> {
   const broken: string[] = [];
   for (const name of required) if (await incomplete(name)) broken.push(name);
   if (!broken.length) return;
-  // `--prefer-online` keeps a stale entry in npm's own cache from handing back the very tree
-  // that made the peer unloadable.
+  // `--prefer-online` keeps a stale entry in npm's own cache from handing back the very tree that
+  // made the peer unloadable. Repair stays best effort on purpose: a static gap check can be wrong
+  // about an exotic export map, and turning that guess into a thrown error would block a session
+  // that would otherwise load — the load itself stays the authority.
   await run('npm', ['install', ...broken.map(name => `${name}@${peers[name]}`), '--prefix', root, '--omit=dev', '--no-save', '--no-audit', '--no-fund', '--prefer-online'], { timeout: 300_000 });
-  const stillBroken: string[] = [];
-  for (const name of broken) if (await incomplete(name)) stillBroken.push(name);
-  if (stillBroken.length) {
-    throw new RuntimeError('capability_unavailable', `Pi extension source ${entry} cannot load: peer ${stillBroken.join(', ')} is still incomplete after reinstalling (remove ${join(root, 'node_modules', stillBroken[0]!)} and let Graph install it again)`);
-  }
 }
 
 export interface PiExtensionSourceStatus {
