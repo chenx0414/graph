@@ -6,6 +6,8 @@ import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { createUsageService, type UsageService, type UsageSnapshot } from '../../src/server/usage.ts';
+import type { GraphConfig } from '../../src/server/config.ts';
+import { defaultAccessPolicy } from '../../src/core/access-policy.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -41,6 +43,67 @@ function grokPayload(percent: number) {
   bytes.writeFloatLE(percent, 1);
   return new Response(bytes, { status: 200, headers: { 'content-type': 'application/grpc-web+proto' } });
 }
+
+test('a platform with several accounts reports every account with its own quota', async () => {
+  const home = await temp('accounts');
+  const config: GraphConfig = {
+    path: join(home, 'graph.config.json'), configured: true, projects: [],
+    access: defaultAccessPolicy(), piExtensionAutoUpdate: false,
+    credentials: {
+      'opencode-go': { secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', displayName: '主账户' },
+      'opencode-go-work': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_WORK_KEY', displayName: '工作账户' },
+    },
+    models: {
+      preferences: {},
+      entries: [{
+        id: 'zen', provider: 'opencode-go', grade: 'high', api: 'openai-completions',
+        baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 1_000_000, maxTokens: 384_000, credentialId: 'opencode-go',
+      }],
+    },
+    limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
+  };
+  const env = {
+    HOME: home,
+    GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: 'main-key',
+    GRAPH_OPENCODE_WORK_KEY: 'work-key',
+  };
+  const seen: string[] = [];
+  const fetchImpl = async (input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === 'https://opencode.ai/zen/go/v1/usage') {
+      const headers = Object.fromEntries(Object.entries(init?.headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]));
+      const authorization = headers.authorization ?? '';
+      seen.push(authorization);
+      const percent = authorization.includes('work-key') ? 70 : 12;
+      return json({ usage: { rolling: { status: 'ok', percent, resetsAt: '2026-09-16T12:00:00Z' } } });
+    }
+    if (url === 'https://models.dev/api.json') return json({});
+    return new Response('not found', { status: 404 });
+  };
+  const service = createUsageService({
+    home, fetch: fetchImpl, env,
+    pricingPath: join(home, 'model-pricing.json'),
+    loadConfig: async () => ({ config, env }),
+  });
+
+  const snapshot = await service.get(true);
+  const accounts = snapshot.plans.filter(plan => plan.platform === 'opencode-go');
+  // The platform's own credential keeps the plan it always had; the extra account
+  // is its own row, so nothing a single-account setup relies on changes shape.
+  expect(accounts).toHaveLength(2);
+  expect(accounts[0]).toMatchObject({ id: 'opencode-go', platform: 'opencode-go', account: null });
+  expect(accounts[1]).toMatchObject({
+    id: 'opencode-go#opencode-go-work', platform: 'opencode-go',
+    account: { id: 'opencode-go-work', name: '工作账户' },
+  });
+  expect(accounts[0]?.windows[0]?.usedPercent).toBe(12);
+  expect(accounts[1]?.windows[0]?.usedPercent).toBe(70);
+  // Each account asked with its own key, which is the point of the feature.
+  expect(seen.some(value => value.includes('main-key'))).toBe(true);
+  expect(seen.some(value => value.includes('work-key'))).toBe(true);
+  // The summary counts accounts, not platforms.
+  expect(snapshot.summary.configured).toBe(2);
+});
 
 test('usage service normalizes the five supported subscription sources', async () => {
   const home = await temp('service');
@@ -166,7 +229,7 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
     generatedAt: Date.now(),
     plans: [
       {
-        id: 'opencode-go', name: 'OpenCode Go', subtitle: 'openCode.ai · 5 小时滚动额度', configured: true, status: 'ok', plan: 'Go',
+        id: 'opencode-go', platform: 'opencode-go', account: null, name: 'OpenCode Go', subtitle: 'openCode.ai · 5 小时滚动额度', configured: true, status: 'ok', plan: 'Go',
         credentialSource: 'OpenCode 配置 · opencode-go',
         credential: { id: 'opencode-go', secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', source: 'OpenCode 配置 · opencode-go', configured: true },
         models: [{ id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 1_000_000, maxTokens: 384_000, reasoning: true, supported: true }],
@@ -176,7 +239,7 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
         ], balance: null, details: {}, error: null, updatedAt: Date.now(),
       },
       {
-        id: 'command-goat', name: 'Command Goat', subtitle: 'CommandCode · 月度订阅额度', configured: true, status: 'warning', plan: 'GOAT',
+        id: 'command-goat', platform: 'command-goat', account: null, name: 'Command Goat', subtitle: 'CommandCode · 月度订阅额度', configured: true, status: 'warning', plan: 'GOAT',
         credentialSource: 'OpenCode 配置 · command-goat',
         credential: { id: 'command-goat', secretRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY', source: 'OpenCode 配置 · command-goat', configured: true },
         models: [{ id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', api: 'openai-completions', baseUrl: 'https://api.commandcode.ai/provider/v1', contextWindow: 131_072, maxTokens: 8_192, reasoning: true, supported: true }],
@@ -184,9 +247,9 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
           { id: 'monthly', label: '本月', usedPercent: 82, remainingPercent: 18, resetAt: Date.now() + 86_400_000, used: 57.4, limit: 70, unit: 'USD' },
         ], balance: { remaining: 12.6, used: 57.4, total: 70, currency: 'USD', unit: '$' }, details: {}, error: null, updatedAt: Date.now(),
       },
-      { id: 'deepseek', name: 'DeepSeek', subtitle: 'DeepSeek 官方 API · 账户余额', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
-      { id: 'grok', name: 'Grok', subtitle: 'xAI SuperGrok · 周期额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
-      { id: 'chatgpt', name: 'ChatGPT', subtitle: 'ChatGPT Codex · 官方订阅额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
+      { id: 'deepseek', platform: 'deepseek', account: null, name: 'DeepSeek', subtitle: 'DeepSeek 官方 API · 账户余额', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
+      { id: 'grok', platform: 'grok', account: null, name: 'Grok', subtitle: 'xAI SuperGrok · 周期额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
+      { id: 'chatgpt', platform: 'chatgpt', account: null, name: 'ChatGPT', subtitle: 'ChatGPT Codex · 官方订阅额度', configured: false, status: 'unconfigured', plan: null, credentialSource: null, credential: null, models: [], windows: [], balance: null, details: {}, error: null, updatedAt: Date.now() },
     ],
     pricing: {
       source: '~/.cc-switch/model-pricing.json',

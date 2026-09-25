@@ -18,7 +18,9 @@ import {
   customDraft,
   draftFromModelVendor,
   draftFromPlatform,
+  accountCredentialEntry,
   draftFromPlatformWithCredential,
+  nextAccountDraft,
   draftToModelEntry,
   hasProviderErrors,
   hasRequiredModelFields,
@@ -72,7 +74,7 @@ type RawModel = {
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string; retrievedAt?: string; catalogRevision?: string };
   headers?: Record<string, string>;
 };
-type RawCredential = { secretRef: string; displayName?: string; sharedLimitGroupId?: string };
+type RawCredential = { secretRef: string; displayName?: string; sharedLimitGroupId?: string; platform?: string };
 type RawConfig = {
   version: 1;
   projects?: { id: string; root: string; grants?: string[] }[];
@@ -412,6 +414,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   const [platformsNote, setPlatformsNote] = useState('');
   const [platformId, setPlatformId] = useState<string>(FALLBACK_PLATFORMS[0]!.id);
   const [custom, setCustom] = useState<ProviderDraft>(customDraft);
+  // One platform may hold several accounts, so its credential id and variable name
+  // can be overridden without retargeting the platform itself.
+  const [account, setAccount] = useState<{ credentialId?: string; credentialRef?: string }>({});
   const [key, setKey] = useState('');
   const [errors, setErrors] = useState<ProviderDraftErrors>({});
   const [busy, setBusy] = useState(false);
@@ -439,11 +444,20 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
 
   const selected = platformById(platforms, platformId);
   const isCustom = isCustomPlatform(platformId) || selected?.custom === true;
-  const active: ProviderDraft = !isCustom && selected ? draftFromPlatformWithCredential(selected, draft.credentials) : custom;
+  const base: ProviderDraft = !isCustom && selected ? draftFromPlatformWithCredential(selected, draft.credentials) : custom;
+  const active: ProviderDraft = { ...base, ...account };
+  const editAccount = (next: { credentialId?: string; credentialRef?: string }) => {
+    if (isCustom) setCustom(current => ({ ...current, ...next }));
+    else setAccount(current => ({ ...current, ...next }));
+  };
   // credentialConfigured / credentialRef come from the daemon catalog; the
   // card must use the daemon's own ref name so the reason names the right env var.
   const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
   const requiredProblems = missingRequiredModelFields(draft.models?.entries ?? []);
+
+  useEffect(() => {
+    setAccount({});
+  }, [platformId]);
 
   useEffect(() => {
     setConcurrency(readConcurrency(draft, active.credentialId));
@@ -564,8 +578,13 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
       }
       mutate(next => {
         const credentials = { ...(next.credentials ?? {}) };
-        const previous = credentials[active.credentialId] ?? { secretRef: active.credentialRef };
-        credentials[active.credentialId] = { ...previous, secretRef: active.credentialRef, displayName: active.label || active.credentialId };
+        credentials[active.credentialId] = accountCredentialEntry(credentials[active.credentialId], {
+          credentialId: active.credentialId,
+          credentialRef: active.credentialRef,
+          label: active.label,
+          platformId: active.platformId,
+          custom: isCustom,
+        });
         next.credentials = credentials;
         writeConcurrency(next, active.credentialId, concurrency);
       });
@@ -654,9 +673,29 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
                 <Field label="兼容格式"><input className="input" value={PROVIDER_COMPATIBILITIES.find(item => item.id === active.api)?.label ?? active.api} readOnly data-testid="provider-api" /></Field>
               </>
             )}
-            <Field label="凭据 id"><input className="input" data-testid="provider-credentialId" data-invalid={mark('credentialId')} value={active.credentialId} readOnly={!isCustom} onChange={event => setCustom({ ...custom, credentialId: event.target.value })} /></Field>
-            <Field label="环境变量（credentialRef）" hint="配置文件只保存这个名字" error={fieldError('credentialRef')}><input className="input" data-testid="provider-credentialRef" data-invalid={mark('credentialRef')} value={active.credentialRef} readOnly={!isCustom} onChange={event => setCustom({ ...custom, credentialRef: event.target.value })} /></Field>
+            <Field label="凭据 id" hint={isCustom ? undefined : '同一平台可配置多个账户：id 不同即不同账户'} data-testid="provider-credentialId-field"><input className="input" data-testid="provider-credentialId" data-invalid={mark('credentialId')} value={active.credentialId} onChange={event => editAccount({ credentialId: event.target.value })} /></Field>
+            <Field label="环境变量（credentialRef）" hint="配置文件只保存这个名字" error={fieldError('credentialRef')}><input className="input" data-testid="provider-credentialRef" data-invalid={mark('credentialRef')} value={active.credentialRef} onChange={event => editAccount({ credentialRef: event.target.value })} /></Field>
           </div>
+
+          {isCustom ? null : (
+            <div className="row" style={{ marginTop: 8 }}>
+              <Button
+                size="sm"
+                icon="plus"
+                data-testid="provider-add-account"
+                disabled={busy}
+                onClick={() => {
+                  if (!selected) return;
+                  const next = nextAccountDraft(selected, Object.keys(draft.credentials ?? {}));
+                  editAccount({ credentialId: next.credentialId, credentialRef: next.credentialRef });
+                  setKey('');
+                }}
+              >
+                同一平台再加一个账户
+              </Button>
+              <span className="muted">每个账户有自己的密钥与额度；模型在下一步选择用哪个账户</span>
+            </div>
+          )}
 
           {bridge ? (
             <Field label={keyGuidance.title} hint="只写入系统钥匙串，不进入配置文件、接口响应或页面" error={fieldError('key')}>

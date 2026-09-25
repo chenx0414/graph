@@ -15,8 +15,15 @@ interface UsageWindow {
   unit?: string;
 }
 
+type UsageProviderId = 'opencode-go' | 'command-goat' | 'deepseek' | 'grok' | 'chatgpt';
+
 interface UsagePlan {
-  id: 'opencode-go' | 'command-goat' | 'deepseek' | 'grok' | 'chatgpt';
+  /** Unique per account: the platform id, or `<platform>#<credentialId>` for an extra account. */
+  id: string;
+  /** The subscription platform this card reports on. */
+  platform: UsageProviderId;
+  /** The extra account of that platform, or null for its primary credential. */
+  account: { id: string; name: string } | null;
   name: string;
   subtitle: string;
   configured: boolean;
@@ -46,7 +53,7 @@ interface UsageSnapshot {
   summary: { configured: number; connected: number; warnings: number; limited: number; unconfigured: number };
 }
 
-const PROVIDER_MARKS: Record<UsagePlan['id'], string> = {
+const PROVIDER_MARKS: Record<UsageProviderId, string> = {
   'opencode-go': 'OC',
   'command-goat': 'CG',
   deepseek: 'DS',
@@ -184,12 +191,16 @@ export function UsagePage() {
       </div>
       <div className="usage-plan-grid">
         {snapshot.plans.map(plan => (
-          <article className="usage-plan-card" data-provider={plan.id} data-testid={`usage-plan-${plan.id}`} key={plan.id}>
+          <article className="usage-plan-card" data-provider={plan.platform} data-testid={`usage-plan-${plan.id}`} key={plan.id}>
             <header className="usage-plan-head">
-              <span className="usage-plan-mark" aria-hidden="true">{PROVIDER_MARKS[plan.id]}</span>
+              <span className="usage-plan-mark" aria-hidden="true">{PROVIDER_MARKS[plan.platform]}</span>
               <div className="usage-plan-title">
                 <strong>{plan.name}</strong>
-                <span>{plan.subtitle}</span>
+                <span>
+                  {plan.account ? <span className="usage-plan-account" data-testid={`usage-plan-account-${plan.id}`}>{plan.account.name}</span> : null}
+                  {plan.account ? ' · ' : ''}
+                  {plan.subtitle}
+                </span>
               </div>
               <Pill tone={statusTone(plan)}>{statusLabel(plan)}</Pill>
             </header>

@@ -11,6 +11,13 @@ export interface CredentialConfig {
   displayName?: string;
   secretRef: string;
   sharedLimitGroupId?: string;
+  /**
+   * The subscription platform this credential is an account of. One platform may
+   * have several accounts; each is an ordinary credential, so a model still names
+   * the account it uses through `credentialId`, and usage reports one row per
+   * account rather than per platform.
+   */
+  platform?: string;
 }
 
 export interface LimitsConfig {
@@ -203,10 +210,16 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
       const entry = asObject(value, path);
       const secretRef = asString(entry.secretRef, `${path}.secretRef`);
       if (!SECRET_REF.test(secretRef)) invalid(`${path}.secretRef must be an environment variable name`);
+      let platform: string | undefined;
+      if (entry.platform !== undefined) {
+        platform = asString(entry.platform, `${path}.platform`).trim();
+        if (!platform) invalid(`${path}.platform must name the subscription platform it is an account of`);
+      }
       credentials[id] = {
         secretRef,
         ...(entry.displayName !== undefined ? { displayName: asString(entry.displayName, `${path}.displayName`) } : {}),
         ...(entry.sharedLimitGroupId !== undefined ? { sharedLimitGroupId: asString(entry.sharedLimitGroupId, `${path}.sharedLimitGroupId`) } : {}),
+        ...(platform !== undefined ? { platform } : {}),
       };
     }
   }

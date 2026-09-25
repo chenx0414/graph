@@ -119,6 +119,53 @@ export function draftFromPlatform(platform: PlatformPreset): ProviderDraft {
   };
 }
 
+/**
+ * A draft for one more account of a platform that already has one. The new account
+ * needs its own credential id and its own variable name, otherwise saving it would
+ * overwrite the key of the account that already works.
+ */
+export function nextAccountDraft(platform: PlatformPreset, taken: readonly string[]): ProviderDraft {
+  const draft = draftFromPlatform(platform);
+  const used = new Set(taken);
+  let index = 2;
+  while (used.has(`${draft.credentialId}-${index}`)) index += 1;
+  return { ...draft, credentialId: `${draft.credentialId}-${index}`, credentialRef: `${draft.credentialRef}_${index}` };
+}
+
+/** The credential entry shown to the daemon, mirroring `CredentialConfig`. */
+export interface AccountCredentialEntry {
+  secretRef: string;
+  displayName?: string;
+  sharedLimitGroupId?: string;
+  platform?: string;
+}
+
+export interface AccountCredentialInput {
+  credentialId: string;
+  credentialRef: string;
+  label: string;
+  platformId: string;
+  custom: boolean;
+}
+
+/**
+ * The credential entry a saved vendor produces: one account of its platform.
+ * An account keeps whatever it already had (its shared limit group) and gains the
+ * platform it belongs to — that field is what makes several accounts of one
+ * platform appear as separate rows in 用量 instead of one merged line.
+ */
+export function accountCredentialEntry(previous: AccountCredentialEntry | undefined, input: AccountCredentialInput): AccountCredentialEntry {
+  const entry: AccountCredentialEntry = {
+    ...(previous ?? { secretRef: input.credentialRef }),
+    secretRef: input.credentialRef,
+    displayName: input.label || input.credentialId,
+  };
+  // A custom provider is somebody's own gateway, not an account of a subscription platform.
+  if (input.custom) delete entry.platform;
+  else entry.platform = input.platformId;
+  return entry;
+}
+
 export function customDraft(): ProviderDraft {
   return { platformId: CUSTOM_PLATFORM_ID, label: '', baseUrl: '', api: 'openai-completions', credentialId: 'custom', credentialRef: 'GRAPH_PROVIDER_API_KEY' };
 }

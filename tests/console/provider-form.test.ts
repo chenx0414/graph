@@ -20,8 +20,10 @@ import {
   costError,
   customDraft,
   draftFromModelVendor,
+  accountCredentialEntry,
   draftFromPlatform,
   draftFromPlatformWithCredential,
+  nextAccountDraft,
   draftToModelEntry,
   fillEntryFromMetadata,
   hasProviderErrors,
@@ -529,5 +531,33 @@ describe('concurrency limits inside a provider entry', () => {
     expect(draftFromPlatformWithCredential(platform!, { 'opencode-go': { secretRef: '   ' } }).credentialRef).toBe(platform!.credentialRef);
     expect(draftFromPlatformWithCredential(platform!, {}).credentialRef).toBe(platform!.credentialRef);
     expect(draftFromPlatformWithCredential(platform!, undefined).credentialRef).toBe(platform!.credentialRef);
+  });
+});
+
+describe('one platform, several accounts', () => {
+  const zen = preset;
+
+  it('gives an extra account its own credential id and variable name', () => {
+    // Reusing the first account's id would silently overwrite its key.
+    expect(nextAccountDraft(zen, ['opencode-go'])).toMatchObject({
+      platformId: 'opencode-go',
+      credentialId: 'opencode-go-2',
+      credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY_2',
+    });
+    expect(nextAccountDraft(zen, ['opencode-go', 'opencode-go-2']).credentialId).toBe('opencode-go-3');
+    expect(nextAccountDraft(zen, ['other']).credentialId).toBe('opencode-go-2');
+  });
+
+  it('records which platform an account belongs to, and keeps what it already had', () => {
+    expect(accountCredentialEntry(undefined, { credentialId: 'opencode-go-2', credentialRef: 'GRAPH_ZEN_2', label: '工作账户', platformId: 'opencode-go', custom: false }))
+      .toEqual({ secretRef: 'GRAPH_ZEN_2', displayName: '工作账户', platform: 'opencode-go' });
+    // A credential that already carries a shared limit group must not lose it.
+    expect(accountCredentialEntry({ secretRef: 'GRAPH_ZEN', sharedLimitGroupId: 'g1' }, { credentialId: 'opencode-go', credentialRef: 'GRAPH_ZEN', label: '', platformId: 'opencode-go', custom: false }))
+      .toEqual({ secretRef: 'GRAPH_ZEN', displayName: 'opencode-go', sharedLimitGroupId: 'g1', platform: 'opencode-go' });
+  });
+
+  it('never claims a platform for a custom provider', () => {
+    expect(accountCredentialEntry({ secretRef: 'GRAPH_X', platform: 'opencode-go' }, { credentialId: 'custom', credentialRef: 'GRAPH_PROVIDER_API_KEY', label: '我的网关', platformId: 'custom', custom: true }))
+      .toEqual({ secretRef: 'GRAPH_PROVIDER_API_KEY', displayName: '我的网关' });
   });
 });
