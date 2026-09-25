@@ -135,7 +135,6 @@ export function agentTools(input: {
     systemDiagnostics?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     proposeSystemChange?: (input: { title: string; problem: string; change: Json; impact?: string; risk?: string }) => Promise<Record<string, unknown>>;
     applySystemChange?: (proposalId: string) => Promise<Record<string, unknown>>;
-    requestModelAccess?: (input: { modelId: string; reason: string; planId?: string }) => Promise<Record<string, unknown>>;
     rsiStatus?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     rsiApply?: (input: unknown) => Promise<Record<string, unknown>>;
   };
@@ -505,39 +504,6 @@ export function agentTools(input: {
       if (!combination) throw new Error(`Unknown Agent combination ${id}`);
       return text(JSON.stringify(combination));
     },
-    save_agent_combination: async (_id, params) => {
-      const combination = JSON.parse(String(fields(params).combinationJson)) as AgentCombination;
-      const saved = await input.catalog!.saveAgentCombination(combination);
-      const compiled = input.catalog!.compileAgentCombination(combination.id);
-      return text(JSON.stringify({ combination: saved, definition: compiled }));
-    },
-    update_agent_combination_description: async (_id, params) => {
-      const body = fields(params);
-      const id = String(body.id).trim();
-      const description = String(body.description).trim();
-      if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
-      if (!description || description.length > 2_000) throw new Error('A nonempty description of at most 2000 characters is required');
-      return text(JSON.stringify(await input.catalog!.updateAgentCombinationDescription(id, description)));
-    },
-    delete_agent_combination: async (_id, params) => {
-      const id = String(fields(params).id).trim();
-      if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
-      return text(JSON.stringify(await input.catalog!.deleteAgentCombination(id)));
-    },
-    request_model_access: async (_id, params) => {
-      const body = fields(params);
-      const modelId = String(body.modelId).trim();
-      const reason = String(body.reason).trim();
-      if (!modelId || modelId.length > 160) throw new Error('A bounded modelId is required');
-      if (!reason || reason.length > 2_000) throw new Error('A concise reason of at most 2000 characters is required');
-      const planId = typeof body.planId === 'string' ? body.planId.trim() : '';
-      if (planId.length > 160) throw new Error('A bounded planId is required');
-      return text(JSON.stringify(await input.systemContext!.requestModelAccess!({
-        modelId,
-        reason,
-        ...(planId ? { planId } : {}),
-      })));
-    },
   };
   const descriptions = describeAgentTools({
     ...(input.role ? { role: input.role } : {}),
@@ -565,7 +531,6 @@ export function agentTools(input: {
       systemDiagnostics: Boolean(input.systemContext.systemDiagnostics),
       proposeSystemChange: Boolean(input.systemContext.proposeSystemChange),
       applySystemChange: Boolean(input.systemContext.applySystemChange),
-      requestModelAccess: Boolean(input.systemContext.requestModelAccess),
     } } : {}),
     ...(input.systemContext?.rsiStatus || input.systemContext?.rsiApply ? { rsi: {
       status: Boolean(input.systemContext.rsiStatus),

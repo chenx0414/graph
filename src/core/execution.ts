@@ -43,7 +43,7 @@ export class Execution {
   private readonly git?: GitIntegration;
   private readonly scratchRoot?: string;
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
-  private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean };
+  private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean };
   private readonly access?: () => ResolvedAccessPolicy;
   private readonly dispatchAllowed?: () => boolean;
   private readonly autoWake: boolean;
@@ -51,7 +51,7 @@ export class Execution {
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean; requestModelAccess?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -611,7 +611,6 @@ export class Execution {
                 },
                 systemContext: {
                   ...this.systemContext,
-                  requestModelAccess: Boolean(conversation && spec.role === 'master' && this.systemContext?.requestModelAccess),
                 },
               } : {}),
             });
@@ -627,7 +626,6 @@ export class Execution {
               ...(spec.role === 'master' && this.systemContext ? {
                 systemContext: {
                   ...this.systemContext,
-                  requestModelAccess: Boolean(conversation && spec.role === 'master' && this.systemContext?.requestModelAccess),
                 },
               } : {}),
             });

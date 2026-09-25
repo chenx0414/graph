@@ -308,14 +308,12 @@ test('only the master receives read-only resource and system inventory tools', a
     catalog,
     systemContext: {
       ...systemContext,
-      requestModelAccess: async input => ({ requestType: 'model_access', ...input }),
     },
   });
   expect(masterTools.map(tool => tool.name)).toEqual(expect.arrayContaining([
     'search_resources', 'get_resource', 'list_agent_combinations', 'get_agent_combination',
-    'save_agent_combination', 'update_agent_combination_description', 'delete_agent_combination',
     'validate_proposal', 'get_graph_state', 'list_projects', 'bind_project',
-    'read_system_capabilities', 'request_model_access',
+    'read_system_capabilities',
   ]));
   expect(masterTools.map(tool => tool.name)).not.toEqual(expect.arrayContaining([
     'artifact_get', 'compile_agent_combination', 'submit_result',
@@ -335,27 +333,8 @@ test('only the master receives read-only resource and system inventory tools', a
   expect(combinations.items).toEqual([expect.objectContaining({ id: 'review' })]);
   const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'review' })).content[0]!.text!) as { resolved: { resourceId: string; version: string }[] };
   expect(combination.resolved[0]).toMatchObject({ resourceId: 'reviewer', version: '1.0.0' });
-  const saved = JSON.parse((await execute('save_agent_combination')('probe', {
-    combinationJson: JSON.stringify({
-      id: 'review',
-      name: '代码审查',
-      description: '组合代码审查资源',
-      recommendedGrade: 'high',
-      review: true,
-      tags: ['审查'],
-      resources: [{ resourceId: 'reviewer', version: '1.0.0', role: 'identity', required: true }],
-    }),
-  })).content[0]!.text!) as { definition: { definitionVersion: string } };
-  expect(saved.definition.definitionVersion).toBe('review@1');
-  const updated = JSON.parse((await execute('update_agent_combination_description')('probe', {
-    id: 'review',
-    description: '独立审查实现证据并报告可执行缺陷。',
-  })).content[0]!.text!) as {
-    combination: { description: string };
-    definition: { definitionVersion: string };
-  };
-  expect(updated.combination.description).toBe('独立审查实现证据并报告可执行缺陷。');
-  expect(updated.definition.definitionVersion).toBe('review@2');
+  // Recipe authoring moved out of the tool surface into the console HTTP routes
+  // documented in docs/agent/agent-recipes.md.
 
   const workerTools = agentTools({ workspace: root, systemContext });
   expect(workerTools.map(tool => tool.name)).not.toContain('search_resources');

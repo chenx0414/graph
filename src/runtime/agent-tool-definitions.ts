@@ -10,7 +10,7 @@ export interface AgentToolFeatures {
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
   supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft', boolean>>;
-  systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange' | 'requestModelAccess', boolean>>;
+  systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
 }
 
@@ -340,30 +340,6 @@ function declarations(features: AgentToolFeatures) {
       name: 'get_agent_combination', label: 'Get Agent combination', description: 'Resolve one subagent recipe to its source resources. This does not install, compose or authorize anything; use the returned resources and their metadata to prepare the required capabilities.',
       parameters: Type.Object({ id: Type.String() }),
       available: main && Boolean(features.catalog),
-      externallyGated: false,
-    },
-    save_agent_combination: {
-      name: 'save_agent_combination', label: 'Save and compile Agent combination', description: 'Create or edit an Agent recipe, then validate and compile it immediately into a versioned Agent definition. A recipe may reference only capabilities that already exist; saving never creates capabilities or grants permission. Use the returned definitionVersion directly in propose_graph.',
-      parameters: Type.Object({ combinationJson: Type.String() }),
-      available: main && Boolean(features.catalog),
-      externallyGated: false,
-    },
-    update_agent_combination_description: {
-      name: 'update_agent_combination_description', label: 'Update Agent combination description', description: 'Edit only one Agent recipe description and immediately persist and recompile it. Use this when the user asks to improve how a subagent is described or when a clearer description would help future subagent selection; it does not change capabilities, permissions or resources.',
-      parameters: Type.Object({ id: Type.String(), description: Type.String() }),
-      available: main && Boolean(features.catalog),
-      externallyGated: false,
-    },
-    delete_agent_combination: {
-      name: 'delete_agent_combination', label: 'Delete Agent combination', description: 'Delete one user-editable Agent recipe. This never removes referenced capabilities.',
-      parameters: Type.Object({ id: Type.String() }),
-      available: main && Boolean(features.catalog),
-      externallyGated: false,
-    },
-    request_model_access: {
-      name: 'request_model_access', label: 'Request model access', description: 'Open one durable user question asking for a model or subscription to be configured. This never edits configuration and never grants permission automatically. Use it only when the current task needs a model that read_system_capabilities shows as unavailable.',
-      parameters: Type.Object({ modelId: Type.String(), reason: Type.String(), planId: Type.Optional(Type.String()) }),
-      available: main && Boolean(features.systemContext?.requestModelAccess),
       externallyGated: false,
     },
   } as const satisfies Record<string, Declaration>;

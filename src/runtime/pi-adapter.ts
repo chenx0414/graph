@@ -593,17 +593,6 @@ export function createPiAdapter(options: {
                       systemChangeApplications.set(proposalId, pending);
                       return pending;
                     },
-                    requestModelAccess: async (request: { modelId: string; reason: string; planId?: string }) => {
-                      const data = {
-                        requestType: 'model_access',
-                        modelId: request.modelId,
-                        reason: request.reason,
-                        ...(request.planId ? { planId: request.planId } : {}),
-                        prompt: `任务需要模型 ${request.modelId}。原因：${request.reason}。请先在“设置 · 模型”中配置对应订阅或模型，然后在此确认。`,
-                      } as Json;
-                      modelAccessQuestion ??= data;
-                      return data as Record<string, unknown>;
-                    },
                   } : {}),
                   ...(channels.rsi && spec.role === 'master' && fullAccess ? {
                     rsiStatus: async () => (await channels.rsi!.status()) as Record<string, unknown>,

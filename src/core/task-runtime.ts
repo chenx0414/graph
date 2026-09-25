@@ -434,7 +434,6 @@ export async function openTaskRuntime(options: {
           resources: true,
           agentCombinations: true,
           systemSummary: Boolean(options.systemContext.systemSummary),
-          requestModelAccess: true,
         },
       } : {}),
       autoWake: Boolean(options.autoWake),
@@ -1282,7 +1281,7 @@ export async function openTaskRuntime(options: {
         ...(options.systemContext ? { systemContext: {
           systemSummary: Boolean(options.systemContext.systemSummary),
           systemDiagnostics: Boolean(view), proposeSystemChange: Boolean(view),
-          applySystemChange: Boolean(view), requestModelAccess: Boolean(view),
+          applySystemChange: Boolean(view),
         } } : {}),
         ...(options.rsi ? { rsi: {
           status: isFullAccess(runtime.currentAccessPolicy()),
