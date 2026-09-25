@@ -73,7 +73,28 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | --- | --- | --- |
 | `secretRef` | 是 | 环境变量名（`^[A-Za-z_][A-Za-z0-9_]*$`），**不是密钥本身** |
 | `displayName` | 否 | 界面显示名 |
+| `platform` | 否 | 该凭据是**哪个订阅平台**的账户（如 `opencode-go`）。填了它，用量页就把它当成该平台的**独立账户**，用自己的密钥单独查额度、单独出一张卡 |
 | `sharedLimitGroupId` | 否 | 额度分组；两个凭据解析到**同一个密钥值**时必须同组，否则校验失败 |
+
+### 同一平台的多个账户
+
+一个平台可以配多个账户（各自一把密钥），做法就是**多个 credential**：
+
+```json
+{
+  "credentials": {
+    "opencode-go":      { "secretRef": "GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY", "displayName": "主账户" },
+    "opencode-go-work": { "platform": "opencode-go", "secretRef": "GRAPH_OPENCODE_WORK_KEY", "displayName": "工作账户" }
+  },
+  "models": { "entries": [{ "credentialId": "opencode-go-work", "...": "其余字段同下" }] }
+}
+```
+
+- `platform` 是**显式声明**：没有它，用量服务只能从「哪些模型用了这份凭据」反推平台，因此**没有绑定任何模型的账户不会出现在用量页**。
+- 用量页**每个账户一张卡**：平台自己的凭据（环境变量 / 厂商配置 / 模型反推）是第一张（id 仍是平台 id），每个带 `platform` 的账户各占一张（id 为 `<平台>#<凭据 id>`），summary 也按账户计数。
+- 调度**不做隐式切换**：模型用哪个账户，由 `models.entries[].credentialId` 显式决定；本轮不按剩余额度自动改派。
+- 同一把密钥写进两个 credential 仍然要 `sharedLimitGroupId`（那是「别名」语义，与上面的「多账户」是两件相反的事，别混用）。
+- 设置页「① 配置厂商」里，用**同一平台再加一个账户**按钮：它给新账户生成新的凭据 id 与环境变量名（`…_2`），所以不会覆盖已工作的那把密钥。
 
 ### `models.entries[]`
 

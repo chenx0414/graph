@@ -32,6 +32,8 @@ export interface UsageCredential {
   secretRef: string;
   source: string;
   configured: boolean;
+  /** The account name shown to the operator when one platform has several accounts. */
+  displayName?: string;
 }
 
 export interface SubscriptionModel {
@@ -51,7 +53,12 @@ export interface SubscriptionModel {
 }
 
 export interface UsagePlan {
-  id: UsageProviderId;
+  /** Unique per account: the platform id for its primary credential, `<platform>#<credentialId>` for extra accounts. */
+  id: string;
+  /** The subscription platform this plan reports on. */
+  platform: UsageProviderId;
+  /** The extra account this plan belongs to, or null for the platform's primary credential. */
+  account: { id: string; name: string } | null;
   name: string;
   subtitle: string;
   configured: boolean;
@@ -193,6 +200,8 @@ function basePlan(id: UsageProviderId, configured = false, status: UsageStatus =
   const blueprint = PLAN_BLUEPRINTS[id];
   return {
     id,
+    platform: id,
+    account: null,
     name: blueprint.name,
     subtitle: blueprint.subtitle,
     configured,
@@ -269,6 +278,24 @@ function configCredential(config: GraphConfig | null, env: Record<string, string
     }
   }
   return null;
+}
+
+/**
+ * Every credential that declares itself an account of `platform`. The platform's
+ * own credential (from the environment, the vendor config or the model that uses
+ * it) stays the primary one; these are the additional accounts an operator added,
+ * and each is queried with its own secret.
+ */
+function platformAccountCredentials(config: GraphConfig | null, env: Record<string, string | undefined>, platform: UsageProviderId): Credential[] {
+  const accounts: Credential[] = [];
+  for (const [id, credential] of Object.entries(config?.credentials ?? {})) {
+    if (credential.platform !== platform) continue;
+    const value = env[credential.secretRef]?.trim();
+    if (!value) continue;
+    const displayName = credential.displayName?.trim() || id;
+    accounts.push({ id, secretRef: credential.secretRef, configured: true, value, source: `Graph 账户 · ${displayName}`, displayName });
+  }
+  return accounts;
 }
 
 function literalCredential(value: unknown, provider: UsageProviderId, source: string, baseUrl?: string): Credential | null {
@@ -1027,46 +1054,54 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
     ]);
     const credentials = await credentialInventory();
     const prices = parseModelPrices(pricingRaw);
-    const adapters: { id: UsageProviderId; run: () => Promise<UsagePlan> }[] = [
-      {
-        id: 'opencode-go',
-        run: () => credentials['opencode-go']
-          ? fetchOpenCode(credentials['opencode-go'], fetchImpl, generatedAt, prices, openCodeConfig)
-          : Promise.resolve(basePlan('opencode-go')),
-      },
-      {
-        id: 'command-goat',
-        run: () => credentials['command-goat']
-          ? fetchCommandGoat(credentials['command-goat'], fetchImpl, generatedAt, prices, openCodeConfig)
-          : Promise.resolve(basePlan('command-goat')),
-      },
-      {
-        id: 'deepseek',
-        run: () => credentials.deepseek
-          ? fetchDeepSeek(credentials.deepseek, fetchImpl, prices)
-          : Promise.resolve(basePlan('deepseek')),
-      },
-      {
-        id: 'chatgpt',
-        run: () => credentials.chatgpt
-          ? fetchChatGpt(credentials.chatgpt, fetchImpl, prices)
-          : Promise.resolve(basePlan('chatgpt')),
-      },
-      {
-        id: 'grok',
-        run: () => credentials.grok
-          ? fetchGrok(credentials.grok, fetchImpl, generatedAt, prices)
-          : Promise.resolve(basePlan('grok')),
-      },
-    ];
-    const plans = await Promise.all(adapters.map(async adapter => {
-      const credential = credentials[adapter.id];
+    // One runner per platform, so an extra account of the same platform reuses the
+    // platform's own fetcher instead of duplicating its rules.
+    const runners: Record<UsageProviderId, (credential: Credential) => Promise<UsagePlan>> = {
+      'opencode-go': credential => fetchOpenCode(credential, fetchImpl, generatedAt, prices, openCodeConfig),
+      'command-goat': credential => fetchCommandGoat(credential, fetchImpl, generatedAt, prices, openCodeConfig),
+      deepseek: credential => fetchDeepSeek(credential, fetchImpl, prices),
+      chatgpt: credential => fetchChatGpt(credential, fetchImpl, prices),
+      grok: credential => fetchGrok(credential, fetchImpl, generatedAt, prices),
+    };
+    interface UsageJob {
+      platform: UsageProviderId;
+      planId: string;
+      account: { id: string; name: string } | null;
+      credential: Credential | null;
+      run: () => Promise<UsagePlan>;
+    }
+    const jobs: UsageJob[] = [];
+    for (const platform of Object.keys(runners) as UsageProviderId[]) {
+      const credential = credentials[platform];
+      jobs.push({
+        platform,
+        planId: platform,
+        account: null,
+        credential,
+        run: () => credential ? runners[platform](credential) : Promise.resolve(basePlan(platform)),
+      });
+      for (const account of platformAccountCredentials(current.config, current.env, platform)) {
+        // The credential already reported as the platform's primary one is not repeated.
+        if (account.id === credential?.id) continue;
+        jobs.push({
+          platform,
+          planId: `${platform}#${account.id}`,
+          account: { id: account.id, name: account.displayName?.trim() || account.id },
+          credential: account,
+          run: () => runners[platform](account),
+        });
+      }
+    }
+    const plans = await Promise.all(jobs.map(async job => {
       try {
-        return await adapter.run();
+        const plan = await job.run();
+        return { ...plan, id: job.planId, platform: job.platform, account: job.account };
       } catch (error) {
         return {
-          ...basePlan(adapter.id, true, 'error'),
-          ...(credential ? { credential: credentialInfo(credential), credentialSource: credential.source } : {}),
+          ...basePlan(job.platform, true, 'error'),
+          id: job.planId,
+          account: job.account,
+          ...(job.credential ? { credential: credentialInfo(job.credential), credentialSource: job.credential.source } : {}),
           error: errorMessage(error),
         };
       }

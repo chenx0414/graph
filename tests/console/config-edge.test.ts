@@ -8,6 +8,34 @@ import { parseGraphConfig } from '../../src/server/config.ts';
 import { buildTemplateConfigDocument } from '../../src/web/setup.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
+test('a credential can declare which subscription platform it is an account of', () => {
+  const path = '/tmp/graph.config.json';
+  const parsed = parseGraphConfig({
+    version: 1,
+    revision: 3,
+    projects: [],
+    credentials: {
+      'opencode-go': { secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', displayName: '主账户' },
+      'opencode-go-work': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_WORK_KEY', displayName: '工作账户' },
+    },
+    models: { entries: [{ id: 'zen', provider: 'opencode-go', grade: 'high', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 1000000, maxTokens: 384000, credentialId: 'opencode-go' }] },
+  }, path);
+  expect(parsed.credentials['opencode-go-work']).toEqual({
+    platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_WORK_KEY', displayName: '工作账户',
+  });
+  // Existing configs never declared an account, and they keep working untouched.
+  expect(parsed.credentials['opencode-go']?.platform).toBeUndefined();
+  // An unusable platform is a config error rather than a silently ignored account.
+  expect(() => parseGraphConfig({
+    version: 1, revision: 1, projects: [],
+    credentials: { a: { platform: '   ', secretRef: 'GRAPH_KEY_A' } }, models: { entries: [{ id: 'x', provider: 'custom', grade: 'low', api: 'openai-completions', baseUrl: 'https://x.example/v1', contextWindow: 1000, maxTokens: 100, credentialId: 'a' }] },
+  }, path)).toThrow(/credentials\.a\.platform/);
+  expect(() => parseGraphConfig({
+    version: 1, revision: 1, projects: [],
+    credentials: { a: { platform: 7, secretRef: 'GRAPH_KEY_A' } }, models: { entries: [{ id: 'x', provider: 'custom', grade: 'low', api: 'openai-completions', baseUrl: 'https://x.example/v1', contextWindow: 1000, maxTokens: 100, credentialId: 'a' }] },
+  }, path)).toThrow(/credentials\.a\.platform/);
+});
+
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
