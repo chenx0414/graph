@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, type AssistantMessage, type Context, type Model, type TranscriptContext } from '@earendil-works/pi-ai';
 import { streamSimple as openaiStreamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import { streamSimple as anthropicStreamSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
 import { estimateContextTokens, estimateTextTokens } from '@earendil-works/pi-ai/utils/estimate';
@@ -270,7 +270,7 @@ export interface StreamSlot {
 
 export interface AccountUsageDeltaInput {
   model: Model<ModelApi>;
-  context: Context;
+  context: TranscriptContext;
   /** A fresh clone owned by the callback; it may be consumed. */
   response: Response;
 }
@@ -322,7 +322,7 @@ function anthropicOutputText(body: unknown, contentType: string): string {
   return '';
 }
 
-async function estimateMissingUsage(response: Response, api: 'openai-completions' | 'anthropic-messages', context: Context): Promise<TokenUsage | null> {
+async function estimateMissingUsage(response: Response, api: 'openai-completions' | 'anthropic-messages', context: TranscriptContext): Promise<TokenUsage | null> {
   if (!response.ok) return null;
   const reader = response.body?.getReader();
   if (!reader) return null;
@@ -415,7 +415,9 @@ export function controlledOpenAIStream(
             if (!reported) {
               reported = true;
               // A diagnostic must never break a send: the model call is what matters.
-              try { usageOptions.onSend?.(context.systemPrompt ?? null); } catch { /* ignored on purpose */ }
+              // The provider now receives a normalized transcript: the current prompt is
+              // what every system message in it replays to, never a plain field.
+              try { usageOptions.onSend?.(getCurrentSystemPrompt(context.messages) || null); } catch { /* ignored on purpose */ }
             }
             // The slot is acquired per attempt inside gatedProviderFetch, so a
             // retry re-queues and re-passes the gate after releasing capacity.

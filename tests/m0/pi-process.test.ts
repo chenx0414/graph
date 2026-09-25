@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt } from '@earendil-works/pi-ai';
 import { reply, modelA } from '../fixtures/models.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { controlledOpenAIStream, type SendGate } from '../../src/runtime/controlled-openai.ts';
@@ -33,7 +33,7 @@ test('different subagents run in independent Pi processes with their own capabil
     stateDir: join(root, id),
     model: modelA,
     stream: (_model, context) => {
-      prompts.set(id, context.systemPrompt ?? '');
+      prompts.set(id, getCurrentSystemPrompt(context.messages));
       const stream = createAssistantMessageEventStream();
       stream.push({ type: 'done', reason: 'stop', message: reply(modelA, id) });
       return stream;

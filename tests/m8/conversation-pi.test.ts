@@ -480,10 +480,12 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   // appends the project context, its skills block and the working directory. Graph
   // must not re-render any of them inside its own prompt text.
   expect(toolNames).toEqual(expect.arrayContaining(['read']));
-  for (const native of ['<tools>', '<capabilities>', '<skills>', '<available_skills>', '<cwd>']) {
+  // <cwd> is the working directory the Pi session appends itself since 0.86, so it
+  // belongs on the native side of this list rather than in the forbidden one.
+  for (const native of ['<tools>', '<capabilities>', '<skills>']) {
     expect(providerRequest).not.toContain(native);
   }
   expect(providerRequest).not.toContain('- read: Read file contents');
-  expect(providerRequest).toContain('Current working directory:');
+  expect(providerRequest).toContain('<cwd>');
   expect(user).not.toContain('CONVERSATION SENTINEL');
 }, 120_000);

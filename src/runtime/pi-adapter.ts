@@ -765,8 +765,16 @@ export function createPiAdapter(options: {
           if (event.type === 'message_end') {
             // Real assistant message from the Pi session, not a fabricated
             // summary of the final output.
-            const message = (event as unknown as { message?: { role?: string; content?: { type?: string; text?: string }[] } }).message;
-            const text = (message?.content ?? []).filter(part => part.type === 'text' && typeof part.text === 'string').map(part => part.text!).join('');
+            const message = (event as unknown as { message?: { role?: string; content?: unknown } }).message;
+            // Since 0.86 a system or user message carries plain string content
+            // (types.d.ts: content: string | TextContent[]), so the role has to be
+            // checked before the array shape is assumed.
+            const content = message?.content;
+            const text = message?.role !== 'assistant' ? ''
+              : typeof content === 'string' ? content
+              : Array.isArray(content)
+                ? (content as { type?: string; text?: string }[]).filter(part => part.type === 'text' && typeof part.text === 'string').map(part => part.text!).join('')
+                : '';
             if (message?.role === 'assistant' && text.trim()) {
               if (persistEntries) {
                 sawAssistantMessageEnd = true;

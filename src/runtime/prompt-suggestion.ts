@@ -1,4 +1,5 @@
 import type { StreamFn } from '@earendil-works/pi-agent-core';
+import { normalizeContext } from '@earendil-works/pi-ai';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT } from './agent-context.ts';
@@ -65,7 +66,7 @@ export async function generatePromptSuggestion(input: {
     }],
   };
   try {
-    const stream = await input.stream(input.model, context, {
+    const stream = await input.stream(input.model, normalizeContext(context), {
       maxTokens: 160,
       reasoning: 'minimal',
       ...(input.signal ? { signal: input.signal } : {}),

@@ -104,7 +104,7 @@ test('the next-operation preview matches the real master tools and context at th
   // session's own additions: they reach the request, never the preview.
   expect(system).toContain('<project_context>');
   expect(system).toContain('SELECTED PROJECT INSTRUCTIONS');
-  expect(system).toContain('Current working directory:');
+  expect(system).toContain('<cwd>');
   // The preview follows next-operation settings, while the previous request is
   // unchanged. No new model call or historical load fact is needed to refresh.
   access = standardAccessPolicy();

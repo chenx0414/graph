@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { Type } from '@earendil-works/pi-ai';
+import { Type, normalizeContext } from '@earendil-works/pi-ai';
 import type { ToolDefinition, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from '../../src/runtime/pi-instance.ts';
 import { CallBroker, type TokenUsage } from '../../src/runtime/call-broker.ts';
@@ -42,7 +42,7 @@ test('Graph supplies the custom prompt and the Pi session keeps its own native a
   // prompt and the Pi session appends its own parts itself, which is how the
   // working-directory line reaches the model.
   expect(system.startsWith(composed)).toBe(true);
-  expect(system).toContain('Current working directory:');
+  expect(system).toMatch(/<cwd>\n[^\n]+\n<\/cwd>/);
 });
 
 test('the exact system prompt sent to the provider is reported back to the caller', async () => {
@@ -104,7 +104,7 @@ test('an LLM request made inside a tool cannot bypass a pause', async () => {
     name: 'ask_model', label: 'Ask model', description: 'Nested model call', parameters: Type.Object({}),
     execute: async () => {
       gate.pause();
-      const stream = await controlledOpenAIStream(gate, 'local-key')(service.model, { messages: [{ role: 'user', content: 'Nested request', timestamp: Date.now() }] });
+      const stream = await controlledOpenAIStream(gate, 'local-key')(service.model, normalizeContext({ messages: [{ role: 'user', content: 'Nested request', timestamp: Date.now() }] }));
       nestedStopReason = (await stream.result()).stopReason;
       return { content: [{ type: 'text', text: 'Nested request was stopped' }], details: {} };
     },
@@ -204,7 +204,7 @@ test('a connection reset after the request was sent is not resent and holds unkn
     reasoning: false, input: ['text' as const], contextWindow: 32_000, maxTokens: 256,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
-  const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] });
+  const stream = await controlledOpenAIStream(broker, 'scripted-local-key')(model, normalizeContext({ messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] }));
   expect((await stream.result()).stopReason).toBe('error');
   expect(attempts).toBe(1);
   expect(broker.inspect()).toMatchObject({ used: 0, hold: 'unknown usage', status: 'blocked', calls: [{ state: 'unknown' }] });

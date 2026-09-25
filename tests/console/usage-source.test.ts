@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest';
-import type { Context } from '@earendil-works/pi-ai';
+import { normalizeContext } from '@earendil-works/pi-ai';
 import { controlledOpenAIStream, type SendGate } from '../../src/runtime/controlled-openai.ts';
 import type { TokenUsage } from '../../src/runtime/call-broker.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -35,7 +35,7 @@ function bounded<T>(promise: Promise<T>, milliseconds: number, label: string) {
 test('a completed SSE response settles before the provider closes its connection', async () => {
   const provider = await openaiServer([{ text: 'already complete', holdOpen: true }]);
   cleanup.push(() => provider.close());
-  const context: Context = { messages: [{ role: 'user', content: 'Answer now.', timestamp: 1 }] };
+  const context = normalizeContext({ messages: [{ role: 'user', content: 'Answer now.', timestamp: 1 }] });
   const tracked = collectingGate();
 
   await bounded(
@@ -55,7 +55,7 @@ test('usage provenance prefers provider, then account delta, then local estimati
     { text: 'estimated answer', usage: null },
   ]);
   cleanup.push(() => provider.close());
-  const context: Context = { messages: [{ role: 'user', content: 'Explain the token usage source.', timestamp: 1 }] };
+  const context = normalizeContext({ messages: [{ role: 'user', content: 'Explain the token usage source.', timestamp: 1 }] });
 
   const authoritative = collectingGate();
   await consume(controlledOpenAIStream(authoritative.gate, 'key')(provider.model, context, { apiKey: 'ignored' }));
