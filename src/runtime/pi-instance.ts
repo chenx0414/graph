@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -290,7 +290,15 @@ export async function openPiInstance(options: PiInstanceOptions) {
     },
   };
   const extensionFactories = [...(options.extensionFactories ?? []), ...(promptTakeover ? [promptTakeover] : [])];
-  if (options.mcpAdapterServers?.length) extensionFactories.push(mcpAdapterBridge(options.mcpAdapterServers));
+  if (options.mcpAdapterServers?.length) {
+    // The adapter lives in the same session, so a registration it refuses is
+    // otherwise invisible: record it where the instance can be inspected.
+    const adapterLog = join(options.stateDir, 'mcp-adapter.log');
+    extensionFactories.push(mcpAdapterBridge(options.mcpAdapterServers, message => {
+      try { appendFileSync(adapterLog, `${new Date().toISOString()} ${message}\n`); }
+      catch { /* a diagnostic must never break a session */ }
+    }));
+  }
   // The session's own view of skills must match the block Graph renders into the system
   // prompt: the Agent's folder plus the SDK's own global and project folders.
   const skillLoadPaths = [...new Set([

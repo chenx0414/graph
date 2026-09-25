@@ -26,25 +26,59 @@ interface RuntimeRegistrationRequest {
  * bound to. Registered servers are proxy-tool-only, so the model reaches them
  * through the adapter's "mcp" gateway, which has to be allowed in the session.
  */
-export function mcpAdapterBridge(servers: readonly { name: string; definition: unknown }[]): InlineExtension {
+/**
+ * Build the inline extension that registers every MCP server this operation is
+ * bound to. Registered servers are proxy-tool-only, so the model reaches them
+ * through the adapter's "mcp" gateway, which has to be allowed in the session.
+ *
+ * The adapter is a sibling extension and only accepts a server once its own
+ * session state exists, so one round is not enough: an unanswered event means
+ * nobody was listening yet, and the next turn tries again. A refusal is
+ * reported, never swallowed - a dropped registration leaves an empty gateway
+ * that no one can see.
+ */
+export function mcpAdapterBridge(
+  servers: readonly { name: string; definition: unknown }[],
+  report: (message: string) => void = message => process.stderr.write(`${message}\n`),
+): InlineExtension {
   return {
     name: 'graph-mcp-adapter',
     hidden: true,
     factory: pi => {
       const registrations: { dispose(): Promise<void> }[] = [];
-      pi.on('session_start', () => {
+      const registered = new Set<string>();
+      const reported = new Set<string>();
+      const inform = (message: string) => {
+        if (reported.has(message)) return;
+        reported.add(message);
+        report(message);
+      };
+      const round = () => {
         for (const server of servers) {
+          if (registered.has(server.name)) continue;
           const request: RuntimeRegistrationRequest = {
             version: MCP_RUNTIME_REGISTER_VERSION,
             name: server.name,
             definition: server.definition,
           };
           try { (pi as ExtensionAPI).events?.emit(MCP_RUNTIME_REGISTER_EVENT, request); }
-          catch { continue; }
+          catch (error) {
+            inform(`MCP adapter registration for ${server.name} could not be sent: ${error instanceof Error ? error.message : String(error)}`);
+            continue;
+          }
           const result = request.result;
-          if (result?.ok) registrations.push(result.registration);
+          if (result?.ok) {
+            registered.add(server.name);
+            registrations.push(result.registration);
+            continue;
+          }
+          if (result && !result.ok) {
+            inform(`MCP adapter refused the server ${server.name}: ${result.error.message}`);
+          }
         }
-      });
+      };
+      pi.on('session_start', round);
+      pi.on('before_agent_start', round);
       pi.on('session_shutdown', async () => {
         for (const registration of registrations.splice(0)) await registration.dispose().catch(() => undefined);
       });
