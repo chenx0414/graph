@@ -1028,12 +1028,12 @@ export async function openTaskRuntime(options: {
       if (!proposal) throw new RuntimeError('not_found', `Proposal v${version} was not found`);
       return proposal;
     },
-    async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[]; command?: 'compact' }) {
+    async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[]; command?: 'compact'; source?: Json }) {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const attachments = cleanAttachments(input.attachments);
       const receipt = store.command(`conversation:${conversationId}`, input.requestId, {
-        type: 'chat', text: input.text, attachments, command: input.command ?? null,
+        type: 'chat', text: input.text, attachments, command: input.command ?? null, source: input.source ?? null,
       }, () => {
         if (!input.text.trim() && !attachments.length && !input.command) throw new RuntimeError('invalid_input', 'A nonempty message, attachment or command is required');
         recoverMaster(store, conversation.anchor_task_id, 'message');
@@ -1042,10 +1042,12 @@ export async function openTaskRuntime(options: {
         const state = anchor.paused || (node && ['preparing', 'running', 'blocked'].includes(node.status)) ? 'queued' : 'pending';
         const message = appendMessage(store, {
           conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state,
-          ...(attachments.length || input.command ? {
+          ...(attachments.length || input.command || input.source ? {
             data: {
               ...(attachments.length ? { attachments } : {}),
               ...(input.command ? { command: input.command } : {}),
+              // Who wrote it, when it was not the user: another Agent's conversation.
+              ...(input.source ? { source: input.source } : {}),
             } as unknown as Json,
           } : {}),
         });
