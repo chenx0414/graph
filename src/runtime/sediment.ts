@@ -73,12 +73,19 @@ export interface SedimentProposal {
 }
 
 export interface SedimentOutcome {
+  /** No skill was written. */
   nothing: boolean;
   written: { id: string; path: string; replaced: boolean }[];
   refused: string[];
+  /**
+   * What the reply actually carried: the action it proposed, `nothing` when it said so, and `null`
+   * when nothing readable came back at all. Without this, a silent failure and a deliberate
+   * "nothing to save" look identical from the outside.
+   */
+  proposed: 'create' | 'update' | 'nothing' | null;
 }
 
-const NOTHING: SedimentOutcome = { nothing: true, written: [], refused: [] };
+const NOTHING: SedimentOutcome = { nothing: true, written: [], refused: [], proposed: null };
 
 /** Only the master's own operations are reviewed, and only when they did real work. */
 export function shouldSediment(gate: SedimentGate): boolean {
@@ -156,7 +163,8 @@ export function existingSkillSummaries(projectRoot: string): { id: string; descr
  */
 export function applySedimentProposal(input: { projectRoot: string; proposal: SedimentProposal | null }): SedimentOutcome {
   const proposal = input.proposal;
-  if (!proposal || proposal.action === 'nothing') return NOTHING;
+  if (!proposal) return NOTHING;
+  if (proposal.action === 'nothing') return { ...NOTHING, proposed: 'nothing' };
   const refused: string[] = [];
   const id = proposal.id ?? '';
   const description = proposal.description ?? '';
@@ -171,24 +179,24 @@ export function applySedimentProposal(input: { projectRoot: string; proposal: Se
   if (!body || body.length > BODY_LIMIT) {
     refused.push(`refused: body must be markdown between 1 and ${BODY_LIMIT} characters`);
   }
-  if (refused.length) return { nothing: false, written: [], refused };
+  if (refused.length) return { nothing: false, written: [], refused, proposed: proposal.action };
 
   const skillsRoot = resolve(input.projectRoot, ...SKILLS_SEGMENTS);
   const dir = join(skillsRoot, id);
   if (!(resolve(dir) + sep).startsWith(skillsRoot + sep)) {
-    return { nothing: false, written: [], refused: [`refused: ${id} resolves outside the project skill folder`] };
+    return { nothing: false, written: [], refused: [`refused: ${id} resolves outside the project skill folder`], proposed: proposal.action };
   }
   const path = join(dir, 'SKILL.md');
   let replaced = false;
   if (existsSync(path)) {
     if (!/^---[\s\S]*?^created-by:\s*graph-agent\s*$/m.test(readFileSync(path, 'utf8'))) {
-      return { nothing: false, written: [], refused: [`refused: skill '${id}' was not written by us (no created-by: graph-agent); it is somebody else's text`] };
+      return { nothing: false, written: [], refused: [`refused: skill '${id}' was not written by us (no created-by: graph-agent); it is somebody else's text`], proposed: proposal.action };
     }
     replaced = true;
   }
   mkdirSync(dir, { recursive: true });
   writeFileSync(path, `---\nname: ${id}\ncreated-by: graph-agent\ndescription: ${description}\n---\n\n${body}\n`);
-  return { nothing: false, written: [{ id, path, replaced }], refused: [] };
+  return { nothing: false, written: [{ id, path, replaced }], refused: [], proposed: proposal.action };
 }
 
 function textFromMessage(message: { content?: unknown }) {

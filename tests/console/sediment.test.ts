@@ -91,7 +91,9 @@ test('nothing to save writes nothing at all', async () => {
 
   const outcome = applySedimentProposal({ projectRoot: root, proposal: { action: 'nothing' } });
 
-  expect(outcome).toEqual({ nothing: true, written: [], refused: [] });
-  expect(applySedimentProposal({ projectRoot: root, proposal: null }).nothing).toBe(true);
+  // "the model said nothing" and "nothing readable came back" both write nothing, and they are not
+  // the same fact: the record has to tell them apart, or a silent failure hides behind a decision.
+  expect(outcome).toEqual({ nothing: true, written: [], refused: [], proposed: 'nothing' });
+  expect(applySedimentProposal({ projectRoot: root, proposal: null })).toEqual({ nothing: true, written: [], refused: [], proposed: null });
   expect(await readFile(join(root, '.agents', 'skills', '.keep'), 'utf8').catch(() => null)).toBeNull();
 });

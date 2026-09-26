@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
@@ -74,4 +75,57 @@ test('an operation that did the work writes its own skill, without anybody readi
   const review = reader.requests.map(request => JSON.stringify(request)).find(request => request.includes('existingSkills'));
   expect(review).toBeTruthy();
   expect(review).toContain('数操作自己的工具调用');
+  // A decision nobody can read is not a fact. The review records what it decided and what it wrote,
+  // so "did it run, and what came of it" is answerable from the store instead of by guessing.
+  const recorded = new DatabaseSync(join(root, 'state', 'tasks.sqlite'))
+    .prepare("SELECT data FROM events WHERE type = 'skill_sediment.reviewed'").all() as { data: string }[];
+  expect(recorded).toHaveLength(1);
+  const decision = JSON.parse(recorded[0]!.data) as { reviewed: boolean; proposed: string; written: { id: string }[] };
+  expect(decision).toMatchObject({ reviewed: true, proposed: 'create' });
+  expect(decision.written.map(entry => entry.id)).toEqual(['count-own-work']);
+}, 120_000);
+
+// A reply that carries no proposal is a real outcome, and it is not the same as an empty one: the
+// record has to say the review ran and found nothing readable, or a silent failure looks identical.
+test('a review whose reply carries no proposal is recorded as such and writes nothing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sediment-nothing-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(join(project, '.agents', 'skills'), { recursive: true });
+  const main = await openaiServer([
+    { tools: [{ id: 'call-1', name: 'bash', arguments: '{"command":"echo one"}' }] },
+    { tools: [{ id: 'call-2', name: 'bash', arguments: '{"command":"echo two"}' }] },
+    { text: '这次没有可沉淀的东西。' },
+  ]);
+  const reader = await openaiServer([{ text: '我看了，没什么值得记的。' }, { text: '我看了，没什么值得记的。' }]);
+  cleanup.push(() => main.close());
+  cleanup.push(() => reader.close());
+  const entries = [
+    { id: 'main-model', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: main.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+    { id: 'reader-model', provider: 'graph-openai', grade: 'low' as const, api: 'openai-completions' as const, baseUrl: reader.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+  ];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], actions: {},
+    models: { entries, credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }), modelRuntime: main.runtime },
+    live: {
+      revision: () => 1,
+      config: () => ({ skills: { sedimentation: { enabled: true, afterToolCalls: 2, model: 'reader-model', budgetTokens: 40_000 } } }),
+      entries: () => entries,
+      preferences: () => ({}),
+      credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }),
+      masterModel: () => 'main-model',
+      defaultBudgetTokens: () => null,
+      projects: () => [{ id: 'p', root: project }],
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'main-model' },
+  });
+  cleanup.push(() => runtime.close());
+  await runtime.conversations.create({ projectId: 'p', text: '做两步检查。', requestId: 'sediment-nothing' });
+  await runtime.host.runReady();
+
+  expect(readdirSync(join(project, '.agents', 'skills'))).toEqual([]);
+  const recorded = new DatabaseSync(join(root, 'state', 'tasks.sqlite'))
+    .prepare("SELECT data FROM events WHERE type = 'skill_sediment.reviewed'").all() as { data: string }[];
+  expect(recorded).toHaveLength(1);
+  expect(JSON.parse(recorded[0]!.data)).toMatchObject({ reviewed: true, proposed: null, written: [], refused: [] });
 }, 120_000);

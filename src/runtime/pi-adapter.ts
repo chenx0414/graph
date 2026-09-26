@@ -1164,7 +1164,7 @@ export function createPiAdapter(options: {
                   existingSkills: existingSkillSummaries(project.root),
                 };
                 try {
-                  await runSedimentReview({
+                  const decision = await runSedimentReview({
                     gate: {
                       enabled: true, role: 'master', toolCalls,
                       threshold: settings.afterToolCalls,
@@ -1184,6 +1184,20 @@ export function createPiAdapter(options: {
                       systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/sediment.md') : DEFAULT_SEDIMENT_PROMPT,
                       payload,
                     }),
+                  });
+                  // What the review decided travels with the operation, so "it ran and found nothing",
+                  // "it proposed and was refused" and "it never came back with anything readable" are
+                  // facts in the store instead of guesses.
+                  options.store.event(operation.taskId, 'skill_sediment.reviewed', {
+                    operationId: operation.id,
+                    nodeId: operation.nodeId,
+                    model: sedimentEntry.id,
+                    toolCalls,
+                    threshold: settings.afterToolCalls,
+                    reviewed: decision.reviewed,
+                    proposed: decision.outcome.proposed,
+                    written: decision.outcome.written.map(entry => ({ id: entry.id, replaced: entry.replaced })),
+                    refused: decision.outcome.refused,
                   });
                 } catch {
                   // A review is an observer of the operation, never a step in it.
