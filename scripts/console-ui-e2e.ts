@@ -156,6 +156,15 @@ try {
   const shot = join(screenshots, 'tool-stats.png');
   await page.screenshot({ path: shot, fullPage: true });
   console.log(`截图 ${shot}`);
+  // 清空记录后页面必须回到空态，并把「采集范围」写清楚：这类口径类文案以前没有任何断言守着，
+  // 所以它过时了一整轮才被发现（HB-90）。
+  await page.getByRole('button', { name: '清空记录' }).click();
+  await page.getByTestId('tool-stats-page').getByText('还没有记录').waitFor({ timeout: 10_000 });
+  const cleared = await page.getByTestId('tool-stats-page').innerText();
+  checkContains('清空后回到空态', cleared, '还没有记录');
+  checkContains('口径说明写明含并行车道', cleared, '并行车道');
+  check('清空后表格消失', await page.getByTestId('tool-stats-table').count(), 0);
+
   // The decision card: the shape the master's own ask_user question renders as.
   await page.goto(`${url}/#/tasks/hb80-asked`, { waitUntil: 'domcontentloaded' });
   await page.getByTestId('questions').waitFor({ timeout: 10_000 });
