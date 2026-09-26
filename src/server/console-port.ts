@@ -14,6 +14,8 @@ export async function preferredConsolePort(input: {
   stateDir: string;
   read?: (stateDir: string) => Promise<ConsoleAddress | null>;
   isFree?: (port: number) => Promise<boolean>;
+  waitMs?: number;
+  pollMs?: number;
 }): Promise<number | undefined> {
   const read = input.read ?? readConsoleAddress;
   const isFree = input.isFree ?? (() => Promise.resolve(true));
@@ -26,7 +28,17 @@ export async function preferredConsolePort(input: {
     return undefined;
   }
   if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined;
-  return (await isFree(port).catch(() => false)) ? port : undefined;
+  // The daemon being replaced is usually still closing its socket, so the remembered port is
+  // expected to be busy for a moment. Waiting for it is what makes a reload keep the address:
+  // measured, a bare probe moved the console to a new port on every reload, and the only way to
+  // tell "still exiting" apart from "someone else's service" is to watch the port for a while.
+  const deadline = Date.now() + (input.waitMs ?? 0);
+  const pollMs = Math.max(10, input.pollMs ?? 150);
+  for (;;) {
+    if (await isFree(port).catch(() => false)) return port;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise(done => setTimeout(done, pollMs));
+  }
 }
 
 /** Whether binding 127.0.0.1:port would succeed right now. A probe, not a reservation. */

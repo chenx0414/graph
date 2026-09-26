@@ -56,7 +56,7 @@ export async function openGraphServer(options: Parameters<typeof openTaskRuntime
   // directory last served on: a reload must not move the console out from under open tabs.
   const requestedPort = options.port ?? 0;
   const bindPort = requestedPort === 0
-    ? (await preferredConsolePort({ stateDir: options.stateDir, isFree: portIsFree })) ?? 0
+    ? (await preferredConsolePort({ stateDir: options.stateDir, isFree: portIsFree, waitMs: 5_000 })) ?? 0
     : requestedPort;
   try {
     address = await app.listen({ host: '127.0.0.1', port: bindPort });
