@@ -41,6 +41,48 @@ test('the switch, the role, the threshold, a pause and a second look all gate th
   expect(shouldSediment({ ...base, alreadyReviewed: true })).toBe(false);
 });
 
+test('a markdown body with literal newlines is still read', () => {
+  // A model writes a markdown body the way markdown looks, so the newline between two lines arrives
+  // as a real newline inside a JSON string and JSON.parse refuses the whole proposal. The reply is
+  // otherwise exactly what was asked for, and throwing it away is the difference between a written
+  // skill and a silent "nothing".
+  const literal = '{"action":"create","id":"newline-body","description":"Use when a body spans several lines","body":"line one\nline two\n\n- a bullet"}';
+  const parsed = parseSedimentProposal(literal);
+  expect(parsed?.action).toBe('create');
+  expect(parsed?.id).toBe('newline-body');
+  expect(parsed?.body).toContain('line two');
+  // Tabs and carriage returns are the same class of mistake.
+  expect(parseSedimentProposal('{"action":"nothing","reason":"a\treason"}')?.action).toBe('nothing');
+  // A reply that is genuinely broken stays unreadable instead of being guessed at.
+  expect(parseSedimentProposal('{"action":"create","id":')).toBeNull();
+  expect(parseSedimentProposal('no json at all')).toBeNull();
+});
+
+test('metadata on one line plus a fenced body is read, markdown and all', () => {
+  // Asking a model to put a markdown body inside a JSON string asks it to escape markdown, and it
+  // will not: real replies arrive with a line break or a quoted command in the middle and the whole
+  // proposal is lost. The metadata stays one line; the skill itself travels in a fenced block.
+  const reply = [
+    '{"action":"create","id":"fenced-body","description":"Use when a skill body needs quotes and lines","reason":"the body is markdown"}',
+    '```markdown',
+    '## Steps',
+    '',
+    '1. Run "node --run e2e:console"; it needs chromium.',
+    '2. Read the screenshot.',
+    '```',
+  ].join('\n');
+  const parsed = parseSedimentProposal(reply);
+  expect(parsed?.action).toBe('create');
+  expect(parsed?.id).toBe('fenced-body');
+  expect(parsed?.body).toContain('## Steps');
+  expect(parsed?.body).toContain('node --run e2e:console');
+  // A fence that never closes is not a body, and an empty body is refused by the writer anyway.
+  expect(parseSedimentProposal('{"action":"create","id":"x","description":"Use when x"}\n```markdown\nunfinished')?.body).toBeUndefined();
+  // The older shape, body inside the JSON, keeps working: a reply is read whatever shape it takes.
+  // The body is trimmed on the way in, which is the normalisation the writer applies anyway.
+  expect(parseSedimentProposal(JSON.stringify(GOOD))?.body).toBe(GOOD.body.trim());
+});
+
 test('a reply becomes a proposal, and a refusal to sediment becomes nothing', () => {
   const fenced = `\`\`\`json\n${JSON.stringify(GOOD)}\n\`\`\``;
 
@@ -91,7 +133,9 @@ test('nothing to save writes nothing at all', async () => {
 
   const outcome = applySedimentProposal({ projectRoot: root, proposal: { action: 'nothing' } });
 
-  expect(outcome).toEqual({ nothing: true, written: [], refused: [] });
-  expect(applySedimentProposal({ projectRoot: root, proposal: null }).nothing).toBe(true);
+  // "the model said nothing" and "nothing readable came back" both write nothing, and they are not
+  // the same fact: the record has to tell them apart, or a silent failure hides behind a decision.
+  expect(outcome).toEqual({ nothing: true, written: [], refused: [], proposed: 'nothing' });
+  expect(applySedimentProposal({ projectRoot: root, proposal: null })).toEqual({ nothing: true, written: [], refused: [], proposed: null });
   expect(await readFile(join(root, '.agents', 'skills', '.keep'), 'utf8').catch(() => null)).toBeNull();
 });

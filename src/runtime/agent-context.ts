@@ -64,8 +64,12 @@ export const DEFAULT_PROMPT_SUGGESTION_PROMPT = [
  */
 export const DEFAULT_SEDIMENT_PROMPT = [
   'You are reviewing one finished operation of a coding agent, deciding whether it taught something worth keeping as a skill.',
-  'Answer with one JSON object and nothing else:',
-  '{"action":"create"|"update"|"nothing","id":"<lowercase-slug>","description":"<one sentence saying when to use it>","body":"<markdown>","reason":"<one line>"}',
+  'Answer with one line of metadata, then the skill itself:',
+  '{"action":"create"|"update"|"nothing","id":"<lowercase-slug>","description":"<one sentence saying when to use it>","reason":"<one line>"}',
+  'Keep that line to metadata only — never put markdown in it. When the action is create or update, follow it with the skill in a fenced block:',
+  '```markdown',
+  '<the skill: the procedure in order, the commands that work, the pitfalls>',
+  '```',
   'Use "nothing" when the operation taught nothing reusable. That is a real answer, but not the default: an operation that involved a correction, a dead end, or a non-trivial technique usually taught something.',
   '',
   'What a skill is: the instructions for doing a class of task the efficient and correct way — the procedure in order, the commands that work, and the pitfalls that cost time.',
@@ -88,7 +92,7 @@ export const DEFAULT_SEDIMENT_PROMPT = [
   '',
   'Field rules: id is a lowercase slug, at most 60 characters, and names the CLASS of task rather than today\'s incident (never a PR number, a file name, or "fix-X-today").',
   'description is one sentence, at most 300 characters, and must say when to use the skill ("Use when …").',
-  'body is markdown, at most 20000 characters, and is the skill itself.',
+  'The fenced block is the skill itself: markdown, at most 20000 characters, the thing a future operation follows.',
 ].join('\n');
 
 export const DEFAULT_COMMON_RULES = [
@@ -340,6 +344,19 @@ const LEGACY_PROMPT_REPLACEMENTS: Partial<Record<AgentPromptKey, readonly (reado
     '',
   ]],
   'runtime/main-graph.md': [['\n{{selfModelSection}}', '']],
+  // The review used to ask for the whole skill inside one JSON object, which asks a model to escape
+  // markdown and quietly loses the proposal. A file seeded by that version is migrated here, because
+  // the library reads the visible file and a constant alone would only reach fresh installations.
+  'runtime/sediment.md': [
+    ['Answer with one JSON object and nothing else:', 'Answer with one line of metadata, then the skill itself:'],
+    [
+      '{"action":"create"|"update"|"nothing","id":"<lowercase-slug>","description":"<one sentence saying when to use it>","body":"<markdown>","reason":"<one line>"}',
+      '{"action":"create"|"update"|"nothing","id":"<lowercase-slug>","description":"<one sentence saying when to use it>","reason":"<one line>"}\n'
+      + 'Keep that line to metadata only — never put markdown in it. When the action is create or update, follow it with the skill in a fenced block:\n'
+      + '```markdown\n<the skill: the procedure in order, the commands that work, the pitfalls>\n```',
+    ],
+    ['body is markdown, at most 20000 characters, and is the skill itself.', 'The fenced block is the skill itself: markdown, at most 20000 characters, the thing a future operation follows.'],
+  ],
 };
 
 function render(content: string, variables: Record<string, string>) {

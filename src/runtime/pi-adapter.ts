@@ -47,7 +47,7 @@ import { linkProjectDependencies } from './project-dependencies.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT, DEFAULT_SEDIMENT_PROMPT, type AgentContextLibrary } from './agent-context.ts';
 import {
-  existingSkillSummaries, generateSkillProposal, runSedimentReview, selectSedimentModel, type SedimentSettings,
+  existingSkillSummaries, generateSkillProposal, runSedimentReview, selectSedimentModel, type SedimentReply, type SedimentSettings,
 } from './sediment.ts';
 
 export interface PiAdapterChannels {
@@ -1154,16 +1154,20 @@ export function createPiAdapter(options: {
                   { optional: true },
                 );
                 sedimentGate.setPurpose('skill_sediment');
-                const toolCalls = (options.store.db
-                  .prepare('SELECT count(*) AS calls FROM tool_calls WHERE instance_id = ?')
-                  .get(operation.instanceId!) as { calls: number }).calls;
+                // What this operation itself did. Counting rows in `tool_calls` instead would make the
+                // review wait for somebody to open the statistics page: worker lanes are folded into
+                // that table on demand, so a fresh conversation would never reach the threshold.
+                const toolCalls = toolActivity.length;
                 const payload = {
                   lastUserMessage: lastUserMessage ?? '',
                   reply: reply.slice(0, 8_000),
                   existingSkills: existingSkillSummaries(project.root),
                 };
+                // Kept so the record can say why a reply produced nothing: a truncated answer and a
+                // prose answer both arrive as "no proposal", and they need opposite fixes.
+                const capture: { reply: SedimentReply | null } = { reply: null };
                 try {
-                  await runSedimentReview({
+                  const decision = await runSedimentReview({
                     gate: {
                       enabled: true, role: 'master', toolCalls,
                       threshold: settings.afterToolCalls,
@@ -1174,15 +1178,36 @@ export function createPiAdapter(options: {
                     settings,
                     projectRoot: project.root,
                     payload,
-                    review: async () => generateSkillProposal({
-                      stream: controlledOpenAIStream(sedimentGate, resolveKeyFor(sedimentEntry), slotFor(sedimentEntry), sedimentEntry.api, {
-                        estimateMissing: true,
-                        ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
-                      }),
-                      model: toPiModel(sedimentEntry),
-                      systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/sediment.md') : DEFAULT_SEDIMENT_PROMPT,
-                      payload,
-                    }),
+                    review: async () => {
+                      capture.reply = await generateSkillProposal({
+                        stream: controlledOpenAIStream(sedimentGate, resolveKeyFor(sedimentEntry), slotFor(sedimentEntry), sedimentEntry.api, {
+                          estimateMissing: true,
+                          ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+                        }),
+                        model: toPiModel(sedimentEntry),
+                        systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/sediment.md') : DEFAULT_SEDIMENT_PROMPT,
+                        payload,
+                      });
+                      return capture.reply.text;
+                    },
+                  });
+                  // What the review decided travels with the operation, so "it ran and found nothing",
+                  // "it proposed and was refused" and "it never came back with anything readable" are
+                  // facts in the store instead of guesses.
+                  options.store.event(operation.taskId, 'skill_sediment.reviewed', {
+                    operationId: operation.id,
+                    nodeId: operation.nodeId,
+                    model: sedimentEntry.id,
+                    toolCalls,
+                    threshold: settings.afterToolCalls,
+                    reviewed: decision.reviewed,
+                    proposed: decision.outcome.proposed,
+                    written: decision.outcome.written.map(entry => ({ id: entry.id, replaced: entry.replaced })),
+                    refused: decision.outcome.refused,
+                    replyStop: capture.reply?.stopReason ?? null,
+                    replyChars: capture.reply?.raw.length ?? 0,
+                    replyHead: capture.reply?.raw.slice(0, 200) ?? '',
+                    replyError: capture.reply?.error ?? null,
                   });
                 } catch {
                   // A review is an observer of the operation, never a step in it.
