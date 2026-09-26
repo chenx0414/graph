@@ -322,6 +322,46 @@ test('a failed check keeps the change so the Agent can keep fixing', async () =>
   expect(shell(root, ['log', '-1', '--format=%s'])).toBe('rsi: Retry checks');
 });
 
+test('a retry whose anchor predates the failed attempt is told which text to match', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  // Fails once, the way a flaky check does: the stale-anchor attempt is refused before checks run, and
+  // the third attempt lands the change.
+  let attempts = 0;
+  const firstFails = async (): Promise<RsiValidationResult[]> => {
+    attempts += 1;
+    return [{ command: 'mock check', status: attempts === 1 ? 'failed' : 'passed', output: attempts === 1 ? 'boom' : '' }];
+  };
+  const rsi = service(root, dir, firstFails);
+  const failed = await rsi.apply({
+    title: 'Broken change',
+    problem: 'Introduce a regression.',
+    changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'export const value = 1;', newText: 'export const value = 2;' }] }],
+  }, { store, taskId, conversationId });
+  expect(failed.status).toBe('checks_failed');
+
+  // The worktree now holds the failed attempt's text, so the anchor that was correct before it matches
+  // nothing (0 occurrences). The receipt has to say which state it matched against: reaching for the
+  // committed file is the trap, and "found 0" alone reads like a typo instead of a stale anchor.
+  const conflicted = await rsi.apply({
+    title: 'Broken change',
+    problem: 'Introduce a regression.',
+    changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'export const value = 1;', newText: 'export const value = 3;' }] }],
+  }, { store, taskId, conversationId });
+  expect(conflicted.status).toBe('rolled_back');
+  expect(conflicted.error).toMatch(/found 0[\s\S]*\u4e0a\u4e00\u8f6e\u672a\u63d0\u4ea4[\s\S]*write/);
+
+  // And what the file actually holds is what a retry matches. Nothing else about the flow changed.
+  const applied = await rsi.apply({
+    title: 'Finish the change',
+    activate: false,
+    problem: 'Correct the earlier attempt.',
+    changes: [{ path: 'src/keep.ts', action: 'replace', edits: [{ oldText: 'export const value = 2;', newText: 'export const value = 4;' }] }],
+  }, { store, taskId, conversationId });
+  expect(applied.status).toBe('applied');
+  expect(await readFile(join(root, 'src', 'keep.ts'), 'utf8')).toContain('value = 4');
+});
+
 test('activate=false commits without scheduling a reload', async () => {
   const root = await repo();
   const { store, taskId, conversationId, dir } = ledger();
