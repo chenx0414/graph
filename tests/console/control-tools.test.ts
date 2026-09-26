@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { agentTools } from '../../src/runtime/agent-tools.ts';
 import { assertQuestionAnswer, questionOwner, questionSummary } from '../../src/core/question-routing.ts';
+import { describeQuestion } from '../../src/web/labels.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { describeAgentTools } from '../../src/runtime/agent-tool-definitions.ts';
 import { activeOperationForNode } from '../../src/core/control-targets.ts';
@@ -31,6 +32,9 @@ test('a master question is the user decision to make, and a plain answer settles
   expect(() => assertQuestionAnswer('waiting', { type: 'respond', value: 'Web' })).not.toThrow();
   expect(() => assertQuestionAnswer('waiting', { type: 'grant', grant: 'mcp:demo:write' }))
     .toThrow('Answer type does not match the open question');
+  // The console names what it is waiting for: a decision, not an external condition.
+  expect(describeQuestion('waiting', { requestType: 'user_decision' })).toBe('等待你的决定');
+  expect(describeQuestion('waiting', { requestType: 'model_access' })).toBe('等待外部条件');
 });
 
 test('the master tool inventory carries the two control tools and workers do not', () => {

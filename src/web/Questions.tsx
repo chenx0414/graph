@@ -4,6 +4,14 @@ import { describeQuestion } from './labels.ts';
 import { Button, Pill, toast } from './ui.tsx';
 
 function questionPrompt(kind: string, data: Record<string, unknown>) {
+  // The agent's own question: what it asks, and what its answer changes.
+  if (kind === 'waiting' && data.requestType === 'user_decision') {
+    const prompt = text('prompt');
+    const why = text('why');
+    if (prompt && why) return `${prompt}（会改变：${why}）`;
+    if (prompt) return prompt;
+    return '主 Agent 需要你的一个决定。';
+  }
   const text = (key: string) => typeof data[key] === 'string' && String(data[key]).trim() ? String(data[key]).trim() : undefined;
   if (kind === 'permission') {
     const grant = text('grant');
@@ -46,7 +54,7 @@ export function QuestionReply({ taskId, question, onDone }: {
   return (
     <li className="list-item" style={{ alignItems: 'flex-start', flexDirection: 'column' }}>
       <div className="row">
-        <Pill tone="warn">{describeQuestion(question.kind)}</Pill>
+        <Pill tone="warn">{describeQuestion(question.kind, question.data)}</Pill>
         <code className="faint">{question.kind}</code>
         <span>{questionPrompt(question.kind, question.data)}</span>
       </div>
@@ -56,7 +64,7 @@ export function QuestionReply({ taskId, question, onDone }: {
       </details>
       <div className="row">
         {question.kind === 'budget' && <input className="input" style={{ width: 130 }} data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
-        {question.kind === 'waiting' && <input className="input" style={{ width: 220 }} data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder="外部条件已满足的说明" />}
+        {question.kind === 'waiting' && <input className="input" style={{ width: 220 }} data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder={question.data.requestType === 'user_decision' ? '写下你的决定' : '外部条件已满足的说明'} />}
         {question.kind === 'unknown_usage' && <>
           <select className="select" style={{ width: 320 }} data-testid="usage-mode" value={usageMode} onChange={event => setUsageMode(event.target.value as 'usage' | 'reconcile')}>
             <option value="usage">补记用量（按供应商实际回复填写）</option>

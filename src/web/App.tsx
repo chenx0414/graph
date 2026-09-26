@@ -97,7 +97,7 @@ const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
 function statusText(view: TaskView) {
   if (view.paused) return TASK_LABEL[view.status] ?? view.status;
   const open = view.questions.filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
-  if (open.length) return open.map(question => QUESTION_LABEL[question.kind] ?? question.kind).join('、');
+  if (open.length) return open.map(question => describeQuestion(question.kind, question.data)).join('、');
   return TASK_LABEL[view.status] ?? view.status;
 }
 

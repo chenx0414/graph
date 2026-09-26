@@ -57,6 +57,8 @@ export function elapsedLabel(ms: number) {
   return restMinutes ? `耗时 ${hours} 小时 ${restMinutes} 分` : `耗时 ${hours} 小时`;
 }
 
-export function describeQuestion(kind: string) {
+export function describeQuestion(kind: string, data?: Record<string, unknown>) {
+  // A master question asks for a decision, not for an external condition to clear.
+  if (kind === 'waiting' && data?.requestType === 'user_decision') return '等待你的决定';
   return QUESTION_LABEL[kind] ?? kind;
 }
