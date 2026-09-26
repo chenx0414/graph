@@ -65,7 +65,7 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 - `agent_browser click <selector>` 对 React 组件可能报 `Clicked: …` 却**不触发** onClick。对 React 一律用 `eval` + `document.querySelector(...).click()`（或用角色/文本定位的动作），并**另起一次** DOM 读回确认；`click` 返回的「Action dispatched; application change unverified」不是证据。
 - `open` 之后先断言 `location.href` 再点（点击可能落在旧标签页上）；DOM 状态要在另一次 eval 里读，因为 React 异步 flush。带 hash 的同 URL `open` 不会重载，需要 `location.reload()`。
 - 长连接页面（例如控制台的 SSE 流）上 `open` 可能超时：恢复手段是扩展自己的动作——`tab list` → `tab t<N>` → 重新断言；同标签页跳转 `location.href = ...` 是兜底。
-- 剪贴板：automation 浏览器里 `navigator.clipboard` 写入可能被拒（即使已 `grant_clipboard_permission` 且 `document.hasFocus()` 为 true）。复制类验收只能人工，必须在报告里分清楚哪条腿机器验过、哪条腿等人验。
+- 剪贴板：automation 浏览器里剪贴板**写入实测不行**（2026-09-27，Chrome for Testing 153）：`writeText`、`readText`、`execCommand('copy')` 全部 `NotAllowedError`，而 `navigator.permissions.query({name:'clipboard-write'})` 同时报 `granted`、`document.hasFocus()` 为 `true`——**那个权限状态不是证据**。所以：`grant_clipboard_permission` + `focus_browser_window` 可以试，但必须用读回（`pbpaste` 或页面自己的 `readText`）证明；写不进去时从 DOM 读「它本要复制的东西」；报告里分清楚哪条腿机器验过、哪条腿等人验。
 
 ## 发现与诊断
 
