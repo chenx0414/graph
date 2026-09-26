@@ -368,3 +368,16 @@ export function restoreConsoleRoute(base: string, route: string | null): string 
   if (route && consoleRoute(`http://127.0.0.1/${route}`)) url.hash = route;
   return url.toString();
 }
+
+/** A same-port daemon reload keeps the console address. Electron's `loadURL` of
+ * that exact address is an in-place navigation: it fails with ERR_FAILED and
+ * never requests `GET /`, so the new session cookie is never installed and the
+ * page stays on 重连中. Same document must reload; a new port must navigate. */
+export function consoleReloadAction(currentUrl: string, nextUrl: string): 'reload' | 'navigate' {
+  try {
+    const current = new URL(currentUrl);
+    const next = new URL(nextUrl);
+    if (current.origin === next.origin && current.pathname === next.pathname && current.search === next.search) return 'reload';
+  } catch { /* A blank or malformed current page still needs a real navigation. */ }
+  return 'navigate';
+}

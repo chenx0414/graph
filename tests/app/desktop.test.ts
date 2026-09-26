@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  consoleRoute, restoreConsoleRoute, appRootFilePath, applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
+  consoleRoute, restoreConsoleRoute, consoleReloadAction, appRootFilePath, applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
   loadRawSecretEntries, resolveDaemonMode, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications,
   trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
@@ -257,6 +257,14 @@ describe('self-improvement reload decision', () => {
   });
 });
 
+test('same-port reload must refresh the document instead of navigating in place', () => {
+  const current = 'http://127.0.0.1:65146/#/conversations/abc-123';
+  const same = 'http://127.0.0.1:65146/#/conversations/abc-123';
+  const moved = 'http://127.0.0.1:63472/#/conversations/abc-123';
+  expect(consoleReloadAction(current, same)).toBe('reload');
+  expect(consoleReloadAction(current, moved)).toBe('navigate');
+  expect(consoleReloadAction('', same)).toBe('navigate');
+});
 
 test('desktop restores the internal conversation across changing daemon ports', () => {
   const route = consoleRoute('http://127.0.0.1:1234/#/conversations/abc-123');

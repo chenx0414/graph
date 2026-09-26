@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  consoleRoute, restoreConsoleRoute, absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadRawSecretEntries, loadSecrets,
+  consoleRoute, restoreConsoleRoute, consoleReloadAction, absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadRawSecretEntries, loadSecrets,
   parseBannerAddress, resolveAppPaths, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
@@ -220,7 +220,7 @@ if (!app.requestSingleInstanceLock()) {
             pendingReady = null;
             ready.resolve(url);
           } else if (window) {
-            void window.loadURL(consoleUrl(url));
+            showConsole(url);
           } else {
             openWindow(url);
           }
@@ -250,6 +250,20 @@ if (!app.requestSingleInstanceLock()) {
       dialog.showErrorBox('Graph daemon stopped', `exit ${code ?? signal}\n${tailText(stderr, 8)}`);
       app.quit();
     });
+  }
+  function showConsole(url) {
+    const target = consoleUrl(url);
+    if (!window) {
+      openWindow(url);
+      return;
+    }
+    // Same address after a port-reusing reload: loadURL does not install the
+    // new session cookie. Force a document reload so GET / runs.
+    if (consoleReloadAction(window.webContents.getURL(), target) === 'reload') {
+      window.webContents.reloadIgnoringCache();
+      return;
+    }
+    void window.loadURL(target);
   }
 
   function restartDaemon() {
@@ -433,7 +447,7 @@ if (!app.requestSingleInstanceLock()) {
           .then(async url => {
             const cleared = await ackRestart(pending.id);
             if (!cleared) console.warn('[app] rsi restart applied but the request was not acknowledged');
-            if (window) void window.loadURL(consoleUrl(url));
+            if (window) showConsole(url);
           })
           .catch(error => console.warn('[app] rsi restart failed', error))
           .finally(() => { rsiRestarting = false; });
