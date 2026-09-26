@@ -64,7 +64,7 @@ Activation 区分同一节点的新一轮执行。回环返回到原节点时：
 - 小于 `TOOL_RESULT_LIMIT`（4,000 字符）的结果原样交给模型；
 - 大于该阈值的结果，同一会话/工具/参数/内容的**前两次**仍全量返回，**第三次起**换为不超过 `SUMMARY_LIMIT`（1,024 字符）的首尾视图；
 - `bash` 另有 `SHELL_OUTPUT_LIMIT`（20,000 字符）封顶，与只读 `git` 同口径，从第一次视图就生效；`read_system_capabilities` 同样单发封顶 `SYSTEM_SUMMARY_LIMIT`（12,000 字符）——它是一次性大结果，懒加载永远碰不到它；
-- 被压缩的结果总是形如 `[large tool result: N bytes, M lines]` … `... omitted X of N bytes ...` … `handle: <路径>` … `Read the whole result with the read tool (offset/limit) on that path.`。句柄是 `<instance>/tool-results/<key>.txt`，仍然包含逐字节完整的原文。
+- 被压缩的结果总是形如 `[large tool result: N chars, M lines]` … `... omitted X of N chars ...` … `handle: <路径>` … `Read the whole result with the read tool (offset/limit) on that path.`。数字的**单位是字符，不是字节**（非 ASCII 结果在磁盘上比它长），句柄是 `<instance>/tool-results/<key>.txt`，仍然包含逐字节完整的原文。
 
 **工具返回不是证据**，因此压缩不影响验收；但「按需拉全」必须真的可行：需要完整内容时用 `read` 读句柄路径（`offset`/`limit` 分段），不要凭摘要下结论。上游 `read`/`bash` 自带的上限与 `offset` 继续读、完整输出临时文件路径照旧保留，本接缝不重复实现；`read` 与 `edit` 不在 Graph 侧封顶（`edit` 的模型可见内容本来就只有一行）。
 

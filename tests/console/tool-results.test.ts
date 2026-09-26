@@ -116,6 +116,9 @@ test('the summary is deterministic and always says how to get the rest', async (
   expect(first).toBe(second);
   expect(first.length).toBeLessThanOrEqual(SUMMARY_LIMIT);
   expect(first).toContain('400 lines');
+  // The unit is characters, not bytes: a non-ASCII result is longer on disk than the
+  // number the summary reports, and calling that number bytes would be a false label.
+  expect(first).toMatch(/\[large tool result: \d+ chars, 400 lines\]/);
   expect(first).toContain(String(text.length));
   expect(first).toContain('line-0');
   expect(first).toContain('line-399');

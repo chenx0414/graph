@@ -6,8 +6,9 @@
  * third the caller gets a bounded, deterministic summary plus a handle - a path on disk
  * that still holds every byte, readable with the existing read tool.
  *
- * The summary states how many bytes were left out, counted from what the final text
- * actually dropped, so a single huge line cannot hide the omission.
+ * The summary states how many characters were left out, counted from what the final text
+ * actually dropped, so a single huge line cannot hide the omission. Characters, not bytes:
+ * a non-ASCII result is longer on disk than the number reported here.
  *
  * `toolResultHook` is the single seam: Pi's agent loop calls it for every tool result,
  * Graph's own tools and Pi's built-ins alike. It overrides `content` only, so a tool's
@@ -120,7 +121,9 @@ export function createToolResultTracker(options: { capacity?: number; initial?: 
 export function summarizeToolResult(input: { text: string; handle: string; limit?: number }): string {
   const limit = input.limit ?? SUMMARY_LIMIT;
   const lineCount = input.text.split('\n').length;
-  const header = `[large tool result: ${input.text.length} bytes, ${lineCount} lines]`;
+  // The unit is characters, not bytes: a non-ASCII result occupies more bytes on disk
+  // than the number reported here, so the label must not claim bytes.
+  const header = `[large tool result: ${input.text.length} chars, ${lineCount} lines]`;
   const trailer = `handle: ${input.handle}\nRead the whole result with the read tool (offset/limit) on that path.`;
   const room = Math.max(0, limit - header.length - trailer.length - 64);
   const tailBudget = Math.floor(room / 3);
@@ -129,7 +132,7 @@ export function summarizeToolResult(input: { text: string; handle: string; limit
   // Counted from what this summary really dropped, so a single huge line still
   // reports its omission instead of looking complete.
   const dropped = Math.max(0, input.text.length - head.length - tail.length);
-  const marker = `... omitted ${dropped} of ${input.text.length} bytes ...`;
+  const marker = `... omitted ${dropped} of ${input.text.length} chars ...`;
   return `${[header, head, marker, tail, trailer].join('\n')}`.slice(0, limit);
 }
 
