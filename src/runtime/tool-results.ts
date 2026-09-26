@@ -130,12 +130,12 @@ export function hoistTruncationNotice(text: string): string {
 
 /** The banner alone, so a summary can lead with it; null when nothing was truncated. */
 export function truncationBanner(text: string): string | null {
-  const match = /\n*(\[(?:Showing lines|[\d,]+ more lines in file|Output truncated)[^\]]*\])\s*$/.exec(text);
+  const match = /\n*(\[(?:Showing lines|[\d,]+ more lines in file|Output truncated|Line \d+ is)[^\]]*\])\s*$/.exec(text);
   return match ? `[truncated: ${match[1]!}]` : null;
 }
 
 function bodyWithoutNotice(text: string): string {
-  return text.replace(/\n*\[(?:Showing lines|[\d,]+ more lines in file|Output truncated)[^\]]*\]\s*$/, '');
+  return text.replace(/\n*\[(?:Showing lines|[\d,]+ more lines in file|Output truncated|Line \d+ is)[^\]]*\]\s*$/, '');
 }
 
 /** Deterministic head/tail summary: same input, same text, no model call. Whole lines are
