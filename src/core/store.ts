@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -568,6 +568,80 @@ export class TaskStore {
       // Existing rows stay NULL (= not recorded), which the console reports as such.
       this.db.exec('ALTER TABLE operations ADD COLUMN tool_declarations TEXT; PRAGMA user_version=35;');
     });
+    if (version < 36) this.transaction(() => {
+      // Durable per-tool telemetry: one append-only row per executed tool call, so call counts,
+      // success rates and durations accumulate across restarts instead of dying with the process.
+      // IF NOT EXISTS keeps a downgraded database (a test that pins an older user_version without
+      // dropping this table) from failing to reopen.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tool_calls(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          instance_id TEXT NOT NULL,
+          task_id TEXT,
+          node_id TEXT,
+          role TEXT,
+          tool TEXT NOT NULL,
+          ms INTEGER NOT NULL,
+          is_error INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS tool_calls_tool ON tool_calls(tool, created_at);
+        PRAGMA user_version=36;`);
+    });
+  }
+
+  /** How long a recorded tool call stays visible in the aggregated statistics. */
+  static readonly TOOL_CALL_RETENTION_DAYS = 90;
+
+  /**
+   * Record one executed tool call. Called from the runtime seam that surrounds every tool, so a
+   * failure here must never be able to break a turn - the caller guards it, and the write itself
+   * stays a single statement.
+   *
+   * Attribution is resolved once, at write time, from the node that owns the instance: `nodes`
+   * identifies it uniquely through `instance_id`, and `spec.role` names the Agent role (master,
+   * coder, ...). An instance with no node row records `null` attribution rather than guessing.
+   */
+  recordToolCall(input: { instanceId: string; tool: string; ms: number; isError: boolean; at?: number }): void {
+    const node = this.db.prepare(
+      `SELECT n.task_id AS task_id, n.id AS node_id, json_extract(n.spec, '$.role') AS role FROM nodes n WHERE n.instance_id = ?`,
+    ).get(input.instanceId) as { task_id: string; node_id: string; role: string | null } | undefined;
+    this.db.prepare(
+      'INSERT INTO tool_calls(instance_id, task_id, node_id, role, tool, ms, is_error, created_at) VALUES(?,?,?,?,?,?,?,?)',
+    ).run(
+      input.instanceId, node?.task_id ?? null, node?.node_id ?? null, node?.role ?? null,
+      input.tool, Math.max(0, Math.round(input.ms)), input.isError ? 1 : 0, input.at ?? Date.now(),
+    );
+  }
+
+  /**
+   * Aggregate the retained tool calls by tool and role. Reading prunes too: retention costs no
+   * timer and no extra state, it is enforced exactly when someone looks at the numbers.
+   */
+  toolCallStats(keepDays = TaskStore.TOOL_CALL_RETENTION_DAYS): Array<{
+    tool: string; role: string | null; calls: number; errors: number; totalMs: number; maxMs: number; lastAt: number;
+  }> {
+    this.pruneToolCalls(keepDays);
+    const rows = this.db.prepare(
+      `SELECT tool, role, count(*) AS calls, sum(is_error) AS errors, sum(ms) AS total_ms, max(ms) AS max_ms, max(created_at) AS last_at
+       FROM tool_calls GROUP BY tool, role ORDER BY calls DESC, tool`,
+    ).all() as Array<{ tool: string; role: string | null; calls: number; errors: number; total_ms: number; max_ms: number; last_at: number }>;
+    return rows.map(row => ({
+      tool: row.tool, role: row.role, calls: Number(row.calls), errors: Number(row.errors),
+      totalMs: Number(row.total_ms), maxMs: Number(row.max_ms), lastAt: Number(row.last_at),
+    }));
+  }
+
+  /** Drop the recorded tool calls, so a stale sample cannot be mistaken for a fresh one. */
+  clearToolCalls(): number {
+    const result = this.db.prepare('DELETE FROM tool_calls').run();
+    return Number(result.changes);
+  }
+
+  /** Delete tool calls older than the retention window. Returns how many rows went. */
+  pruneToolCalls(keepDays = TaskStore.TOOL_CALL_RETENTION_DAYS): number {
+    const cutoff = Date.now() - keepDays * 86_400_000;
+    const result = this.db.prepare('DELETE FROM tool_calls WHERE created_at < ?').run(cutoff);
+    return Number(result.changes);
   }
   /** The exact system prompt and tool declarations of the newest master turn that sent one. */
   conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string; tools: string | null } | null {
