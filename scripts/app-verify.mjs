@@ -7,8 +7,8 @@
  * it silently - and the running process was a third state again (old code, since a process never
  * swaps itself out).
  *
- * Run: node --run app:verify   (after node --run app:build)
- *      node scripts/app-verify.mjs <checkout>/dist/app   for a package built in another checkout
+ * Run: `node --run app:build` runs this at the end; `node --run app:verify` checks a package that
+ *      already exists (and `node scripts/app-verify.mjs <checkout>/dist/app` another checkout's).
  *
  * The marker list is a smoke set, not a coverage claim: add a marker when a change would be silent
  * if it never reached the package.
