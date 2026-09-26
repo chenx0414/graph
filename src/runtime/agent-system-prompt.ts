@@ -10,16 +10,17 @@ export interface AgentPromptPart {
   source?: string;
 }
 
+/**
+ * The sections Graph itself renders into the system prompt. Identity, rules and docs are
+ * the whole list: tool declarations and capabilities travel outside the prompt text (the
+ * agent loop puts them on the system message as `toolsAdded`, and the provider adapters
+ * fold them into the request `tools`), so no section of this kind exists. Pi appends its
+ * own native blocks (project context, skills, cwd) after Graph's text.
+ */
 export type AgentPromptSectionId =
   | 'identity'
-  | 'tools'
   | 'rules'
-  | 'docs'
-  | 'project_context'
-  | 'capabilities'
-  | 'skills'
-  | 'cwd'
-  | 'pi_cwd';
+  | 'docs';
 
 export interface AgentPromptSection {
   id: AgentPromptSectionId;
