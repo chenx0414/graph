@@ -46,15 +46,19 @@ async function skill(base: string, id: string, options: {
 
 const AUTHORED = 'created-by: graph-agent';
 
-/** Run the linter and return its JSON report plus the exit code. */
-async function lint(base: string, extra: string[] = []) {
+/** Run the linter against a project root, a skills container, or both. */
+async function lintAt(flag: string, base: string, extra: string[] = []) {
   try {
-    const { stdout } = await run('node', [SCRIPT, '--root', base, '--json', ...extra], { cwd: process.cwd() });
+    const { stdout } = await run('node', [SCRIPT, flag, base, '--json', ...extra], { cwd: process.cwd() });
     return { report: JSON.parse(stdout) as LintReport, code: 0 };
   } catch (cause) {
     const failure = cause as { code?: number; stdout?: string };
     return { report: JSON.parse(failure.stdout ?? '{}') as LintReport, code: failure.code ?? 1 };
   }
+}
+
+function lint(base: string, extra: string[] = []) {
+  return lintAt('--root', base, extra);
 }
 
 interface LintWarning { rule: string; message: string }
@@ -136,7 +140,7 @@ test('a skill we did not author is out of scope, and --all only adds the hard ru
 
 test('the repository ships a conforming authored fixture and lints it clean', async () => {
   const fixture = join(process.cwd(), 'tests/fixtures/skills/good');
-  const { report, code } = await lint(fixture, ['--strict']);
+  const { report, code } = await lintAt('--skills', fixture, ['--strict']);
 
   expect(report.summary.skills).toBeGreaterThan(0);
   expect(report.summary.warnings).toBe(0);

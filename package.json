@@ -19,6 +19,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "node scripts/check-floating-promises.mjs",
+    "skills:lint": "node scripts/skills-lint.mjs",
     "test": "vitest run",
     "test:m0": "vitest run tests/m0",
     "test:m1": "vitest run tests/m1",
