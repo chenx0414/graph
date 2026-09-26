@@ -28,11 +28,12 @@ test('an operation that did the work writes its own skill, without anybody readi
     action: 'create',
     id: 'count-own-work',
     description: 'Use when a review must decide whether one operation earned a skill',
-    body: '## 步骤\n\n1. 数这个操作自己的工具调用，而不是统计表里的行。\n',
+    reason: 'the review learned how the count is taken',
   });
+  const reply = `${proposal}\n\`\`\`markdown\n## 步骤\n\n1. 数这个操作自己的工具调用，而不是统计表里的行。\n\`\`\``;
   // The cheap model answers two separate one-shot calls per turn (the composer suggestion, then the
   // review), so it needs a plan for each; both are the proposal, which keeps the order irrelevant.
-  const reader = await openaiServer([{ text: proposal }, { text: proposal }]);
+  const reader = await openaiServer([{ text: reply }, { text: reply }]);
   cleanup.push(() => main.close());
   cleanup.push(() => reader.close());
   const entries = [

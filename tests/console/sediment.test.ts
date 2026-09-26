@@ -58,6 +58,31 @@ test('a markdown body with literal newlines is still read', () => {
   expect(parseSedimentProposal('no json at all')).toBeNull();
 });
 
+test('metadata on one line plus a fenced body is read, markdown and all', () => {
+  // Asking a model to put a markdown body inside a JSON string asks it to escape markdown, and it
+  // will not: real replies arrive with a line break or a quoted command in the middle and the whole
+  // proposal is lost. The metadata stays one line; the skill itself travels in a fenced block.
+  const reply = [
+    '{"action":"create","id":"fenced-body","description":"Use when a skill body needs quotes and lines","reason":"the body is markdown"}',
+    '```markdown',
+    '## Steps',
+    '',
+    '1. Run "node --run e2e:console"; it needs chromium.',
+    '2. Read the screenshot.',
+    '```',
+  ].join('\n');
+  const parsed = parseSedimentProposal(reply);
+  expect(parsed?.action).toBe('create');
+  expect(parsed?.id).toBe('fenced-body');
+  expect(parsed?.body).toContain('## Steps');
+  expect(parsed?.body).toContain('node --run e2e:console');
+  // A fence that never closes is not a body, and an empty body is refused by the writer anyway.
+  expect(parseSedimentProposal('{"action":"create","id":"x","description":"Use when x"}\n```markdown\nunfinished')?.body).toBeUndefined();
+  // The older shape, body inside the JSON, keeps working: a reply is read whatever shape it takes.
+  // The body is trimmed on the way in, which is the normalisation the writer applies anyway.
+  expect(parseSedimentProposal(JSON.stringify(GOOD))?.body).toBe(GOOD.body.trim());
+});
+
 test('a reply becomes a proposal, and a refusal to sediment becomes nothing', () => {
   const fenced = `\`\`\`json\n${JSON.stringify(GOOD)}\n\`\`\``;
 

@@ -153,11 +153,16 @@ export function parseSedimentProposal(text: string): SedimentProposal | null {
   if (action !== 'create' && action !== 'update' && action !== 'nothing') return null;
   if (action === 'nothing') return { action };
   const text_ = (value_: unknown) => (typeof value_ === 'string' ? value_.trim() : undefined);
+  // The skill itself travels in a fenced block, so markdown never has to survive JSON escaping —
+  // which is what broke real replies: a line break or a quoted command in the middle of a body.
+  // A body inside the metadata still counts, for a reply that takes the older shape.
+  const fenced = /```(?:markdown|md)?[ \t]*\r?\n([\s\S]*?)\r?\n?```/.exec(raw)?.[1]?.trim();
+  const body = text_(record['body']) ?? (fenced || undefined);
   return {
     action,
     ...(text_(record['id']) ? { id: text_(record['id'])! } : {}),
     ...(text_(record['description']) ? { description: text_(record['description'])! } : {}),
-    ...(text_(record['body']) ? { body: text_(record['body'])! } : {}),
+    ...(body ? { body } : {}),
     ...(text_(record['reason']) ? { reason: text_(record['reason'])! } : {}),
   };
 }
