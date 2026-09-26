@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
+import { TOOL_CALL_SPOOL_DIR, toolCallSpoolPath } from '../src/runtime/tool-call-spool.ts';
 
 const repo = join(import.meta.dirname, '..');
 const web = join(repo, 'dist', 'web');
@@ -80,26 +81,30 @@ try {
     await new Promise(done => setTimeout(done, 250));
   }
 
-  // Seed the rows the tool page reads. Schema-level seeding is deliberate: the page
-  // must render what the store holds, not what a test double hands it.
-  const db = new DatabaseSync(join(state, 'tasks.sqlite'));
-  const seed = db.prepare('INSERT INTO tool_calls(instance_id,task_id,node_id,role,tool,ms,is_error,created_at) VALUES(?,?,?,?,?,?,?,?)');
-  const at = Date.now();
-  seed.run('inst-e2e', 't-e2e', 'n-e2e', 'master', 'bash', 120, 0, at);
-  seed.run('inst-e2e', 't-e2e', 'n-e2e', 'master', 'bash', 300, 1, at);
-  seed.run('inst-e2e', 't-e2e', 'n-e2e', 'master', 'agent_browser', 8_000, 0, at);
-  // A master question (ask_user) is recorded as kind 'waiting' with requestType
-  // 'user_decision' (operation-lifecycle block() + pi-adapter askedQuestion), so the
-  // card below is seeded with exactly that shape, not with a convenient stand-in.
+  // Seed through the worker spool, not by inserting rows: the page must show what the new
+  // ingest path produces, and a worker lane is the only writer that uses it.
   const task = db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES(?,?,?,?,?,?,?,?)');
   task.run('hb80-asked', 'e2e', '决策卡片的真浏览器断言', 1, 0, 'running', 0, 2);
   task.run('hb80-empty', 'e2e', '没有待处理问题的任务', 1, 0, 'running', 0, 3);
+  db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)')
+    .run('hb80-asked', 'n-e2e', JSON.stringify({ role: 'master' }), 'inst-e2e');
   db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)').run(
     'q-hb80', 'hb80-asked', 'n-e2e', null, 'waiting',
     JSON.stringify({ requestType: 'user_decision', prompt: '要不要把这条先改成检测？', why: '答案会改变实现' }),
     'user',
   );
   db.close();
+
+  const spooled = [
+    { tool: 'bash', ms: 120, isError: false },
+    { tool: 'bash', ms: 300, isError: true },
+    { tool: 'agent_browser', ms: 8_000, isError: false },
+  ];
+  await mkdir(join(state, TOOL_CALL_SPOOL_DIR), { recursive: true });
+  await writeFile(
+    toolCallSpoolPath(state, 'inst-e2e'),
+    spooled.map(call => `${JSON.stringify({ instanceId: 'inst-e2e', ...call, at: Date.now() })}\n`).join(''),
+  );
 
   browser = await chromium.launch();
   const page = await browser.newPage();
