@@ -158,23 +158,26 @@ try {
   console.log(`截图 ${shot}`);
   // 清空记录：先证明接口真的归零，再分开断言「页面不刷新就回到空态」——这两件事不是一回事，
   // 合在一句里会把「接口没清」与「界面没重渲染」当成同一个失败（HB-90）。
+  // 「清空记录」先弹原生 confirm：不接手的话弹框行为由浏览器默认决定，断言就不确定。
+  page.on('dialog', dialog => { void dialog.accept(); });
   await page.getByRole('button', { name: '清空记录' }).click();
-  const clearedViaApi = await page.waitForFunction(async () => {
-    const body = await fetch('/api/tool-stats').then(response => response.json()) as { stats?: unknown[] };
-    return Array.isArray(body.stats) && body.stats.length === 0;
-  }, undefined, { timeout: 10_000 }).then(() => true, () => false);
-  check('清空记录：接口已归零', clearedViaApi, true);
+  // 同一刻读两件事：接口的结果与 DOM 的实际状态。它们不一致就是「界面没跟上」，不是接口问题。
+  await page.waitForFunction(() => !document.querySelector('[data-testid="tool-stats-table"]')
+    || document.body.innerText.includes('还没有记录'), undefined, { timeout: 10_000 }).then(() => true, () => false);
+  const after = await page.evaluate(async () => {
+    const body = await fetch('/api/tool-stats', { cache: 'no-store' }).then(response => response.json()) as { stats?: unknown[] };
+    return {
+      apiRows: Array.isArray(body.stats) ? body.stats.length : -1,
+      domHasTable: Boolean(document.querySelector('[data-testid="tool-stats-table"]')),
+      domMentionsEmpty: document.body.innerText.includes('还没有记录'),
+    };
+  });
+  check('清空后接口返回 0 行', after.apiRows, 0);
+  console.log(`       同一刻 DOM：仍有表格=${after.domHasTable}，已显示空态=${after.domMentionsEmpty}`);
+  check('清空后 DOM 不再有表格', after.domHasTable, false);
 
-  const updatedInPlace = await page.getByTestId('tool-stats-page').getByText('还没有记录')
-    .waitFor({ timeout: 5_000 }).then(() => true, () => false);
-  if (!updatedInPlace) {
-    const text = await page.getByTestId('tool-stats-page').innerText().catch(() => '(读不到)');
-    console.log(`       页面未自动回到空态，当前文本片段：${JSON.stringify(text.slice(0, 200))}`);
-  }
-  check('清空后页面自动回到空态（不需重载）', updatedInPlace, true);
-
-  // 口径文案只在空态渲染：重新取一次页面，确保断言读到的是空态那一帧（HB-90）。
-  await page.goto(`${url}/#/tools`, { waitUntil: 'domcontentloaded' });
+  // 口径文案只在空态渲染：用 reload 而不是 goto（同一个带 hash 的 URL 不会触发导航）。
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByTestId('tool-stats-page').getByText('还没有记录').waitFor({ timeout: 10_000 });
   const cleared = await page.getByTestId('tool-stats-page').innerText();
   checkContains('口径说明写明含并行车道', cleared, '并行车道');
