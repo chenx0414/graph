@@ -112,6 +112,20 @@ export function selectSedimentModel(main: ModelEntry, directory: ModelEntry[], p
   return undefined;
 }
 
+/**
+ * JSON forbids a raw control character inside a string, and a markdown body arrives full of them:
+ * an author writes a line break the way a line break looks. Outside strings the same characters are
+ * legal whitespace, so escaping them cannot damage a proposal that was already valid.
+ */
+function escapeControlCharacters(value: string): string {
+  return value.replace(/[\u0000-\u001f]/g, character => {
+    if (character === '\n') return '\\n';
+    if (character === '\r') return '\\r';
+    if (character === '\t') return '\\t';
+    return `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
+  });
+}
+
 /** Read a proposal out of whatever the model replied with; anything unreadable is "nothing". */
 export function parseSedimentProposal(text: string): SedimentProposal | null {
   const raw = text.trim();
@@ -119,11 +133,19 @@ export function parseSedimentProposal(text: string): SedimentProposal | null {
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start < 0 || end <= start) return null;
+  const candidate = raw.slice(start, end + 1);
   let value: unknown;
   try {
-    value = JSON.parse(raw.slice(start, end + 1));
+    value = JSON.parse(candidate);
   } catch {
-    return null;
+    // One repair, narrowly defined: the reply is the proposal with real newlines inside it. Reading it
+    // is the difference between a written skill and a silent "nothing"; what it claims is still
+    // checked field by field below, and the writer refuses anything outside the project's folder.
+    try {
+      value = JSON.parse(escapeControlCharacters(candidate));
+    } catch {
+      return null;
+    }
   }
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;

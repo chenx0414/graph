@@ -41,6 +41,23 @@ test('the switch, the role, the threshold, a pause and a second look all gate th
   expect(shouldSediment({ ...base, alreadyReviewed: true })).toBe(false);
 });
 
+test('a markdown body with literal newlines is still read', () => {
+  // A model writes a markdown body the way markdown looks, so the newline between two lines arrives
+  // as a real newline inside a JSON string and JSON.parse refuses the whole proposal. The reply is
+  // otherwise exactly what was asked for, and throwing it away is the difference between a written
+  // skill and a silent "nothing".
+  const literal = '{"action":"create","id":"newline-body","description":"Use when a body spans several lines","body":"line one\nline two\n\n- a bullet"}';
+  const parsed = parseSedimentProposal(literal);
+  expect(parsed?.action).toBe('create');
+  expect(parsed?.id).toBe('newline-body');
+  expect(parsed?.body).toContain('line two');
+  // Tabs and carriage returns are the same class of mistake.
+  expect(parseSedimentProposal('{"action":"nothing","reason":"a\treason"}')?.action).toBe('nothing');
+  // A reply that is genuinely broken stays unreadable instead of being guessed at.
+  expect(parseSedimentProposal('{"action":"create","id":')).toBeNull();
+  expect(parseSedimentProposal('no json at all')).toBeNull();
+});
+
 test('a reply becomes a proposal, and a refusal to sediment becomes nothing', () => {
   const fenced = `\`\`\`json\n${JSON.stringify(GOOD)}\n\`\`\``;
 
