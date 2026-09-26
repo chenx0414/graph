@@ -135,9 +135,11 @@ try {
   checkContains('bash 行成功率为 50.0%', rows[0] ?? '', '50.0%');
   checkContains('bash 行平均 210 ms', rows[0] ?? '', '210 ms');
   checkContains('bash 行最大 300 ms', rows[0] ?? '', '300 ms');
-  checkContains('鼠标悬停前的第二行是 agent_browser', rows.join('\n'), 'agent_browser');
-  checkContains('agent_browser 平均 8.0 s', rows.join('\n'), '8.0 s');
-  checkContains('角色解析为「主 Agent」', rows.join('\n'), '主 Agent');
+  checkContains('第二行是 agent_browser（按调用次数排序）', rows[1] ?? '', 'agent_browser');
+  checkContains('agent_browser 成功率 100.0%', rows[1] ?? '', '100.0%');
+  checkContains('agent_browser 平均 8.0 s', rows[1] ?? '', '8.0 s');
+  checkContains('bash 行角色为「主 Agent」', rows[0] ?? '', '主 Agent');
+  check('侧栏「问题」徒标计数为 1', await page.locator('.nav-badge').first().innerText(), '1');
 
   const shot = join(screenshots, 'tool-stats.png');
   await page.screenshot({ path: shot, fullPage: true });
