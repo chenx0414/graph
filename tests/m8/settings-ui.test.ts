@@ -48,6 +48,24 @@ async function stubProvider() {
   return { requests, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1` };
 }
 
+/** A vendor that answers `/models` with its own list, so step ② has rows to fetch and an account switch has
+ * something to follow. */
+async function modelListStubProvider(ids: string[]) {
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    if ((request.url ?? '').includes('/models')) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: ids.map(id => ({ id, name: id.toUpperCase() })) }));
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ id: 'stub', usage: { prompt_tokens: 1, completion_tokens: 1 } }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+}
+
 async function configFile(dir: string, baseUrl: string, extra: Record<string, unknown> = {}) {
   const path = join(dir, 'graph.config.json');
   await writeFile(path, JSON.stringify({
@@ -138,7 +156,9 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   // ① 保存并验证 really sends a minimal request. The stub answers /models with a
   // non-list body, so only the explicit model under this credential can be
   // verified - skipping verification there is the defect this asserts against.
-  await expect.poll(async () => stub.requests.length, { timeout: 15_000 }).toBe(2);
+  // Readiness waits for that chat request by its path, not for a request count: naming an account that
+  // already exists also makes step ② follow that account, which probes once (see the account-switch test).
+  await expect.poll(async () => stub.requests.some(request => request.path === '/v1/chat/completions'), { timeout: 15_000 }).toBe(true);
   expect(stub.requests.some(request => request.path === '/v1/models')).toBe(true);
   expect(stub.requests.find(request => request.path === '/v1/chat/completions')).toMatchObject({ model: 'local', authorization: `Bearer ${SECRET}` });
   expect(await page.getByTestId('provider-verification').innerText()).toContain('验证成功');
@@ -152,9 +172,11 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(vendorOptions).not.toContain('Grok');
   const beforeVendorPick = stub.requests.length;
   await page.getByTestId('model-vendor-select').selectOption('local');
-  // Selecting the vendor auto-fetches /models — no button press required.
-  await expect.poll(async () => stub.requests.length, { timeout: 15_000 }).toBeGreaterThan(beforeVendorPick);
-  expect(stub.requests.filter(request => request.path === '/v1/models')).toHaveLength(2);
+  // 选择厂商会自动取 /models（不用再点按钮）；而在 ① 里已经把凭据 id 写成一个已存在账户时，
+  // ② 已经跟着它取过一次了（那正是账户跟随修复要做的事），所以这里的契约是「这个端点被取过"+
+  // 「失败的列表如实报出来」，不是请求次数。
+  expect(beforeVendorPick).toBeGreaterThanOrEqual(1);
+  expect(stub.requests.filter(request => request.path === '/v1/models').length).toBeGreaterThanOrEqual(1);
   // The failed list is reported instead of pretending a list arrived, and an id
   // typed by hand stays visible as a row the user can pick.
   await expect.poll(async () => page.getByTestId('model-probe-note').innerText(), { timeout: 15_000 }).toContain('模型列表');
@@ -371,6 +393,47 @@ test('settings imports detected subscription credentials without exposing their 
   });
   expect(JSON.stringify(payload)).not.toContain('subscription-test-key');
 }, 60_000);
+
+test('switching the account in step one follows through to the model list in step two', async () => {
+  const dir = await temp('account-model-list');
+  const first = await modelListStubProvider(['alpha-1', 'alpha-2']);
+  const second = await modelListStubProvider(['beta-1']);
+  const path = join(dir, 'graph.config.json');
+  await writeFile(path, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'sample', root: dir }],
+    models: {
+      entries: [
+        { id: 'alpha', provider: 'alpha-endpoint', grade: 'medium', api: 'openai-completions', baseUrl: first, contextWindow: 2048, maxTokens: 128, credentialId: 'alpha-account' },
+        { id: 'beta', provider: 'beta-endpoint', grade: 'medium', api: 'openai-completions', baseUrl: second, contextWindow: 2048, maxTokens: 128, credentialId: 'beta-account' },
+      ],
+    },
+    credentials: { 'alpha-account': { secretRef: 'GRAPH_ALPHA_KEY' }, 'beta-account': { secretRef: 'GRAPH_BETA_KEY' } },
+    limits: { credentials: { 'alpha-account': 1, 'beta-account': 1 } },
+  }, null, 2));
+  const daemon = await startGraphDaemon({
+    configPath: path, stateDir: join(dir, 'state'), webDir, port: 0, mode: 'view',
+    env: { HOME: dir, GRAPH_ALPHA_KEY: SECRET, GRAPH_BETA_KEY: SECRET }, log: () => undefined,
+  });
+  cleanup.push(() => daemon.close().catch(() => undefined));
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/settings`);
+  await page.getByTestId('settings-page').waitFor();
+  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+
+  // Step two lists the selected account's own models.
+  await page.getByTestId('model-vendor-select').selectOption('alpha-account');
+  await expect.poll(() => page.getByTestId('model-probe-alpha-1').count(), { timeout: 20_000 }).toBe(1);
+
+  // Switching the account in step one has to move the list with it. Those rows were fetched from alpha's
+  // endpoint: leaving them on screen while the form configures beta is how one account's models end up
+  // saved under another.
+  await page.getByTestId('provider-credentialId').fill('beta-account');
+  await expect.poll(() => page.getByTestId('model-probe-beta-1').count(), { timeout: 20_000 }).toBe(1);
+  expect(await page.getByTestId('model-probe-alpha-1').count()).toBe(0);
+}, 90_000);
 
 test('a supported platform offers an editable account name', async () => {
   const dir = await temp('account-name');
