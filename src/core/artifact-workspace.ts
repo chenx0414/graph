@@ -6,7 +6,10 @@ import { RuntimeError, type Json } from './types.ts';
 
 export const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
 export const ARTIFACT_TASK_QUOTA_BYTES = 256 * 1024 * 1024;
-export const ARTIFACT_MAX_VERSIONS = 100;
+// 这是「版本号上限」，不是「存活版本数」：退役不释放，所以到顶之后该逻辑键就永远不能再发新版。
+// 100 在实践里判死了一份持续演进的长清单（主 Agent 要长期维护的 durable backlog 正好停在第 100 版）。
+// 真正的容量闸门是下面的 ARTIFACT_TASK_QUOTA_BYTES（版本行本身很小，且内容按 digest 去重）。
+export const ARTIFACT_MAX_VERSIONS = 1_000;
 export const ARTIFACT_MAX_PUBLISHES_PER_OPERATION = 32;
 
 export type ArtifactScope = 'task' | 'project';

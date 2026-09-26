@@ -48,6 +48,8 @@ artifactId + version + digest
 
 tag 是标签而非路径：任意文种都可以（例如 `编码`、`已知问题`），写入时统一小写并限长 60 字符；而 `namespace`、`name`、`prefix` 仍要求小写 ASCII slug，因为它们会进入 artifact URI。
 
+容量：单个逻辑制品最多 1,000 版（按版本号算，退役不释放，超限报 `artifact_quota`），单次操作最多发布 32 个制品；真正的容量闸门是任务级字节配额（256 MiB，内容按 digest 去重）。所以「长期演进的一份文档」是合法用法：同一 `namespace/name` 持续发新版即可，引用时带上 `version`。
+
 ## Evidence
 
 Evidence 证明某个 acceptance 在具体输入和提交上是否通过。它必须绑定：

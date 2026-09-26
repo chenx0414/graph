@@ -240,3 +240,23 @@ test('result handoffs can freeze an exact published artifact version without rel
     body: expect.stringContaining(published.uri),
   });
 });
+
+test('a long-lived document keeps publishing past its hundredth version', async () => {
+  // 实测碰到的：主 Agent 要长期维护的那份清单在第 100 版被旧上限判死（上限按版本号算，退役不释放）。
+  // 这里钉的是外部行为——同一逻辑键能继续发到第 101 版，而不是去断言那个常量的数值。
+  const { workspace, artifacts } = await fixture();
+  const source = join(workspace, 'backlog.md');
+  await writeFile(source, '# backlog\n');
+
+  let head = 0;
+  for (let version = 1; version <= 101; version += 1) {
+    const published = await artifacts.publish({
+      taskId: 't1', workspace, namespace: 'plans', name: 'backlog', sourcePath: source,
+      // 每次发布都算一次「操作」，用新 id，否则先撞上「单次操作最多 32 条」。
+      producer: producer(`op-backlog-${version}`), requestId: `publish-backlog-${version}`,
+    });
+    head = published.version;
+  }
+
+  expect(head).toBe(101);
+});
