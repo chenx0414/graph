@@ -73,8 +73,8 @@ test('a production master receives compact rules without the removed workflow pr
   await runtime.host.runReady();
   const prompt = JSON.stringify(provider.requests[0]);
   expect(prompt).toContain('Requirement version: 1');
-  expect(prompt).toContain('<rules>\\n- Use tool results as evidence.');
-  expect(prompt).toContain('Bob_coder');
+  expect(prompt).toContain('<rules>\\n- Use bash for file operations like ls, rg, find');
+  expect(prompt).toContain('R14 When one node stays blocked for three rounds');
   expect(prompt).not.toContain('<workflow>');
   expect(prompt).not.toContain('proposalJson schema');
 });
