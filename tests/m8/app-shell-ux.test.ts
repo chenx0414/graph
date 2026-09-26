@@ -539,8 +539,10 @@ test('the composer suggestion and queue steering follow the three Enter states',
   // longer than the default one-second poll. The budget is deliberately generous: the
   // preconditions above, not the budget, are what makes this assertion meaningful. It is
   // also the only assertion here whose latency grows with the number of capabilities the
-  // master bundle resolves, which is why 60s and not 30s.
-  await expect.poll(() => steered.length, { timeout: 60_000 }).toBe(1);
+  // master bundle resolves — and it is the one that timed out in production: a full gate on a
+  // loaded machine reported `expected +0 to be 1` after 60s while 174 other files ran beside it,
+  // so a budget in seconds was answering a question about load, not about the app.
+  await expect.poll(() => steered.length, { timeout: 150_000 }).toBe(1);
   expect(steered[0]).toContain('优先检查失败分支。');
   await expect.poll(async () => {
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
@@ -563,11 +565,11 @@ test('the composer suggestion and queue steering follow the three Enter states',
     return messages.some(message => message.role === 'user' && message.text === '继续检查测试覆盖和失败分支。');
   }, { timeout: 10_000 }).toBe(true);
   // This test drives a real turn through a browser, so it owns several sequential waits whose
-  // budgets add up (10s + 10s + 1s + 30s + 60s + 10s + 10s + 10s). The outer budget must exceed
+  // budgets add up (10s + 10s + 1s + 30s + 150s + 10s + 10s + 10s). The outer budget must exceed
   // that sum: at 60s the test itself died first and reported only "Test timed out in 60000ms",
   // naming no condition. With room to spare, a real stall now fails inside the poll that was
   // still waiting and says which state never arrived.
-}, 240_000);
+}, 420_000);
 
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');
