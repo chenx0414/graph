@@ -31,6 +31,7 @@ import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
 import { skillUsage } from '../runtime/skill-usage.ts';
+import { sedimentSettings } from '../runtime/sediment.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
 import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
@@ -223,6 +224,8 @@ export async function openTaskRuntime(options: {
    * per use instead of from the static options captured at startup. */
   live?: {
     revision(): number;
+    /** The raw config snapshot: the sediment switch is read from here on every turn. */
+    config(): unknown;
     entries(): ModelEntry[];
     preferences(): Partial<Record<ModelEntry['grade'], string[]>>;
     credentialFor(entry: ModelEntry): { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
@@ -393,6 +396,7 @@ export async function openTaskRuntime(options: {
       ...(options.models?.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
       ...(options.live ? { bindingFor: (entry: ModelEntry) => options.live!.credentialFor(entry) } : {}),
       scheduler: modelScheduler,
+      ...(options.live ? { sediment: () => sedimentSettings(options.live!.config()) } : {}),
       ...(options.network ? { network: options.network } : {}),
       ...(options.capabilitySecrets ? { capabilitySecrets: options.capabilitySecrets } : {}),
       channels: {

@@ -414,6 +414,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     },
     live: {
       revision: () => live.revision(),
+      config: () => live.config(),
       entries: () => live.entries(),
       preferences: () => live.preferences(),
       credentialFor: entry => live.credentialFor(entry),

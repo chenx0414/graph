@@ -15,9 +15,9 @@ import type { SendGate } from './controlled-openai.ts';
 
 /** What one provider send is for. Pi compaction and branch summaries are real
  * billed requests and must be attributable separately from normal turns. */
-export type InvocationPurpose = 'completion' | 'compaction' | 'branch_summary' | 'prompt_suggestion';
+export type InvocationPurpose = 'completion' | 'compaction' | 'branch_summary' | 'prompt_suggestion' | 'skill_sediment';
 
-export const INVOCATION_PURPOSES: readonly InvocationPurpose[] = ['completion', 'compaction', 'branch_summary', 'prompt_suggestion'];
+export const INVOCATION_PURPOSES: readonly InvocationPurpose[] = ['completion', 'compaction', 'branch_summary', 'prompt_suggestion', 'skill_sediment'];
 
 /** Task-store invocation gate: pause, unknown usage, and budget are checked before every provider send. */
 export function taskGate(

@@ -45,7 +45,10 @@ import { taskGate } from './task-gate.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
 import { linkProjectDependencies } from './project-dependencies.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
-import { DEFAULT_PROMPT_SUGGESTION_PROMPT, type AgentContextLibrary } from './agent-context.ts';
+import { DEFAULT_PROMPT_SUGGESTION_PROMPT, DEFAULT_SEDIMENT_PROMPT, type AgentContextLibrary } from './agent-context.ts';
+import {
+  existingSkillSummaries, generateSkillProposal, runSedimentReview, selectSedimentModel, type SedimentSettings,
+} from './sediment.ts';
 
 export interface PiAdapterChannels {
   supervisor: (taskId: string) => {
@@ -157,6 +160,8 @@ export function createPiAdapter(options: {
   /** Full credential binding for one model, including concurrency caps. */
   bindingFor?: (entry: ModelEntry) => { apiKey: string; credentialId: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
   scheduler?: ModelScheduler;
+  /** Settings for the post-operation skill review, read live so the switch needs no restart. */
+  sediment?: () => SedimentSettings;
   modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   capabilitySecrets?: () => Record<string, string>;
@@ -1133,6 +1138,55 @@ export function createPiAdapter(options: {
               } finally {
                 clearTimeout(timeout);
                 suggestionUsage = suggestionGate.total();
+              }
+            }
+            // Sedimentation runs after the turn like the composer suggestion does: one extra call on
+            // a cheaper model, through the same gate, and the write happens in `applySedimentProposal`
+            // so it cannot escape the project's skill folder. Never allowed to break the turn.
+            if (conversation && options.sediment) {
+              const settings = options.sediment();
+              const sedimentEntry = settings.enabled ? selectSedimentModel(entry, options.directory(), settings.model) : undefined;
+              if (sedimentEntry) {
+                const sedimentGate = taskGate(
+                  options.store,
+                  { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId },
+                  sedimentEntry,
+                  { optional: true },
+                );
+                sedimentGate.setPurpose('skill_sediment');
+                const toolCalls = (options.store.db
+                  .prepare('SELECT count(*) AS calls FROM tool_calls WHERE instance_id = ?')
+                  .get(operation.instanceId!) as { calls: number }).calls;
+                const payload = {
+                  lastUserMessage: lastUserMessage ?? '',
+                  reply: reply.slice(0, 8_000),
+                  existingSkills: existingSkillSummaries(project.root),
+                };
+                try {
+                  await runSedimentReview({
+                    gate: {
+                      enabled: true, role: 'master', toolCalls,
+                      threshold: settings.afterToolCalls,
+                      paused: Boolean(options.store.task(operation.taskId).paused),
+                      // This block runs once per settled operation, so a second look is impossible here.
+                      alreadyReviewed: false,
+                    },
+                    settings,
+                    projectRoot: project.root,
+                    payload,
+                    review: async () => generateSkillProposal({
+                      stream: controlledOpenAIStream(sedimentGate, resolveKeyFor(sedimentEntry), slotFor(sedimentEntry), sedimentEntry.api, {
+                        estimateMissing: true,
+                        ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+                      }),
+                      model: toPiModel(sedimentEntry),
+                      systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/sediment.md') : DEFAULT_SEDIMENT_PROMPT,
+                      payload,
+                    }),
+                  });
+                } catch {
+                  // A review is an observer of the operation, never a step in it.
+                }
               }
             }
             // The conversation output always carries the visible reply; worker
