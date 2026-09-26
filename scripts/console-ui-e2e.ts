@@ -23,6 +23,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
 import { readConsoleAddress } from '../src/server/console-address.ts';
 import { TOOL_CALL_SPOOL_DIR, toolCallSpoolPath } from '../src/runtime/tool-call-spool.ts';
+import { openaiServer } from '../tests/fixtures/openai-server.ts';
 
 const repo = join(import.meta.dirname, '..');
 const web = join(repo, 'dist', 'web');
@@ -55,13 +56,28 @@ await mkdir(workspace, { recursive: true });
 await mkdir(join(workspace, '.agents', 'skills', 'e2e-skill'), { recursive: true });
 await writeFile(join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md'), '---\nname: e2e-skill\ncreated-by: graph-agent\ndescription: Seeded fixture skill for the console E2E run. Use when the console tool page is asserted.\n---\n');
 await mkdir(home, { recursive: true });
+// A scripted provider, so this daemon can run one real master turn: the master lane records its tool
+// calls in-process (`pi-adapter` → `recordToolCall`) instead of through the worker spool the sections
+// below seed, and only a real turn can show that write reaching the page (HB-88).
+const provider = await openaiServer([
+  { tools: [{ id: 'master-bash', name: 'bash', arguments: JSON.stringify({ command: 'echo master-direct-write' }) }] },
+  { text: '记录已写入。' },
+  { text: '（余量，防止额外请求把计划用干）' },
+]);
 const config = join(root, 'graph.config.json');
-await writeFile(config, JSON.stringify({ version: 1, projects: [{ id: 'e2e', root: workspace }] }));
+await writeFile(config, JSON.stringify({
+  version: 1,
+  projects: [{ id: 'e2e', root: workspace }],
+  credentials: { e2e: { secretRef: 'GRAPH_E2E_KEY' } },
+  models: { entries: [{ ...provider.model, id: 'e2e-master', credentialId: 'e2e', grade: 'high' }] },
+}));
 
 const daemon = spawn(process.execPath, [
   join(repo, 'src', 'server', 'cli.ts'),
-  '--state-dir', state, '--graph-home', home, '--web-dir', web, '--port', '0', '--config', config,
-], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
+  // `--execute` is what lets this daemon dispatch at all (the default is view-only, history and settings
+  // only): without it the real turn in the last section never runs and its spool file is never written.
+  '--execute', '--state-dir', state, '--graph-home', home, '--web-dir', web, '--port', '0', '--config', config,
+], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GRAPH_E2E_KEY: 'scripted-local-key' } });
 let daemonLog = '';
 daemon.stdout.on('data', (chunk: Buffer) => { daemonLog += String(chunk); });
 daemon.stderr.on('data', (chunk: Buffer) => { daemonLog += String(chunk); });
@@ -221,6 +237,51 @@ try {
   await page.getByTestId('no-questions').waitFor({ timeout: 10_000 });
   check('无问题的任务显示空态', await page.getByTestId('no-questions').count(), 1);
 
+  // ── 一次真回合的遥测（HB-88）：上面那段种的是 spool 字节，这一段让守护进程真的跑一个回合。
+  // 现场先纠了一个错的前提：daemon 里 master 也跑在 worker 进程里，工具调用落进 spool，而 spool
+  // 只在「有人读统计」时才被吸入——所以并不是两条通路，而是同一条通路的两端；这段证明它能被真的
+  // 回合喂饱，而且页面看到的确实是那次回合产生的字节。
+  const created = await page.evaluate(async () => {
+    const response = await fetch('/api/conversations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectId: 'e2e', requestId: 'e2e-master-turn', text: '跑一个回合，好让工具页看见 master 直写的记录。' }),
+    });
+    const body = await response.json().catch(() => null) as { conversationId?: string } | null;
+    return { status: response.status, conversationId: body?.conversationId ?? '' };
+  });
+  check('控制台 HTTP 面能创建会话（即起一个真回合）', created.status, 200);
+  check('创建会话返回了 conversationId', created.conversationId.length > 0, true);
+
+  // Tool calls only reach the table when someone reads the statistics, and loading this page is that
+  // read. Poll the page, not the database: the database is the result of what the page does. And reload
+  // rather than goto() - the same URL with a hash does not navigate, which once read as "no ingest".
+  await page.goto(`${url}/#/tools`, { waitUntil: 'domcontentloaded' });
+  const telemetryDeadline = Date.now() + 90_000;
+  let row = '';
+  while (Date.now() < telemetryDeadline && !row) {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const table = page.getByTestId('tool-stats-table');
+    const appeared = await table.waitFor({ timeout: 5_000 }).then(() => true, () => false);
+    if (!appeared) {
+      await new Promise(done => setTimeout(done, 1_000));
+      continue;
+    }
+    const rows = await table.locator('tbody tr').allInnerTexts();
+    check('清空之后，页面上只有真回合那一行', rows.length, 1);
+    if (rows.length === 1) row = rows[0]!;
+  }
+  checkContains('那行是 bash（真回合真的调了它）', row, 'bash');
+  checkContains('角色是「主 Agent」（master 车道）', row, '主 Agent');
+  // The row came from the turn's own spool file, so this read really performed the ingest.
+  const ingested = new DatabaseSync(join(state, 'tasks.sqlite'));
+  const stored = ingested.prepare('SELECT tool, role, count(*) AS calls FROM tool_calls GROUP BY tool, role').all() as { tool: string; role: string | null; calls: number }[];
+  ingested.close();
+  check('吸入后表里恰好一行：bash / master', stored, [{ tool: 'bash', role: 'master', calls: 1 }]);
+  const telemetryShot = join(screenshots, 'tool-stats-real-turn.png');
+  await page.screenshot({ path: telemetryShot, fullPage: true });
+  console.log(`截图 ${telemetryShot}`);
+
   check('页面无 JS 错误', problems, []);
 } catch (error) {
   failures += 1;
@@ -228,6 +289,7 @@ try {
 } finally {
   await browser?.close();
   daemon.kill('SIGTERM');
+  await provider.close();
 }
 
 console.log(failures === 0 ? '\n真浏览器验收通过' : `\n真浏览器验收失败：${failures} 处`);

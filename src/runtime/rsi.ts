@@ -743,7 +743,13 @@ export class RsiService {
               // A batch rolls back as a whole, so name the edit that failed: the
               // caller has to know which oldText to correct without guessing.
               const head = edit.oldText.split('\n')[0]!.trim().slice(0, 90);
-              throw new RuntimeError('rsi_edit_conflict', `RSI replacement in ${path} must match exactly once, found ${matches} (edit ${index + 1} of ${change.edits.length}, first line: ${head})`);
+              // Which state the anchor was matched against is the part the caller cannot see: a failed
+              // attempt keeps its files uncommitted, so the committed text is already gone from the
+              // worktree and "found 0" on its own reads like a typo instead of a stale anchor.
+              const hint = owned.has(path)
+                ? '；该文件当前是上一轮未提交（检查失败保留）的内容：oldText 要按它现在的样子匹配，或改用 action "write" 直接给全文'
+                : '';
+              throw new RuntimeError('rsi_edit_conflict', `RSI replacement in ${path} must match exactly once, found ${matches} (edit ${index + 1} of ${change.edits.length}, first line: ${head})${hint}`);
             }
             content = content.replace(edit.oldText, edit.newText);
           }

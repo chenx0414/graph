@@ -94,3 +94,10 @@ execFileSync(builder, ['--mac', '--config', join(stage, 'electron-builder.json')
 });
 
 console.log(`app bundle: ${join(root, 'dist/app/mac-arm64/Graph.app')}`);
+
+// The build is not finished when the bundle exists: a shell change that never reached the package is
+// the same failure as one that was never written (`app-verify.mjs` carries that story). Running it here
+// means `app:build` cannot forget the check; the standalone `app:verify` script stays for checking a
+// package built in another checkout.
+console.log('verifying the packaged app');
+execFileSync(process.execPath, [join(root, 'scripts/app-verify.mjs')], { cwd: root, stdio: 'inherit' });
