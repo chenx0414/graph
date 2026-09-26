@@ -4,6 +4,7 @@ import { describeQuestion } from './labels.ts';
 import { Button, Pill, toast } from './ui.tsx';
 
 function questionPrompt(kind: string, data: Record<string, unknown>) {
+  const text = (key: string) => typeof data[key] === 'string' && String(data[key]).trim() ? String(data[key]).trim() : undefined;
   // The agent's own question: what it asks, and what its answer changes.
   if (kind === 'waiting' && data.requestType === 'user_decision') {
     const prompt = text('prompt');
@@ -12,7 +13,6 @@ function questionPrompt(kind: string, data: Record<string, unknown>) {
     if (prompt) return prompt;
     return '主 Agent 需要你的一个决定。';
   }
-  const text = (key: string) => typeof data[key] === 'string' && String(data[key]).trim() ? String(data[key]).trim() : undefined;
   if (kind === 'permission') {
     const grant = text('grant');
     return grant ? `执行需要你授权：${grant}` : '执行需要你确认一项外部权限。';
