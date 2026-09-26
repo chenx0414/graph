@@ -192,3 +192,70 @@ test('a failed review call is recorded with its reason instead of as a silent no
   expect(decision.replyError).toBeTruthy();
   expect(decision.replyError).toMatch(/exploded|500/);
 }, 120_000);
+
+// A review is a small call on a cheap model, and a cheap model is exactly the one whose account can be
+// out of quota. That must not be the end of the answer: ask the next candidate before giving up, and
+// keep every attempt in the record so a silent single failure can never look like a decision.
+test('a review survives one cheap model refusing it by asking the next one', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sediment-failover-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(join(project, '.agents', 'skills'), { recursive: true });
+  const main = await openaiServer([
+    { tools: [{ id: 'call-1', name: 'bash', arguments: '{"command":"echo one"}' }] },
+    { tools: [{ id: 'call-2', name: 'bash', arguments: '{"command":"echo two"}' }] },
+    { text: '两步都做完了。' },
+  ]);
+  // An account that is out of quota answers with nothing at all — a 429 the transport may retry, then
+  // empty replies. Either way the review must not stop there, so the plans below are mostly empty and
+  // there are enough of them to outlast the suggestion call's own retries.
+  const outOfQuota = await openaiServer([
+    { status: 429, error: 'quota exhausted' },
+    { text: '' },
+    { text: '' },
+    { text: '' },
+    { text: '' },
+    { text: '' },
+    { text: '' },
+    { text: '' },
+    { text: '' },
+  ]);
+  const healthy = await openaiServer(Array.from({ length: 8 }, () => ({ text: '{"action":"nothing","reason":"the operation restated what the repository already says"}' })));
+  cleanup.push(() => main.close());
+  cleanup.push(() => outOfQuota.close());
+  cleanup.push(() => healthy.close());
+  const entries = [
+    { id: 'main-model', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: main.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+    { id: 'cheap-model', provider: 'graph-openai', grade: 'low' as const, api: 'openai-completions' as const, baseUrl: outOfQuota.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+    { id: 'next-model', provider: 'graph-openai', grade: 'medium' as const, api: 'openai-completions' as const, baseUrl: healthy.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+  ];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], actions: {},
+    models: { entries, credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }), modelRuntime: main.runtime },
+    live: {
+      revision: () => 1,
+      config: () => ({ skills: { sedimentation: { enabled: true, afterToolCalls: 2, model: 'cheap-model', budgetTokens: 40_000 } } }),
+      entries: () => entries,
+      preferences: () => ({}),
+      credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }),
+      masterModel: () => 'main-model',
+      defaultBudgetTokens: () => null,
+      projects: () => [{ id: 'p', root: project }],
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'main-model' },
+  });
+  cleanup.push(() => runtime.close());
+  await runtime.conversations.create({ projectId: 'p', text: '做两步检查。', requestId: 'sediment-failover' });
+  await runtime.host.runReady();
+
+  const recorded = new DatabaseSync(join(root, 'state', 'tasks.sqlite'))
+    .prepare("SELECT data FROM events WHERE type = 'skill_sediment.reviewed'").all() as { data: string }[];
+  expect(recorded).toHaveLength(1);
+  const decision = JSON.parse(recorded[0]!.data) as {
+    reviewed: boolean; proposed: string | null; model: string; attempts: { model: string; error: string | null; chars: number }[];
+  };
+  // The configured model was asked first and gave nothing usable; the next one answered.
+  expect(decision.attempts.map(attempt => attempt.model)).toEqual(['cheap-model', 'next-model']);
+  expect(decision.model).toBe('next-model');
+  expect(decision.proposed).toBe('nothing');
+}, 120_000);

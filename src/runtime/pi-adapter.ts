@@ -47,7 +47,7 @@ import { linkProjectDependencies } from './project-dependencies.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT, DEFAULT_SEDIMENT_PROMPT, type AgentContextLibrary } from './agent-context.ts';
 import {
-  existingSkillSummaries, generateSkillProposal, runSedimentReview, selectSedimentModel, type SedimentReply, type SedimentSettings,
+  existingSkillSummaries, generateSkillProposal, runSedimentReview, sedimentCandidates, selectSedimentModel, type SedimentReply, type SedimentSettings,
 } from './sediment.ts';
 
 export interface PiAdapterChannels {
@@ -1147,13 +1147,6 @@ export function createPiAdapter(options: {
               const settings = options.sediment();
               const sedimentEntry = settings.enabled ? selectSedimentModel(entry, options.directory(), settings.model) : undefined;
               if (sedimentEntry) {
-                const sedimentGate = taskGate(
-                  options.store,
-                  { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId },
-                  sedimentEntry,
-                  { optional: true },
-                );
-                sedimentGate.setPurpose('skill_sediment');
                 // What this operation itself did. Counting rows in `tool_calls` instead would make the
                 // review wait for somebody to open the statistics page: worker lanes are folded into
                 // that table on demand, so a fresh conversation would never reach the threshold.
@@ -1163,8 +1156,15 @@ export function createPiAdapter(options: {
                   reply: reply.slice(0, 8_000),
                   existingSkills: existingSkillSummaries(project.root),
                 };
-                // Kept so the record can say why a reply produced nothing: a truncated answer and a
-                // prose answer both arrive as "no proposal", and they need opposite fixes.
+                const sedimentSystemPrompt = agentPromptLibrary
+                  ? await agentPromptLibrary.prompt('runtime/sediment.md')
+                  : DEFAULT_SEDIMENT_PROMPT;
+                // A cheap model is exactly the one whose account can be out of quota, so a refusal is not
+                // the end of the review: candidates are asked in order and every attempt is kept, so the
+                // record can never show a single silent failure as if it were a decision.
+                const candidates = sedimentCandidates(entry, options.directory(), settings.model);
+                const attempts: { model: string; stopReason: string | null; error: string | null; chars: number }[] = [];
+                let answered: string | null = null;
                 const capture: { reply: SedimentReply | null } = { reply: null };
                 try {
                   const decision = await runSedimentReview({
@@ -1179,31 +1179,50 @@ export function createPiAdapter(options: {
                     projectRoot: project.root,
                     payload,
                     review: async () => {
-                      capture.reply = await generateSkillProposal({
-                        stream: controlledOpenAIStream(sedimentGate, resolveKeyFor(sedimentEntry), slotFor(sedimentEntry), sedimentEntry.api, {
-                          estimateMissing: true,
-                          ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
-                        }),
-                        model: toPiModel(sedimentEntry),
-                        systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/sediment.md') : DEFAULT_SEDIMENT_PROMPT,
-                        payload,
-                      });
-                      return capture.reply.text;
+                      for (const candidate of candidates) {
+                        const candidateGate = taskGate(
+                          options.store,
+                          { id: operation.id, taskId: operation.taskId, instanceId: operation.instanceId!, nodeId: operation.nodeId },
+                          candidate,
+                          { optional: true },
+                        );
+                        candidateGate.setPurpose('skill_sediment');
+                        const candidateReply = await generateSkillProposal({
+                          stream: controlledOpenAIStream(candidateGate, resolveKeyFor(candidate), slotFor(candidate), candidate.api, {
+                            estimateMissing: true,
+                            ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+                          }),
+                          model: toPiModel(candidate),
+                          systemPrompt: sedimentSystemPrompt,
+                          payload,
+                        });
+                        capture.reply = candidateReply;
+                        attempts.push({ model: candidate.id, stopReason: candidateReply.stopReason, error: candidateReply.error, chars: candidateReply.raw.length });
+                        // An account that is out of quota can answer with an empty message that still says
+                        // "stop": only usable text ends the walk, or the review stops at the refusal.
+                        const usable = candidateReply.text?.trim() ?? '';
+                        if (usable) {
+                          answered = candidate.id;
+                          return usable;
+                        }
+                      }
+                      return null;
                     },
                   });
                   // What the review decided travels with the operation, so "it ran and found nothing",
-                  // "it proposed and was refused" and "it never came back with anything readable" are
-                  // facts in the store instead of guesses.
+                  // "it proposed and was refused", "it never came back with anything readable" and "every
+                  // cheap account refused it" are facts in the store instead of guesses.
                   options.store.event(operation.taskId, 'skill_sediment.reviewed', {
                     operationId: operation.id,
                     nodeId: operation.nodeId,
-                    model: sedimentEntry.id,
+                    model: answered ?? candidates[0]?.id ?? sedimentEntry.id,
                     toolCalls,
                     threshold: settings.afterToolCalls,
                     reviewed: decision.reviewed,
                     proposed: decision.outcome.proposed,
                     written: decision.outcome.written.map(entry => ({ id: entry.id, replaced: entry.replaced })),
                     refused: decision.outcome.refused,
+                    attempts,
                     replyStop: capture.reply?.stopReason ?? null,
                     replyChars: capture.reply?.raw.length ?? 0,
                     replyHead: capture.reply?.raw.slice(0, 200) ?? '',

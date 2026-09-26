@@ -97,6 +97,30 @@ export function shouldSediment(gate: SedimentGate): boolean {
     && gate.toolCalls >= gate.threshold;
 }
 
+const GRADE_ORDER: ModelEntry['grade'][] = ['low', 'medium', 'high', 'highest'];
+
+/** How many models one review may ask before it gives up on an operation. */
+export const SEDIMENT_ATTEMPT_LIMIT = 2;
+
+/**
+ * The models to ask, best first: the configured one, then the cheapest distinct one, then the rest by
+ * grade. A cheap model is exactly the one whose account can be out of quota (a 429 is not a decision),
+ * so the caller walks this list instead of letting one refusal cost the whole review.
+ */
+export function sedimentCandidates(main: ModelEntry, directory: ModelEntry[], preferred: string | null): ModelEntry[] {
+  const ordered: ModelEntry[] = [];
+  const add = (candidate: ModelEntry | undefined) => {
+    if (candidate && !ordered.some(existing => existing.id === candidate.id)) ordered.push(candidate);
+  };
+  const mainIdentity = modelIdentity(main);
+  // The reviewer is a second opinion, so the model that did the work is never a candidate — not even
+  // when it is the configured one.
+  const eligible = directory.filter(model => model.id !== main.id && modelIdentity(model) !== mainIdentity);
+  if (preferred) add(eligible.find(model => model.id === preferred));
+  for (const grade of GRADE_ORDER) for (const model of eligible) if (model.grade === grade) add(model);
+  return ordered.slice(0, SEDIMENT_ATTEMPT_LIMIT);
+}
+
 /** A cheaper, different model does the review: same reasoning as the composer suggestion. */
 export function selectSedimentModel(main: ModelEntry, directory: ModelEntry[], preferred: string | null): ModelEntry | undefined {
   if (preferred) {
