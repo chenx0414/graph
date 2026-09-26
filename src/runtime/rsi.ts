@@ -279,12 +279,28 @@ function assertText(value: unknown, name: string, max: number, required = true) 
   return text;
 }
 
+/** The one key a change cannot omit, spelled the way the batch is accepted. */
+export function changePath(body: Record<string, unknown>): unknown {
+  // `path` is the documented key; `file`/`filePath` are accepted because a batch written without
+  // one had to be resent whole, and the key has exactly one meaning.
+  return body['path'] ?? body['file'] ?? body['filePath'];
+}
+
+/** Names the shape, not just the missing key: a resend must not need a second guess. */
+function requiredChangePath(index: number): never {
+  throw new RuntimeError(
+    'invalid_input',
+    `changes[${index}].path is required: each change is `
+    + '{path, action: "write", content} | {path, action: "replace", edits: [{oldText, newText}]} | {path, action: "delete"}',
+  );
+}
+
 function normalizeChange(value: unknown, index: number): RsiFileChange {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new RuntimeError('invalid_input', `changes[${index}] must be an object`);
   }
   const body = value as Record<string, unknown>;
-  const path = assertText(body.path, `changes[${index}].path`, 1_000);
+  const path = assertText(changePath(body), `changes[${index}].path`, 1_000) || requiredChangePath(index);
   if (body.action === 'write') {
     if (typeof body.content !== 'string') throw new RuntimeError('invalid_input', `changes[${index}].content must be a string`);
     return { path, action: 'write', content: body.content };
