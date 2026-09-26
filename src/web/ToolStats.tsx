@@ -118,7 +118,7 @@ export function ToolStatsPage() {
       {!snapshot && !error && <Card><Spinner label="正在读取工具统计…" /></Card>}
       {snapshot && stats.length === 0 && (
         <Card title="还没有记录" icon="tool" subtitle="发生一次工具调用之后，这里会出现第一行。">
-          <p className="card-sub">统计只记录本守护进程内的工具调用，不回溯历史。</p>
+          <p className="card-sub">统计涵盖本守护进程与它派出的并行车道（车道的调用由其落盘、读取时归入），保留最近 90 天，不回溯历史。</p>
         </Card>
       )}
       {stats.length > 0 && (
