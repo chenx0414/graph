@@ -125,7 +125,12 @@ export function openConversationTools(input: {
 
   return {
     list: async query => input.service.list(query),
-    read: async (conversationId, query) => input.service.view(conversationId, { limit: query.limit, after: query.after }),
+    read: async (conversationId, query) => input.service.view(conversationId, {
+      limit: query.limit,
+      // No cursor means the newest window: a read that answered "what did they just say?" with the
+      // opening messages was useless. A cursor pages forward from where the last read stopped.
+      ...(query.after > 0 ? { after: query.after } : {}),
+    }),
     follow: async (conversationId, after, limit) => input.service.events(conversationId, after, limit),
     send: async request => {
       await check(request.conversationId);

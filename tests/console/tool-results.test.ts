@@ -22,6 +22,7 @@
  *    can only ever mean a full view again, never a surprise summary
  *  - the spill directory keeps only the newest files
  *  - a system inventory has its own ceiling, and only declared tools are capped
+ *  - a conversation transcript read has its own ceiling too: it is a whole session, not a shell line
  *  - the counts file records the scope, so a reopened instance keeps counting
  */
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
@@ -29,6 +30,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import {
+  CONVERSATION_READ_LIMIT,
   SHELL_OUTPUT_LIMIT,
   SUMMARY_LIMIT,
   SYSTEM_SUMMARY_LIMIT,
@@ -299,6 +301,26 @@ test('the spill directory keeps only the newest files', async () => {
   // The invariant is the count, not which file survived: three rapid writes may share a
   // modification time, so only the cap is claimed here.
   expect((await readdir(spillDir)).filter(name => name.endsWith('.txt'))).toHaveLength(2);
+});
+
+test('a conversation read is bounded from its first view, with a handle that still holds every byte', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-hook-transcript', spillDir });
+  const transcript = `${'m'.repeat(30_000)}\nlast-message`;
+  const read = {
+    toolCall: { name: 'conversation_read' }, args: { action: 'read', conversationId: 'other' },
+    result: { content: [{ type: 'text' as const, text: transcript }] },
+  };
+
+  const first = await hook(read);
+  expect(first).toBeTruthy();
+  const summary = partsOf(first!)[0]!.text ?? '';
+  expect(summary.length).toBeLessThanOrEqual(CONVERSATION_READ_LIMIT);
+  expect(summary).toContain('omitted');
+  expect(summary).toContain('last-message');
+  const handle = /handle: (\S+)/.exec(summary)?.[1];
+  expect(handle).toBeTruthy();
+  expect(await readFile(handle!, 'utf8')).toBe(transcript);
 });
 
 test('a system inventory has its own ceiling and only declared tools are capped', async () => {

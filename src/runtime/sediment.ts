@@ -151,13 +151,62 @@ function escapeControlCharacters(value: string): string {
 }
 
 /** Read a proposal out of whatever the model replied with; anything unreadable is "nothing". */
+/**
+ * The first complete JSON object in the text, counting braces that live inside its strings as content.
+ * The previous first-`{`/last-`}` slice took the end from whatever came last in the reply, so a body that
+ * mentioned `{"a":1}` ended the metadata too late and the whole decision was thrown away (HB-126).
+ */
+function firstJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') { quoted = true; continue; }
+    if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+export interface SedimentReplyShape {
+  /** A parseable metadata object was found. */
+  metadataLine: boolean;
+  /** A fenced body was found. */
+  fence: boolean;
+  /** Characters in the reply, as the model wrote them. */
+  chars: number;
+  /** The last characters, so the shape of a lost decision can be read back later. */
+  tail: string;
+}
+
+/** What the parser saw. Recorded with every review, so "unreadable" is never the whole story. */
+export function sedimentReplyShape(text: string): SedimentReplyShape {
+  const raw = text.trim();
+  return {
+    metadataLine: firstJsonObject(raw) !== null,
+    fence: /```(?:markdown|md)?[ \t]*\r?\n[\s\S]*?```/.test(raw),
+    chars: text.length,
+    tail: raw.slice(-200),
+  };
+}
+
 export function parseSedimentProposal(text: string): SedimentProposal | null {
   const raw = text.trim();
   if (!raw) return null;
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  const candidate = raw.slice(start, end + 1);
+  const candidate = firstJsonObject(raw);
+  if (!candidate) return null;
   let value: unknown;
   try {
     value = JSON.parse(candidate);
@@ -181,7 +230,12 @@ export function parseSedimentProposal(text: string): SedimentProposal | null {
   // which is what broke real replies: a line break or a quoted command in the middle of a body.
   // A body inside the metadata still counts, for a reply that takes the older shape.
   const fenced = /```(?:markdown|md)?[ \t]*\r?\n([\s\S]*?)\r?\n?```/.exec(raw)?.[1]?.trim();
-  const body = text_(record['body']) ?? (fenced || undefined);
+  // No fence: everything after the metadata object is the body. A model that writes one metadata line
+  // and then plain markdown has said what it wants; demanding a fence threw that away. An unclosed fence
+  // is still not a body — the existing rule that refuses it stands.
+  const prose = raw.slice(raw.indexOf(candidate) + candidate.length).trim();
+  const proseBody = prose && !prose.startsWith('{') && !prose.startsWith('```') ? prose.slice(0, BODY_LIMIT) : undefined;
+  const body = text_(record['body']) ?? (fenced || proseBody);
   return {
     action,
     ...(text_(record['id']) ? { id: text_(record['id'])! } : {}),

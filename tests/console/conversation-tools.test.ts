@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { CONVERSATION_SEND_LIMIT, agentMessageText, conversationWriteRefusal } from '../../src/runtime/conversation-tools.ts';
+import { CONVERSATION_SEND_LIMIT, agentMessageText, conversationWriteRefusal, openConversationTools } from '../../src/runtime/conversation-tools.ts';
 
 /**
  * The outward rules of handing a message to another conversation, pinned before the tools exist. The
@@ -26,4 +26,28 @@ test('a message written by an Agent says so, so the target never mistakes it for
   expect(written).toContain('请把候选项检查一遍');
   expect(written).toMatch(/另一个 Agent/);
   expect(written).toContain('c-1');
+});
+
+// A live miss: `read` asked for `after: 0`, which the service reads as "the oldest window", so a
+// transcript read for "what did they answer?" returned the opening messages instead of the end.
+test('read asks for the newest window unless a cursor says otherwise', async () => {
+  const queries: ({ limit?: number; after?: number } | undefined)[] = [];
+  const channel = openConversationTools({
+    service: {
+      list: () => [],
+      view: async (_conversationId, query) => { queries.push(query); return { messages: [] }; },
+      events: () => [],
+      chat: async () => ({}),
+      steer: async () => ({}),
+      pause: async () => ({}),
+      resume: async () => ({}),
+    },
+    caller: { conversationId: 'A', taskId: 't-1', nodeId: 'master' },
+    hostWrite: true,
+  });
+
+  await channel.read('B', { limit: 20, after: 0 });
+  await channel.read('B', { limit: 20, after: 7 });
+  expect(queries[0]).toEqual({ limit: 20 });
+  expect(queries[1]).toEqual({ limit: 20, after: 7 });
 });
