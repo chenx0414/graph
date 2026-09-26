@@ -22,5 +22,15 @@ test('packaging warns below the threshold and names what to reclaim', () => {
 test('space is reported in the unit a human reads', () => {
   expect(formatBytes(5.1 * 1024 ** 3)).toBe('5.1 GiB');
   expect(formatBytes(786 * 1024 ** 2)).toBe('786 MiB');
-  expect(MIN_FREE_BYTES).toBe(4 * 1024 ** 3);
+  // The threshold is measured rather than guessed: one build leaves 778 MiB of output (583 MiB app +
+  // 195 MiB dmg) and the build that died did so at 786 MiB free, so 2 GiB is the same early warning with
+  // room to spare. The 4 GiB it used to be cried wolf on three builds that passed at 3.2–3.7 GiB free.
+  expect(MIN_FREE_BYTES).toBe(2 * 1024 ** 3);
+});
+
+test('the warning still arrives before the failure, and stays quiet at a size that has worked', () => {
+  // The size that actually failed.
+  expect(diskSpaceWarning(786 * 1024 ** 2)).not.toBeNull();
+  // Three consecutive builds that passed at this size.
+  expect(diskSpaceWarning(3.2 * 1024 ** 3)).toBeNull();
 });

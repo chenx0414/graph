@@ -1,11 +1,13 @@
 import { statfsSync } from 'node:fs';
 
 /**
- * Room packaging needs before it starts. The dmg step failed once with 786 MiB free (`hdiutil: create
- * failed - 设备上无剩余空间`) and passed with 5.1 GiB, and by then the web build and the whole staging
- * copy had already been paid for.
+ * Room packaging needs before it starts, measured rather than guessed: one build leaves 778 MiB of output
+ * (583 MiB app bundle + 195 MiB dmg), and the dmg step failed once at 786 MiB free (`hdiutil: create
+ * failed - 设备上无剩余空间`) — by which point the web build and the whole staging copy had already been
+ * paid for. At 4 GiB the message fired on builds that then passed three times in a row at 3.2–3.7 GiB
+ * free; a warning that cries wolf costs the user a clean-up it did not need.
  */
-export const MIN_FREE_BYTES = 4 * 1024 ** 3;
+export const MIN_FREE_BYTES = 2 * 1024 ** 3;
 
 /** Sizes the way a person reads them back off `df -h`. */
 export function formatBytes(bytes: number): string {
