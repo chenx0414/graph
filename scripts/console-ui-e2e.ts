@@ -83,6 +83,10 @@ try {
 
   // Seed through the worker spool, not by inserting rows: the page must show what the new
   // ingest path produces, and a worker lane is the only writer that uses it.
+  const db = new DatabaseSync(join(state, 'tasks.sqlite'));
+  // The master's own question (ask_user) records kind 'waiting' with requestType
+  // 'user_decision' (operation-lifecycle block() + pi-adapter askedQuestion), so the card is
+  // seeded with that exact shape rather than a convenient stand-in.
   const task = db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES(?,?,?,?,?,?,?,?)');
   task.run('hb80-asked', 'e2e', '决策卡片的真浏览器断言', 1, 0, 'running', 0, 2);
   task.run('hb80-empty', 'e2e', '没有待处理问题的任务', 1, 0, 'running', 0, 3);
