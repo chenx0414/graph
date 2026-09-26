@@ -80,6 +80,8 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 调用形状是固定的（写错会白跑一个来回，报错会点名缺哪个字段）：`title`、`problem`、`changes`、`checks` 都是**顶层**字段；`changes[]` 的每个条目必须带 `path`（仓储相对路径）与 `action`（`write` / `replace` / `delete`），`write` 配 `content`、`replace` 配 `edits`；`checks` 里每项是 `{ command, args }`，也放顶层，不要塞进单个 change 里。
 
+检查必须能证明它声称的东西：`node --run check` 同时跑 typecheck 与全部测试，是「快检」的下限。只拿单文件 vitest 当检查会漏掉类型错误（实际漏过两次：一次 TDZ、一次忘了提拔 `SCHEMA_VERSION`），所以快检至少写成 `node --run typecheck && node node_modules/vitest/vitest.mjs run <files>`，或者直接用 `node --run check`。
+
 检查失败不会丢弃改动：文件保留在工作区、不提交、不重载，receipt 状态为 `checks_failed`。Main Agent 继续修复同一批文件，或传 `changes: []` 只重跑检查，直到通过；只有意外错误才恢复快照。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。
 
 `status=applied` 表示提交完成。`activate=true` 成功后，工具会结束当前回合，`activation.state=pending_reload` 表示等待重载；不要继续调用工具、追加 RSI 改动或报告“已生效”。已有 operation 结束前，新消息保持排队。宿主确认新 daemon 的提交与请求匹配后，报告更新为 `activation.state=active`，`inspect_rsi_status.lastActivation` 返回该次确认，主管会自动恢复原请求，无需用户发送 continue 或“已重载”；排队的新消息在同一轮优先处理。暂停时延后续跑，归档或终止时不自动唤醒。需要先做多个中间提交时使用 `activate=false`（状态 `saved`），最后再请求激活。
