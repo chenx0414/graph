@@ -26,7 +26,7 @@ test('round-trips the address a reader needs', async () => {
 test('reports no address rather than throwing', async () => {
   const stateDir = state();
   expect(await readConsoleAddress(stateDir)).toBeNull();
-}  );
+});
 
 test('refuses a record that is not an address', async () => {
   const stateDir = state();
