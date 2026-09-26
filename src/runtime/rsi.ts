@@ -279,12 +279,33 @@ function assertText(value: unknown, name: string, max: number, required = true) 
   return text;
 }
 
+/** The one key a change cannot omit, spelled the way the batch is accepted; `file`/`filePath` are
+ * accepted because a batch written without one had to be resent whole. */
+function changePath(body: Record<string, unknown>): unknown {
+  return body['path'] ?? body['file'] ?? body['filePath'];
+}
+
+/** Names the shape, not just the missing key: a resend must not need a second guess. */
+function changePathText(body: Record<string, unknown>, index: number): string {
+  const raw = changePath(body);
+  const path = typeof raw === 'string' ? raw.trim() : '';
+  if (!path) {
+    throw new RuntimeError(
+      'invalid_input',
+      `changes[${index}].path is required: each change is `
+      + '{path, action: "write", content} | {path, action: "replace", edits: [{oldText, newText}]} | {path, action: "delete"}',
+    );
+  }
+  if (path.length > 1_000) throw new RuntimeError('invalid_input', `changes[${index}].path must be at most 1000 characters`);
+  return path;
+}
+
 function normalizeChange(value: unknown, index: number): RsiFileChange {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new RuntimeError('invalid_input', `changes[${index}] must be an object`);
   }
   const body = value as Record<string, unknown>;
-  const path = assertText(body.path, `changes[${index}].path`, 1_000);
+  const path = changePathText(body, index);
   if (body.action === 'write') {
     if (typeof body.content !== 'string') throw new RuntimeError('invalid_input', `changes[${index}].content must be a string`);
     return { path, action: 'write', content: body.content };
@@ -849,6 +870,7 @@ export class RsiService {
         conversationId: conversation.id,
         role: 'system',
         kind: 'rsi',
+        operationId: context.operationId ?? null,
         text: receipt.report,
         data: receipt as unknown as Json,
         state: 'done',
@@ -865,6 +887,7 @@ export class RsiService {
           role: 'assistant',
           kind: 'chat',
           text: RSI_RELOAD_RECEIPT,
+          data: { reloadReceipt: true },
           state: 'done',
           operationId: context.operationId ?? null,
         });

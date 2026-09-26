@@ -15,6 +15,7 @@ import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useTargetBranch, useTaskStream } from './shared.tsx';
 import { Settings } from './Settings.tsx';
 import { UsagePage } from './Usage.tsx';
+import { ToolStatsPage } from './ToolStats.tsx';
 import { ResourceLibrary as CapabilityResourceLibrary } from './ResourceLibrary.tsx';
 import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
 import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
@@ -97,7 +98,7 @@ const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
 function statusText(view: TaskView) {
   if (view.paused) return TASK_LABEL[view.status] ?? view.status;
   const open = view.questions.filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
-  if (open.length) return open.map(question => QUESTION_LABEL[question.kind] ?? question.kind).join('、');
+  if (open.length) return open.map(question => describeQuestion(question.kind, question.data)).join('、');
   return TASK_LABEL[view.status] ?? view.status;
 }
 
@@ -183,6 +184,7 @@ export function App() {
     : pathname === '/inbox' ? '问题收件箱'
       : catalogMatch ? '资源库'
         : pathname === '/usage' ? '用量'
+          : pathname === '/tools' ? '工具'
         : pathname === '/setup' ? '设置'
           : pathname === '/settings' ? '设置'
             : nodeMatch ? '节点详情'
@@ -301,6 +303,7 @@ export function App() {
             {pathname === '/inbox' && <Inbox tasks={tasks} />}
             {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
             {pathname === '/usage' && <UsagePage />}
+            {pathname === '/tools' && <ToolStatsPage />}
             {conversationMatch && (
               <ConversationPanel
                 key={conversationMatch[1]}
@@ -377,6 +380,7 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
         </a>
         <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" /><span className="nav-label">资源库</span></a>
         <a href="#/usage" data-active={path === '/usage'}><Icon name="usage" /><span className="nav-label">用量</span></a>
+        <a href="#/tools" data-active={path === '/tools'}><Icon name="tool" /><span className="nav-label">工具</span></a>
       </nav>
       <div className="sidebar-scroll" data-testid="conversation-list">
         <div className="sidebar-label">

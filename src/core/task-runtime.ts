@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
+import { activeOperationForNode } from './control-targets.ts';
 import { mkdir, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { TaskStore, canonicalJson } from './store.ts';
@@ -28,6 +29,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
+import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
 import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
@@ -985,8 +987,12 @@ export async function openTaskRuntime(options: {
         paused: Boolean(anchor.paused),
         workspaceProjectId: conversation.workspace_project_id, anchorTaskId: conversation.anchor_task_id,
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
+        // Captured synchronously with the message/stream snapshot. New attaches
+        // subscribe after it instead of replaying the entire event history.
+        eventCursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
         messages: listMessages(store, conversationId, query), messageCount,
         streams: conversationStreams(store, conversationId),
+        continuations: store.db.prepare('SELECT operation_id AS operationId,resumed_operation_id AS resumedOperationId FROM rsi_continuations WHERE task_id=?').all(conversation.anchor_task_id) as { operationId: string; resumedOperationId: string | null }[],
         questions: anchorQuestions,
         proposal,
         proposalHistory,
@@ -1218,6 +1224,11 @@ export async function openTaskRuntime(options: {
         return: async () => { controller.abort(); return iterator.return(); },
       };
     },
+    history(conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+      ensureOpen();
+      conversationRow(store, conversationId);
+      return { messages: listMessages(store, conversationId, query) };
+    },
     events(conversationId: string, after = 0, limit = 200) {
       ensureOpen();
       const ids = conversationTaskIds(store, conversationId);
@@ -1277,6 +1288,7 @@ export async function openTaskRuntime(options: {
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
           bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true, confirmDraft: true,
+          controlTask: true,
         },
         ...(options.systemContext ? { systemContext: {
           systemSummary: Boolean(options.systemContext.systemSummary),
@@ -1535,8 +1547,94 @@ export async function openTaskRuntime(options: {
     },
     supervisor(taskId: string) {
       ensureOpen(); store.task(taskId);
+      /** Control reaches this task and its conversation's other tasks, never a sibling conversation. */
+      const controlTarget = (requested?: string): string => {
+        const target = requested?.trim() ? requested.trim() : taskId;
+        if (target === taskId) return target;
+        const conversation = store.task(taskId).conversation_id;
+        if (!conversation || store.task(target).conversation_id !== conversation) {
+          throw new RuntimeError('invalid_input', 'Control reaches only tasks of this conversation');
+        }
+        return target;
+      };
       // Give workers this scoped object, never the user or host runtime object.
       return {
+        /** Task control asked for by the main Agent itself: every action carries its reason
+         * and is recorded under the agent's own command scope, so the audit trail shows who
+         * acted instead of borrowing the user's scope. */
+        async controlTask(input: {
+          action: 'pause' | 'resume' | 'abandon' | 'set_budget' | 'steer';
+          taskId?: string;
+          nodeId?: string;
+          text?: string;
+          tokens?: number | null;
+          reason?: string;
+          requestId: string;
+        }) {
+          ensureOpen();
+          if (!input.requestId || input.requestId.length > 200) throw new RuntimeError('invalid_input', 'A bounded requestId is required');
+          const target = controlTarget(input.taskId);
+          const scope = `supervisor:${taskId}`;
+          if (input.action === 'pause' || input.action === 'resume') {
+            const paused = input.action === 'pause';
+            let stoppedMaster = false;
+            const receipt = store.command(scope, input.requestId, { type: input.action, taskId: target }, () => {
+              store.db.prepare('UPDATE tasks SET paused=? WHERE id=?').run(Number(paused), target);
+              if (paused) {
+                openPause(store, target);
+                // Remember the live master turn so an explicit resume continues it.
+                const active = store.db.prepare(`SELECT o.id FROM operations o
+                  JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+                  WHERE o.task_id=? AND json_extract(n.spec,'$.role')='master'
+                    AND o.state='dispatched' AND o.worker_active=1 ORDER BY o.rowid DESC LIMIT 1`).get(target) as { id: string } | undefined;
+                if (active) stoppedMaster = awaitPauseContinuation(store, input.requestId, target, active.id);
+              } else {
+                closePause(store, target);
+                resumePauseContinuations(store, target);
+              }
+              return { taskId: target, cursor: store.event(target, paused ? 'task.pause_requested' : 'task.resumed', { actor: 'agent', reason: input.reason ?? null }) };
+            });
+            if (paused && stoppedMaster) await execution.stopActiveMasterTurns(target);
+            else if (!paused && options.autoWake) execution.kick();
+            return receipt;
+          }
+          if (input.action === 'abandon') {
+            const reason = input.reason?.trim();
+            if (!reason) throw new RuntimeError('invalid_input', 'Abandoning a task needs a recorded reason');
+            return store.command(scope, input.requestId, { type: 'abandon', taskId: target, reason }, () => ({
+              taskId: target,
+              cursor: execution.abandon(target, reason, { allowMasterTurn: true }),
+            }));
+          }
+          if (input.action === 'set_budget') {
+            const nodeId = input.nodeId?.trim();
+            if (!nodeId) throw new RuntimeError('invalid_input', 'set_budget needs the node whose budget changes');
+            const tokens = input.tokens;
+            if (tokens === undefined) throw new RuntimeError('invalid_input', 'set_budget needs tokens: a positive integer or null for unlimited');
+            if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
+            return store.command(scope, input.requestId, { type: 'set_budget', taskId: target, nodeId, tokens }, () => {
+              const instance = store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?').get(target, nodeId) as { id: string } | undefined;
+              if (!instance) throw new RuntimeError('not_found', 'Unknown agent node');
+              setBudget(store, instance.id, tokens);
+              store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'")
+                .run(canonicalJson({ type: 'set_budget', tokens }), target, nodeId);
+              return { taskId: target, nodeId, tokens, cursor: store.event(target, 'instance.budget_changed', { nodeId, tokens, actor: 'agent' }) };
+            });
+          }
+          // Steering is the one action whose effect happens outside a command transaction:
+          // the message has to reach a live turn first, and only then is the receipt recorded.
+          const nodeId = input.nodeId?.trim();
+          const text = input.text?.trim();
+          if (!nodeId) throw new RuntimeError('invalid_input', 'steer needs the node whose running turn receives the message');
+          if (!text) throw new RuntimeError('invalid_input', 'A nonempty steering message is required');
+          const active = activeOperationForNode(store, target, nodeId);
+          if (!active) throw new RuntimeError('steering_unavailable', `Node ${nodeId} has no running turn to steer`);
+          const steered = await execution.steer(active.id, text);
+          return store.transaction(() => ({
+            taskId: target, nodeId, operationId: active.id, steered: steered?.ordinal ?? null,
+            cursor: store.event(target, 'operation.steered', { nodeId, operationId: active.id, actor: 'agent', text }),
+          }));
+        },
         /** The user asked in chat for this confirmation, so the record must show who
          * really acted and carry their words: the console click and this call stay
          * distinguishable in the command log. */
@@ -1978,6 +2076,23 @@ export async function openTaskRuntime(options: {
       preset(id: string) { ensureOpen(); return catalog.preset(id); },
       definitionSpec(id: string, version: number) { ensureOpen(); return catalog.definition(`${id}@${version}`); },
       recordPreset(id: string, version: string, hash: string, detail: Json) { ensureOpen(); return catalog.recordPreset(id, version, hash, detail); },
+    },
+    /** Durable tool-call telemetry: calls, failures and durations per tool and Agent role. */
+    toolCallStats() {
+      ensureOpen();
+      // Worker lanes spool their calls; reading the numbers is when they join the record.
+      return ingestToolCallSpools(store, stateDir).then(() => ({
+        generatedAt: Date.now(),
+        retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS,
+        stats: store.toolCallStats(),
+      }));
+    },
+    /** Drop the recorded tool calls, so a stale sample cannot be read as a fresh one. */
+    clearToolCalls() {
+      ensureOpen();
+      const removed = store.clearToolCalls();
+      store.forgetToolCallSpools();
+      return clearToolCallSpools(stateDir).then(() => ({ removed }));
     },
     close() {
       if (!closing) {

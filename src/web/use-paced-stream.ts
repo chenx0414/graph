@@ -25,15 +25,14 @@ function reducedMotion() {
  * increments. Keep the canonical text authoritative, but reveal newly arrived
  * text at a stable pace so every stream remains visibly continuous.
  */
-export function usePacedStreamText(target: string, key: string, active: boolean) {
+export function usePacedStreamText(target: string, key: string, active: boolean, attached = false) {
   const keyRef = useRef(key);
   const targetRef = useRef(target);
-  const activeRef = useRef(active);
-  const revealedRef = useRef(active ? 0 : target.length);
+  // Attaching history starts fully revealed; only subsequent appends animate.
+  const revealedRef = useRef(active && !attached ? 0 : target.length);
   const lastFrameRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
-  const [visibleLength, setVisibleLength] = useState(() => active ? 0 : target.length);
-  activeRef.current = active;
+  const [visibleLength, setVisibleLength] = useState(() => active && !attached ? 0 : target.length);
 
   const stop = useCallback(() => {
     if (frameRef.current !== null) {
@@ -72,7 +71,7 @@ export function usePacedStreamText(target: string, key: string, active: boolean)
     if (keyRef.current !== key) {
       keyRef.current = key;
       targetRef.current = target;
-      const initial = activeRef.current ? 0 : target.length;
+      const initial = active && !attached ? 0 : target.length;
       revealedRef.current = initial;
       stop();
       setVisibleLength(initial);
@@ -88,7 +87,7 @@ export function usePacedStreamText(target: string, key: string, active: boolean)
       lastFrameRef.current = null;
       frameRef.current = requestAnimationFrame(tick);
     }
-  }, [active, key, stop, target, tick]);
+  }, [active, attached, key, stop, target, tick]);
 
   useEffect(() => stop, [stop]);
 

@@ -30,6 +30,16 @@ type Supervisor = {
     proof?: string;
     requestId: string;
   }): Promise<unknown>;
+  /** Task control belongs to the main Agent for its own conversation, never to a worker. */
+  controlTask?(input: {
+    action: 'pause' | 'resume' | 'abandon' | 'set_budget' | 'steer';
+    taskId?: string;
+    nodeId?: string;
+    text?: string;
+    tokens?: number | null;
+    reason?: string;
+    requestId: string;
+  }): Promise<unknown>;
 };
 
 type ArtifactToolService = {
@@ -128,6 +138,8 @@ export function agentTools(input: {
   run?: (command: string, args: string[]) => Promise<{ code: number | null; stdout: string; stderr: string }>;
   fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
+  /** How ask_user hands a question to the session that can durably record it. */
+  onAskUser?: (question: { prompt: string; why: string }) => void;
   catalog?: Catalog;
   artifacts?: ArtifactToolService;
   systemContext?: {
@@ -469,6 +481,39 @@ export function agentTools(input: {
       const receipt = await input.systemContext!.rsiApply!(params);
       return { ...text(JSON.stringify(receipt)), ...(receipt.status === 'applied' && receipt.restartRequired === true ? { terminate: true } : {}) };
     },
+    ask_user: async (_id, params) => {
+      const body = fields(params);
+      const prompt = String(body.prompt ?? '').trim();
+      const why = String(body.why ?? '').trim();
+      if (!prompt) throw new Error('A question is required');
+      if (!why) throw new Error('Say what would change with the answer: a question nobody can act on is not worth the user turn');
+      if (!input.onAskUser) throw new Error('This Agent session cannot ask the user');
+      input.onAskUser({ prompt: prompt.slice(0, 2_000), why: why.slice(0, 1_000) });
+      // The turn stops here on purpose: the answer is the next turn's input, so continuing
+      // would spend model requests on work the answer may invalidate.
+      return { ...text(JSON.stringify({ status: 'asked', prompt })), terminate: true };
+    },
+    control_task: async (_id, params) => {
+      const body = fields(params);
+      const action = String(body.action ?? '').trim();
+      if (!['pause', 'resume', 'abandon', 'set_budget', 'steer'].includes(action)) {
+        throw new Error('Unsupported control action: use pause, resume, abandon, set_budget or steer');
+      }
+      if (!input.supervisor?.controlTask) throw new Error('This Agent session cannot control tasks');
+      const requestId = String(body.requestId ?? '').trim();
+      if (!requestId) throw new Error('A bounded requestId is required');
+      const receipt = await input.supervisor.controlTask({
+        action: action as 'pause' | 'resume' | 'abandon' | 'set_budget' | 'steer',
+        ...(typeof body.taskId === 'string' && body.taskId.trim() ? { taskId: body.taskId.trim() } : {}),
+        ...(typeof body.nodeId === 'string' && body.nodeId.trim() ? { nodeId: body.nodeId.trim() } : {}),
+        ...(typeof body.text === 'string' ? { text: body.text } : {}),
+        ...(body.tokens === null ? { tokens: null } : typeof body.tokens === 'number' ? { tokens: body.tokens } : {}),
+        ...(typeof body.reason === 'string' ? { reason: body.reason } : {}),
+        requestId,
+      });
+      // Abandoning ends the task, so there is nothing left to continue in this turn.
+      return { ...text(JSON.stringify(receipt)), ...(action === 'abandon' ? { terminate: true } : {}) };
+    },
     list_agent_combinations: async (_id, params) => {
       const body = fields(params);
       const query = typeof body.query === 'string' ? body.query.trim().toLowerCase() : '';
@@ -510,6 +555,7 @@ export function agentTools(input: {
       confirmDraft: Boolean(input.supervisor.confirmDraft),
       listProblems: Boolean(input.supervisor.listProblems),
       resolveProblem: Boolean(input.supervisor.resolveProblem),
+      controlTask: Boolean(input.supervisor.controlTask),
     } } : {}),
     ...(input.systemContext ? { systemContext: {
       systemSummary: Boolean(input.systemContext.systemSummary),

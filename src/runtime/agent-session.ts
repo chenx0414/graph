@@ -51,6 +51,8 @@ export interface AgentSessionTurn {
 
 export interface AgentSessionRequest {
   binding: AgentSessionBinding;
+  /** Reporting sink for executed tool calls; the in-process transport forwards it to the instance. */
+  onToolCall?: (call: { tool: string; ms: number; isError: boolean }) => void;
   workspace: string;
   stateDir: string;
   model: Model<Api>;
@@ -172,6 +174,7 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
         modelRuntime: options.modelRuntime,
         stream: request.stream,
         ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+        ...(request.onToolCall ? { onToolCall: request.onToolCall } : {}),
         ...(request.tools ? { tools: request.tools } : {}),
         ...(request.nativeTools?.length ? { nativeTools: request.nativeTools } : {}),
         ...(request.skillPaths?.length ? { skillPaths: request.skillPaths } : {}),

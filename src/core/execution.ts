@@ -175,10 +175,18 @@ export class Execution {
    * slot forever, so every queued task of every project waits behind it.
    * Stopping therefore has to hand the slot on, exactly like completion does.
    */
-  abandon(taskId: string, reason: string | null) {
+  abandon(taskId: string, reason: string | null, options: { allowMasterTurn?: boolean } = {}) {
     const task = this.store.task(taskId);
     if (task.phase === 'completed' || task.phase === 'abandoned') throw new RuntimeError('invalid_input', `A ${task.phase} task cannot be abandoned`);
-    if (this.store.db.prepare('SELECT id FROM operations WHERE task_id=? AND worker_active=1').get(taskId)) {
+    // The main Agent may stop the task it is serving: its own discussion turn is not
+    // integration work, so only a worker lane still writing to the target holds the task
+    // open. The user's own abandon keeps the stricter check.
+    const busy = options.allowMasterTurn
+      ? this.store.db.prepare(`SELECT o.id FROM operations o
+          JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+          WHERE o.task_id=? AND o.worker_active=1 AND json_extract(n.spec,'$.role') IS NOT 'master'`).get(taskId)
+      : this.store.db.prepare('SELECT id FROM operations WHERE task_id=? AND worker_active=1').get(taskId);
+    if (busy) {
       throw new RuntimeError('task_busy', 'Pause the task and wait for its running work to settle before abandoning it');
     }
     // The caller already holds a command transaction, so these writes are

@@ -70,3 +70,13 @@ Evidence 证明某个 acceptance 在具体输入和提交上是否通过。它�
 - 合并后记录精确 commit、evidence 和审查范围。
 
 如果 Git 操作结果不明，按 recovery 规则核查，不进行破坏性 reset 或 checkout。
+
+## Worktree 与分支清理
+
+- 任务进入终态（completed / abandoned）后它的工作副本不会自动消失：`git worktree list --porcelain | sed -n 's/^worktree //p'` 取**整行**路径（路径含空格，`awk '{print $2}'` 会截成 `/Users/macmini/Library/Application`），确认在 `<stateDir>/worktrees/` 下后用 `git worktree remove --force` 逐个移除，最后 `git worktree prune` 清理失效注册。
+- 循环里绝不放 `rm -rf` 兜底：失效注册交给 `git worktree prune`。
+- 已并入主线的 `graph/*` 分支用 `git branch -d` 清理，保留最近几个便于追溯。
+
+## 推送失败不等于闸门失败
+
+推送失败时先读日志里的**闸门判定行**，不要把它当成门禁失败重跑一遍；遇到 `RPC failed ... HTTP2 framing layer` 之类的传输层错误，用 `git -c http.version=HTTP/1.1` 重试。

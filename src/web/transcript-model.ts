@@ -34,13 +34,14 @@ export type TranscriptRsi = {
 /** One ordered step of a finished turn: the narration the Agent wrote between
  * tool calls, or a tool call itself. */
 export type TranscriptActivityItem =
+  | { kind: 'rsi'; id: string; rsi: TranscriptRsi; ordinal?: number }
   | { kind: 'narration'; id: string; text: string; ordinal?: number }
   | { kind: 'tool'; id: string; tool: TranscriptTool; ordinal?: number }
   | { kind: 'steer'; id: string; message: ConversationMessage; ordinal?: number };
 
 export type TranscriptRow =
   | { kind: 'message'; id: string; message: ConversationMessage }
-  | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
+  | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; attached?: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
@@ -49,18 +50,19 @@ export type TranscriptRow =
 
 export type TranscriptModelInput = {
   messages: ConversationMessage[];
+  continuations?: { operationId: string; resumedOperationId: string | null }[];
   liveTools: LiveTool[];
   streaming: LiveText[];
   busy: boolean;
 };
 
 function toolName(message: ConversationMessage) {
-  const value = message.data?.toolName;
+  const value = message.data?.toolName ?? message.data?.tool;
   return typeof value === 'string' && value ? value : 'tool';
 }
 
 function toolError(message: ConversationMessage) {
-  return message.data?.isError === true || /失败|error/i.test(message.text);
+  return (message.data?.isError === true || message.data?.error === true) || /失败|error/i.test(message.text);
 }
 
 function durableTool(message: ConversationMessage): TranscriptTool {
@@ -192,6 +194,7 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
     tools = [];
   };
   for (const item of items) {
+    if (item.kind === 'rsi') { flush(); rows.push({ kind: 'rsi', id: item.id, rsi: item.rsi }); continue; }
     if (item.kind === 'narration') {
       flush();
       rows.push({ kind: 'narration', id: `narration:${item.id}`, operationId, text: item.text });
@@ -210,49 +213,50 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
   return rows;
 }
 
-/**
- * Turn the stream projection into stable visual rows. A turn keeps its own
- * order: narration and tool calls are interleaved by the ordinal the server
- * assigned, and a turn that already produced its final answer collapses into one
- * activity block so the answer stays the visible outcome. The live tail is
- * appended after durable history so the same row survives the handoff.
- */
-/**
- * When the turn behind one answer began, as the transcript can see it: the later
- * of the user message that asked for it and the previous answer, so a turn nobody
- * asked for (a reload continuation) still measures itself. Only when neither is
- * visible does it fall back to the earliest record of the same operation.
- */
-function turnStart(messages: ConversationMessage[], message: ConversationMessage): number | null {
-  let start: number | null = null;
-  for (const item of messages) {
-    if (item.seq >= message.seq) continue;
-    if (item.role === 'user' || (item.role === 'assistant' && item.kind === 'chat')) {
-      if (start === null || item.createdAt > start) start = item.createdAt;
-    }
-  }
-  if (start !== null) return start;
-  if (!message.operationId) return null;
-  const sameOperation = messages.filter(item => item.operationId === message.operationId);
-  if (sameOperation.length < 2) return null;
-  return sameOperation.reduce((earliest, item) => Math.min(earliest, item.createdAt), message.createdAt);
-}
-
-/**
- * How long the turn behind one answer took. Null when there is nothing to measure
- * against, so a turn with no visible start shows no duration instead of a fake
- * zero. A receipt written while the turn is still running is the first record of
- * its own operation, which is why the start comes from the turn boundary.
- */
-function turnElapsedMs(messages: ConversationMessage[], message: ConversationMessage): number | null {
-  const start = turnStart(messages, message);
-  if (start === null) return null;
-  const elapsed = message.createdAt - start;
-  return elapsed > 0 ? elapsed : null;
-}
-
 export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[] {
+  // A reload is a transport boundary within the same user request.
+  const parents = new Map((input.continuations ?? []).filter(item => item.resumedOperationId).map(item => [item.resumedOperationId!, item.operationId]));
+  const roots = new Map<string, string>();
+  const root = (id: string) => {
+    if (roots.has(id)) return roots.get(id)!;
+    const visited = new Set<string>();
+    while (parents.has(id) && !visited.has(id)) { visited.add(id); id = parents.get(id)!; }
+    for (const key of visited) roots.set(key, id);
+    return id;
+  };
+  const maxima = new Map<string, number>();
+  for (const item of [...input.messages.map(message => ({ operationId: message.operationId, ordinal: messageOrdinal(message) })), ...input.streaming, ...input.liveTools]) {
+    if (item.operationId) maxima.set(item.operationId, Math.max(maxima.get(item.operationId) ?? 0, item.ordinal ?? 0));
+  }
+  const offsets = new Map<string, number>();
+  const offset = (id: string): number => {
+    if (offsets.has(id)) return offsets.get(id)!;
+    offsets.set(id, 0);
+    const parent = parents.get(id);
+    const value = parent ? offset(parent) + (maxima.get(parent) ?? 0) + 1 : 0;
+    offsets.set(id, value);
+    return value;
+  };
+  const isReceipt = (message: ConversationMessage) => message.data?.reloadReceipt === true
+    || (message.role === 'assistant' && message.text.startsWith('RSI 改动已提交，等待重载。') && message.text.includes('重载确认后会自动继续'));
+  input = { ...input,
+    messages: input.messages.filter(message => !isReceipt(message)).map(message => message.operationId ? { ...message, operationId: root(message.operationId), ...(messageOrdinal(message) !== undefined ? { data: { ...message.data, ordinal: messageOrdinal(message)! + offset(message.operationId) } } : {}) } : message),
+    streaming: input.streaming.map(item => ({ ...item, operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
+    liveTools: input.liveTools.map(item => ({ ...item, operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
+  };
   const rows: TranscriptRow[] = [];
+  const elapsed = new Map<string, number | null>();
+  const earliest = new Map<string, number>();
+  let boundary: number | null = null;
+  for (const message of input.messages) {
+    const key = message.operationId ?? message.id;
+    if (!earliest.has(key)) earliest.set(key, message.createdAt);
+    if (message.role === 'assistant') {
+      const start = boundary ?? earliest.get(key)!;
+      elapsed.set(message.id, message.createdAt > start ? message.createdAt - start : null);
+    }
+    if (message.role === 'user' || (message.role === 'assistant' && message.kind === 'chat')) boundary = message.createdAt;
+  }
   const answered = new Set(input.messages
     .filter(message => message.role === 'assistant' && message.kind === 'chat' && message.operationId)
     .map(message => message.operationId as string));
@@ -275,7 +279,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       if (folded.length) {
         // Opening the muted line brings back the very rows the turn showed while
         // it was running.
-        rows.push({ kind: 'activity', id: `activity:${key}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: true });
+        rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: true });
       }
       if (cut >= 0) rows.push(...activityRows(key, ordered.slice(cut)));
       return;
@@ -296,7 +300,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   };
 
   for (const message of input.messages) {
-    if (isActivityMessage(message) || isSteeredMessage(message)) {
+    if (isActivityMessage(message) || isSteeredMessage(message) || (message.kind === 'rsi' && message.operationId)) {
       const key = message.operationId ?? '';
       if (activityKey !== null && activityKey !== key) flushActivity();
       activityKey = key;
@@ -305,6 +309,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         activityItems.push({ kind: 'steer', id: message.id, message, ...(ordinal !== undefined ? { ordinal } : {}) });
         continue;
       }
+      if (message.kind === 'rsi') { activityItems.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) }); continue; }
       const incoming = activityItem(message);
       if (incoming.kind === 'tool') {
         // A tool call and its result are two records of the same call.
@@ -328,7 +333,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         text: message.text,
         streaming: false,
         createdAt: message.createdAt,
-        elapsedMs: turnElapsedMs(input.messages, message),
+        elapsedMs: elapsed.get(message.id) ?? null,
       });
       continue;
     }
@@ -358,7 +363,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   const merged: { ordinal: number; item?: TranscriptActivityItem; tool?: TranscriptTool; stream?: LiveText }[] = tail.length && pendingItems.length && pendingItems.every(item => item.ordinal !== undefined)
     ? [...pendingItems.map(item => ({ ordinal: item.ordinal ?? 0, item })), ...tail].sort((left, right) => left.ordinal - right.ordinal)
     : tail;
-  if (!tail.length) emitActivity(pendingKey ?? '', pendingItems);
+  if (!tail.length || merged === tail) emitActivity(pendingKey ?? '', pendingItems);
   let liveTools: TranscriptTool[] = [];
   const flushLiveTools = () => {
     pushToolGroup(rows, liveTools);
@@ -368,6 +373,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   // in the turn, so a finished segment never waits for its tool call to end.
   for (const [index, item] of merged.entries()) {
     if (item.item) {
+      if (item.item.kind === 'rsi') { flushLiveTools(); rows.push({ kind: 'rsi', id: item.item.id, rsi: item.item.rsi }); continue; }
       if (item.item.kind === 'narration') {
         flushLiveTools();
         rows.push({
@@ -392,9 +398,10 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       flushLiveTools();
       rows.push({
         kind: 'assistant',
-        id: `assistant:${item.stream.entryId}:${item.stream.partId}`,
+        id: `assistant:${item.stream.operationId}:${item.stream.entryId}:${item.stream.partId}`,
         operationId: item.stream.operationId,
         text: item.stream.text,
+        attached: item.stream.attached ?? false,
         narration: true,
         streaming: index === merged.length - 1,
         // Live narration renders through the same copyable row as a final answer,

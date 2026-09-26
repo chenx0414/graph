@@ -562,10 +562,12 @@ test('the composer suggestion and queue steering follow the three Enter states',
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
     return messages.some(message => message.role === 'user' && message.text === '继续检查测试覆盖和失败分支。');
   }, { timeout: 10_000 }).toBe(true);
-  // This test drives a real turn through a browser; under the parallel gate it has
-  // timed out at the 15s default while passing on its own, so it uses the same
-  // budget as the other browser-driven cases in this file.
-}, 60_000);
+  // This test drives a real turn through a browser, so it owns several sequential waits whose
+  // budgets add up (10s + 10s + 1s + 30s + 60s + 10s + 10s + 10s). The outer budget must exceed
+  // that sum: at 60s the test itself died first and reported only "Test timed out in 60000ms",
+  // naming no condition. With room to spare, a real stall now fails inside the poll that was
+  // still waiting and says which state never arrived.
+}, 240_000);
 
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');
@@ -1797,6 +1799,56 @@ test('a self-improvement report renders as its own card in the conversation', as
     text: '重载已确认', data: { ...report.data as Record<string, import('../../src/core/types.ts').Json>, activation: { state: 'active', confirmedAt: Date.now() } },
   });
   await page.reload();
+  await expect.poll(() => card.innerText()).toContain('已生效');
+  expect(await card.locator('.rsi-report-problem').count()).toBe(0);
+  await card.getByRole('button', { name: '展开', exact: true }).click();
   await expect.poll(() => card.innerText()).toContain('宿主已确认重载，改动已生效');
   expect(await card.innerText()).not.toContain('等待重载');
+}, 60_000);
+
+test('the sent tab shows the tool declarations one request carried, with their count and size', async () => {
+  const root = await temp('agent-context-tools-ui');
+  const agentContext = openAgentContextLibrary(join(root, 'graph', 'prompts'), { identity: 'Default Main' });
+  await agentContext.ensure();
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+    agentContext,
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ text: '看声明', requestId: 'sent-tools-ui' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const declarations = [{
+    name: 'propose_graph', description: 'Draft a graph',
+    parameters: { type: 'object', properties: { proposalJson: { type: 'string' } }, required: ['proposalJson'] },
+  }];
+  const recorded = JSON.stringify(declarations);
+  // The page renders the fact the API reports for one real request; the check that this
+  // fact equals what went over the wire lives in the runtime test.
+  await page.route('**/api/agent-context*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      docsRoot: graphDocumentationPaths().root,
+      definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
+      prompts: [], disabledTools: [], tools: [], capabilities: [],
+      sent: { operationId: 'op-1', at: 1, text: '<identity>demo</identity>', tools: recorded },
+    }),
+  }));
+
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('agent-context-bar').waitFor();
+  await page.getByTestId('agent-context-open').click();
+  await page.getByTestId('agent-context-sent-tools').waitFor();
+  const block = await page.getByTestId('agent-context-sent-tools').innerText();
+  expect(block).toContain('1 个工具');
+  expect(block).toContain(`${recorded.length.toLocaleString()} 字符`);
+  // The same request's prompt still sits above it, unchanged.
+  expect(await page.getByTestId('agent-context-sent-text').innerText()).toBe('<identity>demo</identity>');
+  expect(await page.getByTestId('agent-context-sent-tools-text').innerText()).toContain('propose_graph');
 }, 60_000);

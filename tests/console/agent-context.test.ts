@@ -149,8 +149,11 @@ test('unchanged legacy rule defaults migrate to the compact rule set', async () 
   const library = openAgentContextLibrary(root);
   await library.ensure();
 
-  expect(await library.prompt('rules/common.md')).toBe('- Use tool results as evidence.');
-  expect(await library.prompt('rules/main.md')).toContain('Recipe names use a readable identity plus role');
+  // The default a legacy file migrates to is the compact rule set: Pi's own rules first, then
+  // Graph's shared rules, while the main role keeps only its takeover rule.
+  expect(await library.prompt('rules/common.md')).toContain('- Use bash for file operations like ls, rg, find');
+  expect(await library.prompt('rules/common.md')).toContain('- R27 Test level (high level first)');
+  expect(await library.prompt('rules/main.md')).toContain('R14 When one node stays blocked for three rounds');
   expect(await library.prompt('runtime/main-conversation.md')).not.toContain('Recipe names use');
   expect(await library.prompt('runtime/main-graph.md')).not.toContain('selfModelSection');
 });

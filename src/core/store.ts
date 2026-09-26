@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 37;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -562,20 +562,133 @@ export class TaskStore {
       // Existing rows stay NULL (= not recorded), which the console reports as such.
       this.db.exec('ALTER TABLE operations ADD COLUMN system_prompt TEXT; PRAGMA user_version=34;');
     });
-  }
-  /** The exact system prompt of the newest master turn that sent one, for the console. */
-  conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string } | null {
-    const row = this.db.prepare(`SELECT id, settled_at, dispatched_at, system_prompt FROM operations
-      WHERE task_id = ? AND node_id = 'master' AND system_prompt IS NOT NULL
-      ORDER BY rowid DESC LIMIT 1`).get(anchorTaskId) as
-      { id: string; settled_at: number | null; dispatched_at: number | null; system_prompt: string } | undefined;
-    if (!row) return null;
-    return { operationId: row.id, at: row.settled_at ?? row.dispatched_at ?? 0, text: row.system_prompt };
+    if (version < 35) this.transaction(() => {
+      // The console also shows the tool declarations one request carried. They are recorded
+      // beside the prompt, at the same call site, and are display-only: nothing here is sent.
+      // Existing rows stay NULL (= not recorded), which the console reports as such.
+      this.db.exec('ALTER TABLE operations ADD COLUMN tool_declarations TEXT; PRAGMA user_version=35;');
+    });
+    if (version < 36) this.transaction(() => {
+      // Durable per-tool telemetry: one append-only row per executed tool call, so call counts,
+      // success rates and durations accumulate across restarts instead of dying with the process.
+      // IF NOT EXISTS keeps a downgraded database (a test that pins an older user_version without
+      // dropping this table) from failing to reopen.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tool_calls(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          instance_id TEXT NOT NULL,
+          task_id TEXT,
+          node_id TEXT,
+          role TEXT,
+          tool TEXT NOT NULL,
+          ms INTEGER NOT NULL,
+          is_error INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS tool_calls_tool ON tool_calls(tool, created_at);
+        PRAGMA user_version=36;`);
+    });
+    if (version < 37) this.transaction(() => {
+      // A worker lane runs in a child process that holds no store, so its calls are spooled to a
+      // file and folded in on the next read. This offset is what makes that ingest idempotent.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tool_call_spools(
+          path TEXT PRIMARY KEY,
+          offset INTEGER NOT NULL
+        );
+        PRAGMA user_version=37;`);
+    });
   }
 
-  /** Record the exact system prompt one send carried; the first send of an operation wins. */
-  recordOperationSystemPrompt(operationId: string, text: string): void {
-    this.db.prepare('UPDATE operations SET system_prompt = ? WHERE id = ? AND system_prompt IS NULL').run(text, operationId);
+  /** How long a recorded tool call stays visible in the aggregated statistics. */
+  static readonly TOOL_CALL_RETENTION_DAYS = 90;
+
+  /**
+   * Record one executed tool call. Called from the runtime seam that surrounds every tool, so a
+   * failure here must never be able to break a turn - the caller guards it, and the write itself
+   * stays a single statement.
+   *
+   * Attribution is resolved once, at write time, from the node that owns the instance: `nodes`
+   * identifies it uniquely through `instance_id`, and `spec.role` names the Agent role (master,
+   * coder, ...). An instance with no node row records `null` attribution rather than guessing.
+   */
+  recordToolCall(input: { instanceId: string; tool: string; ms: number; isError: boolean; at?: number }): void {
+    const node = this.db.prepare(
+      `SELECT n.task_id AS task_id, n.id AS node_id, json_extract(n.spec, '$.role') AS role FROM nodes n WHERE n.instance_id = ?`,
+    ).get(input.instanceId) as { task_id: string; node_id: string; role: string | null } | undefined;
+    this.db.prepare(
+      'INSERT INTO tool_calls(instance_id, task_id, node_id, role, tool, ms, is_error, created_at) VALUES(?,?,?,?,?,?,?,?)',
+    ).run(
+      input.instanceId, node?.task_id ?? null, node?.node_id ?? null, node?.role ?? null,
+      input.tool, Math.max(0, Math.round(input.ms)), input.isError ? 1 : 0, input.at ?? Date.now(),
+    );
+  }
+
+  /**
+   * Aggregate the retained tool calls by tool and role. Reading prunes too: retention costs no
+   * timer and no extra state, it is enforced exactly when someone looks at the numbers.
+   */
+  toolCallStats(keepDays = TaskStore.TOOL_CALL_RETENTION_DAYS): Array<{
+    tool: string; role: string | null; calls: number; errors: number; totalMs: number; maxMs: number; lastAt: number;
+  }> {
+    this.pruneToolCalls(keepDays);
+    const rows = this.db.prepare(
+      `SELECT tool, role, count(*) AS calls, sum(is_error) AS errors, sum(ms) AS total_ms, max(ms) AS max_ms, max(created_at) AS last_at
+       FROM tool_calls GROUP BY tool, role ORDER BY calls DESC, tool`,
+    ).all() as Array<{ tool: string; role: string | null; calls: number; errors: number; total_ms: number; max_ms: number; last_at: number }>;
+    return rows.map(row => ({
+      tool: row.tool, role: row.role, calls: Number(row.calls), errors: Number(row.errors),
+      totalMs: Number(row.total_ms), maxMs: Number(row.max_ms), lastAt: Number(row.last_at),
+    }));
+  }
+
+  /** Drop the recorded tool calls, so a stale sample cannot be mistaken for a fresh one. */
+  clearToolCalls(): number {
+    const result = this.db.prepare('DELETE FROM tool_calls').run();
+    return Number(result.changes);
+  }
+
+  /** Delete tool calls older than the retention window. Returns how many rows went. */
+  pruneToolCalls(keepDays = TaskStore.TOOL_CALL_RETENTION_DAYS): number {
+    const cutoff = Date.now() - keepDays * 86_400_000;
+    const result = this.db.prepare('DELETE FROM tool_calls WHERE created_at < ?').run(cutoff);
+    return Number(result.changes);
+  }
+
+  /** How far one spooled worker file has already been folded into `tool_calls`. */
+  toolCallSpoolOffset(path: string): number {
+    const row = this.db.prepare('SELECT offset FROM tool_call_spools WHERE path = ?').get(path) as { offset: number } | undefined;
+    return Number(row?.offset ?? 0);
+  }
+
+  setToolCallSpoolOffset(path: string, offset: number): void {
+    this.db.prepare(
+      'INSERT INTO tool_call_spools(path, offset) VALUES(?,?) ON CONFLICT(path) DO UPDATE SET offset=excluded.offset',
+    ).run(path, Math.max(0, Math.round(offset)));
+  }
+
+  /** Forget every spool offset, so a cleared sample cannot be read back out of the files. */
+  forgetToolCallSpools(): void {
+    this.db.prepare('DELETE FROM tool_call_spools').run();
+  }
+
+  /** Forget one spool file, once the rows it produced are the only record left. */
+  forgetToolCallSpool(path: string): void {
+    this.db.prepare('DELETE FROM tool_call_spools WHERE path = ?').run(path);
+  }
+  /** The exact system prompt and tool declarations of the newest master turn that sent one. */
+  conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string; tools: string | null } | null {
+    const row = this.db.prepare(`SELECT id, settled_at, dispatched_at, system_prompt, tool_declarations FROM operations
+      WHERE task_id = ? AND node_id = 'master' AND system_prompt IS NOT NULL
+      ORDER BY rowid DESC LIMIT 1`).get(anchorTaskId) as
+      { id: string; settled_at: number | null; dispatched_at: number | null; system_prompt: string; tool_declarations: string | null } | undefined;
+    if (!row) return null;
+    return { operationId: row.id, at: row.settled_at ?? row.dispatched_at ?? 0, text: row.system_prompt, tools: row.tool_declarations };
+  }
+
+  /** Record the exact system prompt and tool declarations one send carried; the first send of an operation wins. */
+  recordOperationSystemPrompt(operationId: string, text: string, toolDeclarations?: string): void {
+    this.db.prepare('UPDATE operations SET system_prompt = ?, tool_declarations = ? WHERE id = ? AND system_prompt IS NULL')
+      .run(text, toolDeclarations ?? null, operationId);
   }
 
   transaction<T>(action: () => T): T {

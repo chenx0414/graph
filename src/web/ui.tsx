@@ -3,13 +3,14 @@ import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from '
 /* ---------------------------------------------------------------- icons */
 
 export type IconName =
-  | 'overview' | 'inbox' | 'catalog' | 'usage' | 'wizard' | 'settings' | 'graph' | 'task'
+  | 'overview' | 'inbox' | 'catalog' | 'usage' | 'wizard' | 'settings' | 'graph' | 'task' | 'tool'
   | 'play' | 'pause' | 'check' | 'alert' | 'clock' | 'plus' | 'refresh'
   | 'link' | 'bolt' | 'spark' | 'box' | 'chevron' | 'search' | 'message' | 'send' | 'close'
   | 'folder' | 'file' | 'paperclip' | 'archive' | 'panel-left' | 'panel-right' | 'copy';
 
 const PATHS: Record<IconName, ReactNode> = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+  tool: <><path d="M14.5 6.2a3.9 3.9 0 0 1 5.3 5.3l-2.2-2.2-1.5 1.5-1.6-1.6 1.5-1.5z" /><path d="M13.2 10.6 5.6 18.2a1.9 1.9 0 0 0 2.7 2.7l7.6-7.6z" /></>,
   inbox: <><path d="M4 13.5V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7.5" /><path d="M4 13.5h4l1.5 2h5L16 13.5h4V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /></>,
   catalog: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v14H6.5A2.5 2.5 0 0 0 4 19.5z" /><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H19v-5" /></>,
   usage: <><path d="M4 19V9M10 19V4M16 19v-7M22 19H2" /><path d="m3 7 6-4 6 7 6-4" /></>,

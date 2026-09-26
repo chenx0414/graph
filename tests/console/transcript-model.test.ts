@@ -214,7 +214,7 @@ test('live and durable assistant rows share the turn key the reveal is paced by'
     busy: false,
   });
 
-  expect(live[0]).toMatchObject({ kind: 'assistant', id: 'assistant:entry-1:0', operationId: 'op-1', streaming: true });
+  expect(live[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1:entry-1:0', operationId: 'op-1', streaming: true });
   expect(durable[0]).toMatchObject({ kind: 'assistant', id: 'assistant:op-1', operationId: 'op-1', streaming: false });
 });
 
@@ -336,4 +336,24 @@ test('a steered message interleaves with the running turn by ordinal', () => {
   const steered = rows[3];
   if (steered?.kind !== 'message') throw new Error('expected the steered message row');
   expect(steered.message.text).toBe('插队：改成 B');
+});
+
+
+test('reload continuation retains one activity group and one final answer', () => {
+  const activity = (id: string, seq: number, op: string) => ({ ...message({ id, seq, role: 'activity', operationId: op, text: id }), kind: 'activity', data: { ordinal: 1 } });
+  const rows = buildTranscriptRows({
+    messages: [activity('before', 1, 'a'),
+      { ...message({ id: 'rsi', seq: 2, role: 'system', operationId: 'a' }), kind: 'rsi', data: { status: 'applied', activation: { state: 'active' } } },
+      { ...message({ id: 'receipt', seq: 3, role: 'assistant', operationId: 'a' }), data: { reloadReceipt: true } },
+      activity('after', 4, 'b'), message({ id: 'answer', seq: 5, role: 'assistant', operationId: 'b', text: 'finished' })],
+    continuations: [{ operationId: 'a', resumedOperationId: 'b' }], liveTools: [], streaming: [], busy: false,
+  });
+  expect(rows.map(row => row.kind)).toEqual(['activity', 'assistant']);
+  expect(rows[0]).toMatchObject({ operationId: 'a', items: [{ id: 'before' }, { id: 'rsi:rsi' }, { id: 'after' }] });
+  expect(rows[1]).toMatchObject({ text: 'finished' });
+});
+
+test('older activity without ordinals is retained alongside a new live tail', () => {
+  const rows = buildTranscriptRows({ messages: [{ ...message({ id: 'old', seq: 1, role: 'activity', operationId: 'a', text: 'retained' }), kind: 'activity' }], liveTools: [], streaming: [{ operationId: 'b', entryId: 'e', partId: '0', text: 'new', ordinal: 1, length: 3, updatedAt: 2 }], busy: true });
+  expect(rows).toContainEqual(expect.objectContaining({ text: 'retained' }));
 });

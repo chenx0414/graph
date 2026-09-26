@@ -1,4 +1,5 @@
 import { createApp } from './app.ts';
+import { portIsFree, preferredConsolePort } from './console-port.ts';
 import { join } from 'node:path';
 import { openTaskRuntime } from '../core/task-runtime.ts';
 import { RuntimeError } from '../core/types.ts';
@@ -51,8 +52,14 @@ export async function openGraphServer(options: Parameters<typeof openTaskRuntime
   const runtime = await openTaskRuntime({ ...options, agentContext, autoWake: Boolean(options.autoDrive) });
   const app = await createApp(runtime, { origin: options.origin ?? 'http://127.0.0.1', ...(options.webDir ? { webDir: options.webDir } : {}), ...(options.startup ? { startup: options.startup } : {}), ...(options.startupInfo ? { startupInfo: options.startupInfo } : {}), ...(options.configStore ? { config: { store: options.configStore, env: options.configEnv ?? {} } } : {}), ...(options.configTest ? { configTest: options.configTest } : {}), ...(options.appServices ? { appServices: options.appServices } : {}), ...(options.usage ? { usage: options.usage } : {}), ...(options.systemContext ? { systemContext: options.systemContext } : {}), agentContext });
   let address: string;
+  // A free-port request (`--port 0`, what the desktop app passes) prefers the port this state
+  // directory last served on: a reload must not move the console out from under open tabs.
+  const requestedPort = options.port ?? 0;
+  const bindPort = requestedPort === 0
+    ? (await preferredConsolePort({ stateDir: options.stateDir, isFree: portIsFree, waitMs: 5_000 })) ?? 0
+    : requestedPort;
   try {
-    address = await app.listen({ host: '127.0.0.1', port: options.port ?? 0 });
+    address = await app.listen({ host: '127.0.0.1', port: bindPort });
   } catch (error) {
     await app.close().catch(() => undefined);
     await runtime.close().catch(() => undefined);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
@@ -141,6 +141,8 @@ function residentFlag(id: string): 'true' | undefined {
 }
 type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; owner?: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string };
 type ConversationView = {
+  eventCursor?: number;
+  continuations?: { operationId: string; resumedOperationId: string | null }[];
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;
   createdAt: number; requirementVersion: number; paused: boolean;
   messages: ConversationMessage[]; messageCount: number;
@@ -606,9 +608,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   useEffect(() => { writeComposerDraft(composerStorage(), id, text); }, [id, text]);
   const connected = useEventStream(view ? `/api/conversations/${view.id}/events/stream` : null, event => {
     const data = event.data as Parameters<typeof applyConversationEvent>[1]['data'];
-    setProjection(current => applyConversationEvent(current, { type: event.type, ...(data ? { data } : {}) }));
-    refresh();
-  });
+    setProjection(current => applyConversationEvent(current, { type: event.type, cursor: event.cursor, ...(data ? { data } : {}) }));
+    if (event.type !== 'message.delta') refresh();
+  }, view?.eventCursor ?? 0);
   useEffect(() => {
     const latest = view?.accepted.at(-1);
     if (latest?.targetBranch) setBranch(latest.targetBranch);
@@ -641,7 +643,16 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   useEffect(() => {
     if (view) setProjection(current => observeConversationView(current, view));
   }, [view]);
-  const snapshot = conversationProjectionSnapshot(projection, { busy: Boolean(busy) });
+  const snapshot = useMemo(() => conversationProjectionSnapshot(projection, { busy: Boolean(busy) }), [projection, busy]);
+  const displayMessages = useMemo(() => visibleTranscriptMessages(snapshot.messages), [snapshot.messages]);
+  const composerHistory = useMemo(() => sentUserPrompts(displayMessages), [displayMessages]);
+  const transcriptRows = useMemo(() => buildTranscriptRows({
+    messages: displayMessages,
+    continuations: view?.continuations ?? [],
+    liveTools: snapshot.liveTools,
+    streaming: snapshot.streaming,
+    busy: Boolean(busy),
+  }), [displayMessages, view?.continuations, snapshot.liveTools, snapshot.streaming, busy]);
   useEffect(() => {
     if (snapshot.streamNeedsResync) reload();
   }, [reload, snapshot.streamNeedsResync]);
@@ -661,9 +672,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     const frame = requestAnimationFrame(() => transcriptFollow.scrollToLatest('auto'));
     return () => cancelAnimationFrame(frame);
   }, [conversationTab, snapshot.messages.length, transcriptFollow.scrollToLatest]);
-  if (loading && !view) return <p>加载中…</p>;
+  if (loading && !view) return <div role="status" className="conversation-loading"><Spinner label="正在加载会话…" /></div>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
-  if (!view) return <p>加载中…</p>;
+  if (!view) return <div role="status" className="conversation-loading"><Spinner label="正在加载会话…" /></div>;
 
   const acceptedVersions = new Set(view.accepted.map(item => item.proposalVersion));
   const proposal = view.proposal;
@@ -847,8 +858,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     setLoadingOlder(true);
     setActionError('');
     try {
-      const page = await api<ConversationView>(
-        `/api/conversations/${id}?${request.direction}=${request.cursor}&limit=200`,
+      const page = await api<{ messages: ConversationMessage[] }>(
+        `/api/conversations/${id}/history?${request.direction}=${request.cursor}&limit=200`,
       );
       setProjection(current => observeConversationHistory(current, { request, messages: page.messages }));
     } catch (reason) {
@@ -886,14 +897,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const graphRuntimeTaskId = activeProposalVersion === null
     ? null
     : view.accepted.find(item => item.proposalVersion === activeProposalVersion)?.taskId ?? null;
-  const displayMessages = visibleTranscriptMessages(snapshot.messages);
-  const composerHistory = sentUserPrompts(displayMessages);
-  const transcriptRows = buildTranscriptRows({
-    messages: displayMessages,
-    liveTools: snapshot.liveTools,
-    streaming: snapshot.streaming,
-    busy: Boolean(busy),
-  });
   const graphState = {
     taskCount: tasks.length,
     evidenceCount: tasks.reduce((count, task) => count + task.evidence.filter(item => item.valid).length, 0),
@@ -952,7 +955,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
           <div className="conversation-meta">
             {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}</span> : <span data-testid="conversation-project">未绑定项目</span>}
             <span>·</span>
-            <span data-testid="master-status">{paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
+            <span data-testid="master-status" className="master-work-status">{busy && !paused && <span className="spinner" aria-hidden="true" />}{paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
             <span>·</span>
             <span data-testid="conversation-connection">{connected ? '已连接' : '重连中…'}</span>
             <span>·</span>

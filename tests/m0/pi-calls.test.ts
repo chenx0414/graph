@@ -14,7 +14,7 @@ import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provider: Awaited<ReturnType<typeof openaiServer>>) => ToolDefinition[] = () => [],
-  config: { auto?: boolean; systemPrompt?: string; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void; onSend?: (systemPrompt: string | null) => void } = {}) {
+  config: { auto?: boolean; systemPrompt?: string; onEvent?: (event: AgentSessionEvent, broker: CallBroker) => void; onSend?: (sent: { systemPrompt: string | null; toolDeclarations: string | null }) => void } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-pi-calls-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans); cleanup.push(() => provider.close());
@@ -47,16 +47,22 @@ test('Graph supplies the custom prompt and the Pi session keeps its own native a
 
 test('the exact system prompt sent to the provider is reported back to the caller', async () => {
   const composed = '<identity>\nAgent\n</identity>';
-  const reported: (string | null)[] = [];
-  const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed, onSend: value => reported.push(value) });
+  const reported: { systemPrompt: string | null; toolDeclarations: string | null }[] = [];
+  const { instance, provider } = await fixture([{}], () => [], { systemPrompt: composed, onSend: sent => reported.push(sent) });
   await instance.prompt('Hello');
-  const request = provider.requests[0] as { messages: { role: string; content: string }[] };
+  const request = provider.requests[0] as { messages: { role: string; content: string }[]; tools?: unknown[] };
   const system = request.messages.find(message => message.role === 'system' || message.role === 'developer')!.content;
 
   // The console must show what the model really received, so the report has to be the same string
   // the provider got — not a second rendering of the same facts.
   expect(reported).toHaveLength(1);
-  expect(reported[0]).toBe(system);
+  expect(reported[0]!.systemPrompt).toBe(system);
+
+  // The declarations are read off the very request being sent, so the console can show them
+  // too — without a second renderer and without anything extra being sent. This fixture
+  // sends a prompt without tools, so the report mirrors that instead of inventing any.
+  const carriedTools = request.tools ?? [];
+  expect(reported[0]!.toolDeclarations).toBe(carriedTools.length ? JSON.stringify(carriedTools) : null);
 });
 
 test('native Pi HTTP calls pass the gate and raw cache/reasoning totals are charged once', async () => {

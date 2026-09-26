@@ -19,7 +19,7 @@ import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
 import { isFullAccess } from '../core/access-policy.ts';
 import { agentTools } from './agent-tools.ts';
-import { conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
+import { conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityPermissionRequest } from './capabilities.ts';
 import type { CapabilityOperation } from './capability-bundle.ts';
@@ -314,6 +314,9 @@ export function createPiAdapter(options: {
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
+        // The agent's own question to the user, asked through ask_user; it turns the turn
+        // into a waiting turn once the loop stops.
+        let askedQuestion: { prompt: string; why: string } | undefined;
         let reloadReceipt: Record<string, unknown> | undefined;
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
@@ -415,6 +418,9 @@ export function createPiAdapter(options: {
             onPermissionRequired: request => { permissionRequest ??= request; },
             hostTools: ({ readRoots }) => agentTools({
               workspace, ...(spec.role ? { role: spec.role } : {}),
+              // The tool surface records the agent's own question here; the capability
+              // layer above knows nothing about it.
+              onAskUser: request => { askedQuestion ??= request; },
               ...(accessPolicy ? { access: accessPolicy } : {}),
               ...(readRoots.length ? { readRoots: [...readRoots] } : {}),
               run: (command, args) => commands!.run(command, args),
@@ -711,6 +717,7 @@ export function createPiAdapter(options: {
         };
         const flushDeltas = (force: boolean) => { for (const part of parts.values()) flushPart(part, force); };
         const toolSummaries = new Map<string, string>();
+        const activeConversationTools = new Set<string>();
         const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
         // Ordered turn activity for a conversation transcript: the narration
         // between tool calls and the tool calls themselves, in the order they
@@ -730,7 +737,7 @@ export function createPiAdapter(options: {
           if (existing) return existing;
           const part = { entryId: currentEntryId, partId, text: '', buffer: '', lastFlush: 0, ordinal: nextOrdinal() };
           parts.set(key, part);
-          const narration = { type: 'narration' as const, text: '', ordinal: nextOrdinal() };
+          const narration = { type: 'narration' as const, text: '', ordinal: part.ordinal };
           activity.push(narration);
           narrationByEntry.set(currentEntryId, narration);
           return part;
@@ -852,12 +859,17 @@ export function createPiAdapter(options: {
             const callOrdinal = nextOrdinal();
             toolOrdinals.set(event.toolCallId, callOrdinal);
             activity.push({ type: 'tool', toolCallId: event.toolCallId, name: event.toolName, summary, state: 'done', ordinal: callOrdinal });
+            flushDeltas(true);
+            activeConversationTools.add(event.toolCallId);
+            persistConversationActivity(options.store, conversation.id, operation.id, operation.attempt, conversationActivityRecords(activity, ''), activeConversationTools);
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary, ordinal: callOrdinal });
           } else if (event.type === 'tool_execution_end') {
             const summary = toolSummaries.get(event.toolCallId) ?? event.toolName;
             toolActivity.push({ toolCallId: event.toolCallId, name: event.toolName, summary, state: event.isError ? 'error' : 'done' });
             const record = activity.find(item => item.type === 'tool' && item.toolCallId === event.toolCallId);
             if (record && record.type === 'tool') record.state = event.isError ? 'error' : 'done';
+            activeConversationTools.delete(event.toolCallId);
+            persistConversationActivity(options.store, conversation.id, operation.id, operation.attempt, conversationActivityRecords(activity, ''), activeConversationTools);
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError, ordinal: toolOrdinals.get(event.toolCallId) ?? nextOrdinal() });
           }
         };
@@ -892,16 +904,29 @@ export function createPiAdapter(options: {
           const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
+            // Durable telemetry for every tool call this instance executes, Graph's and Pi's alike.
+            // The write is guarded here: a statistics table must never be able to break a turn.
+            onToolCall: call => {
+              try {
+                options.store.recordToolCall({
+                  instanceId: operation.instanceId!, tool: call.tool, ms: call.ms, isError: call.isError,
+                });
+              } catch {
+                // Observed, not executed: recording stays outside the turn's own failure path.
+              }
+            },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry),
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
               ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
-              onSend: systemPrompt => {
-                if (systemPrompt !== null) options.store.recordOperationSystemPrompt(operation.id, systemPrompt);
+              onSend: sent => {
+                if (sent.systemPrompt !== null) {
+                  options.store.recordOperationSystemPrompt(operation.id, sent.systemPrompt, sent.toolDeclarations ?? undefined);
+                }
                 // The site that records the truth also reports when a part of it is
                 // gone: reporting only, a send is never blocked or rewritten.
-                void reportPromptIntegrity(join(options.instancesDir, operation.instanceId!), operation.id, systemPrompt)
+                void reportPromptIntegrity(join(options.instancesDir, operation.instanceId!), operation.id, sent.systemPrompt)
                   .catch(() => undefined);
               },
             }), {
@@ -1040,6 +1065,19 @@ export function createPiAdapter(options: {
               return {
                 outcome: 'failed',
                 output: { error: 'Model response hit the output token limit before completing the reply' },
+                usage: gate.total(),
+              };
+            }
+            // An explicit question from the agent ends the turn: the answer is the next
+            // turn's input, so waiting costs no further model requests.
+            if (askedQuestion) {
+              return {
+                outcome: 'waiting',
+                output: { question: { prompt: askedQuestion.prompt, why: askedQuestion.why } },
+                question: {
+                  prompt: askedQuestion.prompt,
+                  data: { requestType: 'user_decision', prompt: askedQuestion.prompt, why: askedQuestion.why },
+                },
                 usage: gate.total(),
               };
             }

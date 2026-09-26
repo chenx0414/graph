@@ -69,7 +69,7 @@ export interface AgentContextView {
     text: string;
   };
   /** The exact system prompt the newest master turn sent, recorded at the provider call. */
-  sent: { operationId: string; at: number; text: string } | null;
+  sent: { operationId: string; at: number; text: string; tools: string | null } | null;
 }
 
 const GROUP_LABELS: Record<AgentPromptView['group'], string> = {
@@ -275,6 +275,33 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     }
   }
 
+  const declarationCount = useMemo(() => {
+    const raw = data?.sent?.tools;
+    if (!raw) return 0;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? parsed.length : 0;
+    } catch { return 0; }
+  }, [data?.sent?.tools]);
+
+  // The recorded payload is the SDK's declarations; pretty-print only for reading.
+  const declarationText = useMemo(() => {
+    const raw = data?.sent?.tools;
+    if (!raw) return '';
+    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+  }, [data?.sent?.tools]);
+
+  async function copyDeclarations() {
+    const text = data?.sent?.tools;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('实际发送的工具声明已复制', 'success');
+    } catch (reason) {
+      toast(`复制失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    }
+  }
+
   const openPromptsFolder = async () => {
     const bridge = window.graph;
     if (!bridge?.openResource) {
@@ -355,6 +382,19 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                     本次会话尚未记录到已发出的请求：只有真正发起过模型请求的会话才有这一份。
                   </p>
                 )}
+                {data?.sent?.tools ? (
+                  <div className="agent-preview-panel" data-testid="agent-context-sent-tools">
+                    <div className="agent-preview-meta">
+                      <strong>实际发送的工具声明</strong>
+                      <span>{`${declarationCount.toLocaleString()} 个工具 · ${data.sent.tools.length.toLocaleString()} 字符`}</span>
+                      <Button size="sm" icon="file" onClick={() => void copyDeclarations()}>复制声明</Button>
+                    </div>
+                    <p className="agent-preview-notice">
+                      与上面那份提示词同属<strong>同一次</strong>请求：内容从这次请求体的 tools 字段原样读出（OpenAI 侧为 function 包装、Anthropic 侧为 input_schema），只读、不参与发送，也不会再给模型发第二份。
+                    </p>
+                    <pre className="agent-preview-markdown" data-testid="agent-context-sent-tools-text">{declarationText}</pre>
+                  </div>
+                ) : null}
               </div>
               {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'prompts' ? (
                 <div className="agent-prompt-layout">

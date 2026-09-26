@@ -2856,6 +2856,11 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .usage-page { display: flex; flex-direction: column; gap: 18px; }
 .usage-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .usage-page-head h2 { margin: 0; font-size: 18px; }
+.tool-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tool-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 8px 16px; border-bottom: 1px solid var(--border-strong); }
+.tool-table td { padding: 8px 16px; border-bottom: 1px solid var(--border-strong); }
+.tool-table tr:last-child td { border-bottom: none; }
+.tool-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .usage-page-head p { margin: 4px 0 0; color: var(--muted); }
 .usage-error { margin-top: -6px; }
 .usage-summary {
@@ -3342,3 +3347,15 @@ details.disclosure summary:hover { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+.conversation-loading { display: grid; place-items: center; min-height: 220px; }
+.master-work-status { display: inline-flex; align-items: center; }
+.master-work-status .spinner { width: 12px; height: 12px; margin-right: 5px; }
+/* Offscreen history retains geometry without laying out every Markdown block. */
+.conversation-thread[data-testid="message-list"] > .conversation-thread-inner > .message-row,
+.conversation-thread[data-testid="message-list"] > .conversation-thread-inner > .rsi-report,
+.conversation-thread[data-testid="message-list"] > .conversation-thread-inner > .collapsed-turn {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 100px;
+}
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none !important; } }

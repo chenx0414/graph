@@ -306,6 +306,9 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return options.appServices.rsi.ack(body.id.trim());
   });
   app.get('/api/limits', async () => runtime.modelLimits());
+  // Per-tool telemetry the runtime records itself; the console renders it as the 工具 page.
+  app.get('/api/tool-stats', async () => runtime.toolCallStats());
+  app.post('/api/tool-stats/clear', async () => runtime.clearToolCalls());
   if (options.config) {
     app.get('/api/config', async () => {
       const { revision, config } = await options.config!.store.snapshot();
@@ -409,6 +412,15 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const params = request.params as { conversationId: string };
     const query = request.query as { after?: string; before?: string; limit?: string };
     return runtime.conversations.view(params.conversationId, {
+      ...(query.after ? { after: Number(query.after) } : {}),
+      ...(query.before ? { before: Number(query.before) } : {}),
+      ...(query.limit ? { limit: Number(query.limit) } : {}),
+    });
+  });
+  app.get('/api/conversations/:conversationId/history', async request => {
+    const { conversationId } = request.params as { conversationId: string };
+    const query = request.query as { after?: string; before?: string; limit?: string };
+    return runtime.conversations.history(conversationId, {
       ...(query.after ? { after: Number(query.after) } : {}),
       ...(query.before ? { before: Number(query.before) } : {}),
       ...(query.limit ? { limit: Number(query.limit) } : {}),
@@ -547,6 +559,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const after = Number((request.query as { after?: string }).after ?? 0);
     reply.hijack();
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    // An idle snapshot attach has no replay events to flush the headers.
+    reply.raw.flushHeaders();
     const watch = runtime.conversations.watch(params.conversationId, after);
     const abort = () => { void watch.return?.(); };
     request.raw.on('close', abort);

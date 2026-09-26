@@ -93,6 +93,36 @@ test('a runtime-only change skips app:build while a web change still builds', as
   expect(seen[1]).toBe(true);
 });
 
+// A batch written with `file` instead of `path` once cost a whole round trip: the key has exactly
+// one meaning, so the alias is accepted rather than handed back to be corrected by hand.
+test('accepts a change that names its file as `file`', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  await service(root, dir).apply({
+    title: 'Alias', activate: false, problem: 'A batch written with the wrong key.',
+    changes: [{ file: 'src/keep.ts', action: 'write', content: 'export const value = 9;\n' }] as never,
+  }, { store, taskId, conversationId });
+  expect(await readFile(join(root, 'src', 'keep.ts'), 'utf8')).toContain('value = 9');
+});
+
+// The refusal has to name the shape: the batch was resent whole while the error only said which key
+// was missing.
+test('refuses a change with no file key and names the shape', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  let error: Error | undefined;
+  try {
+    await service(root, dir).apply({
+      title: 'Missing path', activate: false, problem: 'No file key at all.',
+      changes: [{ action: 'write', content: 'x' }] as never,
+    }, { store, taskId, conversationId });
+  } catch (thrown) {
+    error = thrown as Error;
+  }
+  expect(error?.message).toContain('changes[0].path is required');
+  expect(error?.message).toContain('edits: [{oldText, newText}]');
+});
+
 test('an activation that commits nothing new does not schedule a reload', async () => {
   const root = await repo();
   const { store, taskId, conversationId, dir } = ledger();

@@ -115,6 +115,29 @@ export function createToolResultTracker(options: { capacity?: number; initial?: 
   };
 }
 
+/**
+ * The SDK's read truncates to a head slice and says so in a *trailing* line, which is easy to lose
+ * inside a long result - and a partly shown file then reads like a whole file. Hoisting that notice
+ * to the front is what makes a truncated view unmistakable; it changes no content, only where the
+ * warning sits. (Investigated 2026-09-25: read has no cache, it re-reads the file every time, so a
+ * mismatch between what a read showed and what the file holds is this truncation, not staleness.)
+ */
+export function hoistTruncationNotice(text: string): string {
+  const banner = truncationBanner(text);
+  if (!banner || text.startsWith(banner)) return text;
+  return `${banner}\n${bodyWithoutNotice(text)}`;
+}
+
+/** The banner alone, so a summary can lead with it; null when nothing was truncated. */
+export function truncationBanner(text: string): string | null {
+  const match = /\n*(\[(?:Showing lines|[\d,]+ more lines in file|Output truncated)[^\]]*\])\s*$/.exec(text);
+  return match ? `[truncated: ${match[1]!}]` : null;
+}
+
+function bodyWithoutNotice(text: string): string {
+  return text.replace(/\n*\[(?:Showing lines|[\d,]+ more lines in file|Output truncated)[^\]]*\]\s*$/, '');
+}
+
 /** Deterministic head/tail summary: same input, same text, no model call. Whole lines are
  * taken from each end while the budget allows, so a short tail - the line that carries a
  * failure - is never lost to one enormous leading line. */
@@ -187,14 +210,19 @@ export async function renderToolResult(input: {
   limit?: number;
   maxSpillFiles?: number;
 }): Promise<string> {
-  if (input.limit === undefined && input.text.length <= TOOL_RESULT_LIMIT) return input.text;
+  const text = hoistTruncationNotice(input.text);
+  if (input.limit === undefined && text.length <= TOOL_RESULT_LIMIT) return text;
   const key = toolResultKey(input);
-  if (input.limit === undefined && input.tracker.record(key) <= 2) return input.text;
+  if (input.limit === undefined && input.tracker.record(key) <= 2) return text;
   const handle = join(input.spillDir, `${key}.txt`);
   await mkdir(input.spillDir, { recursive: true });
-  await writeFile(handle, input.text, { mode: 0o600 });
+  await writeFile(handle, text, { mode: 0o600 });
   await pruneSpills(input.spillDir, input.maxSpillFiles ?? MAX_SPILL_FILES);
-  return summarizeToolResult({ text: input.text, handle, ...(input.limit === undefined ? {} : { limit: input.limit }) });
+  const summary = summarizeToolResult({ text, handle, ...(input.limit === undefined ? {} : { limit: input.limit }) });
+  // "This file was cut short" outranks "this result is large": the summary's own header must not
+  // push the warning out of sight.
+  const banner = truncationBanner(input.text);
+  return banner ? `${banner}\n${summary}` : summary;
 }
 
 type CountsFile = { version: 1; scopes: Record<string, Record<string, number>> };

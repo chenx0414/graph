@@ -38,15 +38,16 @@ const proposal = {
 /** Deterministic local provider: a master that investigates once, drafts once,
  * then answers from its briefing; workers always finish. */
 async function conversationProvider() {
-  const requests: { tools: string[]; messages: { role?: string; content?: unknown }[] }[] = [];
+  const requests: { tools: string[]; declarations: { function?: { name?: string; parameters?: unknown } }[]; messages: { role?: string; content?: unknown }[]; raw: string }[] = [];
   let listed = false;
   let drafted = false;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk);
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] } : {};
+    const raw = chunks.length ? Buffer.concat(chunks).toString() : '';
+    const body = chunks.length ? JSON.parse(raw) as { tools?: { function?: { name?: string; parameters?: unknown } }[]; messages?: { role?: string; content?: unknown }[] } : {};
     const tools = (body.tools ?? []).map(tool => tool.function?.name ?? '');
-    requests.push({ tools, messages: body.messages ?? [] });
+    requests.push({ tools, declarations: body.tools ?? [], messages: body.messages ?? [], raw });
     const isMaster = tools.includes('propose_graph');
     // A new prompt ends with the user briefing; tool follow-ups end with a tool
     // result, which the persistent session also keeps in older history.
@@ -481,4 +482,65 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   expect(providerRequest).not.toContain('- read: Read file contents');
   expect(providerRequest).toContain('<cwd>');
   expect(user).not.toContain('CONVERSATION SENTINEL');
+}, 120_000);
+
+test('the console can show the prompt and the tool declarations one request carried, each exactly once', async () => {
+  const root = await temp('context-truth');
+  // The console reads the prompt and the declarations through the real agent-context view,
+  // so this test opens the same library the daemon does.
+  const agentContext = openAgentContextLibrary(join(root, 'prompts'), { identity: 'Default identity' });
+  await agentContext.ensure();
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, 'README.md'), '# Truth project\n');
+  git(project, ['init', '-q', '-b', 'main']);
+  git(project, ['config', 'user.email', 'graph@example.invalid']);
+  git(project, ['config', 'user.name', 'Graph Test']);
+  git(project, ['add', '.']);
+  git(project, ['commit', '-q', '-m', 'init']);
+
+  const provider = await conversationProvider();
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    models: {
+      entries: [{ id: 'local', provider: 'local', grade: 'high', api: 'openai-completions', baseUrl: provider.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'c' }],
+      apiKey: 'local-key', modelRuntime: provider.modelRuntime,
+      credentialFor: () => ({ credentialId: 'c', apiKey: 'local-key' }),
+    },
+    agentContext,
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+
+  const created = await runtime.conversations.create({ text: '记录这一次请求', requestId: 'truth' });
+  await runtime.host.runReady();
+
+  const preview = await runtime.agentContextPreview(created.conversationId);
+  expect(preview.sent).toBeTruthy();
+  const sent = preview.sent!;
+
+  // The console's "sent" text is one request's system message, byte for byte.
+  const master = provider.requests.filter(request => request.tools.includes('propose_graph'));
+  expect(master.length).toBeGreaterThan(0);
+  const carried = master.find(request => String(request.messages[0]?.content ?? '') === sent.text);
+  expect(carried).toBeTruthy();
+
+  // The declarations the console reports are the bytes that request carried: the recorded
+  // payload appears verbatim in the request body, and exactly once.
+  expect(sent.tools).toBeTruthy();
+  expect(carried!.raw).toContain(sent.tools!);
+  expect(carried!.raw.split(sent.tools!).length - 1).toBe(1);
+  const declared = JSON.parse(sent.tools!) as { function?: { name?: string; parameters?: unknown } }[];
+  expect(declared.length).toBe(carried!.declarations.length);
+  expect(declared.map(item => item.function?.name)).toEqual(carried!.declarations.map(item => item.function?.name));
+  expect(JSON.stringify(declared.find(item => item.function?.name === 'propose_graph')))
+    .toContain('"properties"');
+
+  // ...and a declaration travels exactly once: a second copy inside the prompt text would
+  // drag its JSON schema keys along with it.
+  for (const marker of ['"parameters"', '"properties"', 'input_schema']) {
+    expect(sent.text).not.toContain(marker);
+  }
 }, 120_000);

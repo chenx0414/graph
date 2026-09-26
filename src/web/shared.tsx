@@ -67,13 +67,13 @@ export type StreamEvent = { cursor: number; type: string; taskId?: string; data?
 /** EventSource with an event cursor. Reconnects from the last applied cursor,
  * so a drop replays only what was missed and duplicate deliveries are ignored.
  * A null URL keeps the stream closed until the record is known. */
-export function useEventStream(url: string | null, onEvent: (event: StreamEvent) => void) {
+export function useEventStream(url: string | null, onEvent: (event: StreamEvent) => void, initialCursor = 0) {
   const [connected, setConnected] = useState(false);
   const cursor = useRef(0);
   const handler = useRef(onEvent);
   handler.current = onEvent;
   useEffect(() => {
-    cursor.current = 0;
+    cursor.current = initialCursor;
     setConnected(false);
     if (!url) return;
     let source: EventSource | null = null;

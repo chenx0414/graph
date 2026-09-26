@@ -56,6 +56,8 @@ export function isExternallyGated(tool: ToolDefinition) {
 
 export interface PiInstanceOptions {
   binding: InstanceBinding;
+  /** Reporting sink for executed tool calls (durable telemetry). A throw here is swallowed. */
+  onToolCall?: (call: { tool: string; ms: number; isError: boolean }) => void;
   workspace: string;
   stateDir: string;
   model: Model<Api>;
@@ -356,10 +358,34 @@ export async function openPiInstance(options: PiInstanceOptions) {
   // that the same call already produced twice is spilled to disk and answered with a
   // bounded summary that names the handle. Smaller results and first views pass through
   // untouched, and only `content` is ever replaced, so `details` and `terminate` survive.
-  session.agent.afterToolCall = toolResultHook({
+  // Every tool call is timed and reported through the same single seam that already trims large
+  // results: one place to observe, no second execution path. Timing uses the monotonic clock and
+  // is paired by tool-call id, so calls that run in parallel cannot be attributed to each other;
+  // a start that never sees its result (an aborted turn) is dropped instead of kept forever.
+  // Recording is observation, never enforcement: a throwing sink cannot fail the turn it watches.
+  const toolStarted = new Map<string, number>();
+  const previousBeforeToolCall = session.agent.beforeToolCall;
+  session.agent.beforeToolCall = async (context, signal) => {
+    if (toolStarted.size >= 32) toolStarted.clear();
+    toolStarted.set(context.toolCall.id, performance.now());
+    return previousBeforeToolCall?.(context, signal);
+  };
+  const toolResultSeam = toolResultHook({
     scopeId: options.binding.instanceId,
     spillDir: join(stateDir, 'tool-results'),
   });
+  session.agent.afterToolCall = async (context, _signal) => {
+    const startedAt = toolStarted.get(context.toolCall.id);
+    if (startedAt !== undefined) {
+      toolStarted.delete(context.toolCall.id);
+      try {
+        options.onToolCall?.({ tool: context.toolCall.name, ms: performance.now() - startedAt, isError: context.isError });
+      } catch {
+        // A sink is an observer of the turn, not a step in it.
+      }
+    }
+    return toolResultSeam(context);
+  };
   session.agent.subscribe(event => {
     if (event.type === 'tool_execution_end' && event.result.terminate === true) stopRequested = true;
   });

@@ -126,12 +126,6 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
       content: input.toolGuidance,
       source: 'tools/<role>.md',
     },
-    {
-      id: 'rules.send_gate',
-      title: 'Send gate',
-      origin: 'generated',
-      content: 'Use only the tools listed in the provider request. Every model, command, MCP and extension call passes the Graph send gate; a blocked call is not retried by inventing another route.',
-    },
     ...(input.role === 'main' ? [] : [{
       id: 'rules.worktree',
       title: 'Worktree',

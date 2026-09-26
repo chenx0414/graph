@@ -9,7 +9,7 @@ export interface AgentToolFeatures {
   fetch?: boolean;
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
-  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft', boolean>>;
+  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft' | 'controlTask', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
 }
@@ -224,6 +224,32 @@ function declarations(features: AgentToolFeatures) {
       available: main && Boolean(features.supervisor?.listProblems && features.supervisor?.resolveProblem),
       externallyGated: false,
     },
+    ask_user: {
+      name: 'ask_user', label: 'Ask the user', description: 'Ask the user the one question whose answer changes the plan, then end this turn and wait for it: the question becomes an open question in the console and the answer arrives in your next turn as a recorded fact. Use it when the project, the confirmed scope and the recorded decisions cannot settle the choice, and state in `why` what would change with the answer. Do not use it to confirm a draft, report progress, or ask what you can find out yourself.',
+      parameters: Type.Object({
+        prompt: Type.String(),
+        why: Type.String(),
+        requestId: Type.String(),
+      }),
+      available: main && Boolean(features.supervisor?.controlTask),
+      externallyGated: false,
+    },
+    control_task: {
+      name: 'control_task', label: 'Control a task', description: 'Control the task you are serving, or another task of the same conversation. pause soft-stops the running turn and waits for an explicit resume; resume continues it; abandon stops the whole task immediately (it is refused while a worker lane is still writing to the target, so pause first when work is in flight); set_budget sets one node budget as a positive token count or null for unlimited (null is what a master node normally runs with: a finite cap must still cover the context reservation of that node, so a small cap starves the instance it was meant to help); steer injects one message into the turn currently running on a node. Every action records its reason, and abandoning work the user still expects is never right.',
+      parameters: Type.Object({
+        action: Type.Union([
+          Type.Literal('pause'), Type.Literal('resume'), Type.Literal('abandon'), Type.Literal('set_budget'), Type.Literal('steer'),
+        ]),
+        taskId: Type.Optional(Type.String()),
+        nodeId: Type.Optional(Type.String()),
+        text: Type.Optional(Type.String()),
+        tokens: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+        reason: Type.Optional(Type.String()),
+        requestId: Type.String(),
+      }),
+      available: main && Boolean(features.supervisor?.controlTask),
+      externallyGated: false,
+    },
     search_resources: {
       name: 'search_resources', label: 'Search capability library', description: 'Search the user capability directory (Skills, MCP servers, Pi extensions, Graph extensions and prompt identities). Search results are discovery only; bind a capability into a versioned Agent recipe or definition to make its tools available to that Agent.',
       parameters: Type.Object({
@@ -279,7 +305,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     apply_rsi_change: {
-      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule a reload. Use it for any harness improvement you can justify, not only bugs. Every change needs a repository-relative path, whatever its action: action "write" (full content), "replace" (each oldText must match exactly once in that file) or "delete". Supply checks for a fast inner loop; the full `node --run check` and `app:build` gate runs before a change goes live. If checks fail the change stays uncommitted so you can keep fixing; pass changes: [] to just re-run checks. activate=true ends this operation and leaves the change pending_reload, so do not start another improvement while a reload is pending. force reloads even while other operations run.',
+      name: 'apply_rsi_change', label: 'Apply self-improvement change', description: 'Change Graph itself: edit, add or delete files in the Graph source checkout, run checks, commit to a dedicated rsi/* branch and (when activate is true) schedule a reload. Use it for any harness improvement you can justify, not only bugs. Every change needs a repository-relative path, whatever its action: action "write" (full content), "replace" (each oldText must match exactly once in that file) or "delete" - one entry per file, shaped {path, action, content} or {path, action, edits: [{oldText, newText}]}. Supply checks for a fast inner loop; the full `node --run check` and `app:build` gate runs before a change goes live. If checks fail the change stays uncommitted so you can keep fixing; pass changes: [] to just re-run checks. activate=true ends this operation and leaves the change pending_reload, so do not start another improvement while a reload is pending. force reloads even while other operations run.',
       parameters: Type.Object({
         title: Type.String(),
         problem: Type.String(),
@@ -311,7 +337,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     get_agent_combination: {
-      name: 'get_agent_combination', label: 'Get Agent combination', description: 'Resolve one subagent recipe to its source resources. This does not install, compose or authorize anything; use the returned resources and their metadata to prepare the required capabilities.',
+      name: 'get_agent_combination', label: 'Get Agent combination', description: 'Resolve one subagent recipe to its source resources. This does not install, compose or authorize anything; use the returned resources and their metadata to prepare the required capabilities. When you present that Agent to the user, keep its readable name (for example Bob_coder) and pair it with the stable recipe id.',
       parameters: Type.Object({ id: Type.String() }),
       available: main && Boolean(features.catalog),
       externallyGated: false,

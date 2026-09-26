@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { appendMessage, conversationStreams, publishConversationDelta, recordConversationInterruption, recordConversationOutput } from '../../src/core/conversation.ts';
+import { appendMessage, persistConversationActivity, conversationStreams, publishConversationDelta, recordConversationInterruption, recordConversationOutput } from '../../src/core/conversation.ts';
 import { TaskStore } from '../../src/core/store.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -159,4 +159,39 @@ test('the reply marker is explicit on the operation, not inferred from message r
   recordConversationOutput(store, operation, result);
   expect(store.db.prepare("SELECT COUNT(*) AS count FROM messages WHERE operation_id='op' AND role='assistant' AND kind='chat'").get())
     .toEqual({ count: 1 });
+});
+
+test('reload receipt does not discard the completed operation activity', async () => {
+  const store = await fixture();
+  const operation = { id: 'op', taskId: 'task', nodeId: 'master', attempt: 1, kind: 'agent' } as unknown as Parameters<typeof recordConversationOutput>[1];
+  appendMessage(store, { conversationId: 'conversation', role: 'assistant', kind: 'chat', text: '重载回执', state: 'done', operationId: 'op' });
+  store.db.prepare('UPDATE operations SET replied_at=1 WHERE id=?').run('op');
+  const result = { outcome: 'completed', output: { text: '重载回执', activity: [{ type: 'narration', text: '重载前的过程', ordinal: 1 }] } } as unknown as Parameters<typeof recordConversationOutput>[2];
+  recordConversationOutput(store, operation, result);
+  recordConversationOutput(store, operation, result);
+  expect(store.db.prepare("SELECT text FROM messages WHERE role='activity'").all()).toEqual([{ text: '重载前的过程' }]);
+  expect(store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE role='assistant'").get()).toEqual({ n: 1 });
+});
+
+
+test('activity checkpoints survive a worker stop and keep parallel tool states separate', async () => {
+  const store = await fixture();
+  publishConversationDelta(store, { taskId: 'task', conversationId: 'conversation', operationId: 'op', entryId: 'e', partId: '0', ordinal: 1, delta: 'before reload', text: 'before reload', length: 13 });
+  const records = [
+    { kind: 'narration' as const, text: 'before reload', ordinal: 1 },
+    { kind: 'tool' as const, text: 'first', data: { toolCallId: 'one', tool: 'bash' }, ordinal: 2 },
+    { kind: 'tool' as const, text: 'second', data: { toolCallId: 'two', tool: 'bash' }, ordinal: 3 },
+  ];
+  persistConversationActivity(store, 'conversation', 'op', 1, records, new Set(['one', 'two']));
+  persistConversationActivity(store, 'conversation', 'op', 1, records, new Set(['two']));
+  const rows = store.db.prepare("SELECT role,text,state FROM messages ORDER BY seq").all();
+  expect(rows).toEqual([
+    { role: 'activity', text: 'before reload', state: 'done' },
+    { role: 'tool', text: 'first', state: 'done' },
+    { role: 'tool', text: 'second', state: 'pending' },
+  ]);
+  expect(conversationStreams(store, 'conversation')).toHaveLength(1);
+  // No final output is needed to retain the checkpoint across a reload.
+  store.db.prepare("UPDATE operations SET state='unknown',worker_active=0 WHERE id='op'").run();
+  expect(store.db.prepare('SELECT role,text,state FROM messages ORDER BY seq').all()).toEqual(rows);
 });
