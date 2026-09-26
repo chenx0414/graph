@@ -88,6 +88,17 @@ try {
   seed.run('inst-e2e', 't-e2e', 'n-e2e', 'master', 'bash', 120, 0, at);
   seed.run('inst-e2e', 't-e2e', 'n-e2e', 'master', 'bash', 300, 1, at);
   seed.run('inst-e2e', 't-e2e', 'n-e2e', 'master', 'agent_browser', 8_000, 0, at);
+  // A master question (ask_user) is recorded as kind 'waiting' with requestType
+  // 'user_decision' (operation-lifecycle block() + pi-adapter askedQuestion), so the
+  // card below is seeded with exactly that shape, not with a convenient stand-in.
+  const task = db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES(?,?,?,?,?,?,?,?)');
+  task.run('hb80-asked', 'e2e', '决策卡片的真浏览器断言', 1, 0, 'running', 0, 2);
+  task.run('hb80-empty', 'e2e', '没有待处理问题的任务', 1, 0, 'running', 0, 3);
+  db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)').run(
+    'q-hb80', 'hb80-asked', 'n-e2e', null, 'waiting',
+    JSON.stringify({ requestType: 'user_decision', prompt: '要不要把这条先改成检测？', why: '答案会改变实现' }),
+    'user',
+  );
   db.close();
 
   browser = await chromium.launch();
@@ -131,6 +142,24 @@ try {
   const shot = join(screenshots, 'tool-stats.png');
   await page.screenshot({ path: shot, fullPage: true });
   console.log(`截图 ${shot}`);
+  // The decision card: the shape the master's own ask_user question renders as.
+  await page.goto(`${url}/#/tasks/hb80-asked`, { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('questions').waitFor({ timeout: 10_000 });
+  check('待处理问题列表有一张卡', await page.getByTestId('questions').locator('li').count(), 1);
+  const card = await page.getByTestId('questions').innerText();
+  checkContains('卡片显示问题原文', card, '要不要把这条先改成检测？');
+  checkContains('卡片标出 waiting 类型', card, 'waiting');
+  checkContains('卡片显示提问原因', card, '答案会改变实现');
+  check('决定输入框的提示语', await page.getByTestId('waiting-value').getAttribute('placeholder'), '写下你的决定');
+  checkContains('技术详情含 user_decision', await page.getByTestId('question-data-q-hb80').innerText(), 'user_decision');
+  const cardShot = join(screenshots, 'question-card.png');
+  await page.screenshot({ path: cardShot, fullPage: true });
+  console.log(`截图 ${cardShot}`);
+
+  await page.goto(`${url}/#/tasks/hb80-empty`, { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('no-questions').waitFor({ timeout: 10_000 });
+  check('无问题的任务显示空态', await page.getByTestId('no-questions').count(), 1);
+
   check('页面无 JS 错误', problems, []);
 } catch (error) {
   failures += 1;
