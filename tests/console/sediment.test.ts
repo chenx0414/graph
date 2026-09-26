@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { applySedimentProposal, parseSedimentProposal, shouldSediment } from '../../src/runtime/sediment.ts';
+import { applySedimentProposal, parseSedimentProposal, sedimentCandidates, shouldSediment } from '../../src/runtime/sediment.ts';
 
 /**
  * Sedimentation is the one new behaviour in this feature, so its outward rules are pinned here:
@@ -138,4 +138,18 @@ test('nothing to save writes nothing at all', async () => {
   expect(outcome).toEqual({ nothing: true, written: [], refused: [], proposed: 'nothing' });
   expect(applySedimentProposal({ projectRoot: root, proposal: null })).toEqual({ nothing: true, written: [], refused: [], proposed: null });
   expect(await readFile(join(root, '.agents', 'skills', '.keep'), 'utf8').catch(() => null)).toBeNull();
+});
+
+test('the review candidates are the configured model first, then a distinct one to fall back on', () => {
+  const entry = (id: string, grade: 'low' | 'medium' | 'high') => ({ id, provider: 'p', grade, api: 'openai-completions' as const, baseUrl: 'https://x.example/v1', contextWindow: 1, maxTokens: 1 });
+  const main = entry('main-model', 'high');
+  const directory = [main, entry('cheap-model', 'low'), entry('next-model', 'medium')];
+
+  expect(sedimentCandidates(main, directory, 'cheap-model').map(model => model.id)).toEqual(['cheap-model', 'next-model']);
+  // With nothing configured, the cheapest distinct model goes first and one alternate follows.
+  expect(sedimentCandidates(main, directory, null).map(model => model.id)).toEqual(['cheap-model', 'next-model']);
+  // The reviewer is never asked to review the work with the model that did it.
+  expect(sedimentCandidates(main, directory, 'main-model').map(model => model.id)).toEqual(['cheap-model', 'next-model']);
+  // One candidate is the whole list when nothing else exists.
+  expect(sedimentCandidates(main, [main, entry('cheap-model', 'low')], null).map(model => model.id)).toEqual(['cheap-model']);
 });
