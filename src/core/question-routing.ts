@@ -70,7 +70,10 @@ export function questionOwner(kind: string, data: Json): QuestionOwner {
   const body = record(data);
   // A worker or the main Agent may hand a decision back to the user through a
   // waiting question; those request types are the user's to answer.
-  if (kind === 'waiting' && (body?.requestType === 'model_access' || body?.requestType === 'noncompliance_decision')) return 'user';
+  // A master question of its own is the user's decision to make: it routes to the inbox
+  // instead of becoming an internal problem nobody outside the runtime can answer.
+  if (kind === 'waiting' && (body?.requestType === 'model_access' || body?.requestType === 'noncompliance_decision'
+    || body?.requestType === 'user_decision')) return 'user';
   return policy(kind).owner;
 }
 

@@ -9,7 +9,7 @@ export interface AgentToolFeatures {
   fetch?: boolean;
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
-  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft', boolean>>;
+  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft' | 'controlTask', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
 }
@@ -222,6 +222,32 @@ function declarations(features: AgentToolFeatures) {
         requestId: Type.String(),
       }),
       available: main && Boolean(features.supervisor?.listProblems && features.supervisor?.resolveProblem),
+      externallyGated: false,
+    },
+    ask_user: {
+      name: 'ask_user', label: 'Ask the user', description: 'Ask the user the one question whose answer changes the plan, then end this turn and wait for it: the question becomes an open question in the console and the answer arrives in your next turn as a recorded fact. Use it when the project, the confirmed scope and the recorded decisions cannot settle the choice, and state in `why` what would change with the answer. Do not use it to confirm a draft, report progress, or ask what you can find out yourself.',
+      parameters: Type.Object({
+        prompt: Type.String(),
+        why: Type.String(),
+        requestId: Type.String(),
+      }),
+      available: main && Boolean(features.supervisor?.controlTask),
+      externallyGated: false,
+    },
+    control_task: {
+      name: 'control_task', label: 'Control a task', description: 'Control the task you are serving, or another task of the same conversation. pause soft-stops the running turn and waits for an explicit resume; resume continues it; abandon stops the whole task immediately (it is refused while a worker lane is still writing to the target, so pause first when work is in flight); set_budget sets one node budget as a positive token count or null for unlimited (null is what a master node normally runs with: a finite cap must still cover the context reservation of that node, so a small cap starves the instance it was meant to help); steer injects one message into the turn currently running on a node. Every action records its reason, and abandoning work the user still expects is never right.',
+      parameters: Type.Object({
+        action: Type.Union([
+          Type.Literal('pause'), Type.Literal('resume'), Type.Literal('abandon'), Type.Literal('set_budget'), Type.Literal('steer'),
+        ]),
+        taskId: Type.Optional(Type.String()),
+        nodeId: Type.Optional(Type.String()),
+        text: Type.Optional(Type.String()),
+        tokens: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+        reason: Type.Optional(Type.String()),
+        requestId: Type.String(),
+      }),
+      available: main && Boolean(features.supervisor?.controlTask),
       externallyGated: false,
     },
     search_resources: {

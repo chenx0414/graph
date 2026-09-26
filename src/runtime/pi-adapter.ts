@@ -314,6 +314,9 @@ export function createPiAdapter(options: {
         const workspace = await realpath(operation.workspace ?? project.root);
         let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
+        // The agent's own question to the user, asked through ask_user; it turns the turn
+        // into a waiting turn once the loop stops.
+        let askedQuestion: { prompt: string; why: string } | undefined;
         let reloadReceipt: Record<string, unknown> | undefined;
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
@@ -415,6 +418,9 @@ export function createPiAdapter(options: {
             onPermissionRequired: request => { permissionRequest ??= request; },
             hostTools: ({ readRoots }) => agentTools({
               workspace, ...(spec.role ? { role: spec.role } : {}),
+              // The tool surface records the agent's own question here; the capability
+              // layer above knows nothing about it.
+              onAskUser: request => { askedQuestion ??= request; },
               ...(accessPolicy ? { access: accessPolicy } : {}),
               ...(readRoots.length ? { readRoots: [...readRoots] } : {}),
               run: (command, args) => commands!.run(command, args),
@@ -1042,6 +1048,19 @@ export function createPiAdapter(options: {
               return {
                 outcome: 'failed',
                 output: { error: 'Model response hit the output token limit before completing the reply' },
+                usage: gate.total(),
+              };
+            }
+            // An explicit question from the agent ends the turn: the answer is the next
+            // turn's input, so waiting costs no further model requests.
+            if (askedQuestion) {
+              return {
+                outcome: 'waiting',
+                output: { question: { prompt: askedQuestion.prompt, why: askedQuestion.why } },
+                question: {
+                  prompt: askedQuestion.prompt,
+                  data: { requestType: 'user_decision', prompt: askedQuestion.prompt, why: askedQuestion.why },
+                },
                 usage: gate.total(),
               };
             }
