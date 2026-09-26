@@ -156,12 +156,27 @@ try {
   const shot = join(screenshots, 'tool-stats.png');
   await page.screenshot({ path: shot, fullPage: true });
   console.log(`截图 ${shot}`);
-  // 清空记录后页面必须回到空态，并把「采集范围」写清楚：这类口径类文案以前没有任何断言守着，
-  // 所以它过时了一整轮才被发现（HB-90）。
+  // 清空记录：先证明接口真的归零，再分开断言「页面不刷新就回到空态」——这两件事不是一回事，
+  // 合在一句里会把「接口没清」与「界面没重渲染」当成同一个失败（HB-90）。
   await page.getByRole('button', { name: '清空记录' }).click();
+  const clearedViaApi = await page.waitForFunction(async () => {
+    const body = await fetch('/api/tool-stats').then(response => response.json()) as { stats?: unknown[] };
+    return Array.isArray(body.stats) && body.stats.length === 0;
+  }, undefined, { timeout: 10_000 }).then(() => true, () => false);
+  check('清空记录：接口已归零', clearedViaApi, true);
+
+  const updatedInPlace = await page.getByTestId('tool-stats-page').getByText('还没有记录')
+    .waitFor({ timeout: 5_000 }).then(() => true, () => false);
+  if (!updatedInPlace) {
+    const text = await page.getByTestId('tool-stats-page').innerText().catch(() => '(读不到)');
+    console.log(`       页面未自动回到空态，当前文本片段：${JSON.stringify(text.slice(0, 200))}`);
+  }
+  check('清空后页面自动回到空态（不需重载）', updatedInPlace, true);
+
+  // 口径文案只在空态渲染：重新取一次页面，确保断言读到的是空态那一帧（HB-90）。
+  await page.goto(`${url}/#/tools`, { waitUntil: 'domcontentloaded' });
   await page.getByTestId('tool-stats-page').getByText('还没有记录').waitFor({ timeout: 10_000 });
   const cleared = await page.getByTestId('tool-stats-page').innerText();
-  checkContains('清空后回到空态', cleared, '还没有记录');
   checkContains('口径说明写明含并行车道', cleared, '并行车道');
   check('清空后表格消失', await page.getByTestId('tool-stats-table').count(), 0);
 
