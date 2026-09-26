@@ -49,7 +49,7 @@ import { linkProjectDependencies } from './project-dependencies.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT, DEFAULT_SEDIMENT_PROMPT, type AgentContextLibrary } from './agent-context.ts';
 import {
-  existingSkillSummaries, generateSkillProposal, runSedimentReview, sedimentCandidates, selectSedimentModel, type SedimentReply, type SedimentSettings,
+  existingSkillSummaries, generateSkillProposal, runSedimentReview, sedimentCandidates, sedimentReplyShape, selectSedimentModel, type SedimentReply, type SedimentSettings,
 } from './sediment.ts';
 
 export interface PiAdapterChannels {
@@ -1253,6 +1253,8 @@ export function createPiAdapter(options: {
                     written: decision.outcome.written.map(entry => ({ id: entry.id, replaced: entry.replaced })),
                     refused: decision.outcome.refused,
                     attempts,
+                    // What the parser saw, so a lost decision is diagnosable instead of merely invisible.
+                    replyShape: capture.reply ? sedimentReplyShape(capture.reply.raw) : null,
                     replyStop: capture.reply?.stopReason ?? null,
                     replyChars: capture.reply?.raw.length ?? 0,
                     replyHead: capture.reply?.raw.slice(0, 200) ?? '',

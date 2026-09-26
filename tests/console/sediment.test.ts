@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { applySedimentProposal, parseSedimentProposal, sedimentCandidates, shouldSediment } from '../../src/runtime/sediment.ts';
+import { applySedimentProposal, parseSedimentProposal, sedimentCandidates, sedimentReplyShape, shouldSediment } from '../../src/runtime/sediment.ts';
 
 /**
  * Sedimentation is the one new behaviour in this feature, so its outward rules are pinned here:
@@ -152,4 +152,32 @@ test('the review candidates are the configured model first, then a distinct one 
   expect(sedimentCandidates(main, directory, 'main-model').map(model => model.id)).toEqual(['cheap-model', 'next-model']);
   // One candidate is the whole list when nothing else exists.
   expect(sedimentCandidates(main, [main, entry('cheap-model', 'low')], null).map(model => model.id)).toEqual(['cheap-model']);
+});
+
+// The live failure this pins down: a 4,363-character reply whose first line was a perfectly good
+// metadata object still arrived as `proposed: null`, because the body below it contained braces of its
+// own and the parser took the *last* one as the end of the metadata.
+test('a body after the metadata line is read without a fence, and a brace inside it cannot hide the metadata', () => {
+  const reply = '{"action":"create","id":"no-fence","description":"Use when a one-off call fails"}\n\n## 步骤\n\n1. 先看 `{"a":1}` 这种形状，再决定。\n';
+  const parsed = parseSedimentProposal(reply);
+  expect(parsed).toMatchObject({ action: 'create', id: 'no-fence' });
+  expect(parsed!.body).toContain('## 步骤');
+  expect(parsed!.body).toContain('{"a":1}');
+
+  // A fenced body still wins, and the older shape (the proposal with real newlines inside it) still reads.
+  expect(parseSedimentProposal('{"action":"create","id":"fenced"}\n```markdown\n# T\n```')!.body).toBe('# T');
+  expect(parseSedimentProposal('{"action":"nothing","id":"x",\n  "reason":"仅复述仓库已写着的事实"}')).toMatchObject({ action: 'nothing' });
+});
+
+// Without this, "the reply was unreadable" is the whole story and the next occurrence cannot be
+// diagnosed: the record has to say what the parser actually saw.
+test('what the parser saw is recorded, so a lost decision can be explained', () => {
+  expect(sedimentReplyShape('{"action":"nothing"}')).toEqual({
+    metadataLine: true, fence: false, chars: 20, tail: '{"action":"nothing"}',
+  });
+  const long = `${'{"action":"create"}\n\`\`\`markdown\nbody\n\`\`\`\n'}${'x'.repeat(400)}`;
+  const shape = sedimentReplyShape(long);
+  expect(shape).toMatchObject({ metadataLine: true, fence: true, chars: long.length });
+  expect(shape.tail.length).toBeLessThanOrEqual(200);
+  expect(shape.tail.endsWith('x'.repeat(20))).toBe(true);
 });

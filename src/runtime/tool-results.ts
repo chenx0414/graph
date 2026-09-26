@@ -32,6 +32,9 @@ export const SHELL_OUTPUT_LIMIT = 20_000;
 /** The system inventory is a single-shot dump, so the lazy rule can never catch it: it
  * gets its own ceiling instead, with the same named fallback. */
 export const SYSTEM_SUMMARY_LIMIT = 12_000;
+/** A conversation transcript is a whole session, not a shell line: one read can carry every message and
+ * every tool row of another Agent's turn. It gets a first-view ceiling for the same reason bash does. */
+export const CONVERSATION_READ_LIMIT = 8_000;
 /** Keys remembered per scope. Evicting a key is safe by construction: the worst case is
  * that a repeated result is shown in full once more, never that it is silently cut. */
 export const MAX_RECORDED_KEYS = 256;
@@ -47,9 +50,16 @@ const COUNTS_FILE = 'counts.json';
  * listed: upstream `read` already continues with `offset` and upstream `edit` already
  * answers in one line, so a cap here would fight behaviour that is already the right shape.
  */
+/**
+ * Per-tool ceilings on the model-visible text. Only the tools that can flood the prompt in a single
+ * view are listed: `bash` (host output), the system inventory (one dump), and reading another
+ * conversation (a whole session). Upstream `read` already continues with `offset` and upstream `edit`
+ * already answers in one line, so a cap here would fight behaviour that is already the right shape.
+ */
 const TOOL_TEXT_LIMITS: Record<string, number> = {
   bash: SHELL_OUTPUT_LIMIT,
   read_system_capabilities: SYSTEM_SUMMARY_LIMIT,
+  conversation_read: CONVERSATION_READ_LIMIT,
 };
 
 type ContentPart = NonNullable<AfterToolCallResult['content']>[number];

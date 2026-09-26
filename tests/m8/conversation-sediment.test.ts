@@ -259,3 +259,60 @@ test('a review survives one cheap model refusing it by asking the next one', asy
   expect(decision.model).toBe('next-model');
   expect(decision.proposed).toBe('nothing');
 }, 120_000);
+
+// The live failure behind HB-126: a 4,363-character reply whose metadata line was perfectly good was
+// dropped as unreadable, because the markdown below it carried braces of its own and the parser took
+// the last one as the end of the metadata. A body without a fence now reads as a body.
+test('a reply whose body carries braces but no fence still writes the skill', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sediment-nofence-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(join(project, '.agents', 'skills'), { recursive: true });
+  const main = await openaiServer([
+    { tools: [{ id: 'call-1', name: 'bash', arguments: '{"command":"echo one"}' }] },
+    { tools: [{ id: 'call-2', name: 'bash', arguments: '{"command":"echo two"}' }] },
+    { text: '两步都做完了。' },
+  ]);
+  const reply = [
+    '{"action":"create","id":"no-fence-body","description":"Use when a verdict arrives as one metadata line plus prose"}',
+    '',
+    '## 步骤',
+    '',
+    '1. 先读元数据行：`{"action":"create"}`。',
+  ].join('\n');
+  const reader = await openaiServer([{ text: reply }, { text: reply }]);
+  cleanup.push(() => main.close());
+  cleanup.push(() => reader.close());
+  const entries = [
+    { id: 'main-model', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: main.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+    { id: 'reader-model', provider: 'graph-openai', grade: 'low' as const, api: 'openai-completions' as const, baseUrl: reader.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+  ];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], actions: {},
+    models: { entries, credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }), modelRuntime: main.runtime },
+    live: {
+      revision: () => 1,
+      config: () => ({ skills: { sedimentation: { enabled: true, afterToolCalls: 2, model: 'reader-model', budgetTokens: 40_000 } } }),
+      entries: () => entries,
+      preferences: () => ({}),
+      credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }),
+      masterModel: () => 'main-model',
+      defaultBudgetTokens: () => null,
+      projects: () => [{ id: 'p', root: project }],
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'main-model' },
+  });
+  cleanup.push(() => runtime.close());
+  await runtime.conversations.create({ projectId: 'p', text: '做两步检查。', requestId: 'sediment-nofence' });
+  await runtime.host.runReady();
+
+  const written = readFileSync(join(project, '.agents', 'skills', 'no-fence-body', 'SKILL.md'), 'utf8');
+  expect(written).toContain('## 步骤');
+  expect(written).toContain('{"action":"create"}');
+  const recorded = new DatabaseSync(join(root, 'state', 'tasks.sqlite'))
+    .prepare("SELECT data FROM events WHERE type = 'skill_sediment.reviewed'").all() as { data: string }[];
+  const decision = JSON.parse(recorded[0]!.data) as { proposed: string | null; replyShape: { metadataLine: boolean; fence: boolean; chars: number } };
+  expect(decision.proposed).toBe('create');
+  // The shape travels with the decision, so the next "unreadable" reply explains itself.
+  expect(decision.replyShape).toMatchObject({ metadataLine: true, fence: false, chars: reply.length });
+}, 120_000);
