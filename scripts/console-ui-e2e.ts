@@ -151,6 +151,8 @@ try {
   checkContains('卡片标出 waiting 类型', card, 'waiting');
   checkContains('卡片显示提问原因', card, '答案会改变实现');
   check('决定输入框的提示语', await page.getByTestId('waiting-value').getAttribute('placeholder'), '写下你的决定');
+  await page.getByText('查看技术详情').first().click();
+  check('技术详情展开后可见', await page.getByTestId('question-data-q-hb80').isVisible(), true);
   checkContains('技术详情含 user_decision', await page.getByTestId('question-data-q-hb80').innerText(), 'user_decision');
   const cardShot = join(screenshots, 'question-card.png');
   await page.screenshot({ path: cardShot, fullPage: true });
