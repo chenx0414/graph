@@ -1,24 +1,44 @@
 import { expect, test } from 'vitest';
-import { CONVERSATION_SEND_LIMIT, agentMessageText, conversationWriteRefusal, openConversationTools } from '../../src/runtime/conversation-tools.ts';
+import { agentMessageText, conversationWriteRefusal, openConversationTools } from '../../src/runtime/conversation-tools.ts';
 
 /**
- * The outward rules of handing a message to another conversation, pinned before the tools exist. The
- * authority is the user's decision: any conversation in any project, and full access is what unlocks
- * it. Everything else here exists because that door is wide: a session must not be able to talk to
- * itself, a chain must not bounce (A→B→A), and one turn must not become a broadcast.
+ * The outward rules of handing a message to another conversation. The user kept one authority and
+ * removed two guards: full access is still what unlocks a write, and a session still cannot address
+ * itself — but a reply back is a message rather than a bounce, and one turn may hand out as many as it
+ * needs. Both removed rules never fired in production and one of them forbade a normal conversation.
  */
-test('a write into another conversation needs full access and a target that is not in the chain', () => {
-  const base = { hostWrite: true, caller: 'A', chain: [] as string[], sent: 0 };
-  expect(conversationWriteRefusal({ ...base, target: 'B' })).toBeNull();
+test('a write needs full access, and that is the only door it needs', () => {
+  expect(conversationWriteRefusal({ hostWrite: true, caller: 'A', target: 'B' })).toBeNull();
 
   // Without host write there is no authority to speak into somebody else's session.
-  expect(conversationWriteRefusal({ ...base, hostWrite: false, target: 'B' })).toMatch(/完全访问/);
-  // Talking to itself is what every other tool already does.
-  expect(conversationWriteRefusal({ ...base, target: 'A' })).toMatch(/自己/);
-  // A→B→A ping-pong: the target already appears in this message's forwarding chain.
-  expect(conversationWriteRefusal({ ...base, target: 'C', chain: ['C'] })).toMatch(/链/);
-  // Runaway: one operation may only hand out so many cross-conversation messages.
-  expect(conversationWriteRefusal({ ...base, target: 'B', sent: CONVERSATION_SEND_LIMIT })).toMatch(/上限/);
+  expect(conversationWriteRefusal({ hostWrite: false, caller: 'A', target: 'B' })).toMatch(/完全访问/);
+  // Addressing itself is not a permission question: every other tool already answers this session.
+  expect(conversationWriteRefusal({ hostWrite: true, caller: 'A', target: 'A' })).toMatch(/自己/);
+});
+
+test('agents talk freely: a reply back is a message, and one turn may send as many as it needs', async () => {
+  const sent: string[] = [];
+  const channel = openConversationTools({
+    service: {
+      list: () => [],
+      // A transcript that already relayed a message from B: under the old chain rule this read was
+      // enough to refuse a handoff, which made an ordinary reply impossible.
+      view: async () => ({ messages: [{ role: 'user', data: { source: { chain: ['B', 'A'] } } }] }),
+      events: () => [],
+      chat: async (conversationId, input) => { sent.push(`${conversationId}:${input.text.split('\n').pop() ?? ''}`); return {}; },
+      steer: async () => ({}),
+      pause: async () => ({}),
+      resume: async () => ({}),
+    },
+    caller: { conversationId: 'A', taskId: 't-1', nodeId: 'master' },
+    hostWrite: true,
+  });
+
+  await channel.send({ conversationId: 'B', text: 'reply back', requestId: 'r-0' });
+  for (let index = 1; index <= 6; index += 1) {
+    await channel.send({ conversationId: 'B', text: `fan ${index}`, requestId: `r-${index}` });
+  }
+  expect(sent).toEqual(['B:reply back', 'B:fan 1', 'B:fan 2', 'B:fan 3', 'B:fan 4', 'B:fan 5', 'B:fan 6']);
 });
 
 test('a message written by an Agent says so, so the target never mistakes it for the user', () => {

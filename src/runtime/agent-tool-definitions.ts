@@ -249,7 +249,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     conversation_write: {
-      name: 'conversation_write', label: 'Write into another conversation', description: 'Hand work to another conversation: send a message, steer a running turn with one (the text is queued, then pushed into the turn that is already running), or pause/resume it. Needs full access, may only address other conversations, and cannot bounce back into a conversation that already relayed the message (A→B→A stops there). The message arrives marked as coming from another Agent, never as the user. One operation may hand out a bounded number of messages: report progress to the user instead of broadcasting.',
+      name: 'conversation_write', label: 'Write into another conversation', description: 'Hand work to another conversation: send a message, steer a running turn with one (the text is queued, then pushed into the turn that is already running), or pause/resume it. Needs full access, and may only address other conversations; beyond that agents talk freely — a reply back is a message rather than a bounce, and one turn may hand out as many as it needs. The message arrives marked as coming from another Agent, never as the user, so report progress to the user instead of broadcasting.',
       parameters: Type.Object({
         action: Type.Union([Type.Literal('send'), Type.Literal('steer'), Type.Literal('pause'), Type.Literal('resume')]),
         conversationId: Type.String(),

@@ -435,8 +435,8 @@ export function createPiAdapter(options: {
               run: (command, args) => commands!.run(command, args),
               ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
               ...(artifactService ? { artifacts: artifactService } : {}),
-              // A master session may hand work to any other conversation. The rules and the operation
-              // state (how many handoffs, which chain drove us) live in `conversation-tools.ts`.
+              // A master session may hand work to any other conversation. The rules and the handoff
+              // ledger live in `conversation-tools.ts`.
               ...(channels?.conversations && conversation && spec.role === 'master' ? {
                 conversations: openConversationTools({
                   service: channels.conversations.service,
