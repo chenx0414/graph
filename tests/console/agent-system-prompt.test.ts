@@ -53,12 +53,13 @@ test('the shared composer renders Graph sections in order and keeps Pi-generated
   expect(result.text).toContain('Common rule.');
   expect(result.text).toContain('Submit a graph draft before dispatching work.');
   expect(result.text).toContain('Current requirement version: 3.');
-  // Tool guidance and the send gate stay Graph rules, with their own editable
-  // source, instead of being part of a capability inventory.
+  // The rules block is exactly the editable sources plus the generated worktree orientation:
+  // the send-gate paragraph that used to close it was advice about a gate the host enforces
+  // anyway, so the composed text must no longer carry it.
   expect(result.text).toContain('Use the smallest tool that can prove the claim.');
-  expect(result.text).toContain('Every model, command, MCP and extension call passes the Graph send gate');
+  expect(result.text).not.toContain('Every model, command, MCP and extension call passes the Graph send gate');
   expect(result.sections.find(section => section.id === 'rules')?.parts.map(part => part.source))
-    .toEqual(['rules/common.md', 'rules/<role>.md', 'runtime/*.md', 'tools/<role>.md', undefined, undefined]);
+    .toEqual(['rules/common.md', 'rules/<role>.md', 'runtime/*.md', 'tools/<role>.md', undefined]);
   expect(result.text).toContain('<docs>');
   expect(result.text).toContain('Graph documentation (read when the user asks about Graph itself');
   expect(result.text).toContain('- Main documentation: /app/docs/agent/README.md');
