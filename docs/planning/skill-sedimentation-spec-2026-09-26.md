@@ -40,16 +40,20 @@
 3. `tests/console/skills-lint.test.ts`（新）。
 
 ### 行为
-- **检查范围**（只查这些根，其余一律跳过）：
-  - `<--root>` 下的 `.agents/skills/*/SKILL.md`、`.pi/skills/*/SKILL.md`；
-  - 能力库里 `capability.json` 带 `createdBy === "graph-agent"` 的技能目录。
-  - `imported`/上游/`bundled` 技能**永不检查**（它们不归我们管）。
-- **规则**（输出 `warn`，不阻断）：
+- **检查范围**（**默认只查自著技能**，其余一律跳过）——这是实测后的修正：仓库里现有 22 个项目技能中 15 个不符合下面这套契约（多为描述不含触发条件句式，另有两个描述超 300 字符），它们是**使用者导入的技能**，不是我们写的；把规则套上去既越界，又会逼实现者去改上游内容。
+  - **自著技能**（唯一默认对象）：SKILL.md 的 front-matter 声明 `created-by: graph-agent`（放哪都认：`<root>/.agents/skills/*`、`<root>/.pi/skills/*`、能力库 `<capabilityRoot>/skills/*`）。
+  - `--all` 才会把范围内的**其它**技能也纳入，且只跑下面的**硬规则**，不跑建议规则。
+  - `imported`/上游/`bundled` 技能在任何模式下都**不做**建议规则检查。
+- **规则**分两层（都输出 `warn`，默认不阻断）：
+  - **硬规则**（自著技能一律；`--all` 时扩展到全部）：`missing-frontmatter`、`name-mismatch`、`description-too-long`（>300）、`oversized-body`（>24,000）、`references-sprawl`（>60）、`references-incident-named`。
+  - **建议规则**（**仅自著技能**）：`description-not-triggering`、`incident-log-shape`。
+
+  完整判据：
   | 规则 id | 判据 |
   |---|---|
   | `missing-frontmatter` | 缺 `name` 或 `description` |
   | `name-mismatch` | front-matter `name` 与目录名不一致 |
-  | `description-not-triggering` | `description` 不含触发条件：需匹配 `/Use when\|Use for\|Use before\|When \|何时\|当你\|适用于/` |
+  | `description-not-triggering` | `description` 不含触发条件：**大小写不敏感**匹配 `/use when\|use for\|use before\|use this when\|use this skill when\|when the user\|when you\|何时\|当你\|适用于/`（实测：这个句式表比首版更宽，否则连仓库里合规的技能也会被误判） |
   | `description-too-long` | `description` > 300 字符 |
   | `oversized-body` | 正文（去 front-matter 后）> 24,000 字符（`read` 会整篇进上下文） |
   | `references-sprawl` | `references/` 下文件 > 60 |
@@ -60,8 +64,9 @@
 - **不进 `node --run check`**（advisory；`check` 只跑 P3 的沉淀 E2E 与既有测试）。
 
 ### 验收（A1）
-- `node --run skills:lint` 对**好样本**（仓库内已有的项目技能与本次新增契约示例）零 warn；`--strict` 退出码 0。
-- 测试用临时目录构造 8 类坏样本，每条规则**各命中一次**（黑盒跑脚本、断言 stdout 与退出码），并断言 `imported` 技能不会被检查。
+- 仓库内新增**好样本 fixture** `tests/fixtures/skills/good/**`（一份带 `created-by: graph-agent` 的合规范技能）：`node scripts/skills-lint.mjs --root tests/fixtures/skills/good --strict` 退出码 0、零 warn。
+- 默认范围下对仓库现有（非自著）技能零 warn——这是范围的直接后果，不是运气：`node scripts/skills-lint.mjs --root . --strict` 退出码 0。
+- 测试用临时目录构造 8 类坏样本（外加两个反例：非自著技能不进建议规则；`--all` 时进硬规则），每条规则**各命中一次**（黑盒跑脚本、断言 stdout/`--json` 与退出码）。
 
 ---
 
@@ -116,7 +121,7 @@
    - **课 = 可泛化的规则 + 一句 why**，命令式、挂在受影响的那一步、只说一遍；同一个课第二次学到就是**同一条规则**（先搜再写）；**不重复环境已经教过的东西**。
    - **触发信号**：用户纠正了风格/格式/啰嗦度；用户纠正了流程/顺序；出现非平凡技术、绕坑、调试路径、工具用法；会话中读过的技能本身有错/缺步骤/过时。
    - **不许沉淀**：环境相关失败（缺二进制/未装包/路径不匹配/凭据未配）；**对工具或功能的负面断言**；会话内自行恢复的临时错误；一次性任务叙述；**未解决的失败**（不许把死路写成「推荐做法」）。
-   - **去处与边界**：只写 `<projectRoot>/.agents/skills/<slug>/`；**库内/imported/绑定技能一律只读**；若确实需要改库技能，产出一个 `kind:'waiting'` 的提案问题（`requestType:'user_decision'`）等使用者批准，**不要自行改**。
+   - **去处与边界**：只写 `<projectRoot>/.agents/skills/<slug>/`，且 front-matter 必须带 **`created-by: graph-agent`**（否则它不进入 P1 的 lint 范围）；**库内/imported/绑定技能一律只读**；若确实需要改库技能，产出一个 `kind:'waiting'` 的提案问题（`requestType:'user_decision'`）等使用者批准，**不要自行改**。
    - **出口**：`Nothing to save.` 是合法结果，但不许当默认。
 4. **节点 output**：`{ written: [相对路径...], nothingToSave: boolean, lint: {warnings: n} }`；节点完成后自动跑一次 skills-lint（advisory，结果写进 output）。
 5. **失败与回退**：模型不可用/预算耗尽 → 节点 `failed`，事件里带原因；不重试（避免成本风暴）；不修改任何既有技能。
@@ -159,7 +164,7 @@ curator 式确定性归档、LLM 伞化合并、独立 `skill_manage` 工具、�
 
 | 阶段 | 新增 | 修改 |
 |---|---|---|
-| P1 | `scripts/skills-lint.mjs`、`docs/agent/skill-authoring.md`、`tests/console/skills-lint.test.ts` | `package.json`（`skills:lint`） |
+| P1 | `scripts/skills-lint.mjs`、`docs/agent/skill-authoring.md`、`tests/console/skills-lint.test.ts`、`tests/fixtures/skills/good/**`（+坏样本 fixture） | `package.json`（`skills:lint`） |
 | P2 | `src/runtime/skill-usage.ts`、`tests/console/skill-usage.test.ts` | `src/core/store.ts`（迁移 38）、`src/runtime/tool-call-spool.ts` + 遥测写入接缝（记录 `target`）、`src/server/app.ts`（`/api/skill-stats`）、`src/web/ToolStats.tsx`、`scripts/console-ui-e2e.ts` |
 | P3 | `src/runtime/sediment.ts`（节点执行体）、`runtime/sediment.md`（提示词键，落 `<graphHome>/prompts`）、`scripts/skill-sediment-e2e.ts`、`tests/console/skill-sediment.test.ts` | `src/core/program-adapters.ts`（`graph.sediment`）、`src/core/execution.ts`（收尾判定 + 追加节点）、config 默认值与 `docs/agent/self-configuration.md`、`docs/agent/capabilities.md`（技能沉淀一节） |
 | P4 | `src/runtime/skill-promotion.ts`、`tests/console/skill-promotion.test.ts` | `src/server/app.ts`（`/api/skills/promote`）、`docs/agent/capabilities.md` |
