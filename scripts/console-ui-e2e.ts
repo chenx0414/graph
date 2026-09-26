@@ -112,9 +112,14 @@ try {
     // One call that touched a skill file: this is what makes the skill show as read.
     { tool: 'read', ms: 4, isError: false, target: join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md') },
   ];
-  await mkdir(join(state, TOOL_CALL_SPOOL_DIR), { recursive: true });
+  // Seed through the worker spool, not by inserting rows, and at the directory a lane really
+  // writes: a lane receives its own instance directory as its stateDir, so the file sits under it
+  // (the instance id matches the node's, exactly as production does it). Seeding the daemon's own
+  // root instead is what once hid a reader that never looked where the lanes write.
+  const laneDir = join(state, 'instances', 'inst-e2e');
+  await mkdir(join(laneDir, TOOL_CALL_SPOOL_DIR), { recursive: true });
   await writeFile(
-    toolCallSpoolPath(state, 'inst-e2e'),
+    toolCallSpoolPath(laneDir, 'inst-e2e'),
     spooled.map(call => `${JSON.stringify({ instanceId: 'inst-e2e', ...call, at: Date.now() })}\n`).join(''),
   );
 
