@@ -236,4 +236,5 @@ test('reopening a live conversation attaches its snapshot without replaying old 
   }
   await expect.poll(() => cursors.length).toBe(2);
   expect(cursors.every(cursor => cursor > 1000)).toBe(true);
+  await expect.poll(() => page.getByTestId('conversation-connection').innerText()).toBe('已连接');
 }, 60_000);

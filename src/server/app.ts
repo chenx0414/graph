@@ -559,6 +559,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const after = Number((request.query as { after?: string }).after ?? 0);
     reply.hijack();
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    // An idle snapshot attach has no replay events to flush the headers.
+    reply.raw.flushHeaders();
     const watch = runtime.conversations.watch(params.conversationId, after);
     const abort = () => { void watch.return?.(); };
     request.raw.on('close', abort);
