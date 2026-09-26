@@ -57,6 +57,15 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 `graph.command` 程序节点在 OS sandbox 内执行：不能嵌套 `sandbox-exec`，也看不到窗口服务，所以 Electron、真实浏览器自动化、宿主剪贴板在这里跑不起来（`sandbox_apply: Operation not permitted` 是嵌套被拒）。通过 RSI 传的 `checks` 在 checkout 里不受沙箱限制运行，适合需要真实浏览器或宿主能力的诊断；正式验收仍应落在 `graph.command` 节点上，因为验收证据必须来自受控检查。
 
+## 浏览器验证与恢复
+
+控制台可见的改动要自己先验：用真浏览器读 DOM、把交互跑一遍、截一张图当证据，然后只把需要人判断的部分交给使用者，并说明是哪个窗口（桌面 App 窗口与浏览器页面不同，某些输入只在桌面桥存在时才渲染）。
+
+- `agent_browser click <selector>` 对 React 组件可能报 `Clicked: …` 却**不触发** onClick。对 React 一律用 `eval` + `document.querySelector(...).click()`（或用角色/文本定位的动作），并**另起一次** DOM 读回确认；`click` 返回的「Action dispatched; application change unverified」不是证据。
+- `open` 之后先断言 `location.href` 再点（点击可能落在旧标签页上）；DOM 状态要在另一次 eval 里读，因为 React 异步 flush。带 hash 的同 URL `open` 不会重载，需要 `location.reload()`。
+- 长连接页面（例如控制台的 SSE 流）上 `open` 可能超时：恢复手段是扩展自己的动作——`tab list` → `tab t<N>` → 重新断言；同标签页跳转 `location.href = ...` 是兜底。
+- 剪贴板：automation 浏览器里 `navigator.clipboard` 写入可能被拒（即使已 `grant_clipboard_permission` 且 `document.hasFocus()` 为 true）。复制类验收只能人工，必须在报告里分清楚哪条腿机器验过、哪条腿等人验。
+
 ## 发现与诊断
 
 - `search_resources`：搜索能力库，只用于发现。
