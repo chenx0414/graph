@@ -898,6 +898,17 @@ export function createPiAdapter(options: {
           const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
           const session = await transport.open({
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
+            // Durable telemetry for every tool call this instance executes, Graph's and Pi's alike.
+            // The write is guarded here: a statistics table must never be able to break a turn.
+            onToolCall: call => {
+              try {
+                options.store.recordToolCall({
+                  instanceId: operation.instanceId!, tool: call.tool, ms: call.ms, isError: call.isError,
+                });
+              } catch {
+                // Observed, not executed: recording stays outside the turn's own failure path.
+              }
+            },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
             model: toPiModel(entry),
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {

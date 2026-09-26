@@ -2067,6 +2067,16 @@ export async function openTaskRuntime(options: {
       definitionSpec(id: string, version: number) { ensureOpen(); return catalog.definition(`${id}@${version}`); },
       recordPreset(id: string, version: string, hash: string, detail: Json) { ensureOpen(); return catalog.recordPreset(id, version, hash, detail); },
     },
+    /** Durable tool-call telemetry: calls, failures and durations per tool and Agent role. */
+    toolCallStats() {
+      ensureOpen();
+      return { generatedAt: Date.now(), retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS, stats: store.toolCallStats() };
+    },
+    /** Drop the recorded tool calls, so a stale sample cannot be read as a fresh one. */
+    clearToolCalls() {
+      ensureOpen();
+      return { removed: store.clearToolCalls() };
+    },
     close() {
       if (!closing) {
         closed = true;

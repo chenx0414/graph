@@ -306,6 +306,9 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return options.appServices.rsi.ack(body.id.trim());
   });
   app.get('/api/limits', async () => runtime.modelLimits());
+  // Per-tool telemetry the runtime records itself; the console renders it as the 工具 page.
+  app.get('/api/tool-stats', async () => runtime.toolCallStats());
+  app.post('/api/tool-stats/clear', async () => runtime.clearToolCalls());
   if (options.config) {
     app.get('/api/config', async () => {
       const { revision, config } = await options.config!.store.snapshot();

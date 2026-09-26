@@ -514,3 +514,49 @@ test('the occurrence count for a repeated large result survives an instance reop
     await second.close();
   }
 });
+
+// The telemetry seam sits inside every instance, so it has to report what actually happened: the
+// tool that ran, how long it took, and whether its result was an error. Both outcomes are covered
+// here, because a table that only ever sees successes would report a 100% success rate forever.
+test('the tool seam reports every call with its duration and its outcome', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-tool-calls-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const calls: { tool: string; ms: number; isError: boolean }[] = [];
+  const good = externallyGated({
+    name: 'probe', label: 'Probe', description: 'Succeed.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => ({ content: [{ type: 'text' as const, text: 'ok' }], details: {} }),
+  });
+  const bad = externallyGated({
+    name: 'boom', label: 'Boom', description: 'Fail.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => { throw new Error('boom failed'); },
+  });
+  let modelRequests = 0;
+  const stream: StreamFn = model => {
+    modelRequests += 1;
+    const output = createAssistantMessageEventStream();
+    const message = modelRequests === 1 ? toolCallMessage(model, 'probe')
+      : modelRequests === 2 ? toolCallMessage(model, 'boom')
+        : reply(model, 'Done');
+    output.push({ type: 'done', reason: message.stopReason === 'toolUse' ? 'toolUse' : 'stop', message });
+    return output;
+  };
+  const instance = await openPiInstance({
+    binding: { instanceId: 'agent-tool-calls', nodeId: 'node-tool-calls', definitionVersion: 'coder@1' },
+    workspace, stateDir: join(root, 'state'), model: modelA, modelRuntime: await testModelRuntime(),
+    stream, tools: [good, bad],
+    onToolCall: call => calls.push(call),
+  });
+  try {
+    await instance.prompt('Run both probes');
+    expect(calls.map(call => call.tool)).toEqual(['probe', 'boom']);
+    expect(calls.every(call => call.ms >= 0)).toBe(true);
+    expect(calls[0]!.isError).toBe(false);
+    expect(calls[1]!.isError).toBe(true);
+  } finally {
+    await instance.close();
+  }
+});
