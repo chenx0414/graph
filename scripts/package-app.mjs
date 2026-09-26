@@ -12,6 +12,7 @@ import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MIN_FREE_BYTES, diskSpaceWarning, formatBytes, freeBytesAt } from '../src/runtime/disk-space.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = join(root, '.stage');
@@ -20,6 +21,13 @@ const repo = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 if (!existsSync(join(root, 'dist/web/index.html'))) {
   throw new Error('dist/web is missing; run node --run build:web first');
 }
+
+// Checked before the staging copy rather than discovered by the dmg step at the end, and reported
+// without blocking: a build that cannot finish should say so before it spends the time.
+const freeBytes = freeBytesAt(root);
+console.log(`packaging: ${formatBytes(freeBytes)} free on the output volume (needs ~${formatBytes(MIN_FREE_BYTES)})`);
+const spaceWarning = diskSpaceWarning(freeBytes);
+if (spaceWarning) console.warn(spaceWarning);
 
 await rm(stage, { recursive: true, force: true });
 await mkdir(stage, { recursive: true });

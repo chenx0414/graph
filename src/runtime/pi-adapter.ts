@@ -34,7 +34,7 @@ import { guardHandoffResponses } from './handoff-response.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
-import { generatePromptSuggestion, selectPromptSuggestionModel } from './prompt-suggestion.ts';
+import { generatePromptSuggestion, selectPromptSuggestionModel, type PromptSuggestionReply } from './prompt-suggestion.ts';
 import {
   createRestrictedProcessAgentSessionTransport,
   type AgentSession,
@@ -1105,6 +1105,7 @@ export function createPiAdapter(options: {
             }
             let suggestedPrompt: string | undefined;
             let suggestionUsage: TokenUsage | null = null;
+            let suggestionReply: PromptSuggestionReply | null = null;
             const lastUserMessage = [...(operation.context.messages ?? [])].reverse()
               .find(message => message.text.trim())?.text;
             const suggestionEntry = conversation && lastUserMessage
@@ -1122,7 +1123,7 @@ export function createPiAdapter(options: {
               );
               suggestionGate.setPurpose('prompt_suggestion');
               try {
-                suggestedPrompt = await generatePromptSuggestion({
+                suggestionReply = await generatePromptSuggestion({
                   stream: controlledOpenAIStream(suggestionGate, resolveKeyFor(suggestionEntry), slotFor(suggestionEntry), suggestionEntry.api, {
                     estimateMissing: true,
                     ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
@@ -1133,12 +1134,28 @@ export function createPiAdapter(options: {
                   systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/prompt-suggestion.md') : DEFAULT_PROMPT_SUGGESTION_PROMPT,
                   signal: controller.signal,
                 });
+                suggestedPrompt = suggestionReply.text || undefined;
               } catch {
                 suggestedPrompt = undefined;
               } finally {
                 clearTimeout(timeout);
                 suggestionUsage = suggestionGate.total();
               }
+            }
+            // A failed call and a model that had nothing to suggest used to collapse into the same
+            // silent `undefined`. The decision now travels with the turn, with the call's own words.
+            if (conversation) {
+              options.store.event(operation.taskId, 'prompt_suggestion.decided', {
+                operationId: operation.id,
+                nodeId: operation.nodeId,
+                model: suggestionEntry?.id ?? null,
+                asked: Boolean(suggestionEntry && reply.trim()),
+                stopReason: suggestionReply?.stopReason ?? null,
+                error: suggestionReply?.error ?? null,
+                chars: suggestionReply?.raw.length ?? 0,
+                suggestion: suggestionReply?.text ?? '',
+                replyHead: suggestionReply?.raw.slice(0, 200) ?? '',
+              });
             }
             // Sedimentation runs after the turn like the composer suggestion does: one extra call on
             // a cheaper model, through the same gate, and the write happens in `applySedimentProposal`

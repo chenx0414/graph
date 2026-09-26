@@ -41,10 +41,24 @@ function normalizeSuggestion(value: string) {
   return firstLine.slice(0, 500);
 }
 
+export interface PromptSuggestionReply {
+  /** The suggestion when the call finished normally and carried one; '' when it did not. */
+  text: string;
+  /** What the model actually said before normalization: the evidence behind `text`. */
+  raw: string;
+  stopReason: string | null;
+  /** The provider's or the transport's own words when the call did not finish normally. */
+  error: string | null;
+}
+
+/** A reply that carries no suggestion and no failure: the model answered and had nothing to add. */
+export const NO_SUGGESTION: PromptSuggestionReply = { text: '', raw: '', stopReason: null, error: null };
+
 /**
  * Generate one composer suggestion in a fresh model call. The main Agent's
  * transcript is deliberately absent: only the latest user message and visible
- * reply cross this boundary.
+ * reply cross this boundary. The outcome is returned, never swallowed: a provider that refused and a
+ * model with nothing to say are different facts about the same turn.
  */
 export async function generatePromptSuggestion(input: {
   stream: StreamFn;
@@ -53,7 +67,7 @@ export async function generatePromptSuggestion(input: {
   assistantReply: string;
   systemPrompt?: string;
   signal?: AbortSignal;
-}) {
+}): Promise<PromptSuggestionReply> {
   const context: Context = {
     systemPrompt: input.systemPrompt?.trim() || DEFAULT_PROMPT_SUGGESTION_PROMPT,
     messages: [{
@@ -72,10 +86,17 @@ export async function generatePromptSuggestion(input: {
       ...(input.signal ? { signal: input.signal } : {}),
     });
     const message = await stream.result();
-    if (message.stopReason !== 'stop') return undefined;
-    const suggestion = normalizeSuggestion(textFromMessage(message));
-    return suggestion || undefined;
-  } catch {
-    return undefined;
+    const raw = textFromMessage(message);
+    // The SDK reports its own reason on the message when the provider stopped abnormally; without it
+    // a refusal and an empty answer arrive here looking exactly alike.
+    const reported = (message as unknown as { errorMessage?: unknown }).errorMessage;
+    return {
+      text: message.stopReason === 'stop' ? normalizeSuggestion(raw) : '',
+      raw,
+      stopReason: message.stopReason ?? null,
+      error: typeof reported === 'string' && reported ? reported : null,
+    };
+  } catch (error) {
+    return { text: '', raw: '', stopReason: null, error: error instanceof Error ? error.message : String(error) };
   }
 }
