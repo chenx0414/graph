@@ -74,7 +74,9 @@ await writeFile(config, JSON.stringify({
 
 const daemon = spawn(process.execPath, [
   join(repo, 'src', 'server', 'cli.ts'),
-  '--state-dir', state, '--graph-home', home, '--web-dir', web, '--port', '0', '--config', config,
+  // `--execute` is what lets this daemon dispatch at all (the default is view-only, history and settings
+  // only): without it the real turn in the last section never runs and its spool file is never written.
+  '--execute', '--state-dir', state, '--graph-home', home, '--web-dir', web, '--port', '0', '--config', config,
 ], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GRAPH_E2E_KEY: 'scripted-local-key' } });
 let daemonLog = '';
 daemon.stdout.on('data', (chunk: Buffer) => { daemonLog += String(chunk); });
@@ -235,8 +237,10 @@ try {
   await page.getByTestId('no-questions').waitFor({ timeout: 10_000 });
   check('无问题的任务显示空态', await page.getByTestId('no-questions').count(), 1);
 
-  // ── HB-88：master 车道的工具调用是进程内直写（`pi-adapter` → `recordToolCall`），不走上面种子的
-  // worker spool。要看见它，只能让守护进程真的跑一个回合——这条会话由控制台自己的 HTTP 面创建。
+  // ── 一次真回合的遥测（HB-88）：上面那段种的是 spool 字节，这一段让守护进程真的跑一个回合。
+  // 现场先纠了一个错的前提：daemon 里 master 也跑在 worker 进程里，工具调用落进 spool，而 spool
+  // 只在「有人读统计」时才被吸入——所以并不是两条通路，而是同一条通路的两端；这段证明它能被真的
+  // 回合喂饱，而且页面看到的确实是那次回合产生的字节。
   const created = await page.evaluate(async () => {
     const response = await fetch('/api/conversations', {
       method: 'POST',
@@ -249,37 +253,34 @@ try {
   check('控制台 HTTP 面能创建会话（即起一个真回合）', created.status, 200);
   check('创建会话返回了 conversationId', created.conversationId.length > 0, true);
 
-  // A real turn takes seconds, so wait for the write rather than assuming it: the in-process write is
-  // exactly what this section exists to prove.
-  const directDeadline = Date.now() + 90_000;
-  let direct: { tool: string; role: string | null; calls: number } | null = null;
-  while (Date.now() < directDeadline && !direct) {
-    const reader = new DatabaseSync(join(state, 'tasks.sqlite'));
-    try {
-      const rows = reader.prepare(
-        'SELECT tool, role, COUNT(*) AS calls FROM tool_calls WHERE task_id = (SELECT anchor_task_id FROM conversations WHERE id = ?) GROUP BY tool, role',
-      ).all(created.conversationId) as { tool: string; role: string | null; calls: number }[];
-      direct = rows.find(row => row.tool === 'bash') ?? null;
-    } finally {
-      reader.close();
-    }
-    if (!direct) await new Promise(done => setTimeout(done, 500));
-  }
-  check('master 直写落库：真回合的 bash 调用', direct?.tool, 'bash');
-  check('落库时记下了角色 master', direct?.role, 'master');
-  check('真回合只调了一次工具', direct?.calls, 1);
-
-  // The section above cleared the table, so this is the only row on the page - and it can only have come
-  // from the in-process path. That is the browser-level evidence HB-88 asked for.
+  // Tool calls only reach the table when someone reads the statistics, and loading this page is that
+  // read. Poll the page, not the database: the database is the result of what the page does. And reload
+  // rather than goto() - the same URL with a hash does not navigate, which once read as "no ingest".
   await page.goto(`${url}/#/tools`, { waitUntil: 'domcontentloaded' });
-  await page.getByTestId('tool-stats-table').waitFor({ timeout: 10_000 });
-  check('清空之后，页面上唯一的记录来自真回合的直写', await page.getByTestId('tool-stats-table').locator('tbody tr').count(), 1);
-  const onlyRow = (await page.getByTestId('tool-stats-table').locator('tbody tr').allInnerTexts())[0] ?? '';
-  checkContains('那行是 bash', onlyRow, 'bash');
-  checkContains('角色是「主 Agent」（master 车道）', onlyRow, '主 Agent');
-  const directShot = join(screenshots, 'tool-stats-master-direct.png');
-  await page.screenshot({ path: directShot, fullPage: true });
-  console.log(`截图 ${directShot}`);
+  const telemetryDeadline = Date.now() + 90_000;
+  let row = '';
+  while (Date.now() < telemetryDeadline && !row) {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const table = page.getByTestId('tool-stats-table');
+    const appeared = await table.waitFor({ timeout: 5_000 }).then(() => true, () => false);
+    if (!appeared) {
+      await new Promise(done => setTimeout(done, 1_000));
+      continue;
+    }
+    const rows = await table.locator('tbody tr').allInnerTexts();
+    check('清空之后，页面上只有真回合那一行', rows.length, 1);
+    if (rows.length === 1) row = rows[0]!;
+  }
+  checkContains('那行是 bash（真回合真的调了它）', row, 'bash');
+  checkContains('角色是「主 Agent」（master 车道）', row, '主 Agent');
+  // The row came from the turn's own spool file, so this read really performed the ingest.
+  const ingested = new DatabaseSync(join(state, 'tasks.sqlite'));
+  const stored = ingested.prepare('SELECT tool, role, count(*) AS calls FROM tool_calls GROUP BY tool, role').all() as { tool: string; role: string | null; calls: number }[];
+  ingested.close();
+  check('吸入后表里恰好一行：bash / master', stored, [{ tool: 'bash', role: 'master', calls: 1 }]);
+  const telemetryShot = join(screenshots, 'tool-stats-real-turn.png');
+  await page.screenshot({ path: telemetryShot, fullPage: true });
+  console.log(`截图 ${telemetryShot}`);
 
   check('页面无 JS 错误', problems, []);
 } catch (error) {
