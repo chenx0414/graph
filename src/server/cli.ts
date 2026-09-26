@@ -4,6 +4,7 @@ import { RuntimeError } from '../core/types.ts';
 import { graphHome } from '../catalog/graph-home.ts';
 import { defaultConfigPath, defaultStateDir } from './config.ts';
 import { startGraphDaemon, type GraphDaemon } from './start.ts';
+import { clearConsoleAddress, writeConsoleAddress } from './console-address.ts';
 
 export interface CliOptions {
   configPath: string | null;
@@ -127,6 +128,15 @@ async function main() {
     return;
   }
   printBanner(daemon, write);
+  // Publish the bound address: with `--port 0` (what the desktop app passes) this is the only
+  // place the console URL exists. It is cleared on a graceful stop below; a killed daemon leaves
+  // a stale record whose pid the reader can check.
+  await writeConsoleAddress(daemon.stateDir, {
+    url: daemon.url,
+    pid: process.pid,
+    mode: daemon.mode,
+    startedAt: Date.now(),
+  });
   let stopping = false;
   const stop = async (signal: NodeJS.Signals) => {
     if (stopping) {
@@ -144,6 +154,7 @@ async function main() {
       fail('Stop deadline exceeded; exiting with code 1. In-flight work stays recorded and is re-verified on restart.');
       process.exit(1);
     }
+    await clearConsoleAddress(daemon.stateDir);
     process.exit(0);
   };
   process.on('SIGINT', () => void stop('SIGINT'));

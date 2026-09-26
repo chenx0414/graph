@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
+import { readConsoleAddress } from '../src/server/console-address.ts';
 import { TOOL_CALL_SPOOL_DIR, toolCallSpoolPath } from '../src/runtime/tool-call-spool.ts';
 
 const repo = join(import.meta.dirname, '..');
@@ -62,14 +63,16 @@ let daemonLog = '';
 daemon.stdout.on('data', (chunk: Buffer) => { daemonLog += String(chunk); });
 daemon.stderr.on('data', (chunk: Buffer) => { daemonLog += String(chunk); });
 
+// The address comes from the record the daemon publishes, not from scraping its stdout: reading it
+// here is also what proves the record works for a tool that did not start the daemon.
 async function address(maxMs: number): Promise<string> {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
-    const found = /address:\s+(http\S+)/.exec(daemonLog)?.[1];
-    if (found) return found.replace(/\/$/, '');
+    const record = await readConsoleAddress(state);
+    if (record) return record.url.replace(/\/$/, '');
     await new Promise(done => setTimeout(done, 100));
   }
-  throw new Error(`守护进程未就绪：\n${daemonLog.slice(-2000)}`);
+  throw new Error(`守护进程未就绪（${state} 下无可用 console.json）：\n${daemonLog.slice(-2000)}`);
 }
 
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
