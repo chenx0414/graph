@@ -127,7 +127,9 @@ function parseSkills(value: unknown, models: GraphConfig['models']): GraphConfig
   const raw = root.sedimentation === undefined
     ? undefined
     : asObject(root.sedimentation, 'skills.sedimentation');
-  const model = raw?.model === undefined ? null : asString(raw.model, 'skills.sedimentation.model');
+  const model = raw?.model === undefined || raw.model === null
+    ? null
+    : asString(raw.model, 'skills.sedimentation.model');
   if (model && models && !models.entries.some(entry => entry.id === model)) {
     invalid(`skills.sedimentation.model references unknown model "${model}"`);
   }

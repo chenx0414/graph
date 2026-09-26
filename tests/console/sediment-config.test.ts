@@ -34,6 +34,16 @@ test('a document without the block keeps sedimentation off with the documented d
   expect(sedimentSettings(emptyGraphConfig())).toEqual({ enabled: false, afterToolCalls: 10, model: null, budgetTokens: 40_000 });
 });
 
+test('a sanitized document can be saved again, so the switch cannot erase itself', () => {
+  // The console loads the sanitized document and saves it back. `model` is null until somebody
+  // names one, so null has to be a legal value to read — otherwise the round-trip rejects itself.
+  const first = parseGraphConfig(document({ sedimentation: { enabled: true } }), '/tmp/graph.config.json');
+  const saved = sanitizeConfig(first, {}) as { skills?: unknown };
+  expect(saved.skills).toEqual({ sedimentation: { enabled: true, afterToolCalls: 10, model: null, budgetTokens: 40_000 } });
+  const second = parseGraphConfig({ ...document(), ...saved, revision: 1 }, '/tmp/graph.config.json');
+  expect(sedimentSettings(second)).toEqual({ enabled: true, afterToolCalls: 10, model: null, budgetTokens: 40_000 });
+});
+
 test('a malformed switch is a config error instead of a silent no-op', () => {
   const reject = (skills: unknown, pattern: RegExp) => expect(() => parseGraphConfig(document(skills), '/tmp/graph.config.json')).toThrow(pattern);
   reject({ sedimentation: { enabled: 'yes' } }, /skills\.sedimentation\.enabled/);
