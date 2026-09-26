@@ -360,7 +360,7 @@ export function conversationProjectionSnapshot(
 export function messageAttachments(message: ConversationMessage) {
   const value = message.data?.attachments;
   if (!Array.isArray(value)) return [];
-  return value.flatMap(item => {
+  return value.flatMap((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
     const attachment = item as Record<string, unknown>;
     if (typeof attachment.name !== 'string' || typeof attachment.text !== 'string') return [];
@@ -369,6 +369,9 @@ export function messageAttachments(message: ConversationMessage) {
       type: typeof attachment.type === 'string' ? attachment.type : 'text/plain',
       size: typeof attachment.size === 'number' ? attachment.size : attachment.text.length,
       text: attachment.text,
+      ...(typeof attachment.data === 'string' ? { data: attachment.data } : {}),
+      ...(['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(String(attachment.type))
+        ? { imageUrl: `/api/messages/${encodeURIComponent(message.id)}/attachments/${index}` } : {}),
     }];
   });
 }

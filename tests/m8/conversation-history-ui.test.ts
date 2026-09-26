@@ -54,8 +54,12 @@ test('history pages to the earliest record, survives new messages, and never cro
   expect(streamRequests.length).toBeGreaterThan(0);
   expect(Number(new URL(streamRequests[0]!).searchParams.get('after'))).toBeGreaterThan(0);
 
-  // The cursor advances from the earliest loaded record: three pages reach the start.
-  await page.getByTestId('load-older').click();
+  // Scrolling upward loads the preceding page without clicking the fallback button.
+  const thread = page.getByTestId('message-list');
+  await thread.hover();
+  await page.mouse.wheel(0, -500);
+  await expect.poll(() => thread.getAttribute('data-pinned')).toBe('false');
+  await thread.evaluate(element => { element.scrollTop = 0; });
   await userMessages().filter({ hasText: 'A-message-101' }).waitFor();
   expect(await userMessages().count()).toBe(400);
   await page.getByTestId('load-older').click();

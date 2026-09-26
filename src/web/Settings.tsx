@@ -249,7 +249,7 @@ function PreferencesPage() {
           <label className="preference-item">
             <span className="preference-copy">
               <strong>Markdown 渲染</strong>
-              <span className="muted">开启后你与主 Agent 的消息都按 Markdown 渲染；关闭后显示原文。</span>
+              <span className="muted">开启后显示输入草稿的实时 Markdown 预览，并渲染你与主 Agent 的消息；关闭后显示原文。</span>
             </span>
             <input
               type="checkbox"

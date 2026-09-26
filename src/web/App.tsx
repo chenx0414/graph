@@ -1,3 +1,4 @@
+import { useUsageRefresh } from './usage-refresh.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import type { AgentContextView } from './AgentContext.tsx';
@@ -129,6 +130,7 @@ function route() {
 }
 
 export function App() {
+  useUsageRefresh();
   const [path, setPath] = useState(route);
   const [settings, setSettings] = useState<Settings_ | null>(null);
   const [startup, setStartup] = useState<Startup | null>(null);

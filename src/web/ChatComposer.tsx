@@ -1,3 +1,6 @@
+import { Markdown } from './Markdown.tsx';
+import { usePreferences } from './preferences.ts';
+import { attachmentImageSource } from './attachments.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
 import { insertAtCaret, readClipboardText } from './chat-paste.ts';
@@ -161,6 +164,7 @@ export function ChatComposer({
   const [dragging, setDragging] = useState(false);
   const [attachmentNotices, setAttachmentNotices] = useState<string[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
+  const { preferences } = usePreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   // An explicit snapshot stack: React writes the textarea value programmatically,
@@ -547,8 +551,8 @@ export function ChatComposer({
         <div className="composer-attachments" data-testid="composer-attachments">
           {attachments.map(attachment => (
             <span className="composer-attachment" data-kind={isImageAttachment(attachment) ? 'image' : 'text'} key={`${attachment.name}:${attachment.size}`}>
-              {isImageAttachment(attachment) && attachment.preview
-                ? <img className="composer-attachment-preview" src={attachment.preview} alt="" />
+              {isImageAttachment(attachment) && (attachment.preview || attachmentImageSource(attachment))
+                ? <img className="composer-attachment-preview" src={attachment.preview || attachmentImageSource(attachment)} alt={attachment.name} />
                 : <Icon name="paperclip" size={12} />}
               <span className="truncate">{attachment.name}</span>
               <span className="faint">{attachmentSize(attachment.size)}</span>
@@ -567,6 +571,11 @@ export function ChatComposer({
               <span>{notice}</span>
             </div>
           ))}
+        </div>
+      )}
+      {preferences.markdownRendering && value.trim() && (
+        <div className="composer-markdown-preview" data-testid="composer-markdown-preview" aria-label="草稿预览">
+          <Markdown text={value} />
         </div>
       )}
       <textarea

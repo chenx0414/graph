@@ -348,3 +348,9 @@ test('a fresh tail snapshot cannot swallow an older cached message update in fli
   state = applyConversationEvent(state, { cursor: 25, type: 'message.updated', data: { message: message({ id: 'old', seq: 1, state: 'delivered', updatedAt: 25 }) } });
   expect(state.records.old?.state).toBe('delivered');
 });
+
+test('message image attachments retain their payload for rendering after reload', async () => {
+  const { messageAttachments } = await import('../../src/core/conversation-projection.ts');
+  const image = { name: 'photo.png', type: 'image/png', size: 3, text: '', data: 'YWJj' };
+  expect(messageAttachments(message({ id: 'image', seq: 1, data: { attachments: [image] } }))).toEqual([{ ...image, imageUrl: '/api/messages/image/attachments/0' }]);
+});

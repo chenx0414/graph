@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
 import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
-import { attachmentPayload } from './attachments.ts';
+import { attachmentPayload, attachmentImageSource } from './attachments.ts';
 import {
   cancelQueuedMessage,
   composerPrimaryDisabled,
@@ -588,6 +588,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const { preferences } = usePreferences();
   const [projection, setProjection] = useState(createConversationProjection);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const olderPending = useRef(false);
+  const historyAnchor = useRef<{ height: number; top: number } | null>(null);
   const [drawerSection, setDrawerSection] = useState<ConversationDrawerSection>('draft');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [drawerPage, setDrawerPage] = useState<DrawerPage>(() => defaultDrawerPage());
@@ -644,6 +646,13 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     if (view) setProjection(current => observeConversationView(current, view));
   }, [view]);
   const snapshot = useMemo(() => conversationProjectionSnapshot(projection, { busy: Boolean(busy) }), [projection, busy]);
+  useLayoutEffect(() => {
+    const anchor = historyAnchor.current;
+    const thread = transcriptFollow.threadRef.current;
+    if (!anchor || !thread) return;
+    thread.scrollTop = anchor.top + thread.scrollHeight - anchor.height;
+    historyAnchor.current = null;
+  }, [snapshot.messages]);
   const displayMessages = useMemo(() => visibleTranscriptMessages(snapshot.messages), [snapshot.messages]);
   const composerHistory = useMemo(() => sentUserPrompts(displayMessages), [displayMessages]);
   const transcriptRows = useMemo(() => buildTranscriptRows({
@@ -852,19 +861,23 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
   async function loadOlder() {
-    if (loadingOlder) return;
+    if (olderPending.current) return;
     const request = snapshot.historyRequest;
     if (!request) return;
+    olderPending.current = true;
     setLoadingOlder(true);
     setActionError('');
     try {
       const page = await api<{ messages: ConversationMessage[] }>(
         `/api/conversations/${id}/history?${request.direction}=${request.cursor}&limit=200`,
       );
+      const thread = transcriptFollow.threadRef.current;
+      if (thread && request.direction === 'before') historyAnchor.current = { height: thread.scrollHeight, top: thread.scrollTop };
       setProjection(current => observeConversationHistory(current, { request, messages: page.messages }));
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
+      olderPending.current = false;
       setLoadingOlder(false);
     }
   }
@@ -1055,7 +1068,11 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             data-testid="message-list"
             data-pinned={transcriptFollow.pinned}
             ref={transcriptFollow.threadRef}
-            onScroll={transcriptFollow.onScroll}
+            onScroll={() => {
+              transcriptFollow.onScroll();
+              const thread = transcriptFollow.threadRef.current;
+              if (thread && thread.scrollTop < 160 && !transcriptFollow.pinned) void loadOlder();
+            }}
             onWheel={transcriptFollow.onWheel}
             onTouchStart={transcriptFollow.onTouchStart}
           >
@@ -1112,7 +1129,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                           <div className="queued-message-attachments">
                             {attachments.map(attachment => (
                               <span key={`${attachment.name}:${attachment.size}`}>
-                                <Icon name="paperclip" size={11} />
+                                {attachmentImageSource(attachment) ? <img className="message-attachment-image" src={attachmentImageSource(attachment)} alt={attachment.name} /> : <Icon name="paperclip" size={11} />}
                                 {attachment.name}
                               </span>
                             ))}

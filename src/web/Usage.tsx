@@ -1,3 +1,4 @@
+import { USAGE_REFRESHED_EVENT } from './usage-refresh.ts';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
 import { Button, Card, Icon, Pill, Spinner, Stat } from './ui.tsx';
@@ -140,7 +141,12 @@ export function UsagePage() {
     }
   }, []);
 
-  useEffect(() => { void load(false); }, [load]);
+  useEffect(() => {
+    void load(false);
+    const refreshed = () => { void load(false); };
+    window.addEventListener(USAGE_REFRESHED_EVENT, refreshed);
+    return () => window.removeEventListener(USAGE_REFRESHED_EVENT, refreshed);
+  }, [load]);
 
   if (loading && !snapshot) return <Card><Spinner label="正在查询订阅用量…" /></Card>;
   if (!snapshot) {

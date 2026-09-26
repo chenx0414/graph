@@ -1244,6 +1244,16 @@ export async function openTaskRuntime(options: {
         return: async () => { controller.abort(); return iterator.return(); },
       };
     },
+    attachment(messageId: string, index: number) {
+      ensureOpen();
+      if (!Number.isSafeInteger(index) || index < 0) throw new RuntimeError('not_found', 'Attachment not found');
+      const row = store.db.prepare('SELECT data FROM messages WHERE id=?').get(messageId) as { data: string | null } | undefined;
+      const attachment = row?.data ? JSON.parse(row.data).attachments?.[index] : undefined;
+      if (!attachment || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.type) || typeof attachment.data !== 'string') {
+        throw new RuntimeError('not_found', 'Image attachment not found');
+      }
+      return { type: String(attachment.type), bytes: Buffer.from(attachment.data, 'base64') };
+    },
     history(conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
       ensureOpen();
       conversationRow(store, conversationId);

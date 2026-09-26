@@ -3359,3 +3359,14 @@ details.disclosure summary:hover { color: var(--accent); }
   contain-intrinsic-size: auto 100px;
 }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none !important; } }
+
+.composer-markdown-preview { max-height: 180px; overflow: auto; padding: 8px 12px; margin-bottom: 6px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.composer-markdown-preview > :first-child { margin-top: 0; }
+.composer-markdown-preview > :last-child { margin-bottom: 0; }
+.message-attachments .message-attachment-image { display: block; max-width: min(100%, 420px); max-height: 320px; object-fit: contain; border-radius: 8px; }
+.message-attachments > span:has(img) { display: flex; flex-direction: column; align-items: flex-start; max-width: 100%; }
+.composer-attachment[data-kind="image"] { flex-wrap: wrap; }
+.composer-attachment .composer-attachment-preview { width: 88px; height: 72px; object-fit: contain; border-radius: 6px; }
+
+.queued-message-attachments .message-attachment-image { max-width: 160px; max-height: 100px; object-fit: contain; }
+.tool-name { color: var(--muted); font-weight: 400; }

@@ -1790,6 +1790,8 @@ test('a self-improvement report renders as its own card in the conversation', as
   const card = page.getByTestId('rsi-report');
   await card.waitFor();
   expect(await card.getAttribute('data-status')).toBe('applied');
+  expect(await card.getByRole('button', { name: '查看改动' }).count()).toBe(0);
+  await card.getByRole('button', { name: '展开', exact: true }).click();
   const text = await card.innerText();
   expect(text).toContain('修复超时');
   expect(text).toContain('等待重载');
@@ -1856,3 +1858,41 @@ test('the sent tab shows the tool declarations one request carried, with their c
   expect(await page.getByTestId('agent-context-sent-text').innerText()).toBe('<identity>demo</identity>');
   expect(await page.getByTestId('agent-context-sent-tools-text').innerText()).toContain('propose_graph');
 }, 60_000);
+
+test('draft markdown follows preferences and image attachments survive sending and reload', async () => {
+  const root = await temp('draft-image');
+  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'alpha', root }], webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 } });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '图片测试', requestId: 'draft-image' });
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  let refreshes = 0;
+  await page.route('**/api/usage/refresh', async route => { refreshes++; await route.fulfill({ json: {} }); });
+  await page.clock.install();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await expect.poll(() => refreshes).toBe(1);
+  const input = page.getByTestId('chat-input');
+  await input.fill('**实时草稿**');
+  await page.locator('[data-testid="composer-markdown-preview"] strong').waitFor();
+  await page.evaluate(() => { localStorage.setItem('graph-pref-markdown-rendering', 'false'); window.dispatchEvent(new Event('graph:preferences-changed')); });
+  await page.getByTestId('composer-markdown-preview').waitFor({ state: 'detached' });
+  expect(await input.inputValue()).toBe('**实时草稿**');
+  await page.clock.fastForward(5 * 60_000);
+  await expect.poll(() => refreshes).toBe(2);
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nT8AAAAASUVORK5CYII=', 'base64');
+  await page.getByTestId('chat-attachment-input').setInputFiles({ name: 'pixel.png', mimeType: 'image/png', buffer: bytes });
+  await expect.poll(() => page.locator('.composer-attachment-preview').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+  await page.getByTestId('chat-send').click();
+  const image = page.locator('.message-attachment-image').last();
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+  await page.reload();
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+  const src = await image.getAttribute('src');
+  expect(src).toMatch(/^\/api\/messages\//);
+  const response = await page.request.get(`${server.url}${src}`);
+  expect(response.headers()['content-type']).toContain('image/png');
+  expect(await response.body()).toEqual(bytes);
+  expect((await page.request.get(`${server.url}${src?.replace(/0$/, '99')}`)).status()).toBe(400);
+});

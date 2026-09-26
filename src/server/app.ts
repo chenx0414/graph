@@ -427,6 +427,13 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(query.limit ? { limit: Number(query.limit) } : {}),
     });
   });
+  app.get('/api/messages/:messageId/attachments/:index', async (request, reply) => {
+    const { messageId, index } = request.params as { messageId: string; index: string };
+    const image = runtime.conversations.attachment(messageId, Number(index));
+    reply.header('cache-control', 'private, max-age=3600');
+    reply.header('x-content-type-options', 'nosniff');
+    return reply.type(image.type).send(image.bytes);
+  });
   app.get('/api/conversations/:conversationId/history', async request => {
     const { conversationId } = request.params as { conversationId: string };
     const query = request.query as { after?: string; before?: string; limit?: string };

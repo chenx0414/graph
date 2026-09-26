@@ -1,3 +1,4 @@
+import { toolActivity } from './tool-activity.ts';
 import type {
   ConversationMessage,
   LiveText,
@@ -429,14 +430,19 @@ export function toolGroupSummary(input: TranscriptTool[]) {
     search: 0,
     browse: 0,
     other: 0,
+    skill: 0,
+    mcp: 0,
     failed: 0,
   };
   for (const tool of input) {
-    if (tool.name === 'read' || tool.name === 'list_dir') counts.read += 1;
-    else if (tool.name === 'run_command') counts.run += 1;
-    else if (['write_file', 'apply_patch', 'edit'].includes(tool.name)) counts.edit += 1;
-    else if (['search', 'glob'].includes(tool.name)) counts.search += 1;
-    else if (['fetch', 'web_search'].includes(tool.name)) counts.browse += 1;
+    const kind = toolActivity(tool.name, tool.summary).kind;
+    if (kind === 'read' || kind === 'list') counts.read += 1;
+    else if (kind === 'run') counts.run += 1;
+    else if (kind === 'search') counts.search += 1;
+    else if (kind === 'edit') counts.edit += 1;
+    else if (kind === 'browse') counts.browse += 1;
+    else if (kind === 'skill') counts.skill += 1;
+    else if (kind === 'mcp') counts.mcp += 1;
     else counts.other += 1;
     if (tool.error) counts.failed += 1;
   }
@@ -446,6 +452,8 @@ export function toolGroupSummary(input: TranscriptTool[]) {
   if (counts.edit) parts.push(`编辑 ${counts.edit} 个文件`);
   if (counts.search) parts.push(`搜索 ${counts.search} 次`);
   if (counts.browse) parts.push(`访问 ${counts.browse} 个页面`);
+  if (counts.skill) parts.push(`读取 ${counts.skill} 个 Skill`);
+  if (counts.mcp) parts.push(`MCP 调用 ${counts.mcp} 次`);
   if (counts.other) parts.push(`调用 ${counts.other} 个工具`);
   if (counts.failed) parts.push(`${counts.failed} 项失败`);
   return parts.join(' · ') || `${input.length} 个工具`;
@@ -463,6 +471,6 @@ export function toolActionLabel(name: string) {
 export function activeToolStatus(tools: TranscriptTool[]) {
   const active = [...tools].reverse().find(tool => !tool.done);
   if (!active) return '正在整理结果';
-  const action = toolActionLabel(active.name);
+  const action = toolActivity(active.name, active.summary).label;
   return `正在${action}${active.summary ? ` ${active.summary}` : ''}`;
 }

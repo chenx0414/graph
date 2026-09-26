@@ -262,3 +262,10 @@ export function removeComposerAttachment(state: readonly ChatAttachment[], targe
 export function clearComposerAttachments(): ChatAttachment[] {
   return [];
 }
+
+/** Render raster attachments independently of the Markdown display preference. */
+export function attachmentImageSource(attachment: Pick<ChatAttachment, 'type' | 'data'> & { imageUrl?: string }): string | undefined {
+  if (!isImageAttachmentType(attachment.type)) return undefined;
+  if (attachment.data) return `data:${normalizeMime(attachment.type)};base64,${attachment.data}`;
+  return attachment.imageUrl?.startsWith('/api/messages/') ? attachment.imageUrl : undefined;
+}

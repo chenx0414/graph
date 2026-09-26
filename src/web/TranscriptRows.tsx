@@ -1,14 +1,15 @@
+import { toolActivity } from './tool-activity.ts';
 import { memo, useState, type ReactNode } from 'react';
 import {
   messageAttachments,
   type ConversationMessage,
 } from '../core/conversation-projection.ts';
+import { attachmentImageSource } from './attachments.ts';
 import { copyText, writeClipboardText } from './chat-copy.ts';
 import { Markdown } from './Markdown.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
 import {
   activeToolStatus,
-  toolActionLabel,
   toolGroupSummary,
   type TranscriptRow,
 } from './transcript-model.ts';
@@ -58,7 +59,9 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
               <div className="message-attachments">
                 {attachments.map(attachment => (
                   <span key={`${attachment.name}:${attachment.size}`} title={`${attachment.type} · ${attachment.size} bytes`}>
-                    <Icon name="paperclip" size={12} />
+                    {attachmentImageSource(attachment)
+                      ? <img className="message-attachment-image" src={attachmentImageSource(attachment)} alt={attachment.name} />
+                      : <Icon name="paperclip" size={12} />}
                     {attachment.name}
                   </span>
                 ))}
@@ -135,7 +138,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
             {row.tools.map(tool => (
               <li key={tool.id} data-error={tool.error} data-done={tool.done}>
                 <span className="tool-activity-icon"><Icon name={toolIcon(tool.name)} size={14} /></span>
-                <span className="tool-activity-label">{toolActionLabel(tool.name)}</span>
+                <span className="tool-activity-label">{toolActivity(tool.name, tool.summary).label} <span className="tool-name">{toolActivity(tool.name, tool.summary).name}</span></span>
                 <span className="tool-activity-summary" title={tool.summary}>{tool.summary}</span>
                 <span className="tool-activity-state">{tool.error ? '失败' : tool.done ? '完成' : '进行中'}</span>
               </li>
@@ -198,7 +201,7 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
   const [diffOpen, setDiffOpen] = useState(false);
   const { rsi } = row;
   const [expanded, setExpanded] = useState<boolean | null>(null);
-  const open = expanded ?? rsi.activation !== 'active';
+  const open = expanded ?? false;
   const statusLabel = rsi.status === 'applied' ? (rsi.activation === 'active' ? '已生效' : rsi.activation === 'pending_reload' ? '等待重载' : '已提交')
     : rsi.status === 'checks_failed' ? '检查未通过'
       : rsi.status === 'rolled_back' ? '已回滚' : '不可用';

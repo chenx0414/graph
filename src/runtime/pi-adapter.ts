@@ -113,7 +113,10 @@ export function toPiModel(entry: ModelEntry): Model<ModelApi> {
 function summarizeToolCall(name: string, args: unknown) {
   const body = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {};
   const target = (key: string) => typeof body[key] === 'string' ? body[key] as string : undefined;
-  const summary = name === 'read' || name === 'write_file' || name === 'list_dir' ? target('path') ?? name
+  const summary = name === 'bash' ? target('command') ?? name
+    : name === 'grep' || name === 'rg' ? [target('pattern'), target('path')].filter(Boolean).join(' ') || name
+    : name === 'ls' || name === 'glob' ? target('path') ?? target('pattern') ?? name
+    : name === 'read' || name === 'write_file' || name === 'list_dir' ? target('path') ?? name
     : name === 'artifact_publish' ? [target('namespace'), target('name')].filter(Boolean).join('/') || name
       : name === 'artifact_read' || name === 'artifact_retire' ? `${target('artifactId') ?? name}${typeof body.version === 'number' ? `@${body.version}` : ''}`
         : name === 'artifact_list' ? target('namespace') ?? target('prefix') ?? name
