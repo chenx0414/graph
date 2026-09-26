@@ -1800,3 +1800,50 @@ test('a self-improvement report renders as its own card in the conversation', as
   await expect.poll(() => card.innerText()).toContain('宿主已确认重载，改动已生效');
   expect(await card.innerText()).not.toContain('等待重载');
 }, 60_000);
+
+test('the sent tab shows the tool declarations one request carried, with their count and size', async () => {
+  const root = await temp('agent-context-tools-ui');
+  const agentContext = openAgentContextLibrary(join(root, 'graph', 'prompts'), { identity: 'Default Main' });
+  await agentContext.ensure();
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+    agentContext,
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ text: '看声明', requestId: 'sent-tools-ui' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const declarations = [{
+    name: 'propose_graph', description: 'Draft a graph',
+    parameters: { type: 'object', properties: { proposalJson: { type: 'string' } }, required: ['proposalJson'] },
+  }];
+  const recorded = JSON.stringify(declarations);
+  // The page renders the fact the API reports for one real request; the check that this
+  // fact equals what went over the wire lives in the runtime test.
+  await page.route('**/api/agent-context*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      docsRoot: graphDocumentationPaths().root,
+      definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
+      prompts: [], disabledTools: [], tools: [], capabilities: [],
+      sent: { operationId: 'op-1', at: 1, text: '<identity>demo</identity>', tools: recorded },
+    }),
+  }));
+
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('agent-context-bar').waitFor();
+  await page.getByTestId('agent-context-open').click();
+  await page.getByTestId('agent-context-sent-tools').waitFor();
+  const block = await page.getByTestId('agent-context-sent-tools').innerText();
+  expect(block).toContain('1 个工具');
+  expect(block).toContain(`${recorded.length.toLocaleString()} 字符`);
+  // The same request's prompt still sits above it, unchanged.
+  expect(await page.getByTestId('agent-context-sent-text').innerText()).toBe('<identity>demo</identity>');
+  expect(await page.getByTestId('agent-context-sent-tools-text').innerText()).toContain('propose_graph');
+}, 60_000);

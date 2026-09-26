@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 35;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -562,20 +562,27 @@ export class TaskStore {
       // Existing rows stay NULL (= not recorded), which the console reports as such.
       this.db.exec('ALTER TABLE operations ADD COLUMN system_prompt TEXT; PRAGMA user_version=34;');
     });
+    if (version < 35) this.transaction(() => {
+      // The console also shows the tool declarations one request carried. They are recorded
+      // beside the prompt, at the same call site, and are display-only: nothing here is sent.
+      // Existing rows stay NULL (= not recorded), which the console reports as such.
+      this.db.exec('ALTER TABLE operations ADD COLUMN tool_declarations TEXT; PRAGMA user_version=35;');
+    });
   }
-  /** The exact system prompt of the newest master turn that sent one, for the console. */
-  conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string } | null {
-    const row = this.db.prepare(`SELECT id, settled_at, dispatched_at, system_prompt FROM operations
+  /** The exact system prompt and tool declarations of the newest master turn that sent one. */
+  conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string; tools: string | null } | null {
+    const row = this.db.prepare(`SELECT id, settled_at, dispatched_at, system_prompt, tool_declarations FROM operations
       WHERE task_id = ? AND node_id = 'master' AND system_prompt IS NOT NULL
       ORDER BY rowid DESC LIMIT 1`).get(anchorTaskId) as
-      { id: string; settled_at: number | null; dispatched_at: number | null; system_prompt: string } | undefined;
+      { id: string; settled_at: number | null; dispatched_at: number | null; system_prompt: string; tool_declarations: string | null } | undefined;
     if (!row) return null;
-    return { operationId: row.id, at: row.settled_at ?? row.dispatched_at ?? 0, text: row.system_prompt };
+    return { operationId: row.id, at: row.settled_at ?? row.dispatched_at ?? 0, text: row.system_prompt, tools: row.tool_declarations };
   }
 
-  /** Record the exact system prompt one send carried; the first send of an operation wins. */
-  recordOperationSystemPrompt(operationId: string, text: string): void {
-    this.db.prepare('UPDATE operations SET system_prompt = ? WHERE id = ? AND system_prompt IS NULL').run(text, operationId);
+  /** Record the exact system prompt and tool declarations one send carried; the first send of an operation wins. */
+  recordOperationSystemPrompt(operationId: string, text: string, toolDeclarations?: string): void {
+    this.db.prepare('UPDATE operations SET system_prompt = ?, tool_declarations = ? WHERE id = ? AND system_prompt IS NULL')
+      .run(text, toolDeclarations ?? null, operationId);
   }
 
   transaction<T>(action: () => T): T {

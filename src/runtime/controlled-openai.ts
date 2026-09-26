@@ -284,7 +284,7 @@ export interface ControlledStreamUsageOptions {
    * Reports the exact system prompt one send carries. The console shows what the model really
    * received, so this must be the string the transport sends — never a re-render of the same facts.
    */
-  onSend?: (systemPrompt: string | null) => void;
+  onSend?: (sent: { systemPrompt: string | null; toolDeclarations: string | null }) => void;
 }
 
 function textFromContent(value: unknown): string {
@@ -378,6 +378,17 @@ async function estimateMissingUsage(response: Response, api: 'openai-completions
   return { input, output, cacheRead: 0, cacheWrite: 0, usageSource: 'estimated' };
 }
 
+/** The tool declarations a request carries, read off the very body the provider sends. */
+function requestToolDeclarations(init?: RequestInit): string | null {
+  const body = init?.body;
+  if (typeof body !== 'string') return null;
+  try {
+    const parsed = JSON.parse(body) as { tools?: unknown };
+    if (!Array.isArray(parsed.tools) || parsed.tools.length === 0) return null;
+    return JSON.stringify(parsed.tools);
+  } catch { return null; }
+}
+
 /** Controlled lower-level adapter, currently verified for OpenAI chat-completions SSE. */
 export function controlledOpenAIStream(
   broker: SendGate,
@@ -416,8 +427,15 @@ export function controlledOpenAIStream(
               reported = true;
               // A diagnostic must never break a send: the model call is what matters.
               // The provider now receives a normalized transcript: the current prompt is
-              // what every system message in it replays to, never a plain field.
-              try { usageOptions.onSend?.(getCurrentSystemPrompt(context.messages) || null); } catch { /* ignored on purpose */ }
+              // what every system message in it replays to, never a plain field. The tool
+              // declarations are read off the very request being sent, so the console shows
+              // the bytes this request carries - recording only, nothing extra is ever sent.
+              try {
+                usageOptions.onSend?.({
+                  systemPrompt: getCurrentSystemPrompt(context.messages) || null,
+                  toolDeclarations: requestToolDeclarations(init),
+                });
+              } catch { /* ignored on purpose */ }
             }
             // The slot is acquired per attempt inside gatedProviderFetch, so a
             // retry re-queues and re-passes the gate after releasing capacity.

@@ -897,11 +897,13 @@ export function createPiAdapter(options: {
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
               ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
-              onSend: systemPrompt => {
-                if (systemPrompt !== null) options.store.recordOperationSystemPrompt(operation.id, systemPrompt);
+              onSend: sent => {
+                if (sent.systemPrompt !== null) {
+                  options.store.recordOperationSystemPrompt(operation.id, sent.systemPrompt, sent.toolDeclarations ?? undefined);
+                }
                 // The site that records the truth also reports when a part of it is
                 // gone: reporting only, a send is never blocked or rewritten.
-                void reportPromptIntegrity(join(options.instancesDir, operation.instanceId!), operation.id, systemPrompt)
+                void reportPromptIntegrity(join(options.instancesDir, operation.instanceId!), operation.id, sent.systemPrompt)
                   .catch(() => undefined);
               },
             }), {

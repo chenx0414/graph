@@ -178,7 +178,7 @@ test('upgrading reclassifies legacy internal questions so they leave the user in
   store.transaction(() => {
     // Rewind to the pre-owner shape, then seed the legacy open questions that
     // the upgrade must classify: one genuine permission and one recovery.
-    store.db.exec('DROP INDEX IF EXISTS questions_task_status; DROP INDEX IF EXISTS questions_owner_status; ALTER TABLE questions DROP COLUMN owner; ALTER TABLE operations DROP COLUMN system_prompt; PRAGMA user_version=24;');
+    store.db.exec('DROP INDEX IF EXISTS questions_task_status; DROP INDEX IF EXISTS questions_owner_status; ALTER TABLE questions DROP COLUMN owner; ALTER TABLE operations DROP COLUMN system_prompt; ALTER TABLE operations DROP COLUMN tool_declarations; PRAGMA user_version=24;');
     store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
     store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase,conversation_id) VALUES('anchor','p','chat',1,'chatting','c')").run();
     store.db.prepare("INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES('c','p','anchor','chat',1,1)").run();
