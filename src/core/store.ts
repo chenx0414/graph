@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 36;
+export const SCHEMA_VERSION = 37;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -587,6 +587,16 @@ export class TaskStore {
         CREATE INDEX IF NOT EXISTS tool_calls_tool ON tool_calls(tool, created_at);
         PRAGMA user_version=36;`);
     });
+    if (version < 37) this.transaction(() => {
+      // A worker lane runs in a child process that holds no store, so its calls are spooled to a
+      // file and folded in on the next read. This offset is what makes that ingest idempotent.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tool_call_spools(
+          path TEXT PRIMARY KEY,
+          offset INTEGER NOT NULL
+        );
+        PRAGMA user_version=37;`);
+    });
   }
 
   /** How long a recorded tool call stays visible in the aggregated statistics. */
@@ -642,6 +652,28 @@ export class TaskStore {
     const cutoff = Date.now() - keepDays * 86_400_000;
     const result = this.db.prepare('DELETE FROM tool_calls WHERE created_at < ?').run(cutoff);
     return Number(result.changes);
+  }
+
+  /** How far one spooled worker file has already been folded into `tool_calls`. */
+  toolCallSpoolOffset(path: string): number {
+    const row = this.db.prepare('SELECT offset FROM tool_call_spools WHERE path = ?').get(path) as { offset: number } | undefined;
+    return Number(row?.offset ?? 0);
+  }
+
+  setToolCallSpoolOffset(path: string, offset: number): void {
+    this.db.prepare(
+      'INSERT INTO tool_call_spools(path, offset) VALUES(?,?) ON CONFLICT(path) DO UPDATE SET offset=excluded.offset',
+    ).run(path, Math.max(0, Math.round(offset)));
+  }
+
+  /** Forget every spool offset, so a cleared sample cannot be read back out of the files. */
+  forgetToolCallSpools(): void {
+    this.db.prepare('DELETE FROM tool_call_spools').run();
+  }
+
+  /** Forget one spool file, once the rows it produced are the only record left. */
+  forgetToolCallSpool(path: string): void {
+    this.db.prepare('DELETE FROM tool_call_spools WHERE path = ?').run(path);
   }
   /** The exact system prompt and tool declarations of the newest master turn that sent one. */
   conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string; tools: string | null } | null {

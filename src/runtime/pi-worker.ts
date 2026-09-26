@@ -10,6 +10,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { InlineExtension } from '@earendil-works/pi-coding-agent';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { externallyGated, openPiInstance } from './pi-instance.ts';
+import { spoolToolCall } from './tool-call-spool.ts';
 import { sdkPromptOptions } from './prompt-options.ts';
 import { replayAssistantStream } from './assistant-stream-frames.ts';
 import type { PiWorkerConfig } from './pi-process.ts';
@@ -156,6 +157,8 @@ async function main() {
     ...(config.skillFolder ? { skillFolder: config.skillFolder } : {}),
     ...(config.piExtensionPaths.length ? { piExtensionPaths: config.piExtensionPaths } : {}),
     ...(config.mcpAdapterServers?.length ? { mcpAdapterServers: config.mcpAdapterServers } : {}),
+    // This process holds no store: spool the call so the daemon can fold it in later.
+    onToolCall: call => { void spoolToolCall(config.stateDir, config.binding.instanceId, call); },
     piExtensionTools: config.piExtensionTools,
     extensionFactories: [capabilityGate],
     systemPrompt: config.systemPrompt,

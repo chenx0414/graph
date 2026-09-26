@@ -29,6 +29,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
+import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
 import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
@@ -2070,12 +2071,19 @@ export async function openTaskRuntime(options: {
     /** Durable tool-call telemetry: calls, failures and durations per tool and Agent role. */
     toolCallStats() {
       ensureOpen();
-      return { generatedAt: Date.now(), retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS, stats: store.toolCallStats() };
+      // Worker lanes spool their calls; reading the numbers is when they join the record.
+      return ingestToolCallSpools(store, stateDir).then(() => ({
+        generatedAt: Date.now(),
+        retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS,
+        stats: store.toolCallStats(),
+      }));
     },
     /** Drop the recorded tool calls, so a stale sample cannot be read as a fresh one. */
     clearToolCalls() {
       ensureOpen();
-      return { removed: store.clearToolCalls() };
+      const removed = store.clearToolCalls();
+      store.forgetToolCallSpools();
+      return clearToolCallSpools(stateDir).then(() => ({ removed }));
     },
     close() {
       if (!closing) {
