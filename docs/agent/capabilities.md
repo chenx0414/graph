@@ -59,6 +59,7 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 ## 浏览器验证与恢复
 
+控制台地址随时可从 `<stateDir>/console.json` 读（含 `url`/`pid`/`mode`）：App 启动的 daemon 用 `--port 0`，地址不写日志也不写其他地方。`--port 0` 会**优先复用本状态目录上次的端口**，所以重载通常不换地址、旧标签页仍指向同一个控制台；但过时标签页仍可能默默回答旧端口，用 `tab list` → `tab t<N>` 或直接 `open` 新地址纠正，并在点击前先断言 `location.href`。
 控制台可见的改动要自己先验：用真浏览器读 DOM、把交互跑一遍、截一张图当证据，然后只把需要人判断的部分交给使用者，并说明是哪个窗口（桌面 App 窗口与浏览器页面不同，某些输入只在桌面桥存在时才渲染）。
 
 - `agent_browser click <selector>` 对 React 组件可能报 `Clicked: …` 却**不触发** onClick。对 React 一律用 `eval` + `document.querySelector(...).click()`（或用角色/文本定位的动作），并**另起一次** DOM 读回确认；`click` 返回的「Action dispatched; application change unverified」不是证据。

@@ -26,7 +26,7 @@ Options:
   --state-dir <path>  State directory (default: $XDG_STATE_HOME/graph or ~/.local/state/graph)
   --graph-home <path> User capability/recipe home (default: ~/.graph)
   --web-dir <path>    Built web console (default: ./dist/web)
-  --port <number>     Loopback port, 0 picks a free port (default: 4173)
+  --port <number>     Loopback port, 0 prefers the port this state directory last served on (default: 4173)
   --execute           Enable task dispatch; requires configured models and credentials
   --dynamic           With --execute: start before credentials resolve and activate them live
   --view-only         History, settings and graph only; never dispatches (default)
