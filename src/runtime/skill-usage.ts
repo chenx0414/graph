@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import type { TaskStore } from '../core/store.ts';
 
 export interface SkillUsageEntry {
@@ -86,9 +86,4 @@ export function skillUsage(input: {
     skills,
     summary: { skills: skills.length, neverRead: skills.filter(skill => skill.neverRead).length },
   };
-}
-
-/** Basename of a skill folder, for callers that only have a path. */
-export function skillIdFromPath(path: string): string {
-  return basename(path);
 }

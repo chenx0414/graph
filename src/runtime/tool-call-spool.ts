@@ -16,6 +16,7 @@ const RETAIN_DAYS = 90;
 
 /** Where one worker instance spools its calls. */
 export function toolCallSpoolPath(stateDir: string, instanceId: string): string {
+  // An instance id is a uuid today; a file name is not the place to rely on that.
   return join(stateDir, TOOL_CALL_SPOOL_DIR, `${instanceId.replace(/[^A-Za-z0-9._-]/g, '_')}.jsonl`);
 }
 
