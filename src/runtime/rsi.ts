@@ -72,6 +72,32 @@ export interface RsiReceipt {
   outputPath?: string;
 }
 
+/**
+ * What a turn that changed the harness itself did, in the reviewer's terms.
+ *
+ * An activation turn has no assistant reply: `apply_rsi_change(activate:true)` ends the turn and the
+ * model is never asked again. So the change is the material — its title, the report that says why it
+ * was needed, the files it moved and what the gate said — never the reload receipt, which only names a
+ * request id. The receipt crosses the tool boundary as JSON, so every field is read defensively.
+ */
+export function rsiChangeMaterial(receipt: Record<string, unknown>, reply: string): string {
+  const text = (value: unknown) => typeof value === 'string' ? value : '';
+  const files = Array.isArray(receipt['files']) ? receipt['files'].filter((item): item is string => typeof item === 'string') : [];
+  const checks = Array.isArray(receipt['validation'])
+    ? receipt['validation'].flatMap(row => row && typeof row === 'object'
+      ? [`${text((row as Record<string, unknown>)['command'])}: ${text((row as Record<string, unknown>)['status'])}`]
+      : [])
+    : [];
+  return [
+    reply.trim(),
+    text(receipt['title']) ? `RSI 变更：${text(receipt['title'])}` : '',
+    files.length ? `文件：${files.join(', ')}` : '',
+    checks.length ? `验证：${checks.join('；')}` : '',
+    text(receipt['report']),
+    text(receipt['diff']) ? `diff：\n\`\`\`diff\n${text(receipt['diff']).slice(0, 6_000)}\n\`\`\`` : '',
+  ].filter(part => part.trim().length > 0).join('\n\n');
+}
+
 export interface RsiStatus {
   available: boolean;
   root: string | null;

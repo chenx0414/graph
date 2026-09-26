@@ -35,6 +35,7 @@ import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
 import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
 import { generatePromptSuggestion, selectPromptSuggestionModel, type PromptSuggestionReply } from './prompt-suggestion.ts';
+import { rsiChangeMaterial } from './rsi.ts';
 import {
   createRestrictedProcessAgentSessionTransport,
   type AgentSession,
@@ -1055,13 +1056,10 @@ export function createPiAdapter(options: {
             const result = await session.prompt(briefing, userImages.length ? userImages : undefined);
             flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
-            if (reloadReceipt) {
-              return {
-                outcome: 'completed',
-                output: { text: RSI_RELOAD_RECEIPT, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}) },
-                usage: gate.total(),
-              };
-            }
+            // A turn that applied and activated a harness change is the one turn with no assistant reply:
+            // the model is never asked again after the apply. It is also the turn that did the most real
+            // work, so this no longer returns here — that used to skip the suggestion and the review
+            // entirely — and the handoff waits below until both have had their look at the change.
             // A provider or transport error ends the turn with an assistant
             // error message; that is a failure, never a successful operation.
             if (result.stopReason === 'error') {
@@ -1170,7 +1168,9 @@ export function createPiAdapter(options: {
                 const toolCalls = toolActivity.length;
                 const payload = {
                   lastUserMessage: lastUserMessage ?? '',
-                  reply: reply.slice(0, 8_000),
+                  // An activation turn carries no assistant reply; the change it applied is the material,
+                  // so the review reads what the turn did instead of an empty string.
+                  reply: (reloadReceipt ? rsiChangeMaterial(reloadReceipt, reply) : reply).slice(0, 8_000),
                   existingSkills: existingSkillSummaries(project.root),
                 };
                 const sedimentSystemPrompt = agentPromptLibrary
@@ -1249,6 +1249,15 @@ export function createPiAdapter(options: {
                   // A review is an observer of the operation, never a step in it.
                 }
               }
+            }
+            // The reload handoff keeps its own output: the console shows the receipt, while the review
+            // above already read the change itself.
+            if (reloadReceipt) {
+              return {
+                outcome: 'completed',
+                output: { text: RSI_RELOAD_RECEIPT, rsiRequestId: String(reloadReceipt.id), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}) },
+                usage: gate.total(),
+              };
             }
             // The conversation output always carries the visible reply; worker
             // output keeps its existing submitted-or-text shape.
