@@ -1304,6 +1304,10 @@ export async function openTaskRuntime(options: {
       });
       const preview = await assembly.preview({
         role: 'master', run: true, fetch: true, catalog: true,
+        // The real operation offers these whenever a master turn runs inside a conversation; the
+        // preview must say the same thing, or the settings panel would show a smaller toolbox than
+        // the one the next turn really gets.
+        conversations: { read: true, write: true },
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,

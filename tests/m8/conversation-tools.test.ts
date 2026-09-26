@@ -47,12 +47,15 @@ test('a master turn sends work into another conversation, follows it, and reads 
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
 
-  const caller = await runtime.conversations.create({ projectId: 'p', text: '开工。', requestId: 'caller' });
+  const caller = await runtime.conversations.create({ projectId: 'p', text: '把一个检查交给另一个会话。', requestId: 'caller' });
   const target = await runtime.conversations.create({ projectId: 'p', text: '先待命。', requestId: 'target' });
   const targetId = target.conversationId;
+  // Two independent masters are not dispatched in a promised order and they share one provider, so the
+  // target is held paused until the caller has spoken. Otherwise the target's own first turn could
+  // spend the plan that carries the handoff, and this test would pass or fail on timing.
+  await runtime.conversations.pause(targetId, 'hold-target');
   await runtime.host.runReady();
-  await runtime.conversations.chat(caller.conversationId, { text: '把一个检查交给另一个会话。', requestId: 'ask' });
-  await runtime.host.runReady();
+  await runtime.conversations.resume(targetId, 'release-target');
   await runtime.host.runReady();
 
   const targetView = await runtime.conversations.view(target.conversationId);
