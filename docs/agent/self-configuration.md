@@ -92,6 +92,10 @@ RSI 只改"正在运行的这份代码"，所以：
 - 打包应用：`Graph.app/Contents/Resources/app` 是构建时复制出来的副本，不是 Git 仓库，默认不可用。把 `GRAPH_RSI_ROOT` 指向一个 checkout，启动器会改从该 checkout 运行 daemon，RSI 才会真正生效。
 - 不可用时 `inspect_rsi_status` 仍返回 `available: false` 与原因，`apply_rsi_change` 不注册。
 
+### 何时不建图任务（R20）
+
+单点的产品行为、默认值或文案调整（不需要并行车道、独立审查闸门与人工验收闭环）由 Main Agent 用 `apply_rsi_change` 亲力亲为：一次提交 + 宿主完整门禁 + 重载 + 现场自验（真浏览器读 DOM + 截图）+ 交人工验收即可，**不建图任务、也不留待确认的草稿**。只有需要多车道并行、独立审查与人工验收闭环的较大改动才建图。这类改动的草稿若已被取代，用 `withdraw_draft` 作废它，不要挂着误导后续回合。
+
 ## 原版恢复
 
 Graph 在代码/preset 中保留每个可编辑 prompt 文件的原始版本。`defaults/` 只保存用户明确设为默认的内容；恢复默认只覆盖对应可编辑文件，不修改能力缓存、用户工具清单或项目文件。只读 Agent docs 直接来自源码，不存在需要恢复的用户覆盖版本。
