@@ -215,6 +215,15 @@ const LEGACY_PROMPT_DEFAULTS: Partial<Record<AgentPromptKey, readonly string[]>>
       'Every model, command, MCP, and extension call is governed by Graph. If a call is blocked by pause, budget, permission, or recovery rules, stop and report the blocking reason instead of inventing another route.',
     ].join('\n'),
     'Use only the callable tools listed below. Pi native tools are the basic workspace surface; use them directly when the task requires investigation or changes. Graph enforces every model, command, MCP and extension call at the host boundary.',
+    [
+      '## Reaching for the right capability',
+      '',
+      '- Search inside the repository with the indexed extensions (`ffind`, `ffgrep`) instead of shell `find`/`grep`: they are git-aware and ranked by access frequency. Use shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.',
+      '- Skills are on-demand instructions, not background reading: when the work matches a skill\'s stated trigger, read its `SKILL.md` first and follow it. If a bound skill looks relevant and you skip it, say why.',
+      '- MCP and extension tools are first-class: call them instead of scripting around the same API whenever one exists.',
+      '- Poll with the compact reads (`get_task_status`) and pull a full dump (`get_graph_state`) only when the whole proposal matters.',
+      '- When a tool or capability description does not say when to use it, that is a harness defect: fix it or report it.',
+    ].join('\n'),
   ],
   'agents/main.md': [
     [
@@ -251,9 +260,38 @@ const LEGACY_PROMPT_DEFAULTS: Partial<Record<AgentPromptKey, readonly string[]>>
       'Keep execution problems internal until diagnosed. Report verified progress, blockers, and next actions without dumping raw internals.',
     ].join('\n'),
     'Recipe names use a readable identity plus role, such as `Bob_coder` or `Alice_reviewer`; preserve that name when presenting an Agent and pair it with the stable recipe id.',
+    // The default shipped before the rule set was compacted, listed so an installation that still
+    // holds it migrates instead of keeping the long version forever.
+    [
+      '- Recipe names use a readable identity plus role, such as `Bob_coder` or `Alice_reviewer`; preserve that name when presenting an Agent and pair it with the stable recipe id.',
+      '- The two tools that steer work yourself: ask_user asks the one question whose answer changes the plan and ends the turn until the user answers - their answer arrives as recorded context in your next turn; never use it to confirm a draft, report progress or ask what you could find out. control_task acts on a task of your conversation: pause really soft-stops the running turn and only the user resumes it; abandon stops the whole task immediately and irreversibly, so record the reason and pause first while a worker lane is still writing to the target; set_budget must leave room for the context reservation when it sets a finite cap (a master node normally stays unlimited - a cap below that reservation starves the very turn that set it); steer reaches only a turn that is running right now, and when you were asked prefer resolve_problem respond.',
+      '- Testing level (highest first): E2E, black box or golden file regression, then unit tests of a module or component with complete outward behaviour, and only last a fine-grained single-function unit. A "unit" is never a single function: never write one unit test per function, and never mock a crowd of dependencies to isolate one function. A golden file compares only the final output, and a snapshot change must be deliberate and justified. Unit tests assert outward behaviour only - never a private variable, an internal function or an implementation detail. A tautological test that restates the production logic is forbidden, and a test that stays green while the behaviour is wrong is not a test. Hold yourself to this: renaming, splitting or restructuring internals keeps the suite green without rewriting tests.',
+      '- Shared mutable state (the Pi extension install root, caches, a worktree base) changes only under a serialization lock keyed on the canonical path, and never by deleting or rebuilding a shared tree while handling one object that lives in it. A static signal - a changed file list, a declared-but-unshipped entry point - is a diagnostic only; a destructive action needs evidence from the affected object itself (npm logs, lockfiles, a real load). Tests assert invariants, never dispatch or queue order.',
+    ].join('\n'),
   ],
   'runtime/worker.md': [
     'Use workspace tools to read and edit files. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. run_command is not a shell: it only accepts node (without inline evaluation) and read-only git status/diff/log/show.{{retrievalNote}}',
+  ],
+  // The role rule defaults shipped before the rule set was compacted, listed for the same reason:
+  // the library rewrites a file only while it still equals a listed default, so a customised file
+  // is never touched.
+  'rules/worker.md': [
+    [
+      'Work only inside the assigned task and worktree. Keep changes scoped to the requested outcome and the confirmed acceptance criteria.',
+      'Read the task graph and predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node.',
+      'Run the checks assigned to the node and submit structured results only when the work and evidence are complete.',
+      'Prefer task-scoped changes; modify shared Graph state, credentials, or another Agent worktree only when the request explicitly requires it.',
+      'Choose the highest test level that can prove the behaviour: E2E, black box or golden file regression first, then unit tests of a module or component with complete outward behaviour, and a fine-grained single-function unit only when nothing higher can prove it. Never write one unit test per function and never mock a crowd of dependencies to isolate one function. A golden file compares only the final output, and a snapshot change must be deliberate and justified. Unit tests assert outward behaviour only - never a private variable, an internal function or an implementation detail - and a tautological test that restates the production logic is forbidden. A refactor of internals must keep the suite green without rewriting tests; if it forces a large rewrite, the tests were written against implementation details.',
+    ].join('\n'),
+  ],
+  'rules/reviewer.md': [
+    [
+      'Review only the frozen evidence and exact versions supplied by the graph. Do not inspect the implementation transcript.',
+      'Look for defects, regressions, unsupported claims, and acceptance gaps before stylistic suggestions.',
+      'Show file paths, evidence, and concrete impact for every finding.',
+      'Do not modify implementation files. Return an independent verdict that the verifier can evaluate.',
+      'Judge the level of the tests too: E2E, black box or golden file regression first, then units of a whole module or component, and a single-function unit only when nothing higher can prove the behaviour. Flag as defects: one unit test per function, heavy dependency mocking to isolate one function, assertions on private variables, internal functions or implementation details, and tautological tests that restate the production logic. A golden file must compare only the final output, and every snapshot change must be deliberate and justified.',
+    ].join('\n'),
   ],
 };
 const LEGACY_PROMPT_REPLACEMENTS: Partial<Record<AgentPromptKey, readonly (readonly [string, string])[]>> = {

@@ -337,7 +337,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     get_agent_combination: {
-      name: 'get_agent_combination', label: 'Get Agent combination', description: 'Resolve one subagent recipe to its source resources. This does not install, compose or authorize anything; use the returned resources and their metadata to prepare the required capabilities.',
+      name: 'get_agent_combination', label: 'Get Agent combination', description: 'Resolve one subagent recipe to its source resources. This does not install, compose or authorize anything; use the returned resources and their metadata to prepare the required capabilities. When you present that Agent to the user, keep its readable name (for example Bob_coder) and pair it with the stable recipe id.',
       parameters: Type.Object({ id: Type.String() }),
       available: main && Boolean(features.catalog),
       externallyGated: false,
