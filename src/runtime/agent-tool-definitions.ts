@@ -12,6 +12,8 @@ export interface AgentToolFeatures {
   supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft' | 'controlTask', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
+  /** Channels to other conversations, when this session has them. */
+  conversations?: Partial<Record<'read' | 'write', boolean>>;
 }
 
 export function agentArtifactAccess(input: { role?: string; action: string }) {
@@ -232,6 +234,29 @@ function declarations(features: AgentToolFeatures) {
         requestId: Type.String(),
       }),
       available: main && Boolean(features.supervisor?.controlTask),
+      externallyGated: false,
+    },
+    conversation_read: {
+      name: 'conversation_read', label: 'Read another conversation', description: 'Read another conversation: its transcript, the conversations that exist, or the events since a cursor. This is how a session follows work it handed to somebody else. follow returns what happened after the cursor you pass, so call it again with the highest cursor you saw to continue. Reading is not an authority over the other session: the user still owns it.',
+      parameters: Type.Object({
+        action: Type.Union([Type.Literal('list'), Type.Literal('read'), Type.Literal('follow')]),
+        conversationId: Type.Optional(Type.String()),
+        after: Type.Optional(Type.Number()),
+        limit: Type.Optional(Type.Number()),
+        archived: Type.Optional(Type.Boolean()),
+      }),
+      available: Boolean(features.conversations?.read),
+      externallyGated: false,
+    },
+    conversation_write: {
+      name: 'conversation_write', label: 'Write into another conversation', description: 'Hand work to another conversation: send a message, steer a running turn with one (the text is queued, then pushed into the turn that is already running), or pause/resume it. Needs full access, may only address other conversations, and cannot bounce back into a conversation that already relayed the message (A→B→A stops there). The message arrives marked as coming from another Agent, never as the user. One operation may hand out a bounded number of messages: report progress to the user instead of broadcasting.',
+      parameters: Type.Object({
+        action: Type.Union([Type.Literal('send'), Type.Literal('steer'), Type.Literal('pause'), Type.Literal('resume')]),
+        conversationId: Type.String(),
+        text: Type.Optional(Type.String()),
+        requestId: Type.String(),
+      }),
+      available: Boolean(features.conversations?.write),
       externallyGated: false,
     },
     control_task: {

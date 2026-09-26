@@ -54,7 +54,8 @@ export function agentMessageText(text: string, source: { conversationId: string;
 /** The conversation service as far as these tools need it, so the module does not depend on the runtime. */
 export interface ConversationToolService {
   list(query?: { archived?: boolean }): unknown;
-  view(conversationId: string, query?: { limit?: number; after?: number }): Promise<{ messages: { role: string; data?: { source?: { chain?: string[] } } | null }[] }>;
+  /** The ledger rows as the service returns them; the chain is read defensively from `data`. */
+  view(conversationId: string, query?: { limit?: number; after?: number }): Promise<{ messages: { role?: string; data?: unknown }[] }>;
   events(conversationId: string, after?: number, limit?: number): unknown;
   chat(conversationId: string, input: { text: string; requestId: string; source?: Json }): Promise<unknown>;
   steer(conversationId: string, input: { requestId: string }): Promise<unknown>;
@@ -87,12 +88,18 @@ export function openConversationTools(input: {
 
   // The chain a session inherits is the chain of the message that drove it: whoever sent into this
   // conversation is upstream, so a reply back upstream is a bounce, not a new handoff.
+  const chainOf = (data: unknown): string[] => {
+    const carried = (data as { source?: { chain?: unknown } } | null | undefined)?.source?.chain;
+    return Array.isArray(carried) ? carried.filter((item): item is string => typeof item === 'string') : [];
+  };
   const inheritedChain = async () => {
     try {
       const view = await input.service.view(input.caller.conversationId, { limit: 20 });
-      const carried = [...view.messages].reverse()
-        .find(message => message.data?.source?.chain?.length)?.data?.source?.chain;
-      return carried ?? [];
+      for (const message of [...view.messages].reverse()) {
+        const carried = chainOf(message.data);
+        if (carried.length) return carried;
+      }
+      return [];
     } catch {
       return [];
     }

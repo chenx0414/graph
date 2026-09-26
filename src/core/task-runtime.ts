@@ -403,6 +403,18 @@ export async function openTaskRuntime(options: {
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
+        // Thunks, not values: the conversation service is built below this point in the same scope.
+        conversations: {
+          service: {
+            list: (query?: { archived?: boolean }) => conversations.list(query),
+            view: (conversationId: string, query?: { limit?: number; after?: number }) => conversations.view(conversationId, query),
+            events: (conversationId: string, after?: number, limit?: number) => conversations.events(conversationId, after, limit),
+            chat: (conversationId: string, input: { text: string; requestId: string; source?: Json }) => conversations.chat(conversationId, input),
+            steer: (conversationId: string, input: { requestId: string }) => conversations.steer(conversationId, input),
+            pause: (conversationId: string, requestId: string) => conversations.pause(conversationId, requestId),
+            resume: (conversationId: string, requestId: string) => conversations.resume(conversationId, requestId),
+          },
+        },
         ...(options.agentContext ? { agentContext: options.agentContext } : {}),
         ...(options.catalog?.bootstrapPrompts ? { bootstrapPrompts: options.catalog.bootstrapPrompts } : {}),
         ...(options.catalog?.bootstrapToolPrompt ? { bootstrapToolPrompt: options.catalog.bootstrapToolPrompt } : {}),
