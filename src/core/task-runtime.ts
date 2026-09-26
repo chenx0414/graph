@@ -30,6 +30,7 @@ import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
+import { skillUsage } from '../runtime/skill-usage.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
 import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
@@ -2086,6 +2087,26 @@ export async function openTaskRuntime(options: {
         retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS,
         stats: store.toolCallStats(),
       }));
+    },
+    /** Which skills exist for the known projects and the main Agent, and which were read. */
+    skillStats() {
+      ensureOpen();
+      // Worker lanes spool their calls; reading the numbers is when they join the record.
+      return ingestToolCallSpools(store, stateDir).then(() => {
+        const roots = (configuredProjects() ?? []).map(project => project.root).filter(root => typeof root === 'string' && root.trim().length > 0);
+        const main = catalog.listDefinitions().find(item => item.id === 'main');
+        const capabilityRoot = options.catalog?.capabilityRoot;
+        return {
+          generatedAt: Date.now(),
+          retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS,
+          ...skillUsage({
+            store,
+            ...(roots.length ? { projectRoots: roots } : {}),
+            ...(main && capabilityRoot ? { agentSkillsDir: agentSkillsDir(main.id, resolve(capabilityRoot, '..')) } : {}),
+            ...(capabilityRoot ? { capabilityRoot } : {}),
+          }),
+        };
+      });
     },
     /** Drop the recorded tool calls, so a stale sample cannot be read as a fresh one. */
     clearToolCalls() {

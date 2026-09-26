@@ -24,7 +24,7 @@ export function toolCallSpoolPath(stateDir: string, instanceId: string): string 
 export async function spoolToolCall(
   stateDir: string,
   instanceId: string,
-  call: { tool: string; ms: number; isError: boolean },
+  call: { tool: string; ms: number; isError: boolean; target?: string | null },
 ): Promise<void> {
   try {
     await mkdir(join(stateDir, TOOL_CALL_SPOOL_DIR), { recursive: true });
@@ -34,13 +34,14 @@ export async function spoolToolCall(
       ms: Math.max(0, Math.round(call.ms)),
       isError: call.isError,
       at: Date.now(),
+      ...(call.target ? { target: call.target } : {}),
     })}\n`);
   } catch {
     // An unwritable spool is a missing sample, never a failed tool call.
   }
 }
 
-function parseSpooledLine(line: string): { instanceId: string; tool: string; ms: number; isError: boolean; at: number } | null {
+function parseSpooledLine(line: string): { instanceId: string; tool: string; ms: number; isError: boolean; at: number; target: string | null } | null {
   try {
     const value = JSON.parse(line) as Record<string, unknown>;
     if (typeof value['instanceId'] !== 'string' || typeof value['tool'] !== 'string') return null;
@@ -50,6 +51,7 @@ function parseSpooledLine(line: string): { instanceId: string; tool: string; ms:
       ms: typeof value['ms'] === 'number' ? value['ms'] : 0,
       isError: value['isError'] === true,
       at: typeof value['at'] === 'number' ? value['at'] : Date.now(),
+      target: typeof value['target'] === 'string' ? value['target'] : null,
     };
   } catch {
     return null;
@@ -89,6 +91,7 @@ export async function ingestToolCallSpools(store: TaskStore, stateDir: string, k
           if (!parsed) continue;
           store.recordToolCall({
             instanceId: parsed.instanceId, tool: parsed.tool, ms: parsed.ms, isError: parsed.isError, at: parsed.at,
+            target: parsed.target,
           });
           ingested += 1;
         }

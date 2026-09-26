@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 37;
+export const SCHEMA_VERSION = 38;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -597,6 +597,12 @@ export class TaskStore {
         );
         PRAGMA user_version=37;`);
     });
+    if (version < 38) this.transaction(() => {
+      // Which file a call touched is what makes "this skill was read" observable at all. It rides on
+      // the same row so retention and attribution keep working unchanged (NULL when a call has no
+      // single target, e.g. bash).
+      this.db.exec('ALTER TABLE tool_calls ADD COLUMN target TEXT; PRAGMA user_version=38;');
+    });
   }
 
   /** How long a recorded tool call stays visible in the aggregated statistics. */
@@ -611,15 +617,16 @@ export class TaskStore {
    * identifies it uniquely through `instance_id`, and `spec.role` names the Agent role (master,
    * coder, ...). An instance with no node row records `null` attribution rather than guessing.
    */
-  recordToolCall(input: { instanceId: string; tool: string; ms: number; isError: boolean; at?: number }): void {
+  recordToolCall(input: { instanceId: string; tool: string; ms: number; isError: boolean; at?: number; target?: string | null }): void {
     const node = this.db.prepare(
       `SELECT n.task_id AS task_id, n.id AS node_id, json_extract(n.spec, '$.role') AS role FROM nodes n WHERE n.instance_id = ?`,
     ).get(input.instanceId) as { task_id: string; node_id: string; role: string | null } | undefined;
     this.db.prepare(
-      'INSERT INTO tool_calls(instance_id, task_id, node_id, role, tool, ms, is_error, created_at) VALUES(?,?,?,?,?,?,?,?)',
+      'INSERT INTO tool_calls(instance_id, task_id, node_id, role, tool, ms, is_error, created_at, target) VALUES(?,?,?,?,?,?,?,?,?)',
     ).run(
       input.instanceId, node?.task_id ?? null, node?.node_id ?? null, node?.role ?? null,
       input.tool, Math.max(0, Math.round(input.ms)), input.isError ? 1 : 0, input.at ?? Date.now(),
+      input.target ?? null,
     );
   }
 

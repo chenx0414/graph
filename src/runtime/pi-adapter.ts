@@ -910,6 +910,7 @@ export function createPiAdapter(options: {
               try {
                 options.store.recordToolCall({
                   instanceId: operation.instanceId!, tool: call.tool, ms: call.ms, isError: call.isError,
+                  ...(call.target ? { target: call.target } : {}),
                 });
               } catch {
                 // Observed, not executed: recording stays outside the turn's own failure path.
