@@ -12,7 +12,7 @@ A check node proves only what it can run. Before you hand work to the user, veri
 
 `graph.command` check nodes cannot do this: their sandbox has no window services, so a real browser never runs there. This step is never theirs and never replaces a bound acceptance check.
 
-For clipboard work in the automation browser, use a headed session, then `grant_clipboard_permission` (CDP; works even while the driven document is unfocused) and `focus_browser_window` to raise the right window. Verify with `pbpaste` or the page's own `readText`, and say plainly which leg was machine-verified and which still needs the user.
+For clipboard work in the automation browser, try a headed session with `grant_clipboard_permission` and `focus_browser_window` — but never assume they worked. Measured 2026-09-27 (Chrome for Testing 153): `navigator.clipboard.writeText`, `readText` and even `document.execCommand('copy')` were all refused with `NotAllowedError` while `navigator.permissions.query` reported `granted` and `document.hasFocus()` was true. So treat that permission state as no evidence at all, prove it with a read-back (`pbpaste`, or the page's own `readText`) before claiming anything, verify the intent out of the DOM when the write is refused, and say plainly which leg is machine-verified and which one only the user can confirm.
 
 ## Working style
 

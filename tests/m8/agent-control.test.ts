@@ -126,6 +126,29 @@ test('the master pauses its own turn, then sets a budget and abandons the task i
   expect(JSON.parse(abandoned!.data).reason).toBe('使用者已不需要这条任务');
 }, 60_000);
 
+test('a cap below the dispatch reservation says so instead of silently starving the node', async () => {
+  const { provider, runtime, db, anchorTaskId } = await conversation('budget-warning', [
+    {
+      finishReason: 'tool_calls',
+      tools: [{ id: 'b1', name: 'control_task', arguments: JSON.stringify({ action: 'set_budget', nodeId: 'master', tokens: 1_000, requestId: 'b1' }) }],
+    },
+    { text: '知道了。' },
+  ]);
+  await runtime.host.runReady();
+
+  // The cap is not refused - it is the caller's decision - but it is small enough that the gate refuses
+  // the very next model request inside this turn, which is why there is exactly one request here. That
+  // consequence is the whole reason the receipt has to name it: nothing else tells the caller that it
+  // just starved its own node.
+  expect(db.prepare("SELECT budget, unlimited FROM instances WHERE task_id=? AND node_id='master'").get(anchorTaskId)).toEqual({ budget: 1_000, unlimited: 0 });
+  expect(provider.requests).toHaveLength(1);
+  const changed = db.prepare("SELECT data FROM events WHERE task_id=? AND type='instance.budget_changed' ORDER BY cursor DESC LIMIT 1").get(anchorTaskId) as { data: string };
+  expect(JSON.parse(changed.data)).toMatchObject({ nodeId: 'master', tokens: 1_000 });
+  // The reservation is the number the caller cannot see anywhere else, so the warning has to carry it.
+  expect(String(JSON.parse(changed.data).warning)).toContain('低于');
+  expect(String(JSON.parse(changed.data).warning)).toContain('2000000');
+}, 60_000);
+
 test('steering an idle node is refused instead of queueing text nobody will read', async () => {
   const { runtime, db, anchorTaskId } = await conversation('steer-idle', [
     {

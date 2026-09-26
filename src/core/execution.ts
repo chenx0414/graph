@@ -94,6 +94,17 @@ export class Execution {
     ]);
   }
 
+  /**
+   * The token reservation one dispatch of this action needs, looked up exactly the way dispatch itself
+   * looks it up (an action with no adapter of its own is served by the fallback). The budget tool asks
+   * for it: a cap below this stops that node, and the caller cannot see the number anywhere else.
+   */
+  reserveTokensFor(action: string | undefined): number | undefined {
+    if (!action) return undefined;
+    const adapter = Object.hasOwn(this.actions, action) ? this.actions[action] : this.fallback;
+    return adapter?.reserveTokens;
+  }
+
   report(id: string, generation: number, result: OperationResult) {
     const taskId = this.lifecycle.report(id, generation, result);
     this.deliver(taskId);

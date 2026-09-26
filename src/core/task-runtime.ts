@@ -1646,13 +1646,26 @@ export async function openTaskRuntime(options: {
             const tokens = input.tokens;
             if (tokens === undefined) throw new RuntimeError('invalid_input', 'set_budget needs tokens: a positive integer or null for unlimited');
             if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
+            // A cap below what one dispatch of this node reserves is not refused - it is the caller's
+            // decision - but it stops that node (the running turn too) and blocks it asking a person.
+            // Nothing else in the receipt could tell the caller that it starved its own node, so name
+            // the number it cannot see anywhere else.
+            const specRow = store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(target, nodeId) as { spec: string } | undefined;
+            const action = specRow ? (JSON.parse(specRow.spec) as { action?: string }).action : undefined;
+            const reservation = execution.reserveTokensFor(action);
+            const warning = tokens !== null && reservation !== undefined && tokens < reservation
+              ? `这个上限（${tokens}）低于该节点一次派发所需的预留 ${reservation} tokens：它下一次派发（包括正在跑的这一回合）会被预算挡住并停下来问人。`
+              : undefined;
             return store.command(scope, input.requestId, { type: 'set_budget', taskId: target, nodeId, tokens }, () => {
               const instance = store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?').get(target, nodeId) as { id: string } | undefined;
               if (!instance) throw new RuntimeError('not_found', 'Unknown agent node');
               setBudget(store, instance.id, tokens);
               store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'")
                 .run(canonicalJson({ type: 'set_budget', tokens }), target, nodeId);
-              return { taskId: target, nodeId, tokens, cursor: store.event(target, 'instance.budget_changed', { nodeId, tokens, actor: 'agent' }) };
+              return {
+                taskId: target, nodeId, tokens, ...(warning ? { warning } : {}),
+                cursor: store.event(target, 'instance.budget_changed', { nodeId, tokens, actor: 'agent', ...(warning ? { warning } : {}) }),
+              };
             });
           }
           // Steering is the one action whose effect happens outside a command transaction:

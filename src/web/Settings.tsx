@@ -467,6 +467,20 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
     setVerification(null);
     setErrors({});
   }, [active.credentialId]);
+  // 切账户（凭据 id）之后，② 的模型列表必须跟着走：那些行是从另一个账户的端点取回来的，留在屏幕上就等于
+  // 把 A 的模型按到 B 头上（保存时写进 B）。列表属于账户，所以切到同名厂商让它重新获取一次。
+  const shownAccount = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const previous = shownAccount.current;
+    shownAccount.current = active.credentialId;
+    if (previous === undefined || previous === active.credentialId) return;
+    setProbeModels([]);
+    setPicks([]);
+    setNote('');
+    const next = vendors.find(vendor => vendor.id === active.credentialId);
+    if (next) setSelectedVendorId(next.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.credentialId]);
   const entries = draft.models?.entries ?? [];
   const activeEntries = entries.filter(entry => entry.credentialId === active.credentialId);
   // ② 选择模型 has its own vendor picker: only credentials the config already

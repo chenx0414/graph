@@ -154,6 +154,50 @@ test('the catalog save endpoint returns the compiled definition while the legacy
   expect(JSON.parse(legacy.body)).toMatchObject({ definitionVersion: 'worker@1' });
 });
 
+test('the description and delete endpoints change the recipe through the same door the console uses', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-recipe-lifecycle-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const capabilityRoot = join(root, 'capabilities');
+  await writeCapability(capabilityRoot, 'research', { kind: 'skill', version: '1.0.0', name: 'Research' }, { 'SKILL.md': '# Research\n' });
+  const recipesPath = join(root, 'agent-combinations.json');
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root }],
+    catalog: { capabilityRoot, recipesPath },
+  });
+  cleanup.push(() => runtime.close());
+  const origin = 'http://127.0.0.1:1';
+  const app = await createApp(runtime, { origin });
+  cleanup.push(() => app.close());
+  const home = await app.inject({ method: 'GET', url: '/', headers: { origin } });
+  const cookie = String(home.headers['set-cookie'] ?? '');
+  const headers = { origin, cookie, 'content-type': 'application/json' };
+
+  const saved = await app.inject({ method: 'POST', url: '/api/catalog/combinations', headers, payload: JSON.stringify({ combination: workerRecipe() }) });
+  expect(saved.statusCode).toBe(200);
+
+  // Editing the description is a save of the same recipe: the definition has to move with it, or the
+  // library would show text the compiled identity does not carry.
+  const described = await app.inject({
+    method: 'POST',
+    url: '/api/catalog/combinations/worker/description',
+    headers,
+    payload: JSON.stringify({ description: '把一件事做完。' }),
+  });
+  expect(described.statusCode).toBe(200);
+  expect(JSON.parse(described.body)).toMatchObject({ combination: { description: '把一件事做完。' }, definition: { version: 2 } });
+  expect(JSON.parse(await readFile(recipesPath, 'utf8')).combinations.find((item: { id: string }) => item.id === 'worker').description).toBe('把一件事做完。');
+  expect((await runtime.catalog.definitions()).find(item => item.id === 'worker')?.version).toBe(2);
+
+  // Deleting carries no body at all, so asking for JSON here is the trap: Fastify refuses an empty
+  // JSON body with 400 before the route ever runs, and the console sends no content-type for it.
+  const asJson = await app.inject({ method: 'DELETE', url: '/api/catalog/combinations/worker', headers: { origin, cookie, 'content-type': 'application/json' } });
+  expect(asJson.statusCode).toBe(400);
+  const deleted = await app.inject({ method: 'DELETE', url: '/api/catalog/combinations/worker', headers: { origin, cookie } });
+  expect(deleted.statusCode).toBe(200);
+  expect(JSON.parse(await readFile(recipesPath, 'utf8')).combinations).toEqual([]);
+});
+
 test('the library UI no longer exposes a manual compile action and the catalog always compiles on save', async () => {
   const librarySource = await readFile(join(process.cwd(), 'src/web/ResourceLibrary.tsx'), 'utf8');
   expect(librarySource).not.toContain('void compile(');
