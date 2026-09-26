@@ -562,10 +562,12 @@ test('the composer suggestion and queue steering follow the three Enter states',
     const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
     return messages.some(message => message.role === 'user' && message.text === '继续检查测试覆盖和失败分支。');
   }, { timeout: 10_000 }).toBe(true);
-  // This test drives a real turn through a browser; under the parallel gate it has
-  // timed out at the 15s default while passing on its own, so it uses the same
-  // budget as the other browser-driven cases in this file.
-}, 60_000);
+  // This test drives a real turn through a browser, so it owns several sequential waits whose
+  // budgets add up (10s + 10s + 1s + 30s + 60s + 10s + 10s + 10s). The outer budget must exceed
+  // that sum: at 60s the test itself died first and reported only "Test timed out in 60000ms",
+  // naming no condition. With room to spare, a real stall now fails inside the poll that was
+  // still waiting and says which state never arrived.
+}, 240_000);
 
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');
