@@ -208,9 +208,15 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.getByTestId('proposal').waitFor();
   console.log('[integration] task-view-ready');
 
-  // The credential cap is one, so the second work node must wait for a slot.
-  await page.waitForFunction(() => document.querySelector('[data-testid="node-list"]')?.textContent?.includes('等待 API 名额'));
-  expect(await page.getByTestId('node-list').innerText()).toContain('等待 API 名额');
+  // The credential cap is one, so the second work node must wait for a slot. Assert the text that
+  // satisfied the wait instead of reading the DOM again: the waiting state is transient (the slot frees
+  // and the label becomes 执行中), and under full-suite load the second read really did land on the next
+  // state - that is how this assertion flaked once.
+  const nodeListText = await page.waitForFunction(() => {
+    const text = document.querySelector('[data-testid="node-list"]')?.textContent ?? '';
+    return text.includes('等待 API 名额') ? text : null;
+  }).then(handle => handle.jsonValue() as Promise<string>);
+  expect(nodeListText).toContain('等待 API 名额');
 
   // Batch C: the task graph keeps its four-state legend.
   await page.goto(`${url}/#/tasks/${taskId}/graph`);
