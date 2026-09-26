@@ -4,7 +4,7 @@ import { RuntimeError } from '../core/types.ts';
 import { graphHome } from '../catalog/graph-home.ts';
 import { defaultConfigPath, defaultStateDir } from './config.ts';
 import { startGraphDaemon, type GraphDaemon } from './start.ts';
-import { clearConsoleAddress, writeConsoleAddress } from './console-address.ts';
+import { writeConsoleAddress } from './console-address.ts';
 
 export interface CliOptions {
   configPath: string | null;
@@ -129,8 +129,9 @@ async function main() {
   }
   printBanner(daemon, write);
   // Publish the bound address: with `--port 0` (what the desktop app passes) this is the only
-  // place the console URL exists. It is cleared on a graceful stop below; a killed daemon leaves
-  // a stale record whose pid the reader can check.
+  // place the console URL exists, and it is also how the next start returns to the same port.
+  // A stop deliberately leaves it in place - deleting it here would rob the reload of exactly the
+  // fact it needs (measured: with the delete, every reload moved the console to a new port).
   await writeConsoleAddress(daemon.stateDir, {
     url: daemon.url,
     pid: process.pid,
@@ -154,7 +155,6 @@ async function main() {
       fail('Stop deadline exceeded; exiting with code 1. In-flight work stays recorded and is re-verified on restart.');
       process.exit(1);
     }
-    await clearConsoleAddress(daemon.stateDir);
     process.exit(0);
   };
   process.on('SIGINT', () => void stop('SIGINT'));
