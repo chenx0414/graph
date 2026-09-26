@@ -1207,6 +1207,7 @@ export function createPiAdapter(options: {
                     replyStop: capture.reply?.stopReason ?? null,
                     replyChars: capture.reply?.raw.length ?? 0,
                     replyHead: capture.reply?.raw.slice(0, 200) ?? '',
+                    replyError: capture.reply?.error ?? null,
                   });
                 } catch {
                   // A review is an observer of the operation, never a step in it.

@@ -220,6 +220,8 @@ export interface SedimentReply {
   text: string | null;
   raw: string;
   stopReason: string | null;
+  /** Why the call produced nothing usable: the provider's or transport's own words. */
+  error: string | null;
 }
 
 /** One fresh model call for the review. The operation's transcript crosses as data, never as context. */
@@ -246,9 +248,16 @@ export async function generateSkillProposal(input: {
     });
     const message = await stream.result();
     const raw = textFromMessage(message);
-    return { text: message.stopReason === 'stop' ? raw : null, raw, stopReason: message.stopReason ?? null };
-  } catch {
-    return { text: null, raw: '', stopReason: null };
+    // The SDK reports its own reason on the message when the provider stopped abnormally.
+    const reported = (message as unknown as { errorMessage?: unknown }).errorMessage;
+    return {
+      text: message.stopReason === 'stop' ? raw : null,
+      raw,
+      stopReason: message.stopReason ?? null,
+      error: typeof reported === 'string' && reported ? reported : null,
+    };
+  } catch (error) {
+    return { text: null, raw: '', stopReason: null, error: error instanceof Error ? error.message : String(error) };
   }
 }
 

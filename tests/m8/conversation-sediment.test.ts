@@ -139,3 +139,55 @@ test('a review whose reply carries no proposal is recorded as such and writes no
   expect(decision.replyChars).toBeGreaterThan(0);
   expect(decision.replyHead).toContain('没什么值得记的');
 }, 120_000);
+
+// A review call that fails is the case that actually kept the feature quiet in production: the call
+// errored, `proposed` came back null, and the record said nothing about why. The reason has to be
+// part of the record, or a broken provider is indistinguishable from a model with nothing to say.
+test('a failed review call is recorded with its reason instead of as a silent nothing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sediment-error-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(join(project, '.agents', 'skills'), { recursive: true });
+  const main = await openaiServer([
+    { tools: [{ id: 'call-1', name: 'bash', arguments: '{"command":"echo one"}' }] },
+    { tools: [{ id: 'call-2', name: 'bash', arguments: '{"command":"echo two"}' }] },
+    { text: '两步都做完了。' },
+  ]);
+  const reader = await openaiServer([
+    { status: 500, error: 'the review provider exploded' },
+    { status: 500, error: 'the review provider exploded' },
+  ]);
+  cleanup.push(() => main.close());
+  cleanup.push(() => reader.close());
+  const entries = [
+    { id: 'main-model', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: main.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+    { id: 'reader-model', provider: 'graph-openai', grade: 'low' as const, api: 'openai-completions' as const, baseUrl: reader.model.baseUrl, contextWindow: 32_000, maxTokens: 256 },
+  ];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], actions: {},
+    models: { entries, credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }), modelRuntime: main.runtime },
+    live: {
+      revision: () => 1,
+      config: () => ({ skills: { sedimentation: { enabled: true, afterToolCalls: 2, model: 'reader-model', budgetTokens: 40_000 } } }),
+      entries: () => entries,
+      preferences: () => ({}),
+      credentialFor: entry => ({ credentialId: entry.id, apiKey: 'k' }),
+      masterModel: () => 'main-model',
+      defaultBudgetTokens: () => null,
+      projects: () => [{ id: 'p', root: project }],
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'main-model' },
+  });
+  cleanup.push(() => runtime.close());
+  await runtime.conversations.create({ projectId: 'p', text: '做两步检查。', requestId: 'sediment-error' });
+  await runtime.host.runReady();
+
+  expect(readdirSync(join(project, '.agents', 'skills'))).toEqual([]);
+  const recorded = new DatabaseSync(join(root, 'state', 'tasks.sqlite'))
+    .prepare("SELECT data FROM events WHERE type = 'skill_sediment.reviewed'").all() as { data: string }[];
+  expect(recorded).toHaveLength(1);
+  const decision = JSON.parse(recorded[0]!.data) as { reviewed: boolean; proposed: string | null; replyStop: string | null; replyError: string | null };
+  expect(decision).toMatchObject({ reviewed: true, proposed: null, written: [], refused: [] });
+  expect(decision.replyError).toBeTruthy();
+  expect(decision.replyError).toMatch(/exploded|500/);
+}, 120_000);
