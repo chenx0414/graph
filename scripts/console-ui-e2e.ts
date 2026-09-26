@@ -51,6 +51,9 @@ const state = join(root, 'state');
 const home = join(root, 'graph-home');
 const workspace = join(root, 'project');
 await mkdir(workspace, { recursive: true });
+// A skill the seeded read points at: the 技能使用 section must show what the record proves.
+await mkdir(join(workspace, '.agents', 'skills', 'e2e-skill'), { recursive: true });
+await writeFile(join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md'), '---\nname: e2e-skill\ncreated-by: graph-agent\ndescription: Seeded fixture skill for the console E2E run. Use when the console tool page is asserted.\n---\n');
 await mkdir(home, { recursive: true });
 const config = join(root, 'graph.config.json');
 await writeFile(config, JSON.stringify({ version: 1, projects: [{ id: 'e2e', root: workspace }] }));
@@ -106,6 +109,8 @@ try {
     { tool: 'bash', ms: 120, isError: false },
     { tool: 'bash', ms: 300, isError: true },
     { tool: 'agent_browser', ms: 8_000, isError: false },
+    // One call that touched a skill file: this is what makes the skill show as read.
+    { tool: 'read', ms: 4, isError: false, target: join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md') },
   ];
   await mkdir(join(state, TOOL_CALL_SPOOL_DIR), { recursive: true });
   await writeFile(
@@ -132,16 +137,16 @@ try {
   check('页面根节点存在', await pageRoot.count(), 1);
   const summary = await page.getByTestId('tool-stats-summary').innerText();
   checkContains('汇总含「调用次数」', summary, '调用次数');
-  checkContains('汇总含 3 次调用', summary, '3');
+  checkContains('汇总含 4 次调用', summary, '4');
   checkContains('汇总含 1 次失败', summary, '1 次失败');
-  checkContains('成功率为 66.7%', summary, '66.7%');
-  checkContains('平均耗时为 2.8 s', summary, '2.8 s');
+  checkContains('成功率为 75.0%', summary, '75.0%');
+  checkContains('平均耗时为 2.1 s', summary, '2.1 s');
   checkContains('累计耗时 8.4 s', summary, '8.4 s');
 
   const headers = await page.getByTestId('tool-stats-table').locator('th').allInnerTexts();
   check('表头八列', headers, ['工具', '角色', '次数', '失败', '成功率', '平均耗时', '最大耗时', '最近一次']);
   const rows = await page.getByTestId('tool-stats-table').locator('tbody tr').allInnerTexts();
-  check('两行（两个工具）', rows.length, 2);
+  check('三行（三个工具）', rows.length, 3);
   checkContains('bash 行：次数/失败/成功率/平均/最大', rows[0] ?? '', 'bash');
   checkContains('bash 行含 2 次', rows[0] ?? '', '2');
   checkContains('bash 行成功率为 50.0%', rows[0] ?? '', '50.0%');
@@ -150,8 +155,16 @@ try {
   checkContains('第二行是 agent_browser（按调用次数排序）', rows[1] ?? '', 'agent_browser');
   checkContains('agent_browser 成功率 100.0%', rows[1] ?? '', '100.0%');
   checkContains('agent_browser 平均 8.0 s', rows[1] ?? '', '8.0 s');
+  checkContains('第三行是 read（种子的技能读取）', rows[2] ?? '', 'read');
   checkContains('bash 行角色为「主 Agent」', rows[0] ?? '', '主 Agent');
   check('侧栏「问题」徒标计数为 1', await page.locator('.nav-badge').first().innerText(), '1');
+
+  // 技能使用区块：口径文案必须如实写「只统计被读次数」，且真的按技能给出读数。
+  check('技能使用区块存在', await page.getByTestId('skill-usage-summary').count(), 1);
+  checkContains('技能区块写明口径', await page.getByTestId('skill-usage-note').innerText(), '不统计技能是否被实际应用');
+  const skillCells = await page.getByTestId('skill-usage-row-e2e-skill').locator('td').allInnerTexts();
+  check('种子技能的被读次数', skillCells[2], '1');
+  check('种子技能的来源', skillCells[1], '项目');
 
   const shot = join(screenshots, 'tool-stats.png');
   await page.screenshot({ path: shot, fullPage: true });

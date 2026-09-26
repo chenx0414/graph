@@ -16,7 +16,6 @@ const RETAIN_DAYS = 90;
 
 /** Where one worker instance spools its calls. */
 export function toolCallSpoolPath(stateDir: string, instanceId: string): string {
-  // An instance id is a uuid today; a file name is not the place to rely on that.
   return join(stateDir, TOOL_CALL_SPOOL_DIR, `${instanceId.replace(/[^A-Za-z0-9._-]/g, '_')}.jsonl`);
 }
 
@@ -64,7 +63,23 @@ function parseSpooledLine(line: string): { instanceId: string; tool: string; ms:
  * line is simply read again next time. A file that shrank was rewritten by someone else, so
  * the read starts over rather than trusting a stale offset.
  */
-export async function ingestToolCallSpools(store: TaskStore, stateDir: string, keepDays = RETAIN_DAYS): Promise<number> {
+/**
+ * Reading is what folds worker calls in, and two readers can ask at the same moment (the console
+ * fetches the tool numbers and the skill numbers together). The ingest state lives in the store and
+ * on disk, so two concurrent passes would each read the same offset and insert the same lines
+ * twice. One pass per state directory at a time; a caller arriving during a pass joins it.
+ */
+const ingesting = new Map<string, Promise<number>>();
+
+export function ingestToolCallSpools(store: TaskStore, stateDir: string, keepDays = RETAIN_DAYS): Promise<number> {
+  const running = ingesting.get(stateDir);
+  if (running) return running;
+  const pass = ingestOnce(store, stateDir, keepDays).finally(() => { ingesting.delete(stateDir); });
+  ingesting.set(stateDir, pass);
+  return pass;
+}
+
+async function ingestOnce(store: TaskStore, stateDir: string, keepDays = RETAIN_DAYS): Promise<number> {
   const dir = join(stateDir, TOOL_CALL_SPOOL_DIR);
   let names: string[];
   try {

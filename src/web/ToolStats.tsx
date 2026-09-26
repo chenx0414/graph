@@ -49,15 +49,34 @@ function formatWhen(at: number): string {
  * fails and how long it takes. The numbers come from the durable `tool_calls` table, so they
  * accumulate across reloads instead of dying with the process that happened to observe them.
  */
+export interface SkillUsageSnapshot {
+  generatedAt: number;
+  retentionDays: number;
+  skills: { id: string; path: string; source: 'project' | 'agent' | 'library'; reads: number; lastReadAt: number | null; neverRead: boolean }[];
+  summary: { skills: number; neverRead: number };
+}
+
+function skillSourceLabel(source: SkillUsageSnapshot['skills'][number]['source']): string {
+  if (source === 'project') return '项目';
+  if (source === 'agent') return 'Agent 目录';
+  return '能力库';
+}
+
 export function ToolStatsPage() {
   const [snapshot, setSnapshot] = useState<ToolStatsSnapshot | null>(null);
+  const [skills, setSkills] = useState<SkillUsageSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      setSnapshot(await api<ToolStatsSnapshot>('/api/tool-stats'));
+      const [toolSnapshot, skillSnapshot] = await Promise.all([
+        api<ToolStatsSnapshot>('/api/tool-stats'),
+        api<SkillUsageSnapshot>('/api/skill-stats'),
+      ]);
+      setSnapshot(toolSnapshot);
+      setSkills(skillSnapshot);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -145,6 +164,42 @@ export function ToolStatsPage() {
               ))}
             </tbody>
           </table>
+        </Card>
+      )}
+
+      {skills && (
+        <Card title="技能使用" icon="tool" subtitle="被读次数来自工具调用记录，按技能目录匹配">
+          <p className="card-sub" data-testid="skill-usage-note">
+            只统计技能文件被读取的次数（本守护进程与并行车道合计），<strong>不统计技能是否被实际应用</strong>；
+            保留最近 {skills.retentionDays} 天。
+          </p>
+          <div className="stat-grid" data-testid="skill-usage-summary">
+            <Stat label="可见技能" value={skills.summary.skills} hint="项目 / Agent 目录 / 能力库" />
+            <Stat
+              label="从未被读"
+              value={skills.summary.neverRead}
+              tone={skills.summary.neverRead ? 'warn' : 'success'}
+            />
+          </div>
+          {skills.skills.length === 0 ? (
+            <p className="card-sub">还没有发现技能：项目 .agents/skills、该 Agent 的技能目录与能力库都为空。</p>
+          ) : (
+            <table className="tool-table" data-testid="skill-usage-table">
+              <thead>
+                <tr><th>技能</th><th>来源</th><th>被读次数</th><th>最近一次</th></tr>
+              </thead>
+              <tbody>
+                {skills.skills.map(skill => (
+                  <tr data-testid={`skill-usage-row-${skill.id}`} key={skill.id}>
+                    <td><code>{skill.id}</code></td>
+                    <td>{skillSourceLabel(skill.source)}</td>
+                    <td className="num">{skill.reads}</td>
+                    <td>{skill.lastReadAt === null ? '从未' : formatWhen(skill.lastReadAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Card>
       )}
     </section>

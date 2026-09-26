@@ -83,3 +83,23 @@ test('an unwritable spool stays silent instead of failing the turn', async () =>
   await expect(spoolToolCall(join(root, 'not-a-dir', 'nested'), 'worker-5', { tool: 'bash', ms: 1, isError: false }))
     .resolves.toBeUndefined();
 });
+
+// Two readers can ask at the same moment — the console fetches the tool numbers and the skill
+// numbers together. The fold must still happen exactly once: a duplicated row doubles every count,
+// and it did before this guard existed.
+test('two concurrent reads fold a spool exactly once', async () => {
+  const { stateDir, store } = open();
+  await spoolToolCall(stateDir, 'worker-6', { tool: 'read', ms: 7, isError: false, target: '/tmp/skill/SKILL.md' });
+  await spoolToolCall(stateDir, 'worker-6', { tool: 'bash', ms: 3, isError: false });
+
+  const [first, second] = await Promise.all([
+    ingestToolCallSpools(store, stateDir),
+    ingestToolCallSpools(store, stateDir),
+  ]);
+
+  expect(store.toolCallStats().reduce((sum, entry) => sum + entry.calls, 0)).toBe(2);
+  expect(first).toBe(2);
+  expect(second).toBe(2);
+  const targets = store.db.prepare('SELECT target FROM tool_calls ORDER BY id').all() as { target: string | null }[];
+  expect(targets).toEqual([{ target: '/tmp/skill/SKILL.md' }, { target: null }]);
+});
