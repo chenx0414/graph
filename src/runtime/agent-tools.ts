@@ -11,6 +11,7 @@ import {
 } from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
 import { describeAgentTools, type AgentToolName } from './agent-tool-definitions.ts';
+import type { ConversationToolChannel } from './conversation-tools.ts';
 
 type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
@@ -142,6 +143,8 @@ export function agentTools(input: {
   onAskUser?: (question: { prompt: string; why: string }) => void;
   catalog?: Catalog;
   artifacts?: ArtifactToolService;
+  /** Channels to other conversations: present only when this session may reach them at all. */
+  conversations?: ConversationToolChannel;
   systemContext?: {
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     systemDiagnostics?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -493,6 +496,44 @@ export function agentTools(input: {
       // would spend model requests on work the answer may invalidate.
       return { ...text(JSON.stringify({ status: 'asked', prompt })), terminate: true };
     },
+    conversation_read: async (_id, params) => {
+      const body = fields(params);
+      if (!input.conversations) throw new Error('This Agent session cannot reach other conversations');
+      const action = String(body.action ?? '').trim();
+      const bounded = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
+      if (action === 'list') {
+        return text(JSON.stringify(await input.conversations.list({ ...(body.archived === true ? { archived: true } : {}) })));
+      }
+      const conversationId = String(body.conversationId ?? '').trim();
+      if (!conversationId) throw new Error('conversationId is required for read and follow');
+      if (action === 'read') {
+        return text(JSON.stringify(await input.conversations.read(conversationId, { limit: bounded(body.limit, 50), after: bounded(body.after, 0) })));
+      }
+      if (action === 'follow') {
+        return text(JSON.stringify(await input.conversations.follow(conversationId, bounded(body.after, 0), bounded(body.limit, 100))));
+      }
+      throw new Error('Unsupported read action: use list, read or follow');
+    },
+    conversation_write: async (_id, params) => {
+      const body = fields(params);
+      if (!input.conversations) throw new Error('This Agent session cannot reach other conversations');
+      const action = String(body.action ?? '').trim();
+      const conversationId = String(body.conversationId ?? '').trim();
+      const requestId = String(body.requestId ?? '').trim();
+      if (!conversationId) throw new Error('conversationId is required');
+      if (!requestId) throw new Error('A bounded requestId is required');
+      if (action === 'send' || action === 'steer') {
+        const message = String(body.text ?? '').trim();
+        if (!message) throw new Error(`text is required for ${action}`);
+        const receipt = action === 'send'
+          ? await input.conversations.send({ conversationId, text: message, requestId })
+          : await input.conversations.steer({ conversationId, text: message, requestId });
+        return text(JSON.stringify(receipt));
+      }
+      if (action === 'pause') return text(JSON.stringify(await input.conversations.pause({ conversationId, requestId })));
+      if (action === 'resume') return text(JSON.stringify(await input.conversations.resume({ conversationId, requestId })));
+      throw new Error('Unsupported write action: use send, steer, pause or resume');
+    },
     control_task: async (_id, params) => {
       const body = fields(params);
       const action = String(body.action ?? '').trim();
@@ -557,6 +598,7 @@ export function agentTools(input: {
       resolveProblem: Boolean(input.supervisor.resolveProblem),
       controlTask: Boolean(input.supervisor.controlTask),
     } } : {}),
+    ...(input.conversations ? { conversations: { read: true, write: true } } : {}),
     ...(input.systemContext ? { systemContext: {
       systemSummary: Boolean(input.systemContext.systemSummary),
       systemDiagnostics: Boolean(input.systemContext.systemDiagnostics),

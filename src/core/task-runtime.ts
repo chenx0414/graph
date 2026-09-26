@@ -403,6 +403,18 @@ export async function openTaskRuntime(options: {
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
+        // Thunks, not values: the conversation service is built below this point in the same scope.
+        conversations: {
+          service: {
+            list: (query?: { archived?: boolean }) => conversations.list(query),
+            view: (conversationId: string, query?: { limit?: number; after?: number }) => conversations.view(conversationId, query),
+            events: (conversationId: string, after?: number, limit?: number) => conversations.events(conversationId, after, limit),
+            chat: (conversationId: string, input: { text: string; requestId: string; source?: Json }) => conversations.chat(conversationId, input),
+            steer: (conversationId: string, input: { requestId: string }) => conversations.steer(conversationId, input),
+            pause: (conversationId: string, requestId: string) => conversations.pause(conversationId, requestId),
+            resume: (conversationId: string, requestId: string) => conversations.resume(conversationId, requestId),
+          },
+        },
         ...(options.agentContext ? { agentContext: options.agentContext } : {}),
         ...(options.catalog?.bootstrapPrompts ? { bootstrapPrompts: options.catalog.bootstrapPrompts } : {}),
         ...(options.catalog?.bootstrapToolPrompt ? { bootstrapToolPrompt: options.catalog.bootstrapToolPrompt } : {}),
@@ -1028,12 +1040,12 @@ export async function openTaskRuntime(options: {
       if (!proposal) throw new RuntimeError('not_found', `Proposal v${version} was not found`);
       return proposal;
     },
-    async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[]; command?: 'compact' }) {
+    async chat(conversationId: string, input: { text: string; requestId: string; attachments?: AttachmentInput[]; command?: 'compact'; source?: Json }) {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const attachments = cleanAttachments(input.attachments);
       const receipt = store.command(`conversation:${conversationId}`, input.requestId, {
-        type: 'chat', text: input.text, attachments, command: input.command ?? null,
+        type: 'chat', text: input.text, attachments, command: input.command ?? null, source: input.source ?? null,
       }, () => {
         if (!input.text.trim() && !attachments.length && !input.command) throw new RuntimeError('invalid_input', 'A nonempty message, attachment or command is required');
         recoverMaster(store, conversation.anchor_task_id, 'message');
@@ -1042,10 +1054,12 @@ export async function openTaskRuntime(options: {
         const state = anchor.paused || (node && ['preparing', 'running', 'blocked'].includes(node.status)) ? 'queued' : 'pending';
         const message = appendMessage(store, {
           conversationId, role: 'user', kind: 'chat', text: input.text.trim(), state,
-          ...(attachments.length || input.command ? {
+          ...(attachments.length || input.command || input.source ? {
             data: {
               ...(attachments.length ? { attachments } : {}),
               ...(input.command ? { command: input.command } : {}),
+              // Who wrote it, when it was not the user: another Agent's conversation.
+              ...(input.source ? { source: input.source } : {}),
             } as unknown as Json,
           } : {}),
         });
@@ -1290,6 +1304,10 @@ export async function openTaskRuntime(options: {
       });
       const preview = await assembly.preview({
         role: 'master', run: true, fetch: true, catalog: true,
+        // The real operation offers these whenever a master turn runs inside a conversation; the
+        // preview must say the same thing, or the settings panel would show a smaller toolbox than
+        // the one the next turn really gets.
+        conversations: { read: true, write: true },
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,

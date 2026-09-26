@@ -953,8 +953,10 @@ test('interrupted retry streams are removed before the durable final answer', as
 
   await page.goto(`${server.url}/#/conversations/retry-stream`);
   const answer = page.getByTestId('message-assistant');
-  await answer.waitFor();
-  expect(await answer.innerText()).toContain('最终回答');
+  // The bubble exists before its final text is applied (the same stream carries both), so reading it the
+  // moment the element appears is a race — and under the full parallel gate it lost: `expected '' to
+  // contain '最终回答'`. Wait for the content the test is actually about.
+  await expect.poll(() => answer.innerText()).toContain('最终回答');
   expect(await page.getByTestId('streaming').count()).toBe(0);
   expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
   expect(await page.getByTestId('message-assistant').count()).toBe(1);

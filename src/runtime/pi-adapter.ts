@@ -18,6 +18,7 @@ import type { TaskStore } from '../core/store.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
 import { isFullAccess } from '../core/access-policy.ts';
+import { openConversationTools, type ConversationToolService } from './conversation-tools.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
@@ -52,6 +53,8 @@ import {
 } from './sediment.ts';
 
 export interface PiAdapterChannels {
+  /** The conversation service, as far as tools over other conversations need it. */
+  conversations?: { service: ConversationToolService };
   supervisor: (taskId: string) => {
     propose(proposal: Proposal, requestId: string): Promise<unknown>;
     withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
@@ -432,6 +435,16 @@ export function createPiAdapter(options: {
               run: (command, args) => commands!.run(command, args),
               ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
               ...(artifactService ? { artifacts: artifactService } : {}),
+              // A master session may hand work to any other conversation. The rules and the operation
+              // state (how many handoffs, which chain drove us) live in `conversation-tools.ts`.
+              ...(channels?.conversations && conversation && spec.role === 'master' ? {
+                conversations: openConversationTools({
+                  service: channels.conversations.service,
+                  caller: { conversationId: conversation.id, taskId: operation.taskId, nodeId: operation.nodeId },
+                  hostWrite: Boolean(accessPolicy && isFullAccess(accessPolicy)),
+                  onHandoff: record => options.store.event(operation.taskId, 'conversation.handed_off', record),
+                }),
+              } : {}),
               ...(channels ? { supervisor: channels.supervisor(operation.taskId), catalog: channels.catalog } : {}),
               ...(channels?.systemContext || channels?.rsi ? {
                 systemContext: {
