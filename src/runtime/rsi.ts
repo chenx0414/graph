@@ -849,6 +849,7 @@ export class RsiService {
         conversationId: conversation.id,
         role: 'system',
         kind: 'rsi',
+        operationId: context.operationId ?? null,
         text: receipt.report,
         data: receipt as unknown as Json,
         state: 'done',
@@ -865,6 +866,7 @@ export class RsiService {
           role: 'assistant',
           kind: 'chat',
           text: RSI_RELOAD_RECEIPT,
+          data: { reloadReceipt: true },
           state: 'done',
           operationId: context.operationId ?? null,
         });

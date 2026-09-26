@@ -322,3 +322,29 @@ test('a settled operation drops every live part, not just the first', () => {
   state = applyConversationEvent(state, { type: 'operation.unknown', data: { operationId: 'op' } });
   expect(conversationProjectionSnapshot(state, { busy: true }).streaming).toEqual([]);
 });
+
+test('snapshot does not resurrect settled live text and ignores replayed deltas', () => {
+  let state = createConversationProjection();
+  const stream = { operationId: 'op', entryId: 'e', partId: '0', ordinal: 1, text: 'done', length: 4, updatedAt: 1 };
+  state = observeConversationView(state, { messages: [], messageCount: 0, streams: [stream] });
+  state = applyConversationEvent(state, { type: 'message.delta', data: { ...stream, text: 'do', len: 2, reset: true } });
+  expect(conversationProjectionSnapshot(state, { busy: true }).streaming[0]?.text).toBe('done');
+  state = observeConversationView(state, { messages: [], messageCount: 0, streams: [] });
+  expect(conversationProjectionSnapshot(state, { busy: true }).streaming).toEqual([]);
+});
+
+test('snapshot cursor filters old events and an in-flight snapshot cannot erase newer text', () => {
+  let state = observeConversationView(createConversationProjection(), { eventCursor: 100, messages: [], messageCount: 0, streams: [] });
+  const event = { type: 'message.delta', data: { operationId: 'op', entryId: 'e', partId: '0', text: 'new', len: 3, reset: true } };
+  expect(applyConversationEvent(state, { ...event, cursor: 90 })).toBe(state);
+  state = applyConversationEvent(state, { ...event, cursor: 101 });
+  state = observeConversationView(state, { eventCursor: 100, messages: [], messageCount: 0, streams: [] });
+  expect(conversationProjectionSnapshot(state, { busy: true }).streaming[0]?.text).toBe('new');
+});
+
+test('a fresh tail snapshot cannot swallow an older cached message update in flight', () => {
+  let state = observeConversationView(createConversationProjection(), { eventCursor: 10, messages: [message({ id: 'old', seq: 1, state: 'pending' })], messageCount: 1 });
+  state = observeConversationView(state, { eventCursor: 30, messages: [message({ id: 'new', seq: 20 })], messageCount: 20 });
+  state = applyConversationEvent(state, { cursor: 25, type: 'message.updated', data: { message: message({ id: 'old', seq: 1, state: 'delivered', updatedAt: 25 }) } });
+  expect(state.records.old?.state).toBe('delivered');
+});

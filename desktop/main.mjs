@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadRawSecretEntries, loadSecrets,
+  consoleRoute, restoreConsoleRoute, absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadRawSecretEntries, loadSecrets,
   parseBannerAddress, resolveAppPaths, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
@@ -35,6 +35,10 @@ if (!app.requestSingleInstanceLock()) {
   let restarting = false;
   let readyUrl = null;
   let pendingReady = null;
+  const routePath = join(app.getPath('userData'), 'last-conversation-route.json');
+  let lastRoute = null;
+  try { lastRoute = JSON.parse(readFileSync(routePath, 'utf8')); } catch { /* first launch */ }
+  const consoleUrl = url => restoreConsoleRoute(url, typeof lastRoute === 'string' ? lastRoute : null);
   let secrets = {};
   let secretsPath = null;
   let stdout = '';
@@ -66,6 +70,13 @@ if (!app.requestSingleInstanceLock()) {
         contextIsolation: true, nodeIntegration: false, sandbox: true,
         preload: join(devRoot, 'desktop/preload.cjs'),
       },
+    });
+    window.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (!isMainFrame) return;
+      const route = consoleRoute(url);
+      if (!route) return;
+      lastRoute = route;
+      try { writeFileSync(routePath, JSON.stringify(route)); } catch { /* optional UI state */ }
     });
     window.on('ready-to-show', () => {
       window.show();
@@ -99,7 +110,7 @@ if (!app.requestSingleInstanceLock()) {
     window.webContents.on('render-process-gone', (_event, details) => {
       if (verbose) console.log(`[app] renderer gone ${details.reason}`);
     });
-    void window.loadURL(url);
+    void window.loadURL(consoleUrl(url));
   }
 
   function secretsFromKeychain(paths) {
@@ -209,7 +220,7 @@ if (!app.requestSingleInstanceLock()) {
             pendingReady = null;
             ready.resolve(url);
           } else if (window) {
-            void window.loadURL(url);
+            void window.loadURL(consoleUrl(url));
           } else {
             openWindow(url);
           }
@@ -422,7 +433,7 @@ if (!app.requestSingleInstanceLock()) {
           .then(async url => {
             const cleared = await ackRestart(pending.id);
             if (!cleared) console.warn('[app] rsi restart applied but the request was not acknowledged');
-            if (window) void window.loadURL(url);
+            if (window) void window.loadURL(consoleUrl(url));
           })
           .catch(error => console.warn('[app] rsi restart failed', error))
           .finally(() => { rsiRestarting = false; });

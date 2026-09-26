@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  appRootFilePath, applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
+  consoleRoute, restoreConsoleRoute, appRootFilePath, applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
   loadRawSecretEntries, resolveDaemonMode, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications,
   trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
@@ -255,4 +255,12 @@ describe('self-improvement reload decision', () => {
     expect(rsiRestartDecision(null, false)).toBeNull();
     expect(rsiRestartDecision({ pendingRestart: {}, canRestart: true }, false)).toBeNull();
   });
+});
+
+
+test('desktop restores the internal conversation across changing daemon ports', () => {
+  const route = consoleRoute('http://127.0.0.1:1234/#/conversations/abc-123');
+  expect(restoreConsoleRoute('http://127.0.0.1:5678', route)).toBe('http://127.0.0.1:5678/#/conversations/abc-123');
+  expect(consoleRoute('http://127.0.0.1:1234/#/settings?secret=x')).toBeNull();
+  expect(restoreConsoleRoute('http://127.0.0.1:5678', 'https://evil.example')).toBe('http://127.0.0.1:5678/');
 });

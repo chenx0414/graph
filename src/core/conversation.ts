@@ -162,6 +162,31 @@ export function conversationActivityRecords(activity: unknown, reply: string): C
   return records;
 }
 
+/** Checkpoint completed narration and tool calls before a reload can stop the
+ * worker. Ordinals identify records across the checkpoint and final settlement. */
+export function persistConversationActivity(store: TaskStore, conversationId: string, operationId: string, turn: number, records: ConversationActivityRecord[], activeToolIds?: ReadonlySet<string>) {
+  const existing = store.db.prepare("SELECT id,data,text,state FROM messages WHERE operation_id=? AND role IN ('activity','tool')").all(operationId) as { id: string; data: string | null; text: string; state: string }[];
+  const byKey = new Map(existing.map(row => {
+    const data = row.data ? JSON.parse(row.data) : {};
+    return [String(data.activityKey), row];
+  }));
+  for (const [index, record] of records.entries()) {
+    const key = record.kind === 'tool' ? `tool:${record.data.toolCallId ?? record.ordinal ?? index}` : `text:${record.ordinal ?? index}`;
+    const data = { ...(record.kind === 'tool' ? record.data : {}), activityKey: key, ...(record.ordinal !== undefined ? { ordinal: record.ordinal } : {}) };
+    const state = record.kind === 'tool' && typeof record.data.toolCallId === 'string' && activeToolIds?.has(record.data.toolCallId) ? 'pending' : 'done';
+    const previous = byKey.get(key);
+    if (previous && previous.text === record.text && previous.state === state && previous.data === canonicalJson(data)) continue;
+    appendMessage(store, {
+      conversationId, operationId, turn,
+      role: record.kind === 'narration' ? 'activity' : 'tool',
+      kind: record.kind === 'narration' ? 'activity' : 'tool',
+      text: record.text, data,
+      state,
+      ...(byKey.has(key) ? { messageId: byKey.get(key)!.id } : {}),
+    });
+  }
+}
+
 /** Append one durable message and publish it on the conversation stream. */
 export function appendMessage(store: TaskStore, input: {
   conversationId: string; role: MessageRole; kind: string; text: string; data?: Json;
@@ -169,7 +194,7 @@ export function appendMessage(store: TaskStore, input: {
   messageId?: string;
 }) {
   const now = Date.now();
-  if (input.operationId && input.role !== 'user') clearConversationStream(store, input.operationId);
+  if (input.operationId && input.role === 'assistant') clearConversationStream(store, input.operationId);
   let row: MessageRow;
   if (input.messageId) {
     store.db.prepare('UPDATE messages SET text=?,data=?,state=?,operation_id=?,turn=?,updated_at=MAX(?,updated_at+1) WHERE id=? AND conversation_id=?')
@@ -317,7 +342,7 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
   // The marker is an explicit fact about the turn: a user message carries the same
   // operation id and kind='chat', so a message query cannot be trusted to decide
   // whether this turn already answered.
-  if (operationReplied(store, operation.id)) return;
+  const alreadyReplied = operationReplied(store, operation.id);
   const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
     ? result.output as { [key: string]: Json }
     : undefined;
@@ -330,24 +355,8 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
     // instead of duplicated, and the final reply stays the idempotency marker.
     const activity = Array.isArray(output?.activity) ? output.activity : output?.toolActivity;
     const records = conversationActivityRecords(activity, reply);
-    if (records.length) {
-      store.db.prepare("DELETE FROM messages WHERE operation_id=? AND kind='activity'").run(operation.id);
-    }
-    for (const record of records) {
-      appendMessage(store, {
-        conversationId: conversation.id,
-        role: record.kind === 'narration' ? 'activity' : 'tool',
-        kind: record.kind === 'narration' ? 'activity' : 'tool',
-        text: record.text,
-        ...(record.kind === 'tool'
-          ? { data: { ...record.data, ...(record.ordinal !== undefined ? { ordinal: record.ordinal } : {}) } as unknown as Json }
-          : record.ordinal !== undefined ? { data: { ordinal: record.ordinal } as unknown as Json } : {}),
-        state: 'done',
-        operationId: operation.id,
-        turn: operation.attempt,
-      });
-    }
-    if (reply) {
+    persistConversationActivity(store, conversation.id, operation.id, operation.attempt, records);
+    if (reply && !alreadyReplied) {
       appendMessage(store, {
         conversationId: conversation.id,
         role: 'assistant',
@@ -360,7 +369,7 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
       });
       markOperationReplied(store, operation.id);
     }
-  } else if (result.outcome === 'failed') {
+  } else if (result.outcome === 'failed' && !alreadyReplied) {
     const failure = turnFailureReason(result);
     appendMessage(store, {
       conversationId: conversation.id,

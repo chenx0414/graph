@@ -25,6 +25,8 @@ export interface LiveTool {
 }
 
 export interface LiveText {
+  /** Existing text on attachment is already revealed, unlike a new delta. */
+  attached?: boolean;
   operationId: string;
   entryId: string;
   partId: string;
@@ -47,6 +49,8 @@ function dropOperationStreams(liveText: Record<string, LiveText>, operationId: s
 }
 
 export interface ConversationProjectionState {
+  eventCursor: number;
+  snapshotCursor: number;
   records: Record<string, ConversationMessage>;
   liveText: Record<string, LiveText>;
   liveTools: Record<string, LiveTool>;
@@ -60,6 +64,7 @@ export interface ConversationProjectionState {
 }
 
 export interface ConversationProjectionEvent {
+  cursor?: number;
   type: string;
   data?: {
     operationId?: string;
@@ -155,6 +160,8 @@ function orderMessages(messages: ConversationMessage[]) {
 
 export function createConversationProjection(): ConversationProjectionState {
   return {
+    eventCursor: 0,
+    snapshotCursor: 0,
     records: {},
     liveText: {},
     liveTools: {},
@@ -172,33 +179,46 @@ export function createConversationProjection(): ConversationProjectionState {
 export function observeConversationView(
   state: ConversationProjectionState,
   view: {
+    eventCursor?: number;
     messages: ConversationMessage[];
     messageCount: number;
     streams?: { operationId: string; entryId: string; partId: string; ordinal: number; text: string; length: number; updatedAt: number }[];
   },
 ) {
   const records = mergeRecords(state.records, view.messages);
+  const stale = view.eventCursor !== undefined && view.eventCursor < state.eventCursor;
   const sequences = view.messages.map(message => message.seq);
-  const liveText = { ...state.liveText };
-  for (const stream of view.streams ?? []) {
+  const liveText: Record<string, LiveText> = stale || view.streams === undefined ? { ...state.liveText } : {};
+  for (const stream of stale ? [] : view.streams ?? []) {
     const key = streamKey(stream.operationId, stream.entryId, stream.partId);
-    const previous = liveText[key];
-    if (state.streamNeedsResync || !previous || stream.text.startsWith(previous.text) || stream.length > previous.length) {
-      liveText[key] = stream;
-    }
+    const previous = state.liveText[key];
+    if (view.eventCursor !== undefined || state.streamNeedsResync || !previous || stream.text.startsWith(previous.text) || stream.length > previous.length) {
+      liveText[key] = { ...stream, attached: previous?.attached ?? !previous };
+    } else if (previous) liveText[key] = previous;
   }
   return {
     ...state,
     records,
     liveText,
-    streamNeedsResync: false,
+    // Later windows do not cover updates to cached older messages. Keep
+    // consuming those events even when a newer window has already arrived.
+    eventCursor: state.eventCursor || (view.eventCursor ?? 0),
+    snapshotCursor: Math.max(state.snapshotCursor, view.eventCursor ?? 0),
+    streamNeedsResync: stale ? state.streamNeedsResync : false,
     messageCount: view.messageCount,
     windowStartSeq: sequences.length ? Math.min(...sequences) : state.windowStartSeq,
     windowEndSeq: sequences.length ? Math.max(...sequences) : state.windowEndSeq,
   };
 }
 
-export function applyConversationEvent(
+export function applyConversationEvent(state: ConversationProjectionState, event: ConversationProjectionEvent) {
+  if (event.cursor !== undefined && event.cursor <= state.eventCursor) return state;
+  const coveredStream = event.type === 'message.delta' && event.cursor !== undefined && event.cursor <= state.snapshotCursor;
+  const next = coveredStream ? state : reduceConversationEvent(state, event);
+  return event.cursor === undefined ? next : { ...next, eventCursor: event.cursor };
+}
+
+function reduceConversationEvent(
   state: ConversationProjectionState,
   event: ConversationProjectionEvent,
 ) {
@@ -210,6 +230,10 @@ export function applyConversationEvent(
     const key = streamKey(operationId, entryId, partId);
     const previous = state.liveText[key];
     const length = data.len ?? (previous?.length ?? 0) + data.text.length;
+    // Replayed prefixes must not rewind an already attached snapshot.
+    if (previous && data.len !== undefined && data.len <= previous.length
+      && (data.reset !== true || (event.cursor === undefined && previous.text.startsWith(data.text)))) return state;
+    if (!previous && data.reset !== true && data.len !== undefined && data.len !== data.text.length) return { ...state, streamNeedsResync: true };
     const reset = data.reset === true || !previous;
     const appendable = Boolean(previous && previous.length + data.text.length === length);
     if (!reset && !appendable && data.len !== undefined) {
@@ -316,6 +340,8 @@ export function conversationProjectionSnapshot(
     all.filter(message => message.role === 'tool' && typeof message.data?.toolCallId === 'string')
       .map(message => String(message.data!.toolCallId)),
   );
+  const durableNarration = new Set(all.filter(message => message.role === 'activity' && typeof message.data?.ordinal === 'number')
+    .map(message => `${message.operationId}:${message.data!.ordinal}`));
   const latestAssistant = [...all].reverse().find(message => message.role === 'assistant');
   const suggestedPrompt = typeof latestAssistant?.data?.suggestedPrompt === 'string'
     ? latestAssistant.data.suggestedPrompt.trim().slice(0, 500)
@@ -323,7 +349,7 @@ export function conversationProjectionSnapshot(
   return {
     messages: orderMessages(all.filter(message => !(message.role === 'user' && message.state === 'queued'))),
     queuedMessages,
-    streaming: Object.values(state.liveText).filter(item => !durableAssistantOps.has(item.operationId)),
+    streaming: Object.values(state.liveText).filter(item => !durableAssistantOps.has(item.operationId) && !durableNarration.has(`${item.operationId}:${item.ordinal}`)),
     liveTools: Object.values(state.liveTools).filter(tool => !durableToolIds.has(tool.toolCallId)),
     promptSuggestion: !options.busy && !queuedMessages.length ? suggestedPrompt : '',
     streamNeedsResync: state.streamNeedsResync,

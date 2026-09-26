@@ -19,7 +19,7 @@ import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
 import { isFullAccess } from '../core/access-policy.ts';
 import { agentTools } from './agent-tools.ts';
-import { conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
+import { conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityPermissionRequest } from './capabilities.ts';
 import type { CapabilityOperation } from './capability-bundle.ts';
@@ -717,6 +717,7 @@ export function createPiAdapter(options: {
         };
         const flushDeltas = (force: boolean) => { for (const part of parts.values()) flushPart(part, force); };
         const toolSummaries = new Map<string, string>();
+        const activeConversationTools = new Set<string>();
         const toolActivity: { toolCallId: string; name: string; summary: string; state: 'done' | 'error' }[] = [];
         // Ordered turn activity for a conversation transcript: the narration
         // between tool calls and the tool calls themselves, in the order they
@@ -736,7 +737,7 @@ export function createPiAdapter(options: {
           if (existing) return existing;
           const part = { entryId: currentEntryId, partId, text: '', buffer: '', lastFlush: 0, ordinal: nextOrdinal() };
           parts.set(key, part);
-          const narration = { type: 'narration' as const, text: '', ordinal: nextOrdinal() };
+          const narration = { type: 'narration' as const, text: '', ordinal: part.ordinal };
           activity.push(narration);
           narrationByEntry.set(currentEntryId, narration);
           return part;
@@ -858,12 +859,17 @@ export function createPiAdapter(options: {
             const callOrdinal = nextOrdinal();
             toolOrdinals.set(event.toolCallId, callOrdinal);
             activity.push({ type: 'tool', toolCallId: event.toolCallId, name: event.toolName, summary, state: 'done', ordinal: callOrdinal });
+            flushDeltas(true);
+            activeConversationTools.add(event.toolCallId);
+            persistConversationActivity(options.store, conversation.id, operation.id, operation.attempt, conversationActivityRecords(activity, ''), activeConversationTools);
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'start', toolCallId: event.toolCallId, toolName: event.toolName, summary, ordinal: callOrdinal });
           } else if (event.type === 'tool_execution_end') {
             const summary = toolSummaries.get(event.toolCallId) ?? event.toolName;
             toolActivity.push({ toolCallId: event.toolCallId, name: event.toolName, summary, state: event.isError ? 'error' : 'done' });
             const record = activity.find(item => item.type === 'tool' && item.toolCallId === event.toolCallId);
             if (record && record.type === 'tool') record.state = event.isError ? 'error' : 'done';
+            activeConversationTools.delete(event.toolCallId);
+            persistConversationActivity(options.store, conversation.id, operation.id, operation.attempt, conversationActivityRecords(activity, ''), activeConversationTools);
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError, ordinal: toolOrdinals.get(event.toolCallId) ?? nextOrdinal() });
           }
         };

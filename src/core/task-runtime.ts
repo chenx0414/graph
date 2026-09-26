@@ -987,8 +987,12 @@ export async function openTaskRuntime(options: {
         paused: Boolean(anchor.paused),
         workspaceProjectId: conversation.workspace_project_id, anchorTaskId: conversation.anchor_task_id,
         createdAt: conversation.created_at, requirementVersion: anchor.requirement_version,
+        // Captured synchronously with the message/stream snapshot. New attaches
+        // subscribe after it instead of replaying the entire event history.
+        eventCursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,
         messages: listMessages(store, conversationId, query), messageCount,
         streams: conversationStreams(store, conversationId),
+        continuations: store.db.prepare('SELECT operation_id AS operationId,resumed_operation_id AS resumedOperationId FROM rsi_continuations WHERE task_id=?').all(conversation.anchor_task_id) as { operationId: string; resumedOperationId: string | null }[],
         questions: anchorQuestions,
         proposal,
         proposalHistory,
@@ -1219,6 +1223,11 @@ export async function openTaskRuntime(options: {
         next: () => iterator.next(),
         return: async () => { controller.abort(); return iterator.return(); },
       };
+    },
+    history(conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+      ensureOpen();
+      conversationRow(store, conversationId);
+      return { messages: listMessages(store, conversationId, query) };
     },
     events(conversationId: string, after = 0, limit = 200) {
       ensureOpen();

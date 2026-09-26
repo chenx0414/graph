@@ -1799,6 +1799,9 @@ test('a self-improvement report renders as its own card in the conversation', as
     text: '重载已确认', data: { ...report.data as Record<string, import('../../src/core/types.ts').Json>, activation: { state: 'active', confirmedAt: Date.now() } },
   });
   await page.reload();
+  await expect.poll(() => card.innerText()).toContain('已生效');
+  expect(await card.locator('.rsi-report-problem').count()).toBe(0);
+  await card.getByRole('button', { name: '展开', exact: true }).click();
   await expect.poll(() => card.innerText()).toContain('宿主已确认重载，改动已生效');
   expect(await card.innerText()).not.toContain('等待重载');
 }, 60_000);

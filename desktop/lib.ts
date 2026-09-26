@@ -355,3 +355,16 @@ export function ensureConfigFile(
     return false;
   }
 }
+
+/** Persist only an internal route, never the old daemon port or arbitrary URL. */
+export function consoleRoute(url: string): string | null {
+  try {
+    const hash = new URL(url).hash;
+    return /^#\/(?:conversations|tasks)\/[a-zA-Z0-9-]+$/.test(hash) ? hash : null;
+  } catch { return null; }
+}
+export function restoreConsoleRoute(base: string, route: string | null): string {
+  const url = new URL(base);
+  if (route && consoleRoute(`http://127.0.0.1/${route}`)) url.hash = route;
+  return url.toString();
+}

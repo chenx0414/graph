@@ -5,6 +5,8 @@ import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
+import { TaskStore } from '../../src/core/store.ts';
+import { persistConversationActivity, publishConversationDelta } from '../../src/core/conversation.ts';
 import { evidenceDir } from '../helpers/evidence.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -42,10 +44,15 @@ test('history pages to the earliest record, survives new messages, and never cro
   const page = await browser.newPage();
   const evidence = evidenceDir(root, 'master-agent-entry');
   await mkdir(evidence, { recursive: true });
+  const streamRequests: string[] = [];
+  page.on('request', request => { if (request.url().includes('/events/stream')) streamRequests.push(request.url()); });
   const userMessages = () => page.getByTestId('message-user');
   await page.goto(`${server.url}/#/conversations/${a.conversationId}`);
   await userMessages().filter({ hasText: 'A-message-500' }).waitFor();
   expect(await userMessages().count()).toBe(200);
+  await page.waitForFunction(() => document.querySelector('[data-testid="message-user"]') !== null);
+  expect(streamRequests.length).toBeGreaterThan(0);
+  expect(Number(new URL(streamRequests[0]!).searchParams.get('after'))).toBeGreaterThan(0);
 
   // The cursor advances from the earliest loaded record: three pages reach the start.
   await page.getByTestId('load-older').click();
@@ -196,3 +203,37 @@ test('interleaved conversations page by their own records, not by global sequenc
   expect(await userMessages().filter({ hasText: 'A-700' }).count()).toBe(1);
   expect(await userMessages().filter({ hasText: 'B-' }).count()).toBe(0);
 }, 120_000);
+
+
+test('reopening a live conversation attaches its snapshot without replaying old bubbles', async () => {
+  const root = await temp('stream-attach');
+  const stateDir = join(root, 'state');
+  const server = await openGraphServer({ stateDir, autoDrive: false, webDir });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ text: 'keep working', requestId: 'attach' });
+  const view = await server.runtime.conversations.view(created.conversationId);
+  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  store.db.prepare("INSERT OR IGNORE INTO nodes(task_id,id,spec) VALUES(?,'master','{\"role\":\"master\",\"kind\":\"agent\"}')").run(view.anchorTaskId);
+  store.db.prepare("UPDATE nodes SET status='running' WHERE task_id=? AND id='master'").run(view.anchorTaskId);
+  store.db.prepare("INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,worker_active) VALUES('attach-op',?,'master',1,'{}','dispatched',0,1)").run(view.anchorTaskId);
+  for (let index = 0; index < 1000; index++) store.event(view.anchorTaskId, 'message.delta', { operationId: 'old-op', entryId: `old-${index}`, partId: '0', text: 'MUST-NOT-REPLAY', len: 15, reset: true });
+  persistConversationActivity(store, created.conversationId, 'attach-op', 1, [{ kind: 'narration', text: 'SAVED-NARRATION', ordinal: 1 }]);
+  publishConversationDelta(store, { taskId: view.anchorTaskId, conversationId: created.conversationId, operationId: 'attach-op', entryId: 'e1', partId: '0', ordinal: 1, text: 'SAVED-NARRATION', delta: 'SAVED-NARRATION', length: 15 });
+  publishConversationDelta(store, { taskId: view.anchorTaskId, conversationId: created.conversationId, operationId: 'attach-op', entryId: 'e2', partId: '0', ordinal: 2, text: 'CURRENT-TAIL', delta: 'CURRENT-TAIL', length: 12 });
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const cursors: number[] = [];
+  page.on('request', request => { if (request.url().includes('/events/stream')) cursors.push(Number(new URL(request.url()).searchParams.get('after'))); });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt === 0) await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+    else await page.reload();
+    await page.getByTestId('streaming').filter({ hasText: 'CURRENT-TAIL' }).waitFor();
+    expect(await page.getByTestId('message-narration').filter({ hasText: 'SAVED-NARRATION' }).count()).toBe(1);
+    expect(await page.getByText('MUST-NOT-REPLAY', { exact: true }).count()).toBe(0);
+    expect(await page.getByTestId('master-status').locator('.spinner').count()).toBe(1);
+  }
+  await expect.poll(() => cursors.length).toBe(2);
+  expect(cursors.every(cursor => cursor > 1000)).toBe(true);
+}, 60_000);

@@ -197,6 +197,8 @@ function sameVeils(left: MarkdownVeil[], right: MarkdownVeil[]) {
 function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
   const [diffOpen, setDiffOpen] = useState(false);
   const { rsi } = row;
+  const [expanded, setExpanded] = useState<boolean | null>(null);
+  const open = expanded ?? rsi.activation !== 'active';
   const statusLabel = rsi.status === 'applied' ? (rsi.activation === 'active' ? '已生效' : rsi.activation === 'pending_reload' ? '等待重载' : '已提交')
     : rsi.status === 'checks_failed' ? '检查未通过'
       : rsi.status === 'rolled_back' ? '已回滚' : '不可用';
@@ -209,7 +211,9 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
           <strong>{rsi.title}</strong>
           <span className="rsi-report-badge">{statusLabel}</span>
         </div>
+        <button type="button" className="btn btn-sm" aria-expanded={open} onClick={() => setExpanded(!open)}>{open ? '收起' : '展开'}</button>
       </header>
+      {open && <>
       {rsi.problem && <p className="rsi-report-problem">{rsi.problem}</p>}
       {(rsi.branch || rsi.commit) && (
         <dl className="rsi-report-meta">
@@ -260,6 +264,7 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
           {diffOpen && <pre className="rsi-report-diff">{rsi.diff}</pre>}
         </>
       )}
+      </>}
     </section>
   );
 }
@@ -306,7 +311,7 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
   // Pacing and veils are keyed by the operation, not by the row id: the live row
   // and the durable reply row are two rows of the same turn, and the reveal has
   // to survive that handoff.
-  const paced = usePacedStreamText(row.text, row.operationId, row.streaming);
+  const paced = usePacedStreamText(row.text, row.operationId, row.streaming, row.attached);
   const visualStreaming = row.streaming || paced.revealing;
   const veils = useStreamVeils(paced.text, row.operationId, visualStreaming);
   const blocks = splitMarkdownBlocks(paced.text);

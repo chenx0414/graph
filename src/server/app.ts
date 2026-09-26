@@ -417,6 +417,15 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(query.limit ? { limit: Number(query.limit) } : {}),
     });
   });
+  app.get('/api/conversations/:conversationId/history', async request => {
+    const { conversationId } = request.params as { conversationId: string };
+    const query = request.query as { after?: string; before?: string; limit?: string };
+    return runtime.conversations.history(conversationId, {
+      ...(query.after ? { after: Number(query.after) } : {}),
+      ...(query.before ? { before: Number(query.before) } : {}),
+      ...(query.limit ? { limit: Number(query.limit) } : {}),
+    });
+  });
   app.get('/api/conversations/:conversationId/artifacts', async request => {
     const { conversationId } = request.params as { conversationId: string };
     const query = request.query as Record<string, string | undefined>;
