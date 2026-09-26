@@ -29,6 +29,9 @@ export function sanitizeConfig(config: GraphConfig, env: Record<string, string |
     }])),
     limits: config.limits,
     access: config.access,
+    // The whole block travels back to the console: a value the round-trip drops is a value the next
+    // save would erase, which is how the sedimentation switch stayed unreachable.
+    skills: config.skills,
   };
 }
 

@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { createUsageService, type UsageService, type UsageSnapshot } from '../../src/server/usage.ts';
 import type { GraphConfig } from '../../src/server/config.ts';
+import { DEFAULT_SEDIMENT_SETTINGS } from '../../src/runtime/sediment.ts';
 import { defaultAccessPolicy } from '../../src/core/access-policy.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -50,6 +51,7 @@ test('an account whose key cannot be resolved stays visible as unconfigured', as
     projects: [],
     path: join(home, 'graph.config.json'), configured: true,
     access: defaultAccessPolicy(), piExtensionAutoUpdate: false,
+    skills: { sedimentation: { ...DEFAULT_SEDIMENT_SETTINGS } },
     credentials: {
       'opencode-go-2': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_GO_ACCOUNT_2', displayName: '账户 2' },
     },
@@ -76,6 +78,7 @@ test('a platform with several accounts reports every account with its own quota'
   const config: GraphConfig = {
     path: join(home, 'graph.config.json'), configured: true, projects: [],
     access: defaultAccessPolicy(), piExtensionAutoUpdate: false,
+    skills: { sedimentation: { ...DEFAULT_SEDIMENT_SETTINGS } },
     credentials: {
       'opencode-go': { secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', displayName: '主账户' },
       'opencode-go-work': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_WORK_KEY', displayName: '工作账户' },

@@ -31,6 +31,14 @@ export interface SedimentSettings {
   budgetTokens: number;
 }
 
+/** The documented defaults: the switch is off until somebody says how much work is worth a review. */
+export const DEFAULT_SEDIMENT_SETTINGS: SedimentSettings = {
+  enabled: false,
+  afterToolCalls: 10,
+  model: null,
+  budgetTokens: 40_000,
+};
+
 /** Tolerant by design: a missing or malformed block means the feature is off, never a crash. */
 export function sedimentSettings(config: unknown): SedimentSettings {
   const block = (config as { skills?: { sedimentation?: Record<string, unknown> } } | null | undefined)
@@ -41,9 +49,9 @@ export function sedimentSettings(config: unknown): SedimentSettings {
   const preferred = typeof block?.['model'] === 'string' ? block['model'].trim() : '';
   return {
     enabled: block?.['enabled'] === true,
-    afterToolCalls: positive(block?.['afterToolCalls'], 10),
-    model: preferred || null,
-    budgetTokens: positive(block?.['budgetTokens'], 40_000),
+    afterToolCalls: positive(block?.['afterToolCalls'], DEFAULT_SEDIMENT_SETTINGS.afterToolCalls),
+    model: preferred || DEFAULT_SEDIMENT_SETTINGS.model,
+    budgetTokens: positive(block?.['budgetTokens'], DEFAULT_SEDIMENT_SETTINGS.budgetTokens),
   };
 }
 

@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { RuntimeError } from '../core/types.ts';
 import { defaultAccessPolicy, parseAccessPolicy, type AccessPolicy } from '../core/access-policy.ts';
 import { MODEL_INPUTS, MODEL_THINKING_LEVELS, type ModelApi, type ModelCost, type ModelEntry, type ModelGrade, type ModelInput, type ModelPricing, type ModelThinkingLevel } from '../catalog/models.ts';
+import { DEFAULT_SEDIMENT_SETTINGS, type SedimentSettings } from '../runtime/sediment.ts';
 
 /** Versioned on-disk configuration. Secrets are never stored here; a credential
  * keeps a `secretRef` naming the environment variable that holds the key. */
@@ -39,6 +40,12 @@ export interface GraphConfig {
   credentials: Record<string, CredentialConfig>;
   limits: LimitsConfig;
   access: AccessPolicy;
+  /**
+   * The skill library's own settings. Parsed like everything else: a switch the parser drops is a
+   * feature nobody can turn on, so the runtime reader (`sedimentSettings`) never sees a key the
+   * document could not carry.
+   */
+  skills: { sedimentation: SedimentSettings };
   /** Install available Pi extension source updates when the daemon starts. */
   piExtensionAutoUpdate: boolean;
 }
@@ -55,6 +62,7 @@ export function emptyGraphConfig(): GraphConfig {
     credentials: {},
     limits: { credentials: {}, sharedGroups: {}, defaultBudgetTokens: null },
     access: defaultAccessPolicy(),
+    skills: { sedimentation: { ...DEFAULT_SEDIMENT_SETTINGS } },
     piExtensionAutoUpdate: true,
   };
 }
@@ -106,6 +114,35 @@ function optionalBoolean(value: unknown, path: string): boolean | undefined {
 function positiveInt(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) invalid(`${path} must be a positive integer`);
   return value;
+}
+
+/**
+ * The skill settings block, validated the way the rest of the document is: a wrong type is a config
+ * error rather than a switch that silently does nothing. A named model must exist, because a typo
+ * would otherwise fall back to another model without saying so.
+ */
+function parseSkills(value: unknown, models: GraphConfig['models']): GraphConfig['skills'] {
+  if (value === undefined) return { sedimentation: { ...DEFAULT_SEDIMENT_SETTINGS } };
+  const root = asObject(value, 'skills');
+  const raw = root.sedimentation === undefined
+    ? undefined
+    : asObject(root.sedimentation, 'skills.sedimentation');
+  const model = raw?.model === undefined ? null : asString(raw.model, 'skills.sedimentation.model');
+  if (model && models && !models.entries.some(entry => entry.id === model)) {
+    invalid(`skills.sedimentation.model references unknown model "${model}"`);
+  }
+  return {
+    sedimentation: {
+      enabled: optionalBoolean(raw?.enabled, 'skills.sedimentation.enabled') ?? false,
+      afterToolCalls: raw?.afterToolCalls === undefined
+        ? DEFAULT_SEDIMENT_SETTINGS.afterToolCalls
+        : positiveInt(raw.afterToolCalls, 'skills.sedimentation.afterToolCalls'),
+      model,
+      budgetTokens: raw?.budgetTokens === undefined
+        ? DEFAULT_SEDIMENT_SETTINGS.budgetTokens
+        : positiveInt(raw.budgetTokens, 'skills.sedimentation.budgetTokens'),
+    },
+  };
 }
 
 function asCost(value: unknown, path: string): ModelCost {
@@ -296,6 +333,7 @@ export function parseGraphConfig(raw: unknown, configPath: string): GraphConfig 
     credentials,
     limits,
     access: parseAccessPolicy(root.access, 'access'),
+    skills: parseSkills(root.skills, models),
     piExtensionAutoUpdate: optionalBoolean(root.piExtensionAutoUpdate, 'piExtensionAutoUpdate') ?? true,
   };
 }
