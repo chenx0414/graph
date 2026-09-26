@@ -18,14 +18,20 @@
  *    a handle that still holds every byte
  *  - read and edit keep their upstream behaviour: this seam never caps them
  *  - an explicit limit is honoured by the summary itself
+ *  - the occurrence map is bounded: a forgotten key restarts at one, so an evicted key
+ *    can only ever mean a full view again, never a surprise summary
+ *  - the spill directory keeps only the newest files
+ *  - a system inventory has its own ceiling, and only declared tools are capped
+ *  - the counts file records the scope, so a reopened instance keeps counting
  */
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import {
   SHELL_OUTPUT_LIMIT,
   SUMMARY_LIMIT,
+  SYSTEM_SUMMARY_LIMIT,
   TOOL_RESULT_LIMIT,
   createToolResultTracker,
   renderToolResult,
@@ -110,6 +116,9 @@ test('the summary is deterministic and always says how to get the rest', async (
   expect(first).toBe(second);
   expect(first.length).toBeLessThanOrEqual(SUMMARY_LIMIT);
   expect(first).toContain('400 lines');
+  // The unit is characters, not bytes: a non-ASCII result is longer on disk than the
+  // number the summary reports, and calling that number bytes would be a false label.
+  expect(first).toMatch(/\[large tool result: \d+ chars, 400 lines\]/);
   expect(first).toContain(String(text.length));
   expect(first).toContain('line-0');
   expect(first).toContain('line-399');
@@ -248,4 +257,62 @@ test('the summary honours an explicit limit', () => {
   expect(bounded).toContain('line-0');
   expect(bounded).toContain('line-1999');
   expect(bounded).toContain('handle: /tmp/handle-3');
+});
+
+test('the occurrence map is bounded: a forgotten key restarts at one', () => {
+  const tracker = createToolResultTracker({ capacity: 2 });
+  expect(tracker.record('a')).toBe(1);
+  expect(tracker.record('b')).toBe(1);
+  expect(tracker.record('c')).toBe(1);
+  // 'a' was the oldest, so it is the one forgotten; 'b' keeps counting because it was
+  // touched more recently.
+  expect(tracker.record('b')).toBe(2);
+  expect(tracker.record('a')).toBe(1);
+});
+
+test('the counts file records the scope so a reopened instance keeps its count', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-counts', spillDir });
+  const big = 'c'.repeat(TOOL_RESULT_LIMIT + 3);
+  await hook(context(big));
+  await hook(context(big));
+  const saved = JSON.parse(await readFile(join(spillDir, 'counts.json'), 'utf8')) as {
+    version: number;
+    scopes: Record<string, Record<string, number>>;
+  };
+  expect(saved.version).toBe(1);
+  expect(Object.values(saved.scopes['conv-counts'] ?? {})).toEqual([2]);
+});
+
+test('the spill directory keeps only the newest files', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-spill-cap', spillDir, maxSpillFiles: 2 });
+  const run = async (marker: string) => {
+    const text = `${marker}${'s'.repeat(TOOL_RESULT_LIMIT)}`;
+    for (let round = 0; round < 3; round += 1) {
+      await hook({ toolCall: { name: 'read' }, args: { path: `${marker}.txt` }, result: { content: [{ type: 'text' as const, text }] } });
+    }
+  };
+  await run('one');
+  await run('two');
+  await run('three');
+  // The invariant is the count, not which file survived: three rapid writes may share a
+  // modification time, so only the cap is claimed here.
+  expect((await readdir(spillDir)).filter(name => name.endsWith('.txt'))).toHaveLength(2);
+});
+
+test('a system inventory has its own ceiling and only declared tools are capped', async () => {
+  const spillDir = await scratch();
+  const hook = toolResultHook({ scopeId: 'conv-system-limit', spillDir });
+  const run = (name: string, text: string) =>
+    hook({ toolCall: { name }, args: {}, result: { content: [{ type: 'text' as const, text }] } });
+
+  expect(await run('read_system_capabilities', 'j'.repeat(SYSTEM_SUMMARY_LIMIT))).toBeUndefined();
+  const over = await run('read_system_capabilities', 'j'.repeat(SYSTEM_SUMMARY_LIMIT + 1));
+  expect(over).toBeTruthy();
+  const summary = partsOf(over!)[0]!.text ?? '';
+  expect(summary.length).toBeLessThanOrEqual(SYSTEM_SUMMARY_LIMIT);
+  expect(summary).toContain('omitted');
+  // A Graph tool with no declared ceiling keeps the lazy rule: its first view is full.
+  expect(await run('get_graph_state', 'k'.repeat(SYSTEM_SUMMARY_LIMIT + 1))).toBeUndefined();
 });

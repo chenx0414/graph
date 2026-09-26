@@ -452,3 +452,65 @@ test('a large tool result reaches the model in full twice and as a readable summ
     await instance.close();
   }
 });
+
+test('the occurrence count for a repeated large result survives an instance reopen', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-instance-tool-results-persist-'));
+  directories.push(root);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const stateDir = join(root, 'state');
+  const big = `head-marker\n${'line\n'.repeat(4_000)}tail-marker`;
+  const probe = externallyGated({
+    name: 'probe', label: 'Probe', description: 'Return a large result every time.',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => ({ content: [{ type: 'text' as const, text: big }], details: {} }),
+  });
+  // A stream that asks for the probe a fixed number of times, then answers.
+  const streamWithCalls = (calls: number): StreamFn => {
+    let seen = 0;
+    return model => {
+      seen += 1;
+      const output = createAssistantMessageEventStream();
+      const message = seen <= calls ? toolCallMessage(model, 'probe') : reply(model, 'Done');
+      output.push({ type: 'done', reason: message.stopReason === 'toolUse' ? 'toolUse' : 'stop', message });
+      return output;
+    };
+  };
+  const binding = { instanceId: 'agent-tool-results-persist', nodeId: 'node-tool-results-persist', definitionVersion: 'coder@1' };
+  const textOf = (message: { content: unknown }) =>
+    (message.content as { type: string; text?: string }[]).map(part => part.text ?? '').join('');
+
+  const first = await openPiInstance({
+    binding, workspace, stateDir, model: modelA, modelRuntime: await testModelRuntime(),
+    stream: streamWithCalls(2), tools: [probe],
+  });
+  try {
+    await first.prompt('Two large results');
+    const results = first.inspect().messages.filter(message => message.role === 'toolResult');
+    expect(results).toHaveLength(2);
+    expect(textOf(results[0]!)).toBe(big);
+    expect(textOf(results[1]!)).toBe(big);
+  } finally {
+    await first.close();
+  }
+
+  // A fresh instance over the same persisted state must remember that this exact result
+  // was already seen twice, so this next view is the bounded one - and its handle, written
+  // by the previous instance, is still readable byte for byte.
+  const second = await openPiInstance({
+    binding, workspace, stateDir, model: modelA, modelRuntime: await testModelRuntime(),
+    stream: streamWithCalls(1), tools: [probe],
+  });
+  try {
+    await second.prompt('One more view');
+    const third = second.inspect().messages.filter(message => message.role === 'toolResult').at(-1)!;
+    const text = textOf(third);
+    expect(text.length).toBeLessThanOrEqual(1_024);
+    expect(text).toContain('omitted');
+    const handle = /handle: (\S+)/.exec(text)?.[1];
+    expect(handle).toBeTruthy();
+    expect(await readFile(handle!, 'utf8')).toBe(big);
+  } finally {
+    await second.close();
+  }
+});
