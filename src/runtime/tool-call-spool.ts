@@ -3,6 +3,12 @@
  * written by the daemon's own seam. They are spooled to a file inside the state directory
  * the worker was already given, and folded into `tool_calls` on the next read.
  *
+ * That directory is the lane's own instance directory: a lane receives its session directory as
+ * `stateDir`, so its spool lands at `<stateDir>/instances/<instanceId>/tool-calls/`. The daemon's
+ * own root is read as well, because a lane handed the root (a host-run check, a fixture) writes
+ * there. Both places are the same convention seen from two ends; reading only the root reported
+ * zero calls for every lane while the samples sat on disk.
+ *
  * A file, not a new protocol: the worker already writes only inside that directory, and an
  * append cannot block the turn it observes. Losing a sample is acceptable; breaking a tool
  * call is not, so every write here swallows its own failure.
@@ -12,6 +18,7 @@ import { join } from 'node:path';
 import type { TaskStore } from '../core/store.ts';
 
 export const TOOL_CALL_SPOOL_DIR = 'tool-calls';
+export const INSTANCES_DIR = 'instances';
 const RETAIN_DAYS = 90;
 
 /** Where one worker instance spools its calls. */
@@ -80,45 +87,54 @@ export function ingestToolCallSpools(store: TaskStore, stateDir: string, keepDay
   return pass;
 }
 
+/** Every directory a lane's spool can be in, seen from the daemon: its own root and one per instance. */
+async function spoolDirs(stateDir: string): Promise<string[]> {
+  const dirs = [join(stateDir, TOOL_CALL_SPOOL_DIR)];
+  const instances = await readdir(join(stateDir, INSTANCES_DIR)).catch(() => [] as string[]);
+  for (const instance of instances) dirs.push(join(stateDir, INSTANCES_DIR, instance, TOOL_CALL_SPOOL_DIR));
+  return dirs;
+}
+
 async function ingestOnce(store: TaskStore, stateDir: string, keepDays = RETAIN_DAYS): Promise<number> {
-  const dir = join(stateDir, TOOL_CALL_SPOOL_DIR);
-  let names: string[];
-  try {
-    names = await readdir(dir);
-  } catch {
-    return 0;
-  }
   let ingested = 0;
-  for (const name of names.filter(entry => entry.endsWith('.jsonl'))) {
-    const file = join(dir, name);
-    const info = await stat(file).catch(() => null);
-    if (!info) continue;
-    const recorded = store.toolCallSpoolOffset(file);
-    const from = recorded > info.size ? 0 : recorded;
-    if (info.size > from) {
-      const text = await readFile(file, 'utf8');
-      const chunk = text.slice(from);
-      const cut = chunk.lastIndexOf('\n');
-      if (cut >= 0) {
-        const consumed = chunk.slice(0, cut + 1);
-        for (const line of consumed.split('\n')) {
-          if (!line.trim()) continue;
-          const parsed = parseSpooledLine(line);
-          if (!parsed) continue;
-          store.recordToolCall({
-            instanceId: parsed.instanceId, tool: parsed.tool, ms: parsed.ms, isError: parsed.isError, at: parsed.at,
-            target: parsed.target,
-          });
-          ingested += 1;
-        }
-        store.setToolCallSpoolOffset(file, from + Buffer.byteLength(consumed, 'utf8'));
-      }
+  for (const dir of await spoolDirs(stateDir)) {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      continue;
     }
-    // A fully consumed spool past the retention window is done with: the rows it produced are
-    // pruned by the store on the same schedule.
-    if (store.toolCallSpoolOffset(file) >= info.size && info.mtimeMs < Date.now() - keepDays * 86_400_000) {
-      await rm(file, { force: true });
-      store.forgetToolCallSpool(file);
+    for (const name of names.filter(entry => entry.endsWith('.jsonl'))) {
+      const file = join(dir, name);
+      const info = await stat(file).catch(() => null);
+      if (!info) continue;
+      const recorded = store.toolCallSpoolOffset(file);
+      const from = recorded > info.size ? 0 : recorded;
+      if (info.size > from) {
+        const text = await readFile(file, 'utf8');
+        const chunk = text.slice(from);
+        const cut = chunk.lastIndexOf('\n');
+        if (cut >= 0) {
+          const consumed = chunk.slice(0, cut + 1);
+          for (const line of consumed.split('\n')) {
+            if (!line.trim()) continue;
+            const parsed = parseSpooledLine(line);
+            if (!parsed) continue;
+            store.recordToolCall({
+              instanceId: parsed.instanceId, tool: parsed.tool, ms: parsed.ms, isError: parsed.isError, at: parsed.at,
+              target: parsed.target,
+            });
+            ingested += 1;
+          }
+          store.setToolCallSpoolOffset(file, from + Buffer.byteLength(consumed, 'utf8'));
+        }
+      }
+      // A fully consumed spool past the retention window is done with: the rows it produced are
+      // pruned by the store on the same schedule.
+      if (store.toolCallSpoolOffset(file) >= info.size && info.mtimeMs < Date.now() - keepDays * 86_400_000) {
+        await rm(file, { force: true });
+        store.forgetToolCallSpool(file);
+      }
     }
   }
   return ingested;
@@ -126,5 +142,7 @@ async function ingestOnce(store: TaskStore, stateDir: string, keepDays = RETAIN_
 
 /** Remove every spool file: a cleared sample must not be re-ingested from disk. */
 export async function clearToolCallSpools(stateDir: string): Promise<void> {
-  await rm(join(stateDir, TOOL_CALL_SPOOL_DIR), { recursive: true, force: true }).catch(() => undefined);
+  for (const dir of await spoolDirs(stateDir)) {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
