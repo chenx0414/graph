@@ -15,6 +15,31 @@ async function temp() {
   return root;
 }
 
+test('a sediment prompt file seeded by an older version is migrated to the current shape', async () => {
+  // The library reads the visible file, not the constant, so a format change has to reach the file
+  // that an installation already has — otherwise the new shape is only true on a fresh machine.
+  const root = await temp();
+  const library = openAgentContextLibrary(root);
+  await library.ensure();
+  const file = join(root, 'runtime/sediment.md');
+  await writeFile(file, [
+    'Answer with one JSON object and nothing else:',
+    '{"action":"create"|"update"|"nothing","id":"<lowercase-slug>","description":"<one sentence saying when to use it>","body":"<markdown>","reason":"<one line>"}',
+    'body is markdown, at most 20000 characters, and is the skill itself.',
+    '',
+  ].join('\n'));
+
+  await library.ensure();
+
+  const migrated = await readFile(file, 'utf8');
+  expect(migrated).toContain('one line of metadata');
+  expect(migrated).toContain('```markdown');
+  expect(migrated).not.toContain('"body":"<markdown>"');
+  expect(migrated).toContain('The fenced block is the skill itself');
+  // The runtime reads the same file, so the migration is what the next review actually follows.
+  expect(await library.prompt('runtime/sediment.md')).toContain('one line of metadata');
+});
+
 test('the Agent context library exposes defaults, saves overrides, and renders bounded variables', async () => {
   const root = await temp();
   const library = openAgentContextLibrary(root, {
