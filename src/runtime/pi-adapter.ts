@@ -1154,9 +1154,10 @@ export function createPiAdapter(options: {
                   { optional: true },
                 );
                 sedimentGate.setPurpose('skill_sediment');
-                const toolCalls = (options.store.db
-                  .prepare('SELECT count(*) AS calls FROM tool_calls WHERE instance_id = ?')
-                  .get(operation.instanceId!) as { calls: number }).calls;
+                // What this operation itself did. Counting rows in `tool_calls` instead would make the
+                // review wait for somebody to open the statistics page: worker lanes are folded into
+                // that table on demand, so a fresh conversation would never reach the threshold.
+                const toolCalls = toolActivity.length;
                 const payload = {
                   lastUserMessage: lastUserMessage ?? '',
                   reply: reply.slice(0, 8_000),
