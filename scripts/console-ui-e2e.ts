@@ -51,7 +51,7 @@ const workspace = join(root, 'project');
 await mkdir(workspace, { recursive: true });
 await mkdir(home, { recursive: true });
 const config = join(root, 'graph.config.json');
-await writeFile(config, JSON.stringify({ projects: [{ id: 'e2e', root: workspace }] }));
+await writeFile(config, JSON.stringify({ version: 1, projects: [{ id: 'e2e', root: workspace }] }));
 
 const daemon = spawn(process.execPath, [
   join(repo, 'src', 'server', 'cli.ts'),
