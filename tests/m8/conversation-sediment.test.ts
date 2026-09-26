@@ -127,5 +127,15 @@ test('a review whose reply carries no proposal is recorded as such and writes no
   const recorded = new DatabaseSync(join(root, 'state', 'tasks.sqlite'))
     .prepare("SELECT data FROM events WHERE type = 'skill_sediment.reviewed'").all() as { data: string }[];
   expect(recorded).toHaveLength(1);
-  expect(JSON.parse(recorded[0]!.data)).toMatchObject({ reviewed: true, proposed: null, written: [], refused: [] });
+  const decision = JSON.parse(recorded[0]!.data) as {
+    reviewed: boolean; proposed: string | null; written: unknown[]; refused: unknown[];
+    replyStop: string | null; replyChars: number; replyHead: string;
+  };
+  expect(decision).toMatchObject({ reviewed: true, proposed: null, written: [], refused: [] });
+  // "Nothing readable came back" has to be diagnosable from the record alone: the stop reason, how
+  // long the reply was, and how it began. Without those, a broken call and a rambling model look
+  // exactly the same, and the whole feature can only be described as "it ran and did nothing".
+  expect(decision.replyStop).toBe('stop');
+  expect(decision.replyChars).toBeGreaterThan(0);
+  expect(decision.replyHead).toContain('没什么值得记的');
 }, 120_000);

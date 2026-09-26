@@ -47,7 +47,7 @@ import { linkProjectDependencies } from './project-dependencies.ts';
 import { mergeUsageSource, usageSourceOf, type TokenUsage } from './call-broker.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT, DEFAULT_SEDIMENT_PROMPT, type AgentContextLibrary } from './agent-context.ts';
 import {
-  existingSkillSummaries, generateSkillProposal, runSedimentReview, selectSedimentModel, type SedimentSettings,
+  existingSkillSummaries, generateSkillProposal, runSedimentReview, selectSedimentModel, type SedimentReply, type SedimentSettings,
 } from './sediment.ts';
 
 export interface PiAdapterChannels {
@@ -1163,6 +1163,9 @@ export function createPiAdapter(options: {
                   reply: reply.slice(0, 8_000),
                   existingSkills: existingSkillSummaries(project.root),
                 };
+                // Kept so the record can say why a reply produced nothing: a truncated answer and a
+                // prose answer both arrive as "no proposal", and they need opposite fixes.
+                const capture: { reply: SedimentReply | null } = { reply: null };
                 try {
                   const decision = await runSedimentReview({
                     gate: {
@@ -1175,15 +1178,18 @@ export function createPiAdapter(options: {
                     settings,
                     projectRoot: project.root,
                     payload,
-                    review: async () => generateSkillProposal({
-                      stream: controlledOpenAIStream(sedimentGate, resolveKeyFor(sedimentEntry), slotFor(sedimentEntry), sedimentEntry.api, {
-                        estimateMissing: true,
-                        ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
-                      }),
-                      model: toPiModel(sedimentEntry),
-                      systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/sediment.md') : DEFAULT_SEDIMENT_PROMPT,
-                      payload,
-                    }),
+                    review: async () => {
+                      capture.reply = await generateSkillProposal({
+                        stream: controlledOpenAIStream(sedimentGate, resolveKeyFor(sedimentEntry), slotFor(sedimentEntry), sedimentEntry.api, {
+                          estimateMissing: true,
+                          ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
+                        }),
+                        model: toPiModel(sedimentEntry),
+                        systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/sediment.md') : DEFAULT_SEDIMENT_PROMPT,
+                        payload,
+                      });
+                      return capture.reply.text;
+                    },
                   });
                   // What the review decided travels with the operation, so "it ran and found nothing",
                   // "it proposed and was refused" and "it never came back with anything readable" are
@@ -1198,6 +1204,9 @@ export function createPiAdapter(options: {
                     proposed: decision.outcome.proposed,
                     written: decision.outcome.written.map(entry => ({ id: entry.id, replaced: entry.replaced })),
                     refused: decision.outcome.refused,
+                    replyStop: capture.reply?.stopReason ?? null,
+                    replyChars: capture.reply?.raw.length ?? 0,
+                    replyHead: capture.reply?.raw.slice(0, 200) ?? '',
                   });
                 } catch {
                   // A review is an observer of the operation, never a step in it.

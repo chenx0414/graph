@@ -210,6 +210,18 @@ function textFromMessage(message: { content?: unknown }) {
     .join('');
 }
 
+/**
+ * What one review call gave back. `raw` is whatever arrived and survives even when it is unusable,
+ * because "no proposal" has two opposite causes — a truncated or prose answer, or a call that never
+ * finished — and only the raw text tells them apart.
+ */
+export interface SedimentReply {
+  /** The text when the call finished normally; null when it did not, however much text arrived. */
+  text: string | null;
+  raw: string;
+  stopReason: string | null;
+}
+
 /** One fresh model call for the review. The operation's transcript crosses as data, never as context. */
 export async function generateSkillProposal(input: {
   stream: StreamFn;
@@ -217,7 +229,7 @@ export async function generateSkillProposal(input: {
   systemPrompt?: string;
   payload: unknown;
   signal?: AbortSignal;
-}): Promise<string | null> {
+}): Promise<SedimentReply> {
   const context: Context = {
     systemPrompt: input.systemPrompt?.trim() || DEFAULT_SEDIMENT_PROMPT,
     messages: [{
@@ -233,10 +245,10 @@ export async function generateSkillProposal(input: {
       ...(input.signal ? { signal: input.signal } : {}),
     });
     const message = await stream.result();
-    if (message.stopReason !== 'stop') return null;
-    return textFromMessage(message);
+    const raw = textFromMessage(message);
+    return { text: message.stopReason === 'stop' ? raw : null, raw, stopReason: message.stopReason ?? null };
   } catch {
-    return null;
+    return { text: null, raw: '', stopReason: null };
   }
 }
 
