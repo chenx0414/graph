@@ -23,6 +23,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
 import { readConsoleAddress } from '../src/server/console-address.ts';
 import { TOOL_CALL_SPOOL_DIR, toolCallSpoolPath } from '../src/runtime/tool-call-spool.ts';
+import { openaiServer } from '../tests/fixtures/openai-server.ts';
 
 const repo = join(import.meta.dirname, '..');
 const web = join(repo, 'dist', 'web');
@@ -55,13 +56,26 @@ await mkdir(workspace, { recursive: true });
 await mkdir(join(workspace, '.agents', 'skills', 'e2e-skill'), { recursive: true });
 await writeFile(join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md'), '---\nname: e2e-skill\ncreated-by: graph-agent\ndescription: Seeded fixture skill for the console E2E run. Use when the console tool page is asserted.\n---\n');
 await mkdir(home, { recursive: true });
+// A scripted provider, so this daemon can run one real master turn: the master lane records its tool
+// calls in-process (`pi-adapter` → `recordToolCall`) instead of through the worker spool the sections
+// below seed, and only a real turn can show that write reaching the page (HB-88).
+const provider = await openaiServer([
+  { tools: [{ id: 'master-bash', name: 'bash', arguments: JSON.stringify({ command: 'echo master-direct-write' }) }] },
+  { text: '记录已写入。' },
+  { text: '（余量，防止额外请求把计划用干）' },
+]);
 const config = join(root, 'graph.config.json');
-await writeFile(config, JSON.stringify({ version: 1, projects: [{ id: 'e2e', root: workspace }] }));
+await writeFile(config, JSON.stringify({
+  version: 1,
+  projects: [{ id: 'e2e', root: workspace }],
+  credentials: { e2e: { secretRef: 'GRAPH_E2E_KEY' } },
+  models: { entries: [{ ...provider.model, id: 'e2e-master', credentialId: 'e2e', grade: 'high' }] },
+}));
 
 const daemon = spawn(process.execPath, [
   join(repo, 'src', 'server', 'cli.ts'),
   '--state-dir', state, '--graph-home', home, '--web-dir', web, '--port', '0', '--config', config,
-], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
+], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GRAPH_E2E_KEY: 'scripted-local-key' } });
 let daemonLog = '';
 daemon.stdout.on('data', (chunk: Buffer) => { daemonLog += String(chunk); });
 daemon.stderr.on('data', (chunk: Buffer) => { daemonLog += String(chunk); });
@@ -221,6 +235,52 @@ try {
   await page.getByTestId('no-questions').waitFor({ timeout: 10_000 });
   check('无问题的任务显示空态', await page.getByTestId('no-questions').count(), 1);
 
+  // ── HB-88：master 车道的工具调用是进程内直写（`pi-adapter` → `recordToolCall`），不走上面种子的
+  // worker spool。要看见它，只能让守护进程真的跑一个回合——这条会话由控制台自己的 HTTP 面创建。
+  const created = await page.evaluate(async () => {
+    const response = await fetch('/api/conversations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectId: 'e2e', requestId: 'e2e-master-turn', text: '跑一个回合，好让工具页看见 master 直写的记录。' }),
+    });
+    const body = await response.json().catch(() => null) as { conversationId?: string } | null;
+    return { status: response.status, conversationId: body?.conversationId ?? '' };
+  });
+  check('控制台 HTTP 面能创建会话（即起一个真回合）', created.status, 200);
+  check('创建会话返回了 conversationId', created.conversationId.length > 0, true);
+
+  // A real turn takes seconds, so wait for the write rather than assuming it: the in-process write is
+  // exactly what this section exists to prove.
+  const directDeadline = Date.now() + 90_000;
+  let direct: { tool: string; role: string | null; calls: number } | null = null;
+  while (Date.now() < directDeadline && !direct) {
+    const reader = new DatabaseSync(join(state, 'tasks.sqlite'));
+    try {
+      const rows = reader.prepare(
+        'SELECT tool, role, COUNT(*) AS calls FROM tool_calls WHERE task_id = (SELECT anchor_task_id FROM conversations WHERE id = ?) GROUP BY tool, role',
+      ).all(created.conversationId) as { tool: string; role: string | null; calls: number }[];
+      direct = rows.find(row => row.tool === 'bash') ?? null;
+    } finally {
+      reader.close();
+    }
+    if (!direct) await new Promise(done => setTimeout(done, 500));
+  }
+  check('master 直写落库：真回合的 bash 调用', direct?.tool, 'bash');
+  check('落库时记下了角色 master', direct?.role, 'master');
+  check('真回合只调了一次工具', direct?.calls, 1);
+
+  // The section above cleared the table, so this is the only row on the page - and it can only have come
+  // from the in-process path. That is the browser-level evidence HB-88 asked for.
+  await page.goto(`${url}/#/tools`, { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('tool-stats-table').waitFor({ timeout: 10_000 });
+  check('清空之后，页面上唯一的记录来自真回合的直写', await page.getByTestId('tool-stats-table').locator('tbody tr').count(), 1);
+  const onlyRow = (await page.getByTestId('tool-stats-table').locator('tbody tr').allInnerTexts())[0] ?? '';
+  checkContains('那行是 bash', onlyRow, 'bash');
+  checkContains('角色是「主 Agent」（master 车道）', onlyRow, '主 Agent');
+  const directShot = join(screenshots, 'tool-stats-master-direct.png');
+  await page.screenshot({ path: directShot, fullPage: true });
+  console.log(`截图 ${directShot}`);
+
   check('页面无 JS 错误', problems, []);
 } catch (error) {
   failures += 1;
@@ -228,6 +288,7 @@ try {
 } finally {
   await browser?.close();
   daemon.kill('SIGTERM');
+  await provider.close();
 }
 
 console.log(failures === 0 ? '\n真浏览器验收通过' : `\n真浏览器验收失败：${failures} 处`);

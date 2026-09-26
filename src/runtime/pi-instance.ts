@@ -377,6 +377,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   });
   session.agent.afterToolCall = async (context, _signal) => {
     const startedAt = toolStarted.get(context.toolCall.id);
+    console.error('[probe] afterToolCall', context.toolCall.name, 'startedAt=', startedAt !== undefined);
     if (startedAt !== undefined) {
       toolStarted.delete(context.toolCall.id);
       try {
@@ -386,8 +387,9 @@ export async function openPiInstance(options: PiInstanceOptions) {
           isError: context.isError,
           target: toolCallTarget(context.toolCall.name, context.args, { workspace: options.workspace }),
         });
-      } catch {
+      } catch (error) {
         // A sink is an observer of the turn, not a step in it.
+        console.error('[probe] onToolCall threw', error instanceof Error ? error.message : String(error));
       }
     }
     return toolResultSeam(context);

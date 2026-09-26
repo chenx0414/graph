@@ -931,8 +931,9 @@ export function createPiAdapter(options: {
                   instanceId: operation.instanceId!, tool: call.tool, ms: call.ms, isError: call.isError,
                   ...(call.target ? { target: call.target } : {}),
                 });
-              } catch {
+              } catch (error) {
                 // Observed, not executed: recording stays outside the turn's own failure path.
+                console.error('[probe] recordToolCall threw', error instanceof Error ? error.message : String(error));
               }
             },
             workspace, stateDir: join(options.instancesDir, operation.instanceId!),
