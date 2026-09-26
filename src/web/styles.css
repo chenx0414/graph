@@ -2856,6 +2856,11 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .usage-page { display: flex; flex-direction: column; gap: 18px; }
 .usage-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .usage-page-head h2 { margin: 0; font-size: 18px; }
+.tool-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tool-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 8px 16px; border-bottom: 1px solid var(--border-strong); }
+.tool-table td { padding: 8px 16px; border-bottom: 1px solid var(--border-strong); }
+.tool-table tr:last-child td { border-bottom: none; }
+.tool-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .usage-page-head p { margin: 4px 0 0; color: var(--muted); }
 .usage-error { margin-top: -6px; }
 .usage-summary {
