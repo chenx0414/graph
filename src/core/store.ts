@@ -600,8 +600,14 @@ export class TaskStore {
     if (version < 38) this.transaction(() => {
       // Which file a call touched is what makes "this skill was read" observable at all. It rides on
       // the same row so retention and attribution keep working unchanged (NULL when a call has no
-      // single target, e.g. bash).
-      this.db.exec('ALTER TABLE tool_calls ADD COLUMN target TEXT; PRAGMA user_version=38;');
+      // single target, e.g. bash). Guarded by a column check because a fixture can legitimately replay
+      // the migration chain over a database that already has the column (it simulates an old version
+      // by lowering user_version), and a bare ALTER would then abort the whole open.
+      const columns = this.db.prepare('PRAGMA table_info(tool_calls)').all() as { name: string }[];
+      if (!columns.some(column => column.name === 'target')) {
+        this.db.exec('ALTER TABLE tool_calls ADD COLUMN target TEXT;');
+      }
+      this.db.exec('PRAGMA user_version=38;');
     });
   }
 
