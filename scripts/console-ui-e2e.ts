@@ -51,6 +51,9 @@ const state = join(root, 'state');
 const home = join(root, 'graph-home');
 const workspace = join(root, 'project');
 await mkdir(workspace, { recursive: true });
+// A skill the seeded read points at: the 技能使用 section must show what the record proves.
+await mkdir(join(workspace, '.agents', 'skills', 'e2e-skill'), { recursive: true });
+await writeFile(join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md'), '---\nname: e2e-skill\ncreated-by: graph-agent\ndescription: Seeded fixture skill for the console E2E run. Use when the console tool page is asserted.\n---\n');
 await mkdir(home, { recursive: true });
 const config = join(root, 'graph.config.json');
 await writeFile(config, JSON.stringify({ version: 1, projects: [{ id: 'e2e', root: workspace }] }));
@@ -106,10 +109,17 @@ try {
     { tool: 'bash', ms: 120, isError: false },
     { tool: 'bash', ms: 300, isError: true },
     { tool: 'agent_browser', ms: 8_000, isError: false },
+    // One call that touched a skill file: this is what makes the skill show as read.
+    { tool: 'read', ms: 4, isError: false, target: join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md') },
   ];
-  await mkdir(join(state, TOOL_CALL_SPOOL_DIR), { recursive: true });
+  // Seed through the worker spool, not by inserting rows, and at the directory a lane really
+  // writes: a lane receives its own instance directory as its stateDir, so the file sits under it
+  // (the instance id matches the node's, exactly as production does it). Seeding the daemon's own
+  // root instead is what once hid a reader that never looked where the lanes write.
+  const laneDir = join(state, 'instances', 'inst-e2e');
+  await mkdir(join(laneDir, TOOL_CALL_SPOOL_DIR), { recursive: true });
   await writeFile(
-    toolCallSpoolPath(state, 'inst-e2e'),
+    toolCallSpoolPath(laneDir, 'inst-e2e'),
     spooled.map(call => `${JSON.stringify({ instanceId: 'inst-e2e', ...call, at: Date.now() })}\n`).join(''),
   );
 
@@ -132,16 +142,16 @@ try {
   check('页面根节点存在', await pageRoot.count(), 1);
   const summary = await page.getByTestId('tool-stats-summary').innerText();
   checkContains('汇总含「调用次数」', summary, '调用次数');
-  checkContains('汇总含 3 次调用', summary, '3');
+  checkContains('汇总含 4 次调用', summary, '4');
   checkContains('汇总含 1 次失败', summary, '1 次失败');
-  checkContains('成功率为 66.7%', summary, '66.7%');
-  checkContains('平均耗时为 2.8 s', summary, '2.8 s');
+  checkContains('成功率为 75.0%', summary, '75.0%');
+  checkContains('平均耗时为 2.1 s', summary, '2.1 s');
   checkContains('累计耗时 8.4 s', summary, '8.4 s');
 
   const headers = await page.getByTestId('tool-stats-table').locator('th').allInnerTexts();
   check('表头八列', headers, ['工具', '角色', '次数', '失败', '成功率', '平均耗时', '最大耗时', '最近一次']);
   const rows = await page.getByTestId('tool-stats-table').locator('tbody tr').allInnerTexts();
-  check('两行（两个工具）', rows.length, 2);
+  check('三行（三个工具）', rows.length, 3);
   checkContains('bash 行：次数/失败/成功率/平均/最大', rows[0] ?? '', 'bash');
   checkContains('bash 行含 2 次', rows[0] ?? '', '2');
   checkContains('bash 行成功率为 50.0%', rows[0] ?? '', '50.0%');
@@ -150,12 +160,47 @@ try {
   checkContains('第二行是 agent_browser（按调用次数排序）', rows[1] ?? '', 'agent_browser');
   checkContains('agent_browser 成功率 100.0%', rows[1] ?? '', '100.0%');
   checkContains('agent_browser 平均 8.0 s', rows[1] ?? '', '8.0 s');
+  checkContains('第三行是 read（种子的技能读取）', rows[2] ?? '', 'read');
   checkContains('bash 行角色为「主 Agent」', rows[0] ?? '', '主 Agent');
   check('侧栏「问题」徒标计数为 1', await page.locator('.nav-badge').first().innerText(), '1');
+
+  // 技能使用区块：口径文案必须如实写「只统计被读次数」，且真的按技能给出读数。
+  check('技能使用区块存在', await page.getByTestId('skill-usage-summary').count(), 1);
+  checkContains('技能区块写明口径', await page.getByTestId('skill-usage-note').innerText(), '不统计技能是否被实际应用');
+  const skillCells = await page.getByTestId('skill-usage-row-e2e-skill').locator('td').allInnerTexts();
+  check('种子技能的被读次数', skillCells[2], '1');
+  check('种子技能的来源', skillCells[1], '项目');
 
   const shot = join(screenshots, 'tool-stats.png');
   await page.screenshot({ path: shot, fullPage: true });
   console.log(`截图 ${shot}`);
+  // 清空记录：先证明接口真的归零，再分开断言「页面不刷新就回到空态」——这两件事不是一回事，
+  // 合在一句里会把「接口没清」与「界面没重渲染」当成同一个失败（HB-90）。
+  // 「清空记录」先弹原生 confirm：不接手的话弹框行为由浏览器默认决定，断言就不确定。
+  page.on('dialog', dialog => { void dialog.accept(); });
+  await page.getByRole('button', { name: '清空记录' }).click();
+  // 同一刻读两件事：接口的结果与 DOM 的实际状态。它们不一致就是「界面没跟上」，不是接口问题。
+  await page.waitForFunction(() => !document.querySelector('[data-testid="tool-stats-table"]')
+    || document.body.innerText.includes('还没有记录'), undefined, { timeout: 10_000 }).then(() => true, () => false);
+  const after = await page.evaluate(async () => {
+    const body = await fetch('/api/tool-stats', { cache: 'no-store' }).then(response => response.json()) as { stats?: unknown[] };
+    return {
+      apiRows: Array.isArray(body.stats) ? body.stats.length : -1,
+      domHasTable: Boolean(document.querySelector('[data-testid="tool-stats-table"]')),
+      domMentionsEmpty: document.body.innerText.includes('还没有记录'),
+    };
+  });
+  check('清空后接口返回 0 行', after.apiRows, 0);
+  console.log(`       同一刻 DOM：仍有表格=${after.domHasTable}，已显示空态=${after.domMentionsEmpty}`);
+  check('清空后 DOM 不再有表格', after.domHasTable, false);
+
+  // 口径文案只在空态渲染：用 reload 而不是 goto（同一个带 hash 的 URL 不会触发导航）。
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByTestId('tool-stats-page').getByText('还没有记录').waitFor({ timeout: 10_000 });
+  const cleared = await page.getByTestId('tool-stats-page').innerText();
+  checkContains('口径说明写明含并行车道', cleared, '并行车道');
+  check('清空后表格消失', await page.getByTestId('tool-stats-table').count(), 0);
+
   // The decision card: the shape the master's own ask_user question renders as.
   await page.goto(`${url}/#/tasks/hb80-asked`, { waitUntil: 'domcontentloaded' });
   await page.getByTestId('questions').waitFor({ timeout: 10_000 });

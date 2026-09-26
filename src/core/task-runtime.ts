@@ -30,6 +30,9 @@ import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
+import { skillUsage } from '../runtime/skill-usage.ts';
+import { promoteSkillFromProjects } from '../runtime/skill-promotion.ts';
+import { sedimentSettings } from '../runtime/sediment.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
 import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
 import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
@@ -222,6 +225,8 @@ export async function openTaskRuntime(options: {
    * per use instead of from the static options captured at startup. */
   live?: {
     revision(): number;
+    /** The raw config snapshot: the sediment switch is read from here on every turn. */
+    config(): unknown;
     entries(): ModelEntry[];
     preferences(): Partial<Record<ModelEntry['grade'], string[]>>;
     credentialFor(entry: ModelEntry): { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
@@ -392,6 +397,7 @@ export async function openTaskRuntime(options: {
       ...(options.models?.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
       ...(options.live ? { bindingFor: (entry: ModelEntry) => options.live!.credentialFor(entry) } : {}),
       scheduler: modelScheduler,
+      ...(options.live ? { sediment: () => sedimentSettings(options.live!.config()) } : {}),
       ...(options.network ? { network: options.network } : {}),
       ...(options.capabilitySecrets ? { capabilitySecrets: options.capabilitySecrets } : {}),
       channels: {
@@ -2086,6 +2092,37 @@ export async function openTaskRuntime(options: {
         retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS,
         stats: store.toolCallStats(),
       }));
+    },
+    /** Which skills exist for the known projects and the main Agent, and which were read. */
+    skillStats() {
+      ensureOpen();
+      // Worker lanes spool their calls; reading the numbers is when they join the record.
+      return ingestToolCallSpools(store, stateDir).then(() => {
+        const roots = (configuredProjects() ?? []).map(project => project.root).filter(root => typeof root === 'string' && root.trim().length > 0);
+        const main = catalog.listDefinitions().find(item => item.id === 'main');
+        const capabilityRoot = options.catalog?.capabilityRoot;
+        return {
+          generatedAt: Date.now(),
+          retentionDays: TaskStore.TOOL_CALL_RETENTION_DAYS,
+          ...skillUsage({
+            store,
+            ...(roots.length ? { projectRoots: roots } : {}),
+            ...(main && capabilityRoot ? { agentSkillsDir: agentSkillsDir(main.id, resolve(capabilityRoot, '..')) } : {}),
+            ...(capabilityRoot ? { capabilityRoot } : {}),
+          }),
+        };
+      });
+    },
+    /** Promote one project skill into the capability library; binding stays the user's decision. */
+    promoteSkill(skillId: string) {
+      ensureOpen();
+      const capabilityRoot = options.catalog?.capabilityRoot;
+      if (!capabilityRoot) throw new RuntimeError('invalid_config', 'Capability library is unavailable');
+      const roots = (configuredProjects() ?? [])
+        .map(project => project.root)
+        .filter(root => typeof root === 'string' && root.trim().length > 0)
+        .map(root => resolve(root));
+      return promoteSkillFromProjects({ projectRoots: roots, skillId, capabilityRoot });
     },
     /** Drop the recorded tool calls, so a stale sample cannot be read as a fresh one. */
     clearToolCalls() {

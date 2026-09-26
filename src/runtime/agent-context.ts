@@ -55,6 +55,42 @@ export const DEFAULT_PROMPT_SUGGESTION_PROMPT = [
   'If there is no useful next message, return an empty string.',
 ].join(' ');
 
+/**
+ * The review that runs after an operation. It is a *writer's* brief, not a chat prompt: the model
+ * only ever returns a document plus its metadata, and `applySedimentProposal` decides whether it may
+ * be written. Two blocks are lifted straight from how Hermes Agent runs the same review, because they
+ * are the parts that decide whether a skill library stays useful or rots: what a lesson is, and what
+ * must never be captured.
+ */
+export const DEFAULT_SEDIMENT_PROMPT = [
+  'You are reviewing one finished operation of a coding agent, deciding whether it taught something worth keeping as a skill.',
+  'Answer with one JSON object and nothing else:',
+  '{"action":"create"|"update"|"nothing","id":"<lowercase-slug>","description":"<one sentence saying when to use it>","body":"<markdown>","reason":"<one line>"}',
+  'Use "nothing" when the operation taught nothing reusable. That is a real answer, but not the default: an operation that involved a correction, a dead end, or a non-trivial technique usually taught something.',
+  '',
+  'What a skill is: the instructions for doing a class of task the efficient and correct way — the procedure in order, the commands that work, and the pitfalls that cost time.',
+  'A pitfall is a generalizable rule plus one clause of why. Never write PR or issue numbers, dates, or quoted conversation as content: the rule has to stand without the story behind it.',
+  'The same lesson learned twice is ONE rule. If an existing skill already states it, propose "update" for that id and fold it in instead of adding a second copy.',
+  'Do not restate what the environment already teaches every turn (the repository AGENTS.md, tool schemas).',
+  'Fix a skill in place when it is wrong: edit the sentence that misled, do not append "UPDATE: actually…" underneath it.',
+  '',
+  'Signals that warrant a skill (any one of them):',
+  '- the user corrected the approach, the order of steps, or the shape of the result;',
+  '- a non-trivial technique, workaround, or debugging path emerged that a future operation would benefit from;',
+  '- a skill read during this operation turned out to be wrong, incomplete, or outdated.',
+  '',
+  'Never capture (these harden into constraints the agent later cites against itself):',
+  '- environment failures: a missing binary, an uninstalled package, an unconfigured credential, a command that was not found;',
+  '- negative claims about a tool or a feature ("X does not work");',
+  '- transient errors that a retry fixed — the lesson is the retry, not the failure;',
+  '- one-off task narratives;',
+  '- attempts that never worked. If the operation ended without finding a working method, answer "nothing" instead of presenting dead ends as guidance.',
+  '',
+  'Field rules: id is a lowercase slug, at most 60 characters, and names the CLASS of task rather than today\'s incident (never a PR number, a file name, or "fix-X-today").',
+  'description is one sentence, at most 300 characters, and must say when to use the skill ("Use when …").',
+  'body is markdown, at most 20000 characters, and is the skill itself.',
+].join('\n');
+
 export const DEFAULT_COMMON_RULES = [
   // Pi's own rule set, verbatim first: every role reads the native vocabulary before Graph's rules.
   '- Use bash for file operations like ls, rg, find',
@@ -124,7 +160,8 @@ export type AgentStaticPromptKey =
   | 'runtime/main-conversation.md'
   | 'runtime/main-graph.md'
   | 'runtime/worker.md'
-  | 'runtime/prompt-suggestion.md';
+  | 'runtime/prompt-suggestion.md'
+  | 'runtime/sediment.md';
 
 export type AgentPromptKey = AgentStaticPromptKey;
 
@@ -141,6 +178,7 @@ export interface AgentContextDefaults {
   mainGraph?: string;
   worker?: string;
   promptSuggestion?: string;
+  sediment?: string;
 }
 
 export interface AgentPromptDescriptor {
@@ -174,6 +212,7 @@ interface ResolvedAgentContextDefaults {
   mainGraph: string;
   worker: string;
   promptSuggestion: string;
+  sediment: string;
 }
 
 const STATIC_PROMPTS: readonly {
@@ -195,6 +234,7 @@ const STATIC_PROMPTS: readonly {
   { key: 'runtime/main-graph.md', title: '任务图工作流', description: '历史任务图流程；当前版本不再注入 system prompt。', group: 'runtime', fallback: 'mainGraph' },
   { key: 'runtime/worker.md', title: 'Worker 运行规则', description: '普通实现、审查和验证 Agent 每次 operation 注入 system prompt 的 runtime rules。', group: 'runtime', fallback: 'worker' },
   { key: 'runtime/prompt-suggestion.md', title: '输入建议生成', description: '仅主 Agent 回复后生成下一条输入建议的独立模型请求使用。', group: 'runtime', fallback: 'promptSuggestion' },
+  { key: 'runtime/sediment.md', title: '技能沉淀自省', description: '仅在开关开启时，操作收尾后为沉淀技能而发起的独立模型请求使用。', group: 'runtime', fallback: 'sediment' },
 ];
 
 const TOOL_STATE_FILE = 'tools.json';
@@ -343,6 +383,7 @@ export class AgentContextLibrary {
       mainGraph: defaults.mainGraph?.trim() || DEFAULT_MAIN_GRAPH_PROMPT,
       worker: defaults.worker?.trim() || DEFAULT_WORKER_PROMPT,
       promptSuggestion: defaults.promptSuggestion?.trim() || DEFAULT_PROMPT_SUGGESTION_PROMPT,
+      sediment: defaults.sediment?.trim() || DEFAULT_SEDIMENT_PROMPT,
     };
   }
 

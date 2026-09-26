@@ -19,6 +19,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "node scripts/check-floating-promises.mjs",
+    "skills:lint": "node scripts/skills-lint.mjs",
     "test": "vitest run",
     "test:m0": "vitest run tests/m0",
     "test:m1": "vitest run tests/m1",
@@ -40,6 +41,8 @@
     "check:evidence": "node scripts/check-evidence.mjs",
     "check": "node --run typecheck && node --run lint && node --run test && node --run check:evidence",
     "e2e:console": "node scripts/console-ui-e2e.ts",
+    "e2e:sediment": "node scripts/skill-sediment-e2e.ts",
+    "app:verify": "node scripts/app-verify.mjs",
     "app:dev": "electron desktop/main.mjs",
     "app:smoke": "GRAPH_APP_SMOKE=1 electron desktop/main.mjs",
     "app:icons": "node scripts/make-icons.mjs",

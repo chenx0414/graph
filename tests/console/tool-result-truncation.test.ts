@@ -2,7 +2,7 @@ import { test, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { renderToolResult, hoistTruncationNotice } from '../../src/runtime/tool-results.ts';
+import { renderToolResult, hoistTruncationNotice, truncationBanner } from '../../src/runtime/tool-results.ts';
 
 const NOTICE = '[Showing lines 1-2000 of 3400. Use offset=2001 to continue.]';
 const LARGE = `${Array.from({ length: 400 }, (_, i) => `export interface Thing${i} { a: string }`).join('\n')}\n\n${NOTICE}`;
@@ -15,6 +15,15 @@ test('hoists a trailing truncation notice to the front', () => {
   expect(hoisted).toContain('line one');
   // The notice appears once, in front of the content it qualifies.
   expect(hoisted.split(NOTICE).length - 1).toBe(1);
+});
+
+// The third form the SDK uses: one line too large to show at all, with a bash fallback. It is still
+// "you are not seeing the whole thing", so it gets the same banner.
+test('hoists the single-oversized-line notice too', () => {
+  const notice = "[Line 12 is 120.0KB, exceeds 50.0KB limit. Use bash: sed -n '12p' src/big.ts | head -c 51200]";
+  const hoisted = hoistTruncationNotice(`some content\n${notice}`);
+  expect(hoisted.startsWith('[truncated: [Line 12 is')).toBe(true);
+  expect(truncationBanner(`body\n${notice}`)).toBe(`[truncated: ${notice}]`);
 });
 
 // Every other tool result passes through unchanged: this is an annotation, not a rewrite.

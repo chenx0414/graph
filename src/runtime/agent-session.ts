@@ -52,7 +52,7 @@ export interface AgentSessionTurn {
 export interface AgentSessionRequest {
   binding: AgentSessionBinding;
   /** Reporting sink for executed tool calls; the in-process transport forwards it to the instance. */
-  onToolCall?: (call: { tool: string; ms: number; isError: boolean }) => void;
+  onToolCall?: (call: { tool: string; ms: number; isError: boolean; target: string | null }) => void;
   workspace: string;
   stateDir: string;
   model: Model<Api>;

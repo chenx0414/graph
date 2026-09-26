@@ -15,6 +15,7 @@ import { canonicalJson } from '../core/store.ts';
 import { nativeSkillDirs } from './agent-skills.ts';
 import { mcpAdapterBridge } from './mcp-adapter-bridge.ts';
 import { toolResultHook } from './tool-results.ts';
+import { toolCallTarget } from './tool-call-target.ts';
 import type { SendGate } from './controlled-openai.ts';
 
 export interface InstanceBinding {
@@ -57,7 +58,7 @@ export function isExternallyGated(tool: ToolDefinition) {
 export interface PiInstanceOptions {
   binding: InstanceBinding;
   /** Reporting sink for executed tool calls (durable telemetry). A throw here is swallowed. */
-  onToolCall?: (call: { tool: string; ms: number; isError: boolean }) => void;
+  onToolCall?: (call: { tool: string; ms: number; isError: boolean; target: string | null }) => void;
   workspace: string;
   stateDir: string;
   model: Model<Api>;
@@ -379,7 +380,12 @@ export async function openPiInstance(options: PiInstanceOptions) {
     if (startedAt !== undefined) {
       toolStarted.delete(context.toolCall.id);
       try {
-        options.onToolCall?.({ tool: context.toolCall.name, ms: performance.now() - startedAt, isError: context.isError });
+        options.onToolCall?.({
+          tool: context.toolCall.name,
+          ms: performance.now() - startedAt,
+          isError: context.isError,
+          target: toolCallTarget(context.toolCall.name, context.args, { workspace: options.workspace }),
+        });
       } catch {
         // A sink is an observer of the turn, not a step in it.
       }

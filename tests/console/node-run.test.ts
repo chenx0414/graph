@@ -165,6 +165,7 @@ test('a credential slot wait is recorded apart from the run duration', async () 
     models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }], apiKey: '', credentialFor: () => ({ credentialId: 'local', apiKey: 'k', limit: 1 }), modelRuntime: provider.runtime },
     live: {
       revision: () => 0,
+      config: () => ({}),
       entries: () => [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
       preferences: () => ({}),
       credentialFor: () => ({ credentialId: 'local', apiKey: 'k', limit: 1 }),

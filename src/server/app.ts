@@ -309,6 +309,16 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   // Per-tool telemetry the runtime records itself; the console renders it as the 工具 page.
   app.get('/api/tool-stats', async () => runtime.toolCallStats());
   app.post('/api/tool-stats/clear', async () => runtime.clearToolCalls());
+  // Which skills the recorded calls touched: the 工具 page renders this next to the tool numbers.
+  app.get('/api/skill-stats', async () => runtime.skillStats());
+  // Promote a project skill into the capability library (a copy plus a manifest; never a binding).
+  app.post('/api/skills/promote', async request => {
+    const body = request.body as { skillId?: unknown } | undefined;
+    if (typeof body?.skillId !== 'string' || !body.skillId.trim()) {
+      throw new RuntimeError('invalid_input', 'skillId is required');
+    }
+    return runtime.promoteSkill(body.skillId.trim());
+  });
   if (options.config) {
     app.get('/api/config', async () => {
       const { revision, config } = await options.config!.store.snapshot();

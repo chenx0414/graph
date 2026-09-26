@@ -83,3 +83,52 @@ test('an unwritable spool stays silent instead of failing the turn', async () =>
   await expect(spoolToolCall(join(root, 'not-a-dir', 'nested'), 'worker-5', { tool: 'bash', ms: 1, isError: false }))
     .resolves.toBeUndefined();
 });
+
+// Two readers can ask at the same moment — the console fetches the tool numbers and the skill
+// numbers together. The fold must still happen exactly once: a duplicated row doubles every count,
+// and it did before this guard existed.
+test('two concurrent reads fold a spool exactly once', async () => {
+  const { stateDir, store } = open();
+  await spoolToolCall(stateDir, 'worker-6', { tool: 'read', ms: 7, isError: false, target: '/tmp/skill/SKILL.md' });
+  await spoolToolCall(stateDir, 'worker-6', { tool: 'bash', ms: 3, isError: false });
+
+  const [first, second] = await Promise.all([
+    ingestToolCallSpools(store, stateDir),
+    ingestToolCallSpools(store, stateDir),
+  ]);
+
+  expect(store.toolCallStats().reduce((sum, entry) => sum + entry.calls, 0)).toBe(2);
+  expect(first).toBe(2);
+  expect(second).toBe(2);
+  const targets = store.db.prepare('SELECT target FROM tool_calls ORDER BY id').all() as { target: string | null }[];
+  expect(targets).toEqual([{ target: '/tmp/skill/SKILL.md' }, { target: null }]);
+});
+
+// The state directory a worker lane receives is its own instance directory (its session lives
+// there), so that is where its spool lands. Reading only the daemon's own root would report zero
+// for every lane while the samples sit on disk — the whole outward behaviour of a lane's numbers
+// depends on the read knowing both places.
+test('folds a lane spool written inside the instance directory the lane was given', async () => {
+  const { stateDir, store } = open();
+  const instanceDir = join(stateDir, 'instances', 'worker-5');
+  await spoolToolCall(instanceDir, 'worker-5', { tool: 'read', ms: 30, isError: false, target: '/p/.agents/skills/heartbeat/SKILL.md' });
+  await spoolToolCall(instanceDir, 'worker-5', { tool: 'bash', ms: 11, isError: false });
+
+  expect(await ingestToolCallSpools(store, stateDir)).toBe(2);
+  // One convention, one offset: the instance file is not counted again either.
+  expect(await ingestToolCallSpools(store, stateDir)).toBe(0);
+  expect(store.toolCallStats().find(entry => entry.tool === 'read')).toMatchObject({ calls: 1, totalMs: 30 });
+});
+
+// Clearing from the console means the sample is gone, wherever it was written.
+test('clearing the sample also removes what a lane spooled in its instance directory', async () => {
+  const { stateDir, store } = open();
+  await spoolToolCall(join(stateDir, 'instances', 'worker-6'), 'worker-6', { tool: 'bash', ms: 9, isError: false });
+  expect(await ingestToolCallSpools(store, stateDir)).toBe(1);
+  store.clearToolCalls();
+  store.forgetToolCallSpools();
+  await clearToolCallSpools(stateDir);
+
+  expect(await ingestToolCallSpools(store, stateDir)).toBe(0);
+  expect(store.toolCallStats()).toEqual([]);
+});
