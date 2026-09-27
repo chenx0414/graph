@@ -14,6 +14,7 @@ import { digest, recordContextSession } from '../core/context.ts';
 import { inspectResultHandoffSubmission, resultHandoffFromSubmission, resultHandoffRecoveryContext } from '../core/predecessor-handoff.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import { promptImagesFromAttachments } from '../core/attachments.ts';
+import { boundSkills, injectRequestedSkills, requestedSkillNames } from '../core/skill-invocation.ts';
 import type { TaskStore } from '../core/store.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
@@ -1069,7 +1070,25 @@ export function createPiAdapter(options: {
             const userImages = promptImagesFromAttachments(
               (operation.context.messages ?? []).flatMap(message => message.attachments ?? []),
             );
-            const result = await session.prompt(briefing, userImages.length ? userImages : undefined);
+            // A bound skill is knowledge the model cannot call, and a `disable-model-invocation`
+            // skill is not in the system prompt at all: the only way its body reaches a turn is
+            // the user selecting it. Only this turn's own messages are read for the token - a
+            // briefing keeps an earlier turn as standing context and would re-inject it forever.
+            const turnText = (operation.context.messages ?? []).map(message => message.text).filter(text => text.trim()).join('\n');
+            const skillInjection = await injectRequestedSkills(
+              briefing,
+              boundSkills(contextAssembly.bundle.facts, options.catalog),
+              requestedSkillNames(turnText.length ? turnText : briefing),
+            );
+            if (skillInjection.injected.length || skillInjection.rejected.length) {
+              try {
+                options.store.event(operation.taskId, 'skill.invoked', {
+                  operationId: operation.id, nodeId: operation.nodeId,
+                  injected: skillInjection.injected, rejected: skillInjection.rejected,
+                });
+              } catch { /* an audit line must never break the send it describes */ }
+            }
+            const result = await session.prompt(skillInjection.text, userImages.length ? userImages : undefined);
             flushDeltas(true);
             if (gateRefusal) throw gateRefusal;
             // A turn that applied and activated a harness change is the one turn with no assistant reply:
