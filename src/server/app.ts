@@ -658,6 +658,10 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(query.limit ? { limit: Number(query.limit) } : {}),
     });
   });
+  app.get('/api/tasks/:taskId/nodes/:nodeId/prompt', async request => {
+    const params = request.params as { taskId: string; nodeId: string };
+    return runtime.nodePrompt(params.taskId, params.nodeId);
+  });
   app.get('/api/tasks/:taskId/operations', async request => {
     const params = request.params as { taskId: string };
     const query = request.query as { after?: string; before?: string; latest?: string; nodeId?: string; limit?: string };

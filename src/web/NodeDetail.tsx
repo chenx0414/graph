@@ -1,8 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
+import { RecordedPromptPanel } from './PromptPanel.tsx';
 import { describeQuestion, NODE_LABEL, when } from './labels.ts';
 import { costText, ErrorBox, useTaskStream } from './shared.tsx';
-import { Button, Empty, Pill, Spinner, Stat } from './ui.tsx';
+import { Button, Empty, Pill, Spinner, Stat, toast } from './ui.tsx';
+
+interface NodePromptView {
+  nodeId: string;
+  kind: string;
+  action: string;
+  role: string | null;
+  definitionVersion: string | null;
+  model: string | null;
+  status: string;
+  recorded: { operationId: string; at: number; text: string; tools: string | null } | null;
+  briefing: { text: string; sessionFile: string } | null;
+  notes: string[];
+}
 
 export interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
 interface UsageCounts { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; usageSource?: string }
@@ -126,6 +140,12 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
   const [olderSeq, setOlderSeq] = useState<number | null>(null);
   const [olderLoading, setOlderLoading] = useState(false);
   const [error, setError] = useState('');
+  // The recorded prompt is read only when someone asks for it: a node that never sent
+  // has nothing to show, and the panel must not pretend otherwise.
+  const [prompt, setPrompt] = useState<NodePromptView | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [promptError, setPromptError] = useState('');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const entriesRef = useRef<Entry[]>([]);
   const generationRef = useRef(0);
@@ -205,6 +225,30 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
     }
   }
 
+  async function loadPrompt() {
+    setPromptOpen(true);
+    if (prompt || promptLoading) return;
+    setPromptLoading(true);
+    setPromptError('');
+    try {
+      setPrompt(await api<NodePromptView>(`/api/tasks/${taskId}/nodes/${nodeId}/prompt`));
+    } catch (reason) {
+      setPromptError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setPromptLoading(false);
+    }
+  }
+
+  async function copyBriefing() {
+    if (!prompt?.briefing) return;
+    try {
+      await navigator.clipboard.writeText(prompt.briefing.text);
+      toast('简报已复制', 'success');
+    } catch (reason) {
+      toast(`复制失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    }
+  }
+
   if (error && !data) return <ErrorBox message={error} onRetry={refresh} />;
   if (!data) return <Spinner />;
   const timing = data.timing ?? { totalMs: null, runMs: null, waitingMs: 0, pauseMs: null, userWaitMs: null, inProgress: false };
@@ -243,6 +287,56 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
         <Stat label="费用" value={costText(costSummary)} hint={unknownCost ? '存在未知价格调用，未折零' : '按调用时价格快照，分币种合计'} />
         <Stat label="记录" value={entries.length} hint={`${data.entryCount} 条`} />
       </div>
+
+      <section data-testid="node-prompt">
+        <h4 className="section-title">System prompt（该节点实际注入）</h4>
+        {!promptOpen ? (
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <span className="muted">
+              这里显示这个 subagent 真正收到的 system prompt 与它自己会话里的简报，都从台账与会话文件原样读出，不重算。
+            </span>
+            <Button size="sm" data-testid="node-prompt-open" onClick={() => void loadPrompt()}>查看</Button>
+          </div>
+        ) : promptLoading && !prompt ? <Spinner label="正在读取…" /> : promptError ? (
+          <div className="form-error" data-testid="node-prompt-error">{promptError}</div>
+        ) : prompt ? (
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="row" style={{ flexWrap: 'wrap' }}>
+              <span data-testid="node-prompt-role">
+                <Pill tone="accent">
+                  {prompt.role === 'main' ? 'main Agent' : prompt.role === 'reviewer' ? 'reviewer' : prompt.role === 'worker' ? 'worker' : '程序节点'}
+                </Pill>
+              </span>
+              {prompt.definitionVersion && <span className="muted">{prompt.definitionVersion}</span>}
+              {prompt.model && <span className="muted">{prompt.model}</span>}
+            </div>
+            {prompt.notes.length > 0 && (
+              <ul className="list" data-testid="node-prompt-notes">
+                {prompt.notes.map(note => <li key={note} className="muted">{note}</li>)}
+              </ul>
+            )}
+            <RecordedPromptPanel
+              testId="node-prompt-sent"
+              text={prompt.recorded?.text ?? null}
+              tools={prompt.recorded?.tools ?? null}
+              emptyText="这个节点还没有发送过模型请求，台账里没有它的 system prompt。"
+            />
+            {prompt.briefing && (
+              <div className="agent-preview-panel" data-testid="node-briefing">
+                <div className="agent-preview-meta">
+                  <strong>简报（该节点会话的第一条 user 消息）</strong>
+                  <span>{`${prompt.briefing.text.length.toLocaleString()} 字符`}</span>
+                  <Button size="sm" icon="file" onClick={() => void copyBriefing()}>复制简报</Button>
+                </div>
+                <p className="agent-preview-notice">
+                  从该节点自己的会话文件原样读出：<code>{prompt.briefing.sessionFile}</code>。它不是重算的简报，而是那次派发真正带上的那条 user 消息。
+                </p>
+                <pre className="agent-preview-markdown" data-testid="node-briefing-text">{prompt.briefing.text}</pre>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </section>
 
       {data.capabilityDigest && (
         <section>

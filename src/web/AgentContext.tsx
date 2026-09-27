@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api.ts';
+import { RecordedPromptPanel } from './PromptPanel.tsx';
 import { Button, Icon, Pill, Spinner, toast } from './ui.tsx';
 
 type PromptOrigin = 'editable' | 'generated' | 'pi';
@@ -264,44 +265,6 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     }
   }
 
-  async function copyPrompt() {
-    const text = data?.sent?.text;
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      toast('实际发出的 Prompt 已复制', 'success');
-    } catch (reason) {
-      toast(`复制失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
-    }
-  }
-
-  const declarationCount = useMemo(() => {
-    const raw = data?.sent?.tools;
-    if (!raw) return 0;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      return Array.isArray(parsed) ? parsed.length : 0;
-    } catch { return 0; }
-  }, [data?.sent?.tools]);
-
-  // The recorded payload is the SDK's declarations; pretty-print only for reading.
-  const declarationText = useMemo(() => {
-    const raw = data?.sent?.tools;
-    if (!raw) return '';
-    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
-  }, [data?.sent?.tools]);
-
-  async function copyDeclarations() {
-    const text = data?.sent?.tools;
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      toast('实际发送的工具声明已复制', 'success');
-    } catch (reason) {
-      toast(`复制失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
-    }
-  }
-
   const openPromptsFolder = async () => {
     const bridge = window.graph;
     if (!bridge?.openResource) {
@@ -361,40 +324,21 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
               {error && <div className="form-error">{error}</div>}
               <div className="agent-preview-panel" data-testid="agent-context-sent">
                 <div className="agent-preview-meta">
-                  <strong>实际发出（最近一次模型请求）</strong>
                   <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
                   {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
                   <span>源码 Docs <code>{data?.docsRoot}</code></span>
-                  <span>{data?.sent ? `${data.sent.text.length.toLocaleString()} 字符` : '本次会话尚未记录到已发出的请求'}</span>
-                  <Button size="sm" icon="file" disabled={!data?.sent} onClick={() => void copyPrompt()}>
-                    复制 Prompt
-                  </Button>
                 </div>
                 {definitionChanged && (
                   <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
                     当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。
                   </div>
                 )}
-                {data?.sent ? (
-                  <pre className="agent-preview-markdown" data-testid="agent-context-sent-text">{data.sent.text}</pre>
-                ) : (
-                  <p className="agent-preview-notice" data-testid="agent-context-sent-empty">
-                    本次会话尚未记录到已发出的请求：只有真正发起过模型请求的会话才有这一份。
-                  </p>
-                )}
-                {data?.sent?.tools ? (
-                  <div className="agent-preview-panel" data-testid="agent-context-sent-tools">
-                    <div className="agent-preview-meta">
-                      <strong>实际发送的工具声明</strong>
-                      <span>{`${declarationCount.toLocaleString()} 个工具 · ${data.sent.tools.length.toLocaleString()} 字符`}</span>
-                      <Button size="sm" icon="file" onClick={() => void copyDeclarations()}>复制声明</Button>
-                    </div>
-                    <p className="agent-preview-notice">
-                      与上面那份提示词同属<strong>同一次</strong>请求：内容从这次请求体的 tools 字段原样读出（OpenAI 侧为 function 包装、Anthropic 侧为 input_schema），只读、不参与发送，也不会再给模型发第二份。
-                    </p>
-                    <pre className="agent-preview-markdown" data-testid="agent-context-sent-tools-text">{declarationText}</pre>
-                  </div>
-                ) : null}
+                <RecordedPromptPanel
+                  testId="agent-context-sent"
+                  text={data?.sent?.text ?? null}
+                  tools={data?.sent?.tools ?? null}
+                  emptyText="本次会话尚未记录到已发出的请求：只有真正发起过模型请求的会话才有这一份。"
+                />
               </div>
               {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'prompts' ? (
                 <div className="agent-prompt-layout">
