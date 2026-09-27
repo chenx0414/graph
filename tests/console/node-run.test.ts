@@ -228,6 +228,12 @@ test('the node detail API serves the projection over HTTP', async () => {
   expect(body.session?.sessionId).toBeTruthy();
   const missing = await fetch(`${server.url}/api/tasks/${taskId}/nodes/nope/run`, { headers });
   expect(missing.status).toBe(400);
+  // A task that never got a graph has no containers to fall back to: the honest answer is still
+  // "unknown node", not a crash while looking for a container that cannot exist.
+  const fresh = await server.runtime.user.begin({ projectId: 'p', request: 'No graph yet', requestId: 'begin-2' });
+  const bare = await fetch(`${server.url}/api/tasks/${fresh.taskId}/nodes/nope/run`, { headers });
+  expect(bare.status).toBe(400);
+  expect((await bare.json() as { message: string }).message).toContain('Unknown node');
 }, 120_000);
 
 test('a terminal node is not in progress because of a historical not_sent attempt (UC-R13-R1)', async () => {
