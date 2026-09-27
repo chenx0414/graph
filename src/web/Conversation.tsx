@@ -3,7 +3,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
-import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
 import { ArtifactList } from './ArtifactViews.tsx';
 import type { ArtifactRecord } from '../core/artifact-workspace.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
@@ -135,7 +134,6 @@ type ProposalVersion = {
   accepted: boolean;
 };
 type DrawerPage = ConversationDrawerPage;
-type ConversationTab = 'chat' | 'artifacts';
 
 /** `data-resident` marker for a main-column entry that stays visible even with
  * the drawer shut. Keeps the resident list single-sourced in the policy module. */
@@ -558,13 +556,12 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const [drawerSection, setDrawerSection] = useState<ConversationDrawerSection>('draft');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [drawerPage, setDrawerPage] = useState<DrawerPage>(() => defaultDrawerPage());
-  const [conversationTab, setConversationTab] = useState<ConversationTab>('chat');
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
   const [dismissedQueue, setDismissedQueue] = useState<string[]>([]);
   const busy = view?.master?.status === 'preparing' || view?.master?.status === 'running';
-  const transcriptFollow = useTranscriptFollow(conversationTab === 'chat' ? view?.id ?? null : null, Boolean(busy));
+  const transcriptFollow = useTranscriptFollow(view?.id ?? null, Boolean(busy));
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
     // One event usually means several records changed; coalesce the refetches.
@@ -654,16 +651,15 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const enteredScrollRef = useRef(false);
   useEffect(() => {
     const jump = shouldScrollToLatest({
-      tab: conversationTab,
+      tab: 'chat',
       hasMessages: snapshot.messages.length > 0,
       alreadyJumped: enteredScrollRef.current,
     });
-    if (conversationTab !== 'chat') enteredScrollRef.current = false;
     if (!jump) return;
     enteredScrollRef.current = true;
     const frame = requestAnimationFrame(() => transcriptFollow.scrollToLatest('auto'));
     return () => cancelAnimationFrame(frame);
-  }, [conversationTab, snapshot.messages.length, transcriptFollow.scrollToLatest]);
+  }, [snapshot.messages.length, transcriptFollow.scrollToLatest]);
   if (loading && !view) return <div role="status" className="conversation-loading"><Spinner label="正在加载会话…" /></div>;
   if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <div role="status" className="conversation-loading"><Spinner label="正在加载会话…" /></div>;
@@ -907,7 +903,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   /** The header entry: one click opens the drawer on the draft, or on the first
    * task when there is no draft to show. */
   function openDrawerRoot() {
-    setConversationTab('chat');
     if (proposal || activeProposal) {
       setDrawerSection('draft');
       setDrawerPage(defaultDrawerPage());
@@ -988,33 +983,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         </div>
       </header>
 
-      <nav className="conversation-tabs" data-testid="conversation-tabs" role="tablist" aria-label="对话页面">
-        <button
-          type="button"
-          role="tab"
-          className="conversation-tab"
-          data-testid="conversation-tab-chat"
-          data-active={conversationTab === 'chat'}
-          aria-selected={conversationTab === 'chat'}
-          onClick={() => setConversationTab('chat')}
-        >
-          <Icon name="message" size={15} />
-          对话
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="conversation-tab"
-          data-testid="conversation-tab-artifacts"
-          data-active={conversationTab === 'artifacts'}
-          aria-selected={conversationTab === 'artifacts'}
-          onClick={() => setConversationTab('artifacts')}
-        >
-          <Icon name="box" size={15} />
-          共享产物
-        </button>
-      </nav>
-
       <AgentContextBar conversationId={id} />
 
       {paused && (
@@ -1037,9 +1005,10 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         </section>
       )}
 
-      <div className="conversation-body" data-drawer={drawerOpen} data-view={conversationTab} data-resident-panels={residentPanelIds().join(' ')}>
-        {conversationTab === 'chat' ? (
-          <div className="conversation-main">
+      {/* The chat column is the conversation: its artifacts live in the drawer, and a single
+          artifact opens as its own tab. */}
+      <div className="conversation-body" data-drawer={drawerOpen} data-view="chat" data-resident-panels={residentPanelIds().join(' ')}>
+        <div className="conversation-main">
           <div className="conversation-thread-shell">
           <div
             className="conversation-thread"
@@ -1176,9 +1145,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             </div>
           </div>
         </div>
-        ) : (
-          <ArtifactWorkspace conversationId={view.id} projectBound={Boolean(view.projectId)} />
-        )}
 
         <WindowDrawer open={drawerOpen} wide={drawerSection === 'draft' && drawerPage === 'graph'}>
         <aside
@@ -1292,7 +1258,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         records={artifacts}
                         onOpenDetail={record => {
                           const taskId = artifactScopeTaskId ?? tasks[0]?.id ?? record.taskId;
-                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}`;
+                          // The version travels in the address: two scopes can share an artifact id.
+                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}?v=${record.version}`;
                         }}
                       />
                     )}
@@ -1396,7 +1363,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         records={artifacts}
                         onOpenDetail={record => {
                           const taskId = artifactScopeTaskId ?? record.taskId;
-                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}`;
+                          // The version travels in the address: two scopes can share an artifact id.
+                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}?v=${record.version}`;
                         }}
                       />
                     )}

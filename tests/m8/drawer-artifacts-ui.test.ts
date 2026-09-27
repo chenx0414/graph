@@ -121,7 +121,17 @@ test('the drawer shows a task\'s artifacts apart from the project\'s own, and a 
   await page.getByText('只属于这个任务的计划').first().waitFor();
   await page.screenshot({ path: '/tmp/drawer-artifacts-02-detail-tab.png' });
 
-  // Closing that tab goes back to the window the user came from, not to a blank page.
+  // 提升 lives with the artifact it acts on: this tab promotes this version to the project.
+  // The task keeps its own copy - the promoted one is a new version in the project scope.
+  expect(await page.getByTestId('artifact-promote').isVisible()).toBe(true);
+  await page.getByTestId('artifact-promote').click();
+  await page.getByText('已提升到项目共享').waitFor();
+
+  // Closing that tab goes back to the window the user came from, and the drawer now shows the
+  // promoted version under the project group.
   await page.locator('.tab[data-kind="artifact"] .tab-close').first().click();
   await page.getByTestId('conversation').waitFor();
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('task-tab-artifacts').click();
+  await expect.poll(async () => (await rows(project)).length).toBe(2);
 }, 90_000);

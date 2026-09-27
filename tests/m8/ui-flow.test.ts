@@ -93,13 +93,10 @@ test('the console completes the main flow, keeps projects separate, and restores
     nodes: reviewedA.nodes,
   }, 'proposal-a');
   await server.runtime.user.task(taskA).accept({ proposalVersion: 1, targetBranch: 'feature-a', requestId: 'accept-a' });
-  await page.goto(`${server.url}/#/tasks/${taskA}`);
-  await page.getByTestId('proposal').waitFor();
-  expect(await page.getByTestId('proposal').innerText()).toContain('验收项');
-  expect(await page.getByTestId('proposal').innerText()).toContain('检查节点 check');
-  await page.waitForFunction(() => document.querySelector('[data-testid="status"]')?.textContent?.includes('已完成'));
-  await page.getByRole('link', { name: '查看任务图' }).click();
+  // A task opens on its graph now; the node cards carry the state the task page used to print.
+  await page.goto(`${server.url}/#/tasks/${taskA}/graph`);
   await page.getByTestId('graph').waitFor();
+  await page.locator('.node-card[data-node-id="check"][data-status="succeeded"]').waitFor();
   await page.locator('.node-card[data-node-id="implement"][data-status="succeeded"]').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'implement' }).first().click();
   expect(await page.getByTestId('node-detail').innerText()).toContain('实例');
@@ -110,11 +107,14 @@ test('the console completes the main flow, keeps projects separate, and restores
   // A second project and task must not mix data with the first.
   const taskB = (await server.runtime.user.begin({ projectId: 'project-b', request: '任务 B：修复导出', requestId: 'begin-b' })).taskId;
   expect(taskB).not.toBe(taskA);
-  await page.goto(`${server.url}/#/tasks/${taskA}`);
-  await page.waitForFunction(() => document.querySelector('[data-testid="request"]')?.textContent?.includes('任务 A'));
-  await page.goto(`${server.url}/#/tasks/${taskB}`);
-  await page.waitForFunction(() => document.querySelector('[data-testid="request"]')?.textContent?.includes('任务 B'));
-  expect(await page.getByTestId('request').innerText()).not.toContain('任务 A');
+  // Which task is in front is read from its window: the active task-graph tab is named
+  // after the task, so one project's task cannot show up under another's name.
+  const activeGraphTab = '.tab[data-kind="graph"][data-active="true"] .tab-title';
+  await page.goto(`${server.url}/#/tasks/${taskA}/graph`);
+  await page.waitForFunction(selector => document.querySelector(selector)?.textContent?.includes('任务 A'), activeGraphTab);
+  await page.goto(`${server.url}/#/tasks/${taskB}/graph`);
+  await page.waitForFunction(selector => document.querySelector(selector)?.textContent?.includes('任务 B'), activeGraphTab);
+  expect(await page.locator(activeGraphTab).first().innerText()).not.toContain('任务 A');
   // A direct reload of the graph address restores the page.
   await page.goto(`${server.url}/#/tasks/${taskA}/graph`);
   await page.reload();
@@ -172,7 +172,7 @@ test('parallel branches, subgraphs and rework back-edges render and errors are e
   await page.goto(`${server.url}/#/tasks/missing-task`);
   await page.getByTestId('error').waitFor();
   expect(await page.getByTestId('error').innerText()).not.toContain('加载中');
-  await page.route('**/api/tasks/broken-task', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'internal', message: '合成服务器错误' }) }));
+  await page.route('**/api/tasks/broken-task**', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'internal', message: '合成服务器错误' }) }));
   await page.goto(`${server.url}/#/tasks/broken-task`);
   await page.getByTestId('error').waitFor();
   expect(await page.getByTestId('error').innerText()).toContain('合成服务器错误');

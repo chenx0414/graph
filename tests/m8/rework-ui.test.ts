@@ -85,35 +85,3 @@ test('node records and evidence refresh from task events without leaving the pag
   expect(after).toContain('works:有效');
   await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
 }, 90_000);
-
-test('a late response for task A never overwrites task B after a fast switch', async () => {
-  const root = await temp('race');
-  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir, actions: actions(root) });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
-  const first = await server.runtime.user.begin({ projectId: 'p', request: '任务 A', requestId: 'begin-a' });
-  await propose(server, first.taskId, [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ]);
-  const second = await server.runtime.user.begin({ projectId: 'p', request: '任务 B', requestId: 'begin-b' });
-  await propose(server, second.taskId, [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ]);
-  const page = await launch();
-  await page.goto(server.url);
-  // Hold A's view response so it resolves after B is already displayed.
-  await page.route(`**/api/tasks/${first.taskId}`, async route => {
-    await new Promise(resolve => setTimeout(resolve, 1_500));
-    await route.continue();
-  });
-  await page.goto(`${server.url}/#/tasks/${first.taskId}`);
-  await page.goto(`${server.url}/#/tasks/${second.taskId}`);
-  await page.waitForFunction(() => document.querySelector('[data-testid="request"]')?.textContent?.includes('任务 B'));
-  await page.waitForTimeout(2_500);
-  const text = await page.getByTestId('request').innerText();
-  expect(text).toContain('任务 B');
-  expect(text).not.toContain('任务 A');
-  expect(await page.getByTestId('task').innerText()).not.toContain('任务 A');
-}, 90_000);

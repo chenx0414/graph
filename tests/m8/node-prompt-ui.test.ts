@@ -92,12 +92,12 @@ test('the node detail shows the system prompt and briefing the subagent really r
   const page = await launch();
   await page.goto(`${server.url}/#/tasks/${begun.taskId}/graph`);
   await page.getByTestId('graph').waitFor();
+  // A node opens as its own chat tab now: the injected system prompt sits above the transcript.
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
+  await page.getByTestId('open-node-chat-work').click();
   const section = page.getByTestId('node-prompt');
   await section.waitFor();
-  // Nothing is fetched until the panel is opened.
-  expect(await page.getByTestId('node-prompt-sent-text').count()).toBe(0);
-  await page.getByTestId('node-prompt-open').click();
+  // The tab reads the recorded prompt on open; nothing is recomputed or invented.
   await page.getByTestId('node-prompt-sent-text').waitFor({ timeout: 15_000 });
 
   expect(await page.getByTestId('node-prompt-role').innerText()).toContain('worker');
