@@ -228,8 +228,8 @@ export function App() {
   function retitleWorkspaceTab(kind: WorkspaceTabKind, key: string, title: string) {
     setTabs(current => retitleTab(current, tabId(kind, key), title));
   }
-  // A draft's graph fills its window the same way the conversation does.
-  const conversationFirst = pathname === '/' || Boolean(conversationMatch) || Boolean(draftGraphMatch);
+  // A draft's graph and a node's conversation fill their window the way the conversation does.
+  const conversationFirst = pathname === '/' || Boolean(conversationMatch) || Boolean(draftGraphMatch) || Boolean(nodeMatch);
   const settingsPage = pathname === '/settings' || pathname === '/setup';
 
   if (settingsPage) {
@@ -291,18 +291,22 @@ export function App() {
             onClose={closeWorkspaceTab}
             onOpenNew={startNewConversation}
           />
-          <button
-            type="button"
-            className="icon-button drawer-toggle"
-            data-testid="workspace-drawer-toggle"
-            data-open={detailOpen}
-            onClick={() => setDetailOpen(value => !value)}
-            title={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-            aria-label={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-            aria-expanded={detailOpen}
-          >
-            <Icon name="panel-right" size={16} />
-          </button>
+          {/* The bar itself is a window drag region in the desktop app, so everything the user
+              can click has to opt out of it - otherwise the control is draggable, not pressable. */}
+          <div className="workspace-bar-actions">
+            <button
+              type="button"
+              className="icon-button drawer-toggle"
+              data-testid="workspace-drawer-toggle"
+              data-open={detailOpen}
+              onClick={() => setDetailOpen(value => !value)}
+              title={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-label={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+              aria-expanded={detailOpen}
+            >
+              <Icon name="panel-right" size={16} />
+            </button>
+          </div>
         </div>
         {conversationFirst && !conversationMatch && (
           <header className="topbar conversation-topbar">

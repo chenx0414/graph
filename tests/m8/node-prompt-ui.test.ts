@@ -96,6 +96,10 @@ test('the node detail shows the system prompt and briefing the subagent really r
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
   const section = page.getByTestId('node-prompt');
   await section.waitFor();
+  // What the node was told sits above the transcript, collapsed so the chat keeps the room.
+  expect(await section.getAttribute('open')).toBeNull();
+  await section.locator('summary').click();
+  await expect.poll(() => section.getAttribute('open')).not.toBeNull();
   // The tab reads the recorded prompt on open; nothing is recomputed or invented.
   await page.getByTestId('node-prompt-sent-text').waitFor({ timeout: 15_000 });
 

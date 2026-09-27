@@ -3280,6 +3280,9 @@ details.disclosure summary:hover { color: var(--accent); }
   overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-app-region: no-drag;
 }
 .tab-bar::-webkit-scrollbar { display: none; }
+/* The workspace bar is a drag region in the desktop app: a control placed in it is draggable and
+   never receives a click unless it opts out. Keep every interactive child in this group. */
+.workspace-bar-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; -webkit-app-region: no-drag; }
 .tab-new {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;

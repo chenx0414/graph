@@ -354,7 +354,11 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   const chat = page.getByTestId('graph-agent-chat');
   await chat.waitFor();
   expect(await chat.getAttribute('data-page')).toBe('true');
-  expect(await chat.innerText()).toMatch(/Agent 节点对话/i);
+  // The node window is framed like the main chat: one conversation header, one thread.
+  expect(await chat.getAttribute('class')).toContain('conversation-thread-shell');
+  expect(await page.locator('[data-testid="node-chat-tab"] > .conversation-header').count()).toBe(1);
+  expect(await page.locator('[data-testid="node-chat-tab"] .conversation-body .conversation-main .conversation-thread').count()).toBe(1);
+  expect(await page.getByTestId('node-chat-title').innerText()).toContain('work');
   await expect.poll(() => chat.innerText()).toContain('任务说明');
   expect(await chat.innerText()).toContain('实现 README 功能');
   expect(await chat.innerText()).toContain('读取 1 项');

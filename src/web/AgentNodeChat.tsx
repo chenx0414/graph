@@ -147,6 +147,65 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
   }
 
   const status = data?.node.status ?? 'draft';
+  // The rows are the same rows the main chat renders; only the frame differs.
+  const entriesView = (
+    <>
+      {hasOlder && (
+        <Button size="sm" disabled={olderLoading} onClick={() => void loadOlder()}>
+          {olderLoading ? '载入中…' : '载入更早记录'}
+        </Button>
+      )}
+      {!taskId && (
+        <Empty
+          title="尚未派发"
+          hint="确认包含这个 Agent 节点的草稿并开始执行后，才能查看它的对话与工具记录。"
+        />
+      )}
+      {taskId && loading && !data && <Spinner label="正在加载节点对话…" />}
+      {taskId && error && !data && <ErrorBox message={error} onRetry={refresh} />}
+      {taskId && data && !rows.length && (
+        <Empty title="暂无对话记录" hint="节点还没有产生任务说明、工具调用或回复。" />
+      )}
+      {taskId && rows.map(row => (
+        <TranscriptRowView
+          key={row.id}
+          row={row}
+          assistantAuthor={`${agentName} · 回复`}
+          userAuthor="任务说明"
+        />
+      ))}
+    </>
+  );
+
+  // As a window of its own the transcript uses the main chat's classes, so a node's
+  // conversation reads exactly like the conversation it belongs to. The frame (header, the
+  // node's overview and its prompt) belongs to the tab, not to this transcript.
+  if (page) {
+    return (
+      <div className="conversation-thread-shell" data-testid="graph-agent-chat" data-page="true" aria-label={`${agentName} 节点对话`}>
+        <div
+          className="conversation-thread"
+          data-testid="node-message-list"
+          ref={transcriptFollow.threadRef}
+          onScroll={transcriptFollow.onScroll}
+          onWheel={transcriptFollow.onWheel}
+          onTouchStart={transcriptFollow.onTouchStart}
+        >
+          <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
+            {entriesView}
+            <div className="conversation-runway" style={{ height: transcriptFollow.runway }} aria-hidden="true" />
+          </div>
+        </div>
+        {transcriptFollow.showJump && (
+          <button type="button" className="jump-to-latest" data-testid="jump-to-latest" onClick={() => transcriptFollow.scrollToLatest('smooth')}>
+            <Icon name="chevron" size={13} />
+            回到最新
+          </button>
+        )}
+      </div>
+    );
+  }
+
   const frame = (
       <section
         className="agent-chat-window"
@@ -182,30 +241,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
           onTouchStart={transcriptFollow.onTouchStart}
         >
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
-            {hasOlder && (
-              <Button size="sm" disabled={olderLoading} onClick={() => void loadOlder()}>
-                {olderLoading ? '载入中…' : '载入更早记录'}
-              </Button>
-            )}
-            {!taskId && (
-              <Empty
-                title="尚未派发"
-                hint="确认包含这个 Agent 节点的草稿并开始执行后，才能查看它的对话与工具记录。"
-              />
-            )}
-            {taskId && loading && !data && <Spinner label="正在加载节点对话…" />}
-            {taskId && error && !data && <ErrorBox message={error} onRetry={refresh} />}
-            {taskId && data && !rows.length && (
-              <Empty title="暂无对话记录" hint="节点还没有产生任务说明、工具调用或回复。" />
-            )}
-            {taskId && rows.map(row => (
-              <TranscriptRowView
-                key={row.id}
-                row={row}
-                assistantAuthor={`${agentName} · 回复`}
-                userAuthor="任务说明"
-              />
-            ))}
+            {entriesView}
           </div>
         </div>
 
@@ -216,7 +252,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
         </footer>
       </section>
   );
-  return page ? frame : (
+  return (
     <div
       className="agent-chat-layer"
       data-testid="agent-chat-layer"
