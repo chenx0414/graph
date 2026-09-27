@@ -183,9 +183,9 @@ export function App() {
   const questionTotal = openQuestionTotal(tasks);
   // The drawer is a launcher everywhere: outside a conversation it lists the tasks the user can
   // open, split the same way the conversation drawer splits them.
+  // The drawer is a launcher everywhere: outside a conversation it lists the tasks the user can
+  // open, split the same way the conversation drawer splits them.
   const workspaceTasks = splitTasksByLifecycle(tasks);
-  // Where the user is standing decides which project the launcher's index opens on.
-  const currentProjectId = settings?.projects[0]?.id ?? null;
   // Tabs are named from the data the shell already polls: a conversation by its own title, a
   // task by its request. Until that arrives the tab keeps the generic name it opened with.
   const shownTabs = withTitles(tabs, tab => {
@@ -200,6 +200,11 @@ export function App() {
   const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
   // A task's address always means its graph: the separate task page is gone.
   const taskMatch = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname ?? '/');
+  // Where the user is standing decides which project the launcher's index opens on: the task in
+  // the address when there is one, otherwise the first configured project.
+  const currentProjectId = (taskMatch ? tasks.find(task => task.id === taskMatch[1])?.projectId : null)
+    ?? settings?.projects[0]?.id
+    ?? null;
   const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
   const artifactMatch = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname ?? '/');
   const draftGraphMatch = /^\/conversations\/([^/]+)\/graph$/.exec(pathname ?? '/');
