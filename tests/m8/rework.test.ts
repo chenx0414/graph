@@ -753,6 +753,82 @@ async function interruptedRework(check: 'usage' | 'reconcile') {
   expect(completed.operations.some(operation => operation.id === roundOne.id && operation.state === 'succeeded')).toBe(true);
 }
 
+test('the second round of a rework reads the failure, not the briefing its session already holds', async () => {
+  const root = await temp('rework-briefing');
+  const provider = await openaiServer([
+    { text: 'first attempt done' },
+    { text: 'second attempt done' },
+    { text: 'extra' },
+  ]);
+  cleanup.push(() => provider.close());
+  let checks = 0;
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
+      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key' }),
+    },
+    actions: {
+      check: {
+        kind: 'program',
+        prepare: async () => async () => {
+          checks += 1;
+          if (checks === 1) {
+            return { outcome: 'completed', output: { kind: 'verification', outcome: 'rework', subjects: [], reports: [], blockers: [{ id: 'typecheck-failed', reason: 'two type errors in src/a.ts', evidence: [] }] } };
+          }
+          return { outcome: 'completed', output: { passed: true }, evidence: [{ acceptanceId: 'ok', summary: 'synthetic observing check', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] };
+        },
+      },
+    },
+  });
+  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const begun = await server.runtime.user.begin({ projectId: 'p', request: '修掉类型错误', requestId: 'begin' });
+  const userTask = server.runtime.user.task(begun.taskId);
+  await server.runtime.supervisor(begun.taskId).propose({
+    requirementVersion: 1, summary: 'rework briefing',
+    acceptance: [{ id: 'ok', description: '类型检查通过', checkNode: 'check' }],
+    loops: [{ from: 'check', to: 'work' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', input: { files: ['src/a.ts'], focus: '修掉类型错误' } },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
+    ],
+  }, 'proposal');
+  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await server.runtime.host.drive();
+  // The loop sends the node back after the first check asks for a rework, so two worker operations exist and
+  // the second one is a retry in the same session (a loop keeps the node's instance and its session row).
+  await waitFor(async () => checks >= 2, 30_000);
+
+  // Both rounds run in the worker's own session, and the session keeps its history: what a round reads is
+  // its newest user message, so that is what these assertions look at. The first round was briefed in full;
+  // the second one only reads what failed.
+  const latest = (request: unknown) => {
+    const messages = (request as { messages?: { role?: string; content?: unknown }[] }).messages ?? [];
+    const message = messages.filter(candidate => candidate.role === 'user').at(-1);
+    // A user message carries either a string or content blocks; read whichever this transport used.
+    return typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? '');
+  };
+  const messagesOf = (request: unknown) => JSON.stringify((request as { messages?: unknown }).messages ?? '');
+  const briefed = provider.requests.filter(request => messagesOf(request).includes('Your node: work (agent work)'));
+  const reworked = provider.requests.filter(request => messagesOf(request).includes('Rework (attempt 2, same session)'));
+  expect(briefed.length).toBeGreaterThan(0);
+  expect(reworked.length).toBeGreaterThan(0);
+  expect(latest(briefed[0]!)).toContain('Your node: work (agent work)');
+  expect(latest(briefed[0]!)).toContain('files: src/a.ts');
+  expect(latest(briefed[0]!)).toContain('Request: 修掉类型错误');
+  const rework = latest(reworked[0]!);
+  expect(rework).toContain('Rework (attempt 2, same session)');
+  expect(rework).toContain('typecheck-failed');
+  expect(rework).toContain('two type errors in src/a.ts');
+  expect(rework).not.toContain('Your node: work');
+  expect(rework).not.toContain('Task graph');
+  expect(rework).not.toContain('Request:');
+  expect(rework).toContain('Your node, its file list and every confirmed check input are unchanged.');
+}, 120_000);
+
 test('a rework round interrupted for unknown usage continues instead of reusing the previous success', async () => {
   await interruptedRework('usage');
   await interruptedRework('reconcile');
