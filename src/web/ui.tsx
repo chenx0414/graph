@@ -115,7 +115,10 @@ export function Stat({ label, value, hint, tone, progress, testid }: {
 export function Field({ label, hint, error, children }: { label: string; hint?: ReactNode | undefined; error?: string | undefined; children: ReactNode }) {
   return (
     <label className="field">
-      <span className="field-label">{label}{hint && <span className="field-hint"> · {hint}</span>}</span>
+      {/* The hint is its own line, not a tail on the label: sharing the line makes the label wrap into an
+          orphan word in a narrow card, which is exactly how the vendor card read as crowded. */}
+      <span className="field-label">{label}</span>
+      {hint && <span className="field-hint">{hint}</span>}
       {children}
       {error && <span className="field-error" data-testid={`field-error-${label}`}>{error}</span>}
     </label>

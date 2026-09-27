@@ -463,6 +463,49 @@ test('an account whose own key has no value is not reported as resolved', async 
   expect(await page.getByTestId('provider-key-env').innerText()).toContain('GRAPH_OPENCODE_GO_ACCOUNT_2');
 }, 60_000);
 
+test('the vendor card keeps its fields readable instead of crowding them', async () => {
+  const dir = await temp('card-crowding');
+  const stub = await stubProvider();
+  const path = await configFile(dir, stub.baseUrl);
+  const daemon = await startGraphDaemon({
+    configPath: path, stateDir: join(dir, 'state'), webDir, port: 0, mode: 'view',
+    env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET }, log: () => undefined,
+  });
+  cleanup.push(() => daemon.close().catch(() => undefined));
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await page.goto(`${daemon.url}/#/settings`);
+  await page.getByTestId('settings-page').waitFor();
+  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+  await page.getByTestId('provider-platform-opencode-go').click();
+
+  // Two things a person actually needs from this card, both measurable: the variable name they must export
+  // has to be readable in full (an input clips it silently - scrollWidth > clientWidth), and each field's
+  // hint has to sit on its own line instead of wrapping the label into an orphan word.
+  const measured = await page.evaluate(() => {
+    const card = document.querySelector('#settings-credentials') as HTMLElement;
+    const input = card.querySelector('[data-testid="provider-credentialRef"]') as HTMLInputElement;
+    const crowded = [...card.querySelectorAll('.field')].filter(field => {
+      const label = field.querySelector('.field-label') as HTMLElement | null;
+      const hint = field.querySelector('.field-hint') as HTMLElement | null;
+      if (!label || !hint) return false;
+      return hint.getBoundingClientRect().top <= label.getBoundingClientRect().top + 2;
+    });
+    return {
+      envVar: input.value,
+      envFits: input.scrollWidth <= input.clientWidth + 1,
+      envWidth: Math.round(input.getBoundingClientRect().width),
+      sharedLineHints: crowded.length,
+    };
+  });
+  expect(measured.envVar).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
+  expect(measured.envFits).toBe(true);
+  expect(measured.envWidth).toBeGreaterThan(300);
+  expect(measured.sharedLineHints).toBe(0);
+}, 60_000);
+
 test('a supported platform offers an editable account name', async () => {
   const dir = await temp('account-name');
   const stub = await stubProvider();
