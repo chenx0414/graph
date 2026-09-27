@@ -208,7 +208,8 @@ small { color: var(--muted); }
 .card-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .card-body { padding: 16px; }
 .card-body.tight { padding: 10px 16px; }
-.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; /* Fields bottom-align, so one of them carrying a hint line does not push its control a line lower
+   than its neighbours in the same row. */ align-items: end; }
 
 /* ---------- buttons / inputs ---------- */
 

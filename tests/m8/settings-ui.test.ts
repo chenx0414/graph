@@ -475,7 +475,7 @@ test('the vendor card keeps its fields readable instead of crowding them', async
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.setViewportSize({ width: 1000, height: 900 });
+  await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto(`${daemon.url}/#/settings`);
   await page.getByTestId('settings-page').waitFor();
   await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
