@@ -319,7 +319,7 @@ export function NodeRunPanel({ taskId, nodeId, onClose, full }: { taskId: string
               testId="node-prompt-sent"
               text={prompt.recorded?.text ?? null}
               tools={prompt.recorded?.tools ?? null}
-              emptyText="这个节点还没有发送过模型请求，台账里没有它的 system prompt。"
+              emptyText="台账里没有这个节点的发送记录。"
             />
             {prompt.briefing && (
               <div className="agent-preview-panel" data-testid="node-briefing">
