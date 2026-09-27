@@ -12,8 +12,11 @@
  * hardcode its own copy.
  */
 
-/** Drawer pages. Draft-detail pages plus the full task graph and task detail. */
-export type ConversationDrawerPage = 'acceptance' | 'nodes' | 'decisions' | 'graph' | 'task';
+/**
+ * Drawer pages. Exactly two of them: the task graph and the shared artifacts.
+ * Acceptance items, node lists and decisions are deliberately not here.
+ */
+export type ConversationDrawerPage = 'graph' | 'artifacts' | 'task';
 
 /** The drawer's two top-level sections: the draft details and the task list. */
 export type ConversationDrawerSection = 'draft' | 'task';
@@ -60,16 +63,44 @@ export interface DrawerPanelDescriptor {
   id: Exclude<ConversationDrawerPage, 'task'>;
   label: string;
   /** Which testid family the panel keeps, useful for locating it in tests. */
-  panel: 'draft-detail' | 'task-graph';
+  panel: 'task-graph' | 'artifact-list';
 }
 
-/** Draft-detail pages hosted by the drawer, in tab order. */
+/** Draft-detail pages hosted by the drawer, in tab order. The graph is first: it is the default. */
 export const DRAWER_DRAFT_PAGES: readonly DrawerPanelDescriptor[] = [
-  { id: 'acceptance', label: '验收项', panel: 'draft-detail' },
-  { id: 'nodes', label: '节点', panel: 'draft-detail' },
-  { id: 'decisions', label: '决策与约束', panel: 'draft-detail' },
   { id: 'graph', label: '任务图', panel: 'task-graph' },
+  { id: 'artifacts', label: '共享产物', panel: 'artifact-list' },
 ];
+
+/**
+ * Tasks the drawer keeps in view: the ones still waiting for a decision or still
+ * running. Finished work (completed, failed, abandoned, skipped) is tucked away
+ * under its own disclosure instead of crowding the list.
+ */
+const ENDED_TASK_STATUS = ['completed', 'failed', 'abandoned', 'skipped'];
+
+export function isEndedTask(status: string): boolean {
+  return ENDED_TASK_STATUS.includes(status);
+}
+
+export function splitTasksByLifecycle<T extends { status: string }>(tasks: readonly T[]): { active: T[]; ended: T[] } {
+  return {
+    active: tasks.filter(task => !isEndedTask(task.status)),
+    ended: tasks.filter(task => isEndedTask(task.status)),
+  };
+}
+
+/**
+ * Shared artifacts read in two groups: what this task produced, and what belongs
+ * to the project itself (`scope: 'project'` - promoted knowledge such as the
+ * harness backlog, which no single task owns).
+ */
+export function groupArtifacts<T extends { scope: string }>(records: readonly T[]): { own: T[]; project: T[] } {
+  return {
+    own: records.filter(record => record.scope !== 'project'),
+    project: records.filter(record => record.scope === 'project'),
+  };
+}
 
 /** Everything the drawer hosts: the draft versions, the draft pages, the task
  * navigation list with its empty state, one selected task's execution detail
@@ -77,10 +108,8 @@ export const DRAWER_DRAFT_PAGES: readonly DrawerPanelDescriptor[] = [
  * the drawer; none of it may be rendered unconditionally in the chat stream. */
 export const DRAWER_PANEL_IDS = [
   'draft-versions',
-  'acceptance',
-  'nodes',
-  'decisions',
   'graph',
+  'artifacts',
   'task-nav',
   'task',
   'task-empty',
@@ -101,7 +130,6 @@ export const DRAWER_INIT_PANEL_IDS = [
  */
 export const DRAWER_ENTRY_PANEL_IDS = [
   'proposal-draft',
-  'draft-acceptance',
   'draft-graph',
   'accept-branch',
   'confirm-draft',
@@ -134,8 +162,8 @@ export function defaultDrawerOpen(): boolean {
   return false;
 }
 
-export function defaultDrawerPage(): ConversationDrawerPage {
-  return 'acceptance';
+export function defaultDrawerPage(): Exclude<ConversationDrawerPage, 'task'> {
+  return 'graph';
 }
 
 export function drawerPanelIds(): readonly string[] {

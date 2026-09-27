@@ -233,7 +233,6 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('最小可用版');
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
   // The draft graph renders from the same versioned proposal, inside the drawer.
-  await page.getByTestId('draft-graph').click();
   await page.getByTestId('draft-page-graph').waitFor();
   await page.getByTestId('conversation-graph').waitFor();
   await page.screenshot({ path: join(evidence, '02-first-draft.png'), fullPage: true });
@@ -271,8 +270,12 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await includes(page, '执行记录显示');
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('drawer-mode-tasks').click();
-  await page.locator('[data-testid^="conversation-nodes-"]').first().waitFor();
-  expect(await page.locator('[data-testid^="conversation-nodes-"]').first().innerText()).toContain('work');
+  // The task overview keeps the authoritative status and the two entry points to the
+  // windows that show more; the node list itself lives in the task graph now.
+  const taskDetail = page.getByTestId('drawer-task-detail');
+  await taskDetail.waitFor();
+  expect(await taskDetail.innerText()).toContain('状态');
+  expect(await taskDetail.innerText()).toContain('目标分支');
   await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
@@ -282,6 +285,12 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   // record.
   await page.getByTestId('chat-input').fill('第一句说明。');
   await page.getByTestId('chat-input').press('Enter');
+  // Wait for the first prompt to be on the record before typing the second: the
+  // composer's primary control is the pause button while the master is streaming, so
+  // a second keystroke sent into that window toggles pause instead of sending. The
+  // assertion is on the state that must hold, not on a timer.
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="message-user"]')]
+    .some(node => node.textContent?.includes('第一句说明')));
   await page.getByTestId('chat-input').fill('第二句说明。');
   await page.getByTestId('chat-input').press('Enter');
   await includes(page, '两条都收到。');

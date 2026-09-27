@@ -5,7 +5,7 @@ import { Markdown } from './Markdown.tsx';
 import { Empty, Icon, Pill, Spinner, toast } from './ui.tsx';
 
 type ArtifactPage = { artifacts: ArtifactRecord[]; total: number; nextCursor: string | null };
-type ArtifactContent = {
+export type ArtifactContent = {
   artifact: ArtifactRecord;
   text: string | null;
   truncated: boolean;
@@ -23,7 +23,7 @@ function dateLabel(timestamp: number) {
   return new Date(timestamp).toLocaleString();
 }
 
-function ArtifactPreview({ content }: { content: ArtifactContent | null }) {
+export function ArtifactPreview({ content }: { content: ArtifactContent | null }) {
   if (!content) {
     return (
       <div className="artifact-workspace-empty">

@@ -73,13 +73,10 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   await page.getByTestId('sidebar-toggle').click();
   await sidebar.waitFor({ state: 'visible' });
 
-  const mainDetailToggle = page.getByTestId('detail-toggle');
-  await mainDetailToggle.waitFor();
-  await mainDetailToggle.click();
-  await page.getByTestId('detail-drawer').waitFor();
-  expect(await page.getByTestId('detail-empty').innerText()).toContain('暂无详情');
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
-  await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
+  // The new-chat page has nothing to detail, so the shell offers no drawer control for it:
+  // the right drawer belongs to the conversation, which carries its own entry.
+  expect(await page.getByTestId('detail-toggle').count()).toBe(0);
+  expect(await page.locator('[data-testid="detail-drawer"]').count()).toBe(0);
 });
 
 test('conversations archive from the sidebar and restore from settings', async () => {
@@ -118,6 +115,8 @@ test('conversations archive from the sidebar and restore from settings', async (
   await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('需要归档的对话');
 });
 
+// The drawer opens on the task graph, so this test renders React Flow inside the drawer:
+// that is slower than the old cheap first page and gets its own budget.
 test('the right drawer keeps proposal details and node inspection independent from the chat', async () => {
   const root = await temp('drawer');
   const server = await openGraphServer({
@@ -183,8 +182,10 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('第二版增加审查');
-  expect(await page.getByTestId('draft-graph').isVisible()).toBe(true);
-  expect(await page.getByTestId('draft-acceptance').isVisible()).toBe(true);
+  // The drawer keeps exactly two pages and opens on the task graph.
+  expect(await page.getByTestId('draft-tab-graph').isVisible()).toBe(true);
+  expect(await page.getByTestId('draft-tab-artifacts').isVisible()).toBe(true);
+  expect(await page.getByTestId('draft-page-graph').isVisible()).toBe(true);
   expect(await page.getByTestId('accept-branch').isVisible()).toBe(true);
   expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
   await page.waitForTimeout(260);
@@ -213,19 +214,22 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(afterComposer!.y + afterComposer!.height).toBeLessThanOrEqual(720);
   expect(await page.locator('[data-testid="detail-toggle-close"]').count()).toBe(0);
 
-  await page.getByTestId('draft-page-acceptance').waitFor();
-  expect(await page.getByTestId('draft-page-acceptance').innerText()).toContain('独立审查通过');
+  await page.getByTestId('draft-page-graph').waitFor();
+  expect(await page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
   await page.getByTestId('drawer-draft-version-1').click();
   await expect.poll(() => page.getByTestId('drawer-draft-version-1').getAttribute('data-active')).toBe('true');
-  await expect.poll(() => page.getByTestId('draft-page-acceptance').innerText()).toContain('检查通过');
+  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('先做一个最小版本');
 
-  await page.getByTestId('draft-tab-nodes').click();
-  const nodes = await page.getByTestId('draft-page-nodes').innerText();
-  expect(nodes).toContain('work');
-  expect(nodes).toContain('check');
+  // The pages that moved out of the drawer are gone, not merely hidden.
+  for (const gone of ['draft-tab-acceptance', 'draft-tab-nodes', 'draft-tab-decisions']) {
+    expect(await page.getByTestId(gone).count()).toBe(0);
+  }
 
-  await page.getByTestId('draft-tab-decisions').click();
-  await page.getByTestId('draft-decisions-empty').waitFor();
+  // The second page lists this entry's artifacts and the project's own, apart.
+  await page.getByTestId('draft-tab-artifacts').click();
+  await page.getByTestId('draft-page-artifacts').waitFor();
+  expect(await page.getByTestId('drawer-artifacts-project').innerText()).toContain('不属于任何任务');
+  expect(await page.getByTestId('drawer-artifacts-own').innerText()).toContain('本任务的产物');
 
   await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await expect.poll(() => page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
@@ -235,8 +239,10 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
-  await page.getByTestId('draft-graph').click();
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
+  // Back to the active draft: the version table of contents was left on v1 above.
+  await page.getByTestId('drawer-draft-version-2').click();
+  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
   expect(await page.getByTestId('chat-input').count()).toBe(1);
   await page.getByTestId('conversation-graph').waitFor();
@@ -274,7 +280,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
   await page.getByTestId('chat-input').fill('草稿详情已移入右侧抽屉。');
   expect(await page.getByTestId('chat-input').evaluate((element: HTMLInputElement) => element.value)).toBe('草稿详情已移入右侧抽屉。');
-});
+}, 60_000);
 
 test('a graph agent node opens the same chat transcript used by the main agent', async () => {
   const root = await temp('agent-node-chat');
@@ -339,7 +345,6 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
-  await page.getByTestId('draft-graph').click();
   await page.getByTestId('conversation-graph').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
   await page.getByTestId('open-agent-chat').click();

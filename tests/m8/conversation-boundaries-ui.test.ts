@@ -89,15 +89,16 @@ test('the conversation page surfaces master questions, live worker status, costs
   }, 'draft');
   const confirmed = await server.runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
   const drive = server.runtime.host.runReady();
-  const workerStatus = `[data-testid="conversation-nodes-${confirmed.taskId}"] [data-node="work"]`;
-  // The task / node overview lives in the right drawer now, so open it there.
+  // Node state is read where nodes now live: the task graph, opened in its own tab.
+  const workerStatus = `.node-card[data-node-id="work"]`;
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
   await page.getByTestId('drawer-mode-tasks').click();
+  await page.getByTestId(`task-graph-tab-${confirmed.taskId}`).click();
   await page.locator(workerStatus).waitFor();
-  // Neither the draft card nor the task / node overview appears in the chat
-  // thread any more; the drawer is their only home.
+  // Neither the draft card nor the task overview appears in the chat thread any
+  // more; the drawer and the graph tab are their only homes.
   expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
   expect(await page.locator('.conversation-thread-inner [data-testid^="conversation-task-"]').count()).toBe(0);
   await page.waitForFunction(selector => document.querySelector(selector)?.getAttribute('data-status') === 'running', workerStatus);
@@ -114,6 +115,10 @@ test('the conversation page surfaces master questions, live worker status, costs
   for (let index = 0; index < 210; index++) {
     await server.runtime.conversations.chat(created.conversationId, { text: `paged-${String(index).padStart(3, '0')}`, requestId: `paged-${index}` });
   }
+  // Back to the conversation tab the way a user would switch, then reload: the shell
+  // restores whatever route the address carries.
+  await page.locator('.tab[data-kind="conversation"] .tab-open').first().click();
+  await page.getByTestId('conversation').waitFor();
   await page.reload();
   await page.getByTestId('conversation').waitFor();
   await page.waitForFunction(() => document.body.innerText.includes('paged-209'));

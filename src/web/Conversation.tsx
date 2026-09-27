@@ -4,6 +4,8 @@ import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
 import { ArtifactWorkspace } from './ArtifactWorkspace.tsx';
+import { ArtifactList } from './ArtifactViews.tsx';
+import type { ArtifactRecord } from '../core/artifact-workspace.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { attachmentPayload, attachmentImageSource } from './attachments.ts';
 import {
@@ -40,6 +42,7 @@ import {
   isResidentPanel,
   residentPanelIds,
   resolveDrawerSection,
+  splitTasksByLifecycle,
   type ConversationDrawerPage,
   type ConversationDrawerSection,
   type DraftStatus,
@@ -243,6 +246,7 @@ function ProposalDrawer({
   page,
   selectedVersion,
   graphPanel,
+  artifactsPanel,
   onSelectVersion,
   onSelectPage,
 }: {
@@ -251,19 +255,17 @@ function ProposalDrawer({
   page: Exclude<DrawerPage, 'task'>;
   selectedVersion: number;
   graphPanel: ReactNode;
+  artifactsPanel: ReactNode;
   onSelectVersion: (version: number) => void;
   onSelectPage: (page: Exclude<DrawerPage, 'task'>) => void;
 }) {
   const countFor: Record<Exclude<DrawerPage, 'task'>, number> = {
-    acceptance: proposal.spec.acceptance.length,
-    nodes: proposal.spec.nodes.length,
-    decisions: proposal.decisions?.trim() ? 1 : 0,
     graph: proposal.spec.nodes.length,
+    artifacts: 0,
   };
   // Tab set and order come from the drawer policy module so the two cannot
   // drift apart.
   const pages = DRAWER_DRAFT_PAGES.map(item => ({ ...item, count: countFor[item.id] }));
-  const noDecisions = proposal.decisions === null || !proposal.decisions.trim();
   return (
     <>
       <DraftVersionToc history={history} selectedVersion={selectedVersion} onSelectVersion={onSelectVersion} />
@@ -289,46 +291,9 @@ function ProposalDrawer({
             {graphPanel}
           </section>
         )}
-        {page === 'acceptance' && (
-          <section className="drawer-section" data-testid="draft-page-acceptance">
-            <div className="drawer-section-head">
-              <h3>验收项</h3>
-              <span>{proposal.spec.acceptance.length} 项</span>
-            </div>
-            <ul className="list">
-              {proposal.spec.acceptance.map(item => (
-                <li className="list-item" key={item.id}>
-                  <span className="grow"><strong>{item.id}</strong>：{item.description}</span>
-                  <small>检查节点 {item.checkNode}</small>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {page === 'nodes' && (
-          <section className="drawer-section" data-testid="draft-page-nodes">
-            <div className="drawer-section-head">
-              <h3>节点</h3>
-              <span>{proposal.spec.nodes.length} 个</span>
-            </div>
-            <ul className="list">
-              {proposal.spec.nodes.map(node => (
-                <li className="list-item" key={node.id}>
-                  <span className="grow">{node.id} · {node.kind}{node.action ? ` · ${node.action}` : ''}</span>
-                  <small>{node.model ?? ''}{node.definitionVersion ? ` · ${node.definitionVersion}` : ''}{node.dependsOn?.length ? ` · 依赖 ${node.dependsOn.join(',')}` : ''}</small>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {page === 'decisions' && (
-          <section className="drawer-section" data-testid="draft-page-decisions">
-            <div className="drawer-section-head">
-              <h3>决策与约束</h3>
-            </div>
-            {noDecisions
-              ? <p data-testid="draft-decisions-empty" className="muted">主管已声明本任务没有需要传递的决策或约束。</p>
-              : <pre>{proposal.decisions}</pre>}
+        {page === 'artifacts' && (
+          <section className="drawer-section" data-testid="draft-page-artifacts">
+            {artifactsPanel}
           </section>
         )}
       </div>
@@ -628,6 +593,24 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   useEffect(() => {
     if (view?.proposal) setSelectedProposalVersion(view.proposal.version);
   }, [view?.proposal?.version]);
+  // The artifacts page belongs to whatever entry the drawer shows: the selected task, or - while
+  // the draft has no task yet - the conversation itself. The scope task is read from state that
+  // exists before the loading returns, so the hook order never depends on the fetch.
+  const artifactScopeTaskId = drawerSection === 'task' ? selectedTaskId ?? view?.tasks[0]?.id ?? null : null;
+  const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
+  // The task section shows the same two pages as the draft section; only the entry differs.
+  const [taskPage, setTaskPage] = useState<Exclude<ConversationDrawerPage, 'task'>>('graph');
+  useEffect(() => {
+    if (!drawerOpen) return;
+    let cancelled = false;
+    const url = artifactScopeTaskId
+      ? `/api/tasks/${encodeURIComponent(artifactScopeTaskId)}/artifacts?limit=200`
+      : `/api/conversations/${encodeURIComponent(id)}/artifacts?limit=200`;
+    void api<{ artifacts: ArtifactRecord[] }>(url)
+      .then(page => { if (!cancelled) setArtifacts(page.artifacts); })
+      .catch(() => { if (!cancelled) setArtifacts([]); });
+    return () => { cancelled = true; };
+  }, [drawerOpen, artifactScopeTaskId, id]);
   useEffect(() => {
     setSelectedGraphNodeId(null);
   }, [selectedProposalVersion]);
@@ -905,6 +888,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     : activeProposal
       ? `草稿 v${activeProposal.version}`
       : activeProposalSummary ? `草稿 v${activeProposalSummary.version}` : '草稿';
+  // What the drawer keeps in view: the pending draft and the running tasks; finished work is
+  // tucked into a disclosure instead of crowding the list.
+  const taskLifecycle = splitTasksByLifecycle(tasks);
   const hasDrawerContent = drawerSection === 'draft' ? Boolean(activeProposal) : Boolean(detailTask);
   const activeProposalVersion = selectedProposalVersion ?? activeProposal?.version ?? null;
   const graphRuntimeTaskId = activeProposalVersion === null
@@ -918,13 +904,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     unlimited: Boolean(view.usage.unlimited),
     openQuestions: masterQuestions.length + tasks.reduce((count, task) => count + task.openQuestions.length, 0),
   };
-  function openProposalDrawer(page: Exclude<DrawerPage, 'task'>, version = proposal?.version) {
-    setConversationTab('chat');
-    setDrawerSection('draft');
-    setDrawerPage(page);
-    if (version) setSelectedProposalVersion(version);
-    onDrawerOpenChange(true);
-  }
   /** The header entry: one click opens the drawer on the draft, or on the first
    * task when there is no draft to show. */
   function openDrawerRoot() {
@@ -932,12 +911,12 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
     if (proposal || activeProposal) {
       setDrawerSection('draft');
       setDrawerPage(defaultDrawerPage());
-    } else if (tasks[0]) {
-      setDrawerSection('task');
-      setSelectedTaskId(tasks[0].id);
-      setDrawerPage('task');
     } else {
-      setDrawerSection('draft');
+      // No draft to show: the drawer opens on the task section, which always has the two pages -
+      // the shared artifacts exist whether or not a task does.
+      setDrawerSection('task');
+      if (tasks[0]) setSelectedTaskId(tasks[0].id);
+      setTaskPage('graph');
     }
     onDrawerOpenChange(true);
   }
@@ -1265,9 +1244,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
 
             {drawerOpen && drawerSection === 'draft' && activeProposal && (
               <section className="drawer-section drawer-draft-card" data-testid="proposal-draft" data-resident={residentFlag('proposal-draft')}>
-                {drawerPage !== 'graph' && (
-                  <>
-                    <div className="drawer-draft-head">
+                <div className="drawer-draft-head">
                       <div className="grow">
                         <div className="drawer-draft-title">草稿 v{activeProposal.version}</div>
                         <div className="drawer-draft-summary" data-testid="drawer-draft-summary">{activeProposal.spec.summary}</div>
@@ -1275,16 +1252,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                       <Pill tone={activeProposal.stale ? 'warn' : acceptedVersions.has(activeProposal.version) ? 'success' : 'info'}>
                         {activeProposal.stale ? '需重新讨论' : acceptedVersions.has(activeProposal.version) ? `已确认草稿 v${activeProposal.version}` : '待确认'}
                       </Pill>
-                    </div>
-                    <div className="thread-card-actions">
-                      <button type="button" className="summary-graph-preview" data-testid="draft-graph" data-resident={residentFlag('draft-graph')} onClick={() => openProposalDrawer('graph')}>
-                        <Icon name="graph" size={14} />
-                        任务图 · {activeProposal.spec.nodes.length} 个节点
-                      </button>
-                      <button type="button" className="summary-graph-preview" data-testid="draft-acceptance" data-resident={residentFlag('draft-acceptance')} onClick={() => openProposalDrawer('acceptance')}>
-                        <Icon name="check" size={14} />
-                        验收项 · {activeProposal.spec.acceptance.length}
-                      </button>
                     </div>
                     {activeProposal.stale && <p data-testid="draft-stale" className="muted">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}
                     {acceptedVersions.has(activeProposal.version) && <p data-testid="draft-accepted" className="muted">已确认草稿 v{activeProposal.version}，执行状态见任务导航。</p>}
@@ -1303,13 +1270,11 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         </div>
                       </>
                     )}
-                  </>
-                )}
                 <div className="drawer-draft-pages">
                   <ProposalDrawer
                     proposal={activeProposal}
                     history={proposalHistory}
-                    page={drawerPage === 'task' ? 'acceptance' : drawerPage}
+                    page={drawerPage === 'task' ? 'graph' : drawerPage}
                     selectedVersion={selectedProposalVersion ?? activeProposal.version}
                     graphPanel={(
                       <ConversationGraphBoard
@@ -1320,6 +1285,15 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         runtimeTaskId={graphRuntimeTaskId}
                         state={graphState}
                         onSelectNode={setSelectedGraphNodeId}
+                      />
+                    )}
+                    artifactsPanel={(
+                      <ArtifactList
+                        records={artifacts}
+                        onOpenDetail={record => {
+                          const taskId = artifactScopeTaskId ?? tasks[0]?.id ?? record.taskId;
+                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}`;
+                        }}
                       />
                     )}
                     onSelectVersion={setSelectedProposalVersion}
@@ -1345,8 +1319,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                   </div>
                 )}
                 {tasks.length > 0 && (
-                  <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="全部任务">
-                    {tasks.map(task => (
+                  <>
+                  <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="待确认与进行中的任务">
+                    {taskLifecycle.active.map(task => (
                       <button
                         key={task.id}
                         type="button"
@@ -1360,29 +1335,71 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
                       </button>
                     ))}
+                    {!taskLifecycle.active.length && <p className="muted" data-testid="no-active-tasks">没有待确认或正在跑的任务。</p>}
                   </nav>
+                  {taskLifecycle.ended.length > 0 && (
+                    <details className="drawer-task-ended" data-testid="drawer-task-ended">
+                      <summary data-testid="drawer-task-ended-summary">已收纳 {taskLifecycle.ended.length} 个已完成/已终止的任务</summary>
+                      <nav className="drawer-task-nav" aria-label="已结束的任务">
+                        {taskLifecycle.ended.map(task => (
+                          <button
+                            key={task.id}
+                            type="button"
+                            className="drawer-task-nav-item"
+                            data-testid={`conversation-task-${task.id}`}
+                            data-active={task.id === detailTask?.id}
+                            aria-pressed={task.id === detailTask?.id}
+                            onClick={() => setSelectedTaskId(task.id)}
+                          >
+                            <span className="grow truncate">{task.request}</span>
+                            <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
+                          </button>
+                        ))}
+                      </nav>
+                    </details>
+                  )}
+                  </>
                 )}
-                {detailTask && (
+                {(detailTask || !tasks.length) && (
                   <div className="drawer-task-detail" data-testid="drawer-task-detail">
-                    <dl className="kv">
-                      <dt>状态</dt><dd>{TASK_LABEL[detailTask.status] ?? detailTask.status}</dd>
-                      <dt>目标分支</dt><dd>{detailTask.targetBranch ?? '未确认'}</dd>
-                      <dt>集成提交</dt><dd className="mono">{detailTask.integrationSha ?? '尚无'}</dd>
-                      <dt>费用</dt><dd>{costText(detailTask.cost)}</dd>
-                    </dl>
-                    <ul className="node-summary-list" data-testid={`conversation-nodes-${detailTask.id}`} style={{ marginTop: 12 }}>
-                      {detailTask.nodes.map(node => (
-                        <li key={node.id} data-node={node.id} data-status={node.status}>
-                          <span className="dot" data-tone={NODE_TONE[node.status] ?? 'neutral'} />
-                          <a href={`#/tasks/${detailTask.id}/nodes/${node.id}`} data-testid={`conversation-node-link-${detailTask.id}-${node.id}`}>{node.id}</a>
-                          <span>{NODE_LABEL[node.status] ?? node.status}</span>
-                        </li>
+                    <nav className="drawer-page-tabs" data-testid="task-page-tabs" aria-label="任务页面">
+                      {DRAWER_DRAFT_PAGES.map(item => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="drawer-page-tab"
+                          data-testid={`task-tab-${item.id}`}
+                          data-active={taskPage === item.id}
+                          onClick={() => setTaskPage(item.id)}
+                          aria-current={taskPage === item.id ? 'page' : undefined}
+                        >
+                          <span>{item.label}</span>
+                        </button>
                       ))}
-                    </ul>
-                    <div className="row" style={{ marginTop: 12 }}>
-                      <a className="btn btn-sm" href={`#/tasks/${detailTask.id}`}>打开任务</a>
-                      <a className="btn btn-sm" href={`#/tasks/${detailTask.id}/graph`}>打开任务图</a>
-                    </div>
+                    </nav>
+                    {taskPage === 'graph' ? (
+                      detailTask ? (
+                        <>
+                          <dl className="kv">
+                            <dt>状态</dt><dd>{TASK_LABEL[detailTask.status] ?? detailTask.status}</dd>
+                            <dt>目标分支</dt><dd>{detailTask.targetBranch ?? '未确认'}</dd>
+                            <dt>集成提交</dt><dd className="mono">{detailTask.integrationSha ?? '尚无'}</dd>
+                            <dt>费用</dt><dd>{costText(detailTask.cost)}</dd>
+                          </dl>
+                          <div className="row" style={{ marginTop: 12 }}>
+                            <a className="btn btn-sm" href={`#/tasks/${detailTask.id}/graph`} data-testid={`task-graph-tab-${detailTask.id}`}>查看任务图</a>
+                          </div>
+                        </>
+                      ) : <p className="muted" data-testid="no-task-graph">还没有任务图；确认草稿后这里会显示执行中的图。</p>
+                    ) : (
+                      <ArtifactList
+                        records={artifacts}
+                        onOpenDetail={record => {
+                          const taskId = artifactScopeTaskId ?? record.taskId;
+                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}`;
+                        }}
+                      />
+                    )}
                   </div>
                 )}
               </section>
