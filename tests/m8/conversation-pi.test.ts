@@ -432,7 +432,6 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   const agentContext = openAgentContextLibrary(join(root, 'prompts'), { identity: 'Default identity' });
   await agentContext.ensure();
   await agentContext.savePrompt('agents/main.md', 'MAIN IDENTITY SENTINEL');
-  await agentContext.savePrompt('runtime/main-conversation.md', 'CONVERSATION SENTINEL {{fullAccessInstruction}}');
   await agentContext.setDisabledTools(['ls', 'write']);
 
   const runtime = await openTaskRuntime({
@@ -468,7 +467,6 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   expect(providerRequest).toContain('MAIN IDENTITY SENTINEL');
   expect(providerRequest).toContain('<rules>');
   expect(providerRequest).not.toContain('<workflow>');
-  expect(providerRequest).not.toContain('CONVERSATION SENTINEL');
   expect(providerRequest).toContain('<docs>');
   // What the model can call travels in the request's tool list, and the Pi session
   // appends the project context, its skills block and the working directory. Graph
@@ -481,7 +479,7 @@ test('editable prompt files and Main Agent tool selection apply to the next oper
   }
   expect(providerRequest).not.toContain('- read: Read file contents');
   expect(providerRequest).toContain('<cwd>');
-  expect(user).not.toContain('CONVERSATION SENTINEL');
+  expect(user).not.toContain('MAIN IDENTITY SENTINEL');
 }, 120_000);
 
 test('the console can show the prompt and the tool declarations one request carried, each exactly once', async () => {

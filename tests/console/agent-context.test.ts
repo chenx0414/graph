@@ -44,23 +44,23 @@ test('the Agent context library exposes defaults, saves overrides, and renders b
   const root = await temp();
   const library = openAgentContextLibrary(root, {
     identity: 'Default Main identity',
-    mainGraph: 'Models: {{models}}; requirement {{requirementVersion}}',
+    sediment: 'Models: {{models}}; requirement {{requirementVersion}}',
   });
   await library.ensure();
 
   const initial = await library.view({ models: 'local', requirementVersion: '7' });
   const main = initial.prompts.find(prompt => prompt.key === 'agents/main.md');
-  const graph = initial.prompts.find(prompt => prompt.key === 'runtime/main-graph.md');
+  const graph = initial.prompts.find(prompt => prompt.key === 'runtime/sediment.md');
   expect(main).toMatchObject({ content: 'Default Main identity', customized: false });
   expect(graph).toMatchObject({ content: 'Models: local; requirement 7', customized: false });
   expect(await readFile(join(root, 'agents/main.md'), 'utf8')).toBe('Default Main identity\n');
-  expect(await readFile(join(root, 'runtime/main-graph.md'), 'utf8')).toBe('Models: {{models}}; requirement {{requirementVersion}}\n');
+  expect(await readFile(join(root, 'runtime/sediment.md'), 'utf8')).toBe('Models: {{models}}; requirement {{requirementVersion}}\n');
 
-  await library.savePrompt('runtime/main-graph.md', 'Use {{models}} for requirement {{requirementVersion}}.');
-  expect(await library.prompt('runtime/main-graph.md', { models: 'x', requirementVersion: '8' }))
+  await library.savePrompt('runtime/sediment.md', 'Use {{models}} for requirement {{requirementVersion}}.');
+  expect(await library.prompt('runtime/sediment.md', { models: 'x', requirementVersion: '8' }))
     .toBe('Use x for requirement 8.');
-  expect(await readFile(join(root, 'runtime/main-graph.md'), 'utf8')).toBe('Use {{models}} for requirement {{requirementVersion}}.\n');
-  expect((await library.view({ models: 'local', requirementVersion: '7' })).prompts.find(prompt => prompt.key === 'runtime/main-graph.md'))
+  expect(await readFile(join(root, 'runtime/sediment.md'), 'utf8')).toBe('Use {{models}} for requirement {{requirementVersion}}.\n');
+  expect((await library.view({ models: 'local', requirementVersion: '7' })).prompts.find(prompt => prompt.key === 'runtime/sediment.md'))
     .toMatchObject({ customized: true });
 });
 
@@ -168,8 +168,6 @@ test('unchanged legacy rule defaults migrate to the compact rule set', async () 
   await mkdir(join(root, 'runtime'), { recursive: true, mode: 0o700 });
   await writeFile(join(root, 'rules/common.md'), 'Use tool results as evidence.\n');
   await writeFile(join(root, 'rules/main.md'), 'Recipe names use a readable identity plus role, such as `Bob_coder` or `Alice_reviewer`; preserve that name when presenting an Agent and pair it with the stable recipe id.\n');
-  await writeFile(join(root, 'runtime/main-conversation.md'), 'Use list_agent_combinations/get_agent_combination. Recipe names use a human-readable identity plus role, such as Bob_coder or Alice_reviewer; preserve that name when presenting the Agent and pair it with the stable recipe id. Call get_agent_combination with the recipe id only.\n');
-  await writeFile(join(root, 'runtime/main-graph.md'), 'Submit the graph.\n{{selfModelSection}}\n');
 
   const library = openAgentContextLibrary(root);
   await library.ensure();
@@ -179,8 +177,6 @@ test('unchanged legacy rule defaults migrate to the compact rule set', async () 
   expect(await library.prompt('rules/common.md')).toContain('- Use bash for file operations like ls, rg, find');
   expect(await library.prompt('rules/common.md')).toContain('- R27 Test level (high level first)');
   expect(await library.prompt('rules/main.md')).toContain('R14 When one node stays blocked for three rounds');
-  expect(await library.prompt('runtime/main-conversation.md')).not.toContain('Recipe names use');
-  expect(await library.prompt('runtime/main-graph.md')).not.toContain('selfModelSection');
 });
 
 test('unknown prompt keys and invalid tool names are refused', async () => {
