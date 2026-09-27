@@ -85,6 +85,9 @@ export interface ArtifactQuery {
   cursor?: string;
 }
 
+/** A listing query that does not name a task: everything but `taskId`. */
+export type ProjectArtifactQuery = Omit<ArtifactQuery, 'taskId'>;
+
 export interface ArtifactPage {
   artifacts: ArtifactRecord[];
   nextCursor: string | null;
@@ -440,10 +443,23 @@ export class ArtifactWorkspace {
     return record;
   }
 
+  /**
+   * Artifacts that belong to a project rather than to one task: what promotion puts in project
+   * scope. Listing never touches an artifact's bytes, so it needs no task context - reading the
+   * content still does, and that is what `read` requires.
+   */
+  listProject(projectId: string, input: ProjectArtifactQuery = {}): ArtifactPage {
+    return this.page(['(scope=\'project\' AND owner_id=?)'], [projectId], input);
+  }
+
   list(input: ArtifactQuery): ArtifactPage {
     const task = this.store.task(input.taskId);
     const conditions = ['((scope=\'task\' AND owner_id=?)' + (task.project_id ? ' OR (scope=\'project\' AND project_id=?)' : '') + ')'];
     const params: unknown[] = task.project_id ? [input.taskId, task.project_id] : [input.taskId];
+    return this.page(conditions, params, input);
+  }
+
+  private page(conditions: string[], params: unknown[], input: ProjectArtifactQuery): ArtifactPage {
     if (input.namespace) { conditions.push('namespace=?'); params.push(slug(input.namespace, 'namespace')); }
     if (input.prefix) { conditions.push('name LIKE ?'); params.push(`${slug(input.prefix, 'prefix')}%`); }
     if (input.schema) {
@@ -478,16 +494,23 @@ export class ArtifactWorkspace {
     };
   }
 
-  get(taskId: string, artifactId: string, version?: number) {
+  /**
+   * One artifact version. Promotion mints a new artifact identity, so a version is unambiguous in
+   * practice; the optional scope is for callers that came from a named row and want to say so
+   * rather than rely on that.
+   */
+  get(taskId: string, artifactId: string, version?: number, scope?: 'task' | 'project') {
+    const scoped = scope ? ' AND scope=?' : '';
+    const tail = scope ? [artifactId, scope] : [artifactId];
     const row = version === undefined
-      ? this.store.db.prepare('SELECT * FROM artifacts WHERE artifact_id=? ORDER BY version DESC LIMIT 1').get(artifactId)
-      : this.store.db.prepare('SELECT * FROM artifacts WHERE artifact_id=? AND version=?').get(artifactId, version);
+      ? this.store.db.prepare(`SELECT * FROM artifacts WHERE artifact_id=?${scoped} ORDER BY version DESC LIMIT 1`).get(...tail as never[])
+      : this.store.db.prepare(`SELECT * FROM artifacts WHERE artifact_id=? AND version=?${scoped} ORDER BY CASE scope WHEN 'task' THEN 0 ELSE 1 END LIMIT 1`).get(...(scope ? [artifactId, version, scope] : [artifactId, version]) as never[]);
     if (!row) throw new RuntimeError('not_found', 'Artifact not found');
     return this.assertScope(mapArtifact(row as Record<string, unknown>), taskId);
   }
 
-  async read(taskId: string, artifactId: string, version: number, maxBytes = 262_144) {
-    const record = this.get(taskId, artifactId, version);
+  async read(taskId: string, artifactId: string, version: number, maxBytes = 262_144, scope?: 'task' | 'project') {
+    const record = this.get(taskId, artifactId, version, scope);
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 4 * 1024 * 1024) {
       throw new RuntimeError('invalid_artifact', 'maxBytes must be between 1 byte and 4 MiB');
     }

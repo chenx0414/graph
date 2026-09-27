@@ -73,7 +73,8 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   expect(await page.locator('.node-card[data-node-id="implement"]').getAttribute('data-node-type')).toBe('agent');
   expect(await page.locator('.node-card[data-node-id="check"]').getAttribute('data-node-type')).toBe('tool');
   await implement.click();
-  expect(await page.getByTestId('node-detail').innerText()).toContain('implement');
+  // Clicking a node opens its own window; the overview there names the node.
+  expect(await page.getByTestId('node-overview').innerText()).toContain('implement');
 }, 60_000);
 
 test('the Agent combination library renders and compiles recipes over filesystem capabilities', async () => {

@@ -99,9 +99,10 @@ test('the console completes the main flow, keeps projects separate, and restores
   await page.locator('.node-card[data-node-id="check"][data-status="succeeded"]').waitFor();
   await page.locator('.node-card[data-node-id="implement"][data-status="succeeded"]').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'implement' }).first().click();
-  expect(await page.getByTestId('node-detail').innerText()).toContain('实例');
-  await page.locator('.react-flow__node').filter({ hasText: 'check' }).first().click();
-  expect(await page.getByTestId('node-detail').innerText()).toContain('works:有效');
+  // A node opens its own tab; the overview states what it is, and the graph keeps the state.
+  await expect.poll(() => page.getByTestId('node-overview').innerText()).toContain('implement');
+  await page.locator('.tab[data-kind="node"] .tab-close').first().click();
+  await page.locator('.node-card[data-node-id="implement"][data-status="succeeded"]').waitFor();
   await page.getByTestId('legend').waitFor();
 
   // A second project and task must not mix data with the first.

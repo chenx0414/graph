@@ -23,7 +23,6 @@ import { ComposerTelemetry, type ComposerTelemetryView } from './ComposerTelemet
 import { defaultThinkingOption } from './thinking-levels.ts';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
-import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { NodeChatTab } from './NodeDetail.tsx';
 import { ConversationPanel, type ConversationSummary, type GraphAgentDetail } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
@@ -91,8 +90,6 @@ export type Settings_ = {
   agentCombinationFile?: string | null;
   agentCombinationError?: string | null;
 };
-type Limits = { active: Record<string, number>; queued: Record<string, number> };
-type OperationRow = { id: string; nodeId: string; state: string; reserved: number; workerActive: boolean; result: { output?: unknown } | null; durationMs?: number };
 type GraphPayload = {
   nodes: NodeView[];
   containers: { id: string; parent?: string; nodes: string[] }[];
@@ -118,26 +115,9 @@ function statusText(view: TaskView) {
   return TASK_LABEL[view.status] ?? view.status;
 }
 
-function useLimits() {
-  const { data, reload } = useAsync(() => api<Limits>('/api/limits'), []);
-  useEffect(() => {
-    const timer = setInterval(reload, 500);
-    return () => clearInterval(timer);
-  }, [reload]);
-  return data;
-}
 
 /** A preparing node whose credential has requests waiting is waiting for a
  * model slot, not executing on the provider. */
-function waitingForSlot(node: { selectedModel?: string; status: string }, settings: Settings_ | null, limits: Limits | null, limitAliases?: Record<string, string>) {
-  if (!node.selectedModel || !limits) return false;
-  if (['succeeded', 'skipped', 'failed', 'pending', 'blocked'].includes(node.status)) return false;
-  const credentialId = settings?.models.find(model => model.id === node.selectedModel)?.credentialId;
-  if (!credentialId) return false;
-  // Aliases resolving to the same actual key share one scheduling identity.
-  const canonical = limitAliases?.[credentialId] ?? credentialId;
-  return (limits.queued[canonical] ?? 0) > 0;
-}
 
 function route() {
   const hash = location.hash.replace(/^#/, '') || '/';
@@ -728,35 +708,26 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
 
 function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_ | null; startup: Startup | null }) {
   const { data: graph, error, loading, reload } = useAsync(() => api<GraphPayload>(`/api/tasks/${id}/graph`), [id]);
-  const limits = useLimits();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Clicking a node opens its chat tab: the node's own window is where its transcript and
+  // overview live, so the graph does not grow a second, thinner copy of them.
   const [selected, setSelected] = useState<string | null>(null);
-  const [chatNode, setChatNode] = useState<string | null>(null);
-  const [opsBefore, setOpsBefore] = useState<string | undefined>(undefined);
-  useEffect(() => setOpsBefore(undefined), [id, selected]);
-  const { data: ops, reload: reloadOps } = useAsync(() => api<OperationRow[]>(
-    `/api/tasks/${id}/operations?limit=20&latest=true${selected ? `&nodeId=${encodeURIComponent(selected)}` : ''}${opsBefore ? `&before=${encodeURIComponent(opsBefore)}` : ''}`,
-  ), [id, selected, opsBefore]);
+  function openNode(nodeId: string) {
+    location.hash = `#/tasks/${id}/nodes/${nodeId}`;
+  }
   const { data: view, reload: reloadView } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshAll = useCallback(() => {
     // One task event usually means several records changed; coalesce them.
     clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => { reload(); reloadView(); reloadOps(); }, 150);
-  }, [reload, reloadView, reloadOps]);
+    refreshTimer.current = setTimeout(() => { reload(); reloadView(); }, 150);
+  }, [reload, reloadView]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
   const connected = useTaskStream(id, refreshAll);
   if (loading && !graph) return <Card><Spinner /></Card>;
   if (error && !graph) return <ErrorBox message={error} onRetry={reload} />;
   if (!graph) return <Card><Spinner /></Card>;
   const selectedNode = graph.nodes.find(node => node.id === selected);
-  const chatTarget = chatNode ? graph.nodes.find(node => node.id === chatNode) : undefined;
-  const nodeEvidence = view?.evidence?.filter(item => item.nodeId === selected) ?? [];
-  const nodeOperations = (ops ?? []).filter(item => item.nodeId === selected);
-  const nodeWaiting = selectedNode ? waitingForSlot(selectedNode, settings, limits, startup?.limitAliases) : false;
-  const graphDuration = (value: number | null | undefined) => value === null || value === undefined || !Number.isFinite(value)
-    ? '未记录'
-    : value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
   return (
     <div className="stagger" data-testid="graph" data-editable="false">
       <Card>
@@ -779,104 +750,10 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
 
       <Card title="任务图" icon="graph" subtitle={graph.nodes.length ? `${graph.nodes.length} 个节点` : undefined}>
         {!graph.nodes.length && <Empty icon="graph" title="任务图为空" hint={<span data-testid="graph-empty">尚未确认提案，任务图为空。</span>} />}
-        <GraphCanvas graph={graph} collapsed={collapsed} onSelect={setSelected} selected={selected} />
+        <GraphCanvas graph={graph} collapsed={collapsed} onSelect={openNode} selected={selected} />
       </Card>
 
-      {selectedNode && (
-        <Card testid="node-detail" title={`节点 ${selectedNode.id}`} icon="box"
-          actions={<>
-            {selectedNode.kind === 'agent' && selectedNode.agent && (
-              <Button size="sm" icon="message" data-testid="open-agent-chat" onClick={() => setChatNode(selectedNode.id)}>对话</Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => setSelected(null)}>关闭</Button>
-          </>}>
-          <div className="row" style={{ marginBottom: 10 }}>
-            <Pill tone={NODE_TONE[selectedNode.status] ?? 'neutral'}>{NODE_LABEL[selectedNode.status] ?? selectedNode.status}（{selectedNode.status}）</Pill>
-            {nodeWaiting && <Pill tone="warn">等待 API 名额</Pill>}
-          </div>
-          <div className="stack" style={{ gap: 4 }}>
-            <div><span className="muted">实例 </span><span className="mono">{selectedNode.instanceId ?? '未知'}</span></div>
-            <div><span className="muted">模型 </span>{selectedNode.selectedModel ?? '未知'} · 定义 {selectedNode.boundDefinition ?? '未知'}</div>
-            <div><span className="muted">上下文 </span>{
-              selectedNode.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call')
-                ? `继承会话快照 · ${selectedNode.context.sourceNode ?? '缺少来源'}`
-                : selectedNode.context?.independence && selectedNode.context.independence !== 'none'
-                  ? `独立上下文 · ${selectedNode.context.independence === 'model-excluded' ? '排除实现模型' : '全新上下文'}`
-                  : selectedNode.context?.purpose === 'review' || selectedNode.context?.purpose === 'verify'
-                    ? '独立审查上下文'
-                    : '默认独立上下文；重跑时继续原会话'
-            }</div>
-            {selectedNode.agent && (
-              <>
-                <div><span className="muted">Subagent </span>{selectedNode.agent.name} <span className="mono muted">{selectedNode.agent.id}@{selectedNode.agent.version}</span></div>
-                <div><span className="muted">上下文模式 </span>{selectedNode.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call') ? 'Fork' : 'Fresh'}</div>
-                <div><span className="muted">能力 </span>{selectedNode.agent.capabilities.length ? selectedNode.agent.capabilities.map(item => item.name).join('、') : '未绑定'}</div>
-                <div>
-                  <span className="muted">工作经历 </span>
-                  平均 {selectedNode.agent.experience.task.token.mean === null ? 'token 未知' : `${formatTokens(selectedNode.agent.experience.task.token.mean)} tokens`}
-                  {' · '}
-                  {graphDuration(selectedNode.agent.experience.task.runMs.mean)}
-                  {' · '}
-                  {selectedNode.agent.experience.task.totalSamples} 次样本
-                </div>
-                <div>
-                  <span className="muted">灌输的指令 </span>
-                  {selectedNode.context?.purpose ? `用途 ${selectedNode.context.purpose}` : '默认任务说明'}
-                  {selectedNode.context?.independence ? ` · 独立性 ${selectedNode.context.independence}` : ''}
-                  {selectedNode.agent.capabilities.some(item => item.role === 'agent' || item.role === 'tool')
-                    ? ` · Prompt ${selectedNode.agent.capabilities.filter(item => item.role === 'agent' || item.role === 'tool').map(item => item.name).join('、')}`
-                    : ''}
-                </div>
-                <div>
-                  <span className="muted">Handoff </span>
-                  {selectedNode.context?.predecessorHandoffs?.length
-                    ? selectedNode.context.predecessorHandoffs.map(item => `${item.sourceNodeId ?? '—'}:${item.resultHandoff?.workSummary ?? (item.mode === 'result_handoff' ? '结果交接' : '仅证据交接')}`).join('、')
-                    : selectedNode.context?.predecessors?.length
-                      ? selectedNode.context.predecessors.map(policy => `${policy.source}:${policy.mode === 'result_handoff' ? '结果交接' : '仅证据交接'}`).join('、')
-                      : '无'}
-                </div>
-              </>
-            )}
-            <div><span className="muted">用量 </span>{selectedNode.used == null ? '未知（无权威计量）' : formatTokens(selectedNode.used)}{selectedNode.unlimited ? ' · 额度不限' : selectedNode.budget == null ? '' : ` / 预算 ${formatTokens(selectedNode.budget)}`} · 预留 {selectedNode.reserved ?? 0}</div>
-            <div><span className="muted">尝试次数 </span>{selectedNode.stallCount ?? 0} · 输出版本 {selectedNode.outputVersion ?? 0}</div>
-            <div><span className="muted">验收证据 </span>{nodeEvidence.length ? nodeEvidence.map(item => `${item.acceptanceId}:${item.valid ? '有效' : '无效或过期'} ${item.summary}`).join(' / ') : '无'}</div>
-          </div>
-          <h4 style={{ marginTop: 14 }}>操作记录（本页 {nodeOperations.length} 条）</h4>
-          <ol className="list" data-testid="node-operations">
-            {nodeOperations.map(operation => (
-              <li key={operation.id} className="list-item" style={{ alignItems: 'flex-start', display: 'block' }}>
-                <div className="row">
-                  <Pill tone={operation.state === 'succeeded' ? 'success' : operation.state === 'interrupted' || operation.state === 'unknown' ? 'warn' : 'info'}>{operation.state}</Pill>
-                  <span className="muted">{operation.durationMs !== undefined ? `${operation.durationMs}ms` : '—'} · 预留 {operation.reserved}</span>
-                </div>
-                {operation.result?.output !== undefined && <pre style={{ marginTop: 6 }}>{JSON.stringify(operation.result.output, null, 2)}</pre>}
-              </li>
-            ))}
-          </ol>
-          <div className="row">
-            {opsBefore && <Button size="sm" onClick={() => setOpsBefore(undefined)}>回到最新记录</Button>}
-            <Button size="sm" data-testid="operations-more" disabled={!ops?.length || ops.length < 20}
-              onClick={() => setOpsBefore(ops?.[0]?.id)}>更早的操作记录</Button>
-          </div>
-          <div className="row" style={{ marginTop: 14 }}>
-            <a className="btn btn-sm" data-testid={`open-node-chat-${selectedNode.id}`} href={`#/tasks/${id}/nodes/${selectedNode.id}`}>
-              <Icon name="message" size={13} />
-              <span style={{ marginLeft: 6 }}>打开节点对话</span>
-            </a>
-          </div>
-        </Card>
-      )}
 
-      {/* Any task's Agent node opens its own read-only transcript here, not only
-          from the anchor conversation's graph inspector. */}
-      {chatTarget?.agent && (
-        <AgentNodeChat
-          taskId={id}
-          nodeId={chatTarget.id}
-          agentName={chatTarget.agent.name}
-          onClose={() => setChatNode(null)}
-        />
-      )}
     </div>
   );
 }

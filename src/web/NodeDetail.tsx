@@ -11,8 +11,9 @@
 import { useEffect, useState } from 'react';
 import { api } from './api.ts';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
+import { NODE_LABEL } from './labels.ts';
 import { RecordedPromptPanel } from './PromptPanel.tsx';
-import { Button, Pill, Spinner, toast } from './ui.tsx';
+import { Button, Pill, Spinner, Stat, toast } from './ui.tsx';
 
 interface NodePromptView {
   nodeId: string;
@@ -25,6 +26,14 @@ interface NodePromptView {
   recorded: { operationId: string; at: number; text: string; tools: string | null } | null;
   briefing: { text: string; sessionFile: string } | null;
   notes: string[];
+}
+
+/** What the overview reads: enough to say who this node is and how it is doing. */
+interface NodeOverview {
+  node: { kind: string; action: string; status: string; definitionVersion?: string };
+  instance: { model: string | null; used: number; budget: number | null; unlimited: boolean } | null;
+  timing?: { totalMs: number | null; runMs: number | null; inProgress?: boolean } | null;
+  entryCount: number;
 }
 
 /** One transcript entry, as the node's session records it. */
@@ -55,6 +64,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
   // The recorded prompt is read when the tab opens: an agent node that never sent has
   // nothing to show, and the tab must not pretend otherwise.
   const [prompt, setPrompt] = useState<NodePromptView | null>(null);
+  const [overview, setOverview] = useState<NodeOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -62,6 +72,9 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
     let cancelled = false;
     setLoading(true);
     setError('');
+    void api<NodeOverview>(`/api/tasks/${taskId}/nodes/${nodeId}/run`)
+      .then(view => { if (!cancelled) setOverview(view); })
+      .catch(() => { if (!cancelled) setOverview(null); });
     void api<NodePromptView>(`/api/tasks/${taskId}/nodes/${nodeId}/prompt`)
       .then(view => { if (!cancelled) setPrompt(view); })
       .catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason)); })
@@ -79,8 +92,34 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
     }
   }
 
+  const duration = (value: number | null | undefined) => value === null || value === undefined || !Number.isFinite(value)
+    ? '未记录'
+    : value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
+
   return (
     <div className="node-chat-tab" data-testid="node-chat-tab">
+      {overview && (
+        <section className="card node-overview" data-testid="node-overview">
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <Pill tone="accent">{`${overview.node.kind} · ${overview.node.action}`}</Pill>
+            <Pill tone={overview.node.status === 'succeeded' ? 'success' : overview.node.status === 'failed' ? 'danger' : overview.node.status === 'running' ? 'accent' : 'neutral'}>
+              {NODE_LABEL[overview.node.status] ?? overview.node.status}
+            </Pill>
+            {overview.node.definitionVersion && <span className="muted">{overview.node.definitionVersion}</span>}
+            {overview.instance?.model && <span className="muted mono">{overview.instance.model}</span>}
+          </div>
+          <div className="stat-grid" style={{ marginTop: 10 }}>
+            <Stat label="运行" value={duration(overview.timing?.runMs ?? null)} hint="实际工作时段之和" />
+            <Stat label="总历时" value={duration(overview.timing?.totalMs ?? null)} hint="首次派发到最后结算" />
+            <Stat
+              label="用量"
+              value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
+              hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算不限' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
+            />
+            <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
+          </div>
+        </section>
+      )}
       <section className="card node-prompt-card" data-testid="node-prompt">
         <h4 className="section-title">System prompt（该节点实际注入）</h4>
         {loading && !prompt ? <Spinner label="正在读取…" />

@@ -1503,13 +1503,13 @@ export async function openTaskRuntime(options: {
         ensureOpen();
         return artifacts.list({ taskId, ...query });
       },
-      get(taskId: string, artifactId: string, version?: number) {
+      get(taskId: string, artifactId: string, version?: number, scope?: 'task' | 'project') {
         ensureOpen();
-        return artifacts.get(taskId, artifactId, version);
+        return artifacts.get(taskId, artifactId, version, scope);
       },
-      read(taskId: string, artifactId: string, version: number, maxBytes?: number) {
+      read(taskId: string, artifactId: string, version: number, maxBytes?: number, scope?: 'task' | 'project') {
         ensureOpen();
-        return artifacts.read(taskId, artifactId, version, maxBytes);
+        return artifacts.read(taskId, artifactId, version, maxBytes ?? 262_144, scope);
       },
       retire(input: { taskId: string; artifactId: string; version: number; reason: string; requestId: string }) {
         ensureOpen();
@@ -1518,6 +1518,14 @@ export async function openTaskRuntime(options: {
       promote(input: { taskId: string; artifactId: string; version: number; requestId: string }) {
         ensureOpen();
         return artifacts.promote({ ...input, promotedBy: 'user' });
+      },
+      /** The project's own artifacts, independent of any task in it. */
+      listProject(projectId: string, query: {
+        namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
+        includeRetired?: boolean; latestOnly?: boolean; limit?: number; cursor?: string;
+      } = {}) {
+        ensureOpen();
+        return artifacts.listProject(projectId, query);
       },
       listConversation(conversationId: string, query: {
         namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
