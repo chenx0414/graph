@@ -62,6 +62,20 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 控制台地址随时可从 `<stateDir>/console.json` 读（含 `url`/`pid`/`mode`）：App 启动的 daemon 用 `--port 0`，地址不写日志也不写其他地方。**停下的 daemon 不删这份记录**（删了下次启动就不知道回哪个端口），所以它可能是一个已停进程的地址——`pid` 告诉你它是谁的。`--port 0` 会**优先复用本状态目录上次的端口**，所以重载通常不换地址、旧标签页仍指向同一个控制台；但过时标签页仍可能默默回答旧端口，用 `tab list` → `tab t<N>` 或直接 `open` 新地址纠正，并在点击前先断言 `location.href`。
 控制台可见的改动要自己先验：用真浏览器读 DOM、把交互跑一遍、截一张图当证据，然后只把需要人判断的部分交给使用者，并说明是哪个窗口（桌面 App 窗口与浏览器页面不同，某些输入只在桌面桥存在时才渲染）。
 
+### 对控制台做 HTTP 自验
+
+`/api/*` 需要**会话 cookie**（先 `GET /` 拿）与**本地 `Origin`**，否则 403 `forbidden_origin`；而 App 启动的 daemon 用 `--port 0`，地址只在 `<stateDir>/console.json` 里（上一节）。所以配方是：先读地址，再带 cookie 与 origin 请求：
+
+```sh
+base=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["url"])' "<stateDir>/console.json")
+curl -s -c /tmp/graph-cookie.txt "$base/" > /dev/null
+curl -s -b /tmp/graph-cookie.txt -H "origin: $base" "$base/api/health"
+```
+
+**要写任何东西就另起一个 throwaway daemon**（`--execute|--state-dir <tmp> --graph-home <tmp> --web-dir <checkout>/dist/web --port 0 --config <tmp>/graph.config.json`），绝不把自验指向生产 state：生产库里有真实任务与凭据引用。只读的现场断言（页面、DOM）用浏览器即可。
+
+**一个真实的坑**：运行中的 daemon 服务的是它**自己那个 checkout** 的 `dist/web`（桌面 App 启动时写死的 `--web-dir`）。所以在本仓库改完前端、跑 `app:build` 之后，**现场看到的仍是旧包**——浏览器里量到的旧样式或不存在的元素不是「没生效」，而是看错了目录（实测：应用线重建后服务端给的 CSS 里仍没有新规则；在运行中 checkout 里跑 `node --run build:web` 之后立刻生效）。要先确认 `ps -o command= -p $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["pid"])' "<stateDir>/console.json")` 里的 `--web-dir` 是哪个 checkout。
+
 - `agent_browser click <selector>` 对 React 组件可能报 `Clicked: …` 却**不触发** onClick。对 React 一律用 `eval` + `document.querySelector(...).click()`（或用角色/文本定位的动作），并**另起一次** DOM 读回确认；`click` 返回的「Action dispatched; application change unverified」不是证据。
 - `open` 之后先断言 `location.href` 再点（点击可能落在旧标签页上）；DOM 状态要在另一次 eval 里读，因为 React 异步 flush。带 hash 的同 URL `open` 不会重载，需要 `location.reload()`。
 - 长连接页面（例如控制台的 SSE 流）上 `open` 可能超时：恢复手段是扩展自己的动作——`tab list` → `tab t<N>` → 重新断言；同标签页跳转 `location.href = ...` 是兜底。
