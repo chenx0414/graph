@@ -8,6 +8,7 @@ import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { controlledOpenAIStream, type SendGate } from '../../src/runtime/controlled-openai.ts';
 import { openPiProcess } from '../../src/runtime/pi-process.ts';
 import { createWorkerRequests } from '../../src/runtime/worker-requests.ts';
+import { describeAgentTools } from '../../src/runtime/agent-tool-definitions.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -127,6 +128,54 @@ test('a bound Pi extension registers its declared tool inside the isolated Agent
   });
   expect(await host({ operation: 'tool_gate', name: 'secret_tool' })).toMatchObject({ allowed: false });
   await process.close();
+}, 120_000);
+
+test('the argument hint of a graph tool survives the worker boundary, because that is where a real Agent calls it', async () => {
+  const { root, project } = await workspace('pi-process-hints');
+  const gate = new CallBroker(join(root, 'gate.sqlite'), 'agent');
+  cleanup.push(() => gate.close());
+  const provider = await openaiServer([
+    { tools: [{
+      id: 'rsi-1',
+      name: 'apply_rsi_change',
+      arguments: JSON.stringify({
+        title: 'nested',
+        problem: 'the change carries a top-level field',
+        changes: [{ path: 'a.ts', action: 'write', content: 'x', checks: [{ command: 'node', args: ['--run', 'check'] }] }],
+      }),
+    }] },
+    { text: 'Understood.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const contexts: { role?: string; content?: unknown }[][] = [];
+  const executed: string[] = [];
+  const declaration = describeAgentTools({ rsi: { apply: true }, role: 'master' })
+    .find(candidate => candidate.name === 'apply_rsi_change')!;
+  // The Agent process rebuilds every tool from the JSON its host sent - a function cannot travel - so this
+  // is the level where a declaration seam either survives or is silently dropped. Testing the declaration
+  // where it is built would have missed exactly the defect this covers.
+  const process = await openPiProcess({
+    binding: { instanceId: 'agent-hints', nodeId: 'agent-hints', definitionVersion: 'master@1' },
+    workspace: project,
+    stateDir: join(root, 'agent-hints'),
+    model: provider.model,
+    stream: (model, context) => {
+      contexts.push(structuredClone(context.messages) as { role?: string; content?: unknown }[]);
+      return controlledOpenAIStream(gate, 'scripted-local-key')(model, context);
+    },
+    tools: [{ ...declaration, execute: async () => { executed.push('apply'); return { content: [{ type: 'text', text: 'applied' }], details: {} }; } }],
+    broker: gate,
+    systemPrompt: 'Identity',
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+    readOnly: false,
+  });
+  cleanup.push(() => process.close());
+  await process.prompt('Apply the improvement');
+  const toolResult = contexts[1]?.find(message => message.role === 'toolResult');
+  expect(JSON.stringify(toolResult?.content)).toMatch(/nested one level too deep/);
+  expect(executed).toEqual([]);
 }, 120_000);
 
 test('a bound Pi extension can load sibling modules from its capability directory', async () => {
