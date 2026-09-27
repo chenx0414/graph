@@ -313,7 +313,7 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/usage`);
   await page.getByTestId('usage-page').waitFor();
-  expect(await page.locator('a[href="#/usage"]').innerText()).toContain('用量');
+  expect(await page.locator('a[href="#/usage"]').getAttribute('aria-label')).toBe('用量');
   expect(await page.getByTestId('usage-plan-opencode-go').innerText()).toContain('OpenCode Go');
   expect(await page.getByTestId('usage-plan-command-goat').innerText()).toContain('$12.60');
   expect(await page.getByTestId('usage-plan-deepseek').innerText()).toContain('未检测到凭据');
