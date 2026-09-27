@@ -36,10 +36,30 @@ export type AgentToolDeclaration = Pick<ToolDefinition, 'name' | 'label' | 'desc
   externallyGated: boolean;
 };
 
+/** Argument hints by tool name. A real Agent process rebuilds every tool from the JSON its host sent, so a
+ * closure cannot travel: the hint is attached by name on both sides instead (here and in `pi-worker.ts`).
+ * Anything added to this table must stay free of host state - both processes run it. */
+export const AGENT_TOOL_ARGUMENT_HINTS: Record<string, (args: unknown) => string | undefined> = {
+  apply_rsi_change: rsiChangeShapeHint,
+};
+
+/** The `prepareArguments` seam for one tool, or undefined when it has no hint: it throws the hint before
+ * the SDK's schema check, so the tool result reads as the mistake instead of as the schema it violated. */
+export function prepareToolArguments(name: string): ((args: unknown) => unknown) | undefined {
+  const hint = AGENT_TOOL_ARGUMENT_HINTS[name];
+  if (!hint) return undefined;
+  return (args: unknown) => {
+    const problem = hint(args);
+    if (problem) throw new Error(problem);
+    return args;
+  };
+}
+
 type Declaration = AgentToolDeclaration;
 
 function declarations(features: AgentToolFeatures) {
   const main = features.role === 'master';
+  const rsiArguments = prepareToolArguments('apply_rsi_change');
   return {
     read: {
       name: 'read', label: 'Read file', description: 'Read a UTF-8 file or supported image from the instance workspace or a bound capability.',
@@ -354,13 +374,7 @@ function declarations(features: AgentToolFeatures) {
       }),
       available: main && Boolean(features.rsi?.apply),
       externallyGated: false,
-      // Runs before the SDK's schema check, which is the only place a mis-nested call can be answered with
-      // what went wrong instead of with the schema fact it produced (see `rsiChangeShapeHint`).
-      prepareArguments: (args: unknown) => {
-        const hint = rsiChangeShapeHint(args);
-        if (hint) throw new Error(hint);
-        return args;
-      },
+      ...(rsiArguments ? { prepareArguments: rsiArguments } : {}),
     },
     list_agent_combinations: {
       name: 'list_agent_combinations', label: 'List Agent combinations', description: 'List subagent recipes composed from shared resource-library IDs. Results are recipes, not installed definitions or permissions; inspect the referenced resources before using one.',

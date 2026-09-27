@@ -9,6 +9,7 @@ import {
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { InlineExtension } from '@earendil-works/pi-coding-agent';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { prepareToolArguments } from './agent-tool-definitions.ts';
 import { externallyGated, openPiInstance } from './pi-instance.ts';
 import { spoolToolCall } from './tool-call-spool.ts';
 import { sdkPromptOptions } from './prompt-options.ts';
@@ -114,17 +115,23 @@ async function main() {
     for (const event of replayAssistantStream(response.frames, response.settlement)) output.push(event);
     return output;
   };
-  const tools: ToolDefinition[] = config.tools.map(tool => externallyGated({
-    name: tool.name,
-    label: tool.label,
-    description: tool.description,
-    ...(tool.promptSnippet ? { promptSnippet: tool.promptSnippet } : {}),
-    ...(tool.promptGuidelines?.length ? { promptGuidelines: tool.promptGuidelines } : {}),
-    parameters: Type.Unsafe(tool.parameters as never),
-    execute: async (id, params) => await request({
-      operation: 'tool', id, name: tool.name, args: params,
-    }) as never,
-  }));
+  // The host sent JSON, so a declaration seam that is a function cannot travel: anything the host attached
+  // by value has to be re-attached here by name, or the real Agent process simply never runs it.
+  const tools: ToolDefinition[] = config.tools.map(tool => {
+    const prepareArguments = prepareToolArguments(tool.name);
+    return externallyGated({
+      name: tool.name,
+      label: tool.label,
+      description: tool.description,
+      ...(tool.promptSnippet ? { promptSnippet: tool.promptSnippet } : {}),
+      ...(tool.promptGuidelines?.length ? { promptGuidelines: tool.promptGuidelines } : {}),
+      ...(prepareArguments ? { prepareArguments } : {}),
+      parameters: Type.Unsafe(tool.parameters as never),
+      execute: async (id, params) => await request({
+        operation: 'tool', id, name: tool.name, args: params,
+      }) as never,
+    });
+  });
   const proxiedTools = new Set(config.tools.map(tool => tool.name));
   const capabilityGate: InlineExtension = {
     name: 'graph-capability-gate',
