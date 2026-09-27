@@ -276,7 +276,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
   await page.getByTestId('drawer-entry-artifacts').click();
-  await expect.poll(() => new URL(page.url()).hash).toBe('#/artifacts');
+  await expect.poll(() => new URL(page.url()).hash).toBe('#/artifacts?project=alpha');
   await page.getByTestId('artifact-index').waitFor();
   expect(await page.locator('.tab[data-kind="page"][data-active="true"] .tab-title').innerText()).toContain('共享产物');
   expect(await page.getByTestId('drawer-artifacts-project').innerText()).toContain('不属于任何任务');

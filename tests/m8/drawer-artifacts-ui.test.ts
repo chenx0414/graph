@@ -98,10 +98,12 @@ test('the shared-artifact index shows a task\'s artifacts apart from the project
   // The drawer no longer lists any artifacts itself.
   expect(await page.getByTestId('drawer-task-detail').locator('[data-testid="drawer-artifacts"]').count()).toBe(0);
 
-  // The index is a window of its own, and the drawer opens it as a tab.
+  // The index is a window of its own; the drawer opens it as a tab, on the project the user is
+  // working in rather than whichever project happens to come first.
   await page.getByTestId('drawer-task-artifacts').click();
-  await expect.poll(() => new URL(page.url()).hash).toBe('#/artifacts');
+  await expect.poll(() => new URL(page.url()).hash).toBe('#/artifacts?project=alpha');
   await page.getByTestId('artifact-index').waitFor();
+  expect(await page.getByTestId('artifact-index-project').inputValue()).toBe('alpha');
   const own = page.getByTestId('drawer-artifacts-own');
   const project = page.getByTestId('drawer-artifacts-project');
   await own.waitFor();
