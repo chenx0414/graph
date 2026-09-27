@@ -28,6 +28,7 @@ import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
+import { nodePromptView } from './node-prompt.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
 import { skillUsage } from '../runtime/skill-usage.ts';
@@ -1421,6 +1422,11 @@ export async function openTaskRuntime(options: {
           container: { id: container.id, parent: container.parent ?? null, outputs: container.outputs },
         };
       }
+    },
+    /** What one node really sent: the recorded system prompt, its tools and its briefing. */
+    nodePrompt(taskId: string, nodeId: string) {
+      ensureOpen();
+      return nodePromptView(store, taskId, nodeId);
     },
     /** Read-only workspace identity for prompt preview and diagnostics. */
     agentWorkspace(taskId: string, nodeId: string) {

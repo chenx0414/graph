@@ -691,14 +691,24 @@ export class TaskStore {
   forgetToolCallSpool(path: string): void {
     this.db.prepare('DELETE FROM tool_call_spools WHERE path = ?').run(path);
   }
-  /** The exact system prompt and tool declarations of the newest master turn that sent one. */
-  conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string; tools: string | null } | null {
+  /**
+   * The exact system prompt and tool declarations of one node's newest send.
+   *
+   * One reader serves every node: the master's turn and a subagent's round are the same
+   * record, so a per-node view cannot drift from what the model really received.
+   */
+  nodeSystemPrompt(taskId: string, nodeId: string): { operationId: string; at: number; text: string; tools: string | null } | null {
     const row = this.db.prepare(`SELECT id, settled_at, dispatched_at, system_prompt, tool_declarations FROM operations
-      WHERE task_id = ? AND node_id = 'master' AND system_prompt IS NOT NULL
-      ORDER BY rowid DESC LIMIT 1`).get(anchorTaskId) as
+      WHERE task_id = ? AND node_id = ? AND system_prompt IS NOT NULL
+      ORDER BY rowid DESC LIMIT 1`).get(taskId, nodeId) as
       { id: string; settled_at: number | null; dispatched_at: number | null; system_prompt: string; tool_declarations: string | null } | undefined;
     if (!row) return null;
     return { operationId: row.id, at: row.settled_at ?? row.dispatched_at ?? 0, text: row.system_prompt, tools: row.tool_declarations };
+  }
+
+  /** The exact system prompt and tool declarations of the newest master turn that sent one. */
+  conversationSystemPrompt(anchorTaskId: string): { operationId: string; at: number; text: string; tools: string | null } | null {
+    return this.nodeSystemPrompt(anchorTaskId, 'master');
   }
 
   /** Record the exact system prompt and tool declarations one send carried; the first send of an operation wins. */
