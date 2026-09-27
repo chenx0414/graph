@@ -29,7 +29,6 @@ type ExecutionNodeRow = { id: string; task_id: string; spec: string; instance_id
  */
 const SUBMISSION_DEFECT_CODES = new Set(['invalid_result', 'invalid_evidence']);
 
-/** Private execution state machine. Every mutation shares the task command/event transaction. */
 /**
  * The rework briefing for a retry in the same session: the evidence this node's output feeds that did not
  * succeed, the acceptance that evidence blocks, and a file holding every whole output. A retry whose
@@ -65,6 +64,7 @@ function reworkDelta(input: { store: TaskStore; state: GraphState; graph: readon
   });
 }
 
+/** Private execution state machine. Every mutation shares the task command/event transaction. */
 export class Execution {
   private readonly pending = new Set<Promise<unknown>>();
   private driveActive = 0;
