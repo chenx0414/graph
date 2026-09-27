@@ -57,8 +57,6 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   await page.getByTestId('resource-section-agents').waitFor();
   expect(await page.getByTestId('resource-section-agents').innerText()).toContain('暂无 Agent 配方');
   expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
-  await page.goto(`${server.url}/#/tasks/${taskId}`);
-  await page.getByTestId('status').waitFor();
   await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
   await page.getByTestId('graph').waitFor();
   expect(await page.getByTestId('graph').getAttribute('data-editable')).toBe('false');
@@ -191,11 +189,12 @@ test('the graph follows runtime events and a budget question accepts a token inc
   }, 'plan-two');
   await server.runtime.user.task(next.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-two' });
   await server.runtime.host.drive();
-  await page.goto(`${server.url}/#/tasks/${next.taskId}`);
-  await page.getByTestId('questions').getByRole('button', { name: '答复' }).waitFor();
+  // The task page is gone; a budget question is answered where questions are answered.
+  await page.goto(`${server.url}/#/inbox`);
+  await page.getByTestId('budget-tokens').waitFor();
   await page.getByTestId('budget-tokens').fill('20000000');
   const response = page.waitForResponse(r => r.url().endsWith('/answer'));
-  await page.getByTestId('questions').getByRole('button', { name: '答复' }).click();
+  await page.getByRole('button', { name: '答复' }).click();
   const res = await response;
   expect(res.status()).toBe(200);
   expect((await server.runtime.user.task(next.taskId).view()).questions.filter(question => question.status === 'open')).toEqual([]);

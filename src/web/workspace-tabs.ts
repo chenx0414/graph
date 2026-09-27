@@ -12,7 +12,7 @@
  * `#/setup`), which replaces the whole shell by design.
  */
 
-export type WorkspaceTabKind = 'conversation' | 'task' | 'graph' | 'node' | 'artifact' | 'page';
+export type WorkspaceTabKind = 'conversation' | 'graph' | 'node' | 'artifact' | 'page';
 
 export interface WorkspaceTab {
   /** Stable identity: `kind:key`. The same destination never opens twice. */
@@ -92,12 +92,11 @@ export function tabForPath(path: string): TabDescriptor | null {
   if (conversation) return { kind: 'conversation', key: conversation[1]!, title: '对话', hash: `#${pathname}` };
   const node = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname);
   if (node) return { kind: 'node', key: `${node[1]}/${node[2]}`, title: `节点 ${node[2]}`, hash: `#${pathname}` };
-  const graph = /^\/tasks\/([^/]+)\/graph$/.exec(pathname);
-  if (graph) return { kind: 'graph', key: graph[1]!, title: '任务图', hash: `#${pathname}` };
   const artifact = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname);
   if (artifact) return { kind: 'artifact', key: `${artifact[1]}/${artifact[2]}`, title: '共享产物', hash: `#${pathname}` };
-  const task = /^\/tasks\/([^/]+)$/.exec(pathname);
-  if (task) return { kind: 'task', key: task[1]!, title: '任务', hash: `#${pathname}` };
+  // `/tasks/<id>` and `/tasks/<id>/graph` are the same window now; the graph address is canonical.
+  const graph = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname);
+  if (graph) return { kind: 'graph', key: graph[1]!, title: '任务图', hash: `#/tasks/${graph[1]!}/graph` };
   if (pathname === '/inbox') return page('inbox', '问题', '#/inbox');
   if (pathname === '/usage') return page('usage', '用量', '#/usage');
   if (pathname === '/tools') return page('tools', '工具', '#/tools');

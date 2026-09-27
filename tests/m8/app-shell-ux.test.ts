@@ -168,7 +168,8 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(detailBox).not.toBeNull();
   expect(detailBox!.x).toBeGreaterThanOrEqual(headerDrawerBox!.x + headerDrawerBox!.width);
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
-  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
+  // The chat column is the conversation itself; the window is named in the tab bar.
+  expect(await page.locator('.tab[data-kind="conversation"]').first().getAttribute('data-active')).toBe('true');
   const beforeMain = await page.locator('.conversation-main').boundingBox();
   const beforeComposer = await page.locator('.conversation-composer-wrap').boundingBox();
   expect(beforeMain).not.toBeNull();
@@ -243,7 +244,8 @@ test('the right drawer keeps proposal details and node inspection independent fr
   // Back to the active draft: the version table of contents was left on v1 above.
   await page.getByTestId('drawer-draft-version-2').click();
   await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
-  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
+  // The chat column is the conversation; its window is named in the tab bar.
+  expect(await page.locator('.tab[data-kind="conversation"][data-active="true"] .tab-title').first().innerText()).not.toBe('');
   expect(await page.getByTestId('chat-input').count()).toBe(1);
   await page.getByTestId('conversation-graph').waitFor();
   await page.getByTestId('draft-graph-detail').waitFor();
@@ -277,7 +279,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
 
   // The chat column stayed mounted and interactive while the drawer was open.
   await page.locator('.conversation-composer-wrap').waitFor();
-  expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
+  expect(await page.locator('.tab[data-kind="conversation"][data-active="true"]').count()).toBe(1);
   await page.getByTestId('chat-input').fill('草稿详情已移入右侧抽屉。');
   expect(await page.getByTestId('chat-input').evaluate((element: HTMLInputElement) => element.value)).toBe('草稿详情已移入右侧抽屉。');
 }, 60_000);

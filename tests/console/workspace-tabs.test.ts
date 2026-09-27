@@ -30,9 +30,9 @@ describe('tab identity', () => {
 
   test('one task can be open in several tabs: its detail, its graph and its nodes are distinct tabs', () => {
     const state = visit('/tasks/t1', '/tasks/t1/graph', '/tasks/t1/nodes/impl-a');
-    expect(ids(state)).toEqual(['task:t1', 'graph:t1', 'node:t1/impl-a']);
+    expect(ids(state)).toEqual(['graph:t1', 'node:t1/impl-a']);
     // Revisiting the graph of the same task reuses that tab instead of adding a fourth.
-    expect(ids(openTab(state, tabForPath('/tasks/t1/graph')))).toEqual(['task:t1', 'graph:t1', 'node:t1/impl-a']);
+    expect(ids(openTab(state, tabForPath('/tasks/t1/graph')))).toEqual(['graph:t1', 'node:t1/impl-a']);
   });
 
   test('the new-chat route and the settings takeover are not workspace tabs', () => {
@@ -43,7 +43,8 @@ describe('tab identity', () => {
 
   test('every tab-able route names its destination and where it lives', () => {
     expect(tabForPath('/conversations/c1')).toEqual({ kind: 'conversation', key: 'c1', title: '对话', hash: '#/conversations/c1' });
-    expect(tabForPath('/tasks/t1')).toEqual({ kind: 'task', key: 't1', title: '任务', hash: '#/tasks/t1' });
+    // Both addresses are one window: a task's page and its graph are the same tab.
+    expect(tabForPath('/tasks/t1')).toEqual({ kind: 'graph', key: 't1', title: '任务图', hash: '#/tasks/t1/graph' });
     expect(tabForPath('/tasks/t1/graph')).toEqual({ kind: 'graph', key: 't1', title: '任务图', hash: '#/tasks/t1/graph' });
     expect(tabForPath('/tasks/t1/nodes/impl-a')).toEqual({ kind: 'node', key: 't1/impl-a', title: '节点 impl-a', hash: '#/tasks/t1/nodes/impl-a' });
     expect(tabForPath('/inbox')).toEqual({ kind: 'page', key: 'inbox', title: '问题', hash: '#/inbox' });

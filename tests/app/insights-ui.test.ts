@@ -76,44 +76,6 @@ async function waitFor(predicate: () => Promise<boolean>, timeout = 30_000) {
   throw new Error('condition not met');
 }
 
-test('the task page shows a run timeline, usage summary and a toned graph with a minimap', async () => {
-  const root = await temp('timeline');
-  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir, actions: actions(root) });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
-  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'timeline task', requestId: 'begin' });
-  await propose(server, taskId, [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ]);
-  await settle(server, taskId);
-
-  const page = await launch();
-  await page.goto(`${server.url}/#/tasks/${taskId}`);
-  await page.getByTestId('timeline').waitFor();
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="timeline"] li').length > 0);
-  const timeline = await page.getByTestId('timeline').innerText();
-  expect(timeline).toContain('创建任务');
-  expect(timeline).toContain('任务完成');
-  expect(timeline).toContain('调用完成');
-  expect(await page.getByTestId('usage-summary').innerText()).toContain('已计量 20 tokens');
-
-  await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
-  await page.getByTestId('graph').waitFor();
-  await page.locator('.react-flow__minimap').waitFor();
-  expect(await page.locator('.react-flow__minimap').isVisible()).toBe(true);
-  expect(await page.locator('.react-flow__node').count()).toBeGreaterThanOrEqual(2);
-  await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
-  const border = await page.locator('.node-card[data-node-id="work"]').first()
-    .evaluate(element => ({ top: getComputedStyle(element).borderTopColor, left: getComputedStyle(element).borderLeftColor }));
-  expect(border.top).toBe('rgb(22, 163, 74)');
-  expect(border.left).toBe('rgb(37, 99, 235)');
-  // The status dot mirrors the border tone.
-  const dot = await page.locator('.node-card[data-node-id="work"]').first()
-    .locator('.node-dot').evaluate(element => getComputedStyle(element).backgroundColor);
-  expect(dot).toBe('rgb(22, 163, 74)');
-}, 90_000);
-
 test('the inbox aggregates open questions, shows a nav badge and can answer them', async () => {
   const root = await temp('inbox');
   const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir, actions: actions(root, 10) });

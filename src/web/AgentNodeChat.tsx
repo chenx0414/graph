@@ -40,11 +40,14 @@ function eventNodeId(event: StreamEvent) {
 }
 
 /** Read-only Pi transcript for one graph node, using the same rows as the main chat. */
-export function AgentNodeChat({ taskId, nodeId, agentName, onClose }: {
+export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false }: {
   taskId: string | null;
   nodeId: string;
   agentName: string;
-  onClose: () => void;
+  /** Overlay use (the graph inspector) closes; a tab keeps the transcript resident. */
+  onClose?: () => void;
+  /** `page` drops the overlay shell and the close button: the tab is the frame. */
+  page?: boolean;
 }) {
   const [data, setData] = useState<NodeRun | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -144,13 +147,13 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose }: {
   }
 
   const status = data?.node.status ?? 'draft';
-  return (
-    <div
-      className="agent-chat-layer"
-      data-testid="agent-chat-layer"
-      onClick={event => { if (event.target === event.currentTarget) onClose(); }}
-    >
-      <section className="agent-chat-window" data-testid="graph-agent-chat" aria-label={`${agentName} 节点对话`}>
+  const frame = (
+      <section
+        className="agent-chat-window"
+        data-testid="graph-agent-chat"
+        data-page={page}
+        aria-label={`${agentName} 节点对话`}
+      >
         <header className="agent-chat-header">
           <div className="agent-chat-heading">
             <div className="drawer-eyebrow">Agent 节点对话</div>
@@ -164,9 +167,11 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose }: {
               <span>只读</span>
             </div>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} title="关闭节点对话" aria-label="关闭节点对话">
-            <Icon name="close" size={16} />
-          </button>
+          {onClose && (
+            <button type="button" className="icon-button" onClick={onClose} title="关闭节点对话" aria-label="关闭节点对话">
+              <Icon name="close" size={16} />
+            </button>
+          )}
         </header>
 
         <div
@@ -210,6 +215,14 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose }: {
           {error && data && <span className="danger-text">{error}</span>}
         </footer>
       </section>
+  );
+  return page ? frame : (
+    <div
+      className="agent-chat-layer"
+      data-testid="agent-chat-layer"
+      onClick={event => { if (event.target === event.currentTarget) onClose?.(); }}
+    >
+      {frame}
     </div>
   );
 }

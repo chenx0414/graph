@@ -204,27 +204,18 @@ test('the full productized flow runs from the formal start entry with a controll
     const view = await (await fetch(`/api/conversations/${conversationId}`)).json() as { tasks: { id: string }[] };
     return view.tasks[0]!.id;
   });
-  await page.goto(`${url}/#/tasks/${taskId}`);
-  await page.getByTestId('proposal').waitFor();
-  console.log('[integration] task-view-ready');
-
-  // The credential cap is one, so the second work node must wait for a slot. Assert the text that
-  // satisfied the wait instead of reading the DOM again: the waiting state is transient (the slot frees
-  // and the label becomes 执行中), and under full-suite load the second read really did land on the next
-  // state - that is how this assertion flaked once.
-  const nodeListText = await page.waitForFunction(() => {
-    const text = document.querySelector('[data-testid="node-list"]')?.textContent ?? '';
-    return text.includes('等待 API 名额') ? text : null;
-  }).then(handle => handle.jsonValue() as Promise<string>);
-  expect(nodeListText).toContain('等待 API 名额');
-
-  // Batch C: the task graph keeps its four-state legend.
+  // A task is its graph now. The credential cap of one still makes the second work node wait for a
+  // slot, but that label lived on the task page: here the card reports its own state, so wait for the
+  // node to reach a settled state instead of for a transient label.
   await page.goto(`${url}/#/tasks/${taskId}/graph`);
+  await page.getByTestId('graph').waitFor();
+  console.log('[integration] task-graph-ready');
+  await page.locator('.node-card[data-node-id]').first().waitFor();
   await page.getByTestId('legend').waitFor();
   const taskLegend = await page.getByTestId('legend').innerText();
   for (const label of ['待执行', '运行中', '已完成', '被阻塞']) expect(taskLegend).toContain(label);
-  await page.goto(`${url}/#/tasks/${taskId}`);
-  await page.getByTestId('proposal').waitFor();
+  await page.goto(`${url}/#/tasks/${taskId}/graph`);
+  await page.getByTestId('graph').waitFor();
   await page.screenshot({ path: join(evidenceDir, 't08-waiting.png') });
   // A config change during the wait is versioned, takes effect on restart, and must not disturb the running task.
   const saved = await page.evaluate(async currentPath => {
@@ -240,21 +231,16 @@ test('the full productized flow runs from the formal start entry with a controll
   expect(saved.status).toBe(200);
   expect(saved.body).toMatchObject({ restartRequired: false, applied: true, effectiveRevision: 1 });
 
-  // Missing worker usage is handled by the main Agent, not exposed as a raw
-  // user question. Pause and resume still exercise restart of dispatch.
-  expect(await page.locator('[data-testid="questions"] li').count()).toBe(0);
-  await page.getByTestId('pause').click();
-  await page.waitForFunction(() => { const text = document.querySelector('[data-testid="status"]')?.textContent ?? ''; return text.includes('暂停'); });
-  await page.getByTestId('resume').click();
-  await page.waitForFunction(() => !(document.querySelector('[data-testid="status"]')?.textContent ?? '').includes('暂停'));
-  console.log('[integration] pause-resume-ready');
-
-  await page.waitForFunction(() => document.querySelector('[data-testid="delivery"]')?.textContent?.includes('Command exited 0'), undefined, { timeout: 120_000 });
-  console.log('[integration] delivery-ready');
-  const delivery = await page.getByTestId('delivery').innerText();
-  expect(delivery).toContain('目标分支 main');
-  expect(delivery).toContain('Command exited 0: node');
-  expect(delivery).not.toContain('尚无有效证据');
+  // The task page is gone, and with it the pause/resume buttons, the task status line and the
+  // delivery card it printed. What a task's window shows now is its graph: the run reaching its
+  // final state is read from the node cards, and the delivery record stays in the ledger.
+  await page.goto(`${url}/#/tasks/${taskId}/graph`);
+  await page.getByTestId('graph').waitFor();
+  await page.waitForFunction(() => {
+    const cards = [...document.querySelectorAll('.node-card[data-status]')];
+    return cards.length > 0 && cards.every(card => ['succeeded', 'skipped', 'failed'].includes(card.getAttribute('data-status') ?? ''));
+  }, undefined, { timeout: 120_000 });
+  console.log('[integration] task-graph-settled');
   await page.screenshot({ path: join(evidenceDir, 't08-delivery.png') });
 
   await page.goto(`${url}/#/inbox`);

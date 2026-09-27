@@ -10,16 +10,10 @@
 import { useEffect, useState } from 'react';
 import type { ArtifactRecord } from '../core/artifact-workspace.ts';
 import { api } from './api.ts';
-import { ArtifactPreview, type ArtifactContent } from './ArtifactWorkspace.tsx';
 import { groupArtifacts } from './conversation-drawer.ts';
 import { ErrorBox } from './shared.tsx';
-import { Icon, Spinner } from './ui.tsx';
-
-function bytesLabel(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 102 * 1024 ? 1 : 0)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
+import { Markdown } from './Markdown.tsx';
+import { Icon, Pill, Spinner, toast } from './ui.tsx';
 
 function ArtifactRow({ record, onOpenDetail }: { record: ArtifactRecord; onOpenDetail: (record: ArtifactRecord) => void }) {
   return (
@@ -94,19 +88,24 @@ export function ArtifactList({ records, loading, onOpenDetail }: {
  * The record is read through the task the user came from, which is the workspace
  * that may see it.
  */
-export function ArtifactDetail({ taskId, artifactId, onTitle }: {
+export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
   taskId: string;
   artifactId: string;
+  /** The version the row pointed at; without it the newest one is shown. */
+  version?: number;
   onTitle?: (title: string) => void;
 }) {
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [error, setError] = useState('');
+  const [promoting, setPromoting] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setContent(null);
     setError('');
-    void api<ArtifactRecord>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`)
+    const query = version === undefined ? '' : `?version=${version}`;
+    void api<ArtifactRecord>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}${query}`)
       .then(async record => {
         if (cancelled) return;
         onTitle?.(record.title ?? record.name);
@@ -119,13 +118,147 @@ export function ArtifactDetail({ taskId, artifactId, onTitle }: {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
       });
     return () => { cancelled = true; };
-  }, [taskId, artifactId]);
+  }, [taskId, artifactId, version, reloadToken]);
 
+  /** Promotion is what turns a task's artifact into the project's own; it lives here
+   * because this tab is where one artifact is looked at as a whole. */
+  async function promote() {
+    const record = content?.artifact;
+    if (!record || promoting || record.scope === 'project') return;
+    setPromoting(true);
+    try {
+      await api(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(record.artifactId)}/${record.version}/promote`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `promote-${crypto.randomUUID()}` }),
+      });
+      toast('已提升到项目共享', 'success');
+      setReloadToken(value => value + 1);
+    } catch (reason) {
+      toast(`提升失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  const record = content?.artifact ?? null;
   return (
     <div className="artifact-tab" data-testid="artifact-tab">
       {error && <ErrorBox message={`读取产物失败：${error}`} />}
       {!error && !content && <Spinner label="读取产物…" />}
-      {content && <ArtifactPreview content={content} />}
+      {content && (
+        <>
+          {record?.scope === 'task' && (
+            <div className="artifact-promote-bar">
+              <span>该版本只对当前任务可见。</span>
+              <button type="button" className="btn btn-sm" data-testid="artifact-promote" disabled={promoting} onClick={() => void promote()}>
+                <Icon name="box" size={13} />
+                {promoting ? '提升中…' : '提升到项目共享'}
+              </button>
+            </div>
+          )}
+          <ArtifactPreview content={content} />
+        </>
+      )}
     </div>
+  );
+}
+
+export type ArtifactContent = {
+  artifact: ArtifactRecord;
+  text: string | null;
+  truncated: boolean;
+  bytes: number;
+  events: { type: string; data: Record<string, unknown>; timestamp: number }[];
+};
+
+function bytesLabel(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 102 * 1024 ? 1 : 0)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function dateLabel(timestamp: number) {
+  return new Date(timestamp).toLocaleString();
+}
+
+export function ArtifactPreview({ content }: { content: ArtifactContent | null }) {
+  if (!content) {
+    return (
+      <div className="artifact-workspace-empty">
+        <Icon name="box" size={22} />
+        <strong>选择一个产物</strong>
+        <span>查看版本、来源、摘要和内容。</span>
+      </div>
+    );
+  }
+  const artifact = content.artifact;
+  return (
+    <article className="artifact-detail">
+      <header className="artifact-detail-head">
+        <div>
+          <div className="artifact-kicker">{artifact.namespace} / {artifact.name} · v{artifact.version}</div>
+          <h2>{artifact.title ?? artifact.name}</h2>
+        </div>
+        <div className="artifact-detail-actions">
+          <a
+            className="btn btn-sm"
+            href={`/api/tasks/${encodeURIComponent(artifact.taskId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/${artifact.version}/content?download=true`}
+            download
+          >
+            <Icon name="box" size={13} />
+            下载
+          </a>
+        </div>
+      </header>
+      <div className="artifact-detail-badges">
+        <Pill tone={artifact.scope === 'project' ? 'info' : 'neutral'}>{artifact.scope === 'project' ? '项目共享' : '任务共享'}</Pill>
+        <Pill tone={artifact.state === 'published' ? 'success' : 'warn'}>{artifact.state === 'published' ? '已发布' : '已撤回'}</Pill>
+        <Pill tone={artifact.trust === 'accepted' ? 'success' : artifact.trust === 'reviewed' ? 'info' : 'warn'}>{artifact.trust}</Pill>
+        {artifact.schemaKind && <Pill tone="neutral">{artifact.schemaKind}@{artifact.schemaVersion}</Pill>}
+      </div>
+      {artifact.summary && <p className="artifact-summary">{artifact.summary}</p>}
+      <dl className="artifact-metadata">
+        <div><dt>URI</dt><dd className="mono">{artifact.uri}</dd></div>
+        <div><dt>Digest</dt><dd className="mono">{artifact.digest}</dd></div>
+        <div><dt>Producer</dt><dd className="mono">{artifact.producer?.nodeId ?? 'host'}</dd></div>
+        <div><dt>Created</dt><dd>{dateLabel(artifact.createdAt)}</dd></div>
+        <div><dt>Size</dt><dd>{bytesLabel(artifact.size)}</dd></div>
+        <div><dt>Media</dt><dd className="mono">{artifact.mediaType}</dd></div>
+      </dl>
+      {artifact.tags.length > 0 && (
+        <div className="artifact-tags">
+          {artifact.tags.map(tag => <span key={tag}>#{tag}</span>)}
+        </div>
+      )}
+      <section className="artifact-content">
+        <div className="artifact-content-head">
+          <strong>内容预览</strong>
+          {content.truncated && <span className="faint">只显示前 256 KiB</span>}
+        </div>
+        {content.text === null ? (
+          <div className="artifact-binary">
+            <Icon name="file" size={18} />
+            <span>二进制内容不直接注入上下文，请使用下载按钮查看。</span>
+          </div>
+        ) : artifact.mediaType.includes('markdown') ? (
+          <div className="artifact-markdown"><Markdown text={content.text} /></div>
+        ) : (
+          <pre className="artifact-text-preview">{content.text}</pre>
+        )}
+      </section>
+      {content.events.length > 0 && (
+        <section className="artifact-audit">
+          <div className="artifact-content-head"><strong>版本事件</strong></div>
+          <ol>
+            {content.events.slice(0, 8).map(event => (
+              <li key={`${event.type}:${event.timestamp}`}>
+                <code>{event.type}</code>
+                <span>{dateLabel(event.timestamp)}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+    </article>
   );
 }

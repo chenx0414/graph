@@ -24,7 +24,7 @@ import { defaultThinkingOption } from './thinking-levels.ts';
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
-import { NodeRunPanel } from './NodeDetail.tsx';
+import { NodeChatTab } from './NodeDetail.tsx';
 import { ConversationPanel, type ConversationSummary, type GraphAgentDetail } from './Conversation.tsx';
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
@@ -204,13 +204,14 @@ export function App() {
     if (tab.kind === 'conversation') return conversations?.find(item => item.id === tab.key)?.title ?? null;
     // A task's tabs stay distinguishable from each other: the kind names the window, the request
     // names the task, so "任务图 · 外壳与标签栏" never looks like "节点 impl-shell".
-    const prefix = tab.kind === 'graph' ? '任务图' : tab.kind === 'task' ? '任务' : null;
+    const prefix = tab.kind === 'graph' ? '任务图' : null;
     if (!prefix) return null;
     const request = tasks.find(item => item.id === tab.key)?.request;
     return request ? `${prefix} · ${request}` : null;
   });
   const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
-  const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(pathname ?? '/');
+  // A task's address always means its graph: the separate task page is gone.
+  const taskMatch = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname ?? '/');
   const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
   const artifactMatch = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
@@ -374,19 +375,21 @@ export function App() {
             )}
             {artifactMatch && (
               <ArtifactDetail
-                key={`${artifactMatch[1]}:${artifactMatch[2]}`}
+                key={`${artifactMatch[1]}:${artifactMatch[2]}:${queryParams.get('v') ?? ''}`}
                 taskId={artifactMatch[1]!}
                 artifactId={artifactMatch[2]!}
+                {...(queryParams.get('v') ? { version: Number(queryParams.get('v')) } : {})}
                 onTitle={title => retitleWorkspaceTab('artifact', `${artifactMatch[1]}/${artifactMatch[2]}`, title)}
               />
             )}
             {nodeMatch && (
-              <Card title={`节点 ${nodeMatch[2]}`} icon="box" actions={<a className="btn" href={`#/tasks/${nodeMatch[1]}/graph`}>返回任务图</a>}>
-                <NodeRunPanel key={`${nodeMatch[1]}:${nodeMatch[2]}`} taskId={nodeMatch[1]!} nodeId={nodeMatch[2]!} full />
-              </Card>
+              <NodeChatTab
+                key={`${nodeMatch[1]}:${nodeMatch[2]}`}
+                taskId={nodeMatch[1]!}
+                nodeId={nodeMatch[2]!}
+              />
             )}
-            {taskMatch && !taskMatch[2] && <TaskPanel id={taskMatch[1]!} onTasks={setTasks} settings={settings} startup={startup} />}
-            {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
+            {taskMatch && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
           </div>
         </div>
       </main>
@@ -689,7 +692,7 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
       )}
       {pending.map(task => (
         <Card key={task.id} testid={`inbox-${task.id}`} icon="inbox" tone="warn"
-          title={<a href={`#/tasks/${task.id}`}>{task.request.slice(0, 70)}</a>}
+          title={<a href={`#/tasks/${task.id}/graph`}>{task.request.slice(0, 70)}</a>}
           subtitle={`${task.projectId} · ${task.openQuestions} 个待处理问题`}>
           <ul className="list">{(views[task.id]?.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user').map(question => (
             <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => void load()} />
@@ -719,195 +722,6 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
           </div>
         )}
       </Card>
-    </div>
-  );
-}
-
-function TaskPanel({ id, onTasks, settings, startup }: { id: string; onTasks: (tasks: TaskSummary[]) => void; settings: Settings_ | null; startup: Startup | null }) {
-  const { data: view, error, loading, reload } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
-  const { data: events, reload: reloadEvents } = useAsync(() => api<EventRow[]>(`/api/tasks/${id}/events?limit=200`), [id]);
-  const limits = useLimits();
-  const [text, setText] = useState('');
-  const { branch, setBranch } = useTargetBranch(settings?.projects ?? null, view?.projectId ?? null);
-  const [actionError, setActionError] = useState('');
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const refreshAll = useCallback(() => {
-    // A task action writes several records; coalesce the refetches.
-    clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => { reload(); reloadEvents(); }, 150);
-  }, [reload, reloadEvents]);
-  useEffect(() => () => clearTimeout(refreshTimer.current), []);
-  const connected = useTaskStream(id, refreshAll);
-  useEffect(() => {
-    if (view?.targetBranch) setBranch(view.targetBranch);
-  }, [view?.targetBranch]);
-  useEffect(() => { void api<TaskSummary[]>('/api/tasks').then(onTasks).catch(() => undefined); }, [view?.status, onTasks]);
-  if (loading && !view) return <Card><Spinner /></Card>;
-  if (error && !view) return <ErrorBox message={error} onRetry={reload} />;
-  if (!view) return <Card><Spinner /></Card>;
-  const open = view.questions.filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
-  const accepted = view.acceptedProposalVersion === view.proposalVersion && view.proposalVersion > 0;
-  const usage = summarizeUsage(view.nodes, view.cost);
-  const timeline = events ? buildTimeline(events) : [];
-  async function act(action: () => Promise<unknown>, success?: string) {
-    setActionError('');
-    try { await action(); if (success) toast(success, 'success'); reload(); }
-    catch (reason) {
-      const message = reason instanceof Error ? reason.message : String(reason);
-      setActionError(message);
-      toast(`操作失败：${message}`, 'danger');
-    }
-  }
-  return (
-    <div className="stagger" data-testid="task">
-      <Card>
-        <div className="row-between">
-          <div>
-            <h1 data-testid="request" style={{ marginBottom: 4 }}>{view.request}</h1>
-            <div className="row">
-              <Pill testid="status" tone={TASK_TONE[view.status] ?? 'neutral'}><StatusDot tone={view.paused ? 'warn' : (TASK_TONE[view.status] === 'neutral' ? 'info' : TASK_TONE[view.status] as 'success')} />{statusText(view)}</Pill>
-              <span className="muted">项目 {view.projectId}</span>
-              <span className="faint">· 更新于 {when(view.updatedAt)}</span>
-              <span className="faint" data-testid="connection">· {connected ? '已连接' : '重连中…'}</span>
-            </div>
-          </div>
-          <div className="row">
-            <a className="btn" href={`#/tasks/${id}/graph`} data-testid="graph-link"><Icon name="graph" size={15} /><span style={{ marginLeft: 6 }}>查看任务图</span></a>
-            <Button icon="pause" onClick={() => void act(() => api(`/api/tasks/${id}/pause`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }), '已请求暂停')} data-testid="pause">暂停</Button>
-            <Button icon="play" variant="primary" onClick={() => void act(() => api(`/api/tasks/${id}/resume`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID() }) }), '已恢复执行')} data-testid="resume">继续</Button>
-            <Button icon="alert" onClick={() => { if (!confirm('终止后该任务无法继续，未完成的工作会被放弃。确定终止？')) return; void act(() => api(`/api/tasks/${id}/abandon`, { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID(), reason: '用户从任务页面终止' }) }), '已终止任务'); }} data-testid="abandon">终止</Button>
-          </div>
-        </div>
-      </Card>
-
-      <div className="stat-grid" data-testid="usage-summary">
-        <p className="muted" style={{ gridColumn: '1 / -1', margin: '0 0 2px' }}>
-          已计量 {formatTokens(usage.used)} tokens
-          {usage.unknownNodes ? ` · ${usage.unknownNodes} 个节点用量未知` : ''}
-          {usage.remaining === null ? '' : ` · 剩余预算 ${formatTokens(usage.remaining)}`}
-          {` · 费用 ${costText(view.cost)}`}
-        </p>
-        <Stat label="已计量 tokens" value={formatTokens(usage.used)} hint={`${usage.measuredNodes} 个节点有权威计量`} />
-        <Stat label="未知用量节点" value={usage.unknownNodes} tone={usage.unknownNodes ? 'warn' : undefined} hint={usage.unknownNodes ? '不计入 0，需核对' : '全部节点可计量'} />
-        <Stat label="剩余预算" value={usage.unlimited ? '不限' : usage.remaining === null ? '未知' : formatTokens(usage.remaining)}
-          hint={usage.unlimited ? `已计量 ${formatTokens(usage.used)} tokens` : usage.remaining === null ? '无预算绑定' : `总预算 ${formatTokens(usage.budget)}`}
-          progress={!usage.unlimited && usage.budget > 0 ? (usage.used / usage.budget) * 100 : undefined} />
-        <Stat label="费用" value={costText(view.cost)} tone={view.cost.unknown ? 'warn' : undefined} hint={view.cost.unknown ? '存在未知价格，不按 0 计' : '按已配置单价估算，分币种合计'} />
-      </div>
-
-      <Card title="运行时间线" icon="clock" subtitle={timeline.length ? `${timeline.length} 条事件` : undefined}>
-        <div data-testid="timeline">
-          {timeline.length ? (
-            <ol className="timeline">
-              {timeline.slice(-60).reverse().map((entry, index) => (
-                <li key={entry.cursor} className="timeline-item" data-tone={entry.tone} style={{ animationDelay: `${Math.min(index * 18, 240)}ms` }}>
-                  <span className="timeline-meta">{when(entry.timestamp)}</span>
-                  {' · '}<span className="timeline-label">{entry.label}</span>
-                  {entry.nodeId && <> <span className="timeline-node">{entry.nodeId}</span></>}
-                  {entry.detail && <div className="timeline-detail truncate" style={{ maxWidth: '100%' }}>{entry.detail}</div>}
-                </li>
-              ))}
-            </ol>
-          ) : <Empty icon="clock" title="暂无事件" hint={<span data-testid="timeline-empty">任务执行时会在这里实时记录每一步。</span>} />}
-        </div>
-      </Card>
-
-      <div className="card-grid">
-        <Card title="节点状态" icon="graph">
-          <ul className="list" data-testid="node-list">
-            {view.nodes.map(node => (
-              <li key={node.id} className="list-item" data-node={node.id}>
-                <StatusDot tone={NODE_TONE[node.status] === 'neutral' ? 'info' : NODE_TONE[node.status] ?? 'info'} pulse={node.status === 'preparing' || node.status === 'running'} />
-                <div className="grow">
-                  <div style={{ fontWeight: 600 }}>{node.id} · <span className="muted">{NODE_LABEL[node.status] ?? node.status}</span></div>
-                  <small>实例 {node.instanceId ? node.instanceId.slice(0, 8) : '未知'} · 用量 {node.used == null ? '未知' : formatTokens(node.used)}</small>
-                </div>
-                {waitingForSlot(node, settings, limits, startup?.limitAliases) && <Pill tone="warn">等待 API 名额</Pill>}
-                {node.status === 'blocked' && view.questions.some(question => question.status === 'open' && (question.owner ?? 'user') === 'user' && question.nodeId === node.id) && <Pill tone="warn">等待人工处理</Pill>}
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card title="需求与提案" icon="task">
-          <div data-testid="conversation" className="stack">
-            {view.messages.map(message => (
-              <div key={message.cursor} className="hint-card" style={{ display: 'block' }}>
-                <strong className="muted">需求（v{message.requirementVersion}）</strong>
-                <p style={{ margin: '2px 0 0' }}>{message.text}</p>
-              </div>
-            ))}
-            {!view.messages.length && <p className="muted">暂无对话。</p>}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <textarea className="textarea" value={text} onChange={event => setText(event.target.value)} placeholder="补充需求或说明" />
-            <Button variant="primary" onClick={() => void act(async () => { await api(`/api/tasks/${id}/say`, { method: 'POST', body: JSON.stringify({ text, requestId: crypto.randomUUID() }) }); setText(''); }, '已发送补充说明')}>发送</Button>
-          </div>
-          {view.proposal && (
-            <div data-testid="proposal" style={{ marginTop: 12 }}>
-              <h3>提案 v{view.proposalVersion}{accepted ? '（已确认）' : ''}</h3>
-              <p className="muted">{view.proposal.summary}</p>
-              <h4>验收项</h4>
-              <ul className="list">{view.proposal.acceptance?.map(item => (
-                <li key={item.id} className="list-item"><div className="grow">{item.id}：{item.description}<br /><small>检查节点 {item.checkNode}</small></div></li>
-              ))}</ul>
-              <h4>节点</h4>
-              <div className="chip-row">{view.proposal.nodes?.map(node => (
-                <Pill key={node.id}>{node.id} · {node.kind}{node.model ? ` · ${node.model}` : ''}{node.definitionVersion ? ` · ${node.definitionVersion}` : ''}</Pill>
-              ))}</div>
-              {!accepted ? (
-                <div className="row" style={{ marginTop: 10 }}>
-                  <label className="field" style={{ margin: 0 }}><span className="field-label">目标分支</span>
-                    <input className="input" style={{ width: 180 }} value={branch} onChange={event => setBranch(event.target.value)} data-testid="accept-branch" /></label>
-                  <Button variant="primary" data-testid="accept" icon="check"
-                    onClick={() => void act(() => api(`/api/tasks/${id}/accept`, { method: 'POST', body: JSON.stringify({ proposalVersion: view.proposalVersion, targetBranch: branch, requestId: `accept-${crypto.randomUUID()}` }) }), '已确认提案，开始执行')}>
-                    确认需求 v{view.proposalVersion}
-                  </Button>
-                </div>
-              ) : <p data-testid="accepted" className="muted">已确认提案 v{view.acceptedProposalVersion}，目标分支 {view.targetBranch}</p>}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {open.length ? (
-        <Card title="待处理问题" icon="inbox" tone="warn">
-          <ul className="list" data-testid="questions">{open.map(question => (
-            <QuestionReply key={question.id} taskId={id} question={question} onDone={() => void reload()} />
-          ))}</ul>
-        </Card>
-      ) : <Card title="待处理问题" icon="check" tone="success">
-        <Empty icon="check" title="没有待处理问题" hint={<span data-testid="no-questions">当前没有待处理问题。</span>} />
-      </Card>}
-
-      {(view.phase === 'completed' || view.acceptedProposalVersion !== null) && (
-        <Card testid="delivery" title="交付" icon="box" subtitle={`目标分支 ${view.targetBranch ?? '未确认'}`}>
-          <dl className="kv">
-            <dt>集成提交</dt><dd className="mono">{view.integrationSha ?? '尚无集成提交'}</dd>
-            <dt>交付目录</dt><dd className="mono">{settings?.projects.find(project => project.id === view.projectId)?.root ?? '未知'}</dd>
-            <dt>费用</dt><dd data-testid="cost">{costText(view.cost)}</dd>
-          </dl>
-          <ul className="list" style={{ marginTop: 10 }}>
-            {view.proposal?.acceptance?.map(item => {
-              const valid = view.evidence.filter(evidence => evidence.acceptanceId === item.id && evidence.valid);
-              const invalid = view.evidence.filter(evidence => evidence.acceptanceId === item.id && !evidence.valid);
-              return (
-                <li key={item.id} className="list-item" data-acceptance={item.id} style={{ alignItems: 'flex-start' }}>
-                  <StatusDot tone={valid.length ? 'success' : 'warn'} />
-                  <div className="grow">
-                    <div style={{ fontWeight: 600 }}>{item.id}：{item.description}</div>
-                    <small>{valid.length ? valid.map(evidence => `${evidence.summary}（${evidence.artifact?.path ?? '无产物'}）`).join('；') : '尚无有效证据'}
-                      {invalid.length ? `；无效或过期证据 ${invalid.length} 条，不计入验收` : ''}</small>
-                  </div>
-                  <Pill tone={valid.length ? 'success' : 'warn'}>{valid.length ? '有效' : '待验证'}</Pill>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-      )}
-
-      {actionError && <ErrorBox message={actionError} />}
     </div>
   );
 }
@@ -948,7 +762,6 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
       <Card>
         <div className="row-between">
           <div className="row">
-            <a href={`#/tasks/${id}`} className="btn"><Icon name="task" size={15} /><span style={{ marginLeft: 6 }}>返回任务</span></a>
             <Pill tone="accent" testid="cost">{costText(graph.cost)}</Pill>
             <Pill testid="revisions">图修订 {graph.revisions.map(item => `v${item.version} ${item.reason}`).join(' / ') || '无'}</Pill>
             <span className="faint" data-testid="connection">{connected ? '已连接' : '重连中…'}</span>
@@ -1045,8 +858,11 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
             <Button size="sm" data-testid="operations-more" disabled={!ops?.length || ops.length < 20}
               onClick={() => setOpsBefore(ops?.[0]?.id)}>更早的操作记录</Button>
           </div>
-          <div style={{ marginTop: 14 }}>
-            <NodeRunPanel key={`${id}:${selectedNode.id}`} taskId={id} nodeId={selectedNode.id} />
+          <div className="row" style={{ marginTop: 14 }}>
+            <a className="btn btn-sm" data-testid={`open-node-chat-${selectedNode.id}`} href={`#/tasks/${id}/nodes/${selectedNode.id}`}>
+              <Icon name="message" size={13} />
+              <span style={{ marginLeft: 6 }}>打开节点对话</span>
+            </a>
           </div>
         </Card>
       )}
