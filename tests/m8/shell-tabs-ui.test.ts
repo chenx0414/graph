@@ -1,0 +1,119 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeAll, expect, test } from 'vitest';
+import { build } from 'vite';
+import { chromium } from 'playwright';
+import { openGraphServer } from '../../src/server/host.ts';
+
+const cleanup: (() => Promise<void> | void)[] = [];
+let webDir: string;
+
+beforeAll(async () => {
+  webDir = await mkdtemp(join(tmpdir(), 'graph-shell-tabs-web-'));
+  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
+}, 60_000);
+
+afterEach(async () => {
+  for (const action of cleanup.reverse()) {
+    await Promise.race([Promise.resolve(action()).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]);
+  }
+  cleanup.length = 0;
+});
+
+async function harness() {
+  const root = await mkdtemp(join(tmpdir(), 'graph-shell-tabs-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'alpha', root }],
+    webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  return { server, page };
+}
+
+/** The tabs the user sees, as `kind` + title, read back out of the DOM. */
+async function tabs(page: Awaited<ReturnType<typeof harness>>['page']) {
+  return page.locator('.tab').evaluateAll(nodes => nodes.map(node => ({
+    kind: node.getAttribute('data-kind'),
+    key: node.getAttribute('data-tab-key'),
+    title: node.querySelector('.tab-title')?.textContent ?? '',
+    active: node.getAttribute('data-active') === 'true',
+  })));
+}
+
+test('the shell opens one tab per destination, keeps the second visit on the first tab, and closes onto the neighbour', async () => {
+  const { server, page } = await harness();
+  const first = await server.runtime.conversations.create({ text: '第一段对话', requestId: 'first' });
+  await server.runtime.conversations.create({ text: '第二段对话', requestId: 'second' });
+  await page.goto(server.url);
+  await page.getByTestId('new-conversation-input').waitFor();
+
+  // An empty workspace says so, and the new-chat page is not a tab.
+  expect(await page.getByTestId('tab-bar-empty').innerText()).toContain('没有打开的窗口');
+  expect(await tabs(page)).toEqual([]);
+
+  // Following a conversation from the list opens its tab and puts it in front.
+  await page.getByTestId('conversation-list').getByText('第一段对话').click();
+  // The tab is named after the conversation itself, not the generic placeholder.
+  await expect.poll(() => tabs(page)).toEqual([{ kind: 'conversation', key: first.conversationId, title: '第一段对话', active: true }]);
+
+  // A rail page is a tab too, and the conversation keeps its own.
+  await page.getByTestId('rail-usage').click();
+  await expect.poll(async () => (await tabs(page)).map(tab => tab.kind)).toEqual(['conversation', 'page']);
+  expect((await tabs(page))[1]).toMatchObject({ key: 'usage', title: '用量', active: true });
+
+  // Going back to a destination that already has a tab reuses it instead of opening a second.
+  await page.getByTestId('tab-open-0').click();
+  await expect.poll(async () => { const list = await tabs(page); return [list.length, list[0]!.active]; }).toEqual([2, true]);
+  await page.getByTestId('rail-usage').click();
+  await expect.poll(async () => (await tabs(page)).length).toBe(2);
+
+  // Closing the tab in front hands the front to the neighbour on its right.
+  await page.getByTestId('tab-close-0').click();
+  await expect.poll(() => tabs(page)).toEqual([{ kind: 'page', key: 'usage', title: '用量', active: true }]);
+
+  // Closing the last tab leaves an empty workspace and returns to the new-chat page.
+  await page.getByTestId('tab-close-0').click();
+  await page.getByTestId('tab-bar-empty').waitFor();
+  expect(await tabs(page)).toEqual([]);
+  await page.getByTestId('new-conversation-input').waitFor();
+
+  // The + button starts a new conversation from wherever the user is.
+  await page.getByTestId('rail-catalog').click();
+  await expect.poll(async () => (await tabs(page)).length).toBe(1);
+  await page.getByTestId('tab-new').click();
+  await expect.poll(async () => (await tabs(page)).length).toBe(1);
+  await page.getByTestId('new-conversation-input').waitFor();
+});
+
+test('one task can be open in several tabs: its graph and one of its nodes are separate tabs', async () => {
+  const { server, page } = await harness();
+  const { taskId } = await server.runtime.user.begin({ projectId: 'alpha', request: '外壳与标签栏', requestId: 'tabs-task' });
+  await page.goto(server.url);
+  await page.getByTestId('new-conversation-input').waitFor();
+
+  await page.evaluate(id => { location.hash = `#/tasks/${id}/graph`; }, taskId);
+  await expect.poll(() => tabs(page)).toEqual([{ kind: 'graph', key: taskId, title: '任务图 · 外壳与标签栏', active: true }]);
+
+  await page.evaluate(id => { location.hash = `#/tasks/${id}/nodes/impl-shell`; }, taskId);
+  await expect.poll(async () => (await tabs(page)).map(tab => [tab.kind, tab.key, tab.title])).toEqual([
+    ['graph', taskId, '任务图 · 外壳与标签栏'],
+    ['node', `${taskId}/impl-shell`, '节点 impl-shell'],
+  ]);
+  expect((await tabs(page))[1]).toMatchObject({ active: true });
+
+  // The same graph again is still two tabs, not three: the node keeps its own address.
+  await page.evaluate(id => { location.hash = `#/tasks/${id}/graph`; }, taskId);
+  await expect.poll(async () => (await tabs(page)).map(tab => tab.active)).toEqual([true, false]);
+
+  // Settings replaces the whole shell, so it is deliberately not a tab.
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.getByTestId('settings-shell').waitFor();
+  expect(await page.getByTestId('tab-bar').count()).toBe(0);
+});

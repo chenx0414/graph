@@ -55,9 +55,10 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   const sidebar = page.getByTestId('conversation-list');
   await expect.poll(() => sidebar.innerText()).toContain('未绑定讨论');
   expect(await sidebar.innerText()).toContain('项目内讨论');
-  expect(await page.locator('a[href="#/inbox"]').innerText()).toContain('问题');
-  expect(await page.locator('a[href="#/catalog"]').innerText()).toContain('资源库');
-  expect(await page.locator('a[href="#/settings"]').innerText()).toContain('设置');
+  // The rail is icons only, so each entry states its own name for assistive use.
+  expect(await page.locator('a[href="#/inbox"]').getAttribute('aria-label')).toBe('问题');
+  expect(await page.locator('a[href="#/catalog"]').getAttribute('aria-label')).toBe('资源库');
+  expect(await page.locator('a[href="#/settings"]').getAttribute('aria-label')).toBe('设置');
   expect(await page.locator('a').filter({ hasText: '概览' }).count()).toBe(0);
   expect(await page.locator('a').filter({ hasText: '向导' }).count()).toBe(0);
 

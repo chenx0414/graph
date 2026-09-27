@@ -1,4 +1,6 @@
+import { TabBar } from './TabBar.tsx';
 import { WindowDrawer } from './WindowDrawer.tsx';
+import { EMPTY_TABS, activateTab, closeTab, openTab, tabForPath, withTitles, type WorkspaceTabs } from './workspace-tabs.ts';
 import { useUsageRefresh } from './usage-refresh.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
@@ -140,6 +142,9 @@ export function App() {
     try { return localStorage.getItem('graph-sidebar-collapsed') === 'true'; } catch { return false; }
   });
   const [detailOpen, setDetailOpen] = useState(false);
+  // Which windows are open in the main area. The hash route stays the truth for what is on
+  // screen; navigating opens or refreshes the matching tab (`workspace-tabs.ts` owns the rules).
+  const [tabs, setTabs] = useState<WorkspaceTabs>(() => openTab(EMPTY_TABS, tabForPath(route())));
   const { data: conversations, reload: reloadConversations } = useAsync(() => api<ConversationSummary[]>('/api/conversations'), []);
 
   const refreshTasks = useCallback(async () => {
@@ -149,7 +154,11 @@ export function App() {
     setSettings(await api<Settings_>('/api/settings'));
   }, []);
   useEffect(() => {
-    const onHash = () => setPath(route());
+    const onHash = () => {
+      const next = route();
+      setPath(next);
+      setTabs(current => openTab(current, tabForPath(next)));
+    };
     const onConversationsChanged = () => void reloadConversations();
     const onSettingsChanged = () => void reloadSettings();
     window.addEventListener('hashchange', onHash);
@@ -177,21 +186,43 @@ export function App() {
   const [pathname, query = ''] = path.split('?');
   const queryParams = new URLSearchParams(query);
   const questionTotal = openQuestionTotal(tasks);
+  // Tabs are named from the data the shell already polls: a conversation by its own title, a
+  // task by its request. Until that arrives the tab keeps the generic name it opened with.
+  const shownTabs = withTitles(tabs, tab => {
+    if (tab.kind === 'conversation') return conversations?.find(item => item.id === tab.key)?.title ?? null;
+    // A task's tabs stay distinguishable from each other: the kind names the window, the request
+    // names the task, so "任务图 · 外壳与标签栏" never looks like "节点 impl-shell".
+    const prefix = tab.kind === 'graph' ? '任务图' : tab.kind === 'task' ? '任务' : null;
+    if (!prefix) return null;
+    const request = tasks.find(item => item.id === tab.key)?.request;
+    return request ? `${prefix} · ${request}` : null;
+  });
   const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
   const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(pathname ?? '/');
   const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
   const modeTone = !startup?.configured ? 'danger' : startup.mode === 'execute' ? 'success' : 'warn';
   const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
-  const title = pathname === '/' ? '新对话'
-    : pathname === '/inbox' ? '问题收件箱'
-      : catalogMatch ? '资源库'
-        : pathname === '/usage' ? '用量'
-          : pathname === '/tools' ? '工具'
-        : pathname === '/setup' ? '设置'
-          : pathname === '/settings' ? '设置'
-            : nodeMatch ? '节点详情'
-              : taskMatch?.[2] ? '任务图' : taskMatch ? '任务详情' : 'Graph';
+  function openWorkspaceTab(id: string) {
+    const tab = tabs.tabs.find(item => item.id === id);
+    if (!tab) return;
+    setTabs(current => activateTab(current, id));
+    // A tab that points where we already are needs no navigation; anything else sets the hash,
+    // which the hash listener turns back into the same tab being in front.
+    if (tab.hash !== `#${path}`) location.hash = tab.hash;
+  }
+  function closeWorkspaceTab(id: string) {
+    const wasActive = tabs.activeId === id;
+    const next = closeTab(tabs, id);
+    setTabs(next);
+    if (!wasActive) return;
+    // The front follows its neighbour; an emptied workspace falls back to the new-chat page.
+    const active = next.tabs.find(tab => tab.id === next.activeId);
+    location.hash = active ? active.hash : '#/';
+  }
+  function startNewConversation() {
+    location.hash = '#/';
+  }
   const conversationFirst = pathname === '/' || Boolean(conversationMatch);
   const settingsPage = pathname === '/settings' || pathname === '/setup';
 
@@ -207,24 +238,54 @@ export function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar" data-collapsed={sidebarCollapsed}>
-        <div className="brand-row">
-          <a className="brand" href="#/" title="新对话">
-            <div className="brand-mark" />
-            <div className="brand-copy">
-              <div className="brand-name">Graph</div>
-
-            </div>
+        <nav className="rail" data-testid="app-rail" aria-label="主入口">
+          <a className="rail-button" href="#/" data-testid="rail-new" title="新对话" aria-label="新对话">
+            <Icon name="plus" size={17} />
           </a>
+          <a className="rail-button" href="#/inbox" data-testid="rail-inbox" title="问题" aria-label="问题" data-active={pathname === '/inbox'}>
+            <Icon name="inbox" size={17} />
+            {questionTotal > 0 && <span className="rail-badge" data-testid="rail-inbox-badge">{questionTotal}</span>}
+          </a>
+          <a className="rail-button" href="#/catalog" data-testid="rail-catalog" title="资源库" aria-label="资源库" data-active={Boolean(catalogMatch)}>
+            <Icon name="catalog" size={17} />
+          </a>
+          <a className="rail-button" href="#/usage" data-testid="rail-usage" title="用量" aria-label="用量" data-active={pathname === '/usage'}>
+            <Icon name="usage" size={17} />
+          </a>
+          <a className="rail-button" href="#/tools" data-testid="rail-tools" title="工具" aria-label="工具" data-active={pathname === '/tools'}>
+            <Icon name="tool" size={17} />
+          </a>
+          <div className="rail-spacer" />
+          <a className="rail-button" href="#/settings" data-testid="rail-settings" title="设置" aria-label="设置" data-active={settingsPage}>
+            <Icon name="settings" size={17} />
+          </a>
+        </nav>
+        <div className="sidebar-body">
+          <div className="brand-row">
+            <a className="brand" href="#/" title="新对话">
+              <div className="brand-mark" />
+              <div className="brand-copy">
+                <div className="brand-name">Graph</div>
+              </div>
+            </a>
+          </div>
+          <Sidebar
+            path={pathname ?? '/'}
+            settings={settings}
+            conversations={conversations ?? []}
+            onSettingsChanged={reloadSettings}
+          />
         </div>
-        <Sidebar
-          path={pathname ?? '/'}
-          settings={settings}
-          conversations={conversations ?? []}
-          questionTotal={questionTotal}
-          onSettingsChanged={reloadSettings}
-        />
       </aside>
       <main className="main">
+        <div className="workspace-bar" data-testid="workspace-bar">
+          <TabBar
+            state={shownTabs}
+            onActivate={openWorkspaceTab}
+            onClose={closeWorkspaceTab}
+            onOpenNew={startNewConversation}
+          />
+        </div>
         {conversationFirst && !conversationMatch && (
           <header className="topbar conversation-topbar">
             <button
@@ -237,7 +298,6 @@ export function App() {
             >
               <Icon name="panel-left" size={16} />
             </button>
-            <h1>{title}</h1>
             <div className="topbar-spacer" />
             <button
               type="button"
@@ -279,7 +339,7 @@ export function App() {
             >
               <Icon name="panel-left" size={16} />
             </button>
-            <h1>{title}</h1>
+            <div className="topbar-spacer" />
             <span className="topbar-sub">
               {modeText}
               {settings && ` · ${settings.projects.length} 个项目 · ${settings.models.length} 个模型`}
@@ -346,11 +406,10 @@ export function App() {
   );
 }
 
-function Sidebar({ path, settings, conversations, questionTotal, onSettingsChanged }: {
+function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   path: string;
   settings: Settings_ | null;
   conversations: ConversationSummary[];
-  questionTotal: number;
   onSettingsChanged: () => void;
 }) {
   const [projectOpen, setProjectOpen] = useState<Record<string, boolean>>({});
@@ -377,15 +436,6 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
   }
   return (
     <>
-      <nav className="nav">
-        <a href="#/inbox" data-active={path === '/inbox'}>
-          <Icon name="inbox" /><span className="nav-label">问题</span>
-          {questionTotal > 0 && <> (<span className="nav-badge">{questionTotal}</span>)</>}
-        </a>
-        <a href="#/catalog" data-active={path === '/catalog'}><Icon name="catalog" /><span className="nav-label">资源库</span></a>
-        <a href="#/usage" data-active={path === '/usage'}><Icon name="usage" /><span className="nav-label">用量</span></a>
-        <a href="#/tools" data-active={path === '/tools'}><Icon name="tool" /><span className="nav-label">工具</span></a>
-      </nav>
       <div className="sidebar-scroll" data-testid="conversation-list">
         <div className="sidebar-label">
           <span>项目</span>
@@ -455,13 +505,6 @@ function Sidebar({ path, settings, conversations, questionTotal, onSettingsChang
             </a>
           </div>
         </div>
-      </div>
-      <div className="sidebar-footer">
-        <nav className="nav">
-          <a href="#/settings" data-active={path === '/settings' || path === '/setup'} title="设置">
-            <Icon name="settings" /><span className="nav-label">设置</span>
-          </a>
-        </nav>
       </div>
       {createProject && (
         <CreateProjectDialog

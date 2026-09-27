@@ -133,7 +133,7 @@ test('the inbox aggregates open questions, shows a nav badge and can answer them
 
   const page = await launch();
   await page.goto(server.url);
-  await page.waitForFunction(() => document.querySelector('a[href="#/inbox"]')?.textContent?.includes('(1)'));
+  await page.waitForFunction(() => document.querySelector('[data-testid="rail-inbox-badge"]')?.textContent === '1');
   await page.click('a[href="#/inbox"]');
   await page.getByTestId('inbox').waitFor();
   await page.waitForFunction(() => document.querySelector('[data-testid="inbox"]')?.textContent?.includes('reservation_exceeded'));

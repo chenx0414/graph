@@ -3239,6 +3239,72 @@ details.disclosure summary:hover { color: var(--accent); }
 ::-webkit-scrollbar-thumb:hover { background: var(--faint); background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* ---------- workspace tabs and the icon rail ---------- */
+
+/* The sidebar is two columns: a permanent icon rail and the list column, which is what
+   collapsing hides. Every rail entry opens one of the pages that already existed. */
+.sidebar { flex-direction: row; gap: 6px; padding: 12px 10px 10px 8px; }
+.sidebar-body { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.sidebar[data-collapsed="true"] .sidebar-body { display: none; }
+.sidebar[data-collapsed="true"] { padding-left: 8px; padding-right: 8px; }
+
+.rail { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 40px; flex: 0 0 40px; -webkit-app-region: no-drag; }
+.rail-spacer { flex: 1; }
+.rail-button {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px;
+  color: var(--sidebar-muted);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.rail-button:hover { background: rgba(26,28,31,0.055); color: var(--sidebar-text); text-decoration: none; }
+.rail-button[data-active="true"] { background: var(--sidebar-active); color: var(--sidebar-text); }
+.rail-badge {
+  position: absolute; top: -2px; right: -2px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; border-radius: 999px;
+  background: var(--danger); color: #fff;
+}
+
+.workspace-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px; flex: 0 0 auto;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+  -webkit-app-region: drag;
+}
+.tab-bar {
+  display: flex; align-items: center; gap: 3px; min-width: 0; flex: 1;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-app-region: no-drag;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+.tab-new {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
+  background: transparent; border: 0; color: var(--muted); cursor: pointer;
+}
+.tab-new:hover { background: var(--bg-soft); color: var(--text); }
+.tab {
+  display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
+  padding: 2px 4px 2px 10px; border-radius: 9px;
+  border: 1px solid transparent; color: var(--muted);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.tab:hover { background: var(--bg-soft); }
+.tab[data-active="true"] { background: var(--bg-soft); border-color: var(--border); color: var(--text); }
+.tab-open {
+  display: inline-flex; align-items: center; min-width: 0; max-width: 190px;
+  padding: 4px 0; background: transparent; border: 0; color: inherit; cursor: pointer;
+}
+.tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
+.tab-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; flex: 0 0 20px; border-radius: 6px;
+  background: transparent; border: 0; color: var(--muted); cursor: pointer; opacity: 0;
+}
+.tab:hover .tab-close, .tab[data-active="true"] .tab-close { opacity: 1; }
+.tab-close:hover { background: rgba(26,28,31,0.1); color: var(--text); }
+.tab-hint { color: var(--muted); font-size: 12.5px; padding-left: 4px; }
+
 @media (max-width: 860px) {
   .app-shell { flex-direction: column; }
   .sidebar { width: 100%; flex: none; height: auto; min-height: 56px; position: static; flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; }
