@@ -7,11 +7,12 @@ import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedA
 import { assertWithinBudget, recordModelUse } from './budget-ledger.ts';
 import { conversationDigest, conversationForTask, deliverMessages, pendingMessages } from './conversation.ts';
 import { digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
-import { loadGraph, type GraphState } from './graph.ts';
+import { loadGraph } from './graph.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
 import { insertQuestion, isMasterParked } from './question-routing.ts';
+import { isReworkDecision } from './verification.ts';
 import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
 import { briefing, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
@@ -34,21 +35,27 @@ const SUBMISSION_DEFECT_CODES = new Set(['invalid_result', 'invalid_evidence']);
  * succeed, the acceptance that evidence blocks, and a file holding every whole output. A retry whose
  * session is gone never reaches here, because re-sending a delta would assume a briefing nobody still has.
  */
-function reworkDelta(input: { store: TaskStore; state: GraphState; graph: readonly NodeSpec[]; proposal?: Proposal; own: string; attempt: number; instanceId: string }) {
+function reworkDelta(input: { store: TaskStore; graph: readonly NodeSpec[]; proposal?: Proposal; own: string; attempt: number; instanceId: string; taskId: string }) {
   const readers = new Set(nodesReading(input.own, input.graph).map(node => node.id));
-  const failed = input.graph
-    .filter(node => readers.has(node.id))
-    .map(node => ({ node, status: input.state.status(node.id) }))
-    .filter(item => item.status === 'failed' || item.status === 'blocked')
-    .map(item => {
-      const output = input.state.output(item.node.id);
-      return {
-        id: item.node.id,
-        label: `${item.node.kind} ${item.node.action}`,
-        status: item.status,
-        output: output === null ? '(no output recorded)' : JSON.stringify(output, null, 2),
-      };
-    });
+  // The verdict lives in the ledger, not in the node row: the loop resets every node after the loop point
+  // (including the check that asked for the rework) before it admits this round, so reading the node state
+  // here would find nothing exactly when a rework was requested. The last settled operation of each reader
+  // is the durable evidence, and a reader that failed or asked for a rework both count.
+  const failed = input.graph.filter(node => readers.has(node.id)).flatMap(node => {
+    const last = input.store.db.prepare('SELECT state,result FROM operations WHERE task_id=? AND node_id=? AND result IS NOT NULL ORDER BY rowid DESC LIMIT 1')
+      .get(input.taskId, node.id) as { state: string; result: string } | undefined;
+    if (!last) return [];
+    const settled = JSON.parse(last.result) as { outcome?: string; output?: Json };
+    const output = settled.output ?? null;
+    const rework = isReworkDecision(output);
+    if (!rework && last.state !== 'failed' && last.state !== 'blocked') return [];
+    return [{
+      id: node.id,
+      label: `${node.kind} ${node.action}`,
+      status: rework ? `${last.state}, verdict rework` : last.state,
+      output: output === null ? '(no output recorded)' : JSON.stringify(output, null, 2),
+    }];
+  });
   const oversized = failed.some(item => item.output.length > REWORK_OUTPUT_LIMIT);
   const handlePath = join(dirname(input.store.path), 'instances', input.instanceId, 'rework', `${input.own}-attempt-${input.attempt}.txt`);
   if (oversized) {
@@ -694,8 +701,8 @@ export class Execution {
           if (graphBriefing?.length && graph && attempt > 1 && spec.role !== 'master' && node.instance_id
             && this.store.db.prepare('SELECT session_id FROM node_sessions WHERE instance_id=?').get(node.instance_id)) {
             intent.context.briefing = reworkDelta({
-              store: this.store, state: graph, graph: graphBriefing,
-              ...(proposal ? { proposal } : {}), own: spec.id, attempt, instanceId: node.instance_id,
+              store: this.store, graph: graphBriefing,
+              ...(proposal ? { proposal } : {}), own: spec.id, attempt, instanceId: node.instance_id, taskId: node.task_id,
             });
           }
           const predecessor = spec.kind === 'agent' && agentContext?.mode === 'fresh' && graph
