@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { briefing } from '../../src/catalog/briefing.ts';
+import { briefing, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../../src/catalog/briefing.ts';
 import type { NodeSpec, Operation } from '../../src/core/types.ts';
 
 test('text attachments are included in the master briefing without changing the user message', () => {
@@ -130,4 +130,40 @@ test('the master briefing keeps the full listing, the version and the message an
   expect(text).toContain('- impl-a (agent work)');
   expect(text).toContain('input={"files"');
   expect(text).toContain('- impl-b (agent work)');
+});
+
+test('the nodes that read a node are found through the graph, not by direct edge only', () => {
+  expect(nodesReading('impl-a', focusedGraph).map(node => node.id)).toEqual(['check-a', 'check-all', 'review']);
+  expect(nodesReading('review', focusedGraph)).toEqual([]);
+});
+
+test('a rework briefing carries the failed evidence instead of the briefing again', () => {
+  const text = reworkBriefing({
+    attempt: 2,
+    evidence: [{ id: 'check-types', label: 'program graph.command', status: 'failed', output: 'x'.repeat(REWORK_OUTPUT_LIMIT + 500) }],
+    acceptance: [
+      { id: 'a1', description: '类型检查通过', checkNode: 'check-types' },
+      { id: 'a2', description: '与这次失败无关的一条', checkNode: 'check-review' },
+    ],
+    handlePath: '/state/instances/i/rework/impl-a-attempt-2.txt',
+  });
+  expect(text).toContain('Rework (attempt 2, same session)');
+  expect(text).toContain('- check-types (program graph.command, failed):');
+  // Only the acceptance this failure blocks is worth repeating; the rest is in the session already.
+  expect(text).toContain('Acceptance this evidence blocks:\n- a1 (check check-types): 类型检查通过');
+  expect(text).not.toContain('a2');
+  expect(text).toContain('[truncated]');
+  expect(text).toContain('/state/instances/i/rework/impl-a-attempt-2.txt');
+  // None of the briefing body comes back: the session already has it.
+  expect(text).not.toContain('Request:');
+  expect(text).not.toContain('Task graph');
+  expect(text).not.toContain('x'.repeat(REWORK_OUTPUT_LIMIT + 1));
+  expect(text).toContain('Your node, its file list and every confirmed check input are unchanged.');
+});
+
+test('a rework with no recorded failure says so instead of inventing one', () => {
+  const text = reworkBriefing({ attempt: 3, evidence: [], acceptance: [{ id: 'a1', description: 'd', checkNode: 'check-types' }] });
+  expect(text).toContain('No downstream evidence is recorded as failed');
+  expect(text).not.toContain('Acceptance this evidence blocks');
+  expect(text).not.toContain('truncated');
 });
