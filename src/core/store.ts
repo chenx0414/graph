@@ -32,9 +32,12 @@ export interface TaskRow {
 /** SQLite and transaction details stay private to the Task Runtime module. */
 export class TaskStore {
   readonly db: DatabaseSync;
+  /** Where this store lives: the state directory's own layout (instances/, rsi/) hangs off it. */
+  readonly path: string;
   private readonly changes = new EventEmitter();
   private readonly eventListeners = new Set<(type: string) => void>();
   constructor(path: string) {
+    this.path = path;
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
