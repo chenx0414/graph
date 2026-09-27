@@ -1,5 +1,6 @@
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { rsiChangeShapeHint } from './rsi.ts';
 
 /** Facts about the host bindings, without executors or filesystem access. */
 export interface AgentToolFeatures {
@@ -27,13 +28,16 @@ export function agentArtifactAccess(input: { role?: string; action: string }) {
   };
 }
 
-type Declaration = Pick<ToolDefinition, 'name' | 'label' | 'description' | 'parameters'> & {
+/** What a declaration carries before a handler is bound: the SDK surface minus execution (the handler is
+ * bound by name in `agent-tools.ts`), plus the two facts this layer owns. `prepareArguments` is part of
+ * the surface on purpose - it runs before the SDK's schema check. */
+export type AgentToolDeclaration = Pick<ToolDefinition, 'name' | 'label' | 'description' | 'parameters' | 'prepareArguments'> & {
   available: boolean;
   externallyGated: boolean;
 };
 
-// Schemas, descriptions and registration conditions are shared by previews and
-// execution. Constructing declarations never resolves paths or invokes a tool.
+type Declaration = AgentToolDeclaration;
+
 function declarations(features: AgentToolFeatures) {
   const main = features.role === 'master';
   return {
@@ -350,6 +354,13 @@ function declarations(features: AgentToolFeatures) {
       }),
       available: main && Boolean(features.rsi?.apply),
       externallyGated: false,
+      // Runs before the SDK's schema check, which is the only place a mis-nested call can be answered with
+      // what went wrong instead of with the schema fact it produced (see `rsiChangeShapeHint`).
+      prepareArguments: (args: unknown) => {
+        const hint = rsiChangeShapeHint(args);
+        if (hint) throw new Error(hint);
+        return args;
+      },
     },
     list_agent_combinations: {
       name: 'list_agent_combinations', label: 'List Agent combinations', description: 'List subagent recipes composed from shared resource-library IDs. Results are recipes, not installed definitions or permissions; inspect the referenced resources before using one.',
@@ -372,6 +383,6 @@ function declarations(features: AgentToolFeatures) {
 
 export type AgentToolName = keyof ReturnType<typeof declarations>;
 
-export function describeAgentTools(features: AgentToolFeatures) {
+export function describeAgentTools(features: AgentToolFeatures): (AgentToolDeclaration & { name: AgentToolName })[] {
   return Object.values(declarations(features)).filter(tool => tool.available);
 }

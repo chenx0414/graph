@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { Type, normalizeContext } from '@earendil-works/pi-ai';
 import type { ToolDefinition, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
+import { describeAgentTools } from '../../src/runtime/agent-tool-definitions.ts';
 import { openPiInstance } from '../../src/runtime/pi-instance.ts';
 import { CallBroker, type TokenUsage } from '../../src/runtime/call-broker.ts';
 import { controlledOpenAIStream, gatedProviderFetch } from '../../src/runtime/controlled-openai.ts';
@@ -291,4 +292,29 @@ test('an ambiguous transport failure is recorded as unknown usage without a rese
   await expect(gatedProviderFetch(gate, 'http://provider.invalid/v1/chat', {}, { reservation: 10, fetchImpl, delay: async () => {} })).rejects.toThrow('socket hang up');
   expect(calls).toBe(1);
   expect(gate.settled).toEqual([{ id: gate.dispatches[0], usage: null }]);
+});
+
+test('a mis-nested RSI change reaches the model as a named mistake and never reaches the handler', async () => {
+  const executed: unknown[] = [];
+  const declaration = describeAgentTools({ rsi: { apply: true }, role: 'master' })
+    .find(candidate => candidate.name === 'apply_rsi_change')!;
+  const nested = {
+    title: 'nested',
+    problem: 'the change carries a top-level field',
+    changes: [{ path: 'a.ts', action: 'write', content: 'x', checks: [{ command: 'node', args: ['--run', 'check'] }] }],
+  };
+  const { instance, provider } = await fixture([
+    { tools: [{ id: 'rsi-1', name: 'apply_rsi_change', arguments: JSON.stringify(nested) }] },
+    { text: 'Understood.' },
+  ], () => [{
+    ...declaration,
+    execute: async args => { executed.push(args); return { content: [{ type: 'text', text: 'applied' }], details: {} }; },
+  }]);
+  await instance.prompt('Apply the improvement');
+  // The hint is what the model reads back, so it has to arrive as the tool result of the real session -
+  // and the declared handler must not have run, because a mis-nested call is not a partial apply.
+  const toolResult = (provider.requests[1] as { messages?: { role?: string; content?: string }[] }).messages
+    ?.find(message => message.role === 'tool');
+  expect(toolResult?.content).toMatch(/nested one level too deep/);
+  expect(executed).toEqual([]);
 });

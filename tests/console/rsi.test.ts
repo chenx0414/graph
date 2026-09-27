@@ -573,6 +573,37 @@ test('a green check refuses to verify a checkout whose changes the commit would 
   expect(await readFile(join(root, 'src/keep.ts'), 'utf8')).toBe('export const value = 9;\n');
 });
 
+test('a rolled-back attempt leaves no index entry behind, so the next attempt is not blocked by its own debris', async () => {
+  const root = await repo();
+  await writeFile(join(root, '.gitignore'), 'scratch/\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'ignore scratch']);
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(root, dir);
+  // `git add -A -- good ignored` stages the good path and then fails on the ignored one, which is how a
+  // failed attempt leaves a staged entry behind. Restoring the files is not enough: the index entry is
+  // what the next attempt reads as somebody else's uncommitted work.
+  const blocked = await rsi.apply({
+    title: 'Mixed staging',
+    problem: 'One change lands on an ignored path.',
+    activate: false,
+    changes: [
+      { path: 'src/fresh.ts', action: 'write', content: 'export const fresh = 1;\n' },
+      { path: 'scratch/ignored.ts', action: 'write', content: 'export const ignored = 1;\n' },
+    ],
+  }, { store, taskId, conversationId });
+  expect(blocked.status).toBe('rolled_back');
+  expect(shell(root, ['status', '--porcelain'])).toBe('');
+
+  const next = await rsi.apply({
+    title: 'Clean retry',
+    problem: 'The failed attempt must not block the fix.',
+    activate: false,
+    changes: [{ path: 'src/fresh.ts', action: 'write', content: 'export const fresh = 2;\n' }],
+  }, { store, taskId, conversationId });
+  expect(next.status).toBe('applied');
+});
+
 test('a check that dirties the checkout does not become a verified commit', async () => {
   const root = await repo();
   const { store, taskId, conversationId, dir } = ledger();
