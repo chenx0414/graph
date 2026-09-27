@@ -96,7 +96,7 @@ export function nodePromptView(store: TaskStore, taskId: string, nodeId: string)
     notes.push('程序节点：它在进程内运行，不会被发送 system prompt。');
     if (recorded) notes.push('节点类型已改变，但台账里仍留着它更早那次作为 agent 发送的记录。');
   } else {
-    if (!recorded) notes.push('台账里没有这个节点的发送记录：它可能还没发送过，也可能是在工作进程里发送、这份记录尚未回传。');
+    if (!recorded) notes.push('台账里没有这个节点的发送记录：它可能还没发送过，也可能这份记录还没有写回来。');
     const session = row.instance_id
       ? store.db.prepare('SELECT session_file FROM node_sessions WHERE instance_id = ?')
         .get(row.instance_id) as { session_file: string } | undefined
