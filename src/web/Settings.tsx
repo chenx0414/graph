@@ -455,7 +455,12 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   };
   // credentialConfigured / credentialRef come from the daemon catalog; the
   // card must use the daemon's own ref name so the reason names the right env var.
-  const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
+  // The daemon's per-credential answer outranks the platform flag: one platform may hold several
+  // accounts, so another account's variable says nothing about this one. Without that precedence the card
+  // reports 凭据已解析 for an account that has no value, and the only symptom is a model that silently
+  // never dispatches (its credential is dropped before the model list is built).
+  const accountHasNoValue = credentialState[active.credentialId] === false && !keyResolved[active.credentialId];
+  const resolved = !accountHasNoValue && Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
   const requiredProblems = missingRequiredModelFields(draft.models?.entries ?? []);
 
   useEffect(() => {
@@ -691,7 +696,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
             )}
             <Field label="名称" hint="用量页与模型列表显示这个名字；支持自定义" error={fieldError('label')}><input className="input" data-testid="provider-label" data-invalid={mark('label')} value={active.label} onChange={event => editAccount({ label: event.target.value })} placeholder={isCustom ? '例如 本地网关' : undefined} /></Field>
             <Field label="凭据 id" hint={isCustom ? undefined : '同一平台可配置多个账户：id 不同即不同账户'} data-testid="provider-credentialId-field"><input className="input" data-testid="provider-credentialId" data-invalid={mark('credentialId')} value={active.credentialId} onChange={event => editAccount({ credentialId: event.target.value })} /></Field>
-            <Field label="环境变量（credentialRef）" hint="配置文件只保存这个名字" error={fieldError('credentialRef')}><input className="input" data-testid="provider-credentialRef" data-invalid={mark('credentialRef')} value={active.credentialRef} onChange={event => editAccount({ credentialRef: event.target.value })} /></Field>
+            <div className="field-full">
+              <Field label="环境变量（credentialRef）" hint="配置文件只保存这个名字" error={fieldError('credentialRef')}><input className="input" data-testid="provider-credentialRef" data-invalid={mark('credentialRef')} value={active.credentialRef} onChange={event => editAccount({ credentialRef: event.target.value })} /></Field>
+            </div>
           </div>
 
           {isCustom ? null : (
