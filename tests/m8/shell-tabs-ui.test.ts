@@ -135,7 +135,7 @@ test('the drawer toggle sits in the workspace bar on every window, and outside a
   await drawer.waitFor();
   expect(await drawer.getAttribute('data-section')).toBe('workspace');
   // The launcher offers the shared-artifact index and the task list, and renders neither itself.
-  expect(await page.getByTestId('drawer-workspace-artifacts').getAttribute('href')).toBe('#/artifacts');
+  expect(await page.getByTestId('drawer-workspace-artifacts').getAttribute('href')).toBe('#/artifacts?project=alpha');
   await page.getByTestId('drawer-workspace-tasks').waitFor();
   expect(await drawer.locator('[data-testid="graph"], [data-testid="drawer-artifacts"]').count()).toBe(0);
 

@@ -184,6 +184,8 @@ export function App() {
   // The drawer is a launcher everywhere: outside a conversation it lists the tasks the user can
   // open, split the same way the conversation drawer splits them.
   const workspaceTasks = splitTasksByLifecycle(tasks);
+  // Where the user is standing decides which project the launcher's index opens on.
+  const currentProjectId = settings?.projects[0]?.id ?? null;
   // Tabs are named from the data the shell already polls: a conversation by its own title, a
   // task by its request. Until that arrives the tab keeps the generic name it opened with.
   const shownTabs = withTitles(tabs, tab => {
@@ -426,7 +428,11 @@ export function App() {
             </div>
             <div className="drawer-inner">
               <div className="drawer-entry-links">
-                <a className="btn btn-sm" data-testid="drawer-workspace-artifacts" href="#/artifacts">
+                <a
+                  className="btn btn-sm"
+                  data-testid="drawer-workspace-artifacts"
+                  href={`#/artifacts${currentProjectId ? `?project=${encodeURIComponent(currentProjectId)}` : ''}`}
+                >
                   <Icon name="box" size={14} />
                   <span style={{ marginLeft: 6 }}>共享产物</span>
                 </a>
