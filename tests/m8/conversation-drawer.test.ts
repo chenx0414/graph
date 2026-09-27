@@ -8,6 +8,8 @@ import {
   DRAWER_PANEL_IDS,
   defaultDrawerOpen,
   defaultDrawerPage,
+  groupArtifacts,
+  isEndedTask,
   drawerEntryLabel,
   drawerInitPanelIds,
   drawerPageIds,
@@ -18,6 +20,7 @@ import {
   panelPlacement,
   residentPanelIds,
   resolveDrawerSection,
+  splitTasksByLifecycle,
 } from '../../src/web/conversation-drawer.ts';
 
 const read = (relative: string) => readFileSync(join(process.cwd(), relative), 'utf8');
@@ -30,7 +33,7 @@ const read = (relative: string) => readFileSync(join(process.cwd(), relative), '
 describe('drawer default state', () => {
   test('the drawer is collapsed by default', () => {
     expect(defaultDrawerOpen()).toBe(false);
-    expect(defaultDrawerPage()).toBe('acceptance');
+    expect(defaultDrawerPage()).toBe('graph');
   });
 });
 
@@ -45,7 +48,7 @@ describe('chat-stream resident policy', () => {
   });
 
   test('the draft card and the task overviews are not resident any more', () => {
-    for (const id of ['proposal-draft', 'draft-acceptance', 'draft-graph', 'accept-branch', 'confirm-draft']) {
+    for (const id of ['proposal-draft', 'accept-branch', 'confirm-draft']) {
       expect(residentPanelIds()).not.toContain(id);
       expect(isResidentPanel(id)).toBe(false);
       expect(panelPlacement(id)).toBe('drawer');
@@ -58,14 +61,16 @@ describe('chat-stream resident policy', () => {
 });
 
 describe('drawer panel policy', () => {
-  test('draft versions, the draft pages, the task graph and the task navigation all live in the drawer', () => {
-    for (const id of ['draft-versions', 'acceptance', 'nodes', 'decisions', 'graph', 'task-nav', 'task']) {
+  test('draft versions, the two draft pages and the task navigation all live in the drawer', () => {
+    for (const id of ['draft-versions', 'graph', 'artifacts', 'task-nav', 'task']) {
       expect(drawerPanelIds()).toContain(id);
       expect(isDrawerPanel(id)).toBe(true);
       expect(panelPlacement(id)).toBe('drawer');
     }
-    expect(DRAWER_DRAFT_PAGES.map(page => page.id)).toEqual(['acceptance', 'nodes', 'decisions', 'graph']);
-    expect(drawerPageIds()).toContain('graph');
+    expect(DRAWER_DRAFT_PAGES.map(page => page.id)).toEqual(['graph', 'artifacts']);
+    expect(drawerPageIds()).toContain('artifacts');
+    // Acceptance items, node lists and decisions are deliberately not drawer pages any more.
+    for (const gone of ['acceptance', 'nodes', 'decisions']) expect(drawerPageIds()).not.toContain(gone);
   });
 
   test('the empty task state and the project binding are drawer initialization panels', () => {
@@ -213,13 +218,16 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('data-testid="drawer-draft-toc"');
     expect(source).toContain('data-testid="conversation-graph"');
     expect(source).toContain('data-testid="drawer-task-nav"');
+    expect(source).toContain('data-testid="draft-page-artifacts"');
+    // The artifacts page itself lives in its own module; the drawer only places it.
+    expect(source).toContain('artifactsPanel=');
+    expect(read('src/web/ArtifactViews.tsx')).toContain('data-testid="drawer-artifacts"');
+    expect(read('src/web/ArtifactViews.tsx')).toContain('不属于任何任务');
   });
 
   test('the draft card, the confirm controls and the task cards moved into the drawer', () => {
     const source = read('src/web/Conversation.tsx');
     expect(source).toContain('data-testid="proposal-draft"');
-    expect(source).toContain('data-testid="draft-graph"');
-    expect(source).toContain('data-testid="draft-acceptance"');
     expect(source).toContain('data-testid="accept-branch"');
     expect(source).toContain('data-testid="confirm-draft"');
     expect(source).toContain('data-testid={`conversation-task-${task.id}`}');
@@ -248,5 +256,33 @@ describe('components genuinely use the policy module', () => {
     // ...but the pending questions do stay in the chat stream.
     expect(thread).toContain('data-testid="conversation-questions"');
     expect(thread).toContain('data-testid={`conversation-questions-${task.id}`}');
+  });
+});
+
+describe('what the drawer keeps quiet', () => {
+  test('finished work is tucked away, a decision or a running task stays in the list', () => {
+    const tasks = [
+      { id: 'a', status: 'running' },
+      { id: 'b', status: 'completed' },
+      { id: 'c', status: 'blocked' },
+      { id: 'd', status: 'abandoned' },
+      { id: 'e', status: 'failed' },
+    ];
+    const { active, ended } = splitTasksByLifecycle(tasks);
+    expect(active.map(task => task.id)).toEqual(['a', 'c']);
+    expect(ended.map(task => task.id)).toEqual(['b', 'd', 'e']);
+    expect(isEndedTask('running')).toBe(false);
+    expect(isEndedTask('abandoned')).toBe(true);
+  });
+
+  test('a shared artifact belongs to the project group, not to the task that produced it', () => {
+    const records = [
+      { artifactId: 'one', scope: 'task' },
+      { artifactId: 'two', scope: 'project' },
+      { artifactId: 'three', scope: 'task' },
+    ];
+    const groups = groupArtifacts(records);
+    expect(groups.own.map(record => record.artifactId)).toEqual(['one', 'three']);
+    expect(groups.project.map(record => record.artifactId)).toEqual(['two']);
   });
 });

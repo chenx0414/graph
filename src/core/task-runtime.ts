@@ -1525,10 +1525,18 @@ export async function openTaskRuntime(options: {
       } = {}) {
         ensureOpen();
         const ids = conversationTaskIds(store, conversationId);
-        const records = ids.flatMap(taskId => artifacts.list({ taskId, ...query, limit: 200 }).artifacts);
+        // Every task in the conversation sees the same project-scoped artifacts, so the union has to
+        // be deduplicated by artifact+version or a shared artifact would be listed once per task.
+        const seen = new Map<string, (typeof artifacts extends never ? never : ReturnType<typeof artifacts.list>['artifacts'][number])>();
+        for (const taskId of ids) {
+          for (const record of artifacts.list({ taskId, ...query, limit: 200 }).artifacts) {
+            seen.set(`${record.artifactId}@${record.version}`, record);
+          }
+        }
+        const records = [...seen.values()].sort((left, right) => right.createdAt - left.createdAt);
         const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 100)));
         return {
-          artifacts: records.sort((left, right) => right.createdAt - left.createdAt).slice(0, limit),
+          artifacts: records.slice(0, limit),
           nextCursor: null,
           total: records.length,
         };

@@ -1,6 +1,18 @@
+import { ArtifactDetail } from './ArtifactViews.tsx';
 import { TabBar } from './TabBar.tsx';
 import { WindowDrawer } from './WindowDrawer.tsx';
-import { EMPTY_TABS, activateTab, closeTab, openTab, tabForPath, withTitles, type WorkspaceTabs } from './workspace-tabs.ts';
+import {
+  EMPTY_TABS,
+  activateTab,
+  closeTab,
+  openTab,
+  retitleTab,
+  tabForPath,
+  tabId,
+  withTitles,
+  type WorkspaceTabKind,
+  type WorkspaceTabs,
+} from './workspace-tabs.ts';
 import { useUsageRefresh } from './usage-refresh.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
@@ -200,6 +212,7 @@ export function App() {
   const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
   const taskMatch = /^\/tasks\/([^/]+)(\/graph)?$/.exec(pathname ?? '/');
   const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
+  const artifactMatch = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
   const modeTone = !startup?.configured ? 'danger' : startup.mode === 'execute' ? 'success' : 'warn';
   const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
@@ -222,6 +235,10 @@ export function App() {
   }
   function startNewConversation() {
     location.hash = '#/';
+  }
+  // Tab content that only learns its own name after loading (a shared artifact) renames its tab.
+  function retitleWorkspaceTab(kind: WorkspaceTabKind, key: string, title: string) {
+    setTabs(current => retitleTab(current, tabId(kind, key), title));
   }
   const conversationFirst = pathname === '/' || Boolean(conversationMatch);
   const settingsPage = pathname === '/settings' || pathname === '/setup';
@@ -299,18 +316,6 @@ export function App() {
               <Icon name="panel-left" size={16} />
             </button>
             <div className="topbar-spacer" />
-            <button
-              type="button"
-              className="icon-button drawer-toggle detail-toggle"
-              data-testid="detail-toggle"
-              data-open={detailOpen}
-              onClick={() => setDetailOpen(value => !value)}
-              title={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-              aria-label={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-              aria-expanded={detailOpen}
-            >
-              <Icon name="panel-right" size={16} />
-            </button>
           </header>
         )}
         {startup && !startup.configured && (
@@ -346,18 +351,6 @@ export function App() {
             </span>
             <div className="topbar-spacer" />
             <Pill tone={modeTone}>{startup?.mode === 'execute' ? '调度开启' : '调度关闭'}</Pill>
-            <button
-              type="button"
-              className="icon-button drawer-toggle detail-toggle"
-              data-testid="detail-toggle"
-              data-open={detailOpen}
-              onClick={() => setDetailOpen(value => !value)}
-              title={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-              aria-label={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-              aria-expanded={detailOpen}
-            >
-              <Icon name="panel-right" size={16} />
-            </button>
           </header>
         )}
         <div className={`content ${conversationFirst ? 'conversation-content' : ''}`}>
@@ -379,6 +372,14 @@ export function App() {
                 onDrawerOpenChange={setDetailOpen}
               />
             )}
+            {artifactMatch && (
+              <ArtifactDetail
+                key={`${artifactMatch[1]}:${artifactMatch[2]}`}
+                taskId={artifactMatch[1]!}
+                artifactId={artifactMatch[2]!}
+                onTitle={title => retitleWorkspaceTab('artifact', `${artifactMatch[1]}/${artifactMatch[2]}`, title)}
+              />
+            )}
             {nodeMatch && (
               <Card title={`节点 ${nodeMatch[2]}`} icon="box" actions={<a className="btn" href={`#/tasks/${nodeMatch[1]}/graph`}>返回任务图</a>}>
                 <NodeRunPanel key={`${nodeMatch[1]}:${nodeMatch[2]}`} taskId={nodeMatch[1]!} nodeId={nodeMatch[2]!} full />
@@ -388,18 +389,6 @@ export function App() {
             {taskMatch?.[2] && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
           </div>
         </div>
-        {!conversationMatch && detailOpen && (
-          <WindowDrawer open={detailOpen}><aside data-open="true" className="detail-drawer app-empty-drawer" data-testid="detail-drawer" role="complementary">
-            <div className="drawer-head">
-              <button className="icon-button" aria-label="关闭详情" onClick={() => setDetailOpen(false)}><Icon name="close" size={16} /></button>
-              <h2>详情</h2>
-            </div>
-            <div className="drawer-empty" data-testid="detail-empty">
-              <strong>暂无详情</strong>
-              <span>出现草稿、任务图或执行进度后，详情会显示在这里。</span>
-            </div>
-          </aside></WindowDrawer>
-        )}
       </main>
       <Toaster />
     </div>
