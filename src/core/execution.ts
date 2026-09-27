@@ -1,18 +1,19 @@
 import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuation.ts';
 import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
-import { isAbsolute } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { assertWithinBudget, recordModelUse } from './budget-ledger.ts';
 import { conversationDigest, conversationForTask, deliverMessages, pendingMessages } from './conversation.ts';
 import { digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
-import { loadGraph } from './graph.ts';
+import { loadGraph, type GraphState } from './graph.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
 import { insertQuestion, isMasterParked } from './question-routing.ts';
 import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
-import { briefing } from '../catalog/briefing.ts';
+import { briefing, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
@@ -27,6 +28,41 @@ type ExecutionNodeRow = { id: string; task_id: string; spec: string; instance_id
  * and become a repair problem instead of an uncertain operation.
  */
 const SUBMISSION_DEFECT_CODES = new Set(['invalid_result', 'invalid_evidence']);
+
+/**
+ * The rework briefing for a retry in the same session: the evidence this node's output feeds that did not
+ * succeed, the acceptance that evidence blocks, and a file holding every whole output. A retry whose
+ * session is gone never reaches here, because re-sending a delta would assume a briefing nobody still has.
+ */
+function reworkDelta(input: { store: TaskStore; state: GraphState; graph: readonly NodeSpec[]; proposal?: Proposal; own: string; attempt: number; instanceId: string }) {
+  const readers = new Set(nodesReading(input.own, input.graph).map(node => node.id));
+  const failed = input.graph
+    .filter(node => readers.has(node.id))
+    .map(node => ({ node, status: input.state.status(node.id) }))
+    .filter(item => item.status === 'failed' || item.status === 'blocked')
+    .map(item => {
+      const output = input.state.output(item.node.id);
+      return {
+        id: item.node.id,
+        label: `${item.node.kind} ${item.node.action}`,
+        status: item.status,
+        output: output === null ? '(no output recorded)' : JSON.stringify(output, null, 2),
+      };
+    });
+  const oversized = failed.some(item => item.output.length > REWORK_OUTPUT_LIMIT);
+  const handlePath = join(dirname(input.store.path), 'instances', input.instanceId, 'rework', `${input.own}-attempt-${input.attempt}.txt`);
+  if (oversized) {
+    // Beside the instance's own state, so it is reclaimed with that instance instead of piling up.
+    mkdirSync(dirname(handlePath), { recursive: true, mode: 0o700 });
+    writeFileSync(handlePath, `${failed.map(item => `== ${item.id} (${item.label}, ${item.status})\n${item.output}\n`).join('\n')}`, { mode: 0o600 });
+  }
+  return reworkBriefing({
+    attempt: input.attempt,
+    evidence: failed,
+    acceptance: input.proposal?.acceptance ?? [],
+    ...(oversized ? { handlePath } : {}),
+  });
+}
 
 /** Private execution state machine. Every mutation shares the task command/event transaction. */
 export class Execution {
@@ -614,6 +650,8 @@ export class Execution {
               acceptance: proposal?.acceptance ?? [],
               ...(capabilities?.length ? { capabilities } : {}),
               ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
+              // A graph node reads its own view: its node and the checks that read it, not every lane.
+              ...(graphBriefing?.length && spec.role !== 'master' ? { focus: spec.id } : {}),
               ...(review ? { review } : {}),
               ...(conversationStatus ? { conversation: conversationStatus } : {}),
               ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
@@ -639,6 +677,8 @@ export class Execution {
               ...(proposal?.summary ? { summary: proposal.summary } : {}),
               acceptance: proposal?.acceptance ?? [],
               ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
+              // A graph node reads its own view: its node and the checks that read it, not every lane.
+              ...(graphBriefing?.length && spec.role !== 'master' ? { focus: spec.id } : {}),
               ...(review ? { review } : {}),
               ...(conversationStatus ? { conversation: conversationStatus } : {}),
               ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
@@ -647,6 +687,15 @@ export class Execution {
                   ...this.systemContext,
                 },
               } : {}),
+            });
+          }
+          // A retry in the same session already holds its briefing and its work copy, so re-sending the
+          // whole briefing would only repeat what that session has. The evidence that failed is what is new.
+          if (graphBriefing?.length && graph && attempt > 1 && spec.role !== 'master' && node.instance_id
+            && this.store.db.prepare('SELECT session_id FROM node_sessions WHERE instance_id=?').get(node.instance_id)) {
+            intent.context.briefing = reworkDelta({
+              store: this.store, state: graph, graph: graphBriefing,
+              ...(proposal ? { proposal } : {}), own: spec.id, attempt, instanceId: node.instance_id,
             });
           }
           const predecessor = spec.kind === 'agent' && agentContext?.mode === 'fresh' && graph
