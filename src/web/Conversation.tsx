@@ -1162,7 +1162,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                       data-testid={`drawer-entry-${entry.id}`}
                       href={entry.id === 'graph'
                         ? `#/conversations/${id}/graph?v=${selectedProposalVersion ?? activeProposal.version}`
-                        : '#/artifacts'}
+                        : `#/artifacts${view.projectId ? `?project=${encodeURIComponent(view.projectId)}` : ''}`}
                     >
                       <Icon name={entry.id === 'graph' ? 'graph' : 'box'} size={14} />
                       <span style={{ marginLeft: 6 }}>{entry.label}</span>
@@ -1246,7 +1246,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                               key={entry.id}
                               className="btn btn-sm"
                               data-testid={entry.id === 'graph' ? `task-graph-tab-${detailTask.id}` : 'drawer-task-artifacts'}
-                              href={entry.id === 'graph' ? `#/tasks/${detailTask.id}/graph` : '#/artifacts'}
+                              href={entry.id === 'graph'
+                                ? `#/tasks/${detailTask.id}/graph`
+                                : `#/artifacts${view.projectId ? `?project=${encodeURIComponent(view.projectId)}` : ''}`}
                             >
                               <Icon name={entry.id === 'graph' ? 'graph' : 'box'} size={14} />
                               <span style={{ marginLeft: 6 }}>{entry.label}</span>
@@ -1259,7 +1261,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         <p className="muted" data-testid="no-task-graph">还没有任务；确认草稿后这里会显示它的窗口。</p>
                         <div className="drawer-entry-links" data-testid="drawer-entry-links">
                           {DRAWER_ENTRY_LINKS.filter(entry => entry.id === 'artifacts').map(entry => (
-                            <a key={entry.id} className="btn btn-sm" data-testid="drawer-task-artifacts" href="#/artifacts">
+                            <a key={entry.id} className="btn btn-sm" data-testid="drawer-task-artifacts" href={`#/artifacts${view.projectId ? `?project=${encodeURIComponent(view.projectId)}` : ''}`}>
                               <Icon name="box" size={14} />
                               <span style={{ marginLeft: 6 }}>{entry.label}</span>
                             </a>
