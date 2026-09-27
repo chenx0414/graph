@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { persistConversationActivity, publishConversationDelta } from '../../src/core/conversation.ts';
@@ -26,6 +26,27 @@ async function temp(name: string) {
   const dir = await mkdtemp(join(tmpdir(), `graph-conversation-history-${name}-`));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   return dir;
+}
+
+/**
+ * One tolerant attempt at paging in older records.
+ *
+ * The transcript re-renders while live records arrive, so the button can be replaced
+ * between "it exists" and "it is clicked": holding that handle makes the click fail with
+ * `element was detached from the DOM` under full-suite load. The caller waits on the
+ * outcome it needs and re-attempts, which is why a lost click here is not a failure.
+ */
+async function clickOlder(page: Page) {
+  const button = page.getByTestId('load-older');
+  if (await button.count() === 0) {
+    await page.waitForTimeout(150);
+    return;
+  }
+  try {
+    await button.click({ timeout: 2_000 });
+  } catch {
+    // The list re-rendered underneath the click; the caller re-reads the outcome instead.
+  }
 }
 
 test('history pages to the earliest record, survives new messages, and never crosses conversations', async () => {
@@ -114,8 +135,7 @@ test('a burst larger than one page fills the middle records without duplicates',
   // Fill any hole left between the loaded head and the latest window.
   const deadline = Date.now() + 20_000;
   while (await userMessages().count() < 280 && Date.now() < deadline) {
-    const button = page.getByTestId('load-older');
-    if (await button.count() > 0) await button.click();
+    await clickOlder(page);
     await page.waitForTimeout(200);
   }
   expect(await userMessages().count()).toBe(280);
@@ -141,9 +161,12 @@ test('processed history messages update from pending to delivered without a relo
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   await page.getByTestId('message-user').filter({ hasText: 'PENDING-219' }).waitFor();
-  const older = page.getByTestId('load-older');
-  if (await older.count() > 0) await older.click();
-  await page.getByTestId('message-user').filter({ hasText: 'PENDING-000' }).waitFor();
+  // The oldest record is behind a button the live stream can replace at any moment: wait on
+  // the record itself, then assert on it strictly below.
+  const oldest = page.getByTestId('message-user').filter({ hasText: 'PENDING-000' });
+  const paging = Date.now() + 30_000;
+  while (await oldest.count() === 0 && Date.now() < paging) await clickOlder(page);
+  await oldest.waitFor({ timeout: 10_000 });
   await page.waitForFunction(() => {
     const element = [...document.querySelectorAll('[data-testid="message-user"]')].find(candidate => candidate.textContent?.includes('PENDING-000'));
     return element?.getAttribute('data-state') === 'pending';
