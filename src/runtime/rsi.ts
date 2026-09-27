@@ -311,6 +311,49 @@ function changePath(body: Record<string, unknown>): unknown {
   return body['path'] ?? body['file'] ?? body['filePath'];
 }
 
+/** The model's own mistakes about the shape of `changes[]`, answered in its terms. The SDK validates the
+ * call before this service sees it and prints every schema fact it finds (`changes.0.path: must have
+ * required properties path`, followed by the received arguments) - accurate, and never a word about what
+ * went wrong: a top-level field nested one level too deep, or a whole change written inside `edits[]`.
+ * `prepareArguments` throws before that check and its message becomes the tool result the model reads.
+ * Everything else - a call that is only missing a field, say - stays the schema's business. */
+export function rsiChangeShapeHint(args: unknown): string | undefined {
+  const top = plainObject(args);
+  if (!top) return undefined;
+  const topLevel = ['title', 'problem', 'evidence', 'diagnosis', 'impact', 'risk', 'checks', 'activate', 'force'];
+  const changeKeys = ['path', 'action', 'content', 'edits'];
+  for (const [index, change] of asArray(top['changes']).entries()) {
+    if (Array.isArray(change)) return `changes[${index}] is an array: changes[] holds one object per file - flatten it.`;
+    const entry = plainObject(change);
+    if (!entry) continue;
+    const stray = topLevel.find(key => Object.hasOwn(entry, key));
+    if (stray) return `changes[${index}] is one file change: {path, action, content, edits}. "${stray}" belongs at the top level of the call - it is nested one level too deep.`;
+    for (const [editIndex, edit] of asArray(entry['edits']).entries()) {
+      if (Array.isArray(edit)) return `changes[${index}].edits[${editIndex}] is an array: edits[] holds one {oldText, newText} per edit - flatten it.`;
+      const edited = plainObject(edit);
+      if (!edited) continue;
+      const nested = changeKeys.find(key => Object.hasOwn(edited, key));
+      if (nested) return `changes[${index}].edits[${editIndex}] is one edit: {oldText, newText}. A change object {path, action, ...} belongs in changes[], not inside edits[] - one change is nested inside another.`;
+    }
+  }
+  for (const [index, check] of asArray(top['checks']).entries()) {
+    const entry = plainObject(check);
+    if (entry && changeKeys.some(key => Object.hasOwn(entry, key))) {
+      return `checks[${index}] is one check: {command, args}. A file change belongs in changes[], not in checks[].`;
+    }
+  }
+  return undefined;
+}
+
+/** A JSON object as the model sends it; arrays and scalars are not a shape mistake. */
+function plainObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 /** Names the shape, not just the missing key: a resend must not need a second guess. */
 function changePathText(body: Record<string, unknown>, index: number): string {
   const raw = changePath(body);
@@ -861,6 +904,13 @@ export class RsiService {
           await writeFile(absolute, content, { mode: 0o644 });
         }
       }
+      // Restoring the files leaves the index alone, and an index entry outlives the attempt that made it:
+      // `git add -A -- good ignored` stages the good path and then fails on the ignored one, so a
+      // rolled-back call used to leave `A good` behind - which the next attempt reads as somebody else's
+      // uncommitted work ("Uncommitted changes outside this RSI change") and refuses to run. The harness
+      // never starts with unowned dirty paths, so resetting these can only undo our own staging.
+      const touched = [...new Set([...uniquePaths, ...owned])];
+      if (touched.length) git(root, ['reset', '-q', '--', ...touched]);
       // Restore only what this attempt wrote; keep files a prior failed attempt
       // still owns so its fix is not lost either.
       if (owned.size) await this.writeWorking(branch, [...owned]);
