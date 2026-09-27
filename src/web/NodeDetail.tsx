@@ -64,6 +64,8 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
   // The recorded prompt is read when the tab opens: an agent node that never sent has
   // nothing to show, and the tab must not pretend otherwise.
   const [prompt, setPrompt] = useState<NodePromptView | null>(null);
+  // The window is named after the agent that runs the node, and only the graph knows that name.
+  const [named, setNamed] = useState<string | null>(agentName ?? null);
   const [overview, setOverview] = useState<NodeOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -75,6 +77,14 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
     void api<NodeOverview>(`/api/tasks/${taskId}/nodes/${nodeId}/run`)
       .then(view => { if (!cancelled) setOverview(view); })
       .catch(() => { if (!cancelled) setOverview(null); });
+    if (!agentName) {
+      void api<{ nodes: { id: string; agent?: { name?: string } }[] }>(`/api/tasks/${taskId}/graph`)
+        .then(payload => {
+          const name = payload.nodes.find(node => node.id === nodeId)?.agent?.name;
+          if (!cancelled && name) setNamed(name);
+        })
+        .catch(() => {});
+    }
     void api<NodePromptView>(`/api/tasks/${taskId}/nodes/${nodeId}/prompt`)
       .then(view => { if (!cancelled) setPrompt(view); })
       .catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason)); })
@@ -161,7 +171,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
             ) : null}
       </section>
 
-      <AgentNodeChat taskId={taskId} nodeId={nodeId} agentName={agentName ?? nodeId} page />
+      <AgentNodeChat taskId={taskId} nodeId={nodeId} agentName={named ?? nodeId} page />
     </div>
   );
 }

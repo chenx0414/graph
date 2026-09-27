@@ -58,18 +58,20 @@ export function resolveDrawerSection(input: DrawerSectionInput): DrawerSectionRe
   return { section: 'task', taskId: stillThere ? selectedTaskId : (taskIds[0] ?? null) };
 }
 
-/** Draft-detail pages that appear as tabs inside the drawer. */
-export interface DrawerPanelDescriptor {
-  id: Exclude<ConversationDrawerPage, 'task'>;
+/**
+ * What the drawer offers as entries. The drawer shows no graph and no artifact list any more: it
+ * names the two windows a draft or a task has, and each one opens as a tab of its own.
+ */
+export interface DrawerEntryLink {
+  id: 'graph' | 'artifacts';
   label: string;
-  /** Which testid family the panel keeps, useful for locating it in tests. */
-  panel: 'task-graph' | 'artifact-list';
+  /** Which window it opens, for tests and for the view to build the address. */
+  target: 'draft-graph' | 'task-graph' | 'artifact-index';
 }
 
-/** Draft-detail pages hosted by the drawer, in tab order. The graph is first: it is the default. */
-export const DRAWER_DRAFT_PAGES: readonly DrawerPanelDescriptor[] = [
-  { id: 'graph', label: '任务图', panel: 'task-graph' },
-  { id: 'artifacts', label: '共享产物', panel: 'artifact-list' },
+export const DRAWER_ENTRY_LINKS: readonly DrawerEntryLink[] = [
+  { id: 'graph', label: '任务图', target: 'task-graph' },
+  { id: 'artifacts', label: '共享产物', target: 'artifact-index' },
 ];
 
 /**
@@ -162,10 +164,6 @@ export function defaultDrawerOpen(): boolean {
   return false;
 }
 
-export function defaultDrawerPage(): Exclude<ConversationDrawerPage, 'task'> {
-  return 'graph';
-}
-
 export function drawerPanelIds(): readonly string[] {
   return DRAWER_PANEL_IDS;
 }
@@ -185,8 +183,8 @@ export function residentPanelIds(): readonly string[] {
   return CHAT_RESIDENT_PANEL_IDS;
 }
 
-export function drawerPageIds(): string[] {
-  return DRAWER_DRAFT_PAGES.map(page => page.id);
+export function drawerEntryIds(): string[] {
+  return DRAWER_ENTRY_LINKS.map(entry => entry.id);
 }
 
 export function isResidentPanel(id: string): boolean {

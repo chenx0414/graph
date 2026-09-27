@@ -117,3 +117,43 @@ test('one task can be open in several tabs: its graph and one of its nodes are s
   await page.getByTestId('settings-shell').waitFor();
   expect(await page.getByTestId('tab-bar').count()).toBe(0);
 });
+
+test('the drawer toggle sits in the workspace bar on every window, and outside a conversation the drawer is only a launcher', async () => {
+  const { server, page } = await harness();
+  const { taskId } = await server.runtime.user.begin({ projectId: 'alpha', request: '外壳目录', requestId: 'tabs-drawer' });
+  await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
+  await page.getByTestId('graph').waitFor();
+
+  const toggle = page.getByTestId('workspace-drawer-toggle');
+  await toggle.waitFor();
+  expect(await toggle.getAttribute('data-open')).toBe('false');
+  await toggle.click();
+  const drawer = page.getByTestId('detail-drawer');
+  await drawer.waitFor();
+  expect(await drawer.getAttribute('data-section')).toBe('workspace');
+  // The launcher offers the shared-artifact index and the task list, and renders neither itself.
+  expect(await page.getByTestId('drawer-workspace-artifacts').getAttribute('href')).toBe('#/artifacts');
+  await page.getByTestId('drawer-workspace-tasks').waitFor();
+  expect(await drawer.locator('[data-testid="graph"], [data-testid="drawer-artifacts"]').count()).toBe(0);
+
+  // It stays available on the next window too, and that window is a tab of its own.
+  await page.getByTestId('drawer-workspace-artifacts').click();
+  await page.getByTestId('artifact-index').waitFor();
+  expect(await page.getByTestId('workspace-drawer-toggle').isVisible()).toBe(true);
+  await expect.poll(async () => (await tabs(page)).map(tab => tab.kind)).toEqual(['graph', 'page']);
+
+  // Navigating closed the launcher again; the toggle is still there, opens it, and closes it.
+  const laterToggle = page.getByTestId('workspace-drawer-toggle');
+  await expect.poll(() => laterToggle.getAttribute('data-open')).toBe('false');
+  await laterToggle.click();
+  await drawer.waitFor();
+  expect(await laterToggle.getAttribute('data-open')).toBe('true');
+  // An open panel covers the right end of the bar, so its own close button is the same corner.
+  await drawer.getByRole('button', { name: '关闭详情' }).click();
+  await drawer.waitFor({ state: 'hidden' });
+  expect(await laterToggle.getAttribute('data-open')).toBe('false');
+  // With the panel away the bar toggle is clickable again.
+  await laterToggle.click();
+  await drawer.waitFor();
+  expect(await laterToggle.getAttribute('data-open')).toBe('true');
+}, 60_000);

@@ -232,14 +232,24 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('最小可用版');
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
-  // The draft graph renders from the same versioned proposal, inside the drawer.
-  await page.getByTestId('draft-page-graph').waitFor();
-  await page.getByTestId('conversation-graph').waitFor();
+  // The drawer lists the two windows the draft has; the graph itself opens as its own tab.
+  expect(await page.getByTestId('drawer-entry-graph').count()).toBe(1);
+  expect(await page.getByTestId('drawer-entry-artifacts').count()).toBe(1);
   await page.screenshot({ path: join(evidence, '02-first-draft.png'), fullPage: true });
+  await page.getByTestId('drawer-entry-graph').click();
+  await page.getByTestId('draft-graph-tab').waitFor();
+  await page.getByTestId('conversation-graph').waitFor();
+  expect(await page.locator('.tab[data-kind="draft"][data-active="true"] .tab-title').innerText()).toContain('任务图');
+  await page.screenshot({ path: join(evidence, '02b-draft-graph-window.png'), fullPage: true });
+  await page.locator('.tab[data-kind="conversation"]').first().click();
+  await page.getByTestId('chat-input').waitFor();
   // The chat thread itself no longer holds the draft card.
   expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
-  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
+  // Opening another window closed the drawer; when it is still open, close it from its header.
+  if (await page.getByTestId('detail-drawer').isVisible().catch(() => false)) {
+    await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+    await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
+  }
 
   // 3. Overturn the draft before confirming; the new draft replaces it.
   await page.getByTestId('chat-input').fill('刚才那个方案先不要，改成先验证性能瓶颈。');

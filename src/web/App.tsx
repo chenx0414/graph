@@ -1,4 +1,7 @@
 import { ArtifactDetail } from './ArtifactViews.tsx';
+import { ArtifactIndex } from './ArtifactIndex.tsx';
+import { DraftGraphTab } from './DraftGraphTab.tsx';
+import { splitTasksByLifecycle } from './conversation-drawer.ts';
 import { TabBar } from './TabBar.tsx';
 import { WindowDrawer } from './WindowDrawer.tsx';
 import {
@@ -178,6 +181,9 @@ export function App() {
   const [pathname, query = ''] = path.split('?');
   const queryParams = new URLSearchParams(query);
   const questionTotal = openQuestionTotal(tasks);
+  // The drawer is a launcher everywhere: outside a conversation it lists the tasks the user can
+  // open, split the same way the conversation drawer splits them.
+  const workspaceTasks = splitTasksByLifecycle(tasks);
   // Tabs are named from the data the shell already polls: a conversation by its own title, a
   // task by its request. Until that arrives the tab keeps the generic name it opened with.
   const shownTabs = withTitles(tabs, tab => {
@@ -194,6 +200,7 @@ export function App() {
   const taskMatch = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname ?? '/');
   const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
   const artifactMatch = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname ?? '/');
+  const draftGraphMatch = /^\/conversations\/([^/]+)\/graph$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
   const modeTone = !startup?.configured ? 'danger' : startup.mode === 'execute' ? 'success' : 'warn';
   const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
@@ -221,7 +228,8 @@ export function App() {
   function retitleWorkspaceTab(kind: WorkspaceTabKind, key: string, title: string) {
     setTabs(current => retitleTab(current, tabId(kind, key), title));
   }
-  const conversationFirst = pathname === '/' || Boolean(conversationMatch);
+  // A draft's graph fills its window the same way the conversation does.
+  const conversationFirst = pathname === '/' || Boolean(conversationMatch) || Boolean(draftGraphMatch);
   const settingsPage = pathname === '/settings' || pathname === '/setup';
 
   if (settingsPage) {
@@ -283,6 +291,18 @@ export function App() {
             onClose={closeWorkspaceTab}
             onOpenNew={startNewConversation}
           />
+          <button
+            type="button"
+            className="icon-button drawer-toggle"
+            data-testid="workspace-drawer-toggle"
+            data-open={detailOpen}
+            onClick={() => setDetailOpen(value => !value)}
+            title={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+            aria-label={detailOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
+            aria-expanded={detailOpen}
+          >
+            <Icon name="panel-right" size={16} />
+          </button>
         </div>
         {conversationFirst && !conversationMatch && (
           <header className="topbar conversation-topbar">
@@ -341,6 +361,19 @@ export function App() {
             {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
             {pathname === '/usage' && <UsagePage />}
             {pathname === '/tools' && <ToolStatsPage />}
+            {draftGraphMatch && (
+              <DraftGraphTab
+                key={draftGraphMatch[1]}
+                conversationId={draftGraphMatch[1]!}
+                {...(queryParams.get('v') ? { version: Number(queryParams.get('v')) } : {})}
+              />
+            )}
+            {pathname === '/artifacts' && (
+              <ArtifactIndex
+                projectId={queryParams.get('project') ?? settings?.projects[0]?.id ?? ''}
+                projects={settings?.projects ?? []}
+              />
+            )}
             {conversationMatch && (
               <ConversationPanel
                 key={conversationMatch[1]}
@@ -373,6 +406,59 @@ export function App() {
           </div>
         </div>
       </main>
+      {!conversationMatch && detailOpen && (
+        <WindowDrawer open={detailOpen}>
+          <aside
+            className="detail-drawer"
+            data-testid="detail-drawer"
+            data-section="workspace"
+            data-open="true"
+            aria-hidden={false}
+            role="complementary"
+          >
+            <div className="drawer-head">
+              <button className="icon-button" aria-label="关闭详情" onClick={() => setDetailOpen(false)}><Icon name="close" size={16} /></button>
+              <div className="grow"><div className="drawer-eyebrow">入口</div><h2>窗口</h2></div>
+            </div>
+            <div className="drawer-inner">
+              <div className="drawer-entry-links">
+                <a className="btn btn-sm" data-testid="drawer-workspace-artifacts" href="#/artifacts">
+                  <Icon name="box" size={14} />
+                  <span style={{ marginLeft: 6 }}>共享产物</span>
+                </a>
+              </div>
+              <section className="drawer-section" data-testid="drawer-workspace-tasks">
+                <div className="drawer-section-head">
+                  <h3>任务</h3>
+                  <span>{workspaceTasks.active.length} 个</span>
+                </div>
+                {workspaceTasks.active.length === 0 && <p className="muted" data-testid="drawer-workspace-empty">没有待确认或正在跑的任务。</p>}
+                <nav className="drawer-task-nav" aria-label="进行中的任务">
+                  {workspaceTasks.active.map(task => (
+                    <a key={task.id} className="drawer-task-nav-item" data-testid={`drawer-workspace-task-${task.id}`} href={`#/tasks/${task.id}/graph`}>
+                      <span className="grow truncate">{task.request}</span>
+                      <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
+                    </a>
+                  ))}
+                </nav>
+                {workspaceTasks.ended.length > 0 && (
+                  <details className="drawer-task-ended">
+                    <summary data-testid="drawer-workspace-ended">已收纳 {workspaceTasks.ended.length} 个已完成/已终止的任务</summary>
+                    <nav className="drawer-task-nav" aria-label="已结束的任务">
+                      {workspaceTasks.ended.map(task => (
+                        <a key={task.id} className="drawer-task-nav-item" data-testid={`drawer-workspace-task-${task.id}`} href={`#/tasks/${task.id}/graph`}>
+                          <span className="grow truncate">{task.request}</span>
+                          <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
+                        </a>
+                      ))}
+                    </nav>
+                  </details>
+                )}
+              </section>
+            </div>
+          </aside>
+        </WindowDrawer>
+      )}
       <Toaster />
     </div>
   );

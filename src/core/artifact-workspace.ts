@@ -86,7 +86,10 @@ export interface ArtifactQuery {
 }
 
 /** A listing query that does not name a task: everything but `taskId`. */
-export type ProjectArtifactQuery = Omit<ArtifactQuery, 'taskId'>;
+export type ProjectArtifactQuery = Omit<ArtifactQuery, 'taskId'> & {
+  /** Read the project's tasks too, not only what belongs to the project itself. */
+  includeTaskArtifacts?: boolean;
+};
 
 export interface ArtifactPage {
   artifacts: ArtifactRecord[];
@@ -449,7 +452,16 @@ export class ArtifactWorkspace {
    * content still does, and that is what `read` requires.
    */
   listProject(projectId: string, input: ProjectArtifactQuery = {}): ArtifactPage {
-    return this.page(['(scope=\'project\' AND owner_id=?)'], [projectId], input);
+    // A project's shared artifacts are the ones it owns; an index of everything published in the
+    // project also needs what each of the project's tasks published.
+    if (input.includeTaskArtifacts) {
+      return this.page(
+        [`((scope='project' AND owner_id=?) OR (scope='task' AND owner_id IN (SELECT id FROM tasks WHERE project_id=?)))`],
+        [projectId, projectId],
+        input,
+      );
+    }
+    return this.page([`(scope='project' AND owner_id=?)`], [projectId], input);
   }
 
   list(input: ArtifactQuery): ArtifactPage {
