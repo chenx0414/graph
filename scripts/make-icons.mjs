@@ -4,7 +4,7 @@
  * without committing a font or an image toolchain.
  * Run: export PATH="$PWD/node_modules/.bin:$PATH"; node scripts/make-icons.mjs
  */
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -12,18 +12,7 @@ import { chromium } from 'playwright';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const build = join(root, 'build');
 
-const appIcon = `
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="224" fill="#0f172a"/>
-  <g stroke="#64748b" stroke-width="26" stroke-linecap="round">
-    <line x1="330" y1="352" x2="700" y2="318"/>
-    <line x1="330" y1="352" x2="512" y2="700"/>
-    <line x1="700" y1="318" x2="512" y2="700"/>
-  </g>
-  <circle cx="330" cy="352" r="118" fill="#2563eb" stroke="#e2e8f0" stroke-width="18"/>
-  <circle cx="700" cy="318" r="118" fill="#16a34a" stroke="#e2e8f0" stroke-width="18"/>
-  <circle cx="512" cy="700" r="118" fill="#d97706" stroke="#e2e8f0" stroke-width="18"/>
-</svg>`;
+const appIcon = `<img style="width:1024px;height:1024px" src="data:image/png;base64,${(await readFile(join(root, 'src/web/assets/graph-icon.png'))).toString('base64')}" />`;
 
 const tray = (size) => `
 <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 22 22">
@@ -42,6 +31,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   const icon = await browser.newPage({ viewport: { width: 1024, height: 1024 } });
   await icon.setContent(`<body style="margin:0;background:transparent">${appIcon}</body>`);
+  await icon.locator('img').evaluate(image => image.decode());
   await icon.screenshot({ path: join(build, 'icon.png'), omitBackground: true });
 
   const trayPage = await browser.newPage({ viewport: { width: 22, height: 22 } });

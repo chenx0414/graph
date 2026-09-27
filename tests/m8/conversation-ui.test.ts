@@ -209,7 +209,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   // project binding moved into the right drawer, reached from the entry.
   expect(await page.locator('.conversation-thread-inner [data-testid="no-conversation-tasks"]').count()).toBe(0);
   expect(await page.locator('.conversation-thread-inner [data-testid="bind-project"]').count()).toBe(0);
-  expect(await page.getByTestId('drawer-entry-label').innerText()).toContain('未绑定项目');
+  expect(await page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('未绑定项目');
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
   await page.getByTestId('bind-project').waitFor();
@@ -221,10 +221,11 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('bind-select').selectOption('project');
   await page.getByTestId('bind-submit').click();
   await includes(page, '项目 project');
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('chat-input').fill('先做最小可用版，预算有限，登录先不改。');
   await page.getByTestId('chat-send').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v1'));
-  expect(await page.getByTestId('drawer-entry-label').innerText()).toContain('待确认');
+  expect(await page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('待确认');
   // The draft card now lives in the drawer; the header entry advertises its
   // version + status while the drawer is still collapsed.
   await page.getByTestId('drawer-entry').click();
@@ -238,7 +239,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.screenshot({ path: join(evidence, '02-first-draft.png'), fullPage: true });
   // The chat thread itself no longer holds the draft card.
   expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
-  await page.getByTestId('detail-toggle').click();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 3. Overturn the draft before confirming; the new draft replaces it.
@@ -261,7 +262,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.screenshot({ path: join(evidence, '03-confirmed.png'), fullPage: true });
   // The task card never appears in the chat stream, only in the drawer.
   expect(await page.locator('.conversation-thread-inner [data-testid^="conversation-task-"]').count()).toBe(0);
-  await page.getByTestId('detail-toggle').click();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 5. Keep asking while the task executes; the answer comes from the ledger.
@@ -272,7 +273,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('drawer-mode-tasks').click();
   await page.locator('[data-testid^="conversation-nodes-"]').first().waitFor();
   expect(await page.locator('[data-testid^="conversation-nodes-"]').first().innerText()).toContain('work');
-  await page.getByTestId('detail-toggle').click();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 6. Two messages in a row while the master is busy: both are kept. While the
@@ -295,7 +296,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('先验证性能瓶颈');
-  await page.getByTestId('detail-toggle').click();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
   await page.screenshot({ path: join(evidence, '04-reloaded.png'), fullPage: true });
 

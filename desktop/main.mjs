@@ -1,3 +1,4 @@
+import { drawerWindowBounds } from './drawer-window.ts';
 /**
  * Electron main process for the Graph desktop app.
  *
@@ -7,7 +8,7 @@
  * Secrets never enter the config file: they are decrypted from the keychain
  * into the child process environment only.
  */
-import { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell, screen } from 'electron';
 import { spawn } from 'node:child_process';
 import { stopDaemonProcess } from './daemon-process.ts';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,6 +31,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let window = null;
+  let drawerBase = null;
   let child = null;
   let quitting = false;
   let restarting = false;
@@ -100,6 +102,7 @@ if (!app.requestSingleInstanceLock()) {
     window.on('closed', () => {
       if (verbose) console.log('[app] window closed');
       window = null;
+      drawerBase = null;
     });
     window.webContents.on('did-start-navigation', (_event, target) => {
       if (verbose) console.log(`[app] nav start ${target}`);
@@ -298,6 +301,23 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function registerBridge() {
+    ipcMain.handle('graph:drawer', (event, input) => {
+      if (!window || event.sender !== window.webContents || typeof input?.open !== 'boolean') return { expanded: false };
+      if (!input.open) {
+        if (drawerBase && !window.isFullScreen() && !window.isMaximized()) {
+          const now = window.getBounds();
+          window.setBounds({ ...drawerBase, y: now.y, height: now.height }, true);
+        }
+        drawerBase = null;
+        return { expanded: false };
+      }
+      const width = input.width === 760 ? 760 : 440;
+      const base = drawerBase ?? window.getBounds();
+      const result = drawerWindowBounds(base, screen.getDisplayMatching(base).workArea, width, window.isFullScreen() || window.isMaximized());
+      if (result.expanded) { drawerBase = base; window.setBounds(result.bounds, true); }
+      else if (drawerBase) { window.setBounds(drawerBase, true); drawerBase = null; }
+      return { expanded: result.expanded };
+    });
     ipcMain.handle('graph:pick-directory', async () => {
       const result = await dialog.showOpenDialog(window ?? undefined, { properties: ['openDirectory', 'createDirectory'] });
       return result.canceled ? null : result.filePaths[0] ?? null;

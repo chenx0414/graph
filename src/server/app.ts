@@ -802,7 +802,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       if (!file.startsWith(options.webDir!)) return reply.status(403).send();
       const body = await readFile(file).catch(() => null);
       if (!body) return reply.status(404).send();
-      reply.type(relative.endsWith('.css') ? 'text/css' : 'text/javascript').send(body);
+      reply.type(relative.endsWith('.css') ? 'text/css' : relative.endsWith('.png') ? 'image/png' : 'text/javascript').send(body);
     });
   }
   void options.origin;

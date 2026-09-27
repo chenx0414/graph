@@ -1,3 +1,4 @@
+import { ArchitectureBoard } from './ArchitectureBoard.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api.ts';
@@ -813,7 +814,7 @@ export function ResourceLibrary({ settings, section }: { settings: ResourceSetti
             ) : active.id === 'config' ? (
               <CapabilityConfigPanel items={settings?.capabilityConfig ?? []} filter={libraryFilter} onFilterChange={setLibraryFilter} />
             ) : active.id === 'architectures' ? (
-              <div className="architecture-list" data-testid="architecture-library">{GRAPH_ARCHITECTURES.map(item => <article className="architecture-item" key={item.name}><div className="architecture-flow mono">{item.flow}</div><div><strong>{item.name}</strong><p>{item.description}</p></div></article>)}</div>
+              <ArchitectureBoard />
             ) : active.items.length ? (
               <>
                 <div className="resource-section-toolbar"><p>{active.description}</p>{active.id === 'pi-extensions' && (

@@ -133,7 +133,7 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
               <span>思考强度</span>
               <span data-testid="thinking-current">{draft ? thinkingOptionLabel(draft) : thinkingLabel(draftLevel)}</span>
             </div>
-            <div className="model-control-selected">{telemetry?.model ?? '未选择模型'}</div>
+            <div className="model-control-selected" title="切换后沿用当前上下文，从下一次调用生效">{telemetry?.model ?? '未选择模型'}</div>
             <input
               className="thinking-slider"
               data-testid="thinking-slider"

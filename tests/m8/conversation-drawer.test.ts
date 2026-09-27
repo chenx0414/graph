@@ -194,7 +194,8 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('DRAWER_DRAFT_PAGES.map');
     expect(source).toContain('residentPanelIds().join');
     expect(source).toContain('drawerPanelIds().join');
-    expect(source).toContain('drawerEntryLabel(');
+    expect(source).toContain('aria-label={drawerEntryAriaLabel(entryState)}');
+    expect(source).toContain('data-testid="drawer-entry-label"');
     expect(source).toContain('drawerInitPanelIds()');
     expect(source).toContain('resolveDrawerSection({');
     expect(source).toContain('data-testid="drawer-entry"');

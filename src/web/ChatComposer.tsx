@@ -1,4 +1,4 @@
-import { Markdown } from './Markdown.tsx';
+import { MarkdownInput } from './MarkdownInput.tsx';
 import { usePreferences } from './preferences.ts';
 import { attachmentImageSource } from './attachments.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -243,14 +243,6 @@ export function ChatComposer({
     setHistoryBrowsing(false);
   }
 
-  useLayoutEffect(() => {
-    const input = textareaRef.current;
-    if (!input) return;
-    input.style.height = 'auto';
-    const next = clampComposerHeight(input.scrollHeight);
-    input.style.height = `${next.height}px`;
-    input.style.overflowY = next.scrollable ? 'auto' : 'hidden';
-  }, [value]);
 
   useEffect(() => {
     const mention = mentionAt(value, cursor);
@@ -573,12 +565,8 @@ export function ChatComposer({
           ))}
         </div>
       )}
-      {preferences.markdownRendering && value.trim() && (
-        <div className="composer-markdown-preview" data-testid="composer-markdown-preview" aria-label="草稿预览">
-          <Markdown text={value} />
-        </div>
-      )}
-      <textarea
+      <MarkdownInput
+        live={preferences.markdownRendering}
         ref={textareaRef}
         data-testid={inputTestId}
         data-history={historyBrowsing ? 'browsing' : undefined}

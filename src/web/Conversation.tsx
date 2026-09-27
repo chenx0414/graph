@@ -1,3 +1,4 @@
+import { WindowDrawer } from './WindowDrawer.tsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
@@ -33,7 +34,6 @@ import {
   defaultDrawerOpen,
   defaultDrawerPage,
   drawerEntryAriaLabel,
-  drawerEntryLabel,
   drawerInitPanelIds,
   drawerPanelIds,
   draftStatusLabel,
@@ -965,14 +965,13 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         </button>
         <div className="conversation-heading">
           <h1 data-testid="conversation-title">{view.title}</h1>
-          <div className="conversation-meta">
+          <div className="conversation-meta" title={`已计量 ${formatTokens(view.usage.used)} tokens · ${costText(view.cost)}`}>
             {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}</span> : <span data-testid="conversation-project">未绑定项目</span>}
             <span>·</span>
             <span data-testid="master-status" className="master-work-status">{busy && !paused && <span className="spinner" aria-hidden="true" />}{paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
             <span>·</span>
             <span data-testid="conversation-connection">{connected ? '已连接' : '重连中…'}</span>
-            <span>·</span>
-            <span>已计量 {formatTokens(view.usage.used)} tokens · {costText(view.cost)}</span>
+
           </div>
         </div>
         <div className="conversation-actions">
@@ -990,7 +989,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             aria-controls="conversation-detail-drawer"
           >
             <Icon name="panel-right" size={15} />
-            <span className="drawer-entry-label" data-testid="drawer-entry-label">{drawerEntryLabel(entryState)}</span>
+            <span className="drawer-entry-label" data-testid="drawer-entry-label">{proposal ? `草稿 v${proposal.version} · ` : ''}任务 {view.tasks.length}</span>
             {(draftStatus === 'pending' || draftStatus === 'stale') && <span className="drawer-entry-dot" data-tone={draftStatus === 'stale' ? 'warn' : 'accent'} aria-hidden="true" />}
           </button>
           {/* The pause/resume control lives on the composer's primary button
@@ -1159,7 +1158,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               projectId={view.projectId}
-              placeholder={busy ? '主 Agent 正在处理；继续输入会排队，不会被丢掉。' : '继续交流，输入 @ 引用项目文件…'}
+              placeholder={busy ? '继续输入，消息会排队…' : '发送消息，@ 引用文件…'}
               suggestion={promptSuggestion}
               slashTools={agentContext?.tools ?? []}
               slashCapabilities={agentContext?.capabilities ?? []}
@@ -1187,7 +1186,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             <div className="composer-footer">
               <span className="composer-note">
                 {busy
-                  ? <span data-testid="queued-hint">主 Agent 正在处理，{queuedMessages.length ? `已有 ${queuedMessages.length} 条队列消息。` : '消息会排队。'}</span>
+                  ? <span data-testid="queued-hint">{queuedMessages.length ? `${queuedMessages.length} 条消息等待处理` : '可继续输入'}</span>
                   : 'Enter 发送，Shift + Enter 换行'}
               </span>
               <ComposerTelemetry
@@ -1202,6 +1201,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
           <ArtifactWorkspace conversationId={view.id} projectBound={Boolean(view.projectId)} />
         )}
 
+        <WindowDrawer open={drawerOpen} wide={drawerSection === 'draft' && drawerPage === 'graph'}>
         <aside
           id="conversation-detail-drawer"
           className="detail-drawer"
@@ -1215,6 +1215,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         >
           <div className="drawer-inner">
             <div className="drawer-head">
+              <button className="icon-button" aria-label="关闭详情" onClick={() => onDrawerOpenChange(false)}><Icon name="close" size={16} /></button>
               <div className="grow">
                 <div className="drawer-eyebrow">{drawerSection === 'draft' ? '草稿详情' : '任务导航'}</div>
                 <h2>{drawerTitle}</h2>
@@ -1395,6 +1396,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             )}
           </div>
         </aside>
+        </WindowDrawer>
       </div>
     </section>
   );

@@ -64,7 +64,7 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   await page.getByTestId('new-conversation-project-alpha').click();
   await page.waitForFunction(() => location.hash.includes('project=alpha'));
   await page.waitForFunction(() => (document.querySelector('[data-testid="new-conversation-project"]') as HTMLSelectElement | null)?.value === 'alpha');
-  expect(await page.getByTestId('new-conversation-project').inputValue()).toBe('alpha');
+  expect(await page.getByTestId('new-conversation-project').evaluate((element: HTMLInputElement) => element.value)).toBe('alpha');
 
   await page.getByTestId('sidebar-toggle').click();
   await page.waitForFunction(() => document.querySelector('.sidebar')?.getAttribute('data-collapsed') === 'true');
@@ -77,7 +77,7 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   await mainDetailToggle.click();
   await page.getByTestId('detail-drawer').waitFor();
   expect(await page.getByTestId('detail-empty').innerText()).toContain('暂无详情');
-  await mainDetailToggle.click();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'detached' });
 });
 
@@ -157,8 +157,8 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.getByTestId('drawer-entry').waitFor();
   // The collapsed drawer advertises its state in the header; the draft card is
   // not part of the chat stream any more.
-  await expect.poll(() => page.getByTestId('drawer-entry-label').innerText()).toContain('草稿 v2');
-  expect(await page.getByTestId('drawer-entry-label').innerText()).toContain('待确认');
+  await expect.poll(() => page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('草稿 v2');
+  expect(await page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('待确认');
   expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
   // The header carries the drawer entry and the detail toggle; the pause control
   // lives in the composer now.
@@ -188,7 +188,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
   await page.waitForTimeout(260);
   await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
-    .toBeLessThan(beforeMain!.width - 240);
+    .toBe(beforeMain!.width);
   const afterMain = await page.locator('.conversation-main').boundingBox();
   const afterComposer = await page.locator('.conversation-composer-wrap').boundingBox();
   const drawerBox = await page.getByTestId('detail-drawer').boundingBox();
@@ -200,7 +200,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await expect.poll(async () => {
     const main = await page.locator('.conversation-main').boundingBox();
     const drawer = await page.getByTestId('detail-drawer').boundingBox();
-    return Boolean(main && drawer && main.x + main.width <= drawer.x + 1);
+    return Boolean(main && drawer && drawer.y === 0 && drawer.height === 720 && main.width === beforeMain!.width);
   }).toBe(true);
   const settledMain = await page.locator('.conversation-main').boundingBox();
   const settledComposer = await page.locator('.conversation-composer-wrap').boundingBox();
@@ -208,7 +208,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(settledMain).not.toBeNull();
   expect(settledComposer).not.toBeNull();
   expect(settledDrawer).not.toBeNull();
-  expect(settledComposer!.x + settledComposer!.width).toBeLessThanOrEqual(settledDrawer!.x + 1);
+  expect(settledComposer!.width).toBe(afterComposer!.width);
   expect(afterComposer!.y + afterComposer!.height).toBeLessThanOrEqual(720);
   expect(await page.locator('[data-testid="detail-toggle-close"]').count()).toBe(0);
 
@@ -226,7 +226,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.getByTestId('draft-tab-decisions').click();
   await page.getByTestId('draft-decisions-empty').waitFor();
 
-  await page.getByTestId('detail-toggle').click();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await expect.poll(() => page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
@@ -272,7 +272,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.locator('.conversation-composer-wrap').waitFor();
   expect(await page.getByTestId('conversation-tab-chat').getAttribute('data-active')).toBe('true');
   await page.getByTestId('chat-input').fill('草稿详情已移入右侧抽屉。');
-  expect(await page.getByTestId('chat-input').inputValue()).toBe('草稿详情已移入右侧抽屉。');
+  expect(await page.getByTestId('chat-input').evaluate((element: HTMLInputElement) => element.value)).toBe('草稿详情已移入右侧抽屉。');
 });
 
 test('a graph agent node opens the same chat transcript used by the main agent', async () => {
@@ -465,7 +465,7 @@ test('the right drawer toggle stays available and opens an empty state', async (
   expect(await page.getByTestId('detail-empty').innerText()).toContain('暂无详情');
   expect(await toggle.getAttribute('data-open')).toBe('true');
 
-  await toggle.click();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await expect.poll(() => toggle.getAttribute('data-open')).toBe('false');
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 });
@@ -532,7 +532,7 @@ test('the composer suggestion and queue steering follow the three Enter states',
   // Assert the two conditions the Enter handler itself branches on - the app knows the
   // master is busy (while it outputs the primary control is pause, by design) and the
   // queued chip above proves it knows the queue - instead of pressing Enter into the dark.
-  await expect.poll(() => input.inputValue()).toBe('');
+  await expect.poll(() => input.evaluate((element: HTMLInputElement) => element.value)).toBe('');
   await expect.poll(() => page.getByTestId('chat-send').getAttribute('data-mode'), { timeout: 30_000 }).toBe('pause');
   await input.press('Enter');
   // Under the full parallel gate a request that travels UI → HTTP → runtime can take far
@@ -555,7 +555,7 @@ test('the composer suggestion and queue steering follow the three Enter states',
 
   // Tab fills the grey suggestion.
   await input.press('Tab');
-  expect(await input.inputValue()).toBe('继续检查测试覆盖和失败分支。');
+  expect(await input.evaluate((element: HTMLInputElement) => element.value)).toBe('继续检查测试覆盖和失败分支。');
 
   // State 1: with the composer empty again, Enter sends the suggestion directly.
   await input.fill('');
@@ -1233,7 +1233,7 @@ test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name
   await page.goto(`${server.url}/#/catalog/agents`);
   await page.getByTestId('agent-combination-worker').waitFor();
   await page.getByTestId('agent-combination-worker').getByRole('button', { name: '编辑' }).click();
-  expect(await page.getByTestId('agent-recipe-description').inputValue()).toBe('Current recipe.');
+  expect(await page.getByTestId('agent-recipe-description').evaluate((element: HTMLInputElement) => element.value)).toBe('Current recipe.');
   const picker = page.getByTestId('recipe-picker-skills');
   const optionLabels = () => picker.locator('[data-testid^="recipe-option-skill-"]').allTextContents();
 
@@ -1378,7 +1378,7 @@ test('the composer inserts project file mentions and carries text attachments in
   await page.getByTestId('mention-file-src/index.ts').waitFor();
   await input.press('ArrowDown');
   await input.press('Enter');
-  expect(await input.inputValue()).toBe('请看 @src/index.ts ');
+  expect(await input.evaluate((element: HTMLInputElement) => element.value)).toBe('请看 @src/index.ts ');
 
   await page.getByTestId('chat-attachment-input').setInputFiles({
     name: 'notes.md',
@@ -1474,9 +1474,9 @@ test('the composer slash menu selects tools, switches model and queues compactio
 
   await input.fill('/');
   await page.getByTestId('slash-tool-read').click();
-  await expect.poll(() => input.inputValue()).toBe('/read ');
+  await expect.poll(() => input.evaluate((element: HTMLInputElement) => element.value)).toBe('/read ');
   expect(await page.getByTestId('composer-command-chips').count()).toBe(0);
-  await input.fill(`${await input.inputValue()}请分析这个项目`);
+  await input.fill(`${await input.evaluate((element: HTMLInputElement) => element.value)}请分析这个项目`);
   await page.getByTestId('chat-send').click();
   await expect.poll(() => sent).not.toBeNull();
   expect(sent!.text).toContain('/read ');
@@ -1511,7 +1511,7 @@ test('the new-chat slash menu stays inside the viewport and inserts an inline to
   expect(box!.y).toBeGreaterThanOrEqual(0);
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
   await page.getByTestId('slash-tool-read').click();
-  await expect.poll(() => input.inputValue()).toBe('/read ');
+  await expect.poll(() => input.evaluate((element: HTMLInputElement) => element.value)).toBe('/read ');
 });
 
 test('the new-chat composer supports project mentions and attachments before submitting', async () => {
@@ -1536,7 +1536,7 @@ test('the new-chat composer supports project mentions and attachments before sub
   await page.getByTestId('mention-popover').waitFor();
   await page.getByTestId('mention-file-src/index.ts').waitFor();
   await page.getByTestId('mention-file-src/index.ts').click();
-  expect(await input.inputValue()).toBe('先看 @src/index.ts ');
+  expect(await input.evaluate((element: HTMLInputElement) => element.value)).toBe('先看 @src/index.ts ');
 
   await page.getByTestId('new-conversation-attachment-input').setInputFiles({
     name: 'brief.md',
@@ -1728,13 +1728,13 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await page.getByTestId('toasts').getByText(/已恢复 Main Agent 对话流程/).waitFor();
   await expect.poll(() => agentContext.override('runtime/main-conversation.md')).not.toContain('CUSTOM CONVERSATION');
   await page.getByTestId('agent-prompt-editor').fill('');
-  await expect.poll(() => page.getByTestId('agent-prompt-editor').inputValue()).toBe('');
+  await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value)).toBe('');
   await page.getByRole('button', { name: '设为默认' }).click();
   await page.getByTestId('toasts').getByText(/已将 Main Agent 对话流程 设为默认/).waitFor();
   await expect.poll(() => agentContext.prompt('runtime/main-conversation.md')).toBe('');
   expect(await readFile(join(root, 'graph', 'prompts', 'defaults', 'runtime', 'main-conversation.md'), 'utf8')).toBe('\n');
   await page.getByTestId('agent-prompt-editor').fill('Temporary after default');
-  await expect.poll(() => page.getByTestId('agent-prompt-editor').inputValue()).toBe('Temporary after default');
+  await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value)).toBe('Temporary after default');
   await page.getByRole('button', { name: '保存 Prompt' }).click();
   await page.getByTestId('toasts').getByText(/已保存 Main Agent 对话流程/).waitFor();
   await expect.poll(() => agentContext.override('runtime/main-conversation.md')).toContain('Temporary after default');
@@ -1875,10 +1875,11 @@ test('draft markdown follows preferences and image attachments survive sending a
   await expect.poll(() => refreshes).toBe(1);
   const input = page.getByTestId('chat-input');
   await input.fill('**实时草稿**');
-  await page.locator('[data-testid="composer-markdown-preview"] strong').waitFor();
+  await page.locator('.markdown-input .md-strong').waitFor();
+  expect(await page.getByTestId('composer-markdown-preview').count()).toBe(0);
   await page.evaluate(() => { localStorage.setItem('graph-pref-markdown-rendering', 'false'); window.dispatchEvent(new Event('graph:preferences-changed')); });
-  await page.getByTestId('composer-markdown-preview').waitFor({ state: 'detached' });
-  expect(await input.inputValue()).toBe('**实时草稿**');
+  await page.locator('.markdown-input .md-strong').waitFor({ state: 'detached' });
+  expect(await input.evaluate((element: HTMLInputElement) => element.value)).toBe('**实时草稿**');
   await page.clock.fastForward(5 * 60_000);
   await expect.poll(() => refreshes).toBe(2);
   const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nT8AAAAASUVORK5CYII=', 'base64');
@@ -1895,4 +1896,38 @@ test('draft markdown follows preferences and image attachments survive sending a
   expect(response.headers()['content-type']).toContain('image/png');
   expect(await response.body()).toEqual(bytes);
   expect((await page.request.get(`${server.url}${src?.replace(/0$/, '99')}`)).status()).toBe(400);
+});
+
+test('live Markdown edits one source, reveals syntax at the caret and preserves undo and composition', async () => {
+  const root = await temp('live-markdown');
+  const server = await openGraphServer({stateDir:join(root,'state'),webDir,autoDrive:false});
+  cleanup.push(()=>server.close());
+  const created=await server.runtime.conversations.create({text:'Live editor',requestId:'live'});
+  const browser=await chromium.launch({headless:true}); cleanup.push(()=>browser.close());
+  const page=await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  const input=page.getByTestId('chat-input');
+  await input.fill('# 标题\n\n**粗体**与 `代码`\n\n最后一行');
+  await input.press('End');
+  await page.locator('.md-heading').waitFor();
+  await expect.poll(()=>page.locator('.md-heading').innerText()).toBe('标题');
+  await page.locator('.md-strong').click();
+  await expect.poll(()=>page.locator('.md-strong').innerText()).toBe('**粗体**');
+  await input.fill('草稿');
+  await input.press('End');
+  await input.press('Shift+Enter');
+  await input.pressSequentially('next');
+  await expect.poll(()=>input.evaluate((e:HTMLTextAreaElement)=>e.value)).toContain('\nnext');
+  await input.press('ControlOrMeta+z');
+  await expect.poll(()=>input.evaluate((e:HTMLTextAreaElement)=>e.value)).not.toContain('\nnext');
+  await input.dispatchEvent('keydown',{key:'Enter',code:'Enter',isComposing:true});
+  expect((await server.runtime.conversations.view(created.conversationId)).messages.filter(m=>m.role==='user').length).toBe(1);
+  await page.screenshot({path:'/tmp/graph-live-editor.png'});
+  await page.goto(`${server.url}/#/catalog/architectures`);
+  await page.getByTestId('architecture-canvas').waitFor();
+  await page.getByRole('button',{name:/主管与工人/}).click();
+  await expect.poll(()=>page.locator('.architecture-canvas .react-flow__node').count()).toBe(3);
+  await page.locator('.architecture-canvas .react-flow__node').filter({hasText:'工人 A'}).click();
+  await expect.poll(()=>page.locator('.architecture-stage footer').innerText()).toContain('工作副本');
+  await page.screenshot({path:'/tmp/graph-architecture-board.png'});
 });

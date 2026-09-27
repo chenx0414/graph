@@ -1,3 +1,4 @@
+import { WindowDrawer } from './WindowDrawer.tsx';
 import { useUsageRefresh } from './usage-refresh.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
@@ -211,7 +212,7 @@ export function App() {
             <div className="brand-mark" />
             <div className="brand-copy">
               <div className="brand-name">Graph</div>
-              <div className="brand-sub">Agent 任务编排控制台</div>
+
             </div>
           </a>
         </div>
@@ -328,15 +329,16 @@ export function App() {
           </div>
         </div>
         {!conversationMatch && detailOpen && (
-          <aside className="detail-drawer app-empty-drawer" data-testid="detail-drawer" role="complementary">
+          <WindowDrawer open={detailOpen}><aside data-open="true" className="detail-drawer app-empty-drawer" data-testid="detail-drawer" role="complementary">
             <div className="drawer-head">
+              <button className="icon-button" aria-label="关闭详情" onClick={() => setDetailOpen(false)}><Icon name="close" size={16} /></button>
               <h2>详情</h2>
             </div>
             <div className="drawer-empty" data-testid="detail-empty">
               <strong>暂无详情</strong>
               <span>出现草稿、任务图或执行进度后，详情会显示在这里。</span>
             </div>
-          </aside>
+          </aside></WindowDrawer>
         )}
       </main>
       <Toaster />

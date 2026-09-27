@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('graph', {
   isDesktop: true,
+  setDrawer: input => ipcRenderer.invoke('graph:drawer', input),
   pickDirectory: () => ipcRenderer.invoke('graph:pick-directory'),
   openResource: kind => ipcRenderer.invoke('graph:open-resource', kind),
   saveSecret: (ref, value) => ipcRenderer.invoke('graph:save-secret', ref, value),
