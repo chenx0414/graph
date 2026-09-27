@@ -493,17 +493,29 @@ test('the vendor card keeps its fields readable instead of crowding them', async
       if (!label || !hint) return false;
       return hint.getBoundingClientRect().top <= label.getBoundingClientRect().top + 2;
     });
+    // Fields sharing a grid row must line their inputs up: a hint on only some of them otherwise pushes
+    // those inputs a line lower, which is the misalignment that replaced the crowding after the first fix.
+    const rows = new Map<number, number[]>();
+    for (const field of card.querySelectorAll('.card-grid > .field, .card-grid > .field-full > .field')) {
+      const control = field.querySelector('input, select') as HTMLElement | null;
+      if (!control) continue;
+      const row = Math.round(field.getBoundingClientRect().top / 40);
+      rows.set(row, [...(rows.get(row) ?? []), Math.round(control.getBoundingClientRect().top)]);
+    }
+    const misalignedRows = [...rows.values()].filter(tops => new Set(tops).size > 1).length;
     return {
       envVar: input.value,
       envFits: input.scrollWidth <= input.clientWidth + 1,
       envWidth: Math.round(input.getBoundingClientRect().width),
       sharedLineHints: crowded.length,
+      misalignedRows,
     };
   });
   expect(measured.envVar).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
   expect(measured.envFits).toBe(true);
   expect(measured.envWidth).toBeGreaterThan(300);
   expect(measured.sharedLineHints).toBe(0);
+  expect(measured.misalignedRows).toBe(0);
 }, 60_000);
 
 test('a supported platform offers an editable account name', async () => {
