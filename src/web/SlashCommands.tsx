@@ -5,7 +5,7 @@ import { Icon, type IconName } from './ui.tsx';
 
 export type SlashTarget = {
   id: string;
-  kind: 'tool' | 'capability';
+  kind: 'tool' | 'capability' | 'skill';
   label: string;
   description: string;
   source?: string;
@@ -60,6 +60,29 @@ function toolEntry(tool: AgentToolView): SlashEntry {
 function capabilityEntry(capability: AgentCapabilityView): SlashEntry {
   const version = capability.version;
   const label = `${capability.name || capability.id}@${version}`;
+  // A skill is knowledge, not a tool the model can call: selecting one injects its body into the
+  // turn, so it is offered under its own group and token instead of the generic capability one.
+  if (capability.kind === 'skill') {
+    const description = capability.description ?? 'skill';
+    return {
+      id: `skill:${capability.name || capability.id}`,
+      label: capability.name || capability.id,
+      description: truncate(`${description} · 选中后把它的正文注入本轮`),
+      group: '技能',
+      icon: 'file',
+      action: {
+        type: 'capability',
+        target: {
+          id: capability.name || capability.id,
+          kind: 'skill',
+          label: capability.name || capability.id,
+          description,
+          source: 'skill',
+          version,
+        },
+      },
+    };
+  }
   const target: SlashTarget = {
     id: `${capability.id}@${version}`,
     kind: 'capability',
@@ -167,6 +190,7 @@ export function filterSlashEntries(entries: readonly SlashEntry[], query: string
 }
 
 export function slashTargetToken(target: SlashTarget) {
+  if (target.kind === 'skill') return `/skill:${target.id}`;
   return target.kind === 'capability' ? `/capability:${target.id}` : `/${target.id}`;
 }
 
@@ -195,7 +219,9 @@ export function extractSlashTargets(
 }
 
 export function composeSlashDirective(text: string, targets: readonly SlashTarget[]) {
-  const unique = [...new Map(targets.map(target => [target.id, target])).values()];
+  // A skill is injected by the host when it reads the `/skill:<name>` token, so it needs no
+  // sentence here: this hint is about tools and capabilities the turn should actually use.
+  const unique = [...new Map(targets.filter(target => target.kind !== 'skill').map(target => [target.id, target])).values()];
   if (!unique.length) return text.trim();
   const requested = unique.map(target => {
     const source = [target.source, target.version].filter(Boolean).join(' · ');

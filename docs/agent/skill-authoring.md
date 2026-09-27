@@ -31,6 +31,8 @@ description: Verify a service is still answering before blaming the code. Use wh
 - 技能出问题时**就地改那句话**，不要在下面追加「UPDATE: 其实……」。
 - `disable-model-invocation: true` 表示这份技能**不进模型的可见清单**，只能由使用者用 `/skill:<name>` 显式调用（对「只给人用的流程」才这样写）。
 
+`/skill:<name>` 是**真的把正文送进那一轮**：控制台的 `/` 菜单把该 Agent 绑定的技能列在「技能」组里，选中即写入 token；宿主读到 token 后把该技能的 `SKILL.md` 正文（去掉 front matter）附在这一轮的消息后面，并记一条 `skill.invoked` 事件。只读**本轮自己的消息**——把历史消息也一起扫会让人没再选的技能每轮都被重新注入。名字没绑到、正文读不到、正文过长被截断，都会在同一个块里**明确写出来**，绝不让模型以为它读过了。
+
 ## 谁会被检查（技能 lint）
 
 ```bash
