@@ -106,10 +106,30 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
     ? '未记录'
     : value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
 
+  const status = overview?.node.status ?? 'draft';
   return (
-    <div className="node-chat-tab" data-testid="node-chat-tab">
+    <div className="conversation-page window-fill" data-testid="node-chat-tab">
+      {/* The window is framed exactly like the main chat: one header, one scrollable conversation.
+          What the node was told sits above the transcript, collapsed but always one click away. */}
+      <header className="conversation-header">
+        <div className="conversation-heading">
+          <h1 data-testid="node-chat-title">
+            {named ?? nodeId} <span className="mono muted">{nodeId}</span>
+          </h1>
+          <div className="conversation-meta">
+            <Pill tone={status === 'succeeded' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'accent' : 'neutral'}>
+              {NODE_LABEL[status] ?? status}
+            </Pill>
+            <span>·</span>
+            <span>只读 · 不会向 Agent 插话</span>
+            {overview?.instance?.model && <><span>·</span><span className="mono">{overview.instance.model}</span></>}
+          </div>
+        </div>
+      </header>
+      <div className="conversation-body" data-view="node">
+        <div className="conversation-main">
       {overview && (
-        <section className="card node-overview" data-testid="node-overview">
+        <section className="conversation-alert node-overview" data-testid="node-overview">
           <div className="row" style={{ flexWrap: 'wrap' }}>
             <Pill tone="accent">{`${overview.node.kind} · ${overview.node.action}`}</Pill>
             <Pill tone={overview.node.status === 'succeeded' ? 'success' : overview.node.status === 'failed' ? 'danger' : overview.node.status === 'running' ? 'accent' : 'neutral'}>
@@ -130,8 +150,8 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
           </div>
         </section>
       )}
-      <section className="card node-prompt-card" data-testid="node-prompt">
-        <h4 className="section-title">System prompt（该节点实际注入）</h4>
+      <details className="conversation-alert node-prompt-card" data-testid="node-prompt">
+        <summary className="section-title">System prompt（该节点实际注入）</summary>
         {loading && !prompt ? <Spinner label="正在读取…" />
           : error ? <div className="form-error" data-testid="node-prompt-error">{error}</div>
             : prompt ? (
@@ -169,9 +189,11 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
                 )}
               </div>
             ) : null}
-      </section>
+      </details>
 
       <AgentNodeChat taskId={taskId} nodeId={nodeId} agentName={named ?? nodeId} page />
+        </div>
+      </div>
     </div>
   );
 }

@@ -127,6 +127,9 @@ test('the drawer toggle sits in the workspace bar on every window, and outside a
   const toggle = page.getByTestId('workspace-drawer-toggle');
   await toggle.waitFor();
   expect(await toggle.getAttribute('data-open')).toBe('false');
+  // The desktop window makes the workspace bar a drag region: a control in it that does not opt
+  // out is draggable and never receives a click (it looked fine in a plain browser).
+  expect(await toggle.evaluate(element => getComputedStyle(element.parentElement!).getPropertyValue('-webkit-app-region').trim())).toBe('no-drag');
   await toggle.click();
   const drawer = page.getByTestId('detail-drawer');
   await drawer.waitFor();
