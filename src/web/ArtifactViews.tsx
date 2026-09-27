@@ -65,10 +65,12 @@ export function ArtifactList({ records, loading, onOpenDetail }: {
   return (
     <div className="drawer-artifacts" data-testid="drawer-artifacts">
       {loading && <Spinner label="加载共享产物…" />}
+      {/* Both groups are read in the project-wide index, so their empty copy names the group
+          rather than a task: the same list has to read correctly for every task in a project. */}
       <Group
         testid="drawer-artifacts-own"
-        title="本任务的产物"
-        hint="这个任务还没有发布产物。"
+        title="各任务的产物"
+        hint="还没有任务发布过产物。"
         records={groups.own}
         onOpenDetail={onOpenDetail}
       />

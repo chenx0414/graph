@@ -704,6 +704,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const { projectId } = request.params as { projectId: string };
     const query = request.query as Record<string, string | undefined>;
     return runtime.artifacts.listProject(projectId, {
+      // An index of everything published in this project also reads what its tasks published.
+      ...(query.include === 'task' ? { includeTaskArtifacts: true } : {}),
       ...(query.namespace ? { namespace: query.namespace } : {}),
       ...(query.prefix ? { prefix: query.prefix } : {}),
       ...(query.schema ? { schema: query.schema } : {}),

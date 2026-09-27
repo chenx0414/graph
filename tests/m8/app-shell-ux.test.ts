@@ -183,10 +183,9 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('第二版增加审查');
-  // The drawer keeps exactly two pages and opens on the task graph.
-  expect(await page.getByTestId('draft-tab-graph').isVisible()).toBe(true);
-  expect(await page.getByTestId('draft-tab-artifacts').isVisible()).toBe(true);
-  expect(await page.getByTestId('draft-page-graph').isVisible()).toBe(true);
+  // The drawer is a launcher: it names the two windows a draft has and nothing more.
+  expect(await page.getByTestId('drawer-entry-graph').isVisible()).toBe(true);
+  expect(await page.getByTestId('drawer-entry-artifacts').isVisible()).toBe(true);
   expect(await page.getByTestId('accept-branch').isVisible()).toBe(true);
   expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
   await page.waitForTimeout(260);
@@ -214,59 +213,48 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(settledComposer!.width).toBe(afterComposer!.width);
   expect(afterComposer!.y + afterComposer!.height).toBeLessThanOrEqual(720);
   expect(await page.locator('[data-testid="detail-toggle-close"]').count()).toBe(0);
+  // The drawer hosts no graph and no artifact list of its own any more.
+  expect(await page.locator('.detail-drawer [data-testid="conversation-graph"]').count()).toBe(0);
+  expect(await page.locator('.detail-drawer [data-testid="drawer-artifacts"]').count()).toBe(0);
 
-  await page.getByTestId('draft-page-graph').waitFor();
-  expect(await page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
+  // The version table of contents stayed in the drawer; a window names its own version.
   await page.getByTestId('drawer-draft-version-1').click();
   await expect.poll(() => page.getByTestId('drawer-draft-version-1').getAttribute('data-active')).toBe('true');
-  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('先做一个最小版本');
 
   // The pages that moved out of the drawer are gone, not merely hidden.
-  for (const gone of ['draft-tab-acceptance', 'draft-tab-nodes', 'draft-tab-decisions']) {
+  for (const gone of ['draft-tab-acceptance', 'draft-tab-nodes', 'draft-tab-decisions', 'draft-page-graph', 'draft-page-artifacts', 'task-page-tabs']) {
     expect(await page.getByTestId(gone).count()).toBe(0);
   }
 
-  // The second page lists this entry's artifacts and the project's own, apart.
-  await page.getByTestId('draft-tab-artifacts').click();
-  await page.getByTestId('draft-page-artifacts').waitFor();
-  expect(await page.getByTestId('drawer-artifacts-project').innerText()).toContain('不属于任何任务');
-  expect(await page.getByTestId('drawer-artifacts-own').innerText()).toContain('本任务的产物');
-
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
-  await expect.poll(() => page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
-  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
-
-  // The task graph opens inside the drawer, not in the main column.
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('detail-drawer').waitFor();
-  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
-  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
-  // Back to the active draft: the version table of contents was left on v1 above.
-  await page.getByTestId('drawer-draft-version-2').click();
-  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
-  // The chat column is the conversation; its window is named in the tab bar.
-  expect(await page.locator('.tab[data-kind="conversation"][data-active="true"] .tab-title').first().innerText()).not.toBe('');
-  expect(await page.getByTestId('chat-input').count()).toBe(1);
+  // The task graph is a window of its own now: the drawer entry opens it as a tab, full width.
+  await page.getByTestId('drawer-entry-graph').click();
+  await expect.poll(() => new URL(page.url()).hash).toContain('/graph');
+  await page.getByTestId('draft-graph-tab').waitFor();
+  expect(await page.locator('.tab[data-kind="draft"][data-active="true"] .tab-title').innerText()).toContain('任务图');
+  expect(await page.getByTestId('conversation-graph-title').innerText()).toContain('先做一个最小版本');
   await page.getByTestId('conversation-graph').waitFor();
   await page.getByTestId('draft-graph-detail').waitFor();
   expect(await page.getByTestId('graph-state-summary').innerText()).toContain('任务状态');
   const legend = await page.getByTestId('legend').innerText();
   for (const label of ['待执行', '运行中', '已完成', '被阻塞']) expect(legend).toContain(label);
   expect(await page.locator('[data-testid="legend"] [data-board-state]').count()).toBe(4);
+
+  // Another window on the same draft names the version it was opened for.
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}/graph?v=2`);
+  await page.getByTestId('draft-graph-tab').waitFor();
+  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
+  await page.locator('.node-card[data-node-id="human"]').waitFor();
   expect(await page.locator('.node-card[data-node-id="human"]').innerText()).toContain('human check');
   expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-node-type')).toBe('human');
   // The legacy tone/status semantics survive alongside the new board state.
   expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-status')).toBe('draft');
   expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-tone')).toBe('pending');
   expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-board-state')).toBe('pending');
-  await expect.poll(async () => {
-    const drawer = await page.getByTestId('detail-drawer').boundingBox();
-    const graph = await page.locator('.conversation-graph-main').boundingBox();
-    return Boolean(drawer && graph && graph.width <= drawer.width + 1 && graph.width > 300);
-  }).toBe(true);
+  // The window fills the workspace the chat column filled before.
+  const graphBox = await page.locator('.conversation-graph-main').boundingBox();
+  expect(graphBox).not.toBeNull();
+  expect(graphBox!.width).toBeGreaterThan(300);
 
-  await page.getByTestId('drawer-draft-version-1').click();
-  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('先做一个最小版本');
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
   const nodeDetail = page.getByTestId('conversation-node-detail');
   await nodeDetail.waitFor();
@@ -277,12 +265,23 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(await nodeDetail.innerText()).toContain('灌输的指令');
   expect(await nodeDetail.innerText()).toMatch(/传递的 handoff/i);
 
-  // The chat column stayed mounted and interactive while the drawer was open.
+  // The chat tab stayed mounted and interactive while the graph window was in front.
+  await page.locator('.tab[data-kind="conversation"]').first().click();
   await page.locator('.conversation-composer-wrap').waitFor();
   expect(await page.locator('.tab[data-kind="conversation"][data-active="true"]').count()).toBe(1);
   await page.getByTestId('chat-input').fill('草稿详情已移入右侧抽屉。');
   expect(await page.getByTestId('chat-input').evaluate((element: HTMLInputElement) => element.value)).toBe('草稿详情已移入右侧抽屉。');
-}, 60_000);
+
+  // The shared-artifact index is its own window too, and the drawer only links to it.
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').waitFor();
+  await page.getByTestId('drawer-entry-artifacts').click();
+  await expect.poll(() => new URL(page.url()).hash).toBe('#/artifacts');
+  await page.getByTestId('artifact-index').waitFor();
+  expect(await page.locator('.tab[data-kind="page"][data-active="true"] .tab-title').innerText()).toContain('共享产物');
+  expect(await page.getByTestId('drawer-artifacts-project').innerText()).toContain('不属于任何任务');
+  expect(await page.getByTestId('drawer-artifacts-own').innerText()).toContain('各任务的产物');
+  }, 60_000);
 
 test('a graph agent node opens the same chat transcript used by the main agent', async () => {
   const root = await temp('agent-node-chat');
@@ -344,15 +343,18 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('detail-drawer').waitFor();
-  await page.getByTestId('conversation-graph').waitFor();
+  // The node is a window of its own: clicking it in the task graph opens its tab.
+  await page.goto(`${server.url}/#/tasks/${confirmed.taskId}/graph`);
+  await page.getByTestId('graph').waitFor();
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
-  await page.getByTestId('open-agent-chat').click();
+  await expect.poll(() => new URL(page.url()).hash).toContain('/nodes/work');
+  expect(await page.locator('.tab[data-kind="node"][data-active="true"] .tab-title').innerText()).toContain('work');
+  await page.getByTestId('node-overview').waitFor();
+  await page.getByTestId('node-prompt').waitFor();
   const chat = page.getByTestId('graph-agent-chat');
   await chat.waitFor();
-  expect(await chat.innerText()).toContain('AGENT 节点对话');
+  expect(await chat.getAttribute('data-page')).toBe('true');
+  expect(await chat.innerText()).toMatch(/Agent 节点对话/i);
   await expect.poll(() => chat.innerText()).toContain('任务说明');
   expect(await chat.innerText()).toContain('实现 README 功能');
   expect(await chat.innerText()).toContain('读取 1 项');
@@ -361,8 +363,10 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   expect(await chat.getByRole('button', { name: '发送' }).count()).toBe(0);
   await chat.getByRole('button', { name: '展开工具活动' }).click();
   expect(await chat.innerText()).toContain('README.md');
-  await chat.getByRole('button', { name: '关闭节点对话' }).click();
-  await chat.waitFor({ state: 'detached' });
+  // A window closes from the tab bar, not from inside the transcript.
+  expect(await chat.getByRole('button', { name: '关闭节点对话' }).count()).toBe(0);
+  // The operation ledger lives nowhere in this window any more.
+  expect(await page.getByTestId('node-operations').count()).toBe(0);
 });
 
 test('the task graph page keeps the permanent four-state legend', async () => {

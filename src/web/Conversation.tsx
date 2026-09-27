@@ -3,7 +3,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
-import { ArtifactList } from './ArtifactViews.tsx';
 import type { ArtifactRecord } from '../core/artifact-workspace.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { attachmentPayload, attachmentImageSource } from './attachments.ts';
@@ -31,9 +30,8 @@ import {
 } from '../core/conversation-projection.ts';
 import { formatTokens } from './insights.ts';
 import {
-  DRAWER_DRAFT_PAGES,
+  DRAWER_ENTRY_LINKS,
   defaultDrawerOpen,
-  defaultDrawerPage,
   drawerEntryAriaLabel,
   drawerInitPanelIds,
   drawerPanelIds,
@@ -98,7 +96,7 @@ export type GraphAgentDetail = {
     }[];
   };
 };
-type DraftGraph = {
+export type DraftGraph = {
   nodes: {
     id: string; kind: string; status: string; container?: string;
     action?: string; definitionVersion?: string; model?: string; dependsOn?: string[];
@@ -114,7 +112,7 @@ type DraftGraph = {
   loops: { from: string; to: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
 };
-type ProposalDetail = {
+export type ProposalDetail = {
   version: number;
   requirementVersion: number;
   stale: boolean;
@@ -238,67 +236,6 @@ function DraftVersionToc({ history, selectedVersion, onSelectVersion }: {
   );
 }
 
-function ProposalDrawer({
-  proposal,
-  history,
-  page,
-  selectedVersion,
-  graphPanel,
-  artifactsPanel,
-  onSelectVersion,
-  onSelectPage,
-}: {
-  proposal: ProposalDetail;
-  history: ProposalVersion[];
-  page: Exclude<DrawerPage, 'task'>;
-  selectedVersion: number;
-  graphPanel: ReactNode;
-  artifactsPanel: ReactNode;
-  onSelectVersion: (version: number) => void;
-  onSelectPage: (page: Exclude<DrawerPage, 'task'>) => void;
-}) {
-  const countFor: Record<Exclude<DrawerPage, 'task'>, number> = {
-    graph: proposal.spec.nodes.length,
-    artifacts: 0,
-  };
-  // Tab set and order come from the drawer policy module so the two cannot
-  // drift apart.
-  const pages = DRAWER_DRAFT_PAGES.map(item => ({ ...item, count: countFor[item.id] }));
-  return (
-    <>
-      <DraftVersionToc history={history} selectedVersion={selectedVersion} onSelectVersion={onSelectVersion} />
-      <nav className="drawer-page-tabs" data-testid="draft-page-tabs" aria-label="草稿详情页面">
-        {pages.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            className="drawer-page-tab"
-            data-testid={`draft-tab-${item.id}`}
-            data-active={page === item.id}
-            onClick={() => onSelectPage(item.id)}
-            aria-current={page === item.id ? 'page' : undefined}
-          >
-            <span>{item.label}</span>
-            {item.count > 0 && <span className="drawer-page-count">{item.count}</span>}
-          </button>
-        ))}
-      </nav>
-      <div className="drawer-page-content" data-testid="draft-page-content" data-page={page}>
-        {page === 'graph' && (
-          <section className="drawer-section drawer-graph-section" data-testid="draft-page-graph">
-            {graphPanel}
-          </section>
-        )}
-        {page === 'artifacts' && (
-          <section className="drawer-section" data-testid="draft-page-artifacts">
-            {artifactsPanel}
-          </section>
-        )}
-      </div>
-    </>
-  );
-}
-
 function graphDuration(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '未记录';
   return value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
@@ -312,7 +249,7 @@ function graphCapabilityLabel(kind: string | null) {
   return '能力';
 }
 
-function ConversationGraphBoard({
+export function ConversationGraphBoard({
   proposal,
   graph,
   graphLoading,
@@ -555,7 +492,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const historyAnchor = useRef<{ height: number; top: number } | null>(null);
   const [drawerSection, setDrawerSection] = useState<ConversationDrawerSection>('draft');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [drawerPage, setDrawerPage] = useState<DrawerPage>(() => defaultDrawerPage());
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null);
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
@@ -590,24 +526,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   useEffect(() => {
     if (view?.proposal) setSelectedProposalVersion(view.proposal.version);
   }, [view?.proposal?.version]);
-  // The artifacts page belongs to whatever entry the drawer shows: the selected task, or - while
-  // the draft has no task yet - the conversation itself. The scope task is read from state that
-  // exists before the loading returns, so the hook order never depends on the fetch.
-  const artifactScopeTaskId = drawerSection === 'task' ? selectedTaskId ?? view?.tasks[0]?.id ?? null : null;
-  const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
-  // The task section shows the same two pages as the draft section; only the entry differs.
-  const [taskPage, setTaskPage] = useState<Exclude<ConversationDrawerPage, 'task'>>('graph');
-  useEffect(() => {
-    if (!drawerOpen) return;
-    let cancelled = false;
-    const url = artifactScopeTaskId
-      ? `/api/tasks/${encodeURIComponent(artifactScopeTaskId)}/artifacts?limit=200`
-      : `/api/conversations/${encodeURIComponent(id)}/artifacts?limit=200`;
-    void api<{ artifacts: ArtifactRecord[] }>(url)
-      .then(page => { if (!cancelled) setArtifacts(page.artifacts); })
-      .catch(() => { if (!cancelled) setArtifacts([]); });
-    return () => { cancelled = true; };
-  }, [drawerOpen, artifactScopeTaskId, id]);
   useEffect(() => {
     setSelectedGraphNodeId(null);
   }, [selectedProposalVersion]);
@@ -905,13 +823,11 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   function openDrawerRoot() {
     if (proposal || activeProposal) {
       setDrawerSection('draft');
-      setDrawerPage(defaultDrawerPage());
     } else {
-      // No draft to show: the drawer opens on the task section, which always has the two pages -
-      // the shared artifacts exist whether or not a task does.
+      // No draft to show: the drawer opens on the task section, which always has something to
+      // offer - the shared artifacts exist whether or not a task does.
       setDrawerSection('task');
       if (tasks[0]) setSelectedTaskId(tasks[0].id);
-      setTaskPage('graph');
     }
     onDrawerOpenChange(true);
   }
@@ -1146,14 +1062,14 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
           </div>
         </div>
 
-        <WindowDrawer open={drawerOpen} wide={drawerSection === 'draft' && drawerPage === 'graph'}>
+        <WindowDrawer open={drawerOpen}>
         <aside
           id="conversation-detail-drawer"
           className="detail-drawer"
           data-testid="detail-drawer"
           data-open={drawerOpen}
           data-section={drawerSection}
-          data-page={drawerSection === 'draft' ? drawerPage : 'task'}
+          data-page={drawerSection === 'draft' ? 'card' : 'task'}
           data-drawer-panels={drawerPanelIds().join(' ')}
           aria-hidden={!drawerOpen}
           inert={!drawerOpen}
@@ -1175,7 +1091,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                   data-testid="drawer-mode-draft"
                   data-active={drawerSection === 'draft'}
                   aria-selected={drawerSection === 'draft'}
-                  onClick={() => { setDrawerSection('draft'); setDrawerPage(defaultDrawerPage()); }}
+                  onClick={() => setDrawerSection('draft')}
                 >
                   {proposal ? `草稿 v${proposal.version} · ${draftStatusLabel(draftStatus)}` : '草稿'}
                 </button>
@@ -1236,36 +1152,22 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         </div>
                       </>
                     )}
-                <div className="drawer-draft-pages">
-                  <ProposalDrawer
-                    proposal={activeProposal}
-                    history={proposalHistory}
-                    page={drawerPage === 'task' ? 'graph' : drawerPage}
-                    selectedVersion={selectedProposalVersion ?? activeProposal.version}
-                    graphPanel={(
-                      <ConversationGraphBoard
-                        proposal={activeProposal}
-                        graph={draftGraph}
-                        graphLoading={draftGraphLoading}
-                        selectedNodeId={selectedGraphNodeId}
-                        runtimeTaskId={graphRuntimeTaskId}
-                        state={graphState}
-                        onSelectNode={setSelectedGraphNodeId}
-                      />
-                    )}
-                    artifactsPanel={(
-                      <ArtifactList
-                        records={artifacts}
-                        onOpenDetail={record => {
-                          const taskId = artifactScopeTaskId ?? tasks[0]?.id ?? record.taskId;
-                          // The version travels in the address: two scopes can share an artifact id.
-                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}?v=${record.version}`;
-                        }}
-                      />
-                    )}
-                    onSelectVersion={setSelectedProposalVersion}
-                    onSelectPage={setDrawerPage}
-                  />
+                <DraftVersionToc history={proposalHistory} selectedVersion={selectedProposalVersion ?? activeProposal.version} onSelectVersion={setSelectedProposalVersion} />
+                {/* The drawer names the windows; it does not render them. */}
+                <div className="drawer-entry-links" data-testid="drawer-entry-links">
+                  {DRAWER_ENTRY_LINKS.map(entry => (
+                    <a
+                      key={entry.id}
+                      className="btn btn-sm"
+                      data-testid={`drawer-entry-${entry.id}`}
+                      href={entry.id === 'graph'
+                        ? `#/conversations/${id}/graph?v=${selectedProposalVersion ?? activeProposal.version}`
+                        : '#/artifacts'}
+                    >
+                      <Icon name={entry.id === 'graph' ? 'graph' : 'box'} size={14} />
+                      <span style={{ marginLeft: 6 }}>{entry.label}</span>
+                    </a>
+                  ))}
                 </div>
               </section>
             )}
@@ -1329,44 +1231,41 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                 )}
                 {(detailTask || !tasks.length) && (
                   <div className="drawer-task-detail" data-testid="drawer-task-detail">
-                    <nav className="drawer-page-tabs" data-testid="task-page-tabs" aria-label="任务页面">
-                      {DRAWER_DRAFT_PAGES.map(item => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="drawer-page-tab"
-                          data-testid={`task-tab-${item.id}`}
-                          data-active={taskPage === item.id}
-                          onClick={() => setTaskPage(item.id)}
-                          aria-current={taskPage === item.id ? 'page' : undefined}
-                        >
-                          <span>{item.label}</span>
-                        </button>
-                      ))}
-                    </nav>
-                    {taskPage === 'graph' ? (
-                      detailTask ? (
-                        <>
-                          <dl className="kv">
-                            <dt>状态</dt><dd>{TASK_LABEL[detailTask.status] ?? detailTask.status}</dd>
-                            <dt>目标分支</dt><dd>{detailTask.targetBranch ?? '未确认'}</dd>
-                            <dt>集成提交</dt><dd className="mono">{detailTask.integrationSha ?? '尚无'}</dd>
-                            <dt>费用</dt><dd>{costText(detailTask.cost)}</dd>
-                          </dl>
-                          <div className="row" style={{ marginTop: 12 }}>
-                            <a className="btn btn-sm" href={`#/tasks/${detailTask.id}/graph`} data-testid={`task-graph-tab-${detailTask.id}`}>查看任务图</a>
-                          </div>
-                        </>
-                      ) : <p className="muted" data-testid="no-task-graph">还没有任务图；确认草稿后这里会显示执行中的图。</p>
+                    {detailTask ? (
+                      <>
+                        <dl className="kv">
+                          <dt>状态</dt><dd>{TASK_LABEL[detailTask.status] ?? detailTask.status}</dd>
+                          <dt>目标分支</dt><dd>{detailTask.targetBranch ?? '未确认'}</dd>
+                          <dt>集成提交</dt><dd className="mono">{detailTask.integrationSha ?? '尚无'}</dd>
+                          <dt>费用</dt><dd>{costText(detailTask.cost)}</dd>
+                        </dl>
+                        {/* The drawer names the windows a task has; each opens as a tab. */}
+                        <div className="drawer-entry-links" data-testid="drawer-entry-links">
+                          {DRAWER_ENTRY_LINKS.map(entry => (
+                            <a
+                              key={entry.id}
+                              className="btn btn-sm"
+                              data-testid={entry.id === 'graph' ? `task-graph-tab-${detailTask.id}` : 'drawer-task-artifacts'}
+                              href={entry.id === 'graph' ? `#/tasks/${detailTask.id}/graph` : '#/artifacts'}
+                            >
+                              <Icon name={entry.id === 'graph' ? 'graph' : 'box'} size={14} />
+                              <span style={{ marginLeft: 6 }}>{entry.label}</span>
+                            </a>
+                          ))}
+                        </div>
+                      </>
                     ) : (
-                      <ArtifactList
-                        records={artifacts}
-                        onOpenDetail={record => {
-                          const taskId = artifactScopeTaskId ?? record.taskId;
-                          // The version travels in the address: two scopes can share an artifact id.
-                          location.hash = `#/tasks/${taskId}/artifacts/${record.artifactId}?v=${record.version}`;
-                        }}
-                      />
+                      <>
+                        <p className="muted" data-testid="no-task-graph">还没有任务；确认草稿后这里会显示它的窗口。</p>
+                        <div className="drawer-entry-links" data-testid="drawer-entry-links">
+                          {DRAWER_ENTRY_LINKS.filter(entry => entry.id === 'artifacts').map(entry => (
+                            <a key={entry.id} className="btn btn-sm" data-testid="drawer-task-artifacts" href="#/artifacts">
+                              <Icon name="box" size={14} />
+                              <span style={{ marginLeft: 6 }}>{entry.label}</span>
+                            </a>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </div>
                 )}

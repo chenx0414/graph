@@ -3,16 +3,15 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
   CHAT_RESIDENT_PANEL_IDS,
-  DRAWER_DRAFT_PAGES,
+  DRAWER_ENTRY_LINKS,
   DRAWER_INIT_PANEL_IDS,
   DRAWER_PANEL_IDS,
   defaultDrawerOpen,
-  defaultDrawerPage,
   groupArtifacts,
   isEndedTask,
   drawerEntryLabel,
   drawerInitPanelIds,
-  drawerPageIds,
+  drawerEntryIds,
   drawerPanelIds,
   draftStatusLabel,
   isDrawerPanel,
@@ -33,7 +32,6 @@ const read = (relative: string) => readFileSync(join(process.cwd(), relative), '
 describe('drawer default state', () => {
   test('the drawer is collapsed by default', () => {
     expect(defaultDrawerOpen()).toBe(false);
-    expect(defaultDrawerPage()).toBe('graph');
   });
 });
 
@@ -67,10 +65,10 @@ describe('drawer panel policy', () => {
       expect(isDrawerPanel(id)).toBe(true);
       expect(panelPlacement(id)).toBe('drawer');
     }
-    expect(DRAWER_DRAFT_PAGES.map(page => page.id)).toEqual(['graph', 'artifacts']);
-    expect(drawerPageIds()).toContain('artifacts');
+    expect(DRAWER_ENTRY_LINKS.map(entry => entry.id)).toEqual(['graph', 'artifacts']);
+    expect(drawerEntryIds()).toContain('artifacts');
     // Acceptance items, node lists and decisions are deliberately not drawer pages any more.
-    for (const gone of ['acceptance', 'nodes', 'decisions']) expect(drawerPageIds()).not.toContain(gone);
+    for (const gone of ['acceptance', 'nodes', 'decisions']) expect(drawerEntryIds()).not.toContain(gone);
   });
 
   test('the empty task state and the project binding are drawer initialization panels', () => {
@@ -195,8 +193,7 @@ describe('components genuinely use the policy module', () => {
     const source = read('src/web/Conversation.tsx');
     expect(source).toContain("from './conversation-drawer.ts'");
     expect(source).toContain('drawerOpen = defaultDrawerOpen()');
-    expect(source).toContain('useState<DrawerPage>(() => defaultDrawerPage())');
-    expect(source).toContain('DRAWER_DRAFT_PAGES.map');
+    expect(source).toContain('DRAWER_ENTRY_LINKS.map');
     expect(source).toContain('residentPanelIds().join');
     expect(source).toContain('drawerPanelIds().join');
     expect(source).toContain('aria-label={drawerEntryAriaLabel(entryState)}');
@@ -212,15 +209,16 @@ describe('components genuinely use the policy module', () => {
   test('the drawer renders the draft pages plus the task graph, keeping their testids', () => {
     const source = read('src/web/Conversation.tsx');
     expect(source).toContain('data-testid="drawer-mode-tabs"');
-    expect(source).toContain('data-testid="draft-page-tabs"');
-    expect(source).toContain('data-testid={`draft-tab-${item.id}`}');
-    expect(source).toContain('data-testid="draft-page-graph"');
     expect(source).toContain('data-testid="drawer-draft-toc"');
-    expect(source).toContain('data-testid="conversation-graph"');
+    // The drawer names the windows; the graph and the artifacts render as tabs of their own.
+    expect(source).toContain('DRAWER_ENTRY_LINKS.map');
+    expect(source).toContain('data-testid="drawer-entry-links"');
+    expect(source).toContain('data-testid={`drawer-entry-${entry.id}`}');
     expect(source).toContain('data-testid="drawer-task-nav"');
-    expect(source).toContain('data-testid="draft-page-artifacts"');
-    // The artifacts page itself lives in its own module; the drawer only places it.
-    expect(source).toContain('artifactsPanel=');
+    // The drawers no longer list anything themselves: the shared-artifact index is its own window.
+    expect(read('src/web/ArtifactIndex.tsx')).toContain('data-testid="artifact-index"');
+    // The two groups, and the label that says the project's own artifacts belong to no task,
+    // live with the list both windows share.
     expect(read('src/web/ArtifactViews.tsx')).toContain('data-testid="drawer-artifacts"');
     expect(read('src/web/ArtifactViews.tsx')).toContain('不属于任何任务');
   });

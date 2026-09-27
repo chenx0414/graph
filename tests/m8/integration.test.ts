@@ -188,8 +188,10 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.screenshot({ path: join(evidenceDir, 't08-overview.png') });
 
   const proposalText = await page.getByTestId('proposal-draft').innerText();
-  expect(proposalText).toContain('验收项');
-  expect(proposalText).toContain('任务图');
+  expect(proposalText).toContain('集成验收流程');
+  expect(proposalText).toContain('待确认');
+  // The drawer names the draft's window; the graph itself is a tab of its own.
+  expect(await page.getByTestId('drawer-entry-graph').innerText()).toContain('任务图');
   await page.screenshot({ path: join(evidenceDir, 't08-confirm.png') });
   await page.getByTestId('confirm-draft').click();
   // After confirming, the task navigation must really open (it used to bounce

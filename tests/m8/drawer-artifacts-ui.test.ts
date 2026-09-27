@@ -23,8 +23,8 @@ afterEach(async () => {
   cleanup.length = 0;
 });
 
-test('the drawer shows a task\'s artifacts apart from the project\'s own, and a detail opens in its own tab', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-drawer-artifacts-'));
+test('the shared-artifact index shows a task\'s artifacts apart from the project\'s own, and a detail opens in its own tab', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-artifact-index-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const server = await openGraphServer({
     stateDir: join(root, 'state'),
@@ -34,7 +34,7 @@ test('the drawer shows a task\'s artifacts apart from the project\'s own, and a 
     startup: { mode: 'view', configured: false, modelCount: 0, enabledModelCount: 0 },
   });
   cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '抽屉里的共享产物。', requestId: 'drawer-artifacts' });
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '共享产物索引。', requestId: 'artifact-index' });
   const view = await server.runtime.conversations.view(created.conversationId);
 
   const source = join(root, 'source');
@@ -87,16 +87,21 @@ test('the drawer shows a task\'s artifacts apart from the project\'s own, and a 
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   await page.getByTestId('conversation').waitFor();
 
-  // This conversation has no draft, so the drawer opens on its task; the task keeps the same
-  // two pages: the task graph and the shared artifacts.
+  // The drawer is only the launcher: it names the task's two windows and links to the index.
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
-  await page.getByTestId('task-page-tabs').waitFor();
-  expect(await page.getByTestId('task-tab-graph').isVisible()).toBe(true);
-  expect(await page.getByTestId('task-tab-artifacts').isVisible()).toBe(true);
-  expect(await page.locator('[data-testid="task-tab-acceptance"], [data-testid="task-tab-nodes"], [data-testid="task-tab-decisions"]').count()).toBe(0);
+  // This conversation has no draft and no feature task of its own, so the drawer names only the
+  // window that exists: the shared-artifact index. It never pretends a task graph is there.
+  await page.getByTestId('no-task-graph').waitFor();
+  expect(await page.getByTestId('drawer-task-artifacts').count()).toBe(1);
+  expect(await page.locator('[data-testid^="task-graph-tab-"]').count()).toBe(0);
+  // The drawer no longer lists any artifacts itself.
+  expect(await page.getByTestId('drawer-task-detail').locator('[data-testid="drawer-artifacts"]').count()).toBe(0);
 
-  await page.getByTestId('task-tab-artifacts').click();
+  // The index is a window of its own, and the drawer opens it as a tab.
+  await page.getByTestId('drawer-task-artifacts').click();
+  await expect.poll(() => new URL(page.url()).hash).toBe('#/artifacts');
+  await page.getByTestId('artifact-index').waitFor();
   const own = page.getByTestId('drawer-artifacts-own');
   const project = page.getByTestId('drawer-artifacts-project');
   await own.waitFor();
@@ -110,7 +115,7 @@ test('the drawer shows a task\'s artifacts apart from the project\'s own, and a 
   expect(await rows(project)).toEqual([`drawer-artifact-detail-${promoted.artifactId}-${promoted.version}`]);
   expect(await rows(own)).toContain(`drawer-artifact-detail-${shared.artifactId}-${shared.version}`);
   expect(await rows(own)).not.toContain(`drawer-artifact-detail-${promoted.artifactId}-${promoted.version}`);
-  await page.screenshot({ path: '/tmp/drawer-artifacts-01-two-groups.png' });
+  await page.screenshot({ path: '/tmp/artifact-index-01-two-groups.png' });
 
   // 查看详情 opens a tab of its own, named after the artifact it shows.
   await own.locator(`[data-testid="drawer-artifact-detail-${taskOnly.artifactId}-${taskOnly.version}"]`).click();
@@ -119,7 +124,7 @@ test('the drawer shows a task\'s artifacts apart from the project\'s own, and a 
   await expect.poll(() => page.locator('.tab[data-kind="artifact"] .tab-title').first().innerText()).toBe('只属于这个任务');
   // The tab shows the artifact's own bytes, not a summary of them.
   await page.getByText('只属于这个任务的计划').first().waitFor();
-  await page.screenshot({ path: '/tmp/drawer-artifacts-02-detail-tab.png' });
+  await page.screenshot({ path: '/tmp/artifact-index-02-detail-tab.png' });
 
   // 提升 lives with the artifact it acts on: this tab promotes this version to the project.
   // The task keeps its own copy - the promoted one is a new version in the project scope.
@@ -127,11 +132,9 @@ test('the drawer shows a task\'s artifacts apart from the project\'s own, and a 
   await page.getByTestId('artifact-promote').click();
   await page.getByText('已提升到项目共享').waitFor();
 
-  // Closing that tab goes back to the window the user came from, and the drawer now shows the
-  // promoted version under the project group.
+  // Closing that tab goes back to the index the user came from, which now carries both
+  // versions of that artifact in the project group.
   await page.locator('.tab[data-kind="artifact"] .tab-close').first().click();
-  await page.getByTestId('conversation').waitFor();
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('task-tab-artifacts').click();
+  await page.getByTestId('artifact-index').waitFor();
   await expect.poll(async () => (await rows(project)).length).toBe(2);
 }, 90_000);
