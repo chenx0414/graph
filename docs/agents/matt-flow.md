@@ -4,6 +4,13 @@
 换 Agent、换会话、换模型，都只读这些文件。前三步（grill / spec / tickets）由 **main Agent** 做，
 后两步（implement / review）由**独立 Agent** 做（本文件的「谁来跑」一节）。
 
+两个 Agent（控制台里可见，可被我当 subagent 调用）：
+
+| 配方 | 名字 | 身份 | 绑定 | grade / 审查 |
+| --- | --- | --- | --- | --- |
+| `matt-implement` | Dan_implementer | `matt-pocock-implement` | `implement-spec`、`tdd` | medium / 否 |
+| `matt-review` | Eve_reviewer | `matt-pocock-review` | `code-review` | medium / **是**（走独立审查通道） |
+
 ## 产物与位置（契约）
 
 | 步骤 | 产物 | 位置 |
