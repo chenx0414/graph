@@ -435,6 +435,34 @@ test('switching the account in step one follows through to the model list in ste
   expect(await page.getByTestId('model-probe-alpha-1').count()).toBe(0);
 }, 90_000);
 
+test('an account whose own key has no value is not reported as resolved', async () => {
+  const dir = await temp('account-missing-key');
+  const stub = await stubProvider();
+  const path = await configFile(dir, stub.baseUrl, {
+    credentials: { 'opencode-go-2': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_GO_ACCOUNT_2', displayName: '账户 2' } },
+  });
+  // The platform-level variable exists - which is exactly what let this card claim 凭据已解析 for an account
+  // that has no value of its own. The only symptom of that lie is a model that silently never dispatches.
+  const daemon = await startGraphDaemon({
+    configPath: path, stateDir: join(dir, 'state'), webDir, port: 0, mode: 'view',
+    env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET, GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: SECRET }, log: () => undefined,
+  });
+  cleanup.push(() => daemon.close().catch(() => undefined));
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/settings`);
+  await page.getByTestId('settings-page').waitFor();
+  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+  await page.getByTestId('provider-platform-opencode-go').click();
+  await page.getByTestId('provider-credentialId').fill('opencode-go-2');
+
+  // One platform may hold several accounts: another account's variable says nothing about this one.
+  await expect.poll(async () => page.getByTestId('provider-credential-state').innerText(), { timeout: 10_000 }).toContain('凭据缺失');
+  // And the card names the variable this account needs, not the platform preset's.
+  expect(await page.getByTestId('provider-key-env').innerText()).toContain('GRAPH_OPENCODE_GO_ACCOUNT_2');
+}, 60_000);
+
 test('a supported platform offers an editable account name', async () => {
   const dir = await temp('account-name');
   const stub = await stubProvider();

@@ -455,7 +455,12 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   };
   // credentialConfigured / credentialRef come from the daemon catalog; the
   // card must use the daemon's own ref name so the reason names the right env var.
-  const resolved = Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
+  // The daemon's per-credential answer outranks the platform flag: one platform may hold several
+  // accounts, so another account's variable says nothing about this one. Without that precedence the card
+  // reports 凭据已解析 for an account that has no value, and the only symptom is a model that silently
+  // never dispatches (its credential is dropped before the model list is built).
+  const accountHasNoValue = credentialState[active.credentialId] === false && !keyResolved[active.credentialId];
+  const resolved = !accountHasNoValue && Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
   const requiredProblems = missingRequiredModelFields(draft.models?.entries ?? []);
 
   useEffect(() => {
