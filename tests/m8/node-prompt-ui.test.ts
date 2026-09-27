@@ -94,7 +94,6 @@ test('the node detail shows the system prompt and briefing the subagent really r
   await page.getByTestId('graph').waitFor();
   // A node opens as its own chat tab now: the injected system prompt sits above the transcript.
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
-  await page.getByTestId('open-node-chat-work').click();
   const section = page.getByTestId('node-prompt');
   await section.waitFor();
   // The tab reads the recorded prompt on open; nothing is recomputed or invented.

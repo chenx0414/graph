@@ -700,14 +700,34 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       ...(query.cursor ? { cursor: query.cursor } : {}),
     });
   });
+  app.get('/api/projects/:projectId/artifacts', async request => {
+    const { projectId } = request.params as { projectId: string };
+    const query = request.query as Record<string, string | undefined>;
+    return runtime.artifacts.listProject(projectId, {
+      ...(query.namespace ? { namespace: query.namespace } : {}),
+      ...(query.prefix ? { prefix: query.prefix } : {}),
+      ...(query.schema ? { schema: query.schema } : {}),
+      ...(query.tag ? { tag: query.tag } : {}),
+      ...(query.trust ? { trust: query.trust as 'unverified' | 'reviewed' | 'accepted' } : {}),
+      ...(query.includeRetired === 'true' ? { includeRetired: true } : {}),
+      ...(query.latestOnly === 'false' ? { latestOnly: false } : {}),
+      ...(query.limit ? { limit: Number(query.limit) } : {}),
+      ...(query.cursor ? { cursor: query.cursor } : {}),
+    });
+  });
+
   app.get('/api/tasks/:taskId/artifacts/:artifactId', async request => {
     const { taskId, artifactId } = request.params as { taskId: string; artifactId: string };
-    const version = (request.query as { version?: string }).version;
-    return runtime.artifacts.get(taskId, artifactId, version ? Number(version) : undefined);
+    const { version, scope } = request.query as { version?: string; scope?: string };
+    if (scope !== undefined && scope !== 'task' && scope !== 'project') {
+      throw new RuntimeError('invalid_artifact', 'scope must be task or project');
+    }
+    return runtime.artifacts.get(taskId, artifactId, version ? Number(version) : undefined, scope);
   });
   app.get('/api/tasks/:taskId/artifacts/:artifactId/:version/content', async (request, reply) => {
     const { taskId, artifactId, version } = request.params as { taskId: string; artifactId: string; version: string };
-    const result = await runtime.artifacts.read(taskId, artifactId, Number(version));
+    const scope = (request.query as { scope?: string }).scope;
+    const result = await runtime.artifacts.read(taskId, artifactId, Number(version), 262_144, scope === 'task' || scope === 'project' ? scope : undefined);
     if ((request.query as { download?: string }).download === 'true') {
       reply.header('content-disposition', `attachment; filename="${result.record.name}"`);
       return reply.type(result.record.mediaType).send(await readFile(result.path));
