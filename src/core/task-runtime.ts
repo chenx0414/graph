@@ -1400,8 +1400,15 @@ export async function openTaskRuntime(options: {
       } catch (error) {
         if (!(error instanceof RuntimeError) || error.code !== 'not_found') throw error;
         // A container has no instance of its own: summarize its children so the
-        // graph view can drill into the group without a dead route.
-        const graph = loadGraph(store, taskId);
+        // graph view can drill into the group without a dead route. A task without a graph has
+        // no containers either - the original not_found is the honest answer, and asking
+        // loadGraph about a draft-less task used to throw a TypeError instead.
+        let graph: ReturnType<typeof loadGraph>;
+        try {
+          graph = loadGraph(store, taskId);
+        } catch {
+          throw error;
+        }
         if (!graph.containers().some(item => item.id === nodeId)) throw error;
         const container = graph.containers().find(item => item.id === nodeId)!;
         const rows = store.db.prepare('SELECT id,spec,status FROM nodes WHERE task_id=?').all(taskId) as { id: string; spec: string; status: string }[];
