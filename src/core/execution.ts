@@ -614,6 +614,8 @@ export class Execution {
               acceptance: proposal?.acceptance ?? [],
               ...(capabilities?.length ? { capabilities } : {}),
               ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
+              // A graph node reads its own view: its node and the checks that read it, not every lane.
+              ...(graphBriefing?.length && spec.role !== 'master' ? { focus: spec.id } : {}),
               ...(review ? { review } : {}),
               ...(conversationStatus ? { conversation: conversationStatus } : {}),
               ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
@@ -639,6 +641,8 @@ export class Execution {
               ...(proposal?.summary ? { summary: proposal.summary } : {}),
               acceptance: proposal?.acceptance ?? [],
               ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
+              // A graph node reads its own view: its node and the checks that read it, not every lane.
+              ...(graphBriefing?.length && spec.role !== 'master' ? { focus: spec.id } : {}),
               ...(review ? { review } : {}),
               ...(conversationStatus ? { conversation: conversationStatus } : {}),
               ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
