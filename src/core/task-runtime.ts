@@ -1384,6 +1384,9 @@ export async function openTaskRuntime(options: {
         // preview must say the same thing, or the settings panel would show a smaller toolbox than
         // the one the next turn really gets.
         conversations: { read: true, write: true },
+        // A master turn is not given `peers`: same-graph messaging belongs to a subagent, and a
+        // preview that claimed otherwise would be the panel's usual lie about the tool surface.
+        peers: false,
         artifacts: agentArtifactAccess({ role: 'master', action }),
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,

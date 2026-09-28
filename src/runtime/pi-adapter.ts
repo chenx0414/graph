@@ -21,6 +21,7 @@ import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
 import { isFullAccess } from '../core/access-policy.ts';
 import { openConversationTools, type ConversationToolService } from './conversation-tools.ts';
+import { nodeInbox, peerNodes, sendNodeMessage } from './agent-messaging.ts';
 import { agentTools } from './agent-tools.ts';
 import { conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
@@ -442,6 +443,16 @@ export function createPiAdapter(options: {
               ...(artifactService ? { artifacts: artifactService } : {}),
               // A master session may hand work to any other conversation. The rules and the handoff
               // ledger live in `conversation-tools.ts`.
+              // A graph node may talk to the other Agents of its OWN graph. The reach rule lives in
+              // `conversation-scope.ts`: naming another graph is refused, which is what keeps a
+              // subagent from commanding the work of a different graph.
+              ...(spec.role !== 'master' ? {
+                peers: {
+                  list: async () => peerNodes(options.store, operation.taskId).map(node => ({ id: node.id, role: node.role, status: node.status })),
+                  send: async request => sendNodeMessage(options.store, { taskId: operation.taskId, from: operation.nodeId, to: request.to, text: request.text, requestId: request.requestId }),
+                  inbox: async () => nodeInbox(options.store, operation.taskId, operation.nodeId),
+                },
+              } : {}),
               ...(channels?.conversations && conversation && spec.role === 'master' ? {
                 conversations: openConversationTools({
                   service: channels.conversations.service,

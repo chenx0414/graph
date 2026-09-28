@@ -14,6 +14,13 @@ import { WriteLedger } from '../core/write-ledger.ts';
 import { describeAgentTools, type AgentToolName } from './agent-tool-definitions.ts';
 import type { ConversationToolChannel } from './conversation-tools.ts';
 
+/** Same-graph Agent messaging, as far as the tools need it. */
+export interface PeerChannel {
+  list(): Promise<unknown>;
+  send(input: { to: string; text: string; requestId: string }): Promise<unknown>;
+  inbox(): Promise<unknown>;
+}
+
 type Supervisor = {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
   withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
@@ -153,6 +160,8 @@ export function agentTools(input: {
   artifacts?: ArtifactToolService;
   /** Channels to other conversations: present only when this session may reach them at all. */
   conversations?: ConversationToolChannel;
+  /** Same-graph peers: where they are, and how to send to one. Present only for a graph node. */
+  peers?: PeerChannel;
   systemContext?: {
     systemSummary?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     systemDiagnostics?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -597,6 +606,25 @@ export function agentTools(input: {
       // Abandoning ends the task, so there is nothing left to continue in this turn.
       return { ...text(JSON.stringify(receipt)), ...(action === 'abandon' ? { terminate: true } : {}) };
     },
+    list_peers: async () => {
+      if (!input.peers) throw new Error('This Agent session has no graph peers');
+      return text(JSON.stringify({ peers: await input.peers.list() }));
+    },
+    send_to_peer: async (_id, params) => {
+      if (!input.peers) throw new Error('This Agent session has no graph peers');
+      const body = fields(params);
+      const to = String(body.to ?? '').trim();
+      const message = String(body.text ?? '').trim();
+      const requestId = String(body.requestId ?? '').trim();
+      if (!to) throw new Error('to is required: name a peer node id (list_peers shows them)');
+      if (!message) throw new Error('text is required');
+      if (!requestId) throw new Error('A bounded requestId is required');
+      return text(JSON.stringify(await input.peers.send({ to, text: message, requestId })));
+    },
+    read_peer_messages: async () => {
+      if (!input.peers) throw new Error('This Agent session has no graph peers');
+      return text(JSON.stringify({ messages: await input.peers.inbox() }));
+    },
     list_agent_combinations: async (_id, params) => {
       const body = fields(params);
       const query = typeof body.query === 'string' ? body.query.trim().toLowerCase() : '';
@@ -643,6 +671,9 @@ export function agentTools(input: {
       controlTask: Boolean(input.supervisor.controlTask),
     } } : {}),
     ...(input.conversations ? { conversations: { read: true, write: true } } : {}),
+    // The peer tools exist only for a graph node that was actually given the channel, so the
+    // declaration and the handler never disagree.
+    ...(input.peers ? { peers: true } : {}),
     ...(input.systemContext ? { systemContext: {
       systemSummary: Boolean(input.systemContext.systemSummary),
       systemDiagnostics: Boolean(input.systemContext.systemDiagnostics),

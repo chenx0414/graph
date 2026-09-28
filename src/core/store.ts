@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 40;
+export const SCHEMA_VERSION = 41;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -657,6 +657,24 @@ export class TaskStore {
           UNIQUE(task_id,node_id,kind,dedupe_key));
         CREATE INDEX IF NOT EXISTS wake_intents_ready ON wake_intents(task_id,node_id,state);
         PRAGMA user_version=40;`);
+    });
+    if (version < 41) this.transaction(() => {
+      // Agents of one graph talk to each other, and the addressing unit has to be a node: a message
+      // belongs to a conversation, but "who is this for?" was previously unanswerable because the
+      // row carried no recipient. `node_id` is the sender (the node whose turn wrote it), and
+      // `to_node_id` is the recipient; a message with no recipient stays a conversation message.
+      // The requestId makes a re-send idempotent the same way operations do.
+      const columns = (this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]).map(row => row.name);
+      if (!columns.includes('node_id')) this.db.exec('ALTER TABLE messages ADD COLUMN node_id TEXT');
+      if (!columns.includes('to_node_id')) this.db.exec('ALTER TABLE messages ADD COLUMN to_node_id TEXT');
+      if (!columns.includes('request_id')) this.db.exec('ALTER TABLE messages ADD COLUMN request_id TEXT');
+      // A fixture that builds an older database by hand may not carry `conversation_id` at all, so
+      // the index is only created when the column it indexes really exists - an unguarded CREATE
+      // INDEX here aborts the whole migration chain.
+      if (columns.includes('conversation_id')) this.db.exec(`
+        CREATE INDEX IF NOT EXISTS messages_to_node ON messages(conversation_id,to_node_id,seq);
+        CREATE UNIQUE INDEX IF NOT EXISTS messages_request ON messages(conversation_id,request_id) WHERE request_id IS NOT NULL;`);
+      this.db.exec('PRAGMA user_version=41;');
     });
   }
 

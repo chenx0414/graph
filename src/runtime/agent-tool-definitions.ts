@@ -15,6 +15,8 @@ export interface AgentToolFeatures {
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
   /** Channels to other conversations, when this session has them. */
   conversations?: Partial<Record<'read' | 'write', boolean>>;
+  /** Same-graph Agent-to-Agent messaging: where the peers are, and whether they can be addressed. */
+  peers?: boolean;
 }
 
 export function agentArtifactAccess(input: { role?: string; action: string }) {
@@ -394,6 +396,28 @@ function declarations(features: AgentToolFeatures) {
       available: main && Boolean(features.rsi?.apply),
       externallyGated: false,
       ...(rsiArguments ? { prepareArguments: rsiArguments } : {}),
+    },
+    list_peers: {
+      name: 'list_peers', label: 'List peer Agents', description: 'List the other Agents of THIS graph with their status, so you can address one by id. A subagent may only talk to nodes of its own graph; naming another graph is refused. Combined with send_to_peer and read_peer_messages, this is how the Agents of one graph work together instead of each guessing what the others are doing.',
+      parameters: Type.Object({}),
+      available: Boolean(features.peers),
+      externallyGated: false,
+    },
+    send_to_peer: {
+      name: 'send_to_peer', label: 'Send a message to a peer Agent', description: 'Send a durable message to another Agent of this graph. The message is addressed to that node and waits in its inbox until it reads it, so the peer does not have to be running now. A retried requestId is the same message, not a second one. Only nodes of your own graph are reachable.',
+      parameters: Type.Object({
+        to: Type.String(),
+        text: Type.String(),
+        requestId: Type.String(),
+      }),
+      available: Boolean(features.peers),
+      externallyGated: false,
+    },
+    read_peer_messages: {
+      name: 'read_peer_messages', label: 'Read messages from peer Agents', description: 'Read the messages other Agents of this graph addressed to you, oldest first. Reading does not delete them: the inbox is the record of what your peers told you.',
+      parameters: Type.Object({}),
+      available: Boolean(features.peers),
+      externallyGated: false,
     },
     list_agent_combinations: {
       name: 'list_agent_combinations', label: 'List Agent combinations', description: 'List subagent recipes composed from shared resource-library IDs. Results are recipes, not installed definitions or permissions; inspect the referenced resources before using one.',
