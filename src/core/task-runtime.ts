@@ -46,6 +46,7 @@ import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.t
 import { effectiveThinkingLevel, thinkingOptionsFor } from '../runtime/thinking.ts';
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
+import { taskSummary } from './task-summary.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
 import type { AgentContextLibrary } from '../runtime/agent-context.ts';
 import { openAgentContextAssembly } from '../runtime/agent-context-assembly.ts';
@@ -738,6 +739,11 @@ export async function openTaskRuntime(options: {
           });
           git.prepareTask(taskId, input.targetBranch);
           return receipt;
+        },
+        /** The end-of-task card, read straight from the ledger so it cannot disagree with it. */
+        summary() {
+          ensureOpen(); store.task(taskId);
+          return taskSummary(store, taskId);
         },
         async view() {
           ensureOpen();
