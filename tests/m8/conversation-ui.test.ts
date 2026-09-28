@@ -221,7 +221,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('bind-select').selectOption('project');
   await page.getByTestId('bind-submit').click();
   await includes(page, '项目 project');
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await page.getByTestId('drawer-entry').click();
   await page.getByTestId('chat-input').fill('先做最小可用版，预算有限，登录先不改。');
   await page.getByTestId('chat-send').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v1'));
@@ -245,9 +245,9 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('chat-input').waitFor();
   // The chat thread itself no longer holds the draft card.
   expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
-  // Opening another window closed the drawer; when it is still open, close it from its header.
+  // Opening another window closed the drawer; when it is still open, use the toolbar toggle.
   if (await page.getByTestId('detail-drawer').isVisible().catch(() => false)) {
-    await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+    await page.getByTestId('drawer-entry').click();
     await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
   }
 
@@ -271,7 +271,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.screenshot({ path: join(evidence, '03-confirmed.png'), fullPage: true });
   // The task card never appears in the chat stream, only in the drawer.
   expect(await page.locator('.conversation-thread-inner [data-testid^="conversation-task-"]').count()).toBe(0);
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 5. Keep asking while the task executes; the answer comes from the ledger.
@@ -286,7 +286,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await taskDetail.waitFor();
   expect(await taskDetail.innerText()).toContain('状态');
   expect(await taskDetail.innerText()).toContain('目标分支');
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
   // 6. Two messages in a row while the master is busy: both are kept. While the
@@ -315,7 +315,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('conversation-tasks').waitFor();
   expect(await page.getByTestId('detail-drawer').getAttribute('data-section')).toBe('task');
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
   await page.screenshot({ path: join(evidence, '04-reloaded.png'), fullPage: true });
 

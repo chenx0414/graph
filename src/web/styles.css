@@ -3572,4 +3572,21 @@ html[data-drawer-expanded="true"] .app-shell { width:var(--drawer-base-width); m
 .node-prompt-summary::-webkit-details-marker { display: none; }
 .node-prompt-card[open] .node-prompt-summary > svg:last-child { transform: rotate(90deg); }
 .node-prompt-card > .stack { padding: 14px; }
+.task-graph-title { margin: 0; font-size: clamp(20px, 2.1vw, 30px); line-height: 1.3; overflow-wrap: anywhere; white-space: normal; }
+.task-graph-page .graph-wrap { height: clamp(640px, calc(100vh - 210px), 1080px); }
+.task-graph-page .node-head { font-size: 14px; }
+.task-graph-page .node-card { padding: 10px 13px; }
+.node-prompt-popover { margin: 0; border: 0; max-height: none; overflow: visible; position: relative; background: transparent; }
+.node-prompt-popover .node-prompt-summary { display: inline-flex; width: 30px; height: 30px; padding: 0; justify-content: center; list-style: none; border-radius: 8px; background: transparent; }
+.node-prompt-popover .node-prompt-summary::-webkit-details-marker { display: none; }
+.node-prompt-popover .node-prompt-popover-panel { position: fixed; right: 16px; top: 48px; width: min(580px, calc(100vw - 32px)); max-height: min(74vh, 780px); overflow: auto; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); z-index: 120; }
+.node-prompt-popover-heading { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.node-prompt-popover-heading span { font-size: 11px; color: var(--muted); }
+.node-prompt-popover .stack { padding: 0; }
+.node-prompt-popover[open] .node-prompt-summary > svg:last-child { transform: none; }
+
+/* The one toolbar control remains reachable when the native drawer widens the window. */
+.workspace-bar { position: relative; z-index: 112; }
+.window-drawer-layer { padding-top: 44px; }
+.window-drawer-layer .detail-drawer .drawer-inner { padding-top: 0; }
 .node-chat-composer { flex: 0 0 auto; }

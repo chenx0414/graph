@@ -8,6 +8,7 @@ interface ToolStat {
   calls: number;
   errors: number;
   totalMs: number;
+  medianMs: number;
   maxMs: number;
   lastAt: number;
 }
@@ -146,7 +147,7 @@ export function ToolStatsPage() {
             <thead>
               <tr>
                 <th>工具</th><th>角色</th><th>次数</th><th>失败</th>
-                <th>成功率</th><th>平均耗时</th><th>最大耗时</th><th>最近一次</th>
+                <th>成功率</th><th>平均耗时</th><th>中位数耗时</th><th>最大耗时</th><th>最近一次</th>
               </tr>
             </thead>
             <tbody>
@@ -158,6 +159,7 @@ export function ToolStatsPage() {
                   <td className="num">{entry.errors}</td>
                   <td className="num">{(((entry.calls - entry.errors) / entry.calls) * 100).toFixed(1)}%</td>
                   <td className="num">{formatDuration(entry.totalMs / entry.calls)}</td>
+                  <td className="num">{formatDuration(entry.medianMs)}</td>
                   <td className="num">{formatDuration(entry.maxMs)}</td>
                   <td>{formatWhen(entry.lastAt)}</td>
                 </tr>

@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { WindowDrawer } from './WindowDrawer.tsx';
+import { TaskDrawerSection } from './TaskDrawerSection.tsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { type AgentContextView } from './AgentContext.tsx';
@@ -167,10 +168,6 @@ type ConversationView = {
   };
   tasks: ConversationTask[];
   cursor: number;
-};
-const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
-  discussing: 'info', running: 'accent', queued: 'neutral', paused: 'warn', pausing: 'warn',
-  blocked: 'warn', completed: 'success', failed: 'danger', skipped: 'neutral', abandoned: 'danger',
 };
 const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   pending: 'neutral', ready: 'info', preparing: 'accent', running: 'accent',
@@ -1042,7 +1039,6 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
         >
           <div className="drawer-inner">
             <div className="drawer-head">
-              <button className="icon-button" aria-label="关闭详情" onClick={() => onDrawerOpenChange(false)}><Icon name="panel-right" size={16} /></button>
               <div className="grow">
                 <h2>{drawerSection === 'draft' ? `草稿 v${proposal?.version ?? ""}` : `任务 · ${tasks.length}`}</h2>
               </div>
@@ -1115,82 +1111,7 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
               <div className="drawer-loading"><Spinner label="正在加载草稿…" /></div>
             )}
 
-            {drawerOpen && (
-              <section className="drawer-section drawer-all-tasks" data-testid="conversation-tasks">
-                <div className="drawer-section-head">
-                  <h3>任务导航</h3>
-                  <span>{tasks.length} 个任务</span>
-                </div>
-                {tasks.length === 0 && deferredInitPanelIds.includes('task-empty') && (
-                  <div className="drawer-init-note" data-testid="no-conversation-tasks" data-panel="task-empty">
-                    <div className="thread-card-title">尚无功能任务</div>
-                    <div className="thread-card-copy">确认草稿后才会创建并开始执行。</div>
-                  </div>
-                )}
-                {tasks.length > 0 && (
-                  <>
-                  <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="全部任务">
-                    {tasks.map(task => (
-                      <button
-                        key={task.id}
-                        type="button"
-                        className="drawer-task-nav-item"
-                        data-testid={`conversation-task-${task.id}`}
-                        data-active={task.id === detailTask?.id}
-                        aria-pressed={task.id === detailTask?.id}
-                        onClick={() => setSelectedTaskId(task.id)}
-                      >
-                        <span className="grow truncate">{task.request}</span>
-                        <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
-                      </button>
-                    ))}
-                  </nav>
-                  </>
-                )}
-                {(detailTask || !tasks.length) && (
-                  <div className="drawer-task-detail" data-testid="drawer-task-detail">
-                    {detailTask ? (
-                      <>
-                        <dl className="kv">
-                          <dt>状态</dt><dd>{TASK_LABEL[detailTask.status] ?? detailTask.status}</dd>
-                          <dt>目标分支</dt><dd>{detailTask.targetBranch ?? '未确认'}</dd>
-                          <dt>集成提交</dt><dd className="mono">{detailTask.integrationSha ?? '尚无'}</dd>
-                          <dt>费用</dt><dd>{costText(detailTask.cost)}</dd>
-                        </dl>
-                        {/* The drawer names the windows a task has; each opens as a tab. */}
-                        <div className="drawer-entry-links" data-testid="drawer-entry-links">
-                          {DRAWER_ENTRY_LINKS.map(entry => (
-                            <a
-                              key={entry.id}
-                              className="btn btn-sm"
-                              data-testid={entry.id === 'graph' ? `task-graph-tab-${detailTask.id}` : 'drawer-task-artifacts'}
-                              href={entry.id === 'graph'
-                                ? `#/tasks/${detailTask.id}/graph`
-                                : `#/artifacts${view.projectId ? `?project=${encodeURIComponent(view.projectId)}` : ''}`}
-                            >
-                              <Icon name={entry.id === 'graph' ? 'graph' : 'box'} size={14} />
-                              <span style={{ marginLeft: 6 }}>{entry.label}</span>
-                            </a>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <p className="muted" data-testid="no-task-graph">还没有任务；确认草稿后这里会显示它的窗口。</p>
-                        <div className="drawer-entry-links" data-testid="drawer-entry-links">
-                          {DRAWER_ENTRY_LINKS.filter(entry => entry.id === 'artifacts').map(entry => (
-                            <a key={entry.id} className="btn btn-sm" data-testid="drawer-task-artifacts" href={`#/artifacts${view.projectId ? `?project=${encodeURIComponent(view.projectId)}` : ''}`}>
-                              <Icon name="box" size={14} />
-                              <span style={{ marginLeft: 6 }}>{entry.label}</span>
-                            </a>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </section>
-            )}
+            {drawerOpen && <TaskDrawerSection tasks={tasks} selectedId={selectedTaskId} onSelect={setSelectedTaskId} projectId={view.projectId} origin="conversation" />}
 
             {drawerOpen && !hasDrawerContent && !drawerLoading && (
               <div className="drawer-empty" data-testid="detail-empty">

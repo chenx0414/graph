@@ -16,12 +16,15 @@ test('aggregates calls, failures and durations per tool', () => {
   const { store } = open();
   store.recordToolCall({ instanceId: 'i1', tool: 'bash', ms: 100, isError: false });
   store.recordToolCall({ instanceId: 'i1', tool: 'bash', ms: 300, isError: true });
+  store.recordToolCall({ instanceId: 'i1', tool: 'bash', ms: 1_000, isError: false });
   store.recordToolCall({ instanceId: 'i1', tool: 'read', ms: 50, isError: false });
 
   const stats = store.toolCallStats();
   const bash = stats.find(entry => entry.tool === 'bash');
-  expect(bash).toMatchObject({ calls: 2, errors: 1, totalMs: 400, maxMs: 300 });
-  expect(stats.find(entry => entry.tool === 'read')).toMatchObject({ calls: 1, errors: 0, totalMs: 50 });
+  expect(bash).toMatchObject({ calls: 3, errors: 1, totalMs: 1_400, medianMs: 300, maxMs: 1_000 });
+  expect(stats.find(entry => entry.tool === 'read')).toMatchObject({ calls: 1, errors: 0, totalMs: 50, medianMs: 50 });
+  store.recordToolCall({ instanceId: 'i1', tool: 'bash', ms: 500, isError: false });
+  expect(store.toolCallStats().find(entry => entry.tool === 'bash')?.medianMs).toBe(400);
   // Ordered by call count, so the console can render it as-is.
   expect(stats[0]!.tool).toBe('bash');
   expect(bash!.lastAt).toBeGreaterThan(0);

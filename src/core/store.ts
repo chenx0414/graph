@@ -657,16 +657,25 @@ export class TaskStore {
    * timer and no extra state, it is enforced exactly when someone looks at the numbers.
    */
   toolCallStats(keepDays = TaskStore.TOOL_CALL_RETENTION_DAYS): Array<{
-    tool: string; role: string | null; calls: number; errors: number; totalMs: number; maxMs: number; lastAt: number;
+    tool: string; role: string | null; calls: number; errors: number; totalMs: number; medianMs: number; maxMs: number; lastAt: number;
   }> {
     this.pruneToolCalls(keepDays);
     const rows = this.db.prepare(
-      `SELECT tool, role, count(*) AS calls, sum(is_error) AS errors, sum(ms) AS total_ms, max(ms) AS max_ms, max(created_at) AS last_at
-       FROM tool_calls GROUP BY tool, role ORDER BY calls DESC, tool`,
-    ).all() as Array<{ tool: string; role: string | null; calls: number; errors: number; total_ms: number; max_ms: number; last_at: number }>;
+      `WITH ranked AS (
+         SELECT tool, role, ms, is_error, created_at,
+           row_number() OVER (PARTITION BY tool, role ORDER BY ms, id) AS ordinal,
+           count(*) OVER (PARTITION BY tool, role) AS sample_count
+         FROM tool_calls
+       )
+       SELECT tool, role, count(*) AS calls, sum(is_error) AS errors,
+         sum(ms) AS total_ms,
+         avg(CASE WHEN ordinal IN ((sample_count + 1) / 2, (sample_count + 2) / 2) THEN ms END) AS median_ms,
+         max(ms) AS max_ms, max(created_at) AS last_at
+       FROM ranked GROUP BY tool, role ORDER BY calls DESC, tool`,
+    ).all() as Array<{ tool: string; role: string | null; calls: number; errors: number; total_ms: number; median_ms: number; max_ms: number; last_at: number }>;
     return rows.map(row => ({
       tool: row.tool, role: row.role, calls: Number(row.calls), errors: Number(row.errors),
-      totalMs: Number(row.total_ms), maxMs: Number(row.max_ms), lastAt: Number(row.last_at),
+      totalMs: Number(row.total_ms), medianMs: Number(row.median_ms), maxMs: Number(row.max_ms), lastAt: Number(row.last_at),
     }));
   }
 

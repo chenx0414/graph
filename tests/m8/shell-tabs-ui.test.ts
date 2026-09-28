@@ -123,6 +123,9 @@ test('the drawer toggle sits in the workspace bar on every window, and outside a
   const { taskId } = await server.runtime.user.begin({ projectId: 'alpha', request: '外壳目录', requestId: 'tabs-drawer' });
   await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
   await page.getByTestId('graph').waitFor();
+  await page.getByTestId('task-graph-title').waitFor();
+  expect(await page.getByTestId('task-graph-title').evaluate(element => getComputedStyle(element).whiteSpace)).toBe('normal');
+  expect(await page.getByTestId('flow').evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(640);
 
   const toggle = page.getByTestId('workspace-drawer-toggle');
   await toggle.waitFor();
@@ -133,14 +136,15 @@ test('the drawer toggle sits in the workspace bar on every window, and outside a
   await toggle.click();
   const drawer = page.getByTestId('detail-drawer');
   await drawer.waitFor();
-  expect(await drawer.getAttribute('data-section')).toBe('workspace');
-  // The launcher offers the shared-artifact index and the task list, and renders neither itself.
-  expect(await page.getByTestId('drawer-workspace-artifacts').getAttribute('href')).toBe('#/artifacts?project=alpha');
+  expect(await drawer.getAttribute('data-section')).toBe('task');
+  expect(await drawer.getByRole('button', { name: '关闭详情' }).count()).toBe(0);
+  expect(await page.getByTestId('drawer-task-artifacts').getAttribute('href')).toBe('#/artifacts?project=alpha');
   await page.getByTestId('drawer-workspace-tasks').waitFor();
+  await page.screenshot({ path: '/tmp/graph-unified-drawer.png' });
   expect(await drawer.locator('[data-testid="graph"], [data-testid="drawer-artifacts"]').count()).toBe(0);
 
   // It stays available on the next window too, and that window is a tab of its own.
-  await page.getByTestId('drawer-workspace-artifacts').click();
+  await page.getByTestId('drawer-task-artifacts').click();
   await page.getByTestId('artifact-index').waitFor();
   expect(await page.getByTestId('workspace-drawer-toggle').isVisible()).toBe(true);
   await expect.poll(async () => (await tabs(page)).map(tab => tab.kind)).toEqual(['graph', 'page']);
@@ -151,8 +155,8 @@ test('the drawer toggle sits in the workspace bar on every window, and outside a
   await laterToggle.click();
   await drawer.waitFor();
   expect(await laterToggle.getAttribute('data-open')).toBe('true');
-  // An open panel covers the right end of the bar, so its own close button is the same corner.
-  await drawer.getByRole('button', { name: '关闭详情' }).click();
+  // The toolbar button remains the only drawer toggle.
+  await laterToggle.click();
   await drawer.waitFor({ state: 'hidden' });
   expect(await laterToggle.getAttribute('data-open')).toBe('false');
   // With the panel away the bar toggle is clickable again.

@@ -92,11 +92,12 @@ test('the node detail shows the system prompt and briefing the subagent really r
   const page = await launch();
   await page.goto(`${server.url}/#/tasks/${begun.taskId}/graph`);
   await page.getByTestId('graph').waitFor();
-  // A node opens as its own chat tab now: the injected system prompt sits above the transcript.
+  // A node opens as its own chat tab; its prompt is reached from the top-right toolbar.
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
   const section = page.getByTestId('node-prompt');
   await section.waitFor();
-  // What the node was told sits above the transcript, collapsed so the chat keeps the room.
+  expect(await page.locator('[data-testid="node-chat-tab"] > .conversation-header').count()).toBe(0);
+  expect(await section.locator('summary').getAttribute('aria-label')).toBe('System prompt');
   expect(await section.getAttribute('open')).toBeNull();
   await section.locator('summary').click();
   await expect.poll(() => section.getAttribute('open')).not.toBeNull();

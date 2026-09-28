@@ -4,11 +4,12 @@
  * Two things live here and nothing else: what the node was actually told (its
  * injected system prompt and the briefing its session carries, both read back
  * from the ledger and the session file rather than recomputed), and its own
- * read-only transcript. Usage, capability lists, context provenance and the
+ * transcript. Usage, capability lists, context provenance and the
  * operation ledger used to sit next to them; they are deliberately gone - the
  * graph and the task records are where that belongs.
  */
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { NODE_LABEL } from './labels.ts';
@@ -107,52 +108,11 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
     ? '未记录'
     : value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
 
-  const status = overview?.node.status ?? 'draft';
-  return (
-    <div className="conversation-page window-fill" data-testid="node-chat-tab">
-      {/* The window is framed exactly like the main chat: one header, one scrollable conversation.
-          What the node was told sits above the transcript, collapsed but always one click away. */}
-      <header className="conversation-header">
-        <div className="conversation-heading">
-          <h1 data-testid="node-chat-title">
-            {named ?? nodeId} <span className="mono muted">{nodeId}</span>
-          </h1>
-          <div className="conversation-meta">
-            <Pill tone={status === 'succeeded' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'accent' : 'neutral'}>
-              {NODE_LABEL[status] ?? status}
-            </Pill>
-            <span>·</span>
-            <span>节点对话</span>
-            {overview?.instance?.model && <><span>·</span><span className="mono">{overview.instance.model}</span></>}
-          </div>
-        </div>
-      </header>
-      <div className="conversation-body" data-view="node">
-        <div className="conversation-main">
-      {overview && (
-        <section className="conversation-alert node-overview" data-testid="node-overview">
-          <div className="row" style={{ flexWrap: 'wrap' }}>
-            <Pill tone="accent">{`${overview.node.kind} · ${overview.node.action}`}</Pill>
-            <Pill tone={overview.node.status === 'succeeded' ? 'success' : overview.node.status === 'failed' ? 'danger' : overview.node.status === 'running' ? 'accent' : 'neutral'}>
-              {NODE_LABEL[overview.node.status] ?? overview.node.status}
-            </Pill>
-            {overview.node.definitionVersion && <span className="muted">{overview.node.definitionVersion}</span>}
-            {overview.instance?.model && <span className="muted mono">{overview.instance.model}</span>}
-          </div>
-          <div className="stat-grid" style={{ marginTop: 10 }}>
-            <Stat label="运行" value={duration(overview.timing?.runMs ?? null)} hint="实际工作时段之和" />
-            <Stat label="总历时" value={duration(overview.timing?.totalMs ?? null)} hint="首次派发到最后结算" />
-            <Stat
-              label="用量"
-              value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
-              hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算不限' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
-            />
-            <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
-          </div>
-        </section>
-      )}
-      <details className="conversation-alert node-prompt-card" data-testid="node-prompt">
-        <summary className="node-prompt-summary"><Icon name="spark" size={16} /><span><strong>System prompt</strong><small>该节点实际注入的上下文与简报</small></span><Icon name="chevron" size={14} /></summary>
+  const promptControl = (
+      <details className="node-prompt-card node-prompt-popover" data-testid="node-prompt">
+        <summary className="icon-button node-prompt-summary" title="System prompt" aria-label="System prompt"><Icon name="spark" size={16} /></summary>
+        <div className="node-prompt-popover-panel">
+        <div className="node-prompt-popover-heading"><strong>System prompt</strong><span>该节点实际注入的上下文与简报</span></div>
         {loading && !prompt ? <Spinner label="正在读取…" />
           : error ? <div className="form-error" data-testid="node-prompt-error">{error}</div>
             : prompt ? (
@@ -188,7 +148,38 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
                 )}
               </div>
             ) : null}
+        </div>
       </details>
+  );
+  return (
+    <div className="conversation-page window-fill" data-testid="node-chat-tab">
+      {/* The tab bar owns the title; the prompt lives in its top-right control. */}
+      {document.getElementById('conversation-toolbar') && createPortal(promptControl, document.getElementById('conversation-toolbar')!)}
+      <div className="conversation-body" data-view="node">
+        <div className="conversation-main">
+      {overview && (
+        <section className="conversation-alert node-overview" data-testid="node-overview">
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <Pill tone="accent">{`${overview.node.kind} · ${overview.node.action}`}</Pill>
+            <Pill tone={overview.node.status === 'succeeded' ? 'success' : overview.node.status === 'failed' ? 'danger' : overview.node.status === 'running' ? 'accent' : 'neutral'}>
+              {NODE_LABEL[overview.node.status] ?? overview.node.status}
+            </Pill>
+            {overview.node.definitionVersion && <span className="muted">{overview.node.definitionVersion}</span>}
+            {overview.instance?.model && <span className="muted mono">{overview.instance.model}</span>}
+          </div>
+          <div className="stat-grid" style={{ marginTop: 10 }}>
+            <Stat label="运行" value={duration(overview.timing?.runMs ?? null)} hint="实际工作时段之和" />
+            <Stat label="总历时" value={duration(overview.timing?.totalMs ?? null)} hint="首次派发到最后结算" />
+            <Stat
+              label="用量"
+              value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
+              hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算不限' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
+            />
+            <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
+          </div>
+        </section>
+      )}
+
 
       <AgentNodeChat taskId={taskId} nodeId={nodeId} agentName={named ?? nodeId} onRunUpdate={setOverview} page />
         </div>

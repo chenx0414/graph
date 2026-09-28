@@ -214,7 +214,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await expect.poll(async () => {
     const main = await page.locator('.conversation-main').boundingBox();
     const drawer = await page.getByTestId('detail-drawer').boundingBox();
-    return Boolean(main && drawer && drawer.y === 0 && drawer.height === 720 && main.width === beforeMain!.width);
+    return Boolean(main && drawer && drawer.y >= 40 && drawer.y + drawer.height === 720 && main.width === beforeMain!.width);
   }).toBe(true);
   const settledMain = await page.locator('.conversation-main').boundingBox();
   const settledComposer = await page.locator('.conversation-composer-wrap').boundingBox();
@@ -369,11 +369,12 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   const chat = page.getByTestId('graph-agent-chat');
   await chat.waitFor();
   expect(await chat.getAttribute('data-page')).toBe('true');
-  // The node window is framed like the main chat: one conversation header, one thread.
+  // The tab bar names the node; the transcript uses the full height below it.
   expect(await chat.getAttribute('class')).toContain('conversation-thread-shell');
-  expect(await page.locator('[data-testid="node-chat-tab"] > .conversation-header').count()).toBe(1);
+  expect(await page.locator('[data-testid="node-chat-tab"] > .conversation-header').count()).toBe(0);
+  expect(await page.getByTestId('node-prompt').locator('summary').getAttribute('aria-label')).toBe('System prompt');
   expect(await page.locator('[data-testid="node-chat-tab"] .conversation-body .conversation-main .conversation-thread').count()).toBe(1);
-  expect(await page.getByTestId('node-chat-title').innerText()).toContain('work');
+  expect(await page.locator('.tab[data-kind="node"] .tab-title').first().innerText()).toContain('work');
   await expect.poll(() => chat.innerText()).toContain('任务说明');
   expect(await chat.innerText()).toContain('实现 README 功能');
   await chat.getByRole('button', { name: '展开这一轮的思考与工具调用' }).click();
@@ -406,6 +407,11 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   expect(await chat.getByRole('button', { name: '关闭节点对话' }).count()).toBe(0);
   // The operation ledger lives nowhere in this window any more.
   expect(await page.getByTestId('node-operations').count()).toBe(0);
+  await page.locator('.tab[data-kind="graph"] .tab-open').first().click();
+  await expect.poll(() => page.getByTestId('node-prompt').isVisible()).toBe(false);
+  await page.locator('.tab[data-kind="node"] .tab-open').first().click();
+  await expect.poll(() => page.getByTestId('node-prompt').isVisible()).toBe(true);
+
 }, 60_000);
 
 test('the task graph page keeps the permanent four-state legend', async () => {
@@ -516,7 +522,7 @@ test('the right drawer toggle stays available and opens an empty state', async (
   expect(await page.getByTestId('detail-empty').innerText()).toContain('暂无详情');
   expect(await toggle.getAttribute('data-open')).toBe('true');
 
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await toggle.click();
   await expect.poll(() => toggle.getAttribute('data-open')).toBe('false');
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 });

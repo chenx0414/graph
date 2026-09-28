@@ -214,7 +214,7 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('DRAWER_ENTRY_LINKS.map');
     expect(source).toContain('data-testid="drawer-entry-links"');
     expect(source).toContain('data-testid={`drawer-entry-${entry.id}`}');
-    expect(source).toContain('data-testid="drawer-task-nav"');
+    expect(read('src/web/TaskDrawerSection.tsx')).toContain('data-testid="drawer-task-nav"');
     // The drawers no longer list anything themselves: the shared-artifact index is its own window.
     expect(read('src/web/ArtifactIndex.tsx')).toContain('data-testid="artifact-index"');
     // The two groups, and the label that says the project's own artifacts belong to no task,
@@ -228,7 +228,7 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('data-testid="proposal-draft"');
     expect(source).toContain('data-testid="accept-branch"');
     expect(source).toContain('data-testid="confirm-draft"');
-    expect(source).toContain('data-testid={`conversation-task-${task.id}`}');
+    expect(read('src/web/TaskDrawerSection.tsx')).toContain('`conversation-task-${task.id}`');
     expect(source).toContain('data-testid={`conversation-questions-${task.id}`}');
   });
 
@@ -237,7 +237,7 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('data-testid="bind-project"');
     expect(source).toContain('data-testid="bind-select"');
     expect(source).toContain('data-testid="bind-submit"');
-    expect(source).toContain('data-testid="no-conversation-tasks"');
+    expect(read('src/web/TaskDrawerSection.tsx')).toContain("'no-conversation-tasks'");
   });
 
   test('the chat thread itself no longer renders the draft card or the task cards', () => {
