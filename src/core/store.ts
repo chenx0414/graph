@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 38;
+export const SCHEMA_VERSION = 39;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -611,6 +611,19 @@ export class TaskStore {
         this.db.exec('ALTER TABLE tool_calls ADD COLUMN target TEXT;');
       }
       this.db.exec('PRAGMA user_version=38;');
+    });
+    if (version < 39) this.transaction(() => {
+      // What a lane wrote, captured before and after each write tool call. A manifest is judged
+      // against these bytes instead of believed, and the record keeps the digest after a file is
+      // deleted, because the digest is what proves the deletion.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS node_write_captures(
+          task_id TEXT NOT NULL, node_id TEXT NOT NULL, instance_id TEXT, turn_id TEXT NOT NULL,
+          path TEXT NOT NULL, tool_name TEXT NOT NULL, tool_call_id TEXT NOT NULL,
+          before TEXT NOT NULL, after TEXT, created_at INTEGER NOT NULL,
+          PRIMARY KEY(task_id,node_id,turn_id,path));
+        CREATE INDEX IF NOT EXISTS node_write_captures_node ON node_write_captures(task_id,node_id,created_at);
+        PRAGMA user_version=39;`);
     });
   }
 

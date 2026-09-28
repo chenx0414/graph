@@ -10,6 +10,7 @@ import {
   listBounded, listHost, readBounded, readBoundedBytes, readHost, readHostBytes, writeBounded, writeHost,
 } from './bounded-path.ts';
 import { externallyGated } from './pi-instance.ts';
+import { WriteLedger } from '../core/write-ledger.ts';
 import { describeAgentTools, type AgentToolName } from './agent-tool-definitions.ts';
 import type { ConversationToolChannel } from './conversation-tools.ts';
 
@@ -155,6 +156,17 @@ export function agentTools(input: {
   };
   onSubmit?: (output: Json) => void;
   /**
+   * Where a write is recorded: the ledger needs the lane, the turn and the tool call so the
+   * change set of one turn stays one lane's own evidence.
+   */
+  writeLedger?: {
+    ledger: WriteLedger;
+    taskId: string;
+    nodeId: string;
+    instanceId: string | null;
+    turnId: string;
+  };
+  /**
    * Reject a submission the harness cannot use, in the worker's own field
    * coordinates, so it can be corrected inside the same turn instead of being
    * discovered after the operation ended.
@@ -201,11 +213,20 @@ export function agentTools(input: {
         ? image(await readBoundedBytes(root, requested), mimeType)
         : text(await readBounded(root, requested));
     },
-    write_file: async (_id: string, params: unknown) => {
+    write_file: async (id: string, params: unknown) => {
       const body = fields(params);
       const requested = String(body.path);
+      const capture = input.writeLedger;
+      const record = (side: 'open' | 'close') => capture
+        ? capture.ledger.capture(side, {
+          taskId: capture.taskId, nodeId: capture.nodeId, instanceId: capture.instanceId, turnId: capture.turnId,
+          toolCallId: id, toolName: 'write_file', path: requested, workspace: root,
+        }).catch(() => null)
+        : Promise.resolve(null);
+      await record('open');
       if (hostWrite && isAbsolute(requested)) await writeHost(requested, String(body.content), pathOptions);
       else await writeBounded(root, requested, String(body.content));
+      await record('close');
       return text(`Wrote ${body.path}`);
     },
     list_dir: async (_id, params) => {

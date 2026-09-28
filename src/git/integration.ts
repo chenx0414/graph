@@ -7,7 +7,7 @@ import { RuntimeError, type Json, type NodeSpec, type Operation } from '../core/
 import { loadGraph, resetIdleNode } from '../core/graph.ts';
 import {
   abortMerge, commitAll, commitBaseline, detectRepo, directoryFingerprint, ensureWorktree, fastForwardCheckout, git,
-  hasHead, initRepo, isClean, mergeRef, pathInside, repoFingerprint, resetHard, revParse, scopedDirty, updateRef, worktreeList,
+  hasHead, initRepo, isClean, mergeConflictFiles, mergeRef, pathInside, repoFingerprint, resetHard, revParse, scopedDirty, updateRef, worktreeList,
   checkedOutBranch, projectPathEntries, type GitIdentity,
 } from './git.ts';
 
@@ -355,7 +355,11 @@ export class GitIntegration {
     const identity = this.agentIdentity(operation.instanceId, operation.nodeId);
     const sha = commitAll(tree.path, `graph:${operation.nodeId}:${operation.id}`, identity);
     if (sha) this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(sha, operation.taskId, operation.nodeId, operation.id, 'instance');
-    this.restoreOutOfScope(tree, task.integration_sha, operation, identity);
+    // The base a lane's out-of-scope paths are restored to is the integration tip. On the first
+    // lane of a task `integration_sha` is still null, and reading only that column silently skipped
+    // the scope restore - so a lane's stray file would land. The branch tip is the same fact.
+    const base = task.integration_sha ?? revParse(integration.path, 'HEAD') ?? null;
+    this.restoreOutOfScope(tree, base, operation, identity);
     const merged = mergeRef(integration.path, tree.branch);
     if (!merged.ok) return merged;
     let rebases: { path: string; sha: string }[] = [];

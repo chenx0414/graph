@@ -441,9 +441,19 @@ export function commitAll(cwd: string, message: string, identity?: GitIdentity) 
 export function mergeRef(cwd: string, ref: string) {
   const merged = git(cwd, ['merge', '--no-edit', '--no-verify', '--', ref]);
   if (merged.code === 0) return { ok: true as const, sha: revParse(cwd, 'HEAD')! };
-  const conflicts = git(cwd, ['diff', '--name-only', '--diff-filter=U']).stdout.split('\n').filter(Boolean);
+  const conflicts = mergeConflictFiles(cwd);
   git(cwd, ['merge', '--abort']);
   return { ok: false as const, conflicts };
+}
+
+/**
+ * The paths a merge left unresolved, read from Git itself rather than from the merge output.
+ * A clean tree is the empty list, which is what a caller needing to confirm a real conflict wants.
+ */
+export function mergeConflictFiles(cwd: string): string[] {
+  const staged = git(cwd, ['diff', '--name-only', '--diff-filter=U']);
+  if (staged.code !== 0) return [];
+  return staged.stdout.split('\n').map(line => line.trim()).filter(Boolean);
 }
 
 export function updateRef(repo: string, ref: string, next: string, previous: string) {

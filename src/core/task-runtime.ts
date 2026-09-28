@@ -51,6 +51,7 @@ import { openAgentContextAssembly } from '../runtime/agent-context-assembly.ts';
 import { agentSkillOwnedRoots, agentSkillsDir } from '../runtime/agent-skills.ts';
 import { agentArtifactAccess } from '../runtime/agent-tool-definitions.ts';
 import type { RsiChangeInput, RsiService } from '../runtime/rsi.ts';
+import type { MergeResolverChannels } from './execution.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
@@ -248,6 +249,12 @@ export async function openTaskRuntime(options: {
   /** Recursive Self-Improvement: lets the Main Agent change the Graph source
    * checkout it is running from, verify the change and schedule a reload. */
   rsi?: RsiService;
+  /**
+   * How a collision between two lanes is handed to an Agent. The harness still decides whether
+   * the resolution is acceptable; this only supplies the turn that proposes one. Omitting it
+   * keeps the previous behaviour, which is to block the task with `git_conflict`.
+   */
+  mergeResolvers?: MergeResolverChannels;
   /** User-owned capability and recipe files. The desktop daemon passes ~/.graph. */
   catalog?: {
     capabilityRoot?: string;
@@ -460,6 +467,7 @@ export async function openTaskRuntime(options: {
       } : {}),
       autoWake: Boolean(options.autoWake),
       ...(options.rsi ? { dispatchAllowed: () => !options.rsi!.hasPendingRestart() } : {}),
+      ...(options.mergeResolvers ? { mergeResolvers: options.mergeResolvers } : {}),
     });
     // Tasks and conversations created while dispatch was disabled carry no
     // master node. Once a master binding exists they get one and become

@@ -43,13 +43,13 @@ function read(base: string, relative: string, at: number) {
   return { instanceId: 'instance-1', tool: 'read', ms: 5, isError: false, target: join(base, relative), at };
 }
 
-test('the store migrates to 38 and keeps a target on every tool call', async () => {
+test('the store migrates to the current schema and keeps a target on every tool call', async () => {
   const { store } = await fixture();
 
   const version = (store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
   const columns = store.db.prepare('PRAGMA table_info(tool_calls)').all() as { name: string }[];
 
-  expect(version).toBe(38);
+  expect(version).toBe(39);
   expect(columns.map(column => column.name)).toContain('target');
 });
 

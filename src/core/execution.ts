@@ -18,6 +18,7 @@ import { briefing, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
+import { attemptConflictMerge } from '../git/conflict-merge.ts';
 import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type AttachmentInput, type ContextHandoffPackage, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
 
@@ -72,12 +73,25 @@ function reworkDelta(input: { store: TaskStore; graph: readonly NodeSpec[]; prop
 }
 
 /** Private execution state machine. Every mutation shares the task command/event transaction. */
+/**
+ * How a collision between two lanes is handed to an Agent.
+ *
+ * The harness owns every decision about whether a resolution is acceptable; the Agent only
+ * produces candidate file content. That split is what keeps "never let a model improvise a
+ * rewrite" true even while an Agent is involved.
+ */
+export interface MergeResolverChannels {
+  /** Run one merge Agent turn in the integration worktree and return when it stops. */
+  resolve(input: { taskId: string; nodeId: string; prompt: string; workspace: string }): Promise<void>;
+}
+
 export class Execution {
   private readonly pending = new Set<Promise<unknown>>();
   private driveActive = 0;
   private stopping = false;
   private readonly driveWaiters: (() => void)[] = [];
   private readonly store: TaskStore;
+  private mergeResolvers?: MergeResolverChannels;
   private readonly actions: Record<string, ActionAdapter>;
   private readonly fallback?: ActionAdapter;
   private readonly catalog?: Catalog;
@@ -94,7 +108,7 @@ export class Execution {
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy; mergeResolvers?: MergeResolverChannels } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -106,6 +120,7 @@ export class Execution {
     if (extras.systemContext) this.systemContext = extras.systemContext;
     if (extras.access) this.access = extras.access;
     if (extras.dispatchAllowed) this.dispatchAllowed = extras.dispatchAllowed;
+    if (extras.mergeResolvers) this.mergeResolvers = extras.mergeResolvers;
     this.autoWake = Boolean(extras.autoWake);
     this.unsubscribeStore = store.onEvent(type => {
       if (this.autoWake && type === 'problem.routed') queueMicrotask(() => this.kick());
@@ -174,6 +189,62 @@ export class Execution {
     })();
     this.pending.add(work);
     try { await work; } finally { this.pending.delete(work); }
+  }
+
+  /**
+   * One bounded attempt at resolving a lane collision.
+   *
+   * The prompt hands the Agent both sides and their common ancestor, and the harness - not the
+   * Agent - decides whether the result is a real merge. A missing resolver, a missing integration
+   * worktree, or a rejected resolution all return false, which leaves the caller's existing block
+   * unchanged.
+   */
+  private async attemptConflictResolution(operation: Operation): Promise<boolean> {
+    if (!this.git || !this.mergeResolvers) return false;
+    const task = this.store.task(operation.taskId);
+    if (!task.integration_branch) return false;
+    const tree = this.store.db.prepare('SELECT branch FROM worktrees WHERE instance_id=?').get(operation.instanceId) as { branch: string } | undefined;
+    const integration = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${operation.taskId}`) as { path: string } | undefined;
+    if (!tree || !integration) return false;
+    const attempt = await attemptConflictMerge({
+      integrationPath: integration.path,
+      laneRef: tree.branch,
+      prompt: sides => [
+        'Two lanes of this task changed the same lines. Produce the merge of both sides.',
+        'Every change either side made must survive: dropping a side is not a resolution.',
+        'Edit only the conflicted paths listed below, leave no conflict markers, and do not touch any other file.',
+        ...sides.ours.map((ours, index) => [
+          `\n## ${ours.path}`,
+          'Common ancestor:',
+          '```',
+          sides.base[index]?.content ?? '(did not exist)',
+          '```',
+          'This task integration branch (ours):',
+          '```',
+          ours.content ?? '(deleted)',
+          '```',
+          'The lane being merged (theirs):',
+          '```',
+          sides.theirs[index]?.content ?? '(deleted)',
+          '```',
+        ].join('\n')),
+      ].join('\n'),
+      run: (prompt, workspace) => this.mergeResolvers!.resolve({
+        taskId: operation.taskId, nodeId: operation.nodeId, prompt, workspace,
+      }),
+    });
+    if (attempt.status !== 'merged') {
+      this.store.event(operation.taskId, 'git.conflict.merge_attempt_refused', {
+        nodeId: operation.nodeId, reason: attempt.reason ?? 'unknown', conflicts: attempt.conflicts ?? [],
+      });
+      return false;
+    }
+    this.store.transaction(() => {
+      this.store.db.prepare('UPDATE tasks SET integration_sha=? WHERE id=?').run(attempt.sha!, operation.taskId);
+      this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(attempt.sha!, operation.taskId, operation.nodeId, operation.id, 'merge-agent');
+    });
+    this.store.event(operation.taskId, 'git.conflict.merge_attempt_merged', { nodeId: operation.nodeId, sha: attempt.sha! });
+    return true;
   }
 
   /**
@@ -882,7 +953,15 @@ export class Execution {
       }
       if (usesGit && this.git && spec.kind === 'agent' && result.outcome === 'completed') {
         const merged = await this.git.exclusive(node.task_id, () => this.git!.integrate(operation));
-        if (merged && !merged.ok) result = { ...result, outcome: 'failed', output: { conflicts: merged.conflicts } };
+        if (merged && !merged.ok) {
+          // Two lanes touched the same lines. Before the task stops, give one bounded merge Agent
+          // the two sides: it must produce a resolution Git accepts, both sides must survive, and
+          // it may change nothing outside the conflict. Anything less and the task blocks exactly
+          // as it did before, because a merge nobody can verify is worse than an honest stop.
+          const resolved = await this.attemptConflictResolution(operation);
+          if (resolved) result = { ...result, output: { mergedAfterConflict: true } };
+          else result = { ...result, outcome: 'failed', output: { conflicts: merged.conflicts } };
+        }
       }
       try {
         this.report(operation.id, operation.generation, result);

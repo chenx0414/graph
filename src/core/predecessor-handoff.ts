@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { digest } from './context.ts';
 import { GraphPlan, type GraphState } from './graph.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
+import { WriteLedger } from './write-ledger.ts';
 import {
   RuntimeError,
   type Json,
@@ -254,6 +255,15 @@ function workspaceDigest(workspace: string | undefined, path: string) {
 export interface ResultHandoffRecoveryContext {
   workspace?: string;
   /**
+   * What this lane's own ledger says it wrote. When present, the manifest is checked against it:
+   * a change the disk does not record, a digest that disagrees with the bytes, or a real change
+   * the manifest omits all make the submission unusable, because the point of the manifest is to
+   * be a receipt rather than a claim.
+   */
+  changeSet?: readonly { path: string; afterDigest: string | null; status: 'added' | 'modified' | 'deleted' }[];
+  /** The paths this node declares. A change outside it belongs to another lane. */
+  scope?: readonly string[];
+  /**
    * Recorded identity for an artifact the worker named loosely, such as the
    * logical `namespace/name` instead of the id the publish call returned.
    */
@@ -314,6 +324,81 @@ export interface HandoffInspectionResult {
 }
 
 /**
+ * Compare a manifest's file changes with the lane's own record and the bytes on disk.
+ *
+ * A digest a worker wrote is never trusted over the disk: where the two disagree the disk wins,
+ * and the defect says so. This is the difference between a receipt and a self-assessment.
+ */
+function checkChangesAgainstLane(
+  draft: ResultHandoffDraft,
+  context: ResultHandoffRecoveryContext,
+  asserted: ResultHandoffDraft = draft,
+): HandoffDefect[] {
+  if (!context.changeSet) return [];
+  const defects: HandoffDefect[] = [];
+  // The digests the worker itself asserted, by lane-relative path, so host repair cannot hide a
+  // claim that contradicts the disk.
+  const assertedDigest = new Map<string, string | undefined>();
+  for (const change of asserted.changes) {
+    if (change.kind !== 'file' || !change.path) continue;
+    assertedDigest.set(laneRelative(context.workspace, change.path), change.digest);
+  }
+  const claimed = new Map<string, ResultHandoffDraft['changes'][number]>();
+  for (const change of draft.changes) {
+    if (change.kind !== 'file' || !change.path) continue;
+    const relative = laneRelative(context.workspace, change.path);
+    claimed.set(relative, change);
+  }
+  const recorded = new Map(context.changeSet.map(change => [change.path.split('\\').join('/'), change]));
+  for (const [relative] of claimed) {
+    const real = recorded.get(relative);
+    if (!real) {
+      defects.push({
+        path: `changes[path=${relative}]`, class: 'safety',
+        expected: 'a file this lane recorded a change for',
+        got: `${relative} has no change recorded in this lane's ledger`,
+      });
+      continue;
+    }
+    if (context.scope && !context.scope.some(owned => relative === owned || relative.startsWith(owned.endsWith('/') ? owned : `${owned}/`))) {
+      defects.push({
+        path: `changes[path=${relative}]`, class: 'semantic',
+        expected: 'a path inside this node declared file list',
+        got: `${relative} belongs to another lane`,
+      });
+      continue;
+    }
+    const workerDigest = assertedDigest.get(relative);
+    // A file that exists on disk is judged by its bytes; a deleted file has no digest and is
+    // judged by the ledger alone.
+    if (real.afterDigest && workerDigest !== undefined && workerDigest !== real.afterDigest) {
+      defects.push({
+        path: `changes[path=${relative}].digest`, class: 'representation',
+        expected: `the digest of the bytes this lane wrote (${real.afterDigest})`,
+        got: workerDigest,
+      });
+    }
+  }
+  for (const [relative] of recorded) {
+    if (claimed.has(relative)) continue;
+    defects.push({
+      path: `changes[path=${relative}]`, class: 'safety',
+      expected: 'every file this lane changed to appear in changes',
+      got: `${relative} was changed by this lane but is missing from the manifest`,
+    });
+  }
+  return defects;
+}
+
+/** A lane-relative identity for a path a worker wrote either absolutely or relatively. */
+function laneRelative(workspace: string | undefined, path: string): string {
+  const normalized = path.split('\\').join('/');
+  if (!workspace) return normalized;
+  const root = resolve(workspace).split('\\').join('/').replace(/\/$/, '');
+  return normalized === root ? '' : normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : normalized;
+}
+
+/**
  * Inspect a worker submission the way the harness will: accept what already
  * validates, otherwise rebuild from recorded truth and report the leftovers.
  * The tool call and the settle path share this so a worker gets the same answer
@@ -327,7 +412,15 @@ export function inspectResultHandoffSubmission(value: Json | undefined, context:
   // The host re-establishes what it can (work-copy paths, digests, artifact
   // identity) before judging the submission, so a worker is never failed for a
   // field the harness can fill in itself.
-  if (after.draft) return { draft: after.draft, defects: [], repaired: !direct.draft };
+  if (after.draft) {
+    // A structurally valid manifest is not yet a true one: the lane's own ledger decides whether
+    // the receipt matches what happened, and a mismatch is a safety defect rather than a shape one.
+    // The check reads the worker's own digests, before the host repaired them, because a digest
+    // the worker asserted and the disk contradicts is exactly the claim this rule must refuse.
+    const ledgerDefects = checkChangesAgainstLane(after.draft, context, direct.draft ?? after.draft);
+    if (ledgerDefects.length) return { defects: ledgerDefects, repaired: !direct.draft };
+    return { draft: after.draft, defects: [], repaired: !direct.draft };
+  }
   return { defects: after.defects.length ? after.defects : direct.defects, repaired: true };
 }
 
@@ -350,6 +443,44 @@ export function resultHandoffRecoveryContext(store: TaskStore, operation: { task
     ...(operation.workspace ? { workspace: operation.workspace } : {}),
     rebindArtifact: change => recordedArtifact(store, operation.taskId, change),
   };
+}
+
+/**
+ * What a node's own lane recorded, so its manifest is judged against the disk.
+ *
+ * The ledger is read at submission time rather than captured when the turn started, because a
+ * worker may correct its manifest several times inside one turn and each submission must be
+ * compared with what the disk holds at that moment. A node with no ledger - a program node, a
+ * read-only role, or a historical task - simply gets no cross-check, never a false rejection.
+ */
+export function laneSubmissionContext(
+  store: TaskStore,
+  operation: { taskId: string; nodeId?: string; workspace?: string; scope?: readonly string[] },
+): ResultHandoffRecoveryContext {
+  const base = resultHandoffRecoveryContext(store, operation);
+  if (!operation.nodeId) return base;
+  const ledger = new WriteLedger(store);
+  const changeSet = ledger.changes(operation.taskId, operation.nodeId);
+  const declared = operation.scope ?? declaredFiles(store, operation.taskId, operation.nodeId);
+  return {
+    ...base,
+    ...(changeSet.length ? { changeSet } : {}),
+    ...(declared && declared.length ? { scope: declared } : {}),
+  };
+}
+
+/** The paths a node declares in its own spec, or null when it declares none. */
+function declaredFiles(store: TaskStore, taskId: string, nodeId: string): string[] | null {
+  const row = store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as { spec: string } | undefined;
+  if (!row) return null;
+  try {
+    const spec = JSON.parse(row.spec) as NodeSpec;
+    const input = spec.input && typeof spec.input === 'object' && !Array.isArray(spec.input) ? spec.input as Record<string, unknown> : null;
+    const files = input?.['files'];
+    return Array.isArray(files) && files.every(item => typeof item === 'string') ? files as string[] : null;
+  } catch {
+    return null;
+  }
 }
 
 export function validatePredecessorPolicies(proposal: Proposal, plan: GraphPlan, nodes: Map<string, NodeSpec>) {

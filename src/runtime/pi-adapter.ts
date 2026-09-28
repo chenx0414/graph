@@ -11,7 +11,8 @@ import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/
 import { thinkingLevelMapFor } from '../catalog/thinking.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
-import { inspectResultHandoffSubmission, resultHandoffFromSubmission, resultHandoffRecoveryContext } from '../core/predecessor-handoff.ts';
+import { inspectResultHandoffSubmission, laneSubmissionContext, resultHandoffFromSubmission } from '../core/predecessor-handoff.ts';
+import { WriteLedger } from '../core/write-ledger.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
 import { promptImagesFromAttachments } from '../core/attachments.ts';
 import { boundSkills, injectRequestedSkills, requestedSkillNames } from '../core/skill-invocation.ts';
@@ -643,7 +644,7 @@ export function createPiAdapter(options: {
                 validateSubmission: (output: Json) => {
                   const inspection = inspectResultHandoffSubmission(
                     output,
-                    resultHandoffRecoveryContext(options.store, { taskId: operation.taskId, workspace }),
+                    laneSubmissionContext(options.store, { taskId: operation.taskId, nodeId: operation.nodeId, workspace }),
                   );
                   return inspection.draft ? { ok: true as const } : { ok: false as const, defects: inspection.defects };
                 },
