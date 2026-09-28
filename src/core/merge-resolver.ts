@@ -73,7 +73,22 @@ export interface MergeTurnInput {
   workspace: string;
 }
 
-export type MergeResolver = (input: MergeTurnInput) => Promise<void>;
+/**
+ * What a merge turn cost, so the spend is visible even though the turn is not an operation.
+ *
+ * This is the honest half of "unlimited budget": the merge is not charged to the task's cap, but
+ * it is recorded, because a spend nobody can see is the defect this type exists to avoid.
+ */
+export interface MergeTurnUsage {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export type MergeResolver = (input: MergeTurnInput) => Promise<MergeTurnUsage | null>;
 
 export function createMergeResolver(options: MergeResolverOptions): MergeResolver {
   const transport = options.transport ?? createInProcessAgentSessionTransport({ modelRuntime: options.modelRuntime });
@@ -81,6 +96,15 @@ export function createMergeResolver(options: MergeResolverOptions): MergeResolve
     const entry = selectModel({ grade: MERGE_GRADE, directory: options.directory() });
     if (!entry) {
       throw new RuntimeError('model_unavailable', `No configured model can serve the ${MERGE_GRADE} grade the merge Agent needs`);
+    }
+    // A merge turn is not charged to the task's budget, so under a finite cap it would spend
+    // quota that no ledger accounts for. Refusing keeps the cap honest; the task blocks exactly
+    // as it did before this feature existed.
+    if (!taskBudgetIsUnlimited(options.store, input.taskId)) {
+      throw new RuntimeError(
+        'budget',
+        'The task has a finite token budget, and a merge turn is not charged to it; resolve this collision by hand or raise the budget',
+      );
     }
     const definition = mergeDefinition(options.catalog);
     const apiKey = options.apiKeyFor?.(entry);
@@ -106,7 +130,8 @@ export function createMergeResolver(options: MergeResolverOptions): MergeResolve
     let session: AgentSession | undefined;
     let capabilityOperation: Awaited<ReturnType<typeof bundle.openOperation>> | undefined;
     // Nothing external is waiting on this turn, so it admits its own calls and settles them here.
-    const gate = mergeGate(apiKey === undefined ? '' : apiKey);
+    let usage: MergeTurnUsage | null = null;
+    const gate = mergeGate(entry.id, collected => { usage = collected; });
     try {
       const dependencies = projectRoot
         ? await linkProjectDependencies(workspace, join(projectRoot, 'node_modules'))
@@ -163,6 +188,7 @@ export function createMergeResolver(options: MergeResolverOptions): MergeResolve
         broker: gate,
       });
       await session.prompt(input.prompt);
+      return usage;
     } finally {
       await session?.close().catch(() => undefined);
       await commands?.close().catch(() => undefined);
@@ -194,18 +220,31 @@ export function mergeAccessPolicy(options: MergeResolverOptions): ResolvedAccess
 }
 
 /**
- * The gate for a turn no operation owns: it admits every call and settles nothing.
+ * The gate for a turn no operation owns: it admits every call and settles nothing against a cap.
  *
- * A merge is not the work the task's budget was set for, so it is not charged to it. That is a
- * deliberate reading of "unlimited budget", and it is recorded in the backlog as an open item
- * rather than presented as accounted usage.
+ * A merge is not the work the task's budget was set for, so it is not charged to it - but every
+ * settled call is summed and handed back to the caller, which records it on the task. The spend is
+ * therefore visible even though it is not capped, and under a finite cap the turn is refused
+ * outright (see `taskBudgetIsUnlimited`).
  */
-function mergeGate(apiKey: string): SendGate {
+function mergeGate(model: string, onUsage: (usage: MergeTurnUsage) => void): SendGate {
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   return {
     dispatch: (_id: string, _reservation: unknown, send: () => unknown) => send(),
-    settle: () => undefined,
-    total: () => undefined,
-    ...(apiKey ? { apiKey } : {}),
+    // Every settled call is added up here: the merge turn usually sends once, but a retry inside
+    // the same turn must be counted too, or the number reported would understate the real spend.
+    settle: (_id: string, reported: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null) => {
+      if (!reported) return;
+      totals.input += reported.input;
+      totals.output += reported.output;
+      totals.cacheRead += reported.cacheRead ?? 0;
+      totals.cacheWrite += reported.cacheWrite ?? 0;
+      onUsage({
+        model,
+        ...totals,
+        total: totals.input + totals.output + totals.cacheRead + totals.cacheWrite,
+      });
+    },
   } as unknown as SendGate;
 }
 
@@ -220,6 +259,20 @@ export function mergeDefinition(catalog: Catalog): string {
     );
   }
   return `${latest.id}@${latest.version}`;
+}
+
+/**
+ * Whether every instance of this task is uncapped.
+ *
+ * `unlimited` is the instance's own flag, set with its budget. A task whose instances are all
+ * uncapped has nothing to overspend, so the merge turn is free to run; one finite instance makes
+ * the turn refuse, because its cost would not appear in any cap.
+ */
+export function taskBudgetIsUnlimited(store: TaskStore, taskId: string): boolean {
+  const row = store.db.prepare(`SELECT COUNT(*) AS finite FROM instances i
+    JOIN nodes n ON n.task_id=i.task_id AND n.id=i.node_id
+    WHERE n.task_id=? AND i.unlimited=0`).get(taskId) as { finite: number } | undefined;
+  return (row?.finite ?? 0) === 0;
 }
 
 function projectRootFor(store: TaskStore, taskId: string): string | null {

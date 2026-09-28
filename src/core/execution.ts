@@ -80,9 +80,24 @@ function reworkDelta(input: { store: TaskStore; graph: readonly NodeSpec[]; prop
  * produces candidate file content. That split is what keeps "never let a model improvise a
  * rewrite" true even while an Agent is involved.
  */
+/** What a merge turn cost, as the resolver reports it. */
+export interface MergeUsage {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
 export interface MergeResolverChannels {
-  /** Run one merge Agent turn in the integration worktree and return when it stops. */
-  resolve(input: { taskId: string; nodeId: string; prompt: string; workspace: string }): Promise<void>;
+  /**
+   * Run one merge Agent turn in the integration worktree and report what it cost.
+   *
+   * The turn is not an operation, so its usage is not charged to the task's cap; returning it lets
+   * the caller record the spend on the task instead of letting it disappear.
+   */
+  resolve(input: { taskId: string; nodeId: string; prompt: string; workspace: string }): Promise<MergeUsage | null>;
 }
 
 export class Execution {
@@ -206,6 +221,9 @@ export class Execution {
     const tree = this.store.db.prepare('SELECT branch FROM worktrees WHERE instance_id=?').get(operation.instanceId) as { branch: string } | undefined;
     const integration = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${operation.taskId}`) as { path: string } | undefined;
     if (!tree || !integration) return false;
+    // A holder rather than a plain `let`: the value is assigned inside the resolver callback, and
+    // control-flow analysis would otherwise narrow the variable to `null` at the read below.
+    const usage: { current: MergeUsage | null } = { current: null };
     const attempt = await attemptConflictMerge({
       integrationPath: integration.path,
       laneRef: tree.branch,
@@ -229,10 +247,19 @@ export class Execution {
           '```',
         ].join('\n')),
       ].join('\n'),
-      run: (prompt, workspace) => this.mergeResolvers!.resolve({
-        taskId: operation.taskId, nodeId: operation.nodeId, prompt, workspace,
-      }),
+      run: async (prompt, workspace) => {
+        usage.current = await this.mergeResolvers!.resolve({
+          taskId: operation.taskId, nodeId: operation.nodeId, prompt, workspace,
+        });
+      },
     });
+    if (usage.current) {
+      // Recorded whatever the verdict: the model was paid either way, and a spend that leaves no
+      // trace is exactly the defect this event exists to prevent.
+      this.store.event(operation.taskId, 'git.conflict.merge_attempt_usage', {
+        nodeId: operation.nodeId, ...usage.current,
+      });
+    }
     if (attempt.status !== 'merged') {
       this.store.event(operation.taskId, 'git.conflict.merge_attempt_refused', {
         nodeId: operation.nodeId, reason: attempt.reason ?? 'unknown', conflicts: attempt.conflicts ?? [],

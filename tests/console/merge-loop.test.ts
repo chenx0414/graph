@@ -50,7 +50,9 @@ async function fixture(name: string, resolve: (input: { prompt: string; workspac
         }),
       },
     },
-    ...(enabled ? { mergeResolvers: { resolve: async input => resolve(input) } } : {}),
+    // The channel reports what the turn cost; these scripted turns cost nothing, which is itself
+    // the honest answer for a resolver that never sent a request.
+    ...(enabled ? { mergeResolvers: { resolve: async input => { await resolve(input); return null; } } } : {}),
   });
   cleanup.push(() => runtime.close());
   await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });

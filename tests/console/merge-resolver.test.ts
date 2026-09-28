@@ -165,3 +165,95 @@ test('a runtime with models configured builds a merge resolver of its own, and a
   expect(['lane1', 'lane2']).toContain(refused[0]!.nodeId);
   void root;
 }, 120_000);
+
+/** The merge identity, installed into a temp capability root so no test depends on the host's. */
+async function installMergeIdentity(root: string): Promise<string> {
+  const capabilityRoot = join(root, 'capabilities');
+  const target = join(capabilityRoot, 'matt-pocock-merge');
+  await mkdir(target, { recursive: true });
+  await writeFile(join(target, 'capability.json'), JSON.stringify({
+    id: 'matt-pocock-merge', kind: 'prompt', role: 'agent', version: '1.0.0', name: 'merge',
+    description: 'Matt 工程流里的合流 Agent。', source: 'local:docs/agents/matt-flow.md',
+  }));
+  await writeFile(join(target, 'agent.md'), '你是 Matt 工程流里的「合流」Agent：合并两边，丢掉任何一侧都不是合并。\n');
+  return capabilityRoot;
+}
+
+/** A runtime whose two lanes collide, with a scripted provider standing in for the model. */
+async function collidingRuntime(name: string, options2: { defaultBudgetTokens?: number | null; publishRecipe: boolean }) {
+  const { root, project, stateDir, store, library } = await fixture(name);
+  const capabilityRoot = await installMergeIdentity(root);
+  const provider = await openaiServer([{ text: 'both sides kept' }]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({
+    stateDir,
+    projects: [{ id: 'p', root: project }],
+    agentContext: library,
+    catalog: { capabilityRoot },
+    ...(options2.defaultBudgetTokens === undefined ? {} : { limits: { defaultBudgetTokens: options2.defaultBudgetTokens } }),
+    access: () => fullAccessPolicy(),
+    actions: {
+      work: {
+        kind: 'agent',
+        reserveTokens: 100,
+        prepare: async operation => async () => {
+          const lane = operation.nodeId === 'lane1' ? 1 : 2;
+          await writeFile(join(operation.workspace!, 'app.ts'), `from-lane-${lane}\n`);
+          return { outcome: 'completed', output: {}, usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 } };
+        },
+      },
+      check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [] }) },
+    },
+    models: {
+      entries: [{ id: 'local', provider: 'graph-openai', grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      credentialFor: () => ({ credentialId: 'local', apiKey: 'scripted-local-key' }),
+      modelRuntime: provider.runtime,
+    },
+  });
+  cleanup.push(() => runtime.close());
+  if (options2.publishRecipe) {
+    runtime.catalog.publishDefinition('matt-merge', {
+      recommendedGrade: 'medium',
+      prompts: { agent: { id: 'matt-pocock-merge', version: '1.0.0' } },
+    }, 'merge-recipe');
+  }
+  await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'collide', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({
+    requirementVersion: 1, summary: 'collide',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [
+      { id: 'lane1', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'lane2', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
+      { id: 'check', kind: 'program', action: 'check', dependsOn: ['lane1', 'lane2'] },
+    ],
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+  const events = (type: string) => (store.db.prepare('SELECT data FROM events WHERE task_id=? AND type=? ORDER BY cursor')
+    .all(taskId, type) as unknown as { data: string }[]).map(row => JSON.parse(row.data) as Record<string, unknown>);
+  return { runtime, provider, taskId, events };
+}
+
+test('a merge turn records what it cost, so the spend is visible even though no cap pays for it', async () => {
+  const { provider, events } = await collidingRuntime('usage', { publishRecipe: true });
+  // The scripted provider answers with prose and never resolves the file, so the merge is refused -
+  // and the usage is recorded anyway, because the model was paid either way.
+  const usage = events('git.conflict.merge_attempt_usage');
+  expect(usage).toHaveLength(1);
+  expect(usage[0]).toMatchObject({ model: 'local' });
+  expect(Number(usage[0]!.input)).toBeGreaterThan(0);
+  expect(Number(usage[0]!.total)).toBeGreaterThan(0);
+  // The turn really was sent: exactly the merge Agent's own request reached the provider.
+  expect(provider.requests.length).toBeGreaterThan(0);
+}, 120_000);
+
+test('under a finite task budget the merge turn is refused instead of spending quota no ledger sees', async () => {
+  const { events, provider } = await collidingRuntime('finite', { defaultBudgetTokens: 1_000_000, publishRecipe: true });
+  const refused = events('git.conflict.merge_attempt_refused');
+  expect(refused).toHaveLength(1);
+  expect(String(refused[0]!.reason)).toMatch(/finite token budget/i);
+  // Refused before any send: the point is that no invisible quota was burned.
+  expect(provider.requests).toHaveLength(0);
+  expect(events('git.conflict.merge_attempt_usage')).toHaveLength(0);
+}, 120_000);
