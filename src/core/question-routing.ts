@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { wakeForBlockedNode } from './wake-ledger.ts';
+import { wakeForBlockedNode, wakeForHumanCheck } from './wake-ledger.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { conversationForTask } from './conversation.ts';
 import { openUserWait } from './time-ledger.ts';
@@ -200,6 +200,13 @@ export function insertQuestion(store: TaskStore, input: {
     if (!['preparing', 'running'].includes(master.status)) {
       store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(conversation.anchor_task_id, master.id);
     }
+    // Record the same durable, deduplicated intent every other wake uses, so a problem
+    // that is observed again does not become a second turn. A problem on the master's
+    // own node is parked instead: waking the master about itself would hit the identical
+    // failure again, which is what "parked" has always meant here.
+    if (!selfOwned) {
+      wakeForBlockedNode(store, input.taskId, { nodeId: input.nodeId, reason: input.kind });
+    }
     store.event(conversation.anchor_task_id, selfOwned ? 'problem.parked' : 'problem.routed', routing);
   } else {
     openUserWait(store, input.taskId, input.nodeId);
@@ -207,8 +214,19 @@ export function insertQuestion(store: TaskStore, input: {
     // conversation's master should hear about once: it is the actor holding the
     // context to say what this means and what happens next. The wake is idempotent,
     // so observing the same block again does not queue a second turn.
-    if (input.kind !== 'human_check') {
-      wakeForBlockedNode(store, input.taskId, { nodeId: input.nodeId, reason: input.kind });
+    //
+    // A question the master raised itself must not wake that same master: it would start a
+    // turn whose only content is the question it just asked.
+    if (!selfOwned) {
+      if (input.kind === 'human_check') {
+        // Review-before-the-user: the master looks at the evidence first, so a check that
+        // should never have been raised can be sent back through rework instead of
+        // interrupting the person. Approving here is deliberately not acceptance - see
+        // approveHumanCheck - because acceptance stays the person's own decision.
+        wakeForHumanCheck(store, input.taskId, { nodeId: input.nodeId, questionId: id });
+      } else {
+        wakeForBlockedNode(store, input.taskId, { nodeId: input.nodeId, reason: input.kind });
+      }
     }
   }
 
@@ -223,4 +241,77 @@ export function insertQuestion(store: TaskStore, input: {
     });
   }
   return { id, owner };
+}
+
+/**
+ * The evidence a human acceptance check is resting on, or null when the question is not
+ * an open human check. This is what the master reads before deciding whether the person
+ * should be asked at all.
+ */
+export function humanCheckPreReview(store: TaskStore, questionId: string) {
+  const row = store.db.prepare('SELECT id,task_id,node_id,kind,status,data FROM questions WHERE id=?').get(questionId) as
+    { id: string; task_id: string; node_id: string; kind: string; status: string; data: string } | undefined;
+  if (!row || row.kind !== 'human_check') return null;
+  const data = JSON.parse(row.data) as Record<string, Json>;
+  return {
+    questionId: row.id,
+    taskId: row.task_id,
+    nodeId: row.node_id,
+    status: row.status,
+    activationId: typeof data.activationId === 'string' ? data.activationId : null,
+    commitSha: typeof data.commitSha === 'string' ? data.commitSha : null,
+    approved: isPreApproved(data),
+  };
+}
+
+function isPreApproved(data: Record<string, Json>): boolean {
+  const review = data.preReview;
+  return Boolean(review && typeof review === 'object' && !Array.isArray(review) && (review as Record<string, Json>).approved === true);
+}
+
+/**
+ * Open human checks in one conversation that are waiting for the master's look.
+ *
+ * Scoped by conversation, not by a task id, because the check belongs to whichever graph
+ * task raised it - a different task from the conversation's anchor. Taking a task id here
+ * invited exactly one mistake: passing the anchor and silently getting nothing back.
+ *
+ * A check that has already been approved is not listed: the master reviewed it, and
+ * listing it again is how the same check gets reviewed twice.
+ */
+export function pendingHumanChecks(store: TaskStore, conversationId: string) {
+  const rows = store.db.prepare(`SELECT q.id,q.task_id,q.node_id,q.data FROM questions q
+    JOIN tasks t ON t.id=q.task_id
+    WHERE t.conversation_id=? AND q.kind='human_check' AND q.status='open' ORDER BY q.rowid`)
+    .all(conversationId) as { id: string; task_id: string; node_id: string; data: string }[];
+  return rows
+    .filter(row => !isPreApproved(JSON.parse(row.data) as Record<string, Json>))
+    .map(row => ({ questionId: row.id, taskId: row.task_id, nodeId: row.node_id }));
+}
+
+/**
+ * Record the master's approval of a human check.
+ *
+ * Approving is **not** acceptance. The check stays open and stays the user's to answer,
+ * because acceptance is the person's own judgement and a machine that signs for them
+ * makes "human acceptance" a name for something it is not. What changes is that the
+ * master's look is now a durable, visible fact, so an unapproved check is one nobody has
+ * examined rather than one nobody mentioned.
+ *
+ * Idempotent: approving an already-approved check writes nothing and returns false, so a
+ * retried command cannot manufacture a second approval.
+ */
+export function approveHumanCheck(store: TaskStore, questionId: string, note: string): boolean {
+  const apply = () => {
+    const row = store.db.prepare("SELECT task_id,node_id,data FROM questions WHERE id=? AND kind='human_check' AND status='open'")
+      .get(questionId) as { task_id: string; node_id: string; data: string } | undefined;
+    if (!row) return false;
+    const data = JSON.parse(row.data) as Record<string, Json>;
+    if (isPreApproved(data)) return false;
+    store.db.prepare('UPDATE questions SET data=? WHERE id=?')
+      .run(canonicalJson({ ...data, preReview: { approved: true, note } }), questionId);
+    store.event(row.task_id, 'human.prereview_approved', { questionId, nodeId: row.node_id, note });
+    return true;
+  };
+  return store.db.isTransaction ? apply() : store.transaction(apply);
 }

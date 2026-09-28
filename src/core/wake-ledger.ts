@@ -9,7 +9,7 @@ import type { TaskStore } from './store.ts';
  * finished, a queued turn to continue after an answer. The master is the only
  * actor holding the conversation's context, so it is the one that has to be told.
  */
-export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting';
+export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting' | 'human_check';
 
 export interface WakeIntent {
   taskId: string;
@@ -109,6 +109,17 @@ export function wakeForBlockedNode(store: TaskStore, taskId: string, block: { no
   });
 }
 
+/**
+ * A human acceptance check opened and the master should look at it before the user does.
+ *
+ * This is review, not acceptance: the master can send it back through rework so a check
+ * that should never have been raised never interrupts the person. The approval itself is
+ * recorded on the question by approveHumanCheck, and the person still has to pass it.
+ */
+export function wakeForHumanCheck(store: TaskStore, taskId: string, data: { nodeId: string; questionId: string } & Json) {
+  return wakeMaster(store, { taskId, kind: 'human_check', dedupeKey: data.questionId, data });
+}
+
 /** A graph reached its end, so the conversation needs a summary and a handback. */
 export function wakeForTaskCompleted(store: TaskStore, taskId: string, data: Json) {
   return wakeMaster(store, { taskId, kind: 'task_completed', dedupeKey: 'completed', data });
@@ -175,6 +186,9 @@ export function renderWakes(wakes: PendingWake[]): string {
     }
     if (wake.kind === 'waiting') {
       return `- Node ${String(data.nodeId ?? '?')} is waiting on a decision only you can make.`;
+    }
+    if (wake.kind === 'human_check') {
+      return `- A human acceptance check opened on node ${String(data.nodeId ?? '?')} and the user has not seen it yet. Look at the evidence: if it should not have been raised, send it back for rework; if it looks right, approve it so the user is asked with your review attached. Approving is not acceptance - the user still has to pass it themselves.`;
     }
     return `- Graph event: ${wake.kind} (${wake.dedupeKey}).`;
   });
