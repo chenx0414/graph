@@ -24,9 +24,26 @@ export function compactionSettings(entry: Pick<ModelEntry, 'contextWindow' | 'ma
 export const COMPACTION_INSTRUCTIONS = [
   'This summary is a working handoff for the next turn, not a transcript.',
   'Keep the entire summary under roughly 1500 tokens.',
+  'Write only the handoff. Do not include <analysis>, <summary>, reasoning, or a chronology of the conversation.',
   'Drop resolved detail, superseded attempts and stale plans instead of preserving them.',
   'Keep only what is needed to continue: the goal, the current state, open blockers, key decisions, exact file paths and the next steps.',
 ].join(' ');
+
+/** A provider can return its internal handoff as a normal, successful chat reply.
+ * Require the complete structure seen in the incident so explanations that
+ * merely mention these tags remain valid user-facing answers. */
+export function isLeakedCompactionReply(text: string) {
+  if (text.length < 2_000) return false;
+  const analysis = /(?:^|\n)\s*<analysis>\s*(?:\n|$)/i.exec(text);
+  if (!analysis || analysis.index > 500) return false;
+  const summary = /(?:^|\n)\s*<summary>\s*(?:\n|$)/i.exec(text);
+  return Boolean(summary && summary.index > analysis.index && /(?:^|\n)\s*<\/summary>\s*$/i.test(text));
+}
+
+export function isSummaryLeakRetry(output: unknown) {
+  return Boolean(output && typeof output === 'object' && !Array.isArray(output)
+    && 'retryCode' in output && output.retryCode === 'session_summary_leak');
+}
 
 /** The recorded context no longer fits the window once its reserve is set aside. */
 export function shouldCompactContext(

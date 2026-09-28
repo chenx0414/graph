@@ -41,7 +41,7 @@ import { agentArtifactAccess } from './agent-tool-definitions.ts';
 import { graphApplicationRoot } from './graph-root.ts';
 import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
-import { COMPACTION_INSTRUCTIONS, isCompactionNoop, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
+import { COMPACTION_INSTRUCTIONS, isCompactionNoop, isLeakedCompactionReply, isSummaryLeakRetry, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
 import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
 import { guardHandoffResponses } from './handoff-response.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
@@ -1151,6 +1151,19 @@ export function createPiAdapter(options: {
             const text = result.finalAssistantText;
             const reply = text.trim() ? text : [...parts.values()].map(part => part.text).join('');
             flushDeltas(true);
+            if (conversation && isLeakedCompactionReply(reply)) {
+              const repeated = isSummaryLeakRetry(operation.context.previousOutput);
+              options.store.event(operation.taskId, 'session.summary_leaked_as_reply', {
+                operationId: operation.id, nodeId: operation.nodeId, repeated, chars: reply.length,
+              });
+              return {
+                outcome: repeated ? 'failed' : 'continue',
+                output: { retryCode: 'session_summary_leak', error: repeated
+                  ? '模型连续两轮将内部会话摘要作为普通回复，已停止自动重试。'
+                  : '模型将内部会话摘要作为普通回复，正在自动续行。' },
+                usage: gate.total(),
+              };
+            }
             if (persistEntries && !sawAssistantMessageEnd && reply.trim()) {
               appendNodeEntry(options.store, {
                 taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,

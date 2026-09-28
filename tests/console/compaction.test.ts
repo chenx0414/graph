@@ -112,6 +112,56 @@ test('compaction settings derive from the model window and response budget', asy
   expect(tiny).toEqual({ enabled: true, reserveTokens: 256, keepRecentTokens: 1_024 });
 });
 
+test('a leaked session summary retries the same master turn instead of ending the chat', async () => {
+  const root = await temp('summary-leak');
+  const leaked = `I found the cause.\n\n<analysis>\n${'Internal chronology. '.repeat(130)}\n</analysis>\n<summary>\n${'Handoff facts. '.repeat(130)}\n</summary>`;
+  const provider = await compactionProvider(({ index }) => ({
+    text: index === 0 ? leaked : '这是针对原问题的正式答复。',
+  }));
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    models: { entries: [modelEntry(provider.baseUrl)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  const created = await runtime.conversations.create({ text: '查明最近两轮为什么输出摘要。', requestId: 'create' });
+  await runtime.host.runReady();
+  for (let attempt = 0; attempt < 40 && provider.requests.length < 2; attempt += 1) {
+    await runtime.host.runReady();
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  expect(provider.requests.filter(request => !request.summary)).toHaveLength(2);
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.messages.filter(message => message.role === 'assistant').map(message => message.text))
+    .toEqual(['这是针对原问题的正式答复。']);
+  expect(JSON.stringify(provider.requests[1]!.messages)).toContain('上一轮输出了内部会话摘要');
+  expect(instanceTotals(root).every(instance => instance.used === instance.expected)).toBe(true);
+}, 60_000);
+
+test('repeated leaked summaries stop after one automatic retry without a false assistant reply', async () => {
+  const root = await temp('repeated-summary-leak');
+  const leaked = `<analysis>\n${'Internal chronology. '.repeat(130)}\n<summary>\n${'Handoff facts. '.repeat(130)}\n</summary>`;
+  const provider = await compactionProvider(() => ({ text: leaked }));
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    models: { entries: [modelEntry(provider.baseUrl)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+  });
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  const created = await runtime.conversations.create({ text: '解释故障。', requestId: 'create' });
+  await runtime.host.runReady();
+  for (let attempt = 0; attempt < 40 && provider.requests.length < 2; attempt += 1) {
+    await runtime.host.runReady();
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  expect(provider.requests.filter(request => !request.summary)).toHaveLength(2);
+  const view = await runtime.conversations.view(created.conversationId);
+  expect(view.messages.filter(message => message.role === 'assistant')).toEqual([]);
+  expect(view.messages.some(message => message.kind === 'error' && message.text.includes('内部会话摘要'))).toBe(true);
+}, 60_000);
+
 test('Graph retries compaction before the next turn when the window is still full', async () => {
   const root = await temp('preemptive');
   const provider = await compactionProvider(({ summary, index }) => {
