@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
+import { insertQuestion } from '../../src/core/question-routing.ts';
 import {
   consumeWakes, pendingWakes, wakeMaster, wakeForBlockedNode, wakeForTaskCompleted, wakeForAnswer,
 } from '../../src/core/wake-ledger.ts';
@@ -116,4 +117,65 @@ test('an answer wakes the master that is waiting to act on it', async () => {
   const [pending] = pendingWakes(store, 'anchor', 'master');
   expect(pending?.kind).toBe('answer');
   expect(masterStatus(store)).toEqual({ status: 'pending' });
+});
+
+// --- The cases a real wake exposed after the first version shipped ---
+
+/**
+ * A problem on the master's own node must never wake that same master: it would start a
+ * turn whose only content is the question it just asked. Ownership decides who answers;
+ * a user-owned question still tells the master the graph is stuck, because the master is
+ * the actor holding the context to say what happens next.
+ */
+test('a question the master raised itself never wakes that same master', async () => {
+  const store = await fixture();
+  insertQuestion(store, {
+    taskId: 'anchor',
+    nodeId: 'master',
+    kind: 'waiting',
+    data: { prompt: 'which shape do you want?', requestType: 'user_decision' },
+  });
+  expect(pendingWakes(store, 'anchor', 'master')).toEqual([]);
+});
+
+test('a human check wakes the master so it can review before the user is asked', async () => {
+  const store = await fixture();
+  insertQuestion(store, {
+    taskId: 'work',
+    nodeId: 'build',
+    kind: 'human_check',
+    data: { prompt: 'A human acceptance check is required', activationId: 'w', commitSha: null },
+  });
+  // It is a *different* wake from a block: the master is not unblocking anything, it is
+  // looking at the evidence so a check that should never have been raised can be sent
+  // back before the person is interrupted.
+  expect(pendingWakes(store, 'anchor', 'master').map(wake => wake.kind)).toEqual(['human_check']);
+});
+
+test('a question the master owns wakes it; the same question once answered does too', async () => {
+  const store = await fixture();
+  const problem = insertQuestion(store, {
+    taskId: 'work', nodeId: 'build', kind: 'recovery', data: { reason: 'boom' },
+  });
+  expect(problem.owner).toBe('main');
+  expect(pendingWakes(store, 'anchor', 'master').map(wake => wake.kind)).toEqual(['node_blocked']);
+
+  // Answering it is a fact the master has to act on, and it is a *different* fact from
+  // the block, so it is a second wake rather than a repeat of the first.
+  store.transaction(() => consumeWakes(store, 'anchor', 'master', 'op-1'));
+  store.transaction(() => wakeForAnswer(store, 'work', { questionId: problem.id, nodeId: 'build', kind: 'recovery' }));
+  expect(pendingWakes(store, 'anchor', 'master').map(wake => wake.kind)).toEqual(['answer']);
+});
+
+test('a node blocked on the user still tells the master, because the graph is stuck', async () => {
+  const store = await fixture();
+  // Ownership decides who answers, not whether the master hears: the user answers the
+  // permission, and the master is told the graph cannot move. Those are two different
+  // facts, and the statement "the user has it in their inbox" is only true if the
+  // master was actually told which node and why.
+  const permission = insertQuestion(store, {
+    taskId: 'work', nodeId: 'build', kind: 'permission', data: { grant: 'mcp:demo:write' },
+  });
+  expect(permission.owner).toBe('user');
+  expect(pendingWakes(store, 'anchor', 'master').map(wake => wake.kind)).toEqual(['node_blocked']);
 });

@@ -10,7 +10,7 @@ export interface AgentToolFeatures {
   fetch?: boolean;
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
-  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft' | 'controlTask', boolean>>;
+  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft' | 'controlTask' | 'pendingHumanChecks' | 'reviewHumanCheck', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
   /** Channels to other conversations, when this session has them. */
@@ -248,6 +248,23 @@ function declarations(features: AgentToolFeatures) {
         requestId: Type.String(),
       }),
       available: main && Boolean(features.supervisor?.listProblems && features.supervisor?.resolveProblem),
+      externallyGated: false,
+    },
+    list_human_checks: {
+      name: 'list_human_checks', label: 'List human acceptance checks', description: 'List the human acceptance checks in this conversation that nobody has reviewed yet. A check that you already approved is not listed again. Use it when you were woken about a check, or before reporting that a task is waiting only on the user.',
+      parameters: Type.Object({}),
+      available: main && Boolean(features.supervisor?.pendingHumanChecks && features.supervisor?.reviewHumanCheck),
+      externallyGated: false,
+    },
+    review_human_check: {
+      name: 'review_human_check', label: 'Review a human acceptance check', description: 'Record your look at one human acceptance check, before the user is asked. approve:true means the evidence looks right and the user should be asked (your review is attached); approve:false means it should not have been raised, so send the node back for rework instead. This is NOT acceptance: the check stays open and the user still has to pass it themselves. Approving twice writes nothing and returns false.',
+      parameters: Type.Object({
+        questionId: Type.String(),
+        approve: Type.Boolean(),
+        note: Type.String(),
+        requestId: Type.String(),
+      }),
+      available: main && Boolean(features.supervisor?.pendingHumanChecks && features.supervisor?.reviewHumanCheck),
       externallyGated: false,
     },
     ask_user: {

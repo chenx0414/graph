@@ -38,7 +38,7 @@ import { promoteSkillFromProjects } from '../runtime/skill-promotion.ts';
 import { sedimentSettings } from '../runtime/sediment.ts';
 import { piExtensionSourceStatus, updatePiExtensionSource, type PiExtensionUpdate } from '../runtime/pi-extension-source.ts';
 import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilities.ts';
-import { problemActions, questionSummary, recoverMaster } from './question-routing.ts';
+import { approveHumanCheck, humanCheckPreReview, insertQuestion, pendingHumanChecks, problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
@@ -1388,6 +1388,7 @@ export async function openTaskRuntime(options: {
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
           bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true, confirmDraft: true,
+          pendingHumanChecks: true, reviewHumanCheck: true,
           controlTask: true,
         },
         ...(options.systemContext ? { systemContext: {
@@ -2056,6 +2057,51 @@ export async function openTaskRuntime(options: {
                 allowedActions: problemActions(row.kind),
               };
             });
+        },
+        async pendingHumanChecks() {
+          ensureOpen();
+          const conversation = conversationForTask(store, taskId);
+          if (!conversation) return [];
+          return pendingHumanChecks(store, conversation.id).map(check => ({
+            ...check,
+            evidence: humanCheckPreReview(store, check.questionId),
+          }));
+        },
+        async reviewHumanCheck(input: { questionId: string; approve: boolean; note: string; requestId: string }) {
+          ensureOpen();
+          const conversation = conversationForTask(store, taskId);
+          if (!conversation) throw new RuntimeError('not_found', 'This master is not attached to a conversation');
+          // The check may belong to any graph task of this conversation, so scope by
+          // conversation rather than by the anchor task the master itself runs on.
+          const inConversation = pendingHumanChecks(store, conversation.id).some(check => check.questionId === input.questionId);
+          if (!inConversation) {
+            throw new RuntimeError('not_found', 'No open human acceptance check with that id in this conversation');
+          }
+          return store.command(`human-review:${taskId}`, input.requestId, input, () => {
+            if (input.approve) {
+              return { questionId: input.questionId, approved: approveHumanCheck(store, input.questionId, input.note) };
+            }
+            // Sending it back is rework, which already means "returned for the main Agent to
+            // fix" and already reaches the node's own turn. Reusing it keeps one way to say
+            // "this is not acceptable" instead of inventing a second.
+            const check = humanCheckPreReview(store, input.questionId);
+            if (!check || check.status !== 'open') {
+              throw new RuntimeError('not_found', 'That human acceptance check is not open');
+            }
+            insertQuestion(store, {
+              taskId: check.taskId,
+              nodeId: check.nodeId,
+              kind: 'rework',
+              data: {
+                prompt: 'The main Agent reviewed the human acceptance check and sent it back',
+                reason: input.note,
+                rejected: true,
+              },
+            });
+            store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?")
+              .run(canonicalJson({ type: 'reject', reason: input.note }), input.questionId);
+            return { questionId: input.questionId, approved: false, sentBack: true };
+          });
         },
         async resolveProblem(input: {
           questionId: string;

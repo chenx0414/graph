@@ -25,6 +25,13 @@ type Supervisor = {
   listProjects?(): Promise<unknown>;
   bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
   listProblems?(): Promise<unknown>;
+  /** Human acceptance checks of this conversation that nobody has looked at yet. */
+  pendingHumanChecks?(): Promise<unknown>;
+  /**
+   * Record the main Agent's review of a human acceptance check. It is not acceptance:
+   * the check stays open and stays the user's to answer.
+   */
+  reviewHumanCheck?(input: { questionId: string; approve: boolean; note: string; requestId: string }): Promise<unknown>;
   resolveProblem?(input: {
     questionId: string;
     action: 'retry' | 'acknowledge' | 'respond' | 'reconcile_usage' | 'escalate';
@@ -419,6 +426,19 @@ export function agentTools(input: {
       })));
     },
     list_problems: async () => text(JSON.stringify(await input.supervisor!.listProblems!())),
+    list_human_checks: async () => text(JSON.stringify(await input.supervisor!.pendingHumanChecks!())),
+    review_human_check: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      if (typeof body.approve !== 'boolean') {
+        throw new Error('review_human_check requires approve as a boolean');
+      }
+      return text(JSON.stringify(await input.supervisor!.reviewHumanCheck!({
+        questionId: String(body.questionId).trim(),
+        approve: body.approve,
+        note: String(body.note ?? '').trim(),
+        requestId: String(body.requestId).trim(),
+      })));
+    },
     resolve_problem: async (_id: string, params: unknown) => {
       const body = fields(params);
       const action = String(body.action).trim();
@@ -618,6 +638,8 @@ export function agentTools(input: {
       confirmDraft: Boolean(input.supervisor.confirmDraft),
       listProblems: Boolean(input.supervisor.listProblems),
       resolveProblem: Boolean(input.supervisor.resolveProblem),
+      pendingHumanChecks: Boolean(input.supervisor.pendingHumanChecks && input.supervisor.reviewHumanCheck),
+      reviewHumanCheck: Boolean(input.supervisor.pendingHumanChecks && input.supervisor.reviewHumanCheck),
       controlTask: Boolean(input.supervisor.controlTask),
     } } : {}),
     ...(input.conversations ? { conversations: { read: true, write: true } } : {}),
