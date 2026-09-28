@@ -16,6 +16,7 @@ afterEach(async () => { for (const close of cleanup.splice(0)) await close(); })
 
 // Structural replay of the September 25 provider response; no production text or credentials.
 const handoff = 'I will inspect the failing test.\n\n<analysis>\nLet me chronologically analyze this conversation.\n</analysis>\n\n<summary>\n1. Primary Request and Intent:\nFix the test.\n6. All user messages:\nprivate-history-marker\n7. Pending Tasks:\nFix it.\n8. Current Work:\nStill pending.\n9. Optional Next Step:\nRead the file.\n</summary>';
+const leakedToolCall = 'I found the likely cause. Let me inspect it.\n\n<parameter name="bash">\n<｜DSML｜ parameter name="command" string="true">grep -n unknown_usage src/core/operation-lifecycle.ts</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">300</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
 
 async function replay(texts: string[], enabled = true) {
   const server = await openaiServer(texts.map(text => ({ chunks: [...text] })));
@@ -56,10 +57,63 @@ test('repeated handoffs stop explicitly instead of succeeding or retrying indefi
   expect(JSON.stringify(result.events)).not.toContain('private-history-marker');
 });
 
+test('a tool call leaked as ordinary text is corrected before it can become a final reply', async () => {
+  const result = await replay([leakedToolCall, 'I used the tool and finished the check.']);
+  expect(result.sends).toBe(2);
+  expect(result.notices).toEqual(['retrying', 'recovered']);
+  expect(JSON.stringify(result.events)).not.toContain('<｜DSML｜');
+  expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ text: 'I used the tool and finished the check.' }] } });
+  expect(JSON.stringify(result.requests[1])).not.toContain('<｜DSML｜');
+});
+
+test('a second leaked tool call fails clearly instead of claiming completion', async () => {
+  const result = await replay([leakedToolCall, leakedToolCall]);
+  expect(result.sends).toBe(2);
+  expect(result.notices).toEqual(['retrying', 'failed']);
+  expect(result.events.at(-1)).toMatchObject({ type: 'error', error: { stopReason: 'error' } });
+  expect(JSON.stringify(result.events)).not.toContain('<｜DSML｜');
+});
+
+test('Pi executes a real tool after a leaked text call, then completes with verified output', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tool-call-recovery-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const server = await openaiServer([
+    { chunks: [...leakedToolCall] },
+    { tools: [{ id: 'inspection', name: 'inspect', arguments: '{}' }] },
+    { text: 'Inspection completed with the tool result.' },
+  ]);
+  cleanup.push(() => server.close());
+  const calls: string[] = [];
+  const notices: string[] = [];
+  const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
+  const instance = await openPiInstance({
+    binding: { instanceId: 'main', nodeId: 'main', definitionVersion: 'main@1' },
+    workspace: root, stateDir: join(root, 'state'), model: server.model, modelRuntime: server.runtime,
+    stream: guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), {
+      enabled: () => true, onRecovery: status => notices.push(status),
+    }),
+    tools: [externallyGated({
+      name: 'inspect', label: 'inspect', description: 'Inspect the fixture',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => { calls.push('inspect'); return { content: [{ type: 'text' as const, text: 'checked' }], details: {} }; },
+    })],
+  });
+  try {
+    await instance.prompt('Inspect and finish the test.');
+    expect(calls).toEqual(['inspect']);
+    expect(server.requests).toHaveLength(3);
+    expect(notices).toEqual(['retrying', 'recovered']);
+    const state = instance.inspect();
+    expect(state.messages.at(-1)).toMatchObject({ role: 'assistant', content: [{ text: 'Inspection completed with the tool result.' }] });
+    expect(await readFile(state.sessionFile, 'utf8')).not.toContain('<｜DSML｜');
+  } finally { await instance.close(); }
+});
+
 test.each([
   '工作摘要：测试已完成，下一步提交。',
   '<summary>这是用户要求的摘要。</summary>',
   'Example:\n```xml\n' + handoff + '\n```',
+  'Example:\n```text\n' + leakedToolCall + '\n```',
 ])('ordinary summaries and quoted markup remain unchanged: %s', async text => {
   const result = await replay([text]);
   expect(result.sends).toBe(1);
