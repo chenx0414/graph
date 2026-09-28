@@ -203,7 +203,7 @@ describe('components genuinely use the policy module', () => {
     expect(source).toContain('data-testid="drawer-entry"');
     // The questions keep their resident marker; the draft card no longer does.
     expect(source).toContain("data-resident={residentFlag('conversation-questions')}");
-    expect(source).toContain('className="conversation-question-region"');
+    expect(source).toContain('className="conversation-question-composer"');
   });
 
   test('the drawer renders the draft pages plus the task graph, keeping their testids', () => {
@@ -251,9 +251,10 @@ describe('components genuinely use the policy module', () => {
     // The empty task state and the project binding moved out of the chat stream.
     expect(thread).not.toContain('no-conversation-tasks');
     expect(thread).not.toContain('bind-project');
-    // ...but the pending questions do stay in the chat stream.
-    expect(thread).toContain('data-testid="conversation-questions"');
-    expect(thread).toContain('data-testid={`conversation-questions-${task.id}`}');
+    // Pending questions replace the composer below the stream.
+    expect(thread).not.toContain('data-testid="conversation-questions"');
+    expect(source).toContain('data-testid="conversation-questions"');
+    expect(source).toContain('data-testid={`conversation-questions-${task.id}`}');
   });
 });
 

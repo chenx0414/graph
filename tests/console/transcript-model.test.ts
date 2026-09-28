@@ -309,15 +309,27 @@ test('a steered user message stays where it interrupted the turn', () => {
     busy: false,
   });
 
-  // Only the work before the interruption folds; the steered message itself stays
-  // visible and keeps the place it interrupted.
-  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'message', 'narration', 'assistant']);
+  // Both sides fold after the answer; the user's message keeps its place.
+  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'message', 'activity', 'assistant']);
   const folded = rows[1];
   if (folded?.kind !== 'activity') throw new Error('expected the folded activity block');
   expect(folded.rows.map(child => child.kind)).toEqual(['narration', 'tools']);
   const steered = rows[2];
   if (steered?.kind !== 'message') throw new Error('expected the steered message row');
   expect(steered.message.text).toBe('插队：改成 B');
+  expect(rows[3]).toMatchObject({ kind: 'activity', collapsed: true });
+});
+
+test('older activity without a loaded answer folds when a later turn has finished', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'old', seq: 1, role: 'activity', kind: 'activity', text: '旧回合的思考', operationId: 'old-op' }),
+      message({ id: 'new', seq: 2, role: 'activity', kind: 'activity', text: '新回合的思考', operationId: 'new-op' }),
+      message({ id: 'answer', seq: 3, role: 'assistant', text: '完成', operationId: 'new-op' }),
+    ], liveTools: [], streaming: [], busy: false,
+  });
+  expect(rows.map(row => row.kind)).toEqual(['activity', 'activity', 'assistant']);
+  expect(rows[0]).toMatchObject({ kind: 'activity', collapsed: true });
 });
 
 test('a steered message interleaves with the running turn by ordinal', () => {
