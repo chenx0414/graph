@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 39;
+export const SCHEMA_VERSION = 40;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -563,13 +563,25 @@ export class TaskStore {
       // The console must be able to show the system prompt the model actually received. Fresh and
       // existing databases both take the column from this ALTER, as every other added column does.
       // Existing rows stay NULL (= not recorded), which the console reports as such.
-      this.db.exec('ALTER TABLE operations ADD COLUMN system_prompt TEXT; PRAGMA user_version=34;');
+      //
+      // Guarded by a column check because lowering user_version is how a fixture (and a hand
+      // rewind) marks a database as older - the columns stay, so a bare ALTER would abort the
+      // whole chain with "duplicate column name" and strand the database part way up.
+      const columns = this.db.prepare('PRAGMA table_info(operations)').all() as { name: string }[];
+      if (!columns.some(column => column.name === 'system_prompt')) {
+        this.db.exec('ALTER TABLE operations ADD COLUMN system_prompt TEXT;');
+      }
+      this.db.exec('PRAGMA user_version=34;');
     });
     if (version < 35) this.transaction(() => {
       // The console also shows the tool declarations one request carried. They are recorded
       // beside the prompt, at the same call site, and are display-only: nothing here is sent.
       // Existing rows stay NULL (= not recorded), which the console reports as such.
-      this.db.exec('ALTER TABLE operations ADD COLUMN tool_declarations TEXT; PRAGMA user_version=35;');
+      const columns = this.db.prepare('PRAGMA table_info(operations)').all() as { name: string }[];
+      if (!columns.some(column => column.name === 'tool_declarations')) {
+        this.db.exec('ALTER TABLE operations ADD COLUMN tool_declarations TEXT;');
+      }
+      this.db.exec('PRAGMA user_version=35;');
     });
     if (version < 36) this.transaction(() => {
       // Durable per-tool telemetry: one append-only row per executed tool call, so call counts,
@@ -624,6 +636,27 @@ export class TaskStore {
           PRIMARY KEY(task_id,node_id,turn_id,path));
         CREATE INDEX IF NOT EXISTS node_write_captures_node ON node_write_captures(task_id,node_id,created_at);
         PRAGMA user_version=39;`);
+    });
+    if (version < 40) this.transaction(() => {
+      // Why the conversation master was woken. A wake is a fact, and the primary key is the fact's
+      // identity - so re-observing one (a task completing, a node blocking, an answer arriving)
+      // collapses into the same row instead of queueing a second turn, while two genuinely
+      // different facts of the same kind stay apart. Same waiting/ready/consumed shape as
+      // rsi_continuations and pause_continuations, with the dedupe key making it idempotent.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS wake_intents(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          node_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          dedupe_key TEXT NOT NULL,
+          data TEXT,
+          state TEXT NOT NULL CHECK(state IN ('waiting','ready','consumed')),
+          consumed_operation_id TEXT REFERENCES operations(id),
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          UNIQUE(task_id,node_id,kind,dedupe_key));
+        CREATE INDEX IF NOT EXISTS wake_intents_ready ON wake_intents(task_id,node_id,state);
+        PRAGMA user_version=40;`);
     });
   }
 

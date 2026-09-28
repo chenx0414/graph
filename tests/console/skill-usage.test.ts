@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { TaskStore } from '../../src/core/store.ts';
+import { TaskStore, SCHEMA_VERSION } from '../../src/core/store.ts';
 import { skillUsage } from '../../src/runtime/skill-usage.ts';
 import { TARGET_LIMIT, toolCallTarget } from '../../src/runtime/tool-call-target.ts';
 
@@ -49,7 +49,9 @@ test('the store migrates to the current schema and keeps a target on every tool 
   const version = (store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
   const columns = store.db.prepare('PRAGMA table_info(tool_calls)').all() as { name: string }[];
 
-  expect(version).toBe(39);
+  // Bound to the constant: a literal here fails on every future migration for no
+  // reason, which trains people to bump the number instead of reading the test.
+  expect(version).toBe(SCHEMA_VERSION);
   expect(columns.map(column => column.name)).toContain('target');
 });
 

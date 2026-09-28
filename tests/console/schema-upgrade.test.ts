@@ -159,6 +159,12 @@ test('v23 renumbers legacy handoffs before enforcing one version per task', asyn
     CREATE TABLE node_capabilities(operation_id TEXT);
     CREATE TABLE messages(operation_id TEXT,state TEXT);
     CREATE TABLE questions(task_id TEXT,status TEXT,owner TEXT,kind TEXT,data TEXT);
+    -- A reduced pre-v23 database still has to take every later migration, so any table a
+    -- later version references is created here. Omitting one makes the chain abort part way,
+    -- which is how this fixture caught the missing wake_intents table.
+    CREATE TABLE wake_intents(id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, node_id TEXT, kind TEXT,
+      dedupe_key TEXT, data TEXT, state TEXT, consumed_operation_id TEXT, created_at INTEGER,
+      UNIQUE(task_id,node_id,kind,dedupe_key));
     CREATE TABLE context_handoffs(id TEXT PRIMARY KEY, task_id TEXT, operation_id TEXT, version INTEGER,
       purpose TEXT, summary TEXT, package TEXT, digest TEXT, created_at INTEGER);
     CREATE TABLE budget_scopes(id TEXT PRIMARY KEY, task_id TEXT, owner_instance_id TEXT,

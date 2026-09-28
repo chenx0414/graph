@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { wakeForBlockedNode } from './wake-ledger.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { conversationForTask } from './conversation.ts';
 import { openUserWait } from './time-ledger.ts';
@@ -202,6 +203,13 @@ export function insertQuestion(store: TaskStore, input: {
     store.event(conversation.anchor_task_id, selfOwned ? 'problem.parked' : 'problem.routed', routing);
   } else {
     openUserWait(store, input.taskId, input.nodeId);
+    // A node that stopped because only a person can unblock it is still a fact the
+    // conversation's master should hear about once: it is the actor holding the
+    // context to say what this means and what happens next. The wake is idempotent,
+    // so observing the same block again does not queue a second turn.
+    if (input.kind !== 'human_check') {
+      wakeForBlockedNode(store, input.taskId, { nodeId: input.nodeId, reason: input.kind });
+    }
   }
 
   if (!input.autoAnswer) {

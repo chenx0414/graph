@@ -199,6 +199,11 @@ export interface Operation {
   context: {
     previousOutput: Json;
     rsiContinuation?: { requestId: string; operationId: string; commit: string };
+    /**
+     * Why the harness woke this node, beyond any user message. Present only on a turn
+     * that is carrying a wake; the master reads it instead of re-deriving what changed.
+     */
+    wakes?: { kind: string; dedupeKey: string; taskId: string; data: string | null }[];
     answers: { questionId: string; value: Json }[];
     messages?: {
       id?: string;

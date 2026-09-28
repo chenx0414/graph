@@ -1,4 +1,5 @@
 import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuation.ts';
+import { pendingWakes, renderWakes, wakeForTaskCompleted } from './wake-ledger.ts';
 import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -673,6 +674,7 @@ export class Execution {
           chatMessages = conversation ? pendingMessages(this.store, conversation.id, 1) : [];
           const rsiContinuation = conversation ? pendingRsiContinuation(this.store, node.task_id, node.id) : undefined;
           const pauseContinuation = conversation ? pendingPauseContinuation(this.store, node.task_id, node.id) : undefined;
+          const wakes = conversation ? pendingWakes(this.store, node.task_id, node.id) : [];
           const graph = task.phase === 'discussing' || task.phase === 'chatting' ? undefined : loadGraph(this.store, node.task_id);
           const dependencies = graph ? graph.inputs(node.id) : {};
           const dependencySources = graph ? graph.sources(node.id) : {};
@@ -723,6 +725,7 @@ export class Execution {
             requirementVersion: task.requirement_version,
             context: {
               ...(rsiContinuation ? { rsiContinuation } : {}),
+              ...(wakes.length ? { wakes } : {}),
               previousOutput: node.output ? JSON.parse(node.output) as Json : null,
               answers,
               ...(messages.length ? { messages } : {}),
@@ -803,7 +806,11 @@ export class Execution {
               ...(proposal ? { proposal } : {}), own: spec.id, attempt, instanceId: node.instance_id, taskId: node.task_id,
             });
           }
+          // A master turn is not part of the task's graph, so the graph has no entry for
+          // its node and asking for its sources would throw. Its context is the conversation,
+          // not predecessor handoffs, so it simply has none.
           const predecessor = spec.kind === 'agent' && agentContext?.mode === 'fresh' && graph
+            && graph.plan.nodes.has(spec.id)
             ? buildPredecessorHandoffs(this.store, graph, spec)
             : { policies: [], projections: [] };
           const resultHandoffRequired = proposal ? requiresResultHandoff(proposal, node.id) : false;
@@ -835,6 +842,7 @@ export class Execution {
           intent.context.briefing = [
             ...userRework.map(message => `User requested rework of this node and its downstream results. Continue in your existing session and address this message:\n${message.text}`),
             intent.context.briefing,
+            wakes.length ? renderWakes(wakes) : '',
             rsiContinuation ? `RSI reload confirmed for ${rsiContinuation.commit} (request ${rsiContinuation.requestId}). Resume the unfinished user request from operation ${rsiContinuation.operationId} using the existing session. Completed changes and tool results remain valid. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
             pauseContinuation ? `The user paused this task and has now resumed it (request ${pauseContinuation.requestId}). Continue the exact turn that was soft-stopped at operation ${pauseContinuation.operationId} using the existing session: the in-flight tool call finished, so do not repeat completed tool calls or restart the request. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
             renderPredecessorHandoffs(predecessor.projections),
@@ -1047,6 +1055,13 @@ export class Execution {
     const task = this.store.task(taskId);
     this.store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
     this.store.event(taskId, 'task.completed', { proposalVersion: task.accepted_proposal });
+    // A finished graph is the case that used to end with nobody watching: the task was
+    // done and the conversation's master was never told. Wake it here, once per fact,
+    // so it can read the outcome and report it.
+    wakeForTaskCompleted(this.store, taskId, {
+      proposalVersion: task.accepted_proposal,
+      integrationSha: task.integration_sha ?? null,
+    });
     this.promoteNextTask();
   }
 
