@@ -111,7 +111,7 @@ export type DraftGraph = {
   }[];
   containers: { id: string; parent?: string }[];
   loops: { from: string; to: string }[];
-  layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
+  layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[]; branches?: { id: string; source: string; target: string; case: string }[] };
 };
 export type ProposalDetail = {
   version: number;

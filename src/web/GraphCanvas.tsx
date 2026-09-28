@@ -31,6 +31,7 @@ type GraphPayload = {
   layout: {
     positions: Record<string, { x: number; y: number; width: number; height: number }>;
     edges: { id: string; source: string; target: string; points?: { x: number; y: number }[] }[];
+    branches?: { id: string; source: string; target: string; case: string }[];
   };
 };
 
@@ -90,19 +91,46 @@ function GraphNode({ data, selected }: NodeProps) {
 
 const nodeTypes = { graphNode: GraphNode };
 
+/**
+ * The label an edge carries, drawn at its midpoint.
+ *
+ * React Flow only renders `label` for its built-in edges; these edges are custom, so a label passed
+ * in options was silently dropped — which is how the existing "结果交接" text never appeared either.
+ * Drawing it here is what makes a branch edge readable as `case: pass` rather than an anonymous line.
+ */
+function EdgeLabel({ text, x, y, color }: { text: string; x: number; y: number; color: string }) {
+  const width = text.length * 6.2 + 10;
+  return (
+    <g transform={`translate(${x - width / 2}, ${y - 9})`}>
+      <rect width={width} height={18} rx={4} fill="#ffffff" fillOpacity={0.92} />
+      <text x={width / 2} y={12.5} textAnchor="middle" fontSize={11} fill={color}>{text}</text>
+    </g>
+  );
+}
+
 function GridEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth, data }: EdgeProps) {
   const points = (data as { points?: { x: number; y: number }[] } | undefined)?.points;
   const lane = (data as { lane?: number } | undefined)?.lane ?? 0;
+  const label = (data as { edgeLabel?: string } | undefined)?.edgeLabel;
+  const labelColor = (data as { edgeLabelColor?: string } | undefined)?.edgeLabelColor ?? '#475569';
+  const midX = points?.length ? points[Math.floor(points.length / 2)]!.x : (sourceX + targetX) / 2;
+  const midY = points?.length ? points[Math.floor(points.length / 2)]!.y : (sourceY + targetY) / 2 + lane;
   const path = points?.length
     ? `M ${points[0]!.x} ${points[0]!.y} ${points.slice(1).map(point => `L ${point.x} ${point.y}`).join(' ')}`
     : sourceX === targetX
     ? `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`
     : `M ${sourceX} ${sourceY} L ${sourceX} ${align((sourceY + targetY) / 2) + lane} L ${targetX} ${align((sourceY + targetY) / 2) + lane} L ${targetX} ${targetY}`;
-  return <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />;
+  return (
+    <>
+      <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />
+      {label ? <EdgeLabel text={label} x={midX} y={midY} color={labelColor} /> : null}
+    </>
+  );
 }
 
 function GridLoopEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth, data }: EdgeProps) {
   const explicitLeft = (data as { leftX?: number } | undefined)?.leftX;
+  const label = (data as { edgeLabel?: string } | undefined)?.edgeLabel;
   const lane = (data as { lane?: number } | undefined)?.lane
     ?? 40 + (id.split('').reduce((sum, value) => sum + value.charCodeAt(0), 0) % 3) * GRID;
   const left = explicitLeft ?? Math.min(sourceX, targetX) - lane;
@@ -112,7 +140,12 @@ function GridLoopEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style
     `L ${left} ${targetY}`,
     `L ${targetX} ${targetY}`,
   ].join(' ');
-  return <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />;
+  return (
+    <>
+      <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />
+      {label ? <EdgeLabel text={label} x={left + 30} y={Math.min(sourceY, targetY) - 14} color="#d97706" /> : null}
+    </>
+  );
 }
 
 const edgeTypes = { grid: GridEdge, gridLoop: GridLoopEdge };
@@ -177,8 +210,14 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
     }),
   ];
   const edges = graph.layout.edges.filter(edge => !hidden.has(edge.source) && !hidden.has(edge.target))
+    // A branch edge says "runs when this case was chosen", which no dependency arrow can express.
+    // It is drawn as its own kind, labelled with the case, so the picture shows what the runtime
+    // actually branches on instead of only who waits for whom.
+    .concat((graph.layout.branches ?? []).filter(branch => !hidden.has(branch.source) && !hidden.has(branch.target))
+      .map(branch => ({ id: branch.id, source: branch.source, target: branch.target, branchCase: branch.case })))
     .map(edge => {
       const loop = edge.id.startsWith('loop:');
+      const branch = 'branchCase' in edge ? (edge as { branchCase: string }).branchCase : null;
       const sourceIsNode = graph.nodes.some(node => node.id === edge.source);
       const targetIsNode = graph.nodes.some(node => node.id === edge.target);
       const policy = edgePolicy.get(`${edge.source}:${edge.target}`);
@@ -204,9 +243,15 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
           labelBgPadding: [4, 2] as [number, number],
           labelBgBorderRadius: 4,
         } : {}),
+        ...(branch ? {
+          data: { ...(edge as { points?: unknown }).points !== undefined ? {} : {}, edgeLabel: `case: ${branch}`, edgeLabelColor: '#0f766e' },
+          animated: false,
+          style: { stroke: '#0f766e', strokeDasharray: '2 3' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#0f766e' },
+        } : {}),
         ...(loop
           ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } }
-          : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),
+          : branch ? {} : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),
       };
     });
   // The four-state legend is rendered here so every view that draws a task

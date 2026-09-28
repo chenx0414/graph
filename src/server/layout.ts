@@ -1,5 +1,6 @@
 import ElkConstructor from 'elkjs';
 import { graphNodeSize } from '../core/graph-presentation.ts';
+import { branchEdges } from '../core/branch-edges.ts';
 import type { ContainerSpec, LoopSpec, NodeSpec } from '../core/types.ts';
 
 type Point = { x: number; y: number };
@@ -132,5 +133,27 @@ export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: Conta
       target: edge.targets[0]!,
       ...(routed.get(edge.id) ? { points: routed.get(edge.id)! } : {}),
     })),
+    // Branch edges are not fed to ELK: like loops, they describe runtime choice rather than
+    // dependency order, and letting them into the layered layout would bend the main path. They are
+    // what makes "which case leads where" visible, which the picture did not show at all before.
+    branches: branchEdges(input.nodes, containers, containerLeaves(input.nodes, containers)),
   };
+}
+
+/** A gated container is drawn by its members, so a branch entering the group names them. */
+function containerLeaves(nodes: readonly NodeSpec[], containers: readonly ContainerSpec[]) {
+  const leaves: Record<string, string[]> = {};
+  const inside = (node: NodeSpec, containerId: string) => {
+    let parent = node.container;
+    while (parent) {
+      if (parent === containerId) return true;
+      parent = containers.find(container => container.id === parent)?.parent;
+    }
+    return false;
+  };
+  for (const container of containers) {
+    if (!container.when) continue;
+    leaves[container.id] = nodes.filter(node => inside(node, container.id)).map(node => node.id);
+  }
+  return leaves;
 }

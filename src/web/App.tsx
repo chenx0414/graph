@@ -98,7 +98,7 @@ type GraphPayload = {
   containers: { id: string; parent?: string; nodes: string[] }[];
   loops: { from: string; to: string; reason?: string }[];
   revisions: { version: number; reason: string }[];
-  layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[] };
+  layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[]; branches?: { id: string; source: string; target: string; case: string }[] };
   cost: { unknown?: boolean; amount?: number | null; amounts?: Record<string, number> };
 };
 
