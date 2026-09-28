@@ -39,6 +39,7 @@ import {
   probeRequest,
   readConcurrency,
   selectedProbeModels,
+  thinkingOptionsFromMetadata,
   uniqueLocalModelId,
   validateProviderDraft,
   withCostField,
@@ -744,7 +745,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
           metadata,
         }));
         const headers = modelRequestHeaders({ provider: vendor.platformId, baseUrl });
-        list.push({ ...built, ...(headers ? { headers } : {}) });
+        list.push({ ...built, thinkingOptions: thinkingOptionsFromMetadata(metadata), ...(headers ? { headers } : {}) });
       }
       next.models = { entries: list };
     });
@@ -1060,6 +1061,12 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
       const detected = detectedResponse.credentials;
       const merged = mergeSubscriptionCredentials(toDraft(response.config), detected);
       const next = merged.config;
+      if (next.models) {
+        next.models.entries = await Promise.all(next.models.entries.map(async entry => ({
+          ...entry,
+          thinkingOptions: thinkingOptionsFromMetadata(await lookupSnapshot(entry.provider, entry.modelId ?? entry.id)),
+        })));
+      }
       clearTimeout(saveTimer.current);
       editVersion.current = merged.changed ? 1 : 0;
       savePending.current = false;
@@ -1151,6 +1158,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
       setEffectiveRevision(response.effectiveRevision ?? response.revision);
       const pending = response.applied === false;
       setStatus(`已自动保存 revision ${response.revision}${pending ? `，等待生效：${response.reason ?? '需要重启守护进程'}` : '，已应用到当前守护进程'}${response.configured === false ? '（尚未配置可用凭据，仅查看模式）' : ''}`);
+      if (!pending) window.dispatchEvent(new Event('graph:settings-changed'));
       if (editVersion.current === version) {
         editVersion.current = 0;
         setDirty(false);

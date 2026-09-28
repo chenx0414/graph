@@ -539,12 +539,21 @@ export interface SnapshotMetadata {
   input?: ModelInput[];
   reasoning?: boolean;
   thinkingLevels?: string[];
+  thinkingOptions?: { level: string; label: string }[];
   defaultThinkingLevel?: string;
   grade?: ModelGrade;
   cost?: ModelCost;
   currency?: string;
   sourceUrl?: string;
   catalogRevision?: string;
+}
+
+/** Match the runtime's Pi defaults when the catalog names no discrete effort. */
+export function thinkingOptionsFromMetadata(metadata: SnapshotMetadata | null | undefined): { level: ModelThinkingLevel; label: string }[] {
+  const levels = thinkingLevels(metadata?.thinkingLevels).filter(level => level !== 'off');
+  if (!metadata?.thinkingLevels?.length) return (['minimal', 'low', 'medium', 'high'] as ModelThinkingLevel[]).map(level => ({ level, label: level }));
+  const labels = new Map(metadata?.thinkingOptions?.map(option => [option.level, option.label]) ?? []);
+  return levels.map(level => ({ level, label: labels.get(level) ?? level }));
 }
 
 /** The form-level model fields. `null` means "unknown, leave blank". */

@@ -32,6 +32,7 @@ import {
   keyEntryGuidance,
   mergeProbeModels,
   metadataToFields,
+  thinkingOptionsFromMetadata,
   missingRequiredModelFields,
   modelFieldErrors,
   modelVendorsFrom,
@@ -53,6 +54,7 @@ import {
 // @ts-ignore -- .tsx import from a NodeNext test program
 import { ADVANCED_SETTING_IDS } from '../../src/web/Settings.tsx';
 import { estimateCost } from '../../src/catalog/models.ts';
+import { lookupModelMetadata } from '../../src/catalog/models-dev.ts';
 
 const preset = FALLBACK_PLATFORMS[0]!;
 
@@ -90,6 +92,14 @@ describe('provider draft validation (step 1)', () => {
     );
     expect(errors.credentialId).toMatch(/凭据 id/);
     expect(errors.credentialRef).toBe('credentialRef 必须是环境变量名');
+  });
+});
+
+describe('model thinking options in the provider editor', () => {
+  it('shows OpenCode Go effort levels as soon as metadata is fetched', () => {
+    expect(thinkingOptionsFromMetadata(lookupModelMetadata('opencode-go', 'deepseek-v4.1-flash')))
+      .toEqual([{ level: 'low', label: 'low' }, { level: 'high', label: 'high' }, { level: 'max', label: 'max' }]);
+    expect(thinkingOptionsFromMetadata(null).map(option => option.level)).toEqual(['minimal', 'low', 'medium', 'high']);
   });
 });
 
