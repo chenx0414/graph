@@ -227,7 +227,13 @@ export function catalogProvenance(snapshot?: unknown): CatalogProvenance {
 function resolveProvider(snapshot: ModelsDevSnapshot, providerHint: string): ModelsDevProvider | undefined {
   const hint = providerHint.trim().toLowerCase();
   if (!hint) return undefined;
-  const candidates = [...(PROVIDER_ALIASES[hint] ?? []), hint];
+  // Multiple credentials for one platform are stored as account ids such as
+  // opencode-go-3. Those ids route requests, but the catalog still names the
+  // platform opencode-go. Only strip a numeric account suffix when its base is
+  // a known platform alias; arbitrary custom provider ids remain exact.
+  const accountBase = hint.replace(/-\d+$/, '');
+  const platform = accountBase !== hint && PROVIDER_ALIASES[accountBase] ? accountBase : hint;
+  const candidates = [...(PROVIDER_ALIASES[platform] ?? []), platform];
   for (const candidate of candidates) {
     const provider = snapshot.providers[candidate];
     if (provider) return provider;

@@ -26,6 +26,13 @@ describe('per-model thinking strengths', () => {
     expect(levels(deepseek)).toEqual(['low', 'high', 'max']);
   });
 
+  test('OpenCode Go account models expose their actual effort levels after saving', () => {
+    const deepseek = entry({ id: 'opencode-go-3:deepseek-v4.1-flash', provider: 'opencode-go-3', modelId: 'deepseek-v4.1-flash' });
+    const bunny = entry({ id: 'opencode-go-3:space-bunny-free', provider: 'opencode-go-3', modelId: 'space-bunny-free' });
+    expect(levels(deepseek)).toEqual(['low', 'high', 'max']);
+    expect(levels(bunny)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
   test('the provider spelling of a level is kept as its label', () => {
     const options = thinkingOptionsFor(entry());
     expect(options.find(option => option.level === 'xhigh')?.label).toBe('xhigh');
