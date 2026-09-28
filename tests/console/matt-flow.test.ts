@@ -89,3 +89,86 @@ test('the json report is machine readable and the exit code carries the verdict'
   expect(failed.ok).toBe(false);
   expect(failed.results[0]?.detail).toContain('docs/specs/other.md');
 });
+
+/** A repository whose two branches collide on one line, plus a branch that does not collide. */
+async function collisionRepo(name: string) {
+  const root = await temp(`merge-${name}`);
+  // A conflicting merge exits non-zero on purpose, so the helper keeps its output instead of throwing.
+  const git = (...args: string[]) => {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+    return `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'graph@example.invalid');
+  git('config', 'user.name', 'Graph Test');
+  await writeFile(join(root, 'shared.ts'), 'alpha\nmiddle\nomega\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'base');
+  git('checkout', '-q', '-b', 'lane');
+  await writeFile(join(root, 'shared.ts'), 'alpha\nfrom-lane\nomega\n');
+  git('commit', '-aqm', 'lane');
+  git('checkout', '-q', 'main');
+  await writeFile(join(root, 'shared.ts'), 'alpha\nfrom-main\nomega\n');
+  git('commit', '-aqm', 'main');
+  // A third branch from the base touches a different file, so it never collides with `lane`.
+  git('checkout', '-q', '-b', 'disjoint', 'main~1');
+  await writeFile(join(root, 'other.ts'), 'unrelated\n');
+  git('add', '.');
+  git('commit', '-qm', 'disjoint');
+  git('checkout', '-q', 'main');
+  return { root, git };
+}
+
+test('the merge stage passes only on a real collision and names the conflicted paths', async () => {
+  const { root } = await collisionRepo('collision');
+  const collided = run(root, ['--stage', 'merge', 'main', 'lane']);
+  expect(collided.code).toBe(0);
+  expect(collided.out).toContain('ok   merge');
+  expect(collided.out).toContain('shared.ts');
+
+  // Two branches that do not touch the same lines need no merge Agent at all.
+  const disjoint = run(root, ['--stage', 'merge', 'lane', 'disjoint']);
+  expect(disjoint.code).toBe(1);
+  expect(disjoint.out).toContain('没有冲突，不需要合流 Agent');
+});
+
+test('the merge stage reads an unfinished merge from the working tree and refuses a dirty one', async () => {
+  const { root, git } = await collisionRepo('worktree');
+  // No refs and no merge in progress: there is nothing to resolve.
+  const nothing = run(root, ['--stage', 'merge']);
+  expect(nothing.code).toBe(1);
+  expect(nothing.out).toContain('当前没有未完成的合并');
+
+  git('merge', '--no-edit', 'lane');
+  const inProgress = run(root, ['--stage', 'merge']);
+  expect(inProgress.code).toBe(0);
+  expect(inProgress.out).toContain('shared.ts');
+
+  // A change outside the conflicted paths is exactly what the judge refuses, so it is refused here.
+  await writeFile(join(root, 'sneaky.ts'), 'not mine to touch\n');
+  const dirty = run(root, ['--stage', 'merge']);
+  expect(dirty.code).toBe(1);
+  expect(dirty.out).toContain('冲突之外的改动');
+  git('merge', '--abort');
+});
+
+test('a ref that does not resolve is reported as such instead of passing', async () => {
+  const { root } = await collisionRepo('badref');
+  const bad = run(root, ['--stage', 'merge', 'main', 'nope']);
+  expect(bad.code).toBe(1);
+  expect(bad.out).toContain('ref 解析不到提交：nope');
+});
+
+test('the merge stage takes no slug, and the other stages still read theirs after a value flag', async () => {
+  const { root } = await collisionRepo('parse');
+  // `--stage merge main lane` must not treat "merge" or "main" as a slug, nor lose the refs.
+  const parsed = run(root, ['--stage', 'merge', 'main', 'lane']);
+  expect(parsed.out).toContain('shared.ts');
+  expect(parsed.out).not.toContain('slug=merge');
+
+  // The same parser must still find the slug when a value flag comes first.
+  await spec(root, 'demo');
+  const ordered = run(root, ['--stage', 'spec', 'demo']);
+  expect(ordered.code).toBe(0);
+  expect(ordered.out).toContain('docs/specs/demo.md');
+});

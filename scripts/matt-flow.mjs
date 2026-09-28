@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const STAGES = ['spec', 'tickets', 'implement', 'review'];
+const STAGES = ['spec', 'tickets', 'implement', 'review', 'merge'];
 const SPEC_ROOT = 'docs/specs';
 const MIN_SPEC_CHARS = 200;
 
@@ -30,7 +30,20 @@ function fail(message) {
 }
 
 const argv = process.argv.slice(2);
-const slug = argv.find(value => !value.startsWith('--'));
+// Flags whose value must not be mistaken for a positional argument. The original parser took the
+// first non-`--` token as the slug, so `--stage merge` read "merge" as the slug; the merge stage
+// takes no slug at all and made that latent bug visible.
+const VALUE_FLAGS = new Set(['stage', 'tickets', 'root']);
+const positionals = [];
+for (let index = 0; index < argv.length; index += 1) {
+  const token = argv[index];
+  if (token.startsWith('--')) {
+    if (VALUE_FLAGS.has(token.slice(2))) index += 1;
+    continue;
+  }
+  positionals.push(token);
+}
+const slug = positionals[0];
 const readOption = name => {
   const index = argv.indexOf(`--${name}`);
   return index === -1 ? undefined : argv[index + 1];
@@ -41,9 +54,9 @@ const stage = readOption('stage') ?? 'implement';
 const ticketsFile = readOption('tickets');
 const root = resolve(readOption('root') ?? process.cwd());
 
-if (!slug) fail('用法：node scripts/matt-flow.mjs <slug> [--stage spec|tickets|implement|review] [--json] [--tickets <file>]');
+if (!slug && stage !== 'merge') fail('用法：node scripts/matt-flow.mjs <slug> [--stage spec|tickets|implement|review] [--json] [--tickets <file>]');
 if (!STAGES.includes(stage)) fail(`--stage 只能是 ${STAGES.join(' | ')}，收到 ${stage}`);
-if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) fail(`slug 只能是小写字母、数字和连字符：${slug}`);
+if (!/^[a-z0-9][a-z0-9-]*$/.test(slug) && stage !== 'merge') fail(`slug 只能是小写字母、数字和连字符：${slug}`);
 
 const results = [];
 const record = (name, ok, detail) => {
@@ -123,11 +136,75 @@ function checkReview() {
   return record('review', true, `可审查：${SPEC_ROOT}/${slug}.md + ${tickets.detail}`);
 }
 
+/**
+ * 合流：前提是**真的有一处冲突**，而不是一个 slug 的产物链。
+ *
+ * 这条 stage 与其它四条不同：它不查规格与任务（撞车与规格无关），而是查这次合并
+ * 到底有没有冲突、工作树是不是干净的。用法：
+ *   node scripts/matt-flow.mjs --stage merge [ours-ref] [theirs-ref]
+ * 不带 ref 时就看当前工作树（一个已经处于未解决冲突状态的合并）。
+ */
+function checkMerge() {
+  // The merge stage takes no slug, so both positionals are refs.
+  const ours = positionals[0];
+  const theirs = positionals[1];
+  const gitTry = (...args) => {
+    try { return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim(); } catch { return undefined; }
+  };
+  // merge-tree exits non-zero exactly when it found a conflict, which is the case this stage is
+  // looking for - so its output has to survive the failure.
+  const gitCapture = (...args) => {
+    try {
+      return { code: 0, out: execFileSync('git', args, { cwd: root, encoding: 'utf8' }) };
+    } catch (error) {
+      const failed = error;
+      return { code: failed.status ?? 1, out: failed.stdout ?? '' };
+    }
+  };
+  if (gitTry('rev-parse', '--git-dir') === undefined) return record('merge', false, '这不是一个 git 工作副本，没有可合并的东西');
+
+  if (ours && theirs) {
+    for (const ref of [ours, theirs]) {
+      if (gitTry('rev-parse', '--verify', `${ref}^{commit}`) === undefined) {
+        return record('merge', false, `ref 解析不到提交：${ref}`);
+      }
+    }
+    // merge-tree 只算结果、不动工作树；它退出非零恰恰就是找到冲突的时候。
+    const probe = gitCapture('merge-tree', '--write-tree', ours, theirs);
+    const conflicted = probe.out.trim();
+    if (!conflicted) return record('merge', false, `${ours} 与 ${theirs} 无法比较（缺少共同祖先？）`);
+    if (!/CONFLICT/.test(conflicted)) {
+      return record('merge', false, `${ours} 与 ${theirs} 没有冲突，不需要合流 Agent`);
+    }
+    const files = [...conflicted.matchAll(/CONFLICT \([^)]*\): (?:Merge conflict in )?(.+)$/gm)].map(match => match[1].trim());
+    return record('merge', true, `${files.length || '若干'} 个冲突路径：${[...new Set(files)].slice(0, 10).join(', ') || '(见 merge-tree 输出)'}`);
+  }
+
+  // 没有 ref：看当前工作树是不是一个「有冲突的未完成合并」。
+  if (gitTry('rev-parse', '-q', '--verify', 'MERGE_HEAD') === undefined) {
+    return record('merge', false, '当前没有未完成的合并（缺少 MERGE_HEAD）；要么给两个 ref，要么先开始一次合并');
+  }
+  const unmerged = gitTry('diff', '--name-only', '--diff-filter=U');
+  if (unmerged === undefined) return record('merge', false, '读不到工作树状态');
+  const unmergedFiles = unmerged.split('\n').filter(Boolean);
+  if (!unmergedFiles.length) return record('merge', false, '这个合并里没有冲突文件；没有要合的东西');
+  // Anything else that would move is refused by the judge, including a brand-new untracked file,
+  // so the gate names it here instead of letting the agent discover it after doing the work.
+  const tracked = (gitTry('diff', '--name-only') ?? '').split('\n').filter(Boolean);
+  const untracked = (gitTry('ls-files', '--others', '--exclude-standard') ?? '').split('\n').filter(Boolean);
+  const outside = [...new Set([...tracked, ...untracked])].filter(path => !unmergedFiles.includes(path));
+  if (outside.length) {
+    return record('merge', false, `工作树里有冲突之外的改动（${outside.slice(0, 5).join(', ')}）：合流 Agent 只该动冲突文件，先收拾干净`);
+  }
+  return record('merge', true, `${unmergedFiles.length} 个冲突文件：${unmergedFiles.slice(0, 10).join(', ')}`);
+}
+
 const checks = {
   spec: () => checkSpec(),
   tickets: () => { checkSpec(); checkTickets(); },
   implement: () => { checkSpec(); checkTickets(); checkImplement(); },
   review: () => checkReview(),
+  merge: () => checkMerge(),
 };
 checks[stage]();
 
