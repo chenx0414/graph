@@ -1,4 +1,5 @@
 import { pendingRsiContinuation, releaseRsiContinuation } from './rsi-continuation.ts';
+import { consumeWakes, releaseWakes, pendingWakes, wakeForAnswer } from './wake-ledger.ts';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
@@ -355,6 +356,9 @@ export class OperationLifecycle {
       WHERE id=?`).run(now, row.id);
     releaseOperationReservation(this.store, row.id);
     releaseRsiContinuation(this.store, row.id);
+    // A wake bound to a turn that never dispatched has to become deliverable again, or the
+    // reason the master was woken is silently swallowed by an operation that never ran.
+    releaseWakes(this.store, row.id);
     if (options.resetNode) {
       this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
     }
@@ -676,8 +680,19 @@ export class OperationLifecycle {
         });
         this.store.event(taskId, 'human.rejected', { questionId, nodeId: question.node_id, reason: answer.reason ?? null });
       }
+      if (question.kind === 'human_check' && answer.type === 'acknowledge') {
+        // "The user passed the human check" has to exist as an event: without it the
+        // only trace of a passed acceptance is an answered question, and the master
+        // cannot tell a pass from a rejection by looking at the stream.
+        this.store.event(taskId, 'human.accepted', { questionId, nodeId: question.node_id });
+      }
       this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?").run(canonicalJson(answer), questionId);
       closeUserWait(this.store, taskId, question.node_id);
+      // An answered question the graph depends on is a fact the conversation's master
+      // has to act on, or the graph would sit still with nobody reading the answer.
+      wakeForAnswer(this.store, taskId, {
+        questionId, nodeId: question.node_id, kind: question.kind, answer: answer as unknown as Json,
+      });
       if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, question.node_id)) {
         const current = this.store.db.prepare(`SELECT o.state,o.result
           FROM operations o JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
@@ -1059,6 +1074,7 @@ export class OperationLifecycle {
     this.store.db.prepare(`UPDATE operations
       SET state='succeeded',worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?)
       WHERE id=?`).run(canonicalJson(result), usage ? canonicalJson(usage) : null, Date.now(), operation.id);
+    this.bindWakes(operation);
     releaseOperationReservation(this.store, operation.id);
     if (operation.instanceId && usage) {
       commitUsage(this.store, operation.instanceId, total);
@@ -1130,6 +1146,24 @@ export class OperationLifecycle {
       }
     }
     this.hooks.advance(operation.taskId);
+  }
+
+  /**
+   * Bind ready wakes to the turn that is about to act on them.
+   *
+   * Consuming at preparation time is what makes "delivered" and "acted on" the same
+   * event: a turn that never dispatches releases them again, so the master is woken
+   * by the next ready turn instead of the reason being lost.
+   */
+  private bindWakes(operation: Operation) {
+    const ready = pendingWakes(this.store, operation.taskId, operation.nodeId);
+    if (!ready.length) return;
+    consumeWakes(this.store, operation.taskId, operation.nodeId, operation.id);
+    this.store.event(operation.taskId, 'wake.delivered', {
+      operationId: operation.id,
+      kinds: ready.map(wake => wake.kind),
+      dedupeKeys: ready.map(wake => wake.dedupeKey),
+    });
   }
 }
 
