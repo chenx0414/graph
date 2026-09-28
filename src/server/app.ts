@@ -592,7 +592,6 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     return runtime.user.begin({ projectId: body.projectId, request: body.request, requestId: body.requestId });
   });
   app.get('/api/tasks/:taskId', async request => runtime.user.task((request.params as { taskId: string }).taskId).view());
-  app.get('/api/tasks/:taskId/summary', async request => runtime.user.task((request.params as { taskId: string }).taskId).summary());
   app.post('/api/tasks/:taskId/say', async request => {
     const params = request.params as { taskId: string };
     const body = request.body as { text: string; requestId: string };

@@ -2,8 +2,6 @@
  * status tones. Pure functions so the labels and unknown-usage rules are
  * testable without a browser. */
 
-import { formatTokens } from './format.ts';
-
 export interface EventRow {
   cursor: number;
   type: string;
@@ -318,7 +316,10 @@ export function summarizeUsage(nodes: UsageNode[], cost?: { unknown?: boolean; a
   };
 }
 
-export { formatTokens } from './format.ts';
+export function formatTokens(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '未知';
+  return value.toLocaleString('en-US');
+}
 
 export function usageText(summary: UsageSummary): string {
   const parts = [`已计量 ${formatTokens(summary.used)} tokens`];

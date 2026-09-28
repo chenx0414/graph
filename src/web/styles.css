@@ -1448,23 +1448,6 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   animation: stream-caret 820ms steps(2, end) infinite;
 }
 .conversation-runway { flex: 0 0 auto; min-height: 0; pointer-events: none; }
-.task-end-card {
-  margin: 12px 0 18px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--muted);
-  border-radius: 12px;
-  background: #fbfbfd;
-  padding: 11px 14px;
-}
-.task-end-card[data-outcome="delivered"] { border-left-color: #3fa66a; background: #f6fcf8; }
-.task-end-card[data-outcome="stopped"] { border-left-color: #d9a441; background: #fffaf0; }
-.task-end-card-head { display: flex; align-items: baseline; gap: 10px; }
-.task-end-card-title { font-weight: 650; flex: 1; min-width: 0; }
-.task-end-card-outcome { color: var(--muted); font-size: 13px; white-space: nowrap; }
-.task-end-card-facts { display: flex; flex-wrap: wrap; gap: 18px; margin: 8px 0 0; }
-.task-end-card-facts dt { color: var(--muted); font-size: 12px; }
-.task-end-card-facts dd { margin: 1px 0 0; font-size: 13px; }
-.task-end-card-delivery { margin-top: 8px; font-size: 13px; }
 .thread-action-card {
   margin: 14px 0 20px;
   border: 1px solid var(--border);

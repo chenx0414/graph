@@ -51,8 +51,6 @@ import { GraphCanvas } from './GraphCanvas.tsx';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream, useTargetBranch } from './shared.tsx';
 import { TranscriptRowView } from './TranscriptRows.tsx';
-import { TaskEndCard } from './TaskEndCard.tsx';
-import { taskCard } from './task-card.ts';
 import { Button, Icon, Pill, Spinner, StatusDot, toast } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
 import { useTranscriptFollow } from './use-transcript-follow.ts';
@@ -778,8 +776,6 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
   }
   const tasks = view.tasks;
   const taskQuestions = tasks.filter(task => task.openQuestions.length > 0);
-  // One card per finished task, newest last, so the transcript reads as a run of work.
-  const finishedTasks = tasks.filter(task => taskCard(task) !== null);
   const detailTask = tasks.find(task => task.id === selectedTaskId) ?? tasks[0] ?? null;
   const proposalHistory = view.proposalHistory ?? [];
   const activeProposal = selectedProposalVersion !== null && selectedProposalVersion === proposal?.version
@@ -898,7 +894,6 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
           {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} markdown={markdownEnabled(preferences)} />)}
-          {finishedTasks.map(task => <TaskEndCard key={task.id} task={task} />)}
 
           <div className="conversation-runway" style={{ height: transcriptFollow.runway }} aria-hidden="true" />
           </div>
