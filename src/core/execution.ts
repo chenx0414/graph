@@ -382,6 +382,31 @@ export class Execution {
     finally { this.pending.delete(result); }
   }
 
+  /**
+   * Whether any node is still waiting on a sibling that has already finished.
+   *
+   * `runReady()` dispatches the nodes that are ready AT THAT MOMENT, and a node whose only
+   * dependency it just completed was still `waiting` during that scan. Production hides this by
+   * re-scanning on the host's 40ms tick, so a one-shot caller -- every test, and any caller that
+   * expects the graph drained -- would otherwise see a chain silently sit at `pending` and have to
+   * guess why. Naming the condition lets such a caller fail loudly instead.
+   */
+  strandedNodes(): string[] {
+    const stranded: string[] = [];
+    for (const taskId of this.laneTasks()) {
+      const task = this.store.task(taskId);
+      if (task.phase === 'chatting' && task.paused) continue;
+      const nodes = this.store.db.prepare("SELECT id FROM nodes WHERE task_id=? AND status='pending'").all(taskId) as { id: string }[];
+      if (!nodes.length) continue;
+      const graph = loadGraph(this.store, taskId);
+      for (const node of nodes) {
+        if (!graph.plan.nodes.has(node.id)) continue;
+        if (graph.readiness(node.id) === 'ready') stranded.push(node.id);
+      }
+    }
+    return stranded;
+  }
+
   /** Dispatch newly ready work as completions land, without waiting for a slow sibling in the same batch. */
   async drive() {
     this.driveActive += 1;
