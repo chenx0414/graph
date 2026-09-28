@@ -1,3 +1,4 @@
+import { isEnvironmentFailure } from '../core/environment-failure.ts';
 import { awaitRsiReload, confirmRsiContinuation } from '../core/rsi-continuation.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -250,21 +251,6 @@ function summarizeValidation(result: RsiValidationResult): RsiValidationResult {
 function buildRelevant(paths: string[]) {
   return paths.some(path => path.startsWith('src/web/') || path.startsWith('desktop/')
     || path === 'package.json' || path === 'index.html' || path.startsWith('vite.config'));
-}
-
-/**
- * Failures that are about the network, not about the change.
- *
- * `app:build` downloads electron-builder artifacts. When that download is aborted the build fails
- * for a reason the change cannot be blamed for, and the same command has passed on a plain rerun
- * once the network recovered - the operator then pays the whole gate again for a flake. Matching
- * the download failure is what lets the retry below be scoped to the case it can actually fix.
- */
-const ENVIRONMENT_FAILURE = /aborted pending request|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|getaddrinfo|socket hang up|SSL_ERROR|ERR_SOCKET|Client network socket disconnected|TLS connection/i;
-
-/** Whether a command failed for an environment reason rather than a verdict on the code. */
-export function isEnvironmentFailure(output: string) {
-  return ENVIRONMENT_FAILURE.test(output);
 }
 
 /** Files that differ from a known commit. An unknown base means "assume it needs a build". */

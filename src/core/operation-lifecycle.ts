@@ -1,5 +1,6 @@
 import { pendingRsiContinuation, releaseRsiContinuation } from './rsi-continuation.ts';
 import { consumeWakes, releaseWakes, pendingWakes, wakeForAnswer } from './wake-ledger.ts';
+import { retryDecision, MAX_TRANSIENT_RETRIES } from './transient-retry.ts';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
@@ -140,6 +141,22 @@ export interface OperationLifecycleHooks {
 
 function operationFrom(row: OperationDbRow) {
   return JSON.parse(row.spec) as Operation;
+}
+
+/**
+ * The words a failed operation left behind, flattened for the environment-failure predicate.
+ * A failure arrives as `{error}`, as a command's `{stdout,stderr}`, or as a bare value; the
+ * predicate matches text, so every shape has to reach it rather than only the first one.
+ */
+function describeFailure(output: Json | undefined): string {
+  if (output === undefined || output === null) return '';
+  if (typeof output === 'string') return output;
+  if (typeof output !== 'object' || Array.isArray(output)) return JSON.stringify(output);
+  const record = output as Record<string, unknown>;
+  const parts = ['error', 'stderr', 'stdout', 'message', 'reason']
+    .map(key => record[key])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  return parts.length ? parts.join('\n') : JSON.stringify(output);
 }
 
 function tokenTotal(usage: TokenUsage) {
@@ -941,6 +958,34 @@ export class OperationLifecycle {
     const source = usageSourceOf(normalizedUsage);
     const estimatedRequiresReconciliation = source === 'estimated' && !options.reconciled;
     const fullAccess = isFullAccess(operation.accessPolicy);
+    // Decide a transient retry BEFORE usage accounting: a failure the environment caused is going
+    // to be re-run, so the question "was this turn's usage accountable?" is moot and must not become
+    // the thing main is woken for. Real ledger: `execution_failed` was answered `retry` 105 times,
+    // about 101 of them a blip. `stall_count` is the per-node attempt counter a manual retry already
+    // clears, so this reuses it instead of adding a column.
+    if (result.outcome === 'failed') {
+      const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
+        .get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+      if (!nodeSpec.optional && !this.store.db.prepare('SELECT id FROM questions WHERE task_id=? AND node_id=? AND status=\'open\'')
+        .get(operation.taskId, operation.nodeId)) {
+        const attempt = (this.store.db.prepare('SELECT stall_count FROM nodes WHERE task_id=? AND id=?')
+          .get(operation.taskId, operation.nodeId) as { stall_count: number } | undefined)?.stall_count ?? 0;
+        const decision = retryDecision({ output: describeFailure(result.output), attempt: attempt + 1 });
+        if (decision.retry) {
+          this.store.db.prepare('UPDATE operations SET state=\'settled\',worker_active=0,result=? WHERE id=?')
+            .run(canonicalJson(result), operation.id);
+          this.store.db.prepare("UPDATE nodes SET status='pending',output=?,stall_count=stall_count+1,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?")
+            .run(canonicalJson(result.output), operation.id, operation.taskId, operation.nodeId);
+          this.store.db.prepare("UPDATE activations SET state='pending',round=round+1 WHERE id=?").run(operation.activationId);
+          this.store.event(operation.taskId, 'node.transient_retry', {
+            nodeId: operation.nodeId, attempt: decision.attempt, reason: decision.reason, operationId: operation.id,
+          });
+          // The activation returns to pending so the scheduler dispatches the node again with
+          // nobody woken and no usage question raised.
+          return;
+        }
+      }
+    }
     const missingUsage = !fullAccess && (!normalizedUsage
       || (source === 'unknown' && !options.reconciled)
       || (estimatedRequiresReconciliation && !unknownUsageIsNonBlocking(this.store, operation.instanceId)));
@@ -1127,7 +1172,17 @@ export class OperationLifecycle {
     if (handoffData) {
       this.block(operation.taskId, operation.nodeId, 'result_noncompliant', handoffData, operation.id);
     } else if (result.outcome === 'failed' && !nodeSpec.optional) {
-      this.block(operation.taskId, operation.nodeId, 'execution_failed', { output: result.output }, operation.id);
+      // The retry decision was already made above (before usage accounting). Reaching here means
+      // the failure is main's: either a verdict, an unexplained failure, or an exhausted bound -
+      // and the problem says which, so main is not handed a bare failure.
+      const attempt = (this.store.db.prepare('SELECT stall_count FROM nodes WHERE task_id=? AND id=?')
+        .get(operation.taskId, operation.nodeId) as { stall_count: number } | undefined)?.stall_count ?? 0;
+      const decision = retryDecision({ output: describeFailure(result.output), attempt: attempt + 1 });
+      this.block(operation.taskId, operation.nodeId, 'execution_failed', {
+        output: result.output,
+        ...(decision.exhausted ? { transientRetriesExhausted: MAX_TRANSIENT_RETRIES } : {}),
+        retryVerdict: decision.reason,
+      }, operation.id);
     }
     if (!fullAccess && total > row.reserved) {
       this.block(operation.taskId, operation.nodeId, 'reservation_exceeded', {
