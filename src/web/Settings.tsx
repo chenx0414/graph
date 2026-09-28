@@ -85,7 +85,14 @@ type RawConfig = {
   access?: AccessPolicy;
 };
 type ConfigResponse = { revision: number; config: RawConfig & { path: string | null; credentials?: Record<string, RawCredential & { configured?: boolean }> } };
-type Startup = { effectiveRevision?: number };
+type Startup = {
+  effectiveRevision?: number;
+  /**
+   * The code the daemon is running. The console shows it because "committed" and "live" are
+   * different facts: a change lands in a checkout, and only a reload makes the daemon run it.
+   */
+  source?: { root: string; commit: string | null; branch: string | null; dirty: boolean | null };
+};
 type ApiError = Error & { code?: string; field?: string };
 
 const GRADES = ['low', 'medium', 'high', 'highest'];
@@ -275,6 +282,43 @@ function PreferencesPage() {
         </div>
       </Card>
     </section>
+  );
+}
+
+/**
+ * Which code the daemon is running.
+ *
+ * The distinction it draws is the one that has cost real time: "saved a config revision" and
+ * "running this commit" are different facts, and so are "committed to a checkout" and "loaded by
+ * the process". The daemon reads this once at startup, so what is shown here is what it runs, and
+ * the copy says plainly that changing source needs a reload to take effect.
+ */
+function RunningSourceCard({ source }: { source?: { root: string; commit: string | null; branch: string | null; dirty: boolean | null } | undefined }) {
+  if (!source) return null;
+  const commit = source.commit ? source.commit.slice(0, 12) : '未知';
+  return (
+    <Card
+      title="运行中的代码"
+      icon="box"
+      subtitle="守护进程启动时载入的那份源码；改动源码后必须重载才会生效"
+      testid="running-source"
+    >
+      <div className="chip-row">
+        <Pill tone={source.commit ? 'info' : 'warn'}>
+          <span>源码根：</span><span data-testid="source-root">{source.root}</span>
+        </Pill>
+        <Pill tone={source.commit ? 'info' : 'warn'}>
+          <span>提交：</span><span data-testid="source-commit">{commit}</span>
+        </Pill>
+        {source.branch && <Pill tone="info"><span>分支：</span><span data-testid="source-branch">{source.branch}</span></Pill>}
+        {source.dirty === true && <Pill tone="warn" testid="source-dirty">有未提交改动</Pill>}
+      </div>
+      {!source.commit && (
+        <p className="muted" data-testid="source-unknown">
+          这份运行代码不在 Git 检出里（打包应用或没有 git），因此没有提交号可显示。
+        </p>
+      )}
+    </Card>
   );
 }
 
@@ -924,6 +968,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
   const [effectiveRevision, setEffectiveRevision] = useState<number | null>(null);
+  const [runningSource, setRunningSource] = useState<Startup['source']>(undefined);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saveInFlight = useRef(false);
   const savePending = useRef(false);
@@ -967,7 +1012,12 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     clearTimeout(saveTimer.current);
     if (editVersion.current > 0) void persistDraft(editVersion.current);
   }, []);
-  useEffect(() => { void api<Startup>('/api/startup').then(startup => setEffectiveRevision(startup.effectiveRevision ?? null)).catch(() => undefined); }, []);
+  useEffect(() => {
+    void api<Startup>('/api/startup').then(startup => {
+      setEffectiveRevision(startup.effectiveRevision ?? null);
+      setRunningSource(startup.source);
+    }).catch(() => undefined);
+  }, []);
 
   const configurationPage = ['settings-overview', 'settings-git', 'settings-models', 'settings-advanced'].includes(active);
   if (!configurationPage) return <div className="settings-page-empty" data-testid="settings-page" data-page={active} />;
@@ -1072,6 +1122,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
             </div>
             <div className="settings-config-messages">{configurationMessages}</div>
           </Card>
+          <RunningSourceCard source={runningSource} />
           <ThemePlaceholder />
         </section>
       )}
