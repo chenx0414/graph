@@ -141,7 +141,7 @@ export function agentTools(input: {
   fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
   /** How ask_user hands a question to the session that can durably record it. */
-  onAskUser?: (question: { prompt: string; why: string }) => void;
+  onAskUser?: (question: { prompt: string; why: string; options: string[]; multiple: boolean }) => void;
   catalog?: Catalog;
   artifacts?: ArtifactToolService;
   /** Channels to other conversations: present only when this session may reach them at all. */
@@ -512,7 +512,8 @@ export function agentTools(input: {
       if (!prompt) throw new Error('A question is required');
       if (!why) throw new Error('Say what would change with the answer: a question nobody can act on is not worth the user turn');
       if (!input.onAskUser) throw new Error('This Agent session cannot ask the user');
-      input.onAskUser({ prompt: prompt.slice(0, 2_000), why: why.slice(0, 1_000) });
+      const options = Array.isArray(body.options) ? [...new Set(body.options.map(value => String(value).trim()).filter(Boolean))].slice(0, 8).map(value => value.slice(0, 300)) : [];
+      input.onAskUser({ prompt: prompt.slice(0, 2_000), why: why.slice(0, 1_000), options, multiple: body.multiple === true });
       // The turn stops here on purpose: the answer is the next turn's input, so continuing
       // would spend model requests on work the answer may invalidate.
       return { ...text(JSON.stringify({ status: 'asked', prompt })), terminate: true };

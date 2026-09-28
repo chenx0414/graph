@@ -251,10 +251,12 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     ask_user: {
-      name: 'ask_user', label: 'Ask the user', description: 'Ask the user the one question whose answer changes the plan, then end this turn and wait for it: the question becomes an open question in the console and the answer arrives in your next turn as a recorded fact. Use it when the project, the confirmed scope and the recorded decisions cannot settle the choice, and state in `why` what would change with the answer. Do not use it to confirm a draft, report progress, or ask what you can find out yourself.',
+      name: 'ask_user', label: 'Ask the user', description: 'Ask the user the one question whose answer changes the plan, then end this turn and wait for it. Write prompt and why in Markdown. When useful, offer concise options and set multiple true only when several choices can be selected together; the user can always write a custom answer. The answer arrives in your next turn as a recorded fact. Use it when the project, confirmed scope and recorded decisions cannot settle the choice.',
       parameters: Type.Object({
         prompt: Type.String(),
         why: Type.String(),
+        options: Type.Optional(Type.Array(Type.String())),
+        multiple: Type.Optional(Type.Boolean()),
         requestId: Type.String(),
       }),
       available: main && Boolean(features.supervisor?.controlTask),

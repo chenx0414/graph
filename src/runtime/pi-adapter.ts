@@ -330,7 +330,7 @@ export function createPiAdapter(options: {
         let permissionRequest: CapabilityPermissionRequest | undefined;
         // The agent's own question to the user, asked through ask_user; it turns the turn
         // into a waiting turn once the loop stops.
-        let askedQuestion: { prompt: string; why: string } | undefined;
+        let askedQuestion: { prompt: string; why: string; options: string[]; multiple: boolean } | undefined;
         let reloadReceipt: Record<string, unknown> | undefined;
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
@@ -1113,10 +1113,10 @@ export function createPiAdapter(options: {
             if (askedQuestion) {
               return {
                 outcome: 'waiting',
-                output: { question: { prompt: askedQuestion.prompt, why: askedQuestion.why } },
+                output: { question: askedQuestion },
                 question: {
                   prompt: askedQuestion.prompt,
-                  data: { requestType: 'user_decision', prompt: askedQuestion.prompt, why: askedQuestion.why },
+                  data: { requestType: 'user_decision', ...askedQuestion },
                 },
                 usage: gate.total(),
               };

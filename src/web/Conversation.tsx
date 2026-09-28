@@ -46,7 +46,7 @@ import {
   type DraftStatus,
 } from './conversation-drawer.ts';
 import './conversation-drawer.css';
-import { NODE_LABEL, TASK_LABEL, describeQuestion } from './labels.ts';
+import { NODE_LABEL, TASK_LABEL } from './labels.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useEventStream, useTargetBranch } from './shared.tsx';
@@ -873,17 +873,6 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
         </section>
       )}
 
-      {masterQuestions.length > 0 && (
-        <section className="conversation-alert" data-testid="master-questions">
-          <div className="thread-action-card" data-tone="warn" style={{ margin: 0 }}>
-            <div className="thread-card-title">主 Agent 需要你的处理</div>
-            <ul className="list" data-testid="master-questions-list">
-              {masterQuestions.map(question => <QuestionReply key={question.id} taskId={question.taskId} question={question} onDone={() => { void reload(); onChanged?.(); }} />)}
-            </ul>
-          </div>
-        </section>
-      )}
-
       {/* The chat column is the conversation: its artifacts live in the drawer, and a single
           artifact opens as its own tab. */}
       <div className="conversation-body" data-drawer={drawerOpen} data-view="chat" data-resident-panels={residentPanelIds().join(' ')}>
@@ -905,25 +894,6 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
           {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} markdown={markdownEnabled(preferences)} />)}
-
-          {taskQuestions.length > 0 && (
-            <section
-              className="conversation-question-region"
-              data-testid="conversation-questions"
-              data-resident={residentFlag('conversation-questions')}
-              aria-label="等待你确认"
-            >
-              <div className="thread-card-title">等待你确认</div>
-              {taskQuestions.map(task => (
-                <div className="conversation-question-group" key={task.id} data-task={task.id}>
-                  <div className="muted">{task.request} · {task.openQuestions.map(question => describeQuestion(question.kind)).join('、')}</div>
-                  <ul className="list" data-testid={`conversation-questions-${task.id}`} data-resident={residentFlag('conversation-questions')}>
-                    {task.openQuestions.map(question => <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => { void reload(); onChanged?.(); }} />)}
-                  </ul>
-                </div>
-              ))}
-            </section>
-          )}
 
           <div className="conversation-runway" style={{ height: transcriptFollow.runway }} aria-hidden="true" />
           </div>
@@ -978,7 +948,18 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
                 })}
               </div>
             )}
-            <ChatComposer
+            {(masterQuestions.length > 0 || taskQuestions.length > 0) ? (
+              <section className="conversation-question-composer" data-testid="conversation-questions" data-resident={residentFlag('conversation-questions')} aria-label="等待你确认">
+                <div className="thread-card-title">需要你的答复</div>
+                <ul className="list" data-testid="master-questions-list">
+                  {masterQuestions.map(question => <QuestionReply key={question.id} taskId={question.taskId} question={question} onDone={() => { void reload(); onChanged?.(); }} />)}
+                  {taskQuestions.map(task => <li key={task.id} className="conversation-question-group" data-testid={`conversation-questions-${task.id}`}>
+                    <div className="muted">{task.request}</div>
+                    <ul className="list">{task.openQuestions.map(question => <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => { void reload(); onChanged?.(); }} />)}</ul>
+                  </li>)}
+                </ul>
+              </section>
+            ) : <ChatComposer
               className="conversation-composer"
               value={text}
               onChange={setText}
@@ -1009,8 +990,8 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
                 hasInput: hasComposerInput,
                 hasSuggestion: Boolean(promptSuggestion),
               })}
-            />
-            <div className="composer-footer">
+            />}
+            {masterQuestions.length === 0 && taskQuestions.length === 0 && <div className="composer-footer">
               <span className="composer-note">
                 {busy
                   ? <span data-testid="queued-hint">{queuedMessages.length ? `${queuedMessages.length} 条消息等待处理` : '可继续输入'}</span>
@@ -1021,7 +1002,7 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
                 models={settings?.models ?? []}
                 onSelect={selectMasterModel}
               />
-            </div>
+            </div>}
           </div>
         </div>
 

@@ -55,6 +55,18 @@ test('the master tool inventory carries the two control tools and workers do not
   expect(describeAgentTools({ role: 'master' }).map(tool => tool.name)).not.toContain('control_task');
 });
 
+test('ask_user keeps bounded choices and multiple selection in its durable question', async () => {
+  const asked: { prompt: string; why: string; options: string[]; multiple: boolean }[] = [];
+  const tools = agentTools({ workspace: '/tmp', role: 'master', onAskUser: question => { asked.push(question); },
+    supervisor: { propose: async () => ({}), revise: async () => ({}), controlTask: async () => ({ ok: true }) },
+  });
+  const ask = tools.find(tool => tool.name === 'ask_user')!;
+  const execute = ask.execute as unknown as (id: string, params: unknown) => Promise<unknown>;
+  const result = await execute('ask', { prompt: '**Choose**', why: 'Changes the plan', options: ['Web', 'Web', 'App'], multiple: true, requestId: 'ask-1' });
+  expect(asked).toEqual([{ prompt: '**Choose**', why: 'Changes the plan', options: ['Web', 'App'], multiple: true }]);
+  expect(result).toMatchObject({ terminate: true });
+});
+
 test('a live operation is resolved for its node and nothing else', async () => {
   const store = await fixture();
   expect(activeOperationForNode(store, 'task', 'master')).toBeUndefined();

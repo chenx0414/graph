@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from './api.ts';
 import { describeQuestion } from './labels.ts';
+import { Markdown } from './Markdown.tsx';
 import { Button, Pill, toast } from './ui.tsx';
 
 function questionPrompt(kind: string, data: Record<string, unknown>) {
@@ -37,9 +38,16 @@ export function QuestionReply({ taskId, question, onDone }: {
   const [inputTokens, setInputTokens] = useState('0');
   const [outputTokens, setOutputTokens] = useState('0');
   const [value, setValue] = useState('');
+  const [choices, setChoices] = useState<string[]>([]);
   const [proof, setProof] = useState('');
   const [usageMode, setUsageMode] = useState<'usage' | 'reconcile'>('usage');
   const [error, setError] = useState('');
+  const decision = question.kind === 'waiting' && question.data.requestType === 'user_decision';
+  const options = decision && Array.isArray(question.data.options)
+    ? question.data.options.filter((option): option is string => typeof option === 'string' && Boolean(option.trim()))
+    : [];
+  const multiple = question.data.multiple === true;
+  const selectedAnswer = multiple ? [...choices, ...(value.trim() ? [value.trim()] : [])] : value.trim() || choices[0] || '';
   async function submit(answer: unknown) {
     try {
       await api(`/api/tasks/${taskId}/answer`, { method: 'POST', body: JSON.stringify({ questionId: question.id, answer, requestId: `ans-${question.id}-${crypto.randomUUID()}` }) });
@@ -52,19 +60,35 @@ export function QuestionReply({ taskId, question, onDone }: {
     }
   }
   return (
-    <li className="list-item" style={{ alignItems: 'flex-start', flexDirection: 'column' }}>
-      <div className="row">
+    <li className="list-item question-reply" data-testid={`question-reply-${question.id}`}>
+      <div className="question-reply-heading">
         <Pill tone="warn">{describeQuestion(question.kind, question.data)}</Pill>
-        <code className="faint">{question.kind}</code>
-        <span>{questionPrompt(question.kind, question.data)}</span>
+        {!decision && <code className="faint">{question.kind}</code>}
+        <div className="question-reply-prompt"><Markdown text={decision ? String(question.data.prompt ?? '主 Agent 需要你的一个决定。') : questionPrompt(question.kind, question.data)} /></div>
       </div>
+      {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
       <details style={{ maxWidth: '100%', margin: '4px 0' }}>
         <summary className="muted" style={{ cursor: 'pointer' }}>查看技术详情</summary>
         <pre data-testid={`question-data-${question.id}`} style={{ maxWidth: '100%', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
       </details>
       <div className="row">
         {question.kind === 'budget' && <input className="input" style={{ width: 130 }} data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
-        {question.kind === 'waiting' && <input className="input" style={{ width: 220 }} data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder={question.data.requestType === 'user_decision' ? '写下你的决定' : '外部条件已满足的说明'} />}
+        {decision && <div className="question-answer-options">
+          {options.length > 0 && <div className="question-option-list" role="group" aria-label="选择答复">
+            {options.map(option => <label className="question-option" key={option}>
+              <input type={multiple ? 'checkbox' : 'radio'} name={`question-${question.id}`} checked={choices.includes(option)} onChange={() => {
+                setChoices(current => multiple ? current.includes(option) ? current.filter(item => item !== option) : [...current, option] : [option]);
+                if (!multiple) setValue('');
+              }} />
+              <Markdown text={option} />
+            </label>)}
+          </div>}
+          <textarea className="input question-custom-answer" data-testid="waiting-value" value={value} onChange={event => {
+            setValue(event.target.value);
+            if (!multiple) setChoices([]);
+          }} placeholder={options.length ? '自定义回答…' : '写下你的决定…'} rows={2} />
+        </div>}
+        {question.kind === 'waiting' && !decision && <input className="input" style={{ width: 220 }} data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder="外部条件已满足的说明" />}
         {question.kind === 'unknown_usage' && <>
           <select className="select" style={{ width: 320 }} data-testid="usage-mode" value={usageMode} onChange={event => setUsageMode(event.target.value as 'usage' | 'reconcile')}>
             <option value="usage">补记用量（按供应商实际回复填写）</option>
@@ -86,9 +110,9 @@ export function QuestionReply({ taskId, question, onDone }: {
         </> : question.kind === 'human_check' ? <>
           <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'acknowledge' })}>确认通过</Button>
           <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'reject', ...(value.trim() ? { reason: value.trim() } : {}) })}>驳回并返工</Button>
-        </> : <Button size="sm" variant="primary" onClick={() => {
+        </> : <Button size="sm" variant="primary" disabled={decision && (multiple ? (selectedAnswer as string[]).length === 0 : !selectedAnswer)} onClick={() => {
           if (question.kind === 'budget') return void submit({ type: 'add_budget', tokens: Number(tokens) });
-          if (question.kind === 'waiting') return void submit({ type: 'respond', value });
+          if (question.kind === 'waiting') return void submit({ type: 'respond', value: decision ? selectedAnswer : value });
           if (question.kind === 'unknown_usage') {
             if (usageMode === 'reconcile') return void submit({ type: 'reconcile_usage', proof });
             return void submit({ type: 'usage', usage: { input: Number(inputTokens), output: Number(outputTokens), cacheRead: 0, cacheWrite: 0 }, proof });
@@ -96,7 +120,7 @@ export function QuestionReply({ taskId, question, onDone }: {
           if (question.kind === 'permission') return void submit({ type: 'grant', grant: question.data.grant });
           if (['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind)) return void submit({ type: 'retry' });
           return void submit({ type: 'acknowledge' });
-        }}>{['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind) ? '重试' : '答复'}</Button>}
+        }}>{decision ? '提交答复' : ['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'].includes(question.kind) ? '重试' : '答复'}</Button>}
       </div>
       {error && <p data-testid="answer-error" style={{ color: 'var(--danger)' }}>{error}</p>}
     </li>
