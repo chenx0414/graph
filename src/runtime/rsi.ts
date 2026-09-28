@@ -62,7 +62,7 @@ export interface RsiReceipt {
   files: string[];
   validation: RsiValidationResult[];
   restartRequired: boolean;
-  activation?: { state: 'saved' | 'pending_reload' | 'active'; confirmedAt?: number; generation?: number };
+  activation?: { state: 'saved' | 'pending_reload' | 'active' | 'checked_only'; confirmedAt?: number; generation?: number };
   force?: boolean;
   /** Files left uncommitted by this or an earlier failed attempt, still fixable. */
   pendingFiles?: string[];
@@ -465,7 +465,44 @@ function unavailableReport(input: RsiChangeInput, root: string | null, reason: s
   ].join('\n');
 }
 
-function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'>) {
+export interface RsiActivation {
+  state: 'saved' | 'pending_reload' | 'active' | 'checked_only';
+  /** One honest sentence for the report, so a reader need not go to the filesystem. */
+  note: string;
+}
+
+/**
+ * What this call actually did about the running daemon.
+ *
+ * HB-179: a call with no changes committed nothing yet was reported as `applied` with activation
+ * `active` and the note "该提交已是运行中的版本，无需重载" — while the source checkout did not hold the
+ * commit at all. `active` says "what you asked for is running", and a check-only call has no right to
+ * say it. The rule here is that the state is derived from THIS call's commit, never from HEAD alone.
+ */
+export function describeActivation(input: {
+  commit: string | null;
+  /** Whether THIS call created the commit. A pre-existing HEAD is not a delivery. */
+  committedNow: boolean;
+  activate: boolean;
+  /** Whether the daemon already runs `commit`. */
+  live: boolean;
+}): RsiActivation {
+  if (!input.activate) {
+    return { state: 'saved', note: input.committedNow ? '仅保存，未重载' : '未重载，且这次调用没有产生提交' };
+  }
+  if (!input.committedNow || !input.commit) {
+    // The honest case the receipt used to hide: checks ran, nothing was delivered, so claiming a
+    // running version would be a statement about work that does not exist.
+    return {
+      state: 'checked_only',
+      note: '这次调用只跑了检查，没有产生提交：源码是否需要更新，请自己核对后再判断。',
+    };
+  }
+  if (input.live) return { state: 'active', note: '这次提交已在运行中的版本里，无需重载' };
+  return { state: 'pending_reload', note: '已安排重载' };
+}
+
+function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'>, activationNote: string) {
   return [
     `### RSI 已提交：${input.title}`,
     '',
@@ -481,9 +518,7 @@ function successReport(input: RsiChangeInput, receipt: Omit<RsiReceipt, 'report'
     ...receipt.validation.map(item => `  - ${item.command}: ${item.status}`),
     ...(receipt.outputPath ? [`- 完整日志：${receipt.outputPath}`] : []),
     ...failureDigest(receipt.validation),
-    `- 激活：${receipt.restartRequired
-      ? receipt.force ? '已安排强制重载（可能中断在途 operation）' : '已安排自动重载（等待在途 operation 结束）'
-      : receipt.activation?.state === 'active' ? '该提交已是运行中的版本，无需重载' : '仅保存，未重载'}`,
+    `- 激活：${activationNote}`,
     ...(receipt.restartRequired ? ['- 当前回合已结束；等待宿主重载确认后才能报告“已生效”。'] : []),
     ...(receipt.diff ? ['', '```diff', receipt.diff, '```'] : []),
   ].join('\n');
@@ -890,6 +925,7 @@ export class RsiService {
         }, null, 2)}\n`);
       }
       const diff = committedNow && commit ? await diffFor(root, commit) : undefined;
+      const described = describeActivation({ commit, committedNow, activate: normalized.activate === true, live });
       const base: Omit<RsiReceipt, 'report'> = {
         id,
         status: 'applied',
@@ -900,12 +936,12 @@ export class RsiService {
         files: stagePaths,
         validation,
         restartRequired,
-        activation: { state: restartRequired ? 'pending_reload' : live && normalized.activate === true ? 'active' : 'saved' },
+        activation: { state: described.state },
         ...(outputPath ? { outputPath } : {}),
         ...(normalized.force ? { force: true } : {}),
         ...(diff ? { diff } : {}),
       };
-      const receipt: RsiReceipt = { ...base, report: successReport(normalized, base) };
+      const receipt: RsiReceipt = { ...base, report: successReport(normalized, base, described.note) };
       this.record(context, receipt);
       return receipt;
     } catch (error) {

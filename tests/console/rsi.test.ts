@@ -199,9 +199,13 @@ test('an activation that commits nothing new does not schedule a reload', async 
   }, { store, taskId, conversationId });
   expect(receipt.status).toBe('applied');
   expect(receipt.restartRequired).toBe(false);
-  expect(receipt.activation).toEqual({ state: 'active' });
+  // The behaviour under test is real and stays: a checks-only re-run must not interrupt the user
+  // with a reload. What changed (HB-179) is the label: this call committed nothing, so it may not
+  // claim the commit is "running" - that sentence is what once covered a checkout holding no such
+  // commit at all. The state now says the honest thing.
+  expect(receipt.activation).toEqual({ state: 'checked_only' });
   expect(existsSync(join(dir, 'rsi', 'restart.json'))).toBe(false);
-  expect(receipt.report).toContain('无需重载');
+  expect(receipt.report).toContain('没有产生提交');
 });
 
 test('an activation writes the turn receipt into the conversation before the reload', async () => {
