@@ -79,7 +79,7 @@ type RawCredential = { secretRef: string; displayName?: string; sharedLimitGroup
 type RawConfig = {
   version: 1;
   projects?: { id: string; root: string; grants?: string[] }[];
-  models?: { entries: RawModel[] };
+  models?: { entries: RawModel[]; preferences?: Partial<Record<'low' | 'medium' | 'high' | 'highest', string[]>> };
   credentials?: Record<string, RawCredential>;
   limits?: { credentials?: Record<string, number>; sharedGroups?: Record<string, number> };
   access?: AccessPolicy;
@@ -107,7 +107,7 @@ function toDraft(config: ConfigResponse['config']): RawConfig {
   return {
     version: 1,
     projects: config.projects ?? [],
-    ...(config.models ? { models: { entries: config.models.entries } } : {}),
+    ...(config.models ? { models: { ...config.models, entries: config.models.entries } } : {}),
     credentials,
     limits: config.limits ?? {},
     access: config.access ?? STANDARD_ACCESS,
@@ -156,7 +156,7 @@ function ProjectGitCard() {
         method: 'POST',
         body: JSON.stringify({ requestId: `prepare-${project.id}-${crypto.randomUUID()}`, initialize: true, createBaseline }),
       });
-      toast(result.state === 'ready' ? 'Git 准备完成' : '需要处理未提交修改', result.state === 'ready' ? 'success' : 'info');
+      toast(result.state === 'ready' ? '项目基线已就绪' : '需要处理未提交修改', result.state === 'ready' ? 'success' : 'info');
     } catch (reason) {
       toast(`准备失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
     } finally {
@@ -166,7 +166,7 @@ function ProjectGitCard() {
   };
   const label = (state: string | undefined) => state === 'ready' ? '已准备' : state === 'detected' ? '待处理' : state === 'failed' ? '失败' : '未准备';
   return (
-    <Card title="项目 Git 准备" icon="box" subtitle="正式派发前必须准备好 Git 与本地基线；普通目录由宿主初始化并建立本地版本记录">
+    <Card title="项目与本地基线" icon="box" subtitle="正式派发前必须准备好 Git 与本地基线；普通目录由宿主初始化并建立本地版本记录">
       {projects === null && <Spinner />}
       {projects?.length === 0 && <p className="muted">尚未配置项目。</p>}
       {projects?.map(project => {
@@ -250,8 +250,8 @@ function ArchivedConversations() {
 function PreferencesPage() {
   const { preferences, update } = usePreferences();
   return (
-    <section id="settings-general" className="settings-section" data-testid="settings-preferences">
-      <Card title="通用" icon="settings" subtitle="这些偏好保存在本机浏览器，不会写入配置文件，也不需要重启守护进程">
+    <section className="settings-section" data-testid="settings-preferences">
+      <Card title="偏好" icon="settings" subtitle="保存在本机浏览器，修改后立即生效">
         <div className="preference-list">
           <label className="preference-item">
             <span className="preference-copy">
@@ -359,6 +359,64 @@ function ThemePlaceholder() {
   );
 }
 
+function ConfiguredModelsPanel({ draft, credentialState, mutate, onManage, onEdit }: {
+  draft: RawConfig;
+  credentialState: Record<string, boolean>;
+  mutate: (change: (next: RawConfig) => void) => void;
+  onManage: (target: 'settings-credentials' | 'settings-models') => void;
+  onEdit: (credentialId: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const entries = draft.models?.entries ?? [];
+  const available = entries.filter(entry => credentialState[entry.credentialId] && hasRequiredModelFields(entry));
+  const defaultId = available[0]?.id;
+  const matches = entries.filter(entry => `${entry.id} ${entry.modelId ?? ''} ${entry.provider} ${draft.credentials?.[entry.credentialId]?.displayName ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()));
+  return (
+    <Card title={`已配置模型 · ${entries.length}`} icon="bolt" subtitle="所有厂商的模型集中在这里；可搜索、查看连接状态，并选择新对话的默认模型"
+      testid="configured-models"
+      actions={<div className="row"><Button size="sm" onClick={() => onManage('settings-credentials')}>连接厂商</Button><Button size="sm" onClick={() => onManage('settings-models')}>添加模型</Button></div>}>
+      {entries.length === 0 ? (
+        <div className="models-empty" data-testid="configured-models-empty">
+          <strong>还没有配置模型</strong>
+          <span>从下方选择厂商，保存凭据，再选用该厂商的模型。</span>
+        </div>
+      ) : <>
+        <div className="configured-models-summary">
+          <Pill tone={available.length ? 'success' : 'warn'}>{available.length} 个凭据就绪</Pill>
+          <span>新对话默认：<strong data-testid="configured-default-model">{available[0]?.modelId ?? available[0]?.id ?? '暂无可用模型'}</strong></span>
+          <span className="muted">切换默认只影响新对话；已有会话的模型保持原样。</span>
+        </div>
+        <label className="configured-models-search"><Icon name="search" size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索模型或厂商" aria-label="搜索已配置模型" /></label>
+        <div className="configured-models-list">
+          {matches.map(entry => {
+            const connected = Boolean(credentialState[entry.credentialId]);
+            const complete = hasRequiredModelFields(entry);
+            const isDefault = entry.id === defaultId;
+            return <div className="configured-model-item" key={entry.id} data-testid={`configured-model-${entry.id}`}>
+              <div className="configured-model-main"><strong>{entry.modelId ?? entry.id}</strong><span className="muted">{draft.credentials?.[entry.credentialId]?.displayName ?? entry.provider} · {entry.id}</span></div>
+              <div className="configured-model-meta">
+                <Pill tone={connected && complete ? 'success' : 'warn'}>{!connected ? '凭据缺失' : complete ? '凭据就绪' : '待补全'}</Pill>
+                {entry.grade && <Pill>{entry.grade}</Pill>}
+                {isDefault && <Pill tone="info">新对话默认</Pill>}
+              </div>
+              <div className="configured-model-actions">
+                {!isDefault && <Button size="sm" disabled={!connected || !complete} data-testid={`configured-default-${entry.id}`} onClick={() => mutate(next => {
+                  const list = next.models?.entries;
+                  if (!list) return;
+                  const index = list.findIndex(model => model.id === entry.id);
+                  if (index > 0) list.unshift(...list.splice(index, 1));
+                })}>设为默认</Button>}
+                <Button size="sm" data-testid={`configured-edit-${entry.id}`} onClick={() => onEdit(entry.credentialId)}>编辑</Button>
+              </div>
+            </div>;
+          })}
+          {matches.length === 0 && <p className="muted">没有匹配的模型。</p>}
+        </div>
+      </>}
+    </Card>
+  );
+}
+
 /** Sidebar sections and their fixed order (B-0). Plain data so the console
  * tests can assert navigation without rendering the page. */
 export interface SettingsSection {
@@ -367,11 +425,7 @@ export interface SettingsSection {
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
-  { id: 'settings-general', label: '通用/偏好' },
   { id: 'settings-overview', label: '常规' },
-  { id: 'settings-models', label: '模型' },
-  { id: 'settings-advanced', label: '高级设置' },
-  { id: 'settings-git', label: 'Git 准备' },
   { id: 'settings-archived', label: '归档对话' },
 ];
 
@@ -448,12 +502,14 @@ async function lookupSnapshot(providerId: string, modelId: string): Promise<Snap
  * calls. Secrets never enter this component: only the keychain/password input
  * holds a value, and it is cleared as soon as the bridge stores it.
  */
-function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }: {
+function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, focusCredentialId, onCredentialStored }: {
   draft: RawConfig;
   credentialState: Record<string, boolean>;
   bridge: DesktopBridge | undefined;
   mutate: (change: (next: RawConfig) => void) => void;
   openGuide: boolean;
+  focusCredentialId: string | null;
+  onCredentialStored: (credentialId: string) => void;
 }) {
   const [platforms, setPlatforms] = useState<PlatformPreset[]>([...FALLBACK_PLATFORMS]);
   const [platformsNote, setPlatformsNote] = useState('');
@@ -472,6 +528,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
   const [manualId, setManualId] = useState('');
   const [note, setNote] = useState('');
   const [selectedVendorId, setSelectedVendorId] = useState('');
+  useEffect(() => { if (focusCredentialId) setSelectedVendorId(focusCredentialId); }, [focusCredentialId]);
   const probedVendor = useRef<string | null>(null);
   const [concurrency, setConcurrency] = useState<ConcurrencyDraft>({ credentialLimit: '', sharedGroupId: '', sharedGroupLimit: '' });
 
@@ -640,6 +697,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide }
           return;
         }
         setKeyResolved(current => ({ ...current, [active.credentialId]: true }));
+        onCredentialStored(active.credentialId);
         setKey('');
       }
       mutate(next => {
@@ -914,7 +972,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   useEffect(() => {
     setActive(openGuide ? 'settings-models' : 'settings-overview');
   }, [openGuide]);
-  const sections = SETTINGS_SECTIONS;
+  const sections = openGuide ? [{ id: 'settings-models', label: '连接向导' }] : SETTINGS_SECTIONS;
   const visibleSections = sections.filter(section => section.label.toLowerCase().includes(search.trim().toLowerCase()));
   function go(id: string) {
     setActive(id);
@@ -933,7 +991,7 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <nav className="settings-nav" aria-label="设置导航">
           {visibleSections.map(section => (
             <button key={section.id} type="button" className="settings-nav-item" data-active={active === section.id} onClick={() => go(section.id)}>
-              <Icon name={section.id === 'settings-models' ? 'bolt' : section.id === 'settings-archived' ? 'archive' : section.id === 'settings-git' ? 'box' : 'settings'} size={16} />
+              <Icon name={section.id === 'settings-models' ? 'bolt' : section.id === 'settings-archived' ? 'archive' : 'settings'} size={16} />
               <span>{section.label}</span>
             </button>
           ))}
@@ -950,7 +1008,13 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <div className="settings-content">
           <div className="settings-root">
             <SettingsAdvanced active={active} autoSyncSubscriptions={!openGuide} openGuide={openGuide} />
-            {active === 'settings-general' && <PreferencesPage />}
+            {active === 'settings-overview' && <>
+              <PreferencesPage />
+              <details className="settings-project-status">
+                <summary>项目状态与本地基线</summary>
+                <ProjectGitCard />
+              </details>
+            </>}
             {active === 'settings-archived' && <section id="settings-archived" className="settings-section"><ArchivedConversations /></section>}
           </div>
         </div>
@@ -959,9 +1023,17 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
   );
 }
 
+/** Model management is a normal workspace tab; only first-run setup uses the takeover shell. */
+export function ModelsPage() {
+  return <div className="models-page" data-testid="models-page"><SettingsAdvanced active="settings-models" autoSyncSubscriptions openGuide={false} /></div>;
+}
+
 function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active: string; autoSyncSubscriptions: boolean; openGuide: boolean }) {
   const [draft, setDraft] = useState<RawConfig | null>(null);
   const [credentialState, setCredentialState] = useState<Record<string, boolean>>({});
+  const [focusCredentialId, setFocusCredentialId] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(openGuide);
+  const [editorTarget, setEditorTarget] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -994,6 +1066,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
       latestDraft.current = next;
       latestRevision.current = response.revision;
       setDraft(next);
+      if (!next.models?.entries.length) setEditorOpen(true);
       setCredentialState({
         ...Object.fromEntries(Object.entries(response.config.credentials ?? {}).map(([id, credential]) => [id, Boolean(credential.configured)])),
         ...Object.fromEntries(Object.keys(detected).map(id => [id, true])),
@@ -1008,6 +1081,14 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     }
   }, [autoSyncSubscriptions]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!editorOpen || !editorTarget) return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(editorTarget)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setEditorTarget(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editorOpen, editorTarget]);
   useEffect(() => () => {
     clearTimeout(saveTimer.current);
     if (editVersion.current > 0) void persistDraft(editVersion.current);
@@ -1019,7 +1100,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     }).catch(() => undefined);
   }, []);
 
-  const configurationPage = ['settings-overview', 'settings-git', 'settings-models', 'settings-advanced'].includes(active);
+  const configurationPage = active === 'settings-overview' || active === 'settings-models';
   if (!configurationPage) return <div className="settings-page-empty" data-testid="settings-page" data-page={active} />;
   if (!draft) return (
     <div className="settings-page-loading" data-testid="settings-page" data-page={active}>
@@ -1129,29 +1210,26 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
 
       {active !== 'settings-overview' && <div className="settings-inline-messages">{configurationMessages}</div>}
 
-      {active === 'settings-git' && <section id="settings-git" className="settings-section">
-      <ProjectGitCard />
-      </section>}
-
       {active === 'settings-models' && <section className="settings-feature">
-      <h2>模型连接</h2>
-      <p className="muted">两步流程：先配置厂商并验证，再在该厂商内选择模型。元数据自动填充自内置 models.dev 快照，未知项留空可手填。</p>
+      <h2>模型</h2>
+      <p className="muted">查看现有模型，或连接厂商并添加模型。配置会自动保存，对新请求立即生效。</p>
       <div className="settings-feature-stack">
-      <ProviderWorkbench draft={draft} credentialState={credentialState} bridge={bridge} mutate={mutate} openGuide={openGuide} />
+      <ConfiguredModelsPanel draft={draft} credentialState={credentialState} mutate={mutate} onManage={target => {
+        setEditorTarget(target);
+        setEditorOpen(true);
+      }} onEdit={credentialId => {
+        setFocusCredentialId(credentialId);
+        setEditorTarget('settings-models');
+        setEditorOpen(true);
+      }} />
+      <div className="model-editor-shell">
+        <button type="button" className="model-editor-toggle" data-testid="model-editor-toggle" aria-expanded={editorOpen} onClick={() => setEditorOpen(value => !value)}>
+          <Icon name="chevron" size={15} /><span>{editorOpen ? '收起厂商与模型管理' : '展开厂商与模型管理'}</span>
+        </button>
+        {editorOpen && <ProviderWorkbench draft={draft} credentialState={credentialState} bridge={bridge} mutate={mutate} openGuide={openGuide}
+          focusCredentialId={focusCredentialId} onCredentialStored={credentialId => setCredentialState(current => ({ ...current, [credentialId]: true }))} />}
       </div>
-      </section>}
-
-      {active === 'settings-advanced' && <section className="settings-feature">
-      <h2>高级设置</h2>
-      <p className="muted">这些选项面向手动调优；不改动它们时保持运行时默认值即可。</p>
-      <section id="settings-advanced" className="settings-section settings-advanced-list">
-      <p className="muted" data-testid="limits-moved-note">并发控制已并入「① 配置厂商」：每个凭据的上限与跨凭据共享组上限都在对应厂商条目内编辑，保存后立即对新请求生效。这里不再单独提供并发限制分区。</p>
-      {ADVANCED_SETTINGS.filter(setting => setting.id !== 'settings-limits').map(setting => (
-        <div key={setting.id} className="advanced-setting" data-testid={`advanced-setting-${setting.id}`}>
-          <p className="field-hint">{setting.summary}</p>
-        </div>
-      ))}
-      </section>
+      </div>
       </section>}
 
     </div>

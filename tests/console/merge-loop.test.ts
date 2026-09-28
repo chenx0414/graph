@@ -126,5 +126,7 @@ test('a merge Agent that drops one lane is refused, whichever lane collided seco
 test('with no merge Agent configured a collision still blocks, so the feature is opt-in', async () => {
   const { runtime, taskId } = await fixture('disabled', async () => { throw new Error('must not run'); }, false);
   const view = await runtime.user.task(taskId).view();
-  expect(view.nodes.find(node => node.id === 'lane2')?.status).not.toBe('succeeded');
+  // Either lane may merge first; the second, whichever it is, must stay blocked.
+  const statuses = ['lane1', 'lane2'].map(id => view.nodes.find(node => node.id === id)?.status);
+  expect(statuses.filter(status => status === 'succeeded').length).toBeLessThanOrEqual(1);
 });

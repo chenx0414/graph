@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -26,6 +26,13 @@ afterEach(async () => {
 });
 
 const SECRET = 'synth-settings-secret';
+
+async function openModelEditor(page: Page) {
+  const toggle = page.getByTestId('model-editor-toggle');
+  await toggle.waitFor();
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+  await page.getByTestId('provider-setup').waitFor();
+}
 
 async function temp(name: string) {
   const dir = await mkdtemp(join(tmpdir(), `graph-m8-settings-${name}-`));
@@ -112,9 +119,18 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.getByTestId('theme-dark').click();
   expect(await page.getByTestId('theme-dark').getAttribute('data-active')).toBe('true');
   await page.getByTestId('theme-system').click();
-  const openPage = (label: string) => page.locator('.settings-nav-item').filter({ hasText: label }).click();
+  const openPage = async (label: '模型' | '常规') => {
+    await page.evaluate(hash => { location.hash = hash; }, label === '模型' ? '#/models' : '#/settings');
+    await page.getByTestId(label === '模型' ? 'models-page' : 'settings-shell').waitFor();
+    if (label === '模型') await openModelEditor(page);
+  };
 
-  await openPage('模型');
+  await page.evaluate(() => { location.hash = '#/models'; });
+  await page.getByTestId('configured-models').waitFor();
+  expect(await page.getByTestId('model-editor-toggle').getAttribute('aria-expanded')).toBe('false');
+  await page.getByRole('button', { name: '连接厂商' }).click();
+  await page.getByTestId('provider-setup').waitFor();
+  expect(await page.evaluate(() => location.hash)).toBe('#/models');
   expect(await page.locator('#settings-credentials').isVisible()).toBe(true);
   expect(await page.locator('#settings-models').isVisible()).toBe(true);
   expect(await page.locator('#settings-preferences').count()).toBe(0);
@@ -193,6 +209,15 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   // ② The added id is persisted with its typed-in required fields, and it keeps
   // reporting an unknown price instead of a fake 0.
   await expect.poll(async () => ((await (await api.get('/api/config')).json() as { config: { models: { entries: { modelId?: string }[] } } }).config.models.entries.some(entry => entry.modelId === 'stub-manual')), { timeout: 10_000 }).toBe(true);
+  await expect.poll(() => page.locator('[data-testid^="configured-model-"]').count()).toBe(2);
+  await page.getByRole('textbox', { name: '搜索已配置模型' }).fill('stub-manual');
+  expect(await page.locator('[data-testid^="configured-model-"]').count()).toBe(1);
+  await page.getByRole('textbox', { name: '搜索已配置模型' }).fill('');
+  const configured = (await (await api.get('/api/config')).json() as { config: { models: { entries: { id: string; modelId?: string }[] } } }).config.models.entries;
+  const manualLocalId = configured.find(entry => entry.modelId === 'stub-manual')!.id;
+  await page.getByTestId(`configured-default-${manualLocalId}`).click();
+  await expect.poll(async () => (await (await api.get('/api/settings')).json() as { defaultModel: string }).defaultModel, { timeout: 10_000 }).toBe(manualLocalId);
+  expect(await page.getByTestId('configured-default-model').innerText()).toBe('stub-manual');
   const savedRevision = (await (await api.get('/api/config')).json() as { revision: number }).revision;
   await openPage('常规');
   // Hot apply: the running build is never behind the revision saved by the time the
@@ -419,9 +444,9 @@ test('switching the account in step one follows through to the model list in ste
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/settings`);
+  await page.goto(`${daemon.url}/#/models`);
   await page.getByTestId('settings-page').waitFor();
-  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+  await openModelEditor(page);
 
   // Step two lists the selected account's own models.
   await page.getByTestId('model-vendor-select').selectOption('alpha-account');
@@ -451,9 +476,9 @@ test('an account whose own key has no value is not reported as resolved', async 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/settings`);
+  await page.goto(`${daemon.url}/#/models`);
   await page.getByTestId('settings-page').waitFor();
-  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+  await openModelEditor(page);
   await page.getByTestId('provider-platform-opencode-go').click();
   await page.getByTestId('provider-credentialId').fill('opencode-go-2');
 
@@ -476,9 +501,9 @@ test('the vendor card keeps its fields readable instead of crowding them', async
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.setViewportSize({ width: 1400, height: 900 });
-  await page.goto(`${daemon.url}/#/settings`);
+  await page.goto(`${daemon.url}/#/models`);
   await page.getByTestId('settings-page').waitFor();
-  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+  await openModelEditor(page);
   await page.getByTestId('provider-platform-opencode-go').click();
 
   // Two things a person actually needs from this card, both measurable: the variable name they must export
@@ -528,11 +553,11 @@ test('a supported platform offers an editable account name', async () => {
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/settings`);
+  await page.goto(`${daemon.url}/#/models`);
   await page.getByTestId('settings-page').waitFor();
+  await openModelEditor(page);
 
-  // The vendor card lives under 模型, and only appears once a platform is chosen.
-  await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click();
+  // The vendor card lives in the independent 模型 tab.
   await page.getByTestId('provider-platform-opencode-go').click();
   const name = page.getByTestId('provider-label');
   await name.waitFor();
