@@ -261,6 +261,13 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   const answered = new Set(input.messages
     .filter(message => message.role === 'assistant' && message.kind === 'chat' && message.operationId)
     .map(message => message.operationId as string));
+  // History is paged. A page may contain activity from an older operation but
+  // omit its answer; a later operation proves the older one has ended.
+  const operationOrder = [...new Set(input.messages.map(message => message.operationId).filter((id): id is string => Boolean(id)))];
+  const currentOperation = operationOrder.at(-1);
+  for (const operationId of operationOrder) {
+    if (operationId !== currentOperation) answered.add(operationId);
+  }
 
   // Durable activity is buffered per turn, so a finished turn becomes one
   // collapsible block and a running one keeps its individual rows.
@@ -272,17 +279,21 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     if (!items.length) return;
     const ordered = sortByOrdinal(items);
     if (key && answered.has(key)) {
-      // The turn is over: the work before an interruption folds away behind one
-      // muted line, and everything from the steering message on stays visible, so
-      // the user's own message keeps the place it interrupted.
-      const cut = ordered.findIndex(item => item.kind === 'steer');
-      const folded = cut < 0 ? ordered : ordered.slice(0, cut);
-      if (folded.length) {
-        // Opening the muted line brings back the very rows the turn showed while
-        // it was running.
+      // Keep steering messages visible in place, but fold every stretch of
+      // activity around them once the operation is complete.
+      let folded: TranscriptActivityItem[] = [];
+      const flushFolded = () => {
+        if (!folded.length) return;
         rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: true });
+        folded = [];
+      };
+      for (const item of ordered) {
+        if (item.kind === 'steer') {
+          flushFolded();
+          rows.push({ kind: 'message', id: item.message.id, message: item.message });
+        } else folded.push(item);
       }
-      if (cut >= 0) rows.push(...activityRows(key, ordered.slice(cut)));
+      flushFolded();
       return;
     }
     // A running turn is not wrapped: its narration bubbles and tool groups sit

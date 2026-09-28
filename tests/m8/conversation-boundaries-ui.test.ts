@@ -5,6 +5,7 @@ import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
+import { TaskStore } from '../../src/core/store.ts';
 import { evidenceDir } from '../helpers/evidence.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -127,3 +128,50 @@ test('the conversation page surfaces master questions, live worker status, costs
   await page.waitForFunction(() => document.body.innerText.includes('queued second message'));
   await page.screenshot({ path: join(evidence, '08-message-paging.png'), fullPage: true });
 }, 120_000);
+
+test('ask_user replaces the composer with Markdown choices and submits multiple answers', async () => {
+  const root = await temp('ask-user');
+  await mkdir(join(root, 'project'), { recursive: true });
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: join(root, 'project') }],
+    actions: { master: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed' as const, output: { text: 'ready' }, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }) } },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+    autoDrive: false, webDir,
+    startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
+  const created = await server.runtime.conversations.create({ projectId: 'p', text: 'Choose a path', requestId: 'ask-create' });
+  await server.runtime.host.runReady();
+  const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  cleanup.push(() => store.close());
+  store.db.prepare("INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,status,owner) VALUES('ask-options',?,'master',NULL,'waiting',?,'open','user')")
+    .run(created.taskId, JSON.stringify({ requestType: 'user_decision', prompt: '**Choose** the work', why: 'Changes the **plan**', options: ['**Web**', 'App'], multiple: true }));
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  const card = page.getByTestId('conversation-questions');
+  await card.waitFor();
+  expect(await page.getByTestId('chat-input').count()).toBe(0);
+  expect(await card.locator('strong', { hasText: 'Choose' }).count()).toBe(1);
+  expect(await card.locator('strong', { hasText: 'plan' }).count()).toBe(1);
+  await card.getByRole('checkbox', { name: 'Web' }).check();
+  await card.getByTestId('waiting-value').fill('CLI');
+  await card.getByRole('button', { name: '提交答复' }).click();
+  await card.waitFor({ state: 'detached' });
+  const row = store.db.prepare("SELECT answer,status FROM questions WHERE id='ask-options'").get() as { answer: string; status: string };
+  expect(row.status).toBe('resolved');
+  expect(JSON.parse(row.answer)).toMatchObject({ type: 'respond', value: ['**Web**', 'CLI'] });
+
+  store.db.prepare("INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,status,owner) VALUES('ask-single',?,'master',NULL,'waiting',?,'open','user')")
+    .run(created.taskId, JSON.stringify({ requestType: 'user_decision', prompt: 'Choose one', why: 'Changes delivery', options: ['Web', 'App'], multiple: false }));
+  await page.reload();
+  const single = page.getByTestId('conversation-questions');
+  await single.waitFor();
+  await single.getByRole('radio', { name: 'App' }).check();
+  await single.getByRole('button', { name: '提交答复' }).click();
+  await single.waitFor({ state: 'detached' });
+  const singleRow = store.db.prepare("SELECT answer FROM questions WHERE id='ask-single'").get() as { answer: string };
+  expect(JSON.parse(singleRow.answer)).toMatchObject({ type: 'respond', value: 'App' });
+});
