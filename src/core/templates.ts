@@ -19,7 +19,12 @@ export function router(ids = { route: 'route', text: 'text', json: 'json', join:
   return {
     containers: [{ id: 'outer', outputs: [ids.join] }, { id: 'inner', parent: 'outer', outputs: [ids.text, ids.json] }] satisfies ContainerSpec[],
     nodes: [
-      program(ids.route, 'route', { container: 'outer', routes: ['text', 'json'] }),
+      // A router has to say HOW it chooses a case, or the graph has no branch to take. This one
+      // decides from a declared field of its own result, which is the tool-node shape.
+      program(ids.route, 'route', {
+        container: 'outer', routes: ['text', 'json'],
+        input: { route: { byField: { path: 'kind', values: { text: 'text', json: 'json' } } } },
+      }),
       agent(ids.text, 'text', { container: 'inner', when: { node: ids.route, case: 'text' } }),
       agent(ids.json, 'json', { container: 'inner', when: { node: ids.route, case: 'json' } }),
       program(ids.join, 'join', { container: 'outer', dependsOn: ['inner'] }),

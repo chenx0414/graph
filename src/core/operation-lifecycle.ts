@@ -1,6 +1,7 @@
 import { pendingRsiContinuation, releaseRsiContinuation } from './rsi-continuation.ts';
 import { consumeWakes, releaseWakes, pendingWakes, wakeForAnswer } from './wake-ledger.ts';
 import { retryDecision, MAX_TRANSIENT_RETRIES } from './transient-retry.ts';
+import { resolveRouteCase, ROUTE_SOURCE_KEY, type RouteSource } from './router-action.ts';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
@@ -137,6 +138,33 @@ export interface OperationRun {
 export interface OperationLifecycleHooks {
   advance(taskId: string): void;
   canReplayBeforeSend?(operation: Operation): boolean;
+}
+
+/**
+ * How this router was told to pick its case, read from its own declared `input.route`.
+ * A node that declares `routes` but no source is refused at settle time rather than silently
+ * routing nothing — an unroutable router is a graph defect, not a quiet no-op.
+ */
+function routeSourceOf(spec: NodeSpec): RouteSource | null {
+  const declaredInput = spec.input;
+  if (!declaredInput || typeof declaredInput !== 'object' || Array.isArray(declaredInput)) return null;
+  const route = (declaredInput as Record<string, unknown>)[ROUTE_SOURCE_KEY];
+  if (!route || typeof route !== 'object' || Array.isArray(route)) return null;
+  const record = route as Record<string, unknown>;
+  if (typeof record['declared'] === 'string') return { declared: record['declared'] };
+  const byField = record['byField'];
+  if (byField && typeof byField === 'object' && !Array.isArray(byField)) {
+    const fieldRecord = byField as Record<string, unknown>;
+    if (typeof fieldRecord['path'] === 'string' && fieldRecord['values'] && typeof fieldRecord['values'] === 'object' && !Array.isArray(fieldRecord['values'])) {
+      return { byField: { path: fieldRecord['path'], values: fieldRecord['values'] as Record<string, string> } };
+    }
+    return null;
+  }
+  const byStatus = record['byStatus'];
+  if (byStatus && typeof byStatus === 'object' && !Array.isArray(byStatus)) {
+    return { byStatus: byStatus as Record<string, string> };
+  }
+  return null;
 }
 
 function operationFrom(row: OperationDbRow) {
@@ -1051,6 +1079,24 @@ export class OperationLifecycle {
     }
     if (result.outcome === 'skipped' && !nodeSpec.optional) {
       throw new RuntimeError('invalid_result', 'Only a predeclared optional node may skip work');
+    }
+    // A router decides its branch from its own result: a tool node maps its status (or a declared
+    // field of its output), an agent node declares the case itself. Before this, nothing could ever
+    // produce a case, so `readiness` skipped EVERY branch of a real router graph.
+    if (nodeSpec.routes?.length && result.route === undefined) {
+      const source = routeSourceOf(nodeSpec);
+      if (source) {
+        const decision = resolveRouteCase({
+          nodeId: operation.nodeId, routes: nodeSpec.routes, status: result.outcome, output: result.output, source,
+        });
+        if ('case' in decision) result = { ...result, route: decision.case };
+        else throw new RuntimeError('invalid_result', decision.refusal);
+      } else if (result.outcome === 'completed') {
+        // A router that declares branches but no way to choose among them is a graph defect. A
+        // FAILED router is different: it never reached a verdict, so it routes nothing and the
+        // failure is reported as itself.
+        throw new RuntimeError('invalid_result', `节点 ${operation.nodeId} 声明了分支 ${nodeSpec.routes.join(', ')}，但没有声明如何选择（input.route）。`);
+      }
     }
     if ((nodeSpec.routes && result.outcome === 'completed' && !nodeSpec.routes.includes(result.route!))
       || (result.route !== undefined && !nodeSpec.routes?.includes(result.route))) {

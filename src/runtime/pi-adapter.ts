@@ -22,6 +22,15 @@ import { insertQuestion } from '../core/question-routing.ts';
 import { isFullAccess } from '../core/access-policy.ts';
 import { openConversationTools, type ConversationToolService } from './conversation-tools.ts';
 import { nodeInbox, peerNodes, sendNodeMessage } from './agent-messaging.ts';
+
+/**
+ * The branch an agent router declared in its submitted result, or undefined when it declared none.
+ * A non-string `route` is ignored rather than coerced: a router must say which branch in words. */
+function declaredRouteCase(submitted: Json | undefined): string | undefined {
+  if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) return undefined;
+  const value = (submitted as Record<string, unknown>)['route'];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
 import { agentTools } from './agent-tools.ts';
 import { conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
@@ -1314,10 +1323,15 @@ export function createPiAdapter(options: {
               ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
               : (submitted ?? { text });
             const resultHandoff = resultHandoffFromSubmission(submitted);
+            // An agent router declares its own branch: the case it names in the submitted result.
+            // The graph then refuses any case the node never declared, so this is a choice among
+            // announced branches, not a free ticket to invent one.
+            const declaredCase = declaredRouteCase(submitted);
             return {
               outcome: 'completed',
               output,
               ...(resultHandoff ? { resultHandoff } : {}),
+              ...(declaredCase !== undefined ? { route: declaredCase } : {}),
               usage: combineKnownUsage(gate.total(), suggestionUsage),
             };
           } finally {
