@@ -19,6 +19,7 @@ import { applyPriceSnapshot, PRICE_SNAPSHOT, PRICE_SNAPSHOT_BASE, type PriceRefr
 import { createModelScheduler } from '../runtime/model-scheduler.ts';
 import { graphApplicationRoot } from '../runtime/graph-root.ts';
 import { openRsiService, resolveRsiRoot } from '../runtime/rsi.ts';
+import { readSourceIdentity } from './source-identity.ts';
 import { widenProcessPath } from '../runtime/developer-path.ts';
 import { graphDocumentationPaths } from '../runtime/agent-docs.ts';
 import { openGraphServer } from './host.ts';
@@ -301,6 +302,9 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   await writeFile(join(stateDir, 'app-token'), `${appToken}\n`, { mode: 0o600 });
   const rsiRoot = resolveRsiRoot(options.env, process.cwd());
   const rsiService = openRsiService({ ...(rsiRoot ? { root: rsiRoot } : {}), stateDir });
+  // What this process is running. `graphApplicationRoot()` is the checkout the server module was
+  // loaded from, which is the honest answer for both a source run and a packaged app.
+  const runningSource = readSourceIdentity(graphApplicationRoot());
 
   const runtimeReady = await ensureModelRuntime();
   const presetsRoot = options.presetsDir ?? fileURLToPath(new URL('../../presets', import.meta.url));
@@ -440,6 +444,9 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       mode: options.mode, configured: live.enabled(), modelCount: live.entries().length,
       enabledModelCount: live.status().enabledModelCount, effectiveRevision: live.revision(),
       ...(Object.keys(live.status().limitAliases).length ? { limitAliases: live.status().limitAliases } : {}),
+      // Read once: the daemon loads its source at startup, so a later read would describe a
+      // checkout this process is not running.
+      source: runningSource,
     }),
     ...(configStore ? { configStore, configEnv: { ...options.env, ...importedSecrets }, configTest: testConnection } : {}),
     usage: usageService,

@@ -252,6 +252,21 @@ function buildRelevant(paths: string[]) {
     || path === 'package.json' || path === 'index.html' || path.startsWith('vite.config'));
 }
 
+/**
+ * Failures that are about the network, not about the change.
+ *
+ * `app:build` downloads electron-builder artifacts. When that download is aborted the build fails
+ * for a reason the change cannot be blamed for, and the same command has passed on a plain rerun
+ * once the network recovered - the operator then pays the whole gate again for a flake. Matching
+ * the download failure is what lets the retry below be scoped to the case it can actually fix.
+ */
+const ENVIRONMENT_FAILURE = /aborted pending request|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|getaddrinfo|socket hang up|SSL_ERROR|ERR_SOCKET|Client network socket disconnected|TLS connection/i;
+
+/** Whether a command failed for an environment reason rather than a verdict on the code. */
+export function isEnvironmentFailure(output: string) {
+  return ENVIRONMENT_FAILURE.test(output);
+}
+
 /** Files that differ from a known commit. An unknown base means "assume it needs a build". */
 function changedSince(root: string, base: string) {
   const result = git(root, ['diff', '--name-only', `${base}..HEAD`]);
@@ -273,7 +288,19 @@ async function defaultValidate(input: { root: string; checks: RsiCommand[]; acti
   results.push(check);
   if (check.status === 'failed' || !input.activate) return results;
   if (!input.needsBuild) return results;
-  results.push(await runCommand(input.root, { command: 'node', args: ['--run', 'app:build'] }, BUILD_TIMEOUT_MS));
+  const appBuild: RsiCommand = { command: 'node', args: ['--run', 'app:build'] };
+  const build = await runCommand(input.root, appBuild, BUILD_TIMEOUT_MS);
+  if (build.status === 'passed' || !isEnvironmentFailure(build.output)) {
+    results.push(build);
+    return results;
+  }
+  // Only the packaging step is re-run here: `check` already passed and its verdict cannot change
+  // because a download was interrupted. One retry, because a flake is what this fixes; a real
+  // outage still fails, and the message says which of the two happened.
+  const retry = await runCommand(input.root, appBuild, BUILD_TIMEOUT_MS);
+  results.push(retry.status === 'passed'
+    ? { ...retry, output: `app:build 第一次因网络/下载中断失败，已自动重跑一次并成功（与改动无关）。\n${retry.output}` }
+    : { ...retry, output: `app:build 连续两次失败，其中至少一次是网络/下载问题，而不是改动本身。\n--- 第一次 ---\n${build.output}\n--- 第二次 ---\n${retry.output}` });
   return results;
 }
 

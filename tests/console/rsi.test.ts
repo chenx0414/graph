@@ -93,6 +93,66 @@ test('a runtime-only change skips app:build while a web change still builds', as
   expect(seen[1]).toBe(true);
 });
 
+/**
+ * A checkout whose `app:build` fails the way a download abort does, once, then succeeds.
+ *
+ * The scripts are real files run by the real `defaultValidate`, so this exercises the retry path
+ * end to end instead of a stubbed runner.
+ */
+async function buildRepo(flaky: boolean) {
+  const root = await mkdtemp(join(tmpdir(), 'graph-rsi-build-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  shell(root, ['init', '-b', 'main']);
+  await mkdir(join(root, 'scripts'), { recursive: true });
+  await writeFile(join(root, 'scripts', 'build.mjs'), flaky
+    // Fails with electron-builder's abort wording until it has left a marker, then succeeds.
+    ? [
+      "import { existsSync, writeFileSync } from 'node:fs';",
+      "import { tmpdir } from 'node:os';",
+      "import { basename, join } from 'node:path';",
+      // The marker lives outside the checkout: a build that dirtied the repo would be refused by
+      // the RSI dirty guard for a reason that has nothing to do with what is being tested.
+      "const marker = join(tmpdir(), `graph-rsi-built-${basename(process.cwd())}`);",
+      "if (!existsSync(marker)) { writeFileSync(marker, '1'); console.error('The server aborted pending request'); process.exit(1); }",
+      '',
+    ].join('\n')
+    : ["console.error('src/web/panel.tsx(1,1): error TS1005: a real compile error');", 'process.exit(1);', ''].join('\n'));
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    name: 'graph', scripts: { check: 'true', 'app:build': 'node scripts/build.mjs' },
+  }, null, 2));
+  await mkdir(join(root, 'src', 'web'), { recursive: true });
+  await writeFile(join(root, 'src', 'web', 'panel.tsx'), 'export const Panel = 1;\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'init']);
+  return root;
+}
+
+test('a build interrupted by a download is retried once and does not fail the activation', async () => {
+  const root = await buildRepo(true);
+  const { store, taskId, conversationId, dir } = ledger();
+  // No injected validate: this runs the real `defaultValidate` and the real build script.
+  const receipt = await new RsiService({ root, stateDir: dir }).apply({
+    title: 'Web change with a flaky download', activate: true, problem: 'A download aborted mid-build.',
+    changes: [{ path: 'src/web/panel.tsx', action: 'write', content: 'export const Panel = 2;\n' }],
+  }, { store, taskId, conversationId });
+  const build = receipt.validation.find(result => result.command.includes('app:build'));
+  expect(build?.status).toBe('passed');
+  expect(receipt.status).not.toBe('checks_failed');
+  // The retry is reported, so a slow activation is explained instead of looking like a clean build.
+  expect(await readFile(receipt.outputPath!, 'utf8')).toContain('已自动重跑一次并成功');
+});
+
+test('a genuine build failure still blocks, and is not dressed up as a network flake', async () => {
+  const root = await buildRepo(false);
+  const { store, taskId, conversationId, dir } = ledger();
+  const receipt = await new RsiService({ root, stateDir: dir }).apply({
+    title: 'Web change that breaks the build', activate: true, problem: 'A real compile error.',
+    changes: [{ path: 'src/web/panel.tsx', action: 'write', content: 'export const Panel = 3;\n' }],
+  }, { store, taskId, conversationId });
+  expect(receipt.status).toBe('checks_failed');
+  expect(receipt.validation.find(result => result.command.includes('app:build'))?.status).toBe('failed');
+});
+
 // A batch written with `file` instead of `path` once cost a whole round trip: the key has exactly
 // one meaning, so the alias is accepted rather than handed back to be corrected by hand.
 test('accepts a change that names its file as `file`', async () => {

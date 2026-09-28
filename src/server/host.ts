@@ -1,4 +1,5 @@
 import { createApp } from './app.ts';
+import type { SourceIdentity } from './source-identity.ts';
 import { portIsFree, preferredConsolePort } from './console-port.ts';
 import { join } from 'node:path';
 import { openTaskRuntime } from '../core/task-runtime.ts';
@@ -18,6 +19,12 @@ export interface StartupInfo {
   effectiveRevision?: number;
   /** Credential alias to canonical scheduling identity, for limit displays. */
   limitAliases?: Record<string, string>;
+  /**
+   * The code this daemon is running, read at startup. Present so the console can answer
+   * "is the running app the code I just committed?" without anyone reading process tables:
+   * a commit lands in a checkout, and the daemon only runs it after a reload.
+   */
+  source?: SourceIdentity;
 }
 
 import type { ConfigWatchReport } from './config-watch.ts';
