@@ -17,6 +17,7 @@ afterEach(async () => { for (const close of cleanup.splice(0)) await close(); })
 // Structural replay of the September 25 provider response; no production text or credentials.
 const handoff = 'I will inspect the failing test.\n\n<analysis>\nLet me chronologically analyze this conversation.\n</analysis>\n\n<summary>\n1. Primary Request and Intent:\nFix the test.\n6. All user messages:\nprivate-history-marker\n7. Pending Tasks:\nFix it.\n8. Current Work:\nStill pending.\n9. Optional Next Step:\nRead the file.\n</summary>';
 const leakedToolCall = 'I found the likely cause. Let me inspect it.\n\n<parameter name="bash">\n<｜DSML｜ parameter name="command" string="true">grep -n unknown_usage src/core/operation-lifecycle.ts</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">300</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
+const directLeakedToolCall = 'The code looks right. Let me inspect the selector.\n\n<parameter name="bash">python3 - <<\'PY\'\nprint("inspect")\nPY</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">400</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
 
 async function replay(texts: string[], enabled = true) {
   const server = await openaiServer(texts.map(text => ({ chunks: [...text] })));
@@ -57,8 +58,11 @@ test('repeated handoffs stop explicitly instead of succeeding or retrying indefi
   expect(JSON.stringify(result.events)).not.toContain('private-history-marker');
 });
 
-test('a tool call leaked as ordinary text is corrected before it can become a final reply', async () => {
-  const result = await replay([leakedToolCall, 'I used the tool and finished the check.']);
+test.each([
+  { variant: 'nested parameter', text: leakedToolCall },
+  { variant: 'direct command', text: directLeakedToolCall },
+])('a $variant tool call leaked as text is corrected before it can become a final reply', async ({ text }) => {
+  const result = await replay([text, 'I used the tool and finished the check.']);
   expect(result.sends).toBe(2);
   expect(result.notices).toEqual(['retrying', 'recovered']);
   expect(JSON.stringify(result.events)).not.toContain('<｜DSML｜');
@@ -114,6 +118,7 @@ test.each([
   '<summary>这是用户要求的摘要。</summary>',
   'Example:\n```xml\n' + handoff + '\n```',
   'Example:\n```text\n' + leakedToolCall + '\n```',
+  'Example:\n```text\n' + directLeakedToolCall + '\n```',
 ])('ordinary summaries and quoted markup remain unchanged: %s', async text => {
   const result = await replay([text]);
   expect(result.sends).toBe(1);
