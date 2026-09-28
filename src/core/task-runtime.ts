@@ -20,6 +20,7 @@ import {
   type MessageRow,
 } from './conversation.ts';
 import { Execution } from './execution.ts';
+import { createMergeResolver } from './merge-resolver.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
@@ -302,7 +303,60 @@ export async function openTaskRuntime(options: {
   const allowedProjects = () => new Set((configuredProjects() ?? []).map(project => project.id));
   // Live getters: hot configuration changes must affect the next use without
   // reopening the runtime; static options remain for unit tests.
+  /** The one effective access policy: dispatch and the merge turn must never disagree about it. */
+  const resolvedAccessPolicy = () => resolveAccessPolicy(options.access?.() ?? standardAccessPolicy(), {
+    home: homedir(),
+    stateDir,
+    graphHome: options.catalog?.capabilityRoot ? resolve(options.catalog.capabilityRoot, '..') : resolve(homedir(), '.graph'),
+  });
   const liveEntries = () => options.live?.entries() ?? options.models?.entries ?? [];
+  /**
+   * The merge Agent's own credential binding, taken from the same live configuration the
+   * dispatcher uses, so a merge turn never borrows a key from an unrelated model.
+   */
+  const liveCredentialFor = (entry: ModelEntry) => options.live
+    ? options.live.credentialFor(entry)
+    : options.models?.credentialFor?.(entry);
+  /**
+   * Resolve a lane collision with a real merge Agent turn.
+   *
+   * The turn runs at the recipe's medium grade, under full access and with no budget cap - the
+   * user's explicit choice. It is not an operation, so it takes no execution slot and writes no
+   * budget row; that gap is recorded in the harness backlog rather than hidden.
+   */
+  const mergeResolverChannel = () => {
+    // Without the prompt library the identity cannot be resolved, and a merge turn that runs
+    // without its discipline is worse than a blocked task: it is the one place a model is asked
+    // to decide what "both sides" means.
+    const library = options.agentContext;
+    if (!library) {
+      return {
+        resolve: async () => {
+          throw new RuntimeError('invalid_config', 'The merge Agent needs the Agent context library to resolve its identity');
+        },
+      };
+    }
+    const runtime = options.live ? undefined : options.models?.modelRuntime;
+    if (!runtime) {
+      // A live-config host supplies the runtime per entry; without one the turn cannot be sent.
+      return {
+        resolve: async () => {
+          throw new RuntimeError('model_unavailable', 'The merge Agent needs a model runtime, which this runtime does not have');
+        },
+      };
+    }
+    const resolve = createMergeResolver({
+      store,
+      catalog,
+      instancesDir: join(stateDir, 'instances'),
+      directory: liveEntries,
+      modelRuntime: runtime,
+      access: () => resolvedAccessPolicy(),
+      apiKeyFor: entry => liveCredentialFor(entry)?.apiKey ?? options.models?.apiKey ?? '',
+      library,
+    });
+    return { resolve };
+  };
   const livePreferences = (): Partial<Record<ModelEntry['grade'], string[]>> | undefined =>
     options.live ? options.live.preferences() : options.models?.preferences;
   // `null` is the legitimate unlimited default: it must never fall back to a
@@ -453,11 +507,7 @@ export async function openTaskRuntime(options: {
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
       ...(options.program ? { program: options.program } : {}),
-      access: () => resolveAccessPolicy(options.access?.() ?? standardAccessPolicy(), {
-        home: homedir(),
-        stateDir,
-        graphHome: options.catalog?.capabilityRoot ? resolve(options.catalog.capabilityRoot, '..') : resolve(homedir(), '.graph'),
-      }),
+      access: () => resolvedAccessPolicy(),
       ...(options.systemContext ? {
         systemContext: {
           resources: true,
@@ -467,7 +517,13 @@ export async function openTaskRuntime(options: {
       } : {}),
       autoWake: Boolean(options.autoWake),
       ...(options.rsi ? { dispatchAllowed: () => !options.rsi!.hasPendingRestart() } : {}),
-      ...(options.mergeResolvers ? { mergeResolvers: options.mergeResolvers } : {}),
+      // A lane collision is resolved by a real merge Agent turn whenever models are configured.
+      // An explicit channel still wins: a test or a host may supply its own resolver.
+      ...(options.mergeResolvers
+        ? { mergeResolvers: options.mergeResolvers }
+        : options.models || options.live
+          ? { mergeResolvers: mergeResolverChannel() }
+          : {}),
     });
     // Tasks and conversations created while dispatch was disabled carry no
     // master node. Once a master binding exists they get one and become

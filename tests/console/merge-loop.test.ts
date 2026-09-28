@@ -102,17 +102,23 @@ test('a lane collision is resolved by one merge Agent and the integration tip ke
   expect(git(project, ['show', `${sha}:shared.ts`]).stdout).toBe('top\nfrom-lane-1\nfrom-lane-2\nbottom');
 });
 
-test('a merge Agent that drops one lane is refused, and the task blocks exactly as before', async () => {
+test('a merge Agent that drops one lane is refused, whichever lane collided second', async () => {
   const { runtime, taskId, events } = await fixture('refused', async input => {
-    // A one-sided "resolution": the other lane's work is gone. This must not be accepted.
+    // A one-sided "resolution": it keeps lane 2's text and drops whatever the other side wrote.
+    // Which lane that is depends on merge order, so the assertion below must not name one.
     await writeFile(join(input.workspace, 'shared.ts'), 'top\nfrom-lane-2\nbottom\n');
   });
-  const view = await runtime.user.task(taskId).view();
-  expect(view.nodes.find(node => node.id === 'lane2')?.status).not.toBe('succeeded');
   const refused = events('git.conflict.merge_attempt_refused');
   expect(refused).toHaveLength(1);
-  expect(refused[0]).toMatchObject({ nodeId: 'lane2' });
+  // The collision really was a collision, and the refusal names the lane that had to be merged.
+  expect(['lane1', 'lane2']).toContain(refused[0]!.nodeId);
   expect(String(refused[0]!.reason)).toMatch(/dropped/i);
+
+  // A refusal means the task does not complete: whichever lane lost its work is not succeeded.
+  const view = await runtime.user.task(taskId).view();
+  const statuses = ['lane1', 'lane2'].map(id => view.nodes.find(node => node.id === id)?.status);
+  expect(statuses.filter(status => status === 'succeeded').length).toBeLessThanOrEqual(1);
+  expect(events('git.conflict.merge_attempt_merged')).toHaveLength(0);
 });
 
 test('with no merge Agent configured a collision still blocks, so the feature is opt-in', async () => {
