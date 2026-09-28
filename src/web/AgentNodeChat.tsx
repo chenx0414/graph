@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConversationMessage } from '../core/conversation-projection.ts';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { nodeMessages } from './node-transcript.ts';
+import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { api } from './api.ts';
 import { NODE_LABEL } from './labels.ts';
 import { ErrorBox, useTaskStream, type StreamEvent } from './shared.tsx';
@@ -15,46 +16,36 @@ function mergeEntries(current: Entry[], incoming: Entry[]) {
   return [...merged.values()].sort((left, right) => left.seq - right.seq);
 }
 
-function nodeMessage(entry: Entry): ConversationMessage {
-  return {
-    id: entry.id,
-    seq: entry.seq,
-    role: entry.role,
-    kind: entry.kind,
-    text: entry.text,
-    data: entry.data,
-    state: entry.role === 'tool' && entry.kind === 'call' ? 'pending' : 'done',
-    operationId: entry.role === 'assistant'
-      ? `${entry.operationId ?? 'operation'}:${entry.id}`
-      : entry.operationId,
-    turn: 0,
-    createdAt: entry.createdAt,
-    updatedAt: entry.createdAt,
-  };
-}
-
 function eventNodeId(event: StreamEvent) {
   if (!event.data || typeof event.data !== 'object') return null;
   const nodeId = (event.data as { nodeId?: unknown }).nodeId;
   return typeof nodeId === 'string' ? nodeId : null;
 }
 
-/** Read-only Pi transcript for one graph node, using the same rows as the main chat. */
-export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false }: {
+/** Node transcript and directed messages, sharing the main chat rows and composer. */
+export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate, page = false }: {
   taskId: string | null;
   nodeId: string;
   agentName: string;
   /** Overlay use (the graph inspector) closes; a tab keeps the transcript resident. */
   onClose?: () => void;
+  onRunUpdate?: (run: NodeRun) => void;
   /** `page` drops the overlay shell and the close button: the tab is the frame. */
   page?: boolean;
 }) {
+  const [text, setText] = useState('');
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [sending, setSending] = useState(false);
+  const pendingSend = useRef<{ text: string; requestId: string } | null>(null);
   const [data, setData] = useState<NodeRun | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(Boolean(taskId));
   const [error, setError] = useState('');
   const [olderLoading, setOlderLoading] = useState(false);
   const [olderExhausted, setOlderExhausted] = useState(false);
+  const olderPending = useRef(false);
+  const historyAnchor = useRef<{ top: number; height: number } | null>(null);
+  const loadedScope = useRef<string | null>(null);
   const entriesRef = useRef<Entry[]>([]);
   const generationRef = useRef(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -74,12 +65,13 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
       const result = await api<NodeRun>(`/api/tasks/${taskId}/nodes/${nodeId}/run?${query}`);
       if (scopeRef.current !== scope || generation !== generationRef.current) return;
       setData(result);
+      onRunUpdate?.(result);
       setEntries(current => mergeEntries(current, result.entries));
       const last = result.entries[result.entries.length - 1]?.seq;
       if (last !== undefined) after = last;
       if (!result.hasNewer) return;
     }
-  }, [nodeId, scope, taskId]);
+  }, [nodeId, scope, taskId, onRunUpdate]);
 
   const refresh = useCallback(() => {
     const generation = generationRef.current;
@@ -91,23 +83,25 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
 
   useEffect(() => {
     generationRef.current += 1;
-    entriesRef.current = [];
-    setData(null);
-    setEntries([]);
+    if (loadedScope.current !== scope) {
+      loadedScope.current = scope;
+      entriesRef.current = [];
+      setData(null); setEntries([]); setText(''); setOlderExhausted(false);
+    }
     setError('');
-    setOlderExhausted(false);
     if (!taskId) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    void pump(undefined, generationRef.current)
+    void pump(entriesRef.current.at(-1)?.seq, generationRef.current)
       .catch(reason => {
         if (scopeRef.current === scope) setError(reason instanceof Error ? reason.message : String(reason));
       })
       .finally(() => {
         if (scopeRef.current === scope) setLoading(false);
       });
+    return () => { generationRef.current += 1; };
   }, [pump, scope, taskId, nodeId]);
 
   const connected = useTaskStream(taskId, event => {
@@ -121,27 +115,64 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
 
   const busy = data?.node.status === 'preparing' || data?.node.status === 'running';
   const transcriptFollow = useTranscriptFollow(scope, Boolean(busy));
-  const rows = buildTranscriptRows({
-    messages: entries.map(nodeMessage),
+  const rows = useMemo(() => buildTranscriptRows({
+    messages: nodeMessages(entries, (data?.operations ?? []) as { id: string; state: string; workerActive?: boolean }[], Boolean(busy)),
     liveTools: [],
     streaming: [],
     busy: Boolean(busy),
-  });
+  }), [entries, data?.operations, busy]);
   const hasOlder = Boolean(data && data.entryCount > entries.length && !olderExhausted && (entries[0]?.seq ?? 0) > 1);
 
+  useLayoutEffect(() => {
+    const anchor = historyAnchor.current;
+    const thread = transcriptFollow.threadRef.current;
+    if (anchor && thread) { thread.scrollTop = anchor.top + thread.scrollHeight - anchor.height; historyAnchor.current = null; }
+  }, [entries]);
+  async function send() {
+    if (!taskId || sending || !text.trim()) return;
+    const message = text.trim() + attachments.map(item => `\n\n附件 ${item.name}:\n${item.text}`).join('');
+    const request = pendingSend.current?.text === message ? pendingSend.current : { text: message, requestId: crypto.randomUUID() };
+    pendingSend.current = request;
+    setSending(true); setError('');
+    try {
+      await api(`/api/tasks/${taskId}/nodes/${nodeId}/messages`, { method: 'POST', body: JSON.stringify(request) });
+      setText(''); setAttachments([]); pendingSend.current = null;
+      refresh(); transcriptFollow.scrollToLatest('auto');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setSending(false); }
+  }
+  const composer = <div className="conversation-composer-wrap node-chat-composer">
+    {error && <ErrorBox message={error} />}
+    <ChatComposer value={text} onChange={setText} attachments={attachments} onAttachmentsChange={setAttachments}
+      allowAttachments={false} projectId={null} placeholder={busy ? `向 ${agentName} 发送补充说明…` : `向 ${agentName} 发送返工要求…`}
+      onSend={() => void send()} sendDisabled={sending || !taskId || data?.node.kind !== 'agent' || !text.trim()}
+      inputTestId="node-chat-input" sendTestId="node-chat-send" history={entries.filter(entry => entry.role === 'user' && entry.kind === 'chat').map(entry => entry.text)} />
+    <div className="composer-footer"><span className="muted">{busy ? 'Enter 发送到当前节点 · Shift + Enter 换行' : '发送将返工此节点及其后续依赖 · Shift + Enter 换行'}</span></div>
+  </div>;
+  const onScroll = () => {
+    transcriptFollow.onScroll();
+    const thread = transcriptFollow.threadRef.current;
+    if (thread && thread.scrollTop < 160 && !transcriptFollow.isPinned() && hasOlder) void loadOlder();
+  };
   async function loadOlder() {
     const first = entries[0]?.seq;
-    if (!taskId || first === undefined || olderLoading) return;
+    if (!taskId || first === undefined || olderPending.current) return;
+    olderPending.current = true;
     setOlderLoading(true);
     try {
       const generation = generationRef.current;
       const page = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${nodeId}/run?before=${first}&limit=100`);
       if (generation !== generationRef.current) return;
       if (!page.entries.length) setOlderExhausted(true);
-      else setEntries(current => mergeEntries(current, page.entries));
+      else {
+        const thread = transcriptFollow.threadRef.current;
+        if (thread) historyAnchor.current = { top: thread.scrollTop, height: thread.scrollHeight };
+        setEntries(current => mergeEntries(current, page.entries));
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
+      olderPending.current = false;
       setOlderLoading(false);
     }
   }
@@ -151,7 +182,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
   const entriesView = (
     <>
       {hasOlder && (
-        <Button size="sm" disabled={olderLoading} onClick={() => void loadOlder()}>
+        <Button size="sm" data-testid="node-load-older" disabled={olderLoading} onClick={() => void loadOlder()}>
           {olderLoading ? '载入中…' : '载入更早记录'}
         </Button>
       )}
@@ -182,12 +213,13 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
   // node's overview and its prompt) belongs to the tab, not to this transcript.
   if (page) {
     return (
+      <>
       <div className="conversation-thread-shell" data-testid="graph-agent-chat" data-page="true" aria-label={`${agentName} 节点对话`}>
         <div
           className="conversation-thread"
           data-testid="node-message-list"
           ref={transcriptFollow.threadRef}
-          onScroll={transcriptFollow.onScroll}
+          onScroll={onScroll}
           onWheel={transcriptFollow.onWheel}
           onTouchStart={transcriptFollow.onTouchStart}
         >
@@ -203,6 +235,8 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
           </button>
         )}
       </div>
+      {composer}
+      </>
     );
   }
 
@@ -223,7 +257,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
               </Pill>
               {data?.instance?.model && <span className="mono">{data.instance.model}</span>}
               {taskId && <span>{connected ? '实时' : '重连中…'}</span>}
-              <span>只读</span>
+              <span>节点对话</span>
             </div>
           </div>
           {onClose && (
@@ -236,7 +270,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
         <div
           className="conversation-thread agent-chat-thread"
           ref={transcriptFollow.threadRef}
-          onScroll={transcriptFollow.onScroll}
+          onScroll={onScroll}
           onWheel={transcriptFollow.onWheel}
           onTouchStart={transcriptFollow.onTouchStart}
         >
@@ -245,11 +279,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, page = false
           </div>
         </div>
 
-        <footer className="agent-chat-footer">
-          <Icon name="message" size={13} />
-          这里展示节点真实执行记录，不会向 Agent 插话，也不会触发工具。
-          {error && data && <span className="danger-text">{error}</span>}
-        </footer>
+        {composer}
       </section>
   );
   return (

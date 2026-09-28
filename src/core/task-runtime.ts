@@ -1,3 +1,4 @@
+import { sendNodeMessage } from './node-messages.ts';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
@@ -1392,6 +1393,12 @@ export async function openTaskRuntime(options: {
         experience: talentExperience(store, id, options),
       };
     },
+    async sendNodeMessage(taskId: string, nodeId: string, input: { text: string; requestId: string }) {
+      ensureOpen();
+      const receipt = await sendNodeMessage(store, execution, taskId, nodeId, input);
+      if (options.autoWake) execution.kick();
+      return receipt;
+    },
     /** Read-only node detail: real session entries, operations and usage. */
     nodeRun(taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {
       ensureOpen();
@@ -1504,7 +1511,7 @@ export async function openTaskRuntime(options: {
     },
     artifacts: {
       list(taskId: string, query: {
-        namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
+        artifactId?: string; namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
         includeRetired?: boolean; latestOnly?: boolean; limit?: number; cursor?: string;
       } = {}) {
         ensureOpen();
@@ -1528,14 +1535,14 @@ export async function openTaskRuntime(options: {
       },
       /** The project's own artifacts, independent of any task in it. */
       listProject(projectId: string, query: {
-        namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
+        artifactId?: string; namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
         includeRetired?: boolean; latestOnly?: boolean; limit?: number; cursor?: string;
       } = {}) {
         ensureOpen();
         return artifacts.listProject(projectId, query);
       },
       listConversation(conversationId: string, query: {
-        namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
+        artifactId?: string; namespace?: string; prefix?: string; schema?: string; tag?: string; trust?: 'unverified' | 'reviewed' | 'accepted';
         includeRetired?: boolean; latestOnly?: boolean; limit?: number;
       } = {}) {
         ensureOpen();

@@ -5,6 +5,7 @@
  * Presentation only — which tabs exist and which one is in front is decided by
  * `workspace-tabs.ts`, and the shell owns navigating to the tab that is picked.
  */
+import { useEffect, useRef } from 'react';
 import { Icon } from './ui.tsx';
 import type { WorkspaceTabs } from './workspace-tabs.ts';
 
@@ -14,8 +15,12 @@ export function TabBar({ state, onActivate, onClose, onOpenNew }: {
   onClose: (id: string) => void;
   onOpenNew: () => void;
 }) {
+  const bar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    bar.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [state.activeId]);
   return (
-    <nav className="tab-bar" data-testid="tab-bar" aria-label="打开的窗口">
+    <nav ref={bar} className="tab-bar" data-testid="tab-bar" aria-label="打开的窗口">
       <button
         type="button"
         className="tab-new"
@@ -43,7 +48,7 @@ export function TabBar({ state, onActivate, onClose, onOpenNew }: {
               className="tab-open"
               data-testid={`tab-open-${index}`}
               aria-selected={active}
-              title={tab.title}
+              title={`${tab.title}${index < 8 ? ` · ⌘${index + 1}` : ''}`}
               onClick={() => onActivate(tab.id)}
             >
               <span className="tab-title">{tab.title}</span>
@@ -53,7 +58,7 @@ export function TabBar({ state, onActivate, onClose, onOpenNew }: {
               className="tab-close"
               data-testid={`tab-close-${index}`}
               aria-label={`关闭 ${tab.title}`}
-              title={`关闭 ${tab.title}`}
+              title={`关闭 ${tab.title} · ⌘W`}
               onClick={() => onClose(tab.id)}
             >
               <Icon name="close" size={12} />

@@ -24,12 +24,14 @@ export interface NodeEntryInput {
  * also receives it so node details can update without a refetch race. */
 export function appendNodeEntry(store: TaskStore, input: NodeEntryInput) {
   const id = randomUUID();
-  store.transaction(() => {
+  const insert = () => {
     store.db.prepare(`INSERT INTO node_entries(id,task_id,node_id,instance_id,activation_id,operation_id,role,kind,text,data,created_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, input.taskId, input.nodeId, input.instanceId ?? null, input.activationId ?? null, input.operationId ?? null,
         input.role, input.kind, input.text, input.data === undefined ? null : canonicalJson(input.data), Date.now());
-  });
+  };
+  if (store.db.isTransaction) insert();
+  else store.transaction(insert);
   const row = store.db.prepare('SELECT seq FROM node_entries WHERE id=?').get(id) as { seq: number };
   store.event(input.taskId, 'node.entry', { nodeId: input.nodeId, seq: row.seq, role: input.role, kind: input.kind, text: input.text });
   return row.seq;

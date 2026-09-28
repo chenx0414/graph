@@ -208,7 +208,7 @@ describe('components genuinely use the policy module', () => {
 
   test('the drawer renders the draft pages plus the task graph, keeping their testids', () => {
     const source = read('src/web/Conversation.tsx');
-    expect(source).toContain('data-testid="drawer-mode-tabs"');
+    expect(source).not.toContain('data-testid="drawer-mode-tabs"');
     expect(source).toContain('data-testid="drawer-draft-toc"');
     // The drawer names the windows; the graph and the artifacts render as tabs of their own.
     expect(source).toContain('DRAWER_ENTRY_LINKS.map');

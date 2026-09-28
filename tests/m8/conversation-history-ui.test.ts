@@ -67,7 +67,7 @@ test('history pages to the earliest record, survives new messages, and never cro
   await mkdir(evidence, { recursive: true });
   const streamRequests: string[] = [];
   page.on('request', request => { if (request.url().includes('/events/stream')) streamRequests.push(request.url()); });
-  const userMessages = () => page.getByTestId('message-user');
+  const userMessages = () => page.getByTestId('message-user').filter({ visible: true });
   await page.goto(`${server.url}/#/conversations/${a.conversationId}`);
   await userMessages().filter({ hasText: 'A-message-500' }).waitFor();
   expect(await userMessages().count()).toBe(200);
@@ -105,6 +105,11 @@ test('history pages to the earliest record, survives new messages, and never cro
   await page.goBack();
   await userMessages().filter({ hasText: 'A-message-501' }).waitFor();
   expect(await userMessages().filter({ hasText: 'B-only-message' }).count()).toBe(0);
+  // Returning to a retained tab keeps all previously loaded history.
+  expect(await userMessages().count()).toBe(502);
+  // Reload to exercise an in-flight older-page read across a subsequent switch.
+  await page.reload();
+  await userMessages().filter({ hasText: 'A-message-501' }).waitFor();
   await page.getByTestId('load-older').click();
   await page.evaluate(id => { location.hash = `#/conversations/${id}`; }, b.conversationId);
   await userMessages().filter({ hasText: 'B-only-message' }).waitFor();
@@ -123,7 +128,7 @@ test('a burst larger than one page fills the middle records without duplicates',
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  const userMessages = () => page.getByTestId('message-user');
+  const userMessages = () => page.getByTestId('message-user').filter({ visible: true });
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   await userMessages().filter({ hasText: 'BURST-019' }).waitFor();
   expect(await userMessages().count()).toBe(20);
@@ -199,7 +204,7 @@ test('interleaved conversations page by their own records, not by global sequenc
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  const userMessages = () => page.getByTestId('message-user');
+  const userMessages = () => page.getByTestId('message-user').filter({ visible: true });
   await page.goto(`${server.url}/#/conversations/${a.conversationId}`);
   await userMessages().filter({ hasText: 'A-500' }).waitFor();
   expect(await userMessages().count()).toBe(200);

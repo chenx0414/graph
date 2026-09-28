@@ -55,6 +55,20 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   const sidebar = page.getByTestId('conversation-list');
   await expect.poll(() => sidebar.innerText()).toContain('未绑定讨论');
   expect(await sidebar.innerText()).toContain('项目内讨论');
+  for (const [heading, title] of [['项目', '项目内讨论'], ['最近', '未绑定讨论']] as const) {
+    const toggle = sidebar.getByRole('button', { name: heading, exact: true });
+    await toggle.click();
+    expect(await toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(await sidebar.getByText(title, { exact: true }).isVisible()).toBe(false);
+    await toggle.click();
+    expect(await sidebar.getByText(title, { exact: true }).isVisible()).toBe(true);
+  }
+  await page.getByTestId('new-conversation-input').focus();
+  await page.mouse.move(700, 500);
+  const add = page.getByTestId('new-conversation-recent');
+  await expect.poll(() => add.evaluate(element => getComputedStyle(element).opacity)).toBe('0');
+  await sidebar.getByRole('button', { name: '最近', exact: true }).hover();
+  await expect.poll(() => add.evaluate(element => getComputedStyle(element).opacity)).toBe('1');
   // The rail is icons only, so each entry states its own name for assistive use.
   expect(await page.locator('a[href="#/inbox"]').getAttribute('aria-label')).toBe('问题');
   expect(await page.locator('a[href="#/catalog"]').getAttribute('aria-label')).toBe('资源库');
@@ -75,7 +89,7 @@ test('the shell groups conversations by project and keeps an unbound recent sect
 
   // The new-chat page has nothing to detail, so the shell offers no drawer control for it:
   // the right drawer belongs to the conversation, which carries its own entry.
-  expect(await page.getByTestId('detail-toggle').count()).toBe(0);
+  expect(await page.getByTestId('workspace-drawer-toggle').count()).toBe(1);
   expect(await page.locator('[data-testid="detail-drawer"]').count()).toBe(0);
 });
 
@@ -163,11 +177,9 @@ test('the right drawer keeps proposal details and node inspection independent fr
   // The header carries the drawer entry and the detail toggle; the pause control
   // lives in the composer now.
   const headerDrawerBox = await page.getByTestId('drawer-entry').boundingBox();
-  const detailBox = await page.getByTestId('detail-toggle').boundingBox();
+  expect(await page.getByTestId('workspace-drawer-toggle').count()).toBe(0);
   expect(headerDrawerBox).not.toBeNull();
-  expect(detailBox).not.toBeNull();
-  expect(detailBox!.x).toBeGreaterThanOrEqual(headerDrawerBox!.x + headerDrawerBox!.width);
-  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('false');
+  expect(await page.getByTestId('drawer-entry').getAttribute('data-open')).toBe('false');
   // The chat column is the conversation itself; the window is named in the tab bar.
   expect(await page.locator('.tab[data-kind="conversation"]').first().getAttribute('data-active')).toBe('true');
   const beforeMain = await page.locator('.conversation-main').boundingBox();
@@ -180,7 +192,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   // now live.
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
-  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
+  expect(await page.getByTestId('drawer-entry').getAttribute('data-open')).toBe('true');
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('第二版增加审查');
   // The drawer is a launcher: it names the two windows a draft has and nothing more.
@@ -315,6 +327,9 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   });
   const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
   cleanup.push(async () => projection.close());
+  for (let i = 0; i < 210; i++) appendNodeEntry(projection, {
+    taskId: confirmed.taskId, nodeId: 'work', role: 'user', kind: 'chat', text: `更早节点消息 ${i}`,
+  });
   appendNodeEntry(projection, { taskId: confirmed.taskId, nodeId: 'work', role: 'user', kind: 'briefing', text: '实现 README 功能' });
   appendNodeEntry(projection, {
     taskId: confirmed.taskId,
@@ -361,17 +376,37 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   expect(await page.getByTestId('node-chat-title').innerText()).toContain('work');
   await expect.poll(() => chat.innerText()).toContain('任务说明');
   expect(await chat.innerText()).toContain('实现 README 功能');
+  await chat.getByRole('button', { name: '展开这一轮的思考与工具调用' }).click();
   expect(await chat.innerText()).toContain('读取 1 项');
   expect(await chat.innerText()).toContain('coder · 回复');
   expect(await chat.innerText()).toContain('实现完成。');
-  expect(await chat.getByRole('button', { name: '发送' }).count()).toBe(0);
+  expect(await page.getByTestId('node-chat-input').isVisible()).toBe(true);
   await chat.getByRole('button', { name: '展开工具活动' }).click();
   expect(await chat.innerText()).toContain('README.md');
+  const messages = page.getByTestId('node-message-list');
+  expect(await chat.getByText('更早节点消息 0', { exact: true }).count()).toBe(0);
+  await expect.poll(() => messages.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  await messages.evaluate(element => {
+    element.addEventListener('wheel', () => element.setAttribute('data-wheeled', 'yes'));
+  });
+  await messages.hover();
+  await page.mouse.wheel(0, -100000);
+  try { await chat.getByText('更早节点消息 0', { exact: true }).waitFor({ timeout: 5000 }); }
+  catch (error) {
+    console.log('NODE SCROLL', await messages.evaluate(element => {
+      const b = element.getBoundingClientRect();
+      return { top: element.scrollTop, height: element.scrollHeight, client: element.clientHeight, wheel: element.getAttribute('data-wheeled'),
+        target: document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.outerHTML.slice(0, 500),
+        older: element.querySelector('[data-testid="node-load-older"]')?.textContent };
+    }));
+    await page.screenshot({ path: '/tmp/node-scroll-failure.png' });
+    throw error;
+  }
   // A window closes from the tab bar, not from inside the transcript.
   expect(await chat.getByRole('button', { name: '关闭节点对话' }).count()).toBe(0);
   // The operation ledger lives nowhere in this window any more.
   expect(await page.getByTestId('node-operations').count()).toBe(0);
-});
+}, 60_000);
 
 test('the task graph page keeps the permanent four-state legend', async () => {
   const root = await temp('task-graph-legend');
@@ -467,7 +502,7 @@ test('the right drawer toggle stays available and opens an empty state', async (
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  const toggle = page.getByTestId('detail-toggle');
+  const toggle = page.getByTestId('drawer-entry');
   await toggle.waitFor();
   expect(await toggle.getAttribute('data-open')).toBe('false');
 
@@ -703,7 +738,7 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
-  expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
+  await expect.poll(() => page.getByTestId('telemetry-model').innerText()).toContain('local');
   expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('思考 off');
 });
 
@@ -1057,7 +1092,7 @@ test('the composer model control switches model and thinking as one persisted se
   await expect.poll(() => selections.length).toBe(2);
   expect(selections[1]).toMatchObject({ model: 'fast', thinkingLevel: 'off' });
   await page.getByTestId('model-menu').waitFor();
-  await page.getByTestId('conversation-title').click();
+  await page.getByTestId('tab-open-0').click();
   await page.getByTestId('model-menu').waitFor({ state: 'detached' });
 });
 
@@ -1610,7 +1645,7 @@ test('the new-chat composer switches model and thinking before the conversation 
   await control.waitFor();
   // The pre-creation composer shows the daemon default and its thinking level,
   // written in the model's own vocabulary (no translation).
-  expect(await page.getByTestId('telemetry-model').innerText()).toContain('local');
+  await expect.poll(() => page.getByTestId('telemetry-model').innerText()).toContain('local');
   expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('思考 low');
   await control.click();
   const fastOption = page.getByTestId('model-option-fast');
@@ -1707,8 +1742,8 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  await page.getByTestId('agent-context-bar').waitFor();
-  expect(await page.getByTestId('agent-context-bar').innerText()).toContain('Agent 上下文');
+  await page.getByTestId('agent-context-open').waitFor();
+  expect(await page.getByTestId('agent-context-bar').count()).toBe(0);
 
   await page.getByTestId('agent-context-open').click();
   await page.getByTestId('agent-context-drawer').waitFor();
@@ -1717,7 +1752,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   const sentPanel = await page.getByTestId('agent-context-sent').innerText();
   expect(sentPanel).toContain('实际发出');
   expect(sentPanel).toContain('本次会话尚未记录到已发出的请求');
-  expect(sentPanel).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
+  await expect.poll(() => page.getByTestId('agent-context-sent').innerText()).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
   expect(await page.locator('[data-testid="agent-context-preview"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-context-preview-markdown"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
@@ -1864,7 +1899,7 @@ test('the sent tab shows the tool declarations one request carried, with their c
   }));
 
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  await page.getByTestId('agent-context-bar').waitFor();
+  await page.getByTestId('agent-context-open').waitFor();
   await page.getByTestId('agent-context-open').click();
   await page.getByTestId('agent-context-sent-tools').waitFor();
   const block = await page.getByTestId('agent-context-sent-tools').innerText();

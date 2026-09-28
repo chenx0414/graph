@@ -260,6 +260,8 @@ export function useTranscriptFollow(key: string | null, active = false) {
     threadRef,
     contentRef,
     pinned,
+    // Scroll handlers need the intent from this event, before React renders it.
+    isPinned: () => pinnedRef.current,
     showJump,
     runway,
     onScroll,

@@ -263,7 +263,24 @@ export class GitIntegration {
     });
   }
 
+  /** Completed tasks release scratch checkouts but retain their integration branch.
+   * Rework restores that exact tip before admitting any worker or check. */
+  private ensureIntegrationWorkspace(taskId: string) {
+    const task = this.store.task(taskId);
+    if (!task.integration_branch || !['running', 'queued'].includes(task.phase)) return;
+    if (this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${taskId}`)) return;
+    const repo = this.repoRoot(taskId);
+    if (!repo) return;
+    const path = join(this.stateDir, 'worktrees', taskWorktreeDirName(task.request, taskId), 'integration');
+    const tip = task.integration_sha ?? revParse(repo, task.integration_branch);
+    if (!tip) throw new RuntimeError('invalid_state', 'Task integration commit is unavailable');
+    ensureWorktree(repo, path, task.integration_branch, tip);
+    this.store.db.prepare('INSERT INTO worktrees VALUES(?,?,?,?,?)')
+      .run(`integration:${taskId}`, taskId, 'integration', path, task.integration_branch);
+  }
+
   workspace(taskId: string, instanceId: string | null, nodeId: string, kind: NodeSpec['kind'], action?: NodeSpec['action']) {
+    this.ensureIntegrationWorkspace(taskId);
     const task = this.store.task(taskId);
     if (!task.integration_branch) return;
     const repo = this.repoRoot(taskId);
@@ -404,6 +421,7 @@ export class GitIntegration {
     const task = this.store.task(taskId);
     if (!task.target_branch || !['running', 'queued'].includes(task.phase)) return;
     if (!task.integration_branch) this.prepareTask(taskId, task.target_branch);
+    this.ensureIntegrationWorkspace(taskId);
     const repo = this.repoRoot(taskId);
     if (!repo) return;
     const integration = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${taskId}`) as { path: string } | undefined;

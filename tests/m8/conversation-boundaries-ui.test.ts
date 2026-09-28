@@ -94,7 +94,7 @@ test('the conversation page surfaces master questions, live worker status, costs
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor();
-  await page.getByTestId('drawer-mode-tasks').click();
+  expect(await page.getByTestId('drawer-mode-tabs').count()).toBe(0);
   await page.getByTestId(`task-graph-tab-${confirmed.taskId}`).click();
   await page.locator(workerStatus).waitFor();
   // Neither the draft card nor the task overview appears in the chat thread any

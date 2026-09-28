@@ -649,6 +649,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       }
     } finally { request.raw.off('close', abort); await watch.return?.(); reply.raw.end(); }
   });
+  app.post('/api/tasks/:taskId/nodes/:nodeId/messages', async request => {
+    const { taskId, nodeId } = request.params as { taskId: string; nodeId: string };
+    const body = request.body as { text: string; requestId: string };
+    return runtime.sendNodeMessage(taskId, nodeId, body);
+  });
   app.get('/api/tasks/:taskId/nodes/:nodeId/run', async request => {
     const params = request.params as { taskId: string; nodeId: string };
     const query = request.query as { after?: string; before?: string; limit?: string };
@@ -687,6 +692,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const { taskId } = request.params as { taskId: string };
     const query = request.query as Record<string, string | undefined>;
     return runtime.artifacts.list(taskId, {
+      ...(query.artifactId ? { artifactId: query.artifactId } : {}),
       ...(query.namespace ? { namespace: query.namespace } : {}),
       ...(query.prefix ? { prefix: query.prefix } : {}),
       ...(query.schema ? { schema: query.schema } : {}),

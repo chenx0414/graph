@@ -160,3 +160,45 @@ test('the drawer toggle sits in the workspace bar on every window, and outside a
   await drawer.waitFor();
   expect(await laterToggle.getAttribute('data-open')).toBe('true');
 }, 60_000);
+
+test('switching into a conversation does not replay a page entrance animation or duplicate context loading', async () => {
+  const { server, page } = await harness();
+  const conversation = await server.runtime.conversations.create({ text: '即时切换', requestId: 'fast-tabs' });
+  let contextRequests = 0;
+  page.on('request', request => { if (request.url().includes('/api/agent-context?')) contextRequests++; });
+  await page.goto(`${server.url}/#/conversations/${conversation.conversationId}`);
+  await page.getByTestId('chat-input').waitFor();
+  const duration = await page.getByTestId('conversation').evaluate(element => getComputedStyle(element).animationDuration);
+  expect(duration).toBe('0s');
+  expect(contextRequests).toBe(1);
+});
+
+test('workspace shortcuts retain conversation DOM and drafts, open context in a tab, and close the last tab', async () => {
+  const { server, page } = await harness();
+  const conversation = await server.runtime.conversations.create({ text: '快捷键测试', requestId: 'keyboard-tabs' });
+  await page.goto(`${server.url}/#/conversations/${conversation.conversationId}`);
+  const input = page.getByTestId('chat-input');
+  await input.fill('保留这份草稿');
+  await page.getByTestId('conversation').evaluate(element => { element.setAttribute('data-retained', 'yes'); });
+  expect(await page.locator('.conversation-header, .agent-context-bar').count()).toBe(0);
+  expect(await page.getByTestId('rail-new').count()).toBe(0);
+  expect(await page.locator('.sidebar-label').filter({ hasText: '最近' }).getByTestId('new-conversation-recent').count()).toBe(1);
+  await page.getByTestId('agent-context-open').click();
+  await page.getByTestId('agent-context-drawer').waitFor();
+  await expect.poll(async () => (await tabs(page)).map(tab => tab.kind)).toEqual(['conversation', 'context']);
+  await page.keyboard.press('Meta+1');
+  await input.waitFor();
+  expect(await input.innerText()).toBe('保留这份草稿');
+  expect(await page.getByTestId('conversation').getAttribute('data-retained')).toBe('yes');
+  await input.focus();
+  await page.keyboard.press('Meta+9');
+  await expect.poll(async () => (await tabs(page))[1]?.active).toBe(true);
+  await page.keyboard.press('Meta+w');
+  await expect.poll(async () => (await tabs(page)).map(tab => tab.kind)).toEqual(['conversation']);
+  await input.waitFor();
+  await input.focus();
+  await page.keyboard.press('Meta+w');
+  await page.getByTestId('new-conversation-input').waitFor();
+  expect(await tabs(page)).toEqual([]);
+  await page.screenshot({ path: '/tmp/graph-tabs-new.png' });
+});

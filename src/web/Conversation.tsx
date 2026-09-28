@@ -1,7 +1,8 @@
+import { createPortal } from 'react-dom';
 import { WindowDrawer } from './WindowDrawer.tsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
-import { AgentContextBar, type AgentContextView } from './AgentContext.tsx';
+import { type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
 import type { ArtifactRecord } from '../core/artifact-workspace.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
@@ -39,7 +40,6 @@ import {
   isResidentPanel,
   residentPanelIds,
   resolveDrawerSection,
-  splitTasksByLifecycle,
   type ConversationDrawerPage,
   type ConversationDrawerSection,
   type DraftStatus,
@@ -451,12 +451,10 @@ export function ConversationGraphBoard({
   );
 }
 
-export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, onSidebarToggle, drawerOpen = defaultDrawerOpen(), onDrawerOpenChange }: {
+export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaultDrawerOpen(), onDrawerOpenChange }: {
   id: string;
   settings: Settings | null;
   onChanged?: () => void;
-  sidebarCollapsed: boolean;
-  onSidebarToggle: () => void;
   drawerOpen?: boolean;
   onDrawerOpenChange: (open: boolean) => void;
 }) {
@@ -535,8 +533,9 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
       current: drawerSection,
       selectedTaskId,
       taskIds: view.tasks.map(task => task.id),
-      hasProposal: Boolean(view.proposal),
+      hasProposal: Boolean(view.proposal && !view.accepted.some(item => item.proposalVersion === view.proposal!.version)),
     });
+    resolved.section = view.proposal && !view.accepted.some(item => item.proposalVersion === view.proposal!.version) ? 'draft' : 'task';
     if (resolved.section !== drawerSection) setDrawerSection(resolved.section);
     if (resolved.taskId !== selectedTaskId) setSelectedTaskId(resolved.taskId);
   }, [view, drawerOpen, drawerSection, selectedTaskId]);
@@ -780,9 +779,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   }
   const tasks = view.tasks;
   const taskQuestions = tasks.filter(task => task.openQuestions.length > 0);
-  const detailTask = drawerSection === 'task'
-    ? tasks.find(task => task.id === selectedTaskId) ?? tasks[0] ?? null
-    : null;
+  const detailTask = tasks.find(task => task.id === selectedTaskId) ?? tasks[0] ?? null;
   const proposalHistory = view.proposalHistory ?? [];
   const activeProposal = selectedProposalVersion !== null && selectedProposalVersion === proposal?.version
     ? proposal
@@ -797,14 +794,6 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         ? 'accepted'
         : 'pending';
   const confirmableForActive = Boolean(activeProposal && proposal && activeProposal.version === proposal.version && confirmable);
-  const drawerTitle = drawerSection === 'task'
-    ? detailTask?.request ?? '任务'
-    : activeProposal
-      ? `草稿 v${activeProposal.version}`
-      : activeProposalSummary ? `草稿 v${activeProposalSummary.version}` : '草稿';
-  // What the drawer keeps in view: the pending draft and the running tasks; finished work is
-  // tucked into a disclosure instead of crowding the list.
-  const taskLifecycle = splitTasksByLifecycle(tasks);
   const hasDrawerContent = drawerSection === 'draft' ? Boolean(activeProposal) : Boolean(detailTask);
   const activeProposalVersion = selectedProposalVersion ?? activeProposal?.version ?? null;
   const graphRuntimeTaskId = activeProposalVersion === null
@@ -821,7 +810,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   /** The header entry: one click opens the drawer on the draft, or on the first
    * task when there is no draft to show. */
   function openDrawerRoot() {
-    if (proposal || activeProposal) {
+    if (proposal && !acceptedVersions.has(proposal.version)) {
       setDrawerSection('draft');
     } else {
       // No draft to show: the drawer opens on the task section, which always has something to
@@ -842,17 +831,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
   const deferredInitPanelIds = drawerInitPanelIds();
   return (
     <section className="conversation-page" data-testid="conversation">
-      <header className="conversation-header">
-        <button
-          type="button"
-          className="icon-button drawer-toggle"
-          data-testid="sidebar-toggle"
-          onClick={onSidebarToggle}
-          title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-          aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-        >
-          <Icon name="panel-left" size={16} />
-        </button>
+      {document.getElementById('conversation-toolbar') && createPortal(<div className="conversation-toolbar-content">
         <div className="conversation-heading">
           <h1 data-testid="conversation-title">{view.title}</h1>
           <div className="conversation-meta" title={`已计量 ${formatTokens(view.usage.used)} tokens · ${costText(view.cost)}`}>
@@ -872,34 +851,21 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
             data-open={drawerOpen}
             data-draft-status={draftStatus}
             data-task-count={tasks.length}
-            onClick={openDrawerRoot}
+            onClick={() => drawerOpen ? onDrawerOpenChange(false) : openDrawerRoot()}
             title={drawerEntryAriaLabel(entryState)}
             aria-label={drawerEntryAriaLabel(entryState)}
             aria-expanded={drawerOpen}
             aria-controls="conversation-detail-drawer"
           >
             <Icon name="panel-right" size={15} />
-            <span className="drawer-entry-label" data-testid="drawer-entry-label">{proposal ? `草稿 v${proposal.version} · ` : ''}任务 {view.tasks.length}</span>
+            <span className="drawer-entry-label" data-testid="drawer-entry-label">{proposal && !acceptedVersions.has(proposal.version) ? `草稿 v${proposal.version}` : `任务 ${view.tasks.length}`}</span>
             {(draftStatus === 'pending' || draftStatus === 'stale') && <span className="drawer-entry-dot" data-tone={draftStatus === 'stale' ? 'warn' : 'accent'} aria-hidden="true" />}
           </button>
           {/* The pause/resume control lives on the composer's primary button
               (same action, same flag); the header no longer repeats it. */}
-          <button
-            type="button"
-            className="icon-button drawer-toggle detail-toggle"
-            data-testid="detail-toggle"
-            data-open={drawerOpen}
-            onClick={() => onDrawerOpenChange(!drawerOpen)}
-            title={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-            aria-label={drawerOpen ? '收起右侧抽屉' : '展开右侧抽屉'}
-            aria-expanded={drawerOpen}
-          >
-            <Icon name="panel-right" size={16} />
-          </button>
-        </div>
-      </header>
 
-      <AgentContextBar conversationId={id} />
+        </div>
+      </div>, document.getElementById('conversation-toolbar')!)}
 
       {paused && (
         <section className="conversation-alert" data-testid="conversation-paused-notice">
@@ -1076,37 +1042,11 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
         >
           <div className="drawer-inner">
             <div className="drawer-head">
-              <button className="icon-button" aria-label="关闭详情" onClick={() => onDrawerOpenChange(false)}><Icon name="close" size={16} /></button>
+              <button className="icon-button" aria-label="关闭详情" onClick={() => onDrawerOpenChange(false)}><Icon name="panel-right" size={16} /></button>
               <div className="grow">
-                <div className="drawer-eyebrow">{drawerSection === 'draft' ? '草稿详情' : '任务导航'}</div>
-                <h2>{drawerTitle}</h2>
+                <h2>{drawerSection === 'draft' ? `草稿 v${proposal?.version ?? ""}` : `任务 · ${tasks.length}`}</h2>
               </div>
             </div>
-
-            {drawerOpen && (
-              <nav className="drawer-mode-tabs" data-testid="drawer-mode-tabs" aria-label="抽屉内容">
-                <button
-                  type="button"
-                  className="drawer-mode-tab"
-                  data-testid="drawer-mode-draft"
-                  data-active={drawerSection === 'draft'}
-                  aria-selected={drawerSection === 'draft'}
-                  onClick={() => setDrawerSection('draft')}
-                >
-                  {proposal ? `草稿 v${proposal.version} · ${draftStatusLabel(draftStatus)}` : '草稿'}
-                </button>
-                <button
-                  type="button"
-                  className="drawer-mode-tab"
-                  data-testid="drawer-mode-tasks"
-                  data-active={drawerSection === 'task'}
-                  aria-selected={drawerSection === 'task'}
-                  onClick={() => { setDrawerSection('task'); if (!selectedTaskId && tasks[0]) setSelectedTaskId(tasks[0].id); }}
-                >
-                  任务 {tasks.length}
-                </button>
-              </nav>
-            )}
 
             {drawerOpen && !view.projectId && deferredInitPanelIds.includes('bind-project') && (
               <section className="drawer-section drawer-bind-card" data-testid="bind-project" data-panel="bind-project">
@@ -1175,8 +1115,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
               <div className="drawer-loading"><Spinner label="正在加载草稿…" /></div>
             )}
 
-            {drawerOpen && drawerSection === 'task' && (
-              <section className="drawer-section" data-testid="conversation-tasks">
+            {drawerOpen && (
+              <section className="drawer-section drawer-all-tasks" data-testid="conversation-tasks">
                 <div className="drawer-section-head">
                   <h3>任务导航</h3>
                   <span>{tasks.length} 个任务</span>
@@ -1189,8 +1129,8 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                 )}
                 {tasks.length > 0 && (
                   <>
-                  <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="待确认与进行中的任务">
-                    {taskLifecycle.active.map(task => (
+                  <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="全部任务">
+                    {tasks.map(task => (
                       <button
                         key={task.id}
                         type="button"
@@ -1204,29 +1144,7 @@ export function ConversationPanel({ id, settings, onChanged, sidebarCollapsed, o
                         <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
                       </button>
                     ))}
-                    {!taskLifecycle.active.length && <p className="muted" data-testid="no-active-tasks">没有待确认或正在跑的任务。</p>}
                   </nav>
-                  {taskLifecycle.ended.length > 0 && (
-                    <details className="drawer-task-ended" data-testid="drawer-task-ended">
-                      <summary data-testid="drawer-task-ended-summary">已收纳 {taskLifecycle.ended.length} 个已完成/已终止的任务</summary>
-                      <nav className="drawer-task-nav" aria-label="已结束的任务">
-                        {taskLifecycle.ended.map(task => (
-                          <button
-                            key={task.id}
-                            type="button"
-                            className="drawer-task-nav-item"
-                            data-testid={`conversation-task-${task.id}`}
-                            data-active={task.id === detailTask?.id}
-                            aria-pressed={task.id === detailTask?.id}
-                            onClick={() => setSelectedTaskId(task.id)}
-                          >
-                            <span className="grow truncate">{task.request}</span>
-                            <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
-                          </button>
-                        ))}
-                      </nav>
-                    </details>
-                  )}
                   </>
                 )}
                 {(detailTask || !tasks.length) && (

@@ -131,3 +131,11 @@ describe('titles from loaded data', () => {
     expect(titled.tabs.map(tab => tab.title)).toEqual(['对话', '用量']);
   });
 });
+
+test('tabs retain project and exact version addresses and context has its own identity', () => {
+  expect(tabForPath('/artifacts?project=beta')?.hash).toBe('#/artifacts?project=beta');
+  expect(tabForPath('/tasks/t/artifacts/a?v=2')?.hash).toBe('#/tasks/t/artifacts/a?v=2');
+  expect(tabForPath('/conversations/c/graph?v=3')?.hash).toBe('#/conversations/c/graph?v=3');
+  expect(ids(visit('/conversations/c', '/conversations/c/context'))).toEqual(['conversation:c', 'context:c']);
+  expect(activeTab(visit('/conversations/c', '/'))).toBeNull();
+});

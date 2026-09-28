@@ -17,9 +17,9 @@ import {
   type WorkspaceTabs,
 } from './workspace-tabs.ts';
 import { useUsageRefresh } from './usage-refresh.ts';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Activity, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
-import type { AgentContextView } from './AgentContext.tsx';
+import { AgentContextPage, type AgentContextView } from './AgentContext.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { attachmentPayload } from './attachments.ts';
 import { ComposerTelemetry, type ComposerTelemetryView } from './ComposerTelemetry.tsx';
@@ -178,17 +178,18 @@ export function App() {
   }, [sidebarCollapsed]);
   useEffect(() => { setDetailOpen(false); }, [path]);
 
-  const [pathname, query = ''] = path.split('?');
-  const queryParams = new URLSearchParams(query);
+  const pathname = path.split('?')[0];
   const questionTotal = openQuestionTotal(tasks);
-  // The drawer is a launcher everywhere: outside a conversation it lists the tasks the user can
-  // open, split the same way the conversation drawer splits them.
   // The drawer is a launcher everywhere: outside a conversation it lists the tasks the user can
   // open, split the same way the conversation drawer splits them.
   const workspaceTasks = splitTasksByLifecycle(tasks);
   // Tabs are named from the data the shell already polls: a conversation by its own title, a
   // task by its request. Until that arrives the tab keeps the generic name it opened with.
   const shownTabs = withTitles(tabs, tab => {
+    if (tab.kind === 'context') {
+      const title = conversations?.find(item => item.id === tab.key)?.title;
+      return title ? `上下文 · ${title}` : null;
+    }
     if (tab.kind === 'conversation') return conversations?.find(item => item.id === tab.key)?.title ?? null;
     // A task's tabs stay distinguishable from each other: the kind names the window, the request
     // names the task, so "任务图 · 外壳与标签栏" never looks like "节点 impl-shell".
@@ -205,16 +206,12 @@ export function App() {
   const currentProjectId = (taskMatch ? tasks.find(task => task.id === taskMatch[1])?.projectId : null)
     ?? settings?.projects[0]?.id
     ?? null;
-  const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
-  const artifactMatch = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname ?? '/');
-  const draftGraphMatch = /^\/conversations\/([^/]+)\/graph$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
-  const modeTone = !startup?.configured ? 'danger' : startup.mode === 'execute' ? 'success' : 'warn';
-  const modeText = !startup?.configured ? '未配置模型' : startup.mode === 'execute' ? '执行模式' : '仅查看模式';
   function openWorkspaceTab(id: string) {
     const tab = tabs.tabs.find(item => item.id === id);
     if (!tab) return;
     setTabs(current => activateTab(current, id));
+    setPath(tab.hash.slice(1));
     // A tab that points where we already are needs no navigation; anything else sets the hash,
     // which the hash listener turns back into the same tab being in front.
     if (tab.hash !== `#${path}`) location.hash = tab.hash;
@@ -226,7 +223,9 @@ export function App() {
     if (!wasActive) return;
     // The front follows its neighbour; an emptied workspace falls back to the new-chat page.
     const active = next.tabs.find(tab => tab.id === next.activeId);
-    location.hash = active ? active.hash : '#/';
+    const hash = active ? active.hash : '#/';
+    setPath(hash.slice(1));
+    location.hash = hash;
   }
   function startNewConversation() {
     location.hash = '#/';
@@ -235,9 +234,26 @@ export function App() {
   function retitleWorkspaceTab(kind: WorkspaceTabKind, key: string, title: string) {
     setTabs(current => retitleTab(current, tabId(kind, key), title));
   }
-  // A draft's graph and a node's conversation fill their window the way the conversation does.
-  const conversationFirst = pathname === '/' || Boolean(conversationMatch) || Boolean(draftGraphMatch) || Boolean(nodeMatch);
+  const destination = tabForPath(path);
+  const visibleTabId = destination ? tabId(destination.kind, destination.key) : null;
   const settingsPage = pathname === '/settings' || pathname === '/setup';
+  useEffect(() => {
+    if (settingsPage) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.isComposing) return;
+      if (/^[1-9]$/.test(event.key)) {
+        event.preventDefault();
+        const tab = tabs.tabs[event.key === '9' ? tabs.tabs.length - 1 : Number(event.key) - 1];
+        if (tab) openWorkspaceTab(tab.id);
+      } else if (event.key.toLowerCase() === 'w') {
+        event.preventDefault();
+        const current = tabForPath(path);
+        if (current) closeWorkspaceTab(tabId(current.kind, current.key));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tabs, path, settingsPage]);
 
   if (settingsPage) {
     return (
@@ -252,9 +268,12 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar" data-collapsed={sidebarCollapsed}>
         <nav className="rail" data-testid="app-rail" aria-label="主入口">
-          <a className="rail-button" href="#/" data-testid="rail-new" title="新对话" aria-label="新对话">
-            <Icon name="plus" size={17} />
-          </a>
+          <button type="button" className="rail-button icon-button" data-testid="sidebar-toggle"
+            onClick={() => setSidebarCollapsed(value => !value)} aria-expanded={!sidebarCollapsed}
+            title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
+            aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}>
+            <Icon name="panel-left" size={17} />
+          </button>
           <a className="rail-button" href="#/inbox" data-testid="rail-inbox" title="问题" aria-label="问题" data-active={pathname === '/inbox'}>
             <Icon name="inbox" size={17} />
             {questionTotal > 0 && <span className="rail-badge" data-testid="rail-inbox-badge">{questionTotal}</span>}
@@ -301,7 +320,12 @@ export function App() {
           {/* The bar itself is a window drag region in the desktop app, so everything the user
               can click has to opt out of it - otherwise the control is draggable, not pressable. */}
           <div className="workspace-bar-actions">
-            <button
+            {conversationMatch && <a className="icon-button" data-testid="agent-context-open"
+              href={`#/conversations/${conversationMatch[1]}/context`} title="Agent 上下文" aria-label="Agent 上下文">
+              <Icon name="spark" size={16} />
+            </a>}
+            <div id="conversation-toolbar" />
+            {!conversationMatch && (            <button
               type="button"
               className="icon-button drawer-toggle"
               data-testid="workspace-drawer-toggle"
@@ -312,24 +336,9 @@ export function App() {
               aria-expanded={detailOpen}
             >
               <Icon name="panel-right" size={16} />
-            </button>
+            </button>)}
           </div>
         </div>
-        {conversationFirst && !conversationMatch && (
-          <header className="topbar conversation-topbar">
-            <button
-              type="button"
-              className="icon-button drawer-toggle"
-              data-testid="sidebar-toggle"
-              onClick={() => setSidebarCollapsed(value => !value)}
-              title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-              aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-            >
-              <Icon name="panel-left" size={16} />
-            </button>
-            <div className="topbar-spacer" />
-          </header>
-        )}
         {startup && !startup.configured && (
           <div className="banner" data-testid="banner">
             <Icon name="alert" />
@@ -344,78 +353,19 @@ export function App() {
             仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。
           </div>
         )}
-        {!conversationFirst && (
-          <header className="topbar">
-            <button
-              type="button"
-              className="icon-button drawer-toggle"
-              data-testid="sidebar-toggle"
-              onClick={() => setSidebarCollapsed(value => !value)}
-              title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-              aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-            >
-              <Icon name="panel-left" size={16} />
-            </button>
-            <div className="topbar-spacer" />
-            <span className="topbar-sub">
-              {modeText}
-              {settings && ` · ${settings.projects.length} 个项目 · ${settings.models.length} 个模型`}
-            </span>
-            <div className="topbar-spacer" />
-            <Pill tone={modeTone}>{startup?.mode === 'execute' ? '调度开启' : '调度关闭'}</Pill>
-          </header>
-        )}
-        <div className={`content ${conversationFirst ? 'conversation-content' : ''}`}>
-          <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`} key={path}>
-            {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
-            {pathname === '/inbox' && <Inbox tasks={tasks} />}
-            {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
-            {pathname === '/usage' && <UsagePage />}
-            {pathname === '/tools' && <ToolStatsPage />}
-            {draftGraphMatch && (
-              <DraftGraphTab
-                key={draftGraphMatch[1]}
-                conversationId={draftGraphMatch[1]!}
-                {...(queryParams.get('v') ? { version: Number(queryParams.get('v')) } : {})}
-              />
-            )}
-            {pathname === '/artifacts' && (
-              <ArtifactIndex
-                projectId={queryParams.get('project') ?? settings?.projects[0]?.id ?? ''}
-                projects={settings?.projects ?? []}
-              />
-            )}
-            {conversationMatch && (
-              <ConversationPanel
-                key={conversationMatch[1]}
-                id={conversationMatch[1]!}
-                settings={settings}
-                onChanged={reloadConversations}
-                sidebarCollapsed={sidebarCollapsed}
-                onSidebarToggle={() => setSidebarCollapsed(value => !value)}
-                drawerOpen={detailOpen}
-                onDrawerOpenChange={setDetailOpen}
-              />
-            )}
-            {artifactMatch && (
-              <ArtifactDetail
-                key={`${artifactMatch[1]}:${artifactMatch[2]}:${queryParams.get('v') ?? ''}`}
-                taskId={artifactMatch[1]!}
-                artifactId={artifactMatch[2]!}
-                {...(queryParams.get('v') ? { version: Number(queryParams.get('v')) } : {})}
-                onTitle={title => retitleWorkspaceTab('artifact', `${artifactMatch[1]}/${artifactMatch[2]}`, title)}
-              />
-            )}
-            {nodeMatch && (
-              <NodeChatTab
-                key={`${nodeMatch[1]}:${nodeMatch[2]}`}
-                taskId={nodeMatch[1]!}
-                nodeId={nodeMatch[2]!}
-              />
-            )}
-            {taskMatch && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
-          </div>
-        </div>
+        {/* Activity retains local state and DOM, disconnecting effects while a tab is hidden. */}
+        {tabs.tabs.map(tab => (
+          <Activity key={tab.id} mode={tab.id === visibleTabId ? 'visible' : 'hidden'}>
+            <WorkspacePage path={tab.id === visibleTabId ? path : tab.hash.slice(1)}
+              active={tab.id === visibleTabId} settings={settings} startup={startup} tasks={tasks}
+              reloadConversations={reloadConversations} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
+              retitleWorkspaceTab={retitleWorkspaceTab} />
+          </Activity>
+        ))}
+        {pathname === '/' && <WorkspacePage path={path} active settings={settings} startup={startup} tasks={tasks}
+          reloadConversations={reloadConversations} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
+          retitleWorkspaceTab={retitleWorkspaceTab} />}
+
       </main>
       {!conversationMatch && detailOpen && (
         <WindowDrawer open={detailOpen}>
@@ -428,7 +378,7 @@ export function App() {
             role="complementary"
           >
             <div className="drawer-head">
-              <button className="icon-button" aria-label="关闭详情" onClick={() => setDetailOpen(false)}><Icon name="close" size={16} /></button>
+              <button className="icon-button" aria-label="关闭详情" onClick={() => setDetailOpen(false)}><Icon name="panel-right" size={16} /></button>
               <div className="grow"><div className="drawer-eyebrow">入口</div><h2>窗口</h2></div>
             </div>
             <div className="drawer-inner">
@@ -479,12 +429,80 @@ export function App() {
   );
 }
 
+function WorkspacePage({ path, active, settings, startup, tasks, reloadConversations, detailOpen, setDetailOpen, retitleWorkspaceTab }: {
+  path: string; active: boolean; settings: Settings_ | null; startup: Startup | null; tasks: TaskSummary[];
+  reloadConversations: () => void; detailOpen: boolean; setDetailOpen: (open: boolean) => void;
+  retitleWorkspaceTab: (kind: WorkspaceTabKind, key: string, title: string) => void;
+}) {
+  const [pathname, query = ''] = path.split('?');
+  const queryParams = new URLSearchParams(query);
+  const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
+  const taskMatch = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname ?? '/');
+  const nodeMatch = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname ?? '/');
+  const artifactMatch = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname ?? '/');
+  const draftGraphMatch = /^\/conversations\/([^/]+)\/graph$/.exec(pathname ?? '/');
+  const contextMatch = /^\/conversations\/([^/]+)\/context$/.exec(pathname ?? '/');
+  const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
+  const conversationFirst = pathname === '/' || Boolean(conversationMatch || draftGraphMatch || nodeMatch || contextMatch);
+  return <div className={`content ${conversationFirst ? 'conversation-content' : ''}`}>
+    <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`}>
+            {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
+            {contextMatch && <AgentContextPage conversationId={contextMatch[1]!} />}
+            {pathname === '/inbox' && <Inbox tasks={tasks} />}
+            {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
+            {pathname === '/usage' && <UsagePage />}
+            {pathname === '/tools' && <ToolStatsPage />}
+            {draftGraphMatch && (
+              <DraftGraphTab
+                key={draftGraphMatch[1]}
+                conversationId={draftGraphMatch[1]!}
+                {...(queryParams.get('v') ? { version: Number(queryParams.get('v')) } : {})}
+              />
+            )}
+            {pathname === '/artifacts' && (
+              <ArtifactIndex
+                projectId={queryParams.get('project') ?? settings?.projects[0]?.id ?? ''}
+                projects={settings?.projects ?? []}
+              />
+            )}
+            {conversationMatch && (
+              <ConversationPanel
+                key={conversationMatch[1]}
+                id={conversationMatch[1]!}
+                settings={settings}
+                onChanged={reloadConversations}
+                drawerOpen={active && detailOpen}
+                onDrawerOpenChange={setDetailOpen}
+              />
+            )}
+            {artifactMatch && (
+              <ArtifactDetail
+                key={`${artifactMatch[1]}:${artifactMatch[2]}:${queryParams.get('v') ?? ''}`}
+                taskId={artifactMatch[1]!}
+                artifactId={artifactMatch[2]!}
+                {...(queryParams.get('v') ? { version: Number(queryParams.get('v')) } : {})}
+                onTitle={title => retitleWorkspaceTab('artifact', `${artifactMatch[1]}/${artifactMatch[2]}`, title)}
+              />
+            )}
+            {nodeMatch && (
+              <NodeChatTab
+                key={`${nodeMatch[1]}:${nodeMatch[2]}`}
+                taskId={nodeMatch[1]!}
+                nodeId={nodeMatch[2]!}
+              />
+            )}
+            {taskMatch && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
+    </div>
+  </div>;
+}
+
 function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   path: string;
   settings: Settings_ | null;
   conversations: ConversationSummary[];
   onSettingsChanged: () => void;
 }) {
+  const [sections, setSections] = useState({ projects: true, recent: true });
   const [projectOpen, setProjectOpen] = useState<Record<string, boolean>>({});
   const [createProject, setCreateProject] = useState(false);
   const [archiving, setArchiving] = useState('');
@@ -511,12 +529,12 @@ function Sidebar({ path, settings, conversations, onSettingsChanged }: {
     <>
       <div className="sidebar-scroll" data-testid="conversation-list">
         <div className="sidebar-label">
-          <span>项目</span>
+          <button type="button" className="sidebar-section-toggle" aria-expanded={sections.projects} onClick={() => setSections(value => ({ ...value, projects: !value.projects }))}><Icon name="chevron" size={12} /><span>项目</span></button>
           <button type="button" className="sidebar-add" data-testid="project-create-open" onClick={() => setCreateProject(true)} aria-label="新建项目" title="新建项目">
             <Icon name="plus" size={15} />
           </button>
         </div>
-        <div className="sidebar-section">
+        <div className="sidebar-section" hidden={!sections.projects}>
           {(settings?.projects ?? []).map(project => {
             const items = ordered.filter(conversation => conversation.projectId === project.id);
             return (
@@ -560,8 +578,10 @@ function Sidebar({ path, settings, conversations, onSettingsChanged }: {
           })}
           {!settings?.projects.length && <span className="sidebar-empty">尚未配置项目</span>}
         </div>
-        <div className="sidebar-label">最近</div>
-        <div className="sidebar-section">
+        <div className="sidebar-label"><button type="button" className="sidebar-section-toggle" aria-expanded={sections.recent} onClick={() => setSections(value => ({ ...value, recent: !value.recent }))}><Icon name="chevron" size={12} /><span>最近</span></button>
+          <a className="sidebar-add" href="#/" data-testid="new-conversation-recent" title="新对话" aria-label="新对话"><Icon name="plus" size={15} /></a>
+        </div>
+        <div className="sidebar-section" hidden={!sections.recent}>
           <div className="sidebar-conversations" style={{ paddingLeft: 0 }}>
             {unbound.map(conversation => (
               <SidebarConversation
@@ -572,10 +592,7 @@ function Sidebar({ path, settings, conversations, onSettingsChanged }: {
                 onArchive={() => void archiveConversation(conversation)}
               />
             ))}
-            <a className="sidebar-conversation" href="#/" data-testid="new-conversation-recent">
-              <Icon name="plus" size={15} />
-              <span className="sidebar-conversation-title">新对话</span>
-            </a>
+
           </div>
         </div>
       </div>

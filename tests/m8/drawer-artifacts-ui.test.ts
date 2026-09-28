@@ -75,6 +75,16 @@ test('the shared-artifact index shows a task\'s artifacts apart from the project
       promotedBy: 'user',
       requestId: 'promote-shared',
     });
+    // A frequently updated document must occupy one row, not 135 rows.
+    for (let version = 2; version <= 135; version++) {
+      await writeFile(join(source, 'backlog.md'), `# Graph harness backlog\n\n版本 ${version}。\n`);
+      shared = await artifacts.publish({ taskId: view.anchorTaskId, workspace: source,
+        namespace: 'plans', name: 'harness-backlog', sourcePath: 'backlog.md', title: 'Graph harness backlog',
+        producer: { nodeId: 'planner', instanceId: 'instance', operationId: `op-${version}`, activationId: 'activation' },
+        requestId: `publish-${version}` });
+      promoted = await artifacts.promote({ taskId: view.anchorTaskId, artifactId: shared.artifactId,
+        version: shared.version, promotedBy: 'user', requestId: `promote-${version}` });
+    }
     expect(taskOnly.scope).toBe('task');
   } finally {
     store.close();
@@ -117,7 +127,32 @@ test('the shared-artifact index shows a task\'s artifacts apart from the project
   expect(await rows(project)).toEqual([`drawer-artifact-detail-${promoted.artifactId}-${promoted.version}`]);
   expect(await rows(own)).toContain(`drawer-artifact-detail-${shared.artifactId}-${shared.version}`);
   expect(await rows(own)).not.toContain(`drawer-artifact-detail-${promoted.artifactId}-${promoted.version}`);
+  const search = page.getByRole('searchbox', { name: '搜索共享产物' });
+  await search.fill('task-only');
+  await expect.poll(async () => (await rows(own)).length).toBe(1);
+  expect(await rows(project)).toEqual([]);
+  await search.fill('');
+  await page.getByRole('combobox', { name: '产物范围' }).selectOption('project');
+  await expect.poll(async () => (await rows(own)).length).toBe(0);
+  expect(await rows(project)).toEqual([`drawer-artifact-detail-${promoted.artifactId}-${promoted.version}`]);
+  await page.getByRole('combobox', { name: '产物范围' }).selectOption('all');
+  await expect.poll(async () => (await rows(own)).length).toBe(2);
   await page.screenshot({ path: '/tmp/artifact-index-01-two-groups.png' });
+
+  await project.locator(`[data-testid="drawer-artifact-detail-${promoted.artifactId}-${promoted.version}"]`).click();
+  await page.getByText('版本 135。', { exact: true }).waitFor();
+  await page.locator('.artifact-version-history summary').click();
+  await page.getByTestId('artifact-history-135').waitFor();
+  expect(await page.locator('[data-testid^="artifact-history-"]').count()).toBe(50);
+  await page.getByRole('button', { name: '更早版本' }).click();
+  await page.getByTestId('artifact-history-36').waitFor();
+  await page.getByRole('button', { name: '更早版本' }).click();
+  await page.getByTestId('artifact-history-1').waitFor();
+  expect(await page.locator('[data-testid^="artifact-history-"]').count()).toBe(135);
+  await page.getByTestId('artifact-history-2').click();
+  await page.getByText('版本 2。', { exact: true }).waitFor();
+  await page.locator('.tab[data-kind="artifact"][data-active="true"] .tab-close').click();
+  await page.getByTestId('artifact-index').waitFor();
 
   // 查看详情 opens a tab of its own, named after the artifact it shows.
   await own.locator(`[data-testid="drawer-artifact-detail-${taskOnly.artifactId}-${taskOnly.version}"]`).click();

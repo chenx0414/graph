@@ -12,7 +12,7 @@
  * `#/setup`), which replaces the whole shell by design.
  */
 
-export type WorkspaceTabKind = 'conversation' | 'draft' | 'graph' | 'node' | 'artifact' | 'page';
+export type WorkspaceTabKind = 'context' | 'conversation' | 'draft' | 'graph' | 'node' | 'artifact' | 'page';
 
 export interface WorkspaceTab {
   /** Stable identity: `kind:key`. The same destination never opens twice. */
@@ -45,11 +45,11 @@ export function activeTab(state: WorkspaceTabs): WorkspaceTab | null {
 
 /**
  * Open a destination: an existing tab is refreshed and brought to the front, a
- * new one is appended. A `null` destination (a route that is not a tab) leaves
- * the set alone — that is how the new-chat page and settings stay out of it.
+ * new one is appended. A `null` destination keeps the open set but clears its
+ * selection — the new-chat page and settings are outside the tab set.
  */
 export function openTab(state: WorkspaceTabs, tab: TabDescriptor | null): WorkspaceTabs {
-  if (!tab) return state;
+  if (!tab) return { ...state, activeId: null };
   const id = tabId(tab.kind, tab.key);
   const found = state.tabs.some(item => item.id === id);
   const tabs = found
@@ -88,19 +88,21 @@ function page(key: string, title: string, hash: string): TabDescriptor {
 export function tabForPath(path: string): TabDescriptor | null {
   const pathname = path.split('?')[0]!.split('#')[0]!;
   if (pathname === '/' || pathname === '' || pathname === '/settings' || pathname === '/setup') return null;
+  const context = /^\/conversations\/([^/]+)\/context$/.exec(pathname);
+  if (context) return { kind: 'context', key: context[1]!, title: 'Agent 上下文', hash: `#${pathname}` };
   const draft = /^\/conversations\/([^/]+)\/graph$/.exec(pathname);
-  if (draft) return { kind: 'draft', key: draft[1]!, title: '任务图', hash: `#${pathname}` };
+  if (draft) return { kind: 'draft', key: draft[1]!, title: '任务图', hash: `#${path}` };
   const conversation = /^\/conversations\/([^/]+)$/.exec(pathname);
   if (conversation) return { kind: 'conversation', key: conversation[1]!, title: '对话', hash: `#${pathname}` };
   const node = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname);
   if (node) return { kind: 'node', key: `${node[1]}/${node[2]}`, title: `节点 ${node[2]}`, hash: `#${pathname}` };
   const artifact = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname);
-  if (artifact) return { kind: 'artifact', key: `${artifact[1]}/${artifact[2]}`, title: '共享产物', hash: `#${pathname}` };
+  if (artifact) return { kind: 'artifact', key: `${artifact[1]}/${artifact[2]}`, title: '共享产物', hash: `#${path}` };
   // `/tasks/<id>` and `/tasks/<id>/graph` are the same window now; the graph address is canonical.
   const graph = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname);
   if (graph) return { kind: 'graph', key: graph[1]!, title: '任务图', hash: `#/tasks/${graph[1]!}/graph` };
   if (pathname === '/inbox') return page('inbox', '问题', '#/inbox');
-  if (pathname === '/artifacts') return page('artifacts', '共享产物', '#/artifacts');
+  if (pathname === '/artifacts') return page('artifacts', '共享产物', `#${path}`);
   if (pathname === '/usage') return page('usage', '用量', '#/usage');
   if (pathname === '/tools') return page('tools', '工具', '#/tools');
   if (/^\/catalog(?:\/[^/]+)?$/.test(pathname)) return page('catalog', '资源库', `#${pathname}`);

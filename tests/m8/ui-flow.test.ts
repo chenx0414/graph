@@ -171,10 +171,10 @@ test('parallel branches, subgraphs and rework back-edges render and errors are e
 
   // Explicit errors: an unknown task and a synthetic 500 never hang on loading.
   await page.goto(`${server.url}/#/tasks/missing-task`);
-  await page.getByTestId('error').waitFor();
-  expect(await page.getByTestId('error').innerText()).not.toContain('加载中');
+  await page.getByTestId('error').filter({ visible: true }).waitFor();
+  expect(await page.getByTestId('error').filter({ visible: true }).innerText()).not.toContain('加载中');
   await page.route('**/api/tasks/broken-task**', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'internal', message: '合成服务器错误' }) }));
   await page.goto(`${server.url}/#/tasks/broken-task`);
-  await page.getByTestId('error').waitFor();
-  expect(await page.getByTestId('error').innerText()).toContain('合成服务器错误');
+  await page.getByTestId('error').filter({ visible: true }).waitFor();
+  expect(await page.getByTestId('error').filter({ visible: true }).innerText()).toContain('合成服务器错误');
 }, 90_000);

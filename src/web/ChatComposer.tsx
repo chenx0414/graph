@@ -78,6 +78,7 @@ function slashAt(value: string, cursor: number): Slash | null {
 }
 
 export function ChatComposer({
+  allowAttachments = true,
   value,
   onChange,
   attachments,
@@ -108,6 +109,7 @@ export function ChatComposer({
   attachTestId = 'chat-attach',
   attachmentInputTestId = 'chat-attachment-input',
 }: {
+  allowAttachments?: boolean;
   value: string;
   onChange: (value: string) => void;
   attachments: ChatAttachment[];
@@ -296,6 +298,7 @@ export function ChatComposer({
   }, [slashOpen]);
 
   async function addAttachments(files: File[]) {
+    if (!allowAttachments) { setAttachmentNotices(['节点消息暂支持文字，请粘贴文字内容。']); return; }
     let next = [...attachments];
     const results: AttachmentResult[] = [];
     for (const file of files) {
@@ -723,7 +726,7 @@ export function ChatComposer({
         }}
       />
       <div className="chat-composer-controls">
-        <button type="button" className="icon-button composer-attach" data-testid={attachTestId} onClick={() => attachmentInputRef.current?.click()} aria-label="选择附件" title="选择附件">
+        <button style={allowAttachments ? undefined : { display: 'none' }} type="button" className="icon-button composer-attach" data-testid={attachTestId} onClick={() => attachmentInputRef.current?.click()} aria-label="选择附件" title="选择附件">
           <Icon name="plus" size={17} />
         </button>
         <input

@@ -732,7 +732,10 @@ export class Execution {
             ? resultHandoffRepair(this.store, { taskId: node.task_id, nodeId: node.id, activationId: node.activation_id })
             : undefined;
           if (repair) intent.context.briefing = renderResultHandoffRepair(repair, { decisions: answers });
+          const userRework = this.store.db.prepare("SELECT text FROM node_entries WHERE task_id=? AND node_id=? AND json_extract(data,'$.reworkActivation')=? ORDER BY seq")
+            .all(node.task_id, node.id, node.activation_id) as { text: string }[];
           intent.context.briefing = [
+            ...userRework.map(message => `User requested rework of this node and its downstream results. Continue in your existing session and address this message:\n${message.text}`),
             intent.context.briefing,
             rsiContinuation ? `RSI reload confirmed for ${rsiContinuation.commit} (request ${rsiContinuation.requestId}). Resume the unfinished user request from operation ${rsiContinuation.operationId} using the existing session. Completed changes and tool results remain valid. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
             pauseContinuation ? `The user paused this task and has now resumed it (request ${pauseContinuation.requestId}). Continue the exact turn that was soft-stopped at operation ${pauseContinuation.operationId} using the existing session: the in-flight tool call finished, so do not repeat completed tool calls or restart the request. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',

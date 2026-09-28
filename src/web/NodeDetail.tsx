@@ -13,7 +13,7 @@ import { api } from './api.ts';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { NODE_LABEL } from './labels.ts';
 import { RecordedPromptPanel } from './PromptPanel.tsx';
-import { Button, Pill, Spinner, Stat, toast } from './ui.tsx';
+import { Button, Icon, Pill, Spinner, Stat, toast } from './ui.tsx';
 
 interface NodePromptView {
   nodeId: string;
@@ -37,7 +37,8 @@ interface NodeOverview {
 }
 
 /** One transcript entry, as the node's session records it. */
-export interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
+export type { Entry } from './node-transcript.ts';
+import type { Entry } from './node-transcript.ts';
 
 /** The node-run payload the transcript reader consumes. */
 export interface NodeRun {
@@ -121,7 +122,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
               {NODE_LABEL[status] ?? status}
             </Pill>
             <span>·</span>
-            <span>只读 · 不会向 Agent 插话</span>
+            <span>节点对话</span>
             {overview?.instance?.model && <><span>·</span><span className="mono">{overview.instance.model}</span></>}
           </div>
         </div>
@@ -151,7 +152,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
         </section>
       )}
       <details className="conversation-alert node-prompt-card" data-testid="node-prompt">
-        <summary className="section-title">System prompt（该节点实际注入）</summary>
+        <summary className="node-prompt-summary"><Icon name="spark" size={16} /><span><strong>System prompt</strong><small>该节点实际注入的上下文与简报</small></span><Icon name="chevron" size={14} /></summary>
         {loading && !prompt ? <Spinner label="正在读取…" />
           : error ? <div className="form-error" data-testid="node-prompt-error">{error}</div>
             : prompt ? (
@@ -181,9 +182,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
                       <span>{`${prompt.briefing.text.length.toLocaleString()} 字符`}</span>
                       <Button size="sm" icon="file" onClick={() => void copyBriefing()}>复制简报</Button>
                     </div>
-                    <p className="agent-preview-notice">
-                      从该节点自己的会话文件原样读出：<code>{prompt.briefing.sessionFile}</code>。它不是重算的简报，而是那次派发真正带上的那条 user 消息。
-                    </p>
+
                     <pre className="agent-preview-markdown" data-testid="node-briefing-text">{prompt.briefing.text}</pre>
                   </div>
                 )}
@@ -191,7 +190,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
             ) : null}
       </details>
 
-      <AgentNodeChat taskId={taskId} nodeId={nodeId} agentName={named ?? nodeId} page />
+      <AgentNodeChat taskId={taskId} nodeId={nodeId} agentName={named ?? nodeId} onRunUpdate={setOverview} page />
         </div>
       </div>
     </div>

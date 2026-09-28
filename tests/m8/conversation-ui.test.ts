@@ -214,7 +214,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('detail-drawer').waitFor();
   await page.getByTestId('bind-project').waitFor();
   expect(await page.getByTestId('bind-project').innerText()).toContain('未绑定项目');
-  await page.getByTestId('drawer-mode-tasks').click();
+  expect(await page.getByTestId('drawer-mode-tabs').count()).toBe(0);
   expect(await page.getByTestId('no-conversation-tasks').innerText()).toContain('尚无功能任务');
 
   // 2. Bind the project and let the master draft, still from the drawer.
@@ -231,7 +231,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('最小可用版');
-  expect(await page.getByTestId('detail-toggle').getAttribute('data-open')).toBe('true');
+  expect(await page.getByTestId('drawer-entry').getAttribute('data-open')).toBe('true');
   // The drawer lists the two windows the draft has; the graph itself opens as its own tab.
   expect(await page.getByTestId('drawer-entry-graph').count()).toBe(1);
   expect(await page.getByTestId('drawer-entry-artifacts').count()).toBe(1);
@@ -263,8 +263,8 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('accept-branch').fill('main');
   await page.getByTestId('confirm-draft').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
-  await includes(page, '已确认草稿 v2');
-  await page.getByTestId('drawer-mode-tasks').click();
+  await expect.poll(() => page.getByTestId('detail-drawer').getAttribute('data-section')).toBe('task');
+  expect(await page.getByTestId('drawer-mode-tabs').count()).toBe(0);
   await page.locator('[data-testid^="conversation-task-"]').first().waitFor();
   await page.locator('[data-testid^="conversation-task-"]').first().click();
   await page.getByTestId('drawer-task-detail').waitFor();
@@ -279,7 +279,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('chat-send').click();
   await includes(page, '执行记录显示');
   await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('drawer-mode-tasks').click();
+  expect(await page.getByTestId('drawer-mode-tabs').count()).toBe(0);
   // The task overview keeps the authoritative status and the two entry points to the
   // windows that show more; the node list itself lives in the task graph now.
   const taskDetail = page.getByTestId('drawer-task-detail');
@@ -311,10 +311,10 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.reload();
   await page.getByTestId('conversation').waitFor();
   await includes(page, '两条都收到。');
-  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v2'));
+  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
   await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('proposal-draft').waitFor();
-  expect(await page.getByTestId('proposal-draft').innerText()).toContain('先验证性能瓶颈');
+  await page.getByTestId('conversation-tasks').waitFor();
+  expect(await page.getByTestId('detail-drawer').getAttribute('data-section')).toBe('task');
   await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
   await page.screenshot({ path: join(evidence, '04-reloaded.png'), fullPage: true });

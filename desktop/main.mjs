@@ -73,6 +73,14 @@ if (!app.requestSingleInstanceLock()) {
         preload: join(devRoot, 'desktop/preload.cjs'),
       },
     });
+    // Suppress Electron's native window-close accelerator for workspace shortcuts;
+    // keydown still reaches the renderer, including while the composer has focus.
+    window.webContents.on('before-input-event', (_event, input) => {
+      const shortcut = (input.meta || input.control) && !input.alt && !input.shift
+        && /^(w|[1-9])$/i.test(input.key);
+      const settings = /#\/(settings|setup)(?:[?/#]|$)/.test(window.webContents.getURL());
+      window.webContents.setIgnoreMenuShortcuts(shortcut && !settings);
+    });
     window.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (!isMainFrame) return;
       const route = consoleRoute(url);

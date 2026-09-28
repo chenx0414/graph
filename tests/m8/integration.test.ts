@@ -197,7 +197,7 @@ test('the full productized flow runs from the formal start entry with a controll
   // After confirming, the task navigation must really open (it used to bounce
   // back to the draft page): wait on the entry state, then the task entries.
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
-  await page.getByTestId('drawer-mode-tasks').click();
+  expect(await page.getByTestId('drawer-mode-tabs').count()).toBe(0);
   await page.getByTestId('drawer-task-detail').waitFor();
   expect(await page.getByTestId('drawer-task-detail').innerText()).toContain('目标分支');
   await page.waitForFunction(() => document.querySelectorAll('[data-testid^="conversation-task-"]').length === 1);

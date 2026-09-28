@@ -46,7 +46,7 @@ function Group({ title, hint, records, onOpenDetail, testid }: {
     <section className="drawer-artifact-group" data-testid={testid}>
       <div className="drawer-section-head">
         <h3>{title}</h3>
-        <span>{records.length} 个版本</span>
+        <span>{records.length} 份文档</span>
       </div>
       {records.length
         ? <ul className="list">{records.map(record => <ArtifactRow key={`${record.artifactId}:${record.version}`} record={record} onOpenDetail={onOpenDetail} />)}</ul>
@@ -97,6 +97,20 @@ export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
   version?: number;
   onTitle?: (title: string) => void;
 }) {
+  const [versions, setVersions] = useState<ArtifactRecord[]>([]);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionsCursor, setVersionsCursor] = useState<string | null>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  async function loadVersions(cursor?: string) {
+    if (versionsLoading) return;
+    setVersionsLoading(true);
+    try {
+      const result = await api<{ artifacts: ArtifactRecord[]; nextCursor: string | null }>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts?artifactId=${encodeURIComponent(artifactId)}&latestOnly=false&includeRetired=true&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+      setVersions(current => cursor ? [...current, ...result.artifacts] : result.artifacts);
+      setVersionsCursor(result.nextCursor);
+    } catch (reason) { setError(String(reason)); }
+    finally { setVersionsLoading(false); }
+  }
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [error, setError] = useState('');
   const [promoting, setPromoting] = useState(false);
@@ -104,7 +118,6 @@ export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
 
   useEffect(() => {
     let cancelled = false;
-    setContent(null);
     setError('');
     const query = version === undefined ? '' : `?version=${version}`;
     void api<ArtifactRecord>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}${query}`)
@@ -147,6 +160,20 @@ export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
     <div className="artifact-tab" data-testid="artifact-tab">
       {error && <ErrorBox message={`读取产物失败：${error}`} />}
       {!error && !content && <Spinner label="读取产物…" />}
+      {content && <details className="artifact-version-history" open={versionsOpen} onToggle={event => {
+        setVersionsOpen(event.currentTarget.open);
+        if (event.currentTarget.open && !versions.length) void loadVersions();
+      }}>
+        <summary><Icon name="file" size={15} />当前版本 v{content.artifact.version}<span>历史版本</span></summary>
+        <div className="artifact-version-list">
+          {versions.map(item => <a key={item.version} data-testid={`artifact-history-${item.version}`} data-active={item.version === content.artifact.version}
+            href={`#/tasks/${taskId}/artifacts/${artifactId}?v=${item.version}`}>
+            <strong>v{item.version}</strong><span>{new Date(item.createdAt).toLocaleString()}</span><small>{item.state} · {bytesLabel(item.size)}</small>
+          </a>)}
+          {versionsLoading && <Spinner label="读取历史版本…" />}
+          {versionsCursor && <button type="button" className="btn btn-sm" onClick={() => void loadVersions(versionsCursor)}>更早版本</button>}
+        </div>
+      </details>}
       {content && (
         <>
           {record?.scope === 'task' && (

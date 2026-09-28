@@ -73,6 +73,7 @@ export interface PublishArtifactInput {
 }
 
 export interface ArtifactQuery {
+  artifactId?: string;
   taskId: string;
   namespace?: string;
   prefix?: string;
@@ -472,6 +473,7 @@ export class ArtifactWorkspace {
   }
 
   private page(conditions: string[], params: unknown[], input: ProjectArtifactQuery): ArtifactPage {
+    if (input.artifactId) { conditions.push('artifact_id=?'); params.push(input.artifactId); }
     if (input.namespace) { conditions.push('namespace=?'); params.push(slug(input.namespace, 'namespace')); }
     if (input.prefix) { conditions.push('name LIKE ?'); params.push(`${slug(input.prefix, 'prefix')}%`); }
     if (input.schema) {

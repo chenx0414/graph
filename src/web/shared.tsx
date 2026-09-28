@@ -45,10 +45,16 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
   // Every request gets a generation; a late response from an old key must
   // never overwrite the record the user is looking at now.
   const generation = useRef(0);
+  const previousDeps = useRef(deps);
   useEffect(() => {
-    generation.current += 1;
-    setData(null);
-    setError(null);
+    // React Activity reconnects effects when a tab becomes visible. Keep its loaded
+    // snapshot while revalidating; only a different resource should clear it.
+    if (deps.some((value, index) => !Object.is(value, previousDeps.current[index]))) {
+      setData(null);
+      setError(null);
+    }
+    previousDeps.current = deps;
+    return () => { generation.current += 1; };
   }, deps);
   const reload = useCallback(() => {
     const current = ++generation.current;
@@ -58,7 +64,12 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
       .catch((reason: unknown) => { if (generation.current === current) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (generation.current === current) setLoading(false); });
   }, deps);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    // A discarded mount (including StrictMode's effect replay) must not start IO.
+    let active = true;
+    queueMicrotask(() => { if (active) reload(); });
+    return () => { active = false; };
+  }, [reload]);
   return { data, error, loading, reload };
 }
 

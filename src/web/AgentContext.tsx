@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { RecordedPromptPanel } from './PromptPanel.tsx';
 import { Button, Icon, Pill, Spinner, toast } from './ui.tsx';
@@ -87,9 +86,9 @@ function availabilityText(tool: AgentToolView) {
   return '当前可用';
 }
 
-export function AgentContextBar({ conversationId }: { conversationId: string }) {
-  const [open, setOpen] = useState(false);
+export function AgentContextPage({ conversationId }: { conversationId: string }) {
   const [tab, setTab] = useState<'sent' | 'prompts' | 'tools'>('sent');
+  const initialized = useRef<string | null>(null);
   const [data, setData] = useState<AgentContextView | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
@@ -124,7 +123,8 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
         setData(next);
         setDisabled(next.disabledTools);
         const first = next.prompts[0];
-        if (first) {
+        if (first && initialized.current !== conversationId) {
+          initialized.current = conversationId;
           setSelectedPrompt(first.key);
           setDraft(first.content);
           draftRef.current = first.content;
@@ -148,8 +148,6 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
     return groups;
   }, [data]);
   const selected = data?.prompts.find(prompt => prompt.key === selectedPrompt) ?? null;
-  const enabledTools = useMemo(() => data?.tools.filter(tool => tool.enabled && tool.available).length ?? 0, [data]);
-  const customized = data?.prompts.filter(prompt => prompt.customized).length ?? 0;
   const definitionChanged = Boolean(
     data?.definitionVersion
     && data.latestDefinitionVersion
@@ -277,37 +275,13 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
 
   return (
     <>
-      <section className="agent-context-bar" data-testid="agent-context-bar">
-        <button
-          type="button"
-          className="agent-context-summary"
-          data-testid="agent-context-open"
-          onClick={() => {
-            setOpen(true);
-            void load().catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
-          }}
-        >
-          <span className="agent-context-summary-icon"><Icon name="spark" size={14} /></span>
-          <span>
-            <strong>Agent 上下文</strong>
-            <small>
-              {data ? `${data.prompts.length} 个来源 · ${enabledTools}/${data.tools.length} 个工具可用` : '正在读取…'}
-              {customized ? ` · ${customized} 个自定义` : ''}
-            </small>
-          </span>
-          <Icon name="chevron" size={14} />
-        </button>
-      </section>
-
-      {open && createPortal(
-        <div className="agent-context-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
-          <aside className="agent-context-drawer" role="dialog" aria-modal="true" aria-label="Agent 上下文" data-testid="agent-context-drawer">
+      <section className="agent-context-page" aria-label="Agent 上下文" data-testid="agent-context-drawer">
             <header className="agent-context-head">
               <div>
                 <h2>Agent 上下文</h2>
                 <p>这里展示模型实际收到的 system prompt（在发出请求时记录，不做二次渲染），以及可编辑来源与实际工具视图；保存后从下一轮生效。</p>
               </div>
-              <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label="关闭"><Icon name="close" size={16} /></button>
+
             </header>
             <div className="agent-context-body">
               <nav className="agent-context-tabs" role="tablist" aria-label="Agent 上下文页面">
@@ -460,10 +434,7 @@ export function AgentContextBar({ conversationId }: { conversationId: string }) 
                 </div>
               )}
             </div>
-          </aside>
-        </div>,
-        document.body,
-      )}
+      </section>
     </>
   );
 }

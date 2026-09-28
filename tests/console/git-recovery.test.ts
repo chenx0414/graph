@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { canonicalJson, TaskStore } from '../../src/core/store.ts';
+import { GitIntegration } from '../../src/git/integration.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -120,3 +121,31 @@ test('a plain-directory intent without usable evidence is unresolved, never repl
   expect(JSON.parse(op.result).reason).toMatch(/changed|attributed/);
   db.close();
 }, 60_000);
+
+
+test('rework restores a released integration checkout at its recorded tip without including later user edits', async () => {
+  const { project, stateDir } = await fixture('rework');
+  const runtime = await open(stateDir, project);
+  cleanup.push(() => runtime.close());
+  await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'rework', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'rework',
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+    nodes: [{ id: 'check', kind: 'program', action: 'check' }] }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  const integration = new GitIntegration(store, stateDir);
+  const original = integration.workspace(taskId, null, 'check', 'program')!;
+  const tip = git(original, ['rev-parse', 'HEAD']);
+  store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
+  integration.sweepTerminalWorkcopies();
+  expect(existsSync(original)).toBe(false);
+  await writeFile(join(project, 'app.txt'), 'later user edit');
+  store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(taskId);
+  const restored = integration.workspace(taskId, null, 'check', 'program')!;
+  expect(git(restored, ['rev-parse', 'HEAD'])).toBe(tip);
+  expect(git(restored, ['status', '--porcelain'])).toBe('');
+  expect(git(project, ['status', '--porcelain'])).toContain('app.txt');
+  expect(integration.workspace(taskId, null, 'check', 'program')).toBe(restored);
+}, 30_000);
