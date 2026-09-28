@@ -37,29 +37,15 @@ const SAMPLE: readonly AdvancedSetting[] = [
  * here is pure data and pure helpers.
  */
 describe('settings navigation sections (B-0/B-1)', () => {
-  it('orders the sidebar as 通用/偏好 → 常规 → 模型 → 高级设置 → Git 准备 → 归档对话', () => {
+  it('keeps only general settings and archived conversations in the settings sidebar', () => {
     expect(SECTIONS.map(section => section.id)).toEqual([
-      'settings-general',
       'settings-overview',
-      'settings-models',
-      'settings-advanced',
-      'settings-git',
       'settings-archived',
     ]);
     expect(SECTIONS.map(section => section.label)).toEqual([
-      '通用/偏好',
       '常规',
-      '模型',
-      '高级设置',
-      'Git 准备',
       '归档对话',
     ]);
-  });
-
-  it('places 高级设置 after 模型 and before Git 准备', () => {
-    const ids = SECTIONS.map(section => section.id);
-    expect(ids.indexOf('settings-advanced')).toBeGreaterThan(ids.indexOf('settings-models'));
-    expect(ids.indexOf('settings-advanced')).toBeLessThan(ids.indexOf('settings-git'));
   });
 
   it('keeps 并发限制 out of the top-level navigation', () => {

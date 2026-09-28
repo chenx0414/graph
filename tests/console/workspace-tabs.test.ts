@@ -50,6 +50,7 @@ describe('tab identity', () => {
     expect(tabForPath('/inbox')).toEqual({ kind: 'page', key: 'inbox', title: '问题', hash: '#/inbox' });
     expect(tabForPath('/usage')).toEqual({ kind: 'page', key: 'usage', title: '用量', hash: '#/usage' });
     expect(tabForPath('/tools')).toEqual({ kind: 'page', key: 'tools', title: '工具', hash: '#/tools' });
+    expect(tabForPath('/models')).toEqual({ kind: 'page', key: 'models', title: '模型', hash: '#/models' });
     expect(tabForPath('/catalog')).toEqual({ kind: 'page', key: 'catalog', title: '资源库', hash: '#/catalog' });
     expect(tabForPath('/nonsense')).toBeNull();
   });

@@ -105,6 +105,7 @@ export function tabForPath(path: string): TabDescriptor | null {
   if (pathname === '/artifacts') return page('artifacts', '共享产物', `#${path}`);
   if (pathname === '/usage') return page('usage', '用量', '#/usage');
   if (pathname === '/tools') return page('tools', '工具', '#/tools');
+  if (pathname === '/models') return page('models', '模型', '#/models');
   if (/^\/catalog(?:\/[^/]+)?$/.test(pathname)) return page('catalog', '资源库', `#${pathname}`);
   return null;
 }

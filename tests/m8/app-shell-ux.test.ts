@@ -1688,9 +1688,12 @@ test('settings opens as a second page with its own navigation and return control
   await page.getByTestId('settings-shell').waitFor();
   expect(await page.locator('.settings-back').getAttribute('href')).toBe('#/');
   const nav = page.locator('.settings-nav');
-  expect(await nav.innerText()).toContain('Git 准备');
-  expect(await nav.innerText()).toContain('模型');
+  expect(await nav.innerText()).toContain('常规');
   expect(await nav.innerText()).toContain('归档对话');
+  expect(await nav.innerText()).not.toContain('通用/偏好');
+  expect(await nav.innerText()).not.toContain('高级设置');
+  expect(await nav.innerText()).not.toContain('Git 准备');
+  expect(await nav.innerText()).not.toContain('模型');
   expect(await nav.innerText()).not.toContain('项目');
   expect(await nav.innerText()).not.toContain('并发限制');
   expect(await nav.innerText()).not.toContain('连接与配置向导');
@@ -1698,13 +1701,14 @@ test('settings opens as a second page with its own navigation and return control
   expect(await nav.innerText()).not.toContain('模型偏好');
   expect(await page.locator('.app-shell').count()).toBe(0);
 
-  await nav.getByRole('button', { name: '模型' }).click();
-  expect(await page.getByTestId('settings-page').getAttribute('data-page')).toBe('settings-models');
-  expect(await nav.getByRole('button', { name: '模型' }).getAttribute('data-active')).toBe('true');
-  expect(await page.locator('#settings-overview').count()).toBe(0);
-  await nav.getByRole('button', { name: 'Git 准备' }).click();
-  expect(await page.getByTestId('settings-page').getAttribute('data-page')).toBe('settings-git');
-  expect(await nav.getByRole('button', { name: 'Git 准备' }).getAttribute('data-active')).toBe('true');
+  expect(await page.getByTestId('settings-preferences').isVisible()).toBe(true);
+  expect(await page.locator('.settings-project-status').count()).toBe(1);
+  await page.locator('.settings-back').click();
+  await page.getByTestId('app-rail').waitFor();
+  expect(await page.getByTestId('rail-models').getAttribute('href')).toBe('#/models');
+  await page.getByTestId('rail-models').click();
+  await page.getByTestId('models-page').waitFor();
+  expect(await page.locator('.tab[data-active="true"] .tab-title').innerText()).toBe('模型');
 });
 
 test('the compact shell keeps the new-chat composer inside the viewport', async () => {

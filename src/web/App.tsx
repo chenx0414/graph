@@ -31,7 +31,7 @@ import { ConversationPanel, type ConversationSummary, type GraphAgentDetail } fr
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, costText, useAsync, useTargetBranch, useTaskStream } from './shared.tsx';
-import { Settings } from './Settings.tsx';
+import { ModelsPage, Settings } from './Settings.tsx';
 import { UsagePage } from './Usage.tsx';
 import { ToolStatsPage } from './ToolStats.tsx';
 import { ResourceLibrary as CapabilityResourceLibrary } from './ResourceLibrary.tsx';
@@ -286,6 +286,9 @@ export function App() {
           <a className="rail-button" href="#/tools" data-testid="rail-tools" title="工具" aria-label="工具" data-active={pathname === '/tools'}>
             <Icon name="tool" size={17} />
           </a>
+          <a className="rail-button" href="#/models" data-testid="rail-models" title="模型" aria-label="模型" data-active={pathname === '/models'}>
+            <Icon name="bolt" size={17} />
+          </a>
           <div className="rail-spacer" />
           <a className="rail-button" href="#/settings" data-testid="rail-settings" title="设置" aria-label="设置" data-active={settingsPage}>
             <Icon name="settings" size={17} />
@@ -342,8 +345,8 @@ export function App() {
           <div className="banner" data-testid="banner">
             <Icon name="alert" />
             {startup.modelCount === 0
-              ? <>首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请<a href="#/settings">打开设置</a>连接模型；保存后立即生效，无需重启。</>
-              : <>模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请<a href="#/settings">打开设置</a>检查凭据，或设置凭据引用的环境变量。{typeof window !== 'undefined' && window.graph && '桌面 APP 也可在设置页保存密钥到钥匙串，保存后立即对该守护进程生效，无需重启。'}</>}
+              ? <>首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请<a href="#/models">打开模型</a>连接厂商；保存后立即生效，无需重启。</>
+              : <>模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请<a href="#/models">打开模型</a>检查凭据，或设置凭据引用的环境变量。{typeof window !== 'undefined' && window.graph && '桌面 APP 也可在模型页保存密钥到钥匙串，保存后立即对该守护进程生效，无需重启。'}</>}
           </div>
         )}
         {startup?.mode === 'view' && startup.configured && (
@@ -405,6 +408,7 @@ function WorkspacePage({ path, active, settings, startup, tasks, reloadConversat
             {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
             {pathname === '/usage' && <UsagePage />}
             {pathname === '/tools' && <ToolStatsPage />}
+            {pathname === '/models' && <ModelsPage />}
             {draftGraphMatch && (
               <DraftGraphTab
                 key={draftGraphMatch[1]}
