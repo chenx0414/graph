@@ -615,8 +615,7 @@ export class GitIntegration {
 
   /**
    * The files a node's dependency closure wrote: its own output paths, then every ancestor's, so a
-   * change anywhere upstream of this node counts as touching it. Evidence directories are excluded:
-   * a review's own report landing under `evidence/` is not a dependency of anything.
+   * change anywhere upstream of this node counts as touching it.
    */
   private closureProducedPaths(taskId: string, graph: ReturnType<typeof loadGraph>, nodeId: string): string[] {
     const paths = new Set<string>();
