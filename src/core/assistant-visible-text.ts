@@ -3,6 +3,8 @@
 export function assistantVisibleText(text: string): string {
   return text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g).map(part => {
     if (part.startsWith('```') || part.startsWith('~~~')) return part;
-    return part.replace(/<analysis>[\s\S]*?<\/analysis>/gi, '').replace(/<analysis>[\s\S]*$/i, '');
+    return part.replace(/<analysis>[\s\S]*?<\/analysis>/gi, '')
+      .replace(/<analysis>[\s\S]*$/i, '')
+      .replace(/<\/analysis>/gi, '');
   }).join('');
 }
