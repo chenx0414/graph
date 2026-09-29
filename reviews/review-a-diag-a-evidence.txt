@@ -1,0 +1,23 @@
+review-a independent verification of scripts/diag-a.mjs
+script_sha256=3903d76f458c4fa218f8799357d10d51e58cd264cb67583f802918bf0fb6f1ed
+script_bytes=6209
+abs_script=/Users/macmini/Library/Application Support/Graph/state/worktrees/zhong-deng-dang-graph-xing-zhuang-a-ben-a2d46de9/review-a/scripts/diag-a.mjs
+run1_cwd=repo exit=0
+run1_stdout="[diag-a] 测试文件 216 个，用例 1422 项（tests/**/*.test.ts；每个 test/it 声明计 1 项，test.each 按声明计 1）\n"
+run2_cwd=repo exit=0
+run2_stdout="[diag-a] 测试文件 216 个，用例 1422 项（tests/**/*.test.ts；每个 test/it 声明计 1 项，test.each 按声明计 1）\n"
+run3_cwd=/tmp exit=0
+run3_stdout="[diag-a] 测试文件 216 个，用例 1422 项（tests/**/*.test.ts；每个 test/it 声明计 1 项，test.each 按声明计 1）\n"
+byte_identical=true
+impl_commit=d437df46ab6c108e36625c4c13f28f86d13067eb
+impl_commit_name_status=A scripts/diag-a.mjs
+imports=node:fs readdirSync/readFileSync, node:path, node:url
+write_apis=none
+independent_file_count=216
+independent_line_start_declarations=1422
+strip_changed_count_files=0
+vitest_include=tests/**/*.test.ts
+handoff=summaries/impl-a-diag-a-evidence@1 digest=5703d2aafc2e61fdb7ca3b94b6f1407234d2cea637b4a9d834928c27e5823be4
+operation=cc9eb9d0-7c39-42bf-b1a9-23bc95180d7e
+activation=820cdce8-aa88-469d-8e17-531ee823f147
+result.artifacts=absent
