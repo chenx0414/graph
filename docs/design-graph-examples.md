@@ -185,7 +185,11 @@ nodes:
 | 门（决定通不通过） | **每个实现者一个** `program` 节点，`action: graph.verify` + `verifier` |
 | 返工回边 | `loops: [{ from: 门, to: 它评的那个实现者 }]`，**每个实现者一条** |
 
-## 形状（已实跑验证）
+## 两种形状（都实跑验证过）
+
+「多个实现者 + 评审 + 返工」在 Graph 里有**两种都成立**的表达，选哪个看你的评审是一个还是一个：
+
+### 形状 A：每个实现者一条完整的车道（各自评审、各自的门、各自的回边）
 
 ```
 nodes:
@@ -198,7 +202,30 @@ nodes:
 loops: [{ from: gate-a, to: impl-a }, { from: gate-b, to: impl-b }]
 ```
 
-## 可直接照抄的范例
+适用：**每条车道有自己的评审维度**（比如 a 的评审看性能、b 的评审看安全），或不同车道要用不同的 `verifier`。
+实测（两条车道 + 两个门 + 两条回边，只 a 首轮不过）：`phase completed`；**`impl-a` 跑 2 次（返工 1 次）、`impl-b` 只跑 1 次**（未变的车道没被牵连）；`gate-a: rework → pass`、`gate-b: pass`；验收项拿到 valid evidence。
+
+### 形状 B：一个统一的门，多条回边到各自实现者（推荐作为默认）
+
+```
+nodes:
+  impl-a   agent,   dependsOn: []                          ┐
+  impl-b   agent,   dependsOn: []                          ├─ n 个并行实现者
+  review-a agent,   dependsOn: [impl-a]                    │
+  review-b agent,   dependsOn: [impl-b]                    │
+  gate     program  dependsOn: [impl-a, impl-b, review-a, review-b]
+                    verifier: independent(reportNodes: [review-a, review-b])  ┘
+loops: [{ from: gate, to: impl-a }, { from: gate, to: impl-b }]
+```
+
+适用：**评审是统一的一道关**（一个评审者或一组评审者看全部车道），这也更贴近你说的「最后交由 main 测试」。
+实测（两条车道首轮都不过）：`phase completed`；门的首次判定 = **`rework[review-a|review-b]`** —— 一个门同时认出两条车道都不过；**`impl-a` 与 `impl-b` 都被返工（各跑 2 次）**；次轮 `pass[]` → 完成。
+
+> 关键在 `independent` 这种 `verifier`：**它没有 `subjectNode`，可以列多个 `reportNodes`**。所以一个门能同时判多条车道。这就是 B 成立的原因，也是 A 的 `multiview` 做不到的原因（见硬规则 1）。
+
+**怎么选**：一份统一评审 → B；每条车道自己的评审/不同判定标准 → A。B 更简单（一个门），推荐默认。
+
+## 可直接照抄的范例（形状 A）
 
 ```json
 {
@@ -230,19 +257,46 @@ loops: [{ from: gate-a, to: impl-a }, { from: gate-b, to: impl-b }]
 
 > `graph.verify` 门是 `program` 节点，`verifier` 只允许出现在它上面（`validateVerifierConfig` 硬校验）。它必须有 `dependsOn` 到实现者与评审者。
 
+## 可直接照抄的范例（形状 B）
+
+```json
+{
+  "requirementVersion": 1,
+  "summary": "两条车道并行实现，一道统一评审，不过就返工对应车道",
+  "decisions": [],
+  "acceptance": [
+    { "id": "all-ok", "description": "两条车道都通过评审", "checkNode": "gate" }
+  ],
+  "loops": [
+    { "from": "gate", "to": "impl-a" },
+    { "from": "gate", "to": "impl-b" }
+  ],
+  "nodes": [
+    { "id": "impl-a", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
+    { "id": "impl-b", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
+    { "id": "review-a", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-a"] },
+    { "id": "review-b", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-b"] },
+    { "id": "gate", "kind": "program", "action": "graph.verify",
+      "dependsOn": ["impl-a", "impl-b", "review-a", "review-b"],
+      "verifier": { "kind": "independent", "reportNodes": ["review-a", "review-b"] } }
+  ]
+}
+```
+
+> B 的评审报告形状不同：`{ "schemaVersion": 1, "body": { "kind": "independent", "verdict": "pass"|"fail", "reason": "...", "evidence": [{ "path": "/abs", "digest": "<sha256>" }] } }`（无 `subject`）。
+
 ## 五条硬规则（都是实测出来的）
 
-### 1. 每个实现者要一个**自己的门**，不是一个大评审
+### 1. `multiview` / `adversarial` **只能判一个**实现者，`independent` 能判多个
 
-- `multiview` / `adversarial` 的 `subjectNode` **只能是一个节点**（一个被评对象）。
+- `multiview` / `adversarial` 的 `subjectNode` **只能是一个节点**。所以想要 B 那种「一个门判多条车道」，**必须用 `independent`**（无 subjectNode，可列多个 `reportNodes`）。
 - `jury` 虽能列多个 candidates，但它**永远不产生 blockers**，所以 `outcome` 永远是 `pass` —— **它驱动不了返工环**。
-- 所以「多个并行实现者 + 返工」= **n 个门**（每个实现者一组）。
 
-### 2. 每个实现者要一条**自己的** `loops` 条目
+### 2. 一个门的**所有** `loops` 回边会一起被激活
 
-- `loops[].to` **只能是节点，不能是容器**（`GraphPlan` 校验 `this.nodes.has(...)`，而 `reactivate` 按 nodes 表查）。
-- 一条 `{from: gate, to: impl}` 只激活那一个实现者；要返工两个，就写两条。
-- 门的 `from` 只对自己声明的 loops 生效：`handleRework` 取 `loops.filter(l => l.from === 当前节点)`。
+- `handleRework` 取 `loops.filter(from === 当前节点)`，然后 `reactivate(loops.map(l => l.to))` —— **一次激活全部目标**。这就是 B 能一次返工两条车道的原因。
+- `loops[].to` **只能是节点，不能是容器**（`GraphPlan` 校验 + `reactivate` 按 `nodes` 表查）。
+- 只想返工其中一条时，门的 blockers 会用 `id`（= 评审节点名）指名是哪个；**固定回边会把整组一起重跑**，所以如果你需要「只返工失败的那条」，用 A。
 
 ### 3. 门的判定是**产物**，不是节点失败
 
@@ -262,9 +316,9 @@ loops: [{ from: gate-a, to: impl-a }, { from: gate-b, to: impl-b }]
 
 「无实质进展」的判据是 blockers 的 id 集合：**上一次的某个 blocker id 这次消失了**才算有进展（`progress` 逻辑）；`invalid_evidence` 不算进展。
 
-### 5. 评审者必须交回一份**合规的 ReviewReport**，否则门会以 `invalid_evidence` 拒绝
+### 5. 评审者必须交回一份**合规的评审报告**，否则门会以 `invalid_evidence` 拒绝
 
-`multiview` 的评审报告形状（最少可用）：
+形状 A（`multiview`）的最少可用报告：
 
 ```json
 {
@@ -276,23 +330,26 @@ loops: [{ from: gate-a, to: impl-a }, { from: gate-b, to: impl-b }]
 }
 ```
 
-要点：
-- **`subject` 必须是它评的那个产物**（`path` + `digest`），不是自由文本；
+形状 B（`independent`）：去掉 `subject`，`body` 是 `{ kind: 'independent', verdict, reason, evidence }`。
+
+共同要点：
 - `verdict` 三值：`pass` / `fail` / `unresolved`；
 - **`evidence` 必须非空**，每项是**绝对路径 + sha256**，否则 `invalid_evidence`；
 - **`files`（可选）= 修复要动的仓库相对路径**。它有一个硬作用：门会检查这些文件是否落在某个节点的声明范围内，**不在任何节点范围内就写进 `unowned`**，提示 main 去扩那个节点的文件清单——而不是让某个车道瞎猜。
 
 ## 收尾与验收
-- 每个门是 `program` 节点，可以作为**验收项的 `checkNode`**（acceptance 只接受强制 program 节点）；本范例用了两条验收项，一门一条。
+- 门是 `program` 节点，可以作为**验收项的 `checkNode`**（acceptance 只接受强制 program 节点）：A 里一门一条，B 里一个门一条。
 - 门通过时才会写 evidence（`evaluateVerifier` 只在 `pass` 时产出 evidence），所以「验收通过」= 真的过了评审。
 - main 自己最后仍要验（跑检查脚本 / 看 diff），门只保证评审规则通过。
 
 ## 什么适合 / 什么不适合
-- **适合**：实现 → 独立评审 → 不通过就返工，且返工方向单一；多车道各改各的文件。
+- **适合**：实现 → 评审 → 不通过就返工，返工方向单一（实现 → 评审 → 实现）。
 - **不适合**：需要在**多个候选之间比较并选一个**（那是 `jury` / 复杂档）；需要多条互相交织的回边（复杂档）。
 
 ## 已实证（不是推测）
-用上面那份可照抄的结构真跑（两条车道 + 两个门 + 两条回边）：`phase completed`；`workA` 跑 **2** 次（返工 1 次）、`workB` 只跑 **1** 次（未变的车道没被牵连）；`gateA` 的两次判定为 **`rework` → `pass`**、`gateB` 为 `pass`；两条验收项都拿到 valid evidence。
+- **形状 A**（两条车道 + 两个门 + 两条回边，只 a 首轮不过）：`phase completed`；`impl-a` 跑 **2** 次、`impl-b` 只跑 **1** 次；`gate-a: rework → pass`、`gate-b: pass`；两条验收项都拿到 valid evidence。
+- **形状 B**（两条车道 + 一个门 + 两条回边，两条车道首轮都不过）：`phase completed`；门首次判定 **`rework[review-a|review-b]`**；**两条车道都被返工（各跑 2 次）**；次轮 `pass[]`。
+- 两份可照抄的 JSON 都经真 `validateProposal` 接受。
 
 ---
 
