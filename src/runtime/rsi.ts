@@ -329,7 +329,9 @@ function changePath(body: Record<string, unknown>): unknown {
  * required properties path`, followed by the received arguments) - accurate, and never a word about what
  * went wrong: a top-level field nested one level too deep, or a whole change written inside `edits[]`.
  * `prepareArguments` throws before that check and its message becomes the tool result the model reads.
- * Everything else - a call that is only missing a field, say - stays the schema's business. */
+ * A missing `path` is answered here too: it measured as the single most frequent mistake (a `replace`
+ * entry carrying `edits` drops it), and the schema's wording never names the entry it lost. Everything
+ * else that is only a field problem stays the schema's business. */
 export function rsiChangeShapeHint(args: unknown): string | undefined {
   const top = plainObject(args);
   if (!top) return undefined;
@@ -341,6 +343,13 @@ export function rsiChangeShapeHint(args: unknown): string | undefined {
     if (!entry) continue;
     const stray = topLevel.find(key => Object.hasOwn(entry, key));
     if (stray) return `changes[${index}] is one file change: {path, action, content, edits}. "${stray}" belongs at the top level of the call - it is nested one level too deep.`;
+    // Every change needs a path, whatever its action. The measured mistake is a `replace` entry that
+    // carries `edits` and quietly drops `path`, and the SDK answers only "must have required
+    // properties path" - no index, no shape, so the same call comes back. Name it here instead.
+    if (typeof entry['path'] !== 'string') {
+      return `changes[${index}] is missing "path": every change needs one path per file. Write it as `
+        + '{path, action: "write", content} | {path, action: "replace", edits: [{oldText, newText}]} | {path, action: "delete"}.';
+    }
     for (const [editIndex, edit] of asArray(entry['edits']).entries()) {
       if (Array.isArray(edit)) return `changes[${index}].edits[${editIndex}] is an array: edits[] holds one {oldText, newText} per edit - flatten it.`;
       const edited = plainObject(edit);
