@@ -1,16 +1,18 @@
 # 独立审查：车道 b —— `scripts/diag-b.mjs` —— pass
 
 - 审查节点：`review-b`（agent 路由器，`routes ['pass','fail']`，`input.route.declared=null`）
-- 审查对象：impl-b 提交 `6c0d039`（`graph:impl-b:af0aed52-…`），其父为合流提交 `f3d0ced`（`f3d0ced` 的另一侧是车道基线 `7165551`）；第 1 轮工作副本 HEAD = `f3d0ced`，第 2 轮复跑 HEAD = `7eafb82`（同一被审提交，文件指纹未变，见 §6.2）
+- 审查对象：impl-b 提交 `6c0d039`（`graph:impl-b:af0aed52-…`），其父为合流提交 `f3d0ced`（`f3d0ced` 的另一侧是车道基线 `7165551`）；第 1 轮工作副本 HEAD = `f3d0ced`，第 2 轮复跑 HEAD = `7eafb82`，第 3 轮复跑 HEAD = `28d5797`（三次都是同一被审提交 `6c0d039`，文件指纹三次均未变，见 §6.2 与 §7.2）
 - 审查依据：impl-b 交付件 `graph://tasks/a621e9d6-…/artifacts/deliverables/diag-b-report@1`（digest `1eac27e6…`）与黑盒 E2E harness `deliverables/diag-b-e2e-harness@1`（digest `7c2e5bee…`）
 - 被审文件指纹：`sha256(scripts/diag-b.mjs) = aba9bf43301a68e83947c2f54b6fa629edc3d274ebe618d5c455a2ae7847c1c6`
-- 结论：**pass** —— 5 条 lookFor 全部成立，**0 个阻塞项**；4 条非阻塞发现（均不在本车道必改范围），另附 1 条**不属于本车道、但会卡死下游 `full-tests`** 的图级风险
+- 结论：**pass** —— 5 条 lookFor 全部成立，**0 个阻塞项**；4 条非阻塞发现（均不在本车道必改范围），另附 1 条**不属于本车道、但会卡死下游 `full-tests`** 的图级风险。第 3 轮复跑结论不变（§7）
 
 > **第 2 轮复跑（同一会话，operation `1c299710`）**：5 条 lookFor 在合并后的 HEAD `7eafb82`（已含 impl-a/impl-c/review-a/review-c）上**复跑全部仍成立**，被审文件仍逐字节同指纹 `aba9bf43…`，数字仍是 `196 / 53,915 / 2,652,346`（兄弟车道新增的文件全在 `scripts/`、`reviews/`，不落在 `src/` 下，所以合流没有扰动本车道口径）。impl-b 的 E2E harness 从产物库取出重跑仍 19/19。**结论不变：pass，0 阻塞项，返工理由仍为空。**
 >
 > 第 1 轮两处说法在本轮被更硬的证据取代，**以此为准**：
 > 1. **基线提交写错了一个**（§0/§3）：本车道的车道前基线是 **`7165551`**，不是 `3cf2e35`。`3cf2e35` 是 `7165551` 的父提交，而 `7165551` 本身已改过 `tests/console/review-as-router.test.ts`（属既有 harness 提交）。第 1 轮拿 `3cf2e35` 当基线，等于比在了更早的一侧。
 > 2. **§3 对红门禁的归因过软**（原文归为「负载抖动 / 跨检出临时路径」）：本轮拿到了具体机制，见 §6。`node --run check` 仍然红，数字与第 1 轮完全一致（42 文件 / 128 用例），**没有变好也没有变坏**。
+>
+> **第 3 轮复跑（同一会话，operation `a752b543`，HEAD `28d5797`，已并入 review-c 的 `b8480ee`）**：图未记录任何下游证据失败，故本轮把 5 条 lookFor 与图级风险在**第三个集成检出**上从零重跑。被审文件仍是 `aba9bf43…`，`git log --oneline HEAD -- scripts/diag-b.mjs` 只有 `6c0d039` 一条。数字仍是 `196 / 53,915 / 2,652,346`；`node --run check` 仍是红的，且三个数字与前两轮**逐个相同**（42 / 175 / 217，128 / 1340 / 1468）。本轮新增两项此前没做过的取证：①**针对 review-c 在车道 c 上判 fail 的那一类缺陷做同族排查**（`argv[1]` 入口守卫 → 符号链接下静默退出 0），结论是**车道 b 不存在该缺陷**，四种调用写法输出逐字节相同；②把符号链接记账缺口的**最坏形态**跑出来了（一棵源码全在符号链接后的目录会报 `TOTAL 0/0` 且 exit 0、无任何提示），仍判非阻塞，理由见 §7.6。**结论不变：pass，0 阻塞项，返工理由仍为空。**
 
 ---
 
@@ -306,4 +308,202 @@ $ ls /Users/macmini/workspace | tr '\n' ' '   # 真实仓库的父目录
 
 - 5 条 lookFor 全部仍成立，**0 个阻塞项**，非阻塞发现仍是 §2.1–§2.4 四条，无新增。
 - 给 `merge` 的三条硬约束（§4）不变，其中第 1 条（禁止把符号链接的记账缺口写成「遍历所有文件」）依然有效。
+- `verdict = pass`，`route.case = 'pass'`，返工理由：无。
+
+---
+
+## 7. 第 3 轮复跑记录（operation `a752b543`，HEAD `28d5797`）
+
+### 7.1 为什么要复跑
+
+图里**没有任何一条下游证据被记为失败**：三条车道 + 三条评审都已合入任务分支，HEAD 从第 2 轮的 `7eafb82` 前进到 `28d5797`（并入了 review-c 的 `b8480ee`，而 review-c 对**车道 c** 判了 fail）。因此本轮不是「按失败返工」，而是把本节点喂给下游的 5 条 lookFor 逐条**在新的集成检出上重跑一遍**，确认前两轮的 pass 没有因为合流而过时，并补上此前两轮没做的同族排查。
+
+### 7.2 被审对象仍然没变
+
+```
+$ git rev-parse --short HEAD
+28d5797
+$ git log --oneline -3
+28d5797 Merge branch '…/review-c' into graph/task/zhong-deng-…
+b8480ee graph:review-c:76b32066-b148-4697-9510-c5d70729500c
+bf47906 graph:review-b:a752b543-3196-4c73-b8e4-5ae4be854a16   # 第 2 轮本节点自己的提交
+
+$ shasum -a 256 scripts/diag-b.mjs
+aba9bf43301a68e83947c2f54b6fa629edc3d274ebe618d5c455a2ae7847c1c6   # 第 1、2、3 轮同一指纹
+
+$ git log --oneline HEAD -- scripts/diag-b.mjs
+6c0d039 graph:impl-b:af0aed52-066b-4259-8b0c-d2cabfa956ad          # HEAD 历史里只有这一条
+
+$ git show --name-status --format='' 6c0d039
+A	scripts/diag-b.mjs                                               # 仍是唯一新增，既有文件 M/D/R = 0
+
+$ git diff --name-status 7165551..HEAD
+A	review-c-report.md      A	reviews/review-a.md      A	reviews/review-b.md
+A	scripts/diag-a.mjs      A	scripts/diag-b.mjs       A	scripts/diag-c.mjs
+```
+
+三条车道 + 三条评审**全部只做新增，没有任何一条改过仓库既有文件**，所以车道 b 的数字口径不会被合流扰动（兄弟车道新增的文件都在 `scripts/`、`reviews/` 与根目录，不落在 `src/` 下）。
+
+> **给 merge 的一个操作提示（§7.7 的具体来源）**：`git log --all -- scripts/diag-b.mjs` 会看到 **4 个不同的 blob**，其中 `8512b60` / `50eb7be` / `31b829b` 属于**上一个任务**的分支 `graph/task/zhong-deng-dang-graph-xing-zhuang-a-ben-a2d46de9`（impl-b 在那个图里也做过同名脚本），只有 `6c0d039` 属于本图。合并时请按 commit 挑文件，不要按文件名挑。
+
+### 7.3 只读（静态 + 动态）——成立
+
+```
+$ grep -nE "writeFile|appendFile|mkdir|rm\(|unlink|rename|createWriteStream|copyFile|chmod|truncate|rmdir|spawn|exec|child_process|process\.chdir|process\.env|fetch\(|http" scripts/diag-b.mjs
+NONE
+$ grep -n "^import" scripts/diag-b.mjs
+19:import { readdir, readFile } from 'node:fs/promises';
+20:import { basename, extname, join, relative, resolve } from 'node:path';
+21:import { fileURLToPath } from 'node:url';
+
+$ for i in 1 2 3; do node scripts/diag-b.mjs > run$i.txt 2> run$i.err; echo "run$i exit=$?"; done
+run1 exit=0   run2 exit=0   run3 exit=0
+$ wc -c run{1,2,3}.err
+0 / 0 / 0
+$ diff -q run1.txt run2.txt && diff -q run1.txt run3.txt && echo RUNS BYTE-IDENTICAL
+RUNS BYTE-IDENTICAL
+$ node scripts/diag-b.mjs --json > json1.txt; node scripts/diag-b.mjs --json > json2.txt; diff -q json1.txt json2.txt && echo JSON DETERMINISTIC
+JSON DETERMINISTIC
+
+# 工作副本 1030 个文件（排除 .git、node_modules）跑前/跑后指纹
+$ diff -q tree-before.txt tree-after.txt && echo "TREE IDENTICAL"
+TREE IDENTICAL
+$ git status --porcelain
+(空)
+```
+
+3 个 import 全是 `node:` 内置；车道提交不含 `package.json` / lockfile；跑完之后 1030 个文件逐字节不变，工作副本干净。零耦合旁证仍成立：全仓 `diag-b` 的引用只有 `scripts/diag-b.mjs` 自身和三份评审报告（`reviews/review-a.md`、`reviews/review-b.md`、`review-c-report.md`），`package.json` 的 scripts 里没有它，`tsconfig.json` 的 `include` 不含 `scripts/**`，`node --run lint`（`scripts/check-floating-promises.mjs`）也不扫 `scripts/`。
+
+### 7.4 统计结果——用第三套工具重算，逐格吻合
+
+第 1 轮用 `find`+`wc -l`，第 2 轮换了一次实现；本轮改用**第三条完全不同的路径**：`git ls-files`（版本库视角的 198 个跟踪文件）→ `case` 语句过滤扩展名（不做通配展开）→ `wc -l` 数行、`stat -f%z` 数字节。
+
+```
+$ git ls-files src | wc -l            → 198
+独立筛出的源码文件                        → 196
+src/catalog     15 files   2525 lines  120625 bytes  nont=0
+src/core        44 files  13979 lines  753600 bytes  nont=0
+src/git          3 files   1270 lines   67656 bytes  nont=0
+src/runtime     55 files  13467 lines  680135 bytes  nont=0
+src/server      16 files   4738 lines  220316 bytes  nont=0
+src/web         63 files  17936 lines  810014 bytes  nont=0
+TOTAL          196 files  53915 lines 2652346 bytes  nont=0
+```
+
+与脚本输出的 `196 / 53,915 / 2,652,346` **逐格相同**；分模块求和 = TOTAL；`nont=0` 说明 196 个文件全部有末尾换行，故 `wc -l` 与脚本的 `countLines` 在本树不会分歧。
+
+- **skipped 账目**：`comm` 比对「`find src -type f` 的 198 个」与「独立筛出的 196 个」，差集恰好 2 个 —— `src/catalog/models-dev.snapshot.json`、`src/web/assets/graph-icon.png`，与脚本的 `2 non-source file(s) skipped.` 对上，无遗漏、无重复计数。
+- **符号链接**：`find src -mindepth 1 ! -type f ! -type d` 输出为空 —— `src/` 下没有任何非普通文件，所以已发布的数字是完整的（§2.1 的缺口在本树未被触发）。
+- **扩展名分解**独立重算同样吻合：`.ts 158/40,025`、`.tsx 31/9,770`、`.css 4/3,988`、`.mjs 1/79`、`.cjs 1/40`、`.html 1/13`。
+- **Top-10** 用 `sort -k1,1nr -k2,2` 独立排出，顺序与数值与脚本输出完全一致（`styles.css 3656`、`task-runtime.ts 2394`、`operation-lifecycle.ts 1387` … `rsi.ts 1077`）。
+
+### 7.5 CLI 面——11 种调用全部符合退出码契约
+
+```
+(无参数)                     exit=0  stderr=0B
+--help / -h                  exit=0  stderr=0B
+--json                       exit=0  stderr=0B
+--json --target src/git --json  exit=0  stderr=0B      # 重复开关幂等
+--target src/git             exit=0  stderr=0B          # 走「文件直挂 target 根」分支
+--target <绝对路径>/src       exit=0  stderr=0B
+--target /definitely/not/here exit=1 stderr=74B         # ENOENT
+--target scripts/diag-b.mjs  exit=1 stderr=186B         # ENOTDIR
+--target（缺值）              exit=1 stderr=38B
+--bogus                      exit=1 stderr=34B          # unknown argument
+```
+
+### 7.6 同族排查：review-c 判 fail 的那一类缺陷，车道 b 没有
+
+review-c 对车道 c 的阻塞结论是：`argv[1]` 与 `import.meta.url` 比对构成的入口守卫，在符号链接调用下**静默 exit 0、零输出**。这是「工具的退出码契约被自己的守卫推翻」，所以判 fail。本轮把同一族触发条件在车道 b 上逐条跑了一遍：
+
+```
+$ grep -n "argv\[1\]" scripts/diag-b.mjs
+(无)                                    # 只有第 31 行从 import.meta.url 推 repoRoot，没有入口守卫
+```
+
+| 调用写法 | exit | stdout | stdout 指纹 |
+| --- | --- | --- | --- |
+| 绝对 realpath `node "$W/scripts/diag-b.mjs"` | 0 | 1371 B | `c882af35…` |
+| 绝对符号链接 `node /tmp/rvb3/link-diag-b.mjs` | 0 | 1371 B | `c882af35…` |
+| `$TMPDIR` 链下的符号链接（`/var` → `/private/var`） | 0 | 1371 B | `c882af35…` |
+| 相对路径 `./diag-b.mjs`（cwd = 符号链接所在目录） | 0 | 1371 B | `c882af35…` |
+| 相对路径 `./diag-b.mjs`（cwd = `scripts/`） | 0 | 1371 B | `c882af35…` |
+
+五种写法输出**逐字节相同**、退出码全 0、stderr 全空。**车道 b 不存在车道 c 的那个阻塞缺陷**；车道 b 唯一的缺省定位方式是「按脚本自身位置推仓库根」，与调用路径无关。
+
+### 7.7 非阻塞发现，本轮状态
+
+| 编号 | 内容 | 本轮状态 |
+| --- | --- | --- |
+| §2.1 | 树内的非普通文件（符号链接）既不进模块桶、也不进 `skipped`，静默丢弃 | **原样复现，且本轮跑出了最坏形态**（见下） |
+| §2.2 | `moduleOf` 硬编码 POSIX `/` 切模块，Windows 上分模块表会塌成一桶 | 仍未触发（仓库无 Windows runner） |
+| §2.3 | `--target` 会吞掉紧跟的开关：`--target --json` 报 ENOENT | 原样复现（退出码仍是 1，只是报错信息不直白） |
+| §2.4 | 「先写测试后写实现」的过程主张在仓库里没有留痕 | 性质未变（过程主张，harness 可复跑） |
+
+§2.1 的最坏形态（**这是本轮新增的取证**，之前只报了「少报」）：
+
+```
+$ # 一棵源码全部位于符号链接之后的目录
+$ find -L fx2/tree -type f        → real/only.ts（5 行）
+$ node scripts/diag-b.mjs --target fx2/tree
+Module      Files       Lines       Bytes  Avg lines
+------  -------  ----------  ----------  ---------
+------  -------  ----------  ----------  ---------
+TOTAL         0           0             0        0.0
+By extension
+Largest files (top 0)
+exit=0                                        # ← 0 文件 0 行 0 字节，退出码 0，且没有任何提示
+
+$ # 对照：根目录本身是符号链接时 readdir 会跟随，结果正确
+$ node scripts/diag-b.mjs --target fx2/tree/linked
+TOTAL           1           5            10        5.0        exit=0
+```
+
+也就是说缺陷的边界很清楚：**只有「树内部」的非普通文件会被吞**，target 自身是符号链接不受影响。对本车道的判定仍然是非阻塞，理由是三条可验证的事实：①交付物的用途是报告**本仓库 `src/`** 的规模，而 `find src -mindepth 1 ! -type f ! -type d` 为空，脚本不存在 `src/` 路径；②已发布的 `196 / 53,915 / 2,652,346` 用三套独立工具重算过，是完整的；③触发需要使用者主动把 `--target` 指到一棵含符号链接的第三方目录。**但它必须继续写进 merge 的约束**：README 不得把 `--target` 描述成「遍历目标目录下所有文件」；一行修法是把 `listChildren` 里既非目录也非文件的条目计入 `skipped`（或跟随链接），改完不影响本仓库任何数字。
+
+### 7.8 实现者的 E2E 证据可复跑
+
+从产物库直接取 `deliverables/diag-b-e2e-harness@1`（`shasum -a 256` = `7c2e5beed32533375d13b26174e68c3beabd1847c283fa7a80be2240158571b9`，与发布时一致），在本检出重跑：
+
+```
+fixture (hand-computed oracle): core=2 files/4 lines, runtime=1/2, web=1/4, total=4 files/10 lines, 2 skipped
+  ok  fixture run exits 0 …（8 项）
+  ok  src/catalog matches independent walk (15 files / 2525 lines)
+  …（6 个真实模块 + 2 项真实树断言）
+  ok  node --run typecheck passes
+  ok  node --run lint passes
+ALL PASSED (19 checks)          exit=0
+```
+
+一处**留给后人的观察（非阻塞）**：harness 的真实树那一段只断言 `files` 与 `lines`，不比对 `bytes`、`largest` 与非普通文件；本轮用 `stat -f%z` 独立补齐了 bytes，`largest` 也已独立排出（§7.4）。另外 harness 只存在于产物库、不在仓库里（这是为了让车道严格只新增一个文件），README 不要把它写成「仓库内的测试」。
+
+### 7.9 门禁复跑
+
+| 命令 | 退出码 | 备注 |
+| --- | --- | --- |
+| `node --run typecheck` | 0 | |
+| `node --run lint` | 0 | |
+| `node --run check:evidence` | 0 | `Acceptance evidence is unchanged.` |
+| `node --run check` | **1** | `Test Files 42 failed \| 175 passed (217)`、`Tests 128 failed \| 1340 passed (1468)`、Duration 223.97 s |
+
+三个数字与第 1、2 轮**逐个相同**，既没变好也没变坏。42 个失败文件全部落在 `tests/console|m0|m3|m7|m8`；**没有一个测试引用本车道的文件**（`tests/` 里唯一出现的 `diag-` 字样是 `tests/m2/verification.test.ts:229/235` 里伪造的 multiview 评审正文里的字符串 `'scripts/diag-a.mjs'`，而 `tests/m2` 不在失败清单里）。
+
+机制与第 2 轮一致，本轮再次在日志里看到原样的一行：
+
+```
+check.log:1257  Error: ENOENT: no such file or directory, copyfile
+  '<worktree>/12-MediaBookmarks/src/config.js' -> '/var/folders/…/graph-m7-page-…/src/config.js'
+check.log:1261     18|   await copyFile(join(process.cwd(), '..', '12-MediaBookmarks', 'src', …
+
+$ ls ..            → graph-m7-acceptance impl-a impl-b impl-c integration review-a review-b review-c
+$ ls /Users/macmini/workspace | grep 12-  → 12-MediaBookmarks
+```
+
+`tests/m7/page.test.ts` 等用例从 `process.cwd()/../12-MediaBookmarks` 取素材，而该兄弟项目只存在于**真实仓库的父目录**，工作副本的父目录里只有本任务的工作树目录 —— 这是**工作树布局造成的必然失败**，与三条车道新增的文件无关（日志另有 2 处 `Test timed out in 15000ms`，属负载抖动）。**对下游的含义不变**：`full-tests` 节点跑的是同一条 `node --run check`，且它所在的 `integration` 检出与本工作副本**同父目录**，所以上面这条失败在它上面同样必然发生；`{from: full-tests, to: merge}` 的回边会因此反复唤醒 `merge`，而 `merge` 只改 `scripts/README.md`，改不动 `tests/`。**这是布局问题，不是交付物问题，人工验收时不要把它算到三条车道的账上。**
+
+### 7.10 本轮结论
+
+- 5 条 lookFor 在第三个集成检出上**全部仍成立**，**0 个阻塞项**，非阻塞发现仍是 §2.1–§2.4 四条（§2.1 已补上最坏形态的复现），无新增阻塞项。
+- 同族排查结论：review-c 在车道 c 上判 fail 的「符号链接下静默退出 0」缺陷，**车道 b 不存在**（§7.6，五种调用写法输出逐字节相同）。
+- 给 merge 的三条硬约束（§4）不变；新增一条操作提示：`scripts/diag-b.mjs` 在其他分支上有同名不同内容的历史版本，合并要按 commit 挑（§7.2）。
 - `verdict = pass`，`route.case = 'pass'`，返工理由：无。
