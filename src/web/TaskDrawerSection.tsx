@@ -73,7 +73,7 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
       <div className="drawer-task-detail" data-testid="drawer-task-detail">
         {selected ? (
           <>
-            <div className="drawer-entry-links" data-testid="drawer-entry-links">
+            <div className="drawer-entry-links" data-testid="drawer-task-links">
               <a className="btn btn-sm" data-testid={`task-graph-tab-${selected.id}`} href={`#/tasks/${selected.id}/graph`}><Icon name="graph" size={14} /><span>任务图</span></a>
               <a className="btn btn-sm" data-testid="drawer-task-artifacts" href={artifactsHref}><Icon name="box" size={14} /><span>共享产物</span></a>
             </div>
@@ -81,7 +81,7 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
         ) : (
           <>
             <p className="muted" data-testid="no-task-graph">还没有任务；确认草稿后这里会显示它的窗口。</p>
-            <div className="drawer-entry-links" data-testid="drawer-entry-links">
+            <div className="drawer-entry-links" data-testid="drawer-task-links-empty">
               <a className="btn btn-sm" data-testid="drawer-task-artifacts" href={artifactsHref}><Icon name="box" size={14} /><span>共享产物</span></a>
             </div>
           </>

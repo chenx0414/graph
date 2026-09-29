@@ -200,6 +200,19 @@ test('the right drawer keeps proposal details and node inspection independent fr
   expect(await page.getByTestId('drawer-entry-artifacts').isVisible()).toBe(true);
   expect(await page.getByTestId('accept-branch').isVisible()).toBe(true);
   expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
+  // The draft card lays its own content out inside its box: an unconfirmed draft
+  // used to squeeze the card to its flex basis, so the version list and the two
+  // window links spilled out over the task navigation (measured: card 78..164,
+  // version list at 298, links at 349, task section from 176). Every part of the
+  // card must sit inside it, and the task navigation must start below it.
+  await expect.poll(async () => {
+    const card = await page.getByTestId('proposal-draft').boundingBox();
+    const toc = await page.getByTestId('drawer-draft-toc').boundingBox();
+    const links = await page.locator('[data-testid=proposal-draft] [data-testid=drawer-entry-links]').boundingBox();
+    const tasks = await page.getByTestId('conversation-tasks').boundingBox();
+    if (!card || !toc || !links || !tasks) return null;
+    return { tocInside: toc.y + toc.height <= card.y + card.height + 1, linksInside: links.y + links.height <= card.y + card.height + 1, tasksBelow: tasks.y >= card.y + card.height - 1 };
+  }).toEqual({ tocInside: true, linksInside: true, tasksBelow: true });
   await page.waitForTimeout(260);
   await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
     .toBe(beforeMain!.width);
