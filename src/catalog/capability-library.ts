@@ -41,6 +41,8 @@ export interface CapabilityBinding {
 
 export interface DefinitionSpec {
   recommendedGrade: ModelGrade;
+  /** Frozen recipe prompt used by new instances of this definition version. */
+  systemPrompt?: string;
   capabilities?: CapabilityBinding[];
   /** Optional prompt capabilities kept separate from executable capabilities. */
   prompts?: {

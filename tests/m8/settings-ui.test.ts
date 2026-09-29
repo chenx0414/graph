@@ -314,6 +314,31 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.getByTestId('config-revision').innerText()).toBe(String(revision));
 }, 120_000);
 
+test('configured vendor panel edits an account and removes its linked models', async () => {
+  const dir = await temp('provider-management');
+  const stub = await stubProvider();
+  const path = await configFile(dir, stub.baseUrl);
+  const daemon = await start(dir, path);
+  const api = await session(daemon.url);
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/models`);
+  await page.getByTestId('configured-provider-local').waitFor();
+  await page.getByTestId('configured-provider-edit-local').click();
+  await page.getByTestId('provider-setup').waitFor();
+  expect(await page.getByTestId('provider-credentialId').inputValue()).toBe('local');
+  expect(await page.getByTestId('provider-baseUrl').inputValue()).toBe(stub.baseUrl);
+  page.once('dialog', dialog => void dialog.accept());
+  await page.getByTestId('configured-provider-delete-local').click();
+  await expect.poll(async () => {
+    const response = await api.get('/api/config');
+    const config = (await response.json() as { config: { credentials: Record<string, unknown>; models: { entries: unknown[] } | null } }).config;
+    return { credentialCount: Object.keys(config.credentials).length, modelCount: config.models?.entries.length ?? 0 };
+  }, { timeout: 10_000 }).toEqual({ credentialCount: 0, modelCount: 0 });
+  await page.getByTestId('configured-providers').getByText('尚未配置厂商。').waitFor();
+}, 60_000);
+
 test('chat composer toggles full access with one click and settings no longer hosts the control', async () => {
   const dir = await temp('access-mode');
   const stub = await stubProvider();

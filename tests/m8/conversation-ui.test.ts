@@ -280,12 +280,12 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await includes(page, '执行记录显示');
   await page.getByTestId('drawer-entry').click();
   expect(await page.getByTestId('drawer-mode-tabs').count()).toBe(0);
-  // The task overview keeps the authoritative status and the two entry points to the
-  // windows that show more; the node list itself lives in the task graph now.
+  // Navigation leads the drawer; task metadata is available in the task graph.
   const taskDetail = page.getByTestId('drawer-task-detail');
   await taskDetail.waitFor();
-  expect(await taskDetail.innerText()).toContain('状态');
-  expect(await taskDetail.innerText()).toContain('目标分支');
+  expect(await taskDetail.innerText()).toContain('任务图');
+  expect(await page.getByTestId('task-sort').inputValue()).toBe('newest');
+  expect(await page.getByTestId('task-status-filter').count()).toBe(1);
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 

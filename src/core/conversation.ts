@@ -172,7 +172,9 @@ export function persistConversationActivity(store: TaskStore, conversationId: st
   }));
   for (const [index, record] of records.entries()) {
     const key = record.kind === 'tool' ? `tool:${record.data.toolCallId ?? record.ordinal ?? index}` : `text:${record.ordinal ?? index}`;
-    const data = { ...(record.kind === 'tool' ? record.data : {}), activityKey: key, ...(record.ordinal !== undefined ? { ordinal: record.ordinal } : {}) };
+    const previousData = byKey.get(key)?.data ? JSON.parse(byKey.get(key)!.data!) as Record<string, Json> : {};
+    const data = { ...(record.kind === 'tool' ? record.data : {}), activityKey: key, ...(record.ordinal !== undefined ? { ordinal: record.ordinal } : {}),
+      ...(record.kind === 'tool' && Array.isArray(previousData.attachments) ? { attachments: previousData.attachments } : {}) };
     const state = record.kind === 'tool' && typeof record.data.toolCallId === 'string' && activeToolIds?.has(record.data.toolCallId) ? 'pending' : 'done';
     const previous = byKey.get(key);
     if (previous && previous.text === record.text && previous.state === state && previous.data === canonicalJson(data)) continue;

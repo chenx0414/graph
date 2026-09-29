@@ -25,6 +25,8 @@ export interface AgentCombination {
   recommendedGrade: ModelGrade;
   review: boolean;
   tags: string[];
+  /** Versioned identity and domain instructions edited with this recipe. */
+  systemPrompt?: string;
   resources: AgentCombinationResource[];
 }
 
@@ -89,8 +91,11 @@ export function parseAgentCombinations(value: unknown): AgentCombinationDocument
     const recommendedGrade = text(entry.recommendedGrade, `combinations[${index}].recommendedGrade`) as ModelGrade;
     if (!GRADES.has(recommendedGrade)) throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} has unsupported grade ${recommendedGrade}`);
     if (entry.review !== undefined && typeof entry.review !== 'boolean') throw new RuntimeError('invalid_agent_combination', `combinations[${index}].review must be a boolean`);
-    if (!Array.isArray(entry.resources) || (!entry.resources.length && mode !== 'main')) {
-      throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} must reference at least one resource unless it is the Main Agent recipe`);
+    if (entry.systemPrompt !== undefined && (typeof entry.systemPrompt !== 'string' || !entry.systemPrompt.trim() || entry.systemPrompt.length > 40_000)) {
+      throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} systemPrompt must contain 1–40000 characters`);
+    }
+    if (!Array.isArray(entry.resources) || (!entry.resources.length && mode !== 'main' && !entry.systemPrompt)) {
+      throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} must include a resource or an inline system Prompt unless it is the Main Agent recipe`);
     }
     const seen = new Set<string>();
     const resources = entry.resources.map((rawResource, resourceIndex) => {
@@ -123,6 +128,7 @@ export function parseAgentCombinations(value: unknown): AgentCombinationDocument
       recommendedGrade,
       review: entry.review === true,
       tags: textList(entry.tags, `combinations[${index}].tags`),
+      ...(entry.systemPrompt ? { systemPrompt: entry.systemPrompt.trim() } : {}),
       resources,
     };
   });
@@ -200,7 +206,8 @@ export function validateAgentCombination(
       name: record.name ?? record.id,
     });
   }
-  if (toolCount && !identityCount) issues.push(`Agent combination ${combination.id} binds a tool prompt without an identity prompt`);
+  if (toolCount && !identityCount && !combination.systemPrompt) issues.push(`Agent combination ${combination.id} binds a tool prompt without an identity prompt`);
+  if (combination.systemPrompt && identityCount) issues.push(`Agent combination ${combination.id} cannot bind an identity Prompt and an inline system Prompt together`);
   return { ...combination, status: issues.length ? 'invalid' : 'valid', issues, resolved };
 }
 
@@ -214,6 +221,7 @@ export function compileAgentCombinationDefinition(
   }
   const definition: DefinitionSpec = {
     recommendedGrade: combination.recommendedGrade,
+    ...(combination.systemPrompt ? { systemPrompt: combination.systemPrompt } : {}),
     ...(combination.review ? { review: true } : {}),
     snapshot: {
       agentCombination: {

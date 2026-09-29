@@ -686,6 +686,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
         agent: graphAgentDetail(runtime, node.boundDefinition),
       })),
       containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost,
+      messages: runtime.graphMessages(params.taskId),
+      handoffs: runtime.graphHandoffs(params.taskId),
     };
   });
   app.get('/api/tasks/:taskId/artifacts', async request => {

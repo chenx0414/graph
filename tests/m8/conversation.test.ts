@@ -1444,6 +1444,9 @@ test('a worker result the harness cannot use is routed to the main Agent and esc
   expect(seen[1]!.context.briefing).not.toContain('TASK_REQUEST_SENTINEL');
   expect(seen[1]!.context.briefing).toContain('BROKEN_HANDOFF_SENTINEL');
   expect(runtime.events(confirmed.taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
+  expect(runtime.graphHandoffs(confirmed.taskId)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ source: 'work', target: 'next', mode: 'result_handoff', text: expect.stringContaining('FIXED_AFTER_ESCALATION') }),
+  ]));
 }, 120_000);
 
 

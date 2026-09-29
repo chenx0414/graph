@@ -25,7 +25,7 @@ export function ArchitectureBoard() {
   return <div className="architecture-board" data-testid="architecture-library">
     <nav className="architecture-picker" aria-label="架构类型">{GRAPH_ARCHITECTURES.map((item,i)=><button key={item.name} aria-pressed={selected===i} onClick={()=>{setSelected(i);setNode(null);}}><span className="architecture-number">{String(i+1).padStart(2,'0')}</span>{item.name}</button>)}</nav>
     <section className="architecture-stage">
-      <header><h2>{architecture.name}</h2><p>{architecture.description}</p></header>
+      <header><h2>{architecture.name}</h2><p>{architecture.description}</p><p className="muted">以下是结构示意。实际执行图由 Main Agent 提案、Graph 校验后创建；运行状态和消息请到任务图查看。</p></header>
       <div className="architecture-canvas" data-testid="architecture-canvas">
         <ReactFlow key={selected} nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{padding:0.35}} minZoom={0.3} maxZoom={1.8} nodesDraggable={false} nodesConnectable={false} onNodeClick={(_event,chosen)=>setNode(Number(chosen.id))} proOptions={{hideAttribution:true}}><Background gap={22} size={1}/><Controls showInteractive={false}/></ReactFlow>
       </div>

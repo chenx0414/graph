@@ -360,7 +360,7 @@ export function agentTools(input: {
     fetch: async (_id, params) => text(JSON.stringify(await input.fetch!(String(fields(params).url)))),
     propose_graph: async (_id: string, params: unknown) => {
       const body = fields(params);
-      const proposal = JSON.parse(String(body.proposalJson)) as Proposal;
+      const proposal = body.proposal !== undefined ? body.proposal as Proposal : JSON.parse(String(body.proposalJson)) as Proposal;
       const receipt = await input.supervisor!.propose(proposal, String(body.requestId));
       return text(JSON.stringify(receipt));
     },

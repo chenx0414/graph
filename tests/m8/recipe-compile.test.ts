@@ -7,6 +7,7 @@ import { TaskStore } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { createApp } from '../../src/server/app.ts';
 import type { AgentCombination } from '../../src/catalog/agent-combinations.ts';
+import { openAgentContextAssembly } from '../../src/runtime/agent-context-assembly.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -63,6 +64,21 @@ test('saving a non-main recipe compiles it immediately and publishes a definitio
     version: 1,
     capabilities: [{ id: 'research', version: '1.0.0' }],
   });
+});
+
+test('an inline recipe prompt is versioned and reaches the next Agent operation', async () => {
+  const { root, catalog } = await catalogFixture('recipe-inline-prompt');
+  const first = await catalog.saveAgentCombination(workerRecipe({ resources: [], systemPrompt: 'You are a climate data specialist.' }));
+  expect(first.definition?.definitionVersion).toBe('worker@1');
+  await catalog.saveAgentCombination(workerRecipe({ resources: [], systemPrompt: 'You are a bioinformatics specialist.' }));
+  expect(catalog.definition('worker@1').systemPrompt).toBe('You are a climate data specialist.');
+  expect(catalog.definition('worker@2').systemPrompt).toBe('You are a bioinformatics specialist.');
+  const assembly = await openAgentContextAssembly({ catalog, workspace: root, definitionVersion: 'worker@2', action: 'work', role: 'worker' });
+  const operation = await assembly.bundle.openOperation({ workspace: root, scratchDir: join(root, 'scratch'), action: 'work',
+    gate: { dispatch: (_id, _reservation, send) => send(), settle: () => {} }, hostTools: () => [] });
+  expect(assembly.forOperation(operation).composed.text).toContain('You are a bioinformatics specialist.');
+  expect(assembly.forOperation(operation).composed.text).not.toContain('climate data specialist');
+  await operation.close();
 });
 
 test('re-saving an identical recipe reuses the published definition instead of publishing a new version', async () => {
