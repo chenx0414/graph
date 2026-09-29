@@ -1,11 +1,16 @@
 # 独立审查：车道 a —— `scripts/diag-a.mjs` —— pass
 
 - 审查节点：`review-a`（agent 路由器，`routes ['pass','fail']`，`input.route.declared=null`）
-- 审查对象：impl-a 提交 `d1d954a`（`graph:impl-a:b2c36132-…`），父提交 `7165551`；本审查工作副本 HEAD = `d1d954a`，`git status --porcelain` 为空
+- 审查对象：impl-a 提交 `d1d954a`（`graph:impl-a:b2c36132-…`），父提交 `7165551`；`scripts/diag-a.mjs` 的 blob 自该提交到当前 HEAD `bf47906` 未变；本审查工作副本 `git status --porcelain` 仅 `M reviews/review-a.md`（即本报告自身）
 - 审查依据：impl-a 交付件 `graph://tasks/a621e9d6-…/artifacts/deliverables/impl-a-diag-a@1`（digest `c1bf4103…`）与 impl-a→review-a 私信
 - 结论：**pass** —— 5 条 lookFor 全部成立，**0 个阻塞项**，2 条非阻塞发现（其中 1 条禁止 merge 原样抄进 README），另附 1 条**不属于本车道但会卡死下游 `full-tests`** 的图级风险
 
 > **第 2 轮增补（同一会话，operation `b2c36132`）**：车道 a 的 5 条 lookFor 在合并后的 HEAD `f3d0ced`（已含 impl-b/impl-c）上**复跑全部仍成立**，数字仍是 `218 / 1431`，三个 diag 脚本合跑对 1028 个文件零改动。门禁复跑：`typecheck` / `lint` / `check:evidence` 全 0，`test` 仍红（42 文件 / 128 用例）—— 但 §4 已被本轮用 **A/B 对照证明**重写：根因是工作副本 `node_modules` 软链，不是代码，且 `integration` 副本**根本没有 `node_modules`**。**第 1 轮 §4 的猜测性结论与「让 merge 去确认基线」的建议作废。**
+
+> **第 3 轮复核（同一会话再次返工，HEAD `bf47906`，已含 review-b/review-c 的报告文件）**：判定不变，仍为 **pass**，0 阻塞项。
+> 车道 a 的 5 条 lookFor 在新 HEAD 上**逐条重跑仍全部成立**，且 `scripts/diag-a.mjs` 的 blob 从车道提交到 HEAD **一字节未变**（`8a4185ba…` == `8a4185ba…`），数字仍是 `218 / 1431`（`find`/`grep` 独立复算吻合，连跑 3 次同摘要）。三个 diag 脚本合跑对 **1030** 个文件零改动。
+> 门禁复跑：`typecheck` / `lint` / `check:evidence` 全 0；`test` 仍红（42 文件 / 128 of 1468）。
+> 本轮把 §4 的归因**从「已证明与车道无关」升级为「已证明是既有的环境基线」**：A/B 对照本轮为 128 → **4**，且这 4 个在**车道之前的基线提交 `7165551`** 上用同样的硬链接依赖**同样失败**（`Test Files 4 failed (4)`），因此它们与三个 diag 车道无因果关系、也不是本任务能修的代码缺陷。`integration` 副本仍然没有 `node_modules`（`tsc: command not found`），§4.5 的死锁风险**今天依然成立**。详见 §4.3 / §4.5 / §7。
 
 ---
 
@@ -190,16 +195,29 @@ Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@earendil-works/pi-ai'
 
 这正是仓库自己写明的陷阱 —— `docs/agents/checks.md`「在 Git 工作树里验证」：「不要手工 `ln -s` 指向主仓库的 `node_modules`……沙箱内的 Agent 子进程会以模块解析失败告终」，以及 `docs/adr/0027-work-copy-dependency-link.md` §2「链接目标在副本之外，没有读取授权就无法解析」。
 
-### 4.3 A/B 对照：128 → 6
+### 4.3 A/B 对照：128 → 4（第 3 轮在 HEAD `bf47906` 上重跑）
 
 同一份源码、同一套依赖，只把 `node_modules` 换成文档规定的硬链接实体目录：
 
 | 副本 | `node_modules` 形态 | 结果 |
 | --- | --- | --- |
-| 审查工作副本 | 软链到 `13-Graph/node_modules` | **42 文件 / 128 用例失败** |
-| 对照副本 `/tmp/rev-a2-probe` | `cp -al` 硬链接实体目录 | **6 文件 / 6 用例失败** |
+| 审查工作副本 `review-a`（HEAD `bf47906`） | 软链到 `13-Graph/node_modules` | **42 文件 / 128 用例失败** |
+| 对照副本 `/tmp/rev-a3-probe`（同一份源码） | `cp -al` 硬链接实体目录 | **5 文件 / 5 用例失败** |
+| 对照副本 + `git init -q` | 同上 | **4 文件 / 4 用例失败** |
+| **基线对照 `/tmp/rev-a3-base`（提交 `7165551`，车道之前，无 diag 脚本）** | 同上硬链接 | **同样 4 文件 / 4 用例失败** |
 
-**122 of 128 的失败仅由软链造成**，与代码、与三个车道都无关。剩下 6 个也全是环境项，不是代码缺陷：`/usr/bin/which npm` 失败（本沙箱 PATH 内确实没有 `npm`：`spawnSync npm` → `ENOENT`）、`12-MediaBookmarks` 兄弟项目缺失（`tests/m7/page.test.ts:18` 依赖 `process.cwd()/../12-MediaBookmarks`）、以及对照副本放在 `/tmp` 导致的 `resolveRsiRoot` 路径断言。
+**124 of 128 的失败仅由软链造成**（工作副本 42 个失败文件中，37 个在硬链接副本上直接转绿；`comm -13` 证明硬链接副本没有引入任何新失败文件）。剩下 4 个**全都是环境项，与代码无关**：
+
+| 失败文件 | 报错 | 归因 |
+| --- | --- | --- |
+| `tests/m0/restricted-process.test.ts` | `Error: Command failed: /usr/bin/which npm` | 沙箱 PATH 内没有 `npm`（宿主侧 `command -v npm` 亦为空） |
+| `tests/m7/delivery.test.ts` | `Error: spawnSync git ENOENT` | 受限子进程 PATH 内没有 `git` |
+| `tests/m7/production.test.ts` | `Error: spawnSync git ENOENT` | 同上 |
+| `tests/m7/page.test.ts` | `ENOENT: copyfile '/private/tmp/12-MediaBookmarks/src/config.js'` | 兄弟项目 `12-MediaBookmarks` 不在磁盘上 |
+
+**第 3 轮新增的决定性一格**：把基线提交 `7165551`（三个车道落地之前）用 `git archive` 抽到 `/tmp/rev-a3-base`、同样 `cp -al` 硬链接依赖，只跑这 4 个文件，结果是 `Test Files 4 failed (4)`、`Tests 4 failed | 23 passed (27)` —— **与 HEAD 上的 4 个失败完全一致**。因此这 4 条是**既有的环境基线**，既不是三个 diag 车道造成的，也不是本任务范围内能修的代码缺陷；`full-tests` 在修好依赖后仍会红，且应当如此判定。
+
+> 第 2 轮记录的「6 个剩余失败」中，`tests/console/rsi.test.ts > resolveRsiRoot prefers an explicit GRAPH_RSI_ROOT` 一条本轮已定位到**精确**原因：`src/runtime/rsi.ts:1042-1050` 的 `resolveRsiRoot` 要求 `detectRepo(root) === root`，而 tar 抽出的对照副本没有 `.git`，于是返回 `undefined`（断言期望 `/private/tmp/rev-a3-probe`）。在对照副本里执行一次 `git init -q` 后该文件 **29 passed (29)**。也就是说它同样是探针构造方式的产物，不是缺陷。
 
 ### 4.4 修法（仓库已给出，照抄即可）
 
@@ -210,11 +228,14 @@ cp -al /Users/macmini/workspace/13-Graph/node_modules <工作副本>/node_module
 复现 A/B 对照（不改动任何工作副本）：
 
 ```sh
-W=<工作副本>; P=/tmp/rev-a2-probe; rm -rf $P; mkdir -p $P
-(cd $W && tar -cf - --exclude=.git --exclude=node_modules .) | (cd $P && tar -xf -)
-cp -al /Users/macmini/workspace/13-Graph/node_modules $P/node_modules
-(cd $P && node --run test)
+W=<工作副本>; P=/tmp/rev-a3-probe; rm -rf $P; mkdir -p $P
+(cd "$W" && tar -cf - --exclude=.git --exclude=node_modules .) | (cd "$P" && tar -xf -)
+cp -al /Users/macmini/workspace/13-Graph/node_modules "$P/node_modules"
+(cd "$P" && git init -q)      # 缺这一步会多出 1 个假失败 tests/console/rsi.test.ts（见 §4.3）
+(cd "$P" && node --run test)
 ```
+
+> 注：路径里有空格（`Application Support`），`cd $W` 一类写法会报 `Not a directory`，必须加引号 —— 第 2 轮的复现块就踩了这个坑，第 3 轮已修正。
 
 ### 4.5 另一处更硬的阻塞：`integration` 副本根本没有 `node_modules`
 
@@ -223,6 +244,14 @@ $ ls -ld ../integration/node_modules
 ls: ../integration/node_modules: No such file or directory
 $ (cd ../integration && node -e "require.resolve('vitest')")
 vitest UNRESOLVED MODULE_NOT_FOUND
+```
+
+第 3 轮再次实测（HEAD `bf47906` 时点，结论与第 2 轮一致、未被修复）：
+
+```
+$ cd ../integration && node --run typecheck
+/bin/sh: tsc: command not found
+typecheck-in-integration exit=1
 ```
 
 所以在 `integration` 副本上，`node --run check` 会在**第一步 `tsc`** 就失败（连 `typescript` 都解析不到），比 128 个用例失败更早、更彻底。**在修好 `integration` 的依赖之前，任何跑 `node --run check` 的 `full-tests` 都必然红 → 退回 `merge` → 而 `merge` 只拥有那段 README → 再次 `full-tests` 再次失败，循环至 stalled。这是可预见的死锁。**
@@ -277,4 +306,72 @@ node --run test                                                    # 基线红�
 - 门禁复跑：`typecheck` 0、`lint` 0、`check:evidence` 0；`test` 1（42 文件 / 128 用例）。
 - `test` 的红**已归因且已证明与车道无关**：A/B 对照（软链 vs `cp -al` 硬链接）为 128 → 6 个失败；且 `integration` 副本无 `node_modules`，`tsc` 即不可解析。详见 §4。
 
-**唯一需要下游动手的事**：按 §4.4 给 `integration` 副本补硬链接依赖，再重跑 `full-tests`；不要让 `merge` 去改这 128 个用例。
+**唯一需要下游动手的事**：按 §4.4 给 `integration` 副本补硬链接依赖，再重跑 `full-tests`；不要让 `merge` 去改那 128 个用例。
+
+---
+
+**第 3 轮复核（HEAD `bf47906`，与车道 a 无关的 `review-b` / `review-c` 报告已合入）**：判定不变，仍为 **pass**，0 阻塞项，2 条非阻塞发现维持原判。
+
+本轮逐条重跑的结果（全部为本机实测，非转述）：
+
+| 检查 | 结果 |
+| --- | --- |
+| 车道提交边界 | `git show --name-status d1d954a` = `A scripts/diag-a.mjs` 一个文件；该 blob 到 HEAD 未变（`8a4185ba…` 两端一致） |
+| 只读（静态） | `writeFile\|appendFile\|mkdir\|rm(\|unlink\|rename\|createWriteStream\|copyFile\|chmod\|truncate\|spawn\|exec\|process.exit\|process.env` 命中 **0** |
+| 只读（动态） | 1030 个文件 `path+size+mtime` 指纹，`diag-a/b/c` 三个脚本合跑前后 diff 为空，`git status --porcelain` 为空 |
+| 仅 node 内置 | import 仅 `node:fs/promises` / `node:path` / `node:url` |
+| 统计正确性 | `diag-a` = `218 / 1431`；`find` / `grep` 独立复算 = `218` / `1431`；vitest 实跑 217 文件，多出的 1 个仍是 `tests/fixtures/m7/web-server.test.js`（§2.1 成立） |
+| 可重复 | 连跑 3 次摘要同为 `7dae6b3d3f453a8dea026fe9257aec1459d7b156500ad354bfadd528938ccbf6` |
+| 零耦合 | 全仓 `diag-a` 仅命中 `tests/m2/verification.test.ts:229,235` 的字符串字面量与脚本自身；`reviews/review-a.md` 在 `tests/console/review-as-router.test.ts:32` 中也只是一个**写入临时目录**的路径常量，不读本文件 |
+| 门禁 | `typecheck` 0、`lint` 0、`check:evidence` 0；`test` 1（42 文件 / 128 of 1468） |
+
+`test` 的红本轮**升级为「既有环境基线」**：A/B 对照 128 → 4（软链 vs `cp -al` 硬链接），且这 4 个在车道之前的基线提交 `7165551` 上同样失败，见 §4.3。`integration` 副本仍无 `node_modules`（`tsc: command not found`），§4.5 死锁风险仍在，见 §4.5。
+
+**仍未闭合的下游事项**（都不是车道 a 的返工理由，但必须在合并前处置）：
+
+1. 给 `integration` 副本补硬链接依赖（§4.4），否则 `full-tests` 必红 → `full-tests → merge` 回边会空转到 stalled。
+2. 修好依赖后 `full-tests` 仍会红 4 个文件 —— 这 4 个是环境基线（沙箱 PATH 缺 `npm`/`git`、兄弟项目 `12-MediaBookmarks` 不在盘上），应判为基线而非回归；**不要**让 `merge` 去改这 4 个用例对应的实现。
+3. `merge` 写 README 时遵守 §2.1 的硬约束：不得把「218 = 本仓测试套件数」或 `scripts/diag-a.mjs:8-9` 那句括号注释原样抄入。
+
+---
+
+## 7. 第 3 轮证据的一次性复现脚本（R23：可复跑产物）
+
+整段可粘贴复跑，输出即本轮表格；只读仓库本体，只在 `/tmp` 下建探针。
+
+```bash
+W="$(pwd)"; P=/tmp/rev-a3-probe; B=/tmp/rev-a3-base; NM=/Users/macmini/workspace/13-Graph/node_modules
+
+# 1) 车道 a 本体：输出、可重复性、独立复算、只读指纹
+node scripts/diag-a.mjs                                     # → diag-a: 218 test files, 1431 test cases
+for i in 1 2 3; do node scripts/diag-a.mjs | shasum -a 256; done   # → 3 次同一摘要
+find . -type f \( -name '*.test.*' -o -name '*.spec.*' \) -not -path './.git/*' -not -path '*/node_modules/*' | wc -l   # 218
+grep -rhE '^[[:space:]]*(it|test)([.][A-Za-z_$]+)*[[:space:]]*[(`]' --include='*.test.*' --include='*.spec.*' . \
+  --exclude-dir=.git --exclude-dir=node_modules | wc -l                                                                 # 1431
+grep -nE "writeFile|appendFile|mkdir|rm\(|unlink|rename|createWriteStream|copyFile|chmod|truncate|spawn|exec|process\.exit|process\.env" scripts/diag-a.mjs  # 无输出
+fp() { find . -path ./.git -prune -o -path '*/node_modules' -prune -o -type f -print0 | xargs -0 stat -f '%N %z %m' | sort; }
+fp > /tmp/fp1; node scripts/diag-a.mjs >/dev/null; node scripts/diag-b.mjs >/dev/null; node scripts/diag-c.mjs >/dev/null; fp > /tmp/fp2
+diff /tmp/fp1 /tmp/fp2 && git status --porcelain            # 两者皆空 ⇒ 三个 diag 脚本只读
+
+# 2) 门禁
+node --run typecheck; node --run lint; node --run check:evidence   # 全部 exit 0
+node --run test                                                     # exit 1：42 files / 128 of 1468（软链所致，见 §4）
+
+# 3) A/B 对照：同样的源码，只把 node_modules 换成硬链接实体目录
+rm -rf "$P"; mkdir -p "$P"
+(cd "$W" && tar -cf - --exclude=.git --exclude=node_modules .) | (cd "$P" && tar -xf -)
+cp -al "$NM" "$P/node_modules"; (cd "$P" && git init -q)      # git init 必须有，否则多 1 个假失败
+(cd "$P" && node --run test)                                 # → 4 files / 4 tests 失败，全部环境项
+
+# 4) 基线对照：车道之前的提交，同样硬链接依赖
+rm -rf "$B"; mkdir -p "$B"
+(cd "$W" && git archive 7165551) | tar -x -C "$B"; cp -al "$NM" "$B/node_modules"
+(cd "$B" && node node_modules/vitest/vitest.mjs run tests/m0/restricted-process.test.ts tests/m7/delivery.test.ts tests/m7/page.test.ts tests/m7/production.test.ts)
+# → Test Files 4 failed (4)  ⇒ 这 4 条是既有基线，与三个 diag 车道无因果关系
+
+# 5) integration 副本的依赖缺口（§4.5）
+ls -ld ../integration/node_modules            # → No such file or directory
+(cd ../integration && node --run typecheck)   # → /bin/sh: tsc: command not found
+```
+
+本轮实际产物路径：`/tmp/rev-a3-test.txt`（工作副本全量 42/128）、`/tmp/rev-a3-probe-test.txt`（硬链接副本 5/5）、`/tmp/rev-a3-fp1.txt` / `rev-a3-fp2.txt`（1030 文件指纹）、`/tmp/rev-a3-wt-fail.txt` 与 `/tmp/rev-a3-probe-fail.txt`（两个失败文件清单，供 `comm -13` 求差）。
