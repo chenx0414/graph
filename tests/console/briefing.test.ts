@@ -48,6 +48,27 @@ test('Agent recipe descriptions are included in the master catalog for subagent 
   expect(text).toContain('- Agent recipe coder (Bob_coder, medium, valid): 默认主实现，承担功能开发、维护、修复和基础测试。');
 });
 
+test('a dependency artifact is named by artifactId and version so artifact_read needs no lookup', () => {
+  const operation = nodeOperation('review');
+  operation.dependencySources = {
+    'impl-a': [{
+      nodeId: 'impl-a', instanceId: 'i', operationId: 'o', activationId: 'a', outputVersion: 1,
+      artifacts: [{
+        id: 'impl-a-diag-a', path: 'deliverables/impl-a-diag-a', digest: 'c1bf4103ac',
+        artifactId: '41c2a46f-13a3-4816-911b-b7602493296c', version: 1,
+        uri: 'graph://tasks/task/artifacts/deliverables/impl-a-diag-a@1',
+        nodeId: 'impl-a', operationId: 'o', activationId: 'a',
+      }],
+    }],
+  };
+  const text = briefing(operation, { request: 'r', acceptance: [], graph: focusedGraph, focus: 'review' });
+  // The uri and digest stay (a stable human-readable reference), but the machine key is named too.
+  expect(text).toContain('graph://tasks/task/artifacts/deliverables/impl-a-diag-a@1');
+  expect(text).toContain('41c2a46f-13a3-4816-911b-b7602493296c@1');
+  // Without this line the Agent has to artifact_list first and usually gives up and reads the work copy.
+  expect(text).toContain('artifact_read');
+});
+
 /** A real-shaped graph: two sibling lanes, one check that reads the focused lane, one review lane. */
 const focusedGraph: NodeSpec[] = [
   { id: 'impl-a', kind: 'agent' as const, action: 'work', role: 'worker', definitionVersion: 'coder@1', model: 'm', input: { files: ['src/a.ts', 'tests/a.test.ts'], focus: '实现 A 的改动' } },

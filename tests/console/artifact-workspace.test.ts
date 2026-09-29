@@ -176,6 +176,28 @@ test('retires an artifact without deleting its immutable content', async () => {
   expect((await artifacts.read('t1', published.artifactId, published.version)).text).toBe('review body');
 });
 
+test('a dependency reference is recorded so the artifact-to-reader edge is observable', async () => {
+  const { store, workspace, artifacts } = await fixture();
+  const source = join(workspace, 'report.md');
+  await writeFile(source, 'review body');
+  const published = await artifacts.publish({
+    taskId: 't1', workspace, namespace: 'reviews', name: 'report', sourcePath: source,
+    mediaType: 'text/markdown', producer: producer(), requestId: 'publish-reference',
+  });
+
+  // The briefing hands a dependency's artifact to a node without the node calling a tool, so the
+  // reader is recorded here. Without this the only proof anybody read it is a reversed bash command.
+  artifacts.recordReference({
+    taskId: 't1', nodeId: 'review-b', artifactId: published.artifactId, version: published.version,
+    relation: 'briefed',
+  });
+  const rows = store.db.prepare("SELECT type,data FROM artifact_events WHERE artifact_id=? AND version=? ORDER BY cursor")
+    .all(published.artifactId, published.version) as { type: string; data: string }[];
+  const referenced = rows.find(row => row.type === 'artifact.referenced');
+  expect(referenced).toBeTruthy();
+  expect(JSON.parse(referenced!.data)).toMatchObject({ nodeId: 'review-b', relation: 'briefed' });
+});
+
 test('result handoffs can freeze an exact published artifact version without relying on its private path', async () => {
   const { store, workspace, artifacts } = await fixture();
   const source = join(workspace, 'report.md');
