@@ -18,6 +18,8 @@ afterEach(async () => { for (const close of cleanup.splice(0)) await close(); })
 const handoff = 'I will inspect the failing test.\n\n<analysis>\nLet me chronologically analyze this conversation.\n</analysis>\n\n<summary>\n1. Primary Request and Intent:\nFix the test.\n6. All user messages:\nprivate-history-marker\n7. Pending Tasks:\nFix it.\n8. Current Work:\nStill pending.\n9. Optional Next Step:\nRead the file.\n</summary>';
 const leakedToolCall = 'I found the likely cause. Let me inspect it.\n\n<parameter name="bash">\n<｜DSML｜ parameter name="command" string="true">grep -n unknown_usage src/core/operation-lifecycle.ts</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">300</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
 const directLeakedToolCall = 'The code looks right. Let me inspect the selector.\n\n<parameter name="bash">python3 - <<\'PY\'\nprint("inspect")\nPY</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">400</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
+const plainXmlLeak = 'Let me reproduce it. <analysis>I need to inspect the parser.</analysis>\n<parameter name="bash"><parameter name="command">rg parseStreamingJson src</parameter><parameter name="timeoutMs">60</parameter></invoke></analysis>';
+const analysisLeak = 'I found the cause.\n<analysis>I should run the regression test before answering.</analysis>';
 
 async function replay(texts: string[], enabled = true) {
   const server = await openaiServer(texts.map(text => ({ chunks: [...text] })));
@@ -61,11 +63,14 @@ test('repeated handoffs stop explicitly instead of succeeding or retrying indefi
 test.each([
   { variant: 'nested parameter', text: leakedToolCall },
   { variant: 'direct command', text: directLeakedToolCall },
+  { variant: 'plain XML with analysis', text: plainXmlLeak },
 ])('a $variant tool call leaked as text is corrected before it can become a final reply', async ({ text }) => {
   const result = await replay([text, 'I used the tool and finished the check.']);
   expect(result.sends).toBe(2);
   expect(result.notices).toEqual(['retrying', 'recovered']);
   expect(JSON.stringify(result.events)).not.toContain('<｜DSML｜');
+  expect(JSON.stringify(result.events)).not.toContain('<parameter name=');
+  expect(JSON.stringify(result.events)).not.toContain('<analysis>');
   expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ text: 'I used the tool and finished the check.' }] } });
   expect(JSON.stringify(result.requests[1])).not.toContain('<｜DSML｜');
 });
@@ -76,6 +81,14 @@ test('a second leaked tool call fails clearly instead of claiming completion', a
   expect(result.notices).toEqual(['retrying', 'failed']);
   expect(result.events.at(-1)).toMatchObject({ type: 'error', error: { stopReason: 'error' } });
   expect(JSON.stringify(result.events)).not.toContain('<｜DSML｜');
+});
+
+test('analysis markup emitted as answer text is corrected before the final reply', async () => {
+  const result = await replay([analysisLeak, '回归测试通过。']);
+  expect(result.sends).toBe(2);
+  expect(result.notices).toEqual(['retrying', 'recovered']);
+  expect(JSON.stringify(result.events)).not.toContain('<analysis>');
+  expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ text: '回归测试通过。' }] } });
 });
 
 test('Pi executes a real tool after a leaked text call, then completes with verified output', async () => {

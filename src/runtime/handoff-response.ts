@@ -6,6 +6,8 @@ const CORRECTION = 'The previous provider response unexpectedly switched from do
 const OMITTED = '[An earlier assistant response unexpectedly returned an internal conversation handoff. It did not complete the pending work. Refer to the user requests and tool results for the actual state.]';
 const TOOL_CORRECTION = 'The previous provider response wrote a tool call in ordinary text. No tool was executed. Continue the latest user request using the actual tool-call interface, then use the tool result to finish the work. Do not repeat completed tool actions or write tool-call markup as text. If the tool is unavailable, state the blocker plainly.';
 const TOOL_OMITTED = '[An earlier assistant response wrote an unexecuted tool call as text. It did not complete the pending work. Refer to the user requests and actual tool results for the current state.]';
+const ANALYSIS_CORRECTION = 'The previous provider response included internal analysis markup in ordinary answer text. Continue the latest user request using the existing tool results. Keep internal reasoning out of the answer and use the actual tool-call interface for any remaining work.';
+const ANALYSIS_OMITTED = '[An earlier assistant response exposed internal analysis as answer text. It did not complete the pending work. Refer to the user requests and tool results for the current state.]';
 const ANALYSIS_TAG = '<analysis>';
 const TAG_PREFIXES = Array.from({ length: ANALYSIS_TAG.length - 1 }, (_, index) => ANALYSIS_TAG.slice(0, index + 1));
 const TOOL_TAG = '<parameter name=';
@@ -30,10 +32,18 @@ function isHandoff(message: AssistantMessage): boolean {
     && /<\/summary>\s*$/.test(text);
 }
 
-function malformedKind(message: AssistantMessage): 'handoff' | 'tool' | null {
+type MalformedKind = 'handoff' | 'tool' | 'analysis';
+
+function malformedKind(message: AssistantMessage): MalformedKind | null {
   if (isHandoff(message)) return 'handoff';
   if (message.stopReason === 'stop' && !message.content.some(part => part.type === 'toolCall')
     && hasUnexecutedToolCall(textOf(message))) return 'tool';
+  if (message.stopReason === 'stop' && !message.content.some(part => part.type === 'toolCall')) {
+    const prose = textOf(message).replace(/```[\s\S]*?```/g, '');
+    // A paired summary is handled by the existing compaction recovery path.
+    if (!/<summary>[\s\S]*?<\/summary>/i.test(prose)
+      && /<analysis>[\s\S]*?<\/analysis>/i.test(prose)) return 'analysis';
+  }
   return null;
 }
 
@@ -51,16 +61,16 @@ export function guardHandoffResponses(stream: StreamFn, options: {
   return (model, context, streamOptions) => {
     if (!options.enabled()) return stream(model, context, streamOptions);
     const output = createAssistantMessageEventStream();
-    let previousKind: 'handoff' | 'tool' | null = null;
+    let previousKind: MalformedKind | null = null;
     const messages = context.messages.map(message => {
       const kind = message.role === 'assistant' ? malformedKind(message) : null;
       if (kind) previousKind = kind;
-      return kind ? { ...message, content: [{ type: 'text' as const, text: kind === 'tool' ? TOOL_OMITTED : OMITTED }] } : message;
+      return kind ? { ...message, content: [{ type: 'text' as const, text: kind === 'tool' ? TOOL_OMITTED : kind === 'analysis' ? ANALYSIS_OMITTED : OMITTED }] } : message;
     });
     // The prompt travels in the transcript now, so the correction is one more system
     // message: the provider replays it after the base prompt.
-    const correction = (kind: 'handoff' | 'tool'): SystemMessage => ({
-      role: 'system', content: kind === 'tool' ? TOOL_CORRECTION : CORRECTION, timestamp: Date.now(),
+    const correction = (kind: MalformedKind): SystemMessage => ({
+      role: 'system', content: kind === 'tool' ? TOOL_CORRECTION : kind === 'analysis' ? ANALYSIS_CORRECTION : CORRECTION, timestamp: Date.now(),
     });
     let request = messages.some((message, index) => message !== context.messages[index])
       ? { ...context, messages: [...messages, correction(previousKind ?? 'handoff')] }
@@ -88,7 +98,9 @@ export function guardHandoffResponses(stream: StreamFn, options: {
                   ...event.message, content: [], stopReason: 'error',
                   errorMessage: kind === 'tool'
                     ? '模型反复把工具调用写成文本，工具没有执行；自动纠正已停止，当前工作尚未完成。'
-                    : '模型反复返回内部会话摘要，自动纠正已停止；当前工作尚未完成。',
+                    : kind === 'analysis'
+                      ? '模型反复把内部思考写进答复文本；自动纠正已停止，当前工作尚未完成。'
+                      : '模型反复返回内部会话摘要，自动纠正已停止；当前工作尚未完成。',
                 } });
                 return;
               }
