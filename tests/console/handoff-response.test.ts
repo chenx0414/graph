@@ -21,6 +21,7 @@ const leakedToolCall = 'I found the likely cause. Let me inspect it.\n\n<paramet
 const directLeakedToolCall = 'The code looks right. Let me inspect the selector.\n\n<parameter name="bash">python3 - <<\'PY\'\nprint("inspect")\nPY</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">400</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
 const plainXmlLeak = 'Let me reproduce it. <analysis>I need to inspect the parser.</analysis>\n<parameter name="bash"><parameter name="command">rg parseStreamingJson src</parameter><parameter name="timeoutMs">60</parameter></invoke></analysis>';
 const analysisLeak = 'I found the cause.\n<analysis>I should run the regression test before answering.</analysis>';
+const bareParameters = 'Building v31.\n<parameter name="path">/tmp/shape-a-v31.json</parameter>\n<parameter name="content">{"loops":[]}</parameter>\nLet me call the tool.';
 
 async function replay(texts: string[], enabled = true) {
   const server = await openaiServer(texts.map(text => ({ chunks: [...text] })));
@@ -151,6 +152,24 @@ test('Pi executes a real tool after a leaked text call, then completes with veri
     expect(state.messages.at(-1)).toMatchObject({ role: 'assistant', content: [{ text: 'Inspection completed with the tool result.' }] });
     expect(await readFile(state.sessionFile, 'utf8')).not.toContain('<｜DSML｜');
   } finally { await instance.close(); }
+});
+
+test('bare parameter text is retried as an actual tool call', async () => {
+  const result = await replay([bareParameters, 'The tool is unavailable here; I cannot submit v31.']);
+  expect(result.sends).toBe(2);
+  expect(JSON.stringify(result.events)).not.toContain('<parameter');
+  expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ text: 'The tool is unavailable here; I cannot submit v31.' }] } });
+});
+
+test('bare parameters beside a real tool call are removed without dropping the call', async () => {
+  const server = await openaiServer([{ chunks: [...bareParameters], tools: [{ id: 'real', name: 'inspect', arguments: '{}' }] }]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _r, send) { return send(); }, settle() {} };
+  const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} });
+  const context = normalizeContext({ messages: [{ role: 'user', content: 'Inspect.', timestamp: 1 }] });
+  const frames = await encodeAssistantStream(await stream(server.model, context, {}));
+  expect(frames.some(frame => frame.type === 'toolcall_start')).toBe(true);
+  expect(JSON.stringify(frames)).not.toContain('<parameter');
 });
 
 test('an earlier tool-use message with private markup is cleaned in model context without losing its tool call', async () => {
