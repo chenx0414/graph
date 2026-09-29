@@ -18,6 +18,11 @@
 > 本轮修正并补充两点：(a) 上一轮探针记录的 5/5 中，第 5 个（`tests/m8/settings-ui.test.ts`）经证是我自己**并发跑两套 vitest** 造成的负载抖动，单独复跑 4 次全绿（探针 3/3、工作副本 1/1），不是缺陷，真实基线是 4；(b) §4.5 的阻塞比上轮记录的**更早也更硬** —— `integration` 副本上不仅 `typecheck`，`node --run test` 同样在第一步就 `vitest: command not found`（真实退出码 1）。详见 §8。
 > 本轮把 §4 的归因**从「已证明与车道无关」升级为「已证明是既有的环境基线」**：A/B 对照本轮为 128 → **4**，且这 4 个在**车道之前的基线提交 `7165551`** 上用同样的硬链接依赖**同样失败**（`Test Files 4 failed (4)`），因此它们与三个 diag 车道无因果关系、也不是本任务能修的代码缺陷。`integration` 副本仍然没有 `node_modules`（`tsc: command not found`），§4.5 的死锁风险**今天依然成立**。详见 §4.3 / §4.5 / §7。
 
+> **第 5 轮复核（HEAD `c7193df`，已并入 review-c 的 `reviews/review-c.md`）**：判定不变，仍为 **pass**，0 阻塞项。
+> 车道 a 的 5 条 lookFor 在新 HEAD 上**逐条重跑仍全部成立**，`scripts/diag-a.mjs` 的 blob 仍是 `8a4185ba…`（车道提交 / HEAD / 工作副本三处一致）；数字仍是 `218 / 1431`（连跑 3 次同摘要 `7dae6b3d…`，`find`/`grep` 独立复算吻合）。`7165551..c7193df` 未碰过任何 `tests/` 或 `src/` 文件 —— 本轮两个新提交只动了 `scripts/diag-c.mjs` 与 `reviews/review-c.md`，与车道 a 无因果关系。
+> 门禁复跑：`typecheck` / `lint` / `check:evidence` 全 0；`test` 仍红（42 文件 / 128 of 1468），但**失败文件集合与第 4 轮逐行相同**，A/B 对照再次独立复现 42/128 → 4/4，基线提交 `7165551` 同样 4/4 且报错逐字相同。
+> 本轮两处事实更新：(a) `integration` 副本的 HEAD 已跟着推进到 `c7193df`（上轮为 `547cf36`），但 `node_modules` 依旧缺失，`typecheck` / `test` 都在第一步就 `command not found` 退出 1 —— §4.5 的 `full-tests → merge` 死锁现在正好卡在 full-tests 要跑的那棵树上；(b) 新增 1 条非阻塞发现：树内存在软链目录时 diag-a 会**静默少计**（本仓 0 软链，数字不受影响，见 §9.4(c)）。详见 §9。
+
 ---
 
 ## 0. 审查对象绑定
@@ -500,3 +505,152 @@ ls -ld ../integration/node_modules                  # → No such file or direct
 ```
 
 本轮实际产物路径：`/tmp/rev-a4-fp1.txt` / `rev-a4-fp2.txt`（1030 文件指纹）、`/tmp/rev-a4-wt-test.txt`（工作副本 42/128）、`/tmp/rev-a4-wt-fail.txt`（42 个失败文件）、`/tmp/rev-a4-probe-test.txt`（并发跑，5/5）、`/tmp/rev-a4-probe-test2.txt`（单独跑，4/4）、`/tmp/rev-a4-sui-1..3.txt` 与 `rev-a4-sui-wt.txt`（settings-ui 4 次复跑全绿）、`/tmp/rev-a4-base-test.txt`（基线 4/4）、`/tmp/rev-a4-int-tc.txt` / `rev-a4-int-test.txt`（integration 两个阶段的失败）。
+
+---
+
+## 9. 第 5 轮：HEAD `c7193df` 上的逐条重跑
+
+### 9.1 车道 a 自身的 5 条 lookFor（全部成立，本机实测）
+
+| 检查 | 复跑命令 | 结果 |
+| --- | --- | --- |
+| 工作副本状态 | `git status --porcelain` | 空 |
+| 提交边界 | `git show --name-status d1d954a` | `A scripts/diag-a.mjs` 单文件，无 M/D/R |
+| blob 未被下游改动 | `git rev-parse d1d954a:scripts/diag-a.mjs` / `HEAD:…` / `git hash-object` | 三处同为 `8a4185ba914e7e3bd0aadae52a705cfaf7f81388` |
+| 输出 | `node scripts/diag-a.mjs` | `diag-a: 218 test files, 1431 test cases`，exit 0，stderr 空 |
+| 可重复 | 连跑 3 次 `\| shasum -a 256` | 三次同为 `7dae6b3d3f453a8dea026fe9257aec1459d7b156500ad354bfadd528938ccbf6` |
+| cwd 无关 | `(cd /tmp && node <repo>/scripts/diag-a.mjs)` | 同一行，exit 0 |
+| 统计正确性 | `find … \| wc -l` / `grep -rhE … \| wc -l` | **218** / **1431**，与脚本逐字吻合 |
+| 只读（静态） | 写/执行类 API 穷举扫描 | 命中 **0**；import 仅 `node:fs/promises` / `node:path` / `node:url`；`node --check` OK |
+| 只读（动态） | 1031 文件 `path+size+mtime` 指纹，`diag-a/b/c` 合跑前后 `diff` | 指纹**逐行相同**，`git status --porcelain` 为空 |
+| 零耦合 | `git diff --name-only 7165551 HEAD -- tests/ src/` | **0** 个文件；全仓 `diag-a` 引用仅 `tests/m2/verification.test.ts:229,235` 的字符串字面量与各评审报告正文 |
+| 门禁 | `typecheck` / `lint` / `check:evidence` | 全部 exit 0（`Acceptance evidence is unchanged.`） |
+| 门禁 | `node --run test` | exit 1，**42 文件 / 128 of 1468 失败**，244.00s（见 §9.3） |
+
+§2.1 仍然成立：`find tests` 出的非 `.test.ts` 测试文件仍是且仅是 `tests/fixtures/m7/web-server.test.js`，而 `vitest.config.ts:6` 的 include 是 `tests/**/*.test.ts`；本轮 vitest 实跑 **217** 个文件，218 − 217 = 1，差的正是这个 fixture。
+
+### 9.2 相对第 4 轮，变化的只有这两件事
+
+1. **HEAD 前进两个提交**：`eedc7a6`（车道 c 改 `scripts/diag-c.mjs`）、`8a7672f`（review-c 第 4 轮报告改 `reviews/review-c.md`）。`git diff --name-only 7165551 HEAD -- tests/ src/` 仍为 **0** —— 三个车道从落地到最新 HEAD 没碰过任何 `tests/` 或 `src/` 文件，车道 a 的文件亦一字节未变。
+2. **`integration` 副本推进了，但依赖缺口没补**：HEAD 从 `547cf36` → `c7193df`，`node_modules` 依旧不存在：
+
+```
+$ ls -ld ../integration/node_modules
+ls: ../integration/node_modules: No such file or directory
+$ (cd ../integration && node --run typecheck; echo $?)   → /bin/sh: tsc: command not found / 1
+$ (cd ../integration && node --run test;    echo $?)      → /bin/sh: vitest: command not found / 1
+```
+
+§4.5 的死锁因此**仍然成立**，而且现在卡的正是 `full-tests` 将要运行的那棵树：`node --run check` 在第一步就死，四个阶段一个都到不了。修法仍是 §4.4 那一行 `cp -al`，必须由图操作者对 `integration` 副本执行。
+
+### 9.3 基线红的归因再次独立复现：42/128 → 4/4
+
+| 副本 | `node_modules` 形态 | 结果 |
+| --- | --- | --- |
+| 工作副本 `review-a`（HEAD `c7193df`） | 软链到 `13-Graph/node_modules` | **42 文件 / 128 of 1468 失败**，244.00s |
+| 探针 `/tmp/rev-a5-probe`（同一份源码，`cp -al` 硬链接 + `git init`） | 硬链接实体目录 | **4 文件 / 4 of 1468 失败**，127.59s |
+| **基线 `/tmp/rev-a5-base`（提交 `7165551`，车道之前，`scripts/diag-*.mjs` 数量 = 0）** | 同上硬链接 | **4 failed (4) / 4 failed \| 23 passed (27)** |
+
+- 失败文件集合与第 4 轮**逐行相同**：`diff /tmp/rev-a4-wt-fail.txt /tmp/rev-a5-wt-fail.txt` 无输出（各 42 行）。
+- 探针的 4 条与基线的 4 条报错逐字相同：`/usr/bin/which npm` 失败、`spawnSync git ENOENT` ×2、`/private/tmp/12-MediaBookmarks/src/config.js` 不在盘上。
+- 本轮探针**没有**重现第 4 轮那次 `tests/m8/settings-ui.test.ts` 抖动（并行负载所致，见 §8.2）；探针单独串行跑，基线就是 4。
+
+结论与前四轮一致：这 4 条是既有环境基线，与三个 diag 车道无因果关系，也不在本任务可修范围内。
+
+### 9.4 本轮新增取证（针对"218/1431 可复现吗"这一直无人挑战的点）
+
+**(a) 计数不受未跟踪 / 被忽略文件影响 —— 可复现性缺口不存在。**
+218 个被计数的测试文件**全部**在 `git ls-files` 里（`comm -23` 输出 0 行），`git status --porcelain --ignored` 里没有任何 `*.test.*` / `*.spec.*`。脚本不走 `.gitignore`，但本仓的忽略目录里没有测试文件，因此从干净检出跑必然也是 `218 / 1431`。
+
+**(b) 软链调用免疫 —— 车道 c 判 fail 的那一类缺陷在车道 a 不存在。**
+`review-c-report.md:104` 称 "diag-a.mjs 与 diag-b.mjs 不做这道 guard"。本轮实测两条调用路径：
+
+```
+$ ln -s <repo>/scripts/diag-a.mjs /tmp/rev-a5-link/diag-a.mjs
+$ node /tmp/rev-a5-link/diag-a.mjs                       → diag-a: 218 test files, 1431 test cases（exit 0）
+$ ln -s <repo> /tmp/rev-a5-link/repo-link
+$ node /tmp/rev-a5-link/repo-link/scripts/diag-a.mjs     → 同一行（exit 0）
+```
+
+与仓库内直跑逐字相同。根因：仓库根由 `import.meta.url` 推导（Node 默认 realpath 主模块），且 diag-a **不接受任何参数**，不存在 diag-c 那种"参数里带软链就静默跳过整个条目"的入口。review-c 对 diag-a 的这句跨车道论断成立。
+
+**(c) 新非阻塞发现：树内存在软链目录时 diag-a 会静默少计。**
+`readdir(withFileTypes)` 的 `isDirectory()` / `isFile()` 对软链条目**都**返回 false，软链目录里的测试文件因此既不进计数也不报错。最小复现（`/tmp/rev-a5-fixt`，脚本本体未改）：
+
+```
+无软链：                                    → diag-a: 2 test files, 3 test cases
+加入 tests/aliased -> linked/（内含 two.test.ts） → diag-a: 2 test files, 3 test cases，exit 0   ← 少计 1 文件 1 用例，无任何提示
+```
+
+本仓当前树内 0 个软链（`find … -type l` 为空），所以 §9.1 的 218/1431 **不受影响**，不判阻塞。按 R27 记为**文档缺口**：`scripts/diag-a.mjs:5-12` 对"文件"的定义没有排除软链条目，读者会以为它数的是"仓库里所有测试文件"。与车道 c 的差别在于：那里是**正常调用方式**下静默无输出（因此阻断），这里是**非常规树形**下少计且本仓为 0。修法二选一（impl-a 侧一行）：入口处对软链条目 `realpath` 后再判类型，或在头注释里写明"软链条目不计"。
+
+### 9.5 非阻塞发现的当前状态
+
+- **§2.1** 仍成立，且仍是 `merge` 的硬约束：不得把「218 = 本仓测试套件数」或 `scripts/diag-a.mjs:8-9` 那句括号注释原样写进 README；若要保留 218，须注明其中 1 个是 `tests/fixtures/m7/web-server.test.js`（`node:test` 载荷，不在 vitest include 内），vitest 实跑 217。
+- **§2.2** 仍成立：`/tmp/diag-a-verify.sh` 还在宿主 `/tmp` 下（本轮实测仍在，2680 B），不在仓库内，随机会话即丢；独立复算命令目前只存在于本报告 §5 / §7。
+- **§4 / §4.5** 仍成立并已按新 HEAD 更新，见 §9.2 / §9.3。
+- **§9.4(c)** 为本轮新增，见上。
+
+### 9.6 本轮可复跑产物（一次性复现脚本）
+
+```bash
+W="$(pwd)"; NM=/Users/macmini/workspace/13-Graph/node_modules
+P=/tmp/rev-a5-probe; B=/tmp/rev-a5-base
+
+# 1) 车道 a 本体
+node scripts/diag-a.mjs                                       # → diag-a: 218 test files, 1431 test cases
+for i in 1 2 3; do node scripts/diag-a.mjs | shasum -a 256; done   # → 3 次同一摘要 7dae6b3d…
+find . -type f \( -name '*.test.*' -o -name '*.spec.*' \) -not -path './.git/*' -not -path '*/node_modules/*' | wc -l   # 218
+grep -rhE '^[[:space:]]*(it|test)([.][A-Za-z_$]+)*[[:space:]]*[(`]' --include='*.test.*' --include='*.spec.*' . \
+  --exclude-dir=.git --exclude-dir=node_modules | wc -l                                                                 # 1431
+node --run typecheck; node --run lint; node --run check:evidence     # 全部 exit 0
+
+# 2) 只读 + 可复现性（§9.4a）
+fp() { find . -path ./.git -prune -o -path '*/node_modules' -prune -o -type f -print0 | xargs -0 stat -f '%N %z %m' | sort; }
+fp > /tmp/rev-a5-fp1.txt
+node scripts/diag-a.mjs >/dev/null; node scripts/diag-b.mjs >/dev/null; node scripts/diag-c.mjs >/dev/null
+fp > /tmp/rev-a5-fp2.txt; diff /tmp/rev-a5-fp1.txt /tmp/rev-a5-fp2.txt && git status --porcelain   # 皆空
+find . -type f \( -name '*.test.*' -o -name '*.spec.*' \) -not -path './.git/*' -not -path '*/node_modules/*' \
+  | sed 's|^\./||' | sort | comm -23 - <(git ls-files | sort) | wc -l                                # 0（无未跟踪/被忽略文件混入）
+
+# 3) 软链调用免疫 + 软链目录静默少计（§9.4b/c）
+rm -rf /tmp/rev-a5-link && mkdir -p /tmp/rev-a5-link
+ln -s "$W/scripts/diag-a.mjs" /tmp/rev-a5-link/diag-a.mjs   && node /tmp/rev-a5-link/diag-a.mjs        # → 218 / 1431
+ln -s "$W" /tmp/rev-a5-link/repo-link                       && node /tmp/rev-a5-link/repo-link/scripts/diag-a.mjs  # → 218 / 1431
+F=/tmp/rev-a5-fixt; rm -rf $F; mkdir -p $F/scripts $F/tests/real $F/linked
+cp scripts/diag-a.mjs $F/scripts/; printf 'it("a",()=>{})\ntest("b",()=>{})\n' > $F/tests/real/one.test.ts
+printf 'it("c",()=>{})\n' > $F/linked/two.test.ts
+node $F/scripts/diag-a.mjs                                   # → 2 test files, 3 test cases
+ln -s $F/linked $F/tests/aliased && node $F/scripts/diag-a.mjs   # → 仍是 2 / 3（静默少计，exit 0）
+
+# 4) A/B 对照（串行，勿与全量并发）
+rm -rf "$P"; mkdir -p "$P"
+(cd "$W" && tar -cf - --exclude=.git --exclude=node_modules .) | (cd "$P" && tar -xf -)
+cp -al "$NM" "$P/node_modules"; (cd "$P" && git init -q); (cd "$P" && node --run test)    # → 4 files / 4 tests 失败
+
+# 5) 基线对照
+rm -rf "$B"; mkdir -p "$B"; (cd "$W" && git archive 7165551) | tar -x -C "$B"; cp -al "$NM" "$B/node_modules"
+(cd "$B" && node node_modules/vitest/vitest.mjs run tests/m0/restricted-process.test.ts tests/m7/delivery.test.ts \
+   tests/m7/page.test.ts tests/m7/production.test.ts)                                       # → Test Files 4 failed (4)
+
+# 6) integration 依赖缺口（§9.2）
+ls -ld ../integration/node_modules                        # → No such file or directory
+(cd ../integration && node --run typecheck; echo $?)       # → tsc: command not found / 1
+```
+
+本轮产物：`/tmp/rev-a5-fp1.txt` / `rev-a5-fp2.txt`（1031 文件指纹）、`/tmp/rev-a5-testfiles.txt` / `rev-a5-tracked.txt`（可复现性比对）、`/tmp/rev-a5-wt-test.txt` + `rev-a5-wt-fail.txt`（工作副本 42/128 及失败清单）、`/tmp/rev-a5-probe-test.txt` + `rev-a5-probe-fail.txt`（硬链接探针 4/4）、`/tmp/rev-a5-base-test.txt`（基线 4/4）、`/tmp/rev-a5-typecheck.txt` / `rev-a5-lint.txt` / `rev-a5-evidence.txt`、`/tmp/rev-a5-int-tc.txt` / `rev-a5-int-test.txt`（integration 两阶段失败）。
+
+### 9.7 判定
+
+**route = `pass`**（与第 1–4 轮一致；0 阻塞项）
+
+- 只读 ✅（静态 0 命中 + 1031 文件指纹动态取证）｜仅 node 内置 ✅｜仅新增 `scripts/diag-a.mjs`、零既有文件改动、零测试耦合 ✅
+- 统计在其自述口径下正确（`find`/`grep` 独立复算 218/1431 吻合），且本轮追加证明**从干净检出可复现**（0 个未跟踪/被忽略文件混入计数）✅
+- 可重复 ✅（3 次同摘要、cwd 无关、软链调用同输出、exit 0、stderr 空）
+- 车道门禁未污染 ✅（`typecheck` / `lint` / `check:evidence` 全 0）
+- `test` 的红**已再次归因且与车道无关**（A/B 42/128 → 4/4，基线提交同样 4/4，失败文件集合与上轮逐行相同）
+
+非阻塞 3 条：§2.1 注释口径（**`merge` 的硬约束**）、§2.2 复算产物未固化、§9.4(c) 软链目录静默少计。
+图级风险 1 条（§4.5）：`integration` 副本 HEAD 已到 `c7193df` 但仍无 `node_modules`，`node --run check` 第一阶段即红 —— **必须由图操作者补硬链接依赖后再跑 `full-tests`**，否则会空转到 stalled；补齐后仍会红 4 个文件，应判为环境基线，不得让 `merge` 去改这 4 个用例。
+
+**车道外观察（不阻断，供 `merge` 参考）**：`review-c-report.md` 位于仓库根目录且已被 Git 跟踪（由 `5e076f0` 引入、`b8480ee` 更新），而 review-c 第 4 轮的正式报告写在了 `reviews/review-c.md`。合并前请确认是否要让这份根目录副本进入 `main`。
