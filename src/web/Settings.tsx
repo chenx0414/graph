@@ -7,7 +7,7 @@ import { STANDARD_ACCESS } from './access-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
 import { modelRequestHeaders, type ModelInput } from '../catalog/models.ts';
 import { defaultThinkingLevelFor } from '../catalog/models.ts';
-import { thinkingOptionLabel } from './thinking-levels.ts';
+import { nearestLevel, thinkingOptionLabel } from './thinking-levels.ts';
 import {
   FALLBACK_PLATFORMS,
   PROVIDER_COMPATIBILITIES,
@@ -903,6 +903,11 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
             const index = entries.indexOf(entry);
             const fieldIssues = modelFieldErrors(entry);
             const complete = completeCost(entry.cost);
+            const thinkingOptions = entry.thinkingOptions ?? [];
+            const selectedThinkingLevel = thinkingOptions.length
+              ? nearestLevel(thinkingOptions, entry.defaultThinkingLevel ?? defaultThinkingLevelFor(thinkingOptions))
+              : '';
+            const staleThinkingLevel = entry.defaultThinkingLevel && entry.defaultThinkingLevel !== selectedThinkingLevel;
             const setCost = (field: 'input' | 'output' | 'cacheRead' | 'cacheWrite', raw: string) => mutate(next => {
               const target = next.models!.entries[index]!;
               const parsed = raw === '' ? undefined : Number(raw);
@@ -933,13 +938,11 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
                       </select>
                     </Field>
                     <Field label="默认思考强度">
-                      <select className="select" data-testid={`model-${index}-thinking`} value={entry.defaultThinkingLevel ?? defaultThinkingLevelFor(entry.thinkingOptions ?? []) ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
-                        {(entry.thinkingOptions ?? []).map(option => <option key={option.level} value={option.level}>{thinkingOptionLabel(option)}</option>)}
-                        {entry.defaultThinkingLevel && !(entry.thinkingOptions ?? []).some(option => option.level === entry.defaultThinkingLevel)
-                          ? <option value={entry.defaultThinkingLevel}>{entry.defaultThinkingLevel}（该模型不支持，请改选）</option>
-                          : null}
+                      <select className="select" data-testid={`model-${index}-thinking`} value={selectedThinkingLevel} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
+                        {thinkingOptions.map(option => <option key={option.level} value={option.level}>{thinkingOptionLabel(option)}</option>)}
                       </select>
                     </Field>
+                    {staleThinkingLevel && <Button size="sm" onClick={() => mutate(next => { next.models!.entries[index]!.defaultThinkingLevel = selectedThinkingLevel as ModelThinkingLevel; })}>原默认值 {entry.defaultThinkingLevel} 不受支持，修正为 {selectedThinkingLevel}</Button>}
                   </div>
                   <div className="row">
                     <label className="checkbox-row"><input type="checkbox" data-testid={`model-${index}-images`} checked={(entry.input ?? ['text']).includes('image')} onChange={event => mutate(next => { next.models!.entries[index]!.input = event.target.checked ? ['text', 'image'] : ['text']; })} /><span>支持图片输入</span></label>

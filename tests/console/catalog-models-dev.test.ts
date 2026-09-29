@@ -63,7 +63,7 @@ describe('models.dev snapshot mapping (B-1)', () => {
     expect(metadata).not.toBeNull();
     expect(metadata).toMatchObject({
       contextWindow: 1_000_000,
-      maxTokens: 384_000,
+      maxTokens: 393_216,
       input: ['text', 'image'],
       reasoning: true,
       sourceUrl: MODELS_DEV_SOURCE_URL,
@@ -100,6 +100,11 @@ describe('models.dev snapshot mapping (B-1)', () => {
     // No cache-write rate is published, so the price (and currency) is left to the user.
     expect(metadata!.cost).toBeUndefined();
     expect(metadata!.currency).toBeUndefined();
+  });
+
+  it('resolves models for a second OpenCode Go account and the current catalog', () => {
+    expect(lookupModelMetadata('opencode-go-3', 'deepseek-v4.1-flash')?.thinkingLevels).toEqual(['low', 'high', 'max']);
+    expect(lookupModelMetadata('opencode-go-3', 'space-bunny-free')?.thinkingLevels).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 
   it('never invents a default thinking strength for a reasoning model', () => {
