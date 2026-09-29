@@ -191,6 +191,20 @@ test('a rework briefing carries the failed evidence instead of the briefing agai
   expect(text).toContain('Your node, its file list and every confirmed check input are unchanged.');
 });
 
+test('a rework briefing re-states the node standing contract so a retry does not lose its route or its deliverable', () => {
+  const text = reworkBriefing({
+    attempt: 2,
+    evidence: [{ id: 'review-a', label: 'agent review', status: 'running, routed fail', output: 'lane a is wrong' }],
+    acceptance: [],
+    contract: ['You are a router: your branch is yours to choose from pass, fail.', 'You must WRITE the file reviews/review-a.md before you finish: it is this node declared deliverable.'],
+  });
+  // The delta is still short, but the rules this node must satisfy on EVERY turn ride along: without them a
+  // same-session retry forgets its route (HB-208) and its deliverable (HB-213), which is exactly what happened.
+  expect(text).toMatch(/you are a router/i);
+  expect(text).toContain('WRITE the file reviews/review-a.md');
+  expect(text).not.toContain('Request:');
+});
+
 test('a rework with no recorded failure says so instead of inventing one', () => {
   const text = reworkBriefing({ attempt: 3, evidence: [], acceptance: [{ id: 'a1', description: 'd', checkNode: 'check-types' }] });
   expect(text).toContain('No downstream evidence is recorded as failed');
