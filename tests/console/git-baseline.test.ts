@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
-import { GitIntegration, outOfScopePaths, rechecksAfterIntegrationChange } from '../../src/git/integration.ts';
+import { GitIntegration, outOfScopePaths, rechecksAfterIntegrationChange, staleRecheckTargets } from '../../src/git/integration.ts';
 import type { NodeSpec, Operation } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -213,6 +213,49 @@ test('only program checks and judging agent nodes re-run when the integration mo
   expect(rechecksAfterIntegrationChange(spec('agent', 'work'), 'succeeded')).toBe(false);
   expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'running')).toBe(false);
   expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'blocked')).toBe(false);
+});
+
+// HB-209 is about WHICH of those re-check: an advance that only touches a sibling lane must not reset a
+// review that judged a different lane. These are the failure modes, written before the implementation.
+test('a review whose lane the advance did not touch is not re-checked (HB-209)', () => {
+  const changed = ['scripts/diag-b.mjs'];
+  const stale = staleRecheckTargets({
+    changedPaths: changed,
+    candidates: [
+      { id: 'review-a', closurePaths: ['scripts/diag-a.mjs'] },
+      { id: 'review-b', closurePaths: ['scripts/diag-b.mjs'] },
+    ],
+  });
+  expect(stale.has('review-b')).toBe(true);
+  expect(stale.has('review-a')).toBe(false);
+});
+
+test('an unknown changed-path set re-checks everyone rather than risk a stale verdict (HB-209)', () => {
+  const stale = staleRecheckTargets({
+    changedPaths: null,
+    candidates: [{ id: 'review-a', closurePaths: ['scripts/diag-a.mjs'] }, { id: 'review-b', closurePaths: [] }],
+  });
+  expect(stale.has('review-a')).toBe(true);
+  expect(stale.has('review-b')).toBe(true);
+});
+
+test('a node with no known output re-checks: its closure cannot be proven unaffected (HB-209)', () => {
+  const stale = staleRecheckTargets({ changedPaths: ['scripts/diag-b.mjs'], candidates: [{ id: 'gate', closurePaths: [] }] });
+  expect(stale.has('gate')).toBe(true);
+});
+
+test('a change under a directory a node produced touches that node (HB-209)', () => {
+  const stale = staleRecheckTargets({
+    changedPaths: ['reviews/review-a.md'],
+    candidates: [{ id: 'x', closurePaths: ['reviews/'] }, { id: 'y', closurePaths: ['scripts/'] }],
+  });
+  expect(stale.has('x')).toBe(true);
+  expect(stale.has('y')).toBe(false);
+});
+
+test('an empty diff reset nothing: the advance landed identical content (HB-209)', () => {
+  const stale = staleRecheckTargets({ changedPaths: [], candidates: [{ id: 'review-a', closurePaths: ['scripts/diag-a.mjs'] }] });
+  expect(stale.size).toBe(0);
 });
 
 test('a terminal task releases its working copies but keeps its integration branch', async () => {
