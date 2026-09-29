@@ -86,6 +86,10 @@ export interface PiAdapterChannels {
     }): Promise<unknown>;
   };
   catalog: Catalog;
+  /** Same-graph Agent-to-Agent delivery: a peer's message reaches the target node like a user prompt. */
+  peers?: (taskId: string) => {
+    deliver(from: string, input: { to: string; text: string; requestId: string }): Promise<unknown>;
+  };
   agentContext?: AgentContextLibrary;
   bootstrapPrompts?: Record<string, string>;
   bootstrapToolPrompt?: string;
@@ -458,7 +462,12 @@ export function createPiAdapter(options: {
               ...(spec.role !== 'master' ? {
                 peers: {
                   list: async () => peerNodes(options.store, operation.taskId).map(node => ({ id: node.id, role: node.role, status: node.status })),
-                  send: async request => sendNodeMessage(options.store, { taskId: operation.taskId, from: operation.nodeId, to: request.to, text: request.text, requestId: request.requestId }),
+                  // Delivered like a user prompt to the target node, not parked in an inbox: the target's
+                  // own chat window shows it and its next dispatch reads it. Falls back to a passive record
+                  // only when the runtime exposed no delivery channel (there is no graph to wake).
+                  send: async request => channels?.peers
+                    ? channels.peers(operation.taskId).deliver(operation.nodeId, { to: request.to, text: request.text, requestId: request.requestId })
+                    : sendNodeMessage(options.store, { taskId: operation.taskId, from: operation.nodeId, to: request.to, text: request.text, requestId: request.requestId }),
                   inbox: async () => nodeInbox(options.store, operation.taskId, operation.nodeId),
                 },
               } : {}),

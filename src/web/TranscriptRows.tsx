@@ -46,11 +46,16 @@ function MessageMeta({ createdAt, elapsedMs }: { createdAt?: number | undefined;
 function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { message: ConversationMessage; userAuthor?: string; copyable?: string; markdown?: boolean }) {
   if (message.role === 'user') {
     const attachments = messageAttachments(message);
+    // A peer Agent's message arrived like a prompt; label it with its sender rather than "我" so the
+    // reader never mistakes another Agent's words for the human's.
+    const peerFrom = message.data && (message.data as Record<string, unknown>).peer === true && typeof (message.data as Record<string, unknown>).from === 'string'
+      ? (message.data as Record<string, unknown>).from as string
+      : undefined;
     return (
       <div className="message-row" data-role="user" data-testid="message-user" data-state={message.state}>
         <div className="message-stack">
           <div className="message-author">
-            {userAuthor ?? (message.kind === 'briefing' ? '任务说明' : '我')}
+            {peerFrom ? `${peerFrom} · Agent 消息` : userAuthor ?? (message.kind === 'briefing' ? '任务说明' : '我')}
             {message.state === 'pending' && <span className="message-state"> · 等待处理</span>}
           </div>
           <div className="message-content">
