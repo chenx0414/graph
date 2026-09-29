@@ -5,6 +5,8 @@
 - 审查依据：impl-a 交付件 `graph://tasks/a621e9d6-…/artifacts/deliverables/impl-a-diag-a@1`（digest `c1bf4103…`）与 impl-a→review-a 私信
 - 结论：**pass** —— 5 条 lookFor 全部成立，**0 个阻塞项**，2 条非阻塞发现（其中 1 条禁止 merge 原样抄进 README），另附 1 条**不属于本车道但会卡死下游 `full-tests`** 的图级风险
 
+> **第 2 轮增补（同一会话，operation `b2c36132`）**：车道 a 的 5 条 lookFor 在合并后的 HEAD `f3d0ced`（已含 impl-b/impl-c）上**复跑全部仍成立**，数字仍是 `218 / 1431`，三个 diag 脚本合跑对 1028 个文件零改动。门禁复跑：`typecheck` / `lint` / `check:evidence` 全 0，`test` 仍红（42 文件 / 128 用例）—— 但 §4 已被本轮用 **A/B 对照证明**重写：根因是工作副本 `node_modules` 软链，不是代码，且 `integration` 副本**根本没有 `node_modules`**。**第 1 轮 §4 的猜测性结论与「让 merge 去确认基线」的建议作废。**
+
 ---
 
 ## 0. 审查对象绑定
@@ -151,9 +153,13 @@ impl-a 交付件与私信里的每一条声明，均已在本工作副本上独�
 
 ---
 
-## 4. 图级风险（不属本车道，但会让 `full-tests` 必然失败并空转返工）
+## 4. 图级风险（不属本车道）：基线红的原因是工作副本的 `node_modules` 软链，已定位并可复现
 
-在本审查副本 HEAD `d1d954a` 上跑 `node --run check` 的四个阶段：
+> **本节在第 2 轮审查中被重写。** 第 1 轮只把基线红记为「harness / 环境层问题」并建议「先确认基线是绿的」。下面是 A/B 对照证明的真正成因与修法；旧的猜测性结论（尤其是「让 `merge` 去确认基线」的建议）**作废**。
+
+### 4.1 现象
+
+在各 impl/review 副本上跑 `node --run check`，前三个阶段全绿，第四阶段必红：
 
 | 阶段 | 退出码 |
 | --- | --- |
@@ -162,11 +168,66 @@ impl-a 交付件与私信里的每一条声明，均已在本工作副本上独�
 | `check:evidence` | 0 |
 | **`test`（`vitest run`）** | **1 —— 42 个文件失败 / 128 of 1468 用例失败** |
 
-失败与本车道**无关**，可证：`d1d954a` 相对 `7165551` 只多一个无人引用的新文件（§0、§1.3）。失败样本是同一种形态 —— 脚本化模型服务收不到请求，例如 `tests/console/presets.test.ts:87` 的 `JSON.stringify(provider.requests[0])` 为 `undefined`（`tests/m8/system-self-improvement.test.ts:111` 同型）。已排除的两个环境猜测：`PI_*` 环境变量污染（`env -u PI_MODEL -u PI_PROVIDER -u PI_REASONING_LEVEL -u PI_SESSION_FILE -u PI_SESSION_ID` 重跑该文件，仍 1 failed）；`pi` 不在 PATH（同样无法解释 `openaiServer` 这种进程内假 provider 收不到请求）。**这属于 harness / 环境层问题，本次不判给车道 a。**
+失败与三个车道**无关**：`7165551..f3d0ced` 的全部改动是 4 个纯新增文件（`scripts/diag-a.mjs`、`scripts/diag-b.mjs`、`scripts/diag-c.mjs`、`reviews/review-a.md`），全仓检索 `diag-[abc]` 只命中 `tests/m2/verification.test.ts:229,235` 的**字符串字面量**（伪造 multiview 载荷），而该文件并不在失败名单里。
 
-**为什么必须现在说**：图的声明是 `loops:[{from:'full-tests', to:'merge'}]`。`full-tests` 在集成副本上跑 `node --run check`，只要基线是红的，它就会失败 → 退回 `merge` → 而 `merge` 只拥有那段 README，它改不动、也不该改这 128 个失败用例 → 再次 `full-tests` 再次失败，循环至 stalled。这是**可预见的死锁**，与车道 a 的质量无关。
+### 4.2 根因（已证明，不是猜测）
 
-**给图操作者**：在合并三份成果之前，先在集成副本上确认基线 `node --run test` 是绿的；若基线确实红，`full-tests` 应当被判为「环境/基线问题」而不是触发 `full-tests → merge` 回边。（本次不占用任何仓库文件：无 lane 拥有图定义本身，v33 草稿在 `/tmp/shape-a-v33.json`。）
+工作副本的 `node_modules` 是**指向仓库外部的软链**：
+
+```
+$ ls -ld node_modules
+node_modules -> /Users/macmini/workspace/13-Graph/node_modules
+```
+
+`src/runtime/pi-process.ts:166` 把 `appRoot = realpath(graphApplicationRoot())`（即工作副本自身）作为 `readPaths` 传给内层 restricted executor。软链的真实目标在 `appRoot` 之外，内层沙箱读不到，于是每个 Pi worker 子进程在启动瞬间就模块解析失败：
+
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@earendil-works/pi-ai'
+  imported from .../review-a/src/runtime/pi-worker.ts
+```
+
+后续 36 处 `provider.requests[N]` 为 `undefined`、12 处 `Timed out waiting for condition` 都是这一个根因的下游症状（worker 没起来，假 provider 自然收不到请求）。
+
+这正是仓库自己写明的陷阱 —— `docs/agents/checks.md`「在 Git 工作树里验证」：「不要手工 `ln -s` 指向主仓库的 `node_modules`……沙箱内的 Agent 子进程会以模块解析失败告终」，以及 `docs/adr/0027-work-copy-dependency-link.md` §2「链接目标在副本之外，没有读取授权就无法解析」。
+
+### 4.3 A/B 对照：128 → 6
+
+同一份源码、同一套依赖，只把 `node_modules` 换成文档规定的硬链接实体目录：
+
+| 副本 | `node_modules` 形态 | 结果 |
+| --- | --- | --- |
+| 审查工作副本 | 软链到 `13-Graph/node_modules` | **42 文件 / 128 用例失败** |
+| 对照副本 `/tmp/rev-a2-probe` | `cp -al` 硬链接实体目录 | **6 文件 / 6 用例失败** |
+
+**122 of 128 的失败仅由软链造成**，与代码、与三个车道都无关。剩下 6 个也全是环境项，不是代码缺陷：`/usr/bin/which npm` 失败（本沙箱 PATH 内确实没有 `npm`：`spawnSync npm` → `ENOENT`）、`12-MediaBookmarks` 兄弟项目缺失（`tests/m7/page.test.ts:18` 依赖 `process.cwd()/../12-MediaBookmarks`）、以及对照副本放在 `/tmp` 导致的 `resolveRsiRoot` 路径断言。
+
+### 4.4 修法（仓库已给出，照抄即可）
+
+```sh
+cp -al /Users/macmini/workspace/13-Graph/node_modules <工作副本>/node_modules
+```
+
+复现 A/B 对照（不改动任何工作副本）：
+
+```sh
+W=<工作副本>; P=/tmp/rev-a2-probe; rm -rf $P; mkdir -p $P
+(cd $W && tar -cf - --exclude=.git --exclude=node_modules .) | (cd $P && tar -xf -)
+cp -al /Users/macmini/workspace/13-Graph/node_modules $P/node_modules
+(cd $P && node --run test)
+```
+
+### 4.5 另一处更硬的阻塞：`integration` 副本根本没有 `node_modules`
+
+```
+$ ls -ld ../integration/node_modules
+ls: ../integration/node_modules: No such file or directory
+$ (cd ../integration && node -e "require.resolve('vitest')")
+vitest UNRESOLVED MODULE_NOT_FOUND
+```
+
+所以在 `integration` 副本上，`node --run check` 会在**第一步 `tsc`** 就失败（连 `typescript` 都解析不到），比 128 个用例失败更早、更彻底。**在修好 `integration` 的依赖之前，任何跑 `node --run check` 的 `full-tests` 都必然红 → 退回 `merge` → 而 `merge` 只拥有那段 README → 再次 `full-tests` 再次失败，循环至 stalled。这是可预见的死锁。**
+
+**给图操作者**：这不是代码问题，不要让 `merge` 去改那 128 个用例（也改不动）。先按 §4.4 给 `integration` 副本补上硬链接依赖，再重跑 `full-tests`；把修依赖之前产生的失败判为「环境/基线问题」，不要触发 `full-tests → merge` 回边。
 
 ---
 
@@ -207,4 +268,13 @@ node --run test                                                    # 基线红�
 - 运行可重复：3 次同摘要、cwd 无关、exit 0、stderr 空 ✅
 
 阻塞项 0 条。非阻塞 2 条（§2.1 注释口径、§2.2 复算产物未固化），其中 §2.1 是 **merge 的硬约束**：不得把「218 = 本仓测试套件数」及那句括号注释原样写入用法说明。
-图级风险 1 条（§4，基线测试红 + `full-tests → merge` 回边会空转），不属于车道 a 的返工理由，但必须在合并前由图操作者处置。
+图级风险 1 条（§4），不属于车道 a 的返工理由，但必须在合并前由图操作者处置。
+
+**第 2 轮复核（operation `b2c36132`，HEAD `f3d0ced`）**：判定不变，仍为 **pass**，0 阻塞项。
+
+- lookFor 五条在合并后复跑全部成立：`diag-a: 218 test files, 1431 test cases` 连跑 3 次 + `/tmp` 下 cwd 无关运行均同值；`find`/`grep` 独立复算 218/1431 吻合；`diag-a.mjs` 静态无任何写/执行 API，import 仅 `node:fs/promises`/`node:path`/`node:url`。
+- 三个 diag 脚本合跑后对 1028 个文件的 `path+size+mtime` 指纹逐行 diff 为空，`git status --porcelain` 干净。
+- 门禁复跑：`typecheck` 0、`lint` 0、`check:evidence` 0；`test` 1（42 文件 / 128 用例）。
+- `test` 的红**已归因且已证明与车道无关**：A/B 对照（软链 vs `cp -al` 硬链接）为 128 → 6 个失败；且 `integration` 副本无 `node_modules`，`tsc` 即不可解析。详见 §4。
+
+**唯一需要下游动手的事**：按 §4.4 给 `integration` 副本补硬链接依赖，再重跑 `full-tests`；不要让 `merge` 去改这 128 个用例。
