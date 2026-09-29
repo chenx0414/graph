@@ -28,6 +28,45 @@ export function rechecksAfterIntegrationChange(spec: NodeSpec, status: string): 
   return spec.kind === 'program' || spec.action === 'review';
 }
 
+/**
+ * Which succeeded checks actually have to run again after an integration advance.
+ *
+ * `rechecksAfterIntegrationChange` answers "would this kind of node re-check at all"; this answers
+ * "did the advance touch what this node judged". An advance that only adds a sibling lane's file
+ * changes the integration sha, but nothing this node depends on moved, so re-running it spends a
+ * whole review turn to reach the same verdict (measured: an unrelated lane's merge reset every
+ * review in the task, and round stayed 1 each time - they never really reworked).
+ *
+ * A node is stale when the changed paths intersect its own dependency closure's produced paths:
+ * the files its upstream nodes wrote plus its own output. When either side is unknown the node is
+ * treated as stale - re-running a node that did not need it costs tokens, but skipping one that did
+ * would let a verdict about code that is no longer there stand, which is the failure this guard exists
+ * to prevent.
+ */
+export function staleRecheckTargets(input: {
+  /** Repo-relative paths the integration advance touched; null when the diff could not be computed. */
+  changedPaths: readonly string[] | null;
+  /** Nodes eligible to re-check, in any order. */
+  candidates: readonly { id: string; closurePaths: readonly string[] }[];
+}): Set<string> {
+  const stale = new Set<string>();
+  for (const candidate of input.candidates) {
+    // Unknown on either side means we cannot prove the node is unaffected, so it re-checks.
+    if (input.changedPaths === null || candidate.closurePaths.length === 0) { stale.add(candidate.id); continue; }
+    const touched = candidate.closurePaths.some(path => input.changedPaths!.some(changed => sameTreePath(changed, path)));
+    if (touched) stale.add(candidate.id);
+  }
+  return stale;
+}
+
+/** Two repo paths name the same thing: equal, or one is a directory prefix of the other. */
+function sameTreePath(a: string, b: string): boolean {
+  const x = a.replace(/^\.\//, '').replace(/\/+$/, '');
+  const y = b.replace(/^\.\//, '').replace(/\/+$/, '');
+  if (!x || !y) return false;
+  return x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`);
+}
+
 const EVIDENCE_PREFIXES = ['evidence/'];
 
 /**
@@ -367,7 +406,7 @@ export class GitIntegration {
       const previous = this.store.task(operation.taskId).integration_sha;
       this.store.db.prepare('UPDATE tasks SET integration_sha=? WHERE id=?').run(merged.sha, operation.taskId);
       this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(merged.sha, operation.taskId, operation.nodeId, operation.id, 'integration');
-      if (previous && previous !== merged.sha && !this.retargetEvidence(operation.taskId, previous, merged.sha)) rebases = this.invalidateChecks(operation.taskId);
+      if (previous && previous !== merged.sha && !this.retargetEvidence(operation.taskId, previous, merged.sha)) rebases = this.invalidateChecks(operation.taskId, previous, merged.sha);
     });
     for (const rebase of rebases) resetHard(rebase.path, rebase.sha);
     return merged;
@@ -452,7 +491,7 @@ export class GitIntegration {
     let rebases: { path: string; sha: string }[] = [];
     this.store.transaction(() => {
       this.store.db.prepare('UPDATE tasks SET integration_sha=?,target_sha=? WHERE id=?').run(moved.sha, targetSha, taskId);
-      rebases = before && before !== moved.sha && this.retargetEvidence(taskId, before, moved.sha) ? [] : this.invalidateChecks(taskId);
+      rebases = before && before !== moved.sha && this.retargetEvidence(taskId, before, moved.sha) ? [] : this.invalidateChecks(taskId, before ?? null, moved.sha);
     });
     for (const rebase of rebases) resetHard(rebase.path, rebase.sha);
     return { status: 'recheck' as const };
@@ -513,17 +552,33 @@ export class GitIntegration {
     this.store.event(operation.taskId, 'git.out-of-scope.restored', { nodeId: operation.nodeId, restored: restorable, created, sha: sha ?? null });
   }
 
-  private invalidateChecks(taskId: string) {
-    this.store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND valid=1').run(taskId);
+  private invalidateChecks(taskId: string, from: string | null, to: string | null) {
     // A task always has a graph revision in production, but a git-level caller must not crash inside
-    // a transaction over a task that has none: the evidence is already invalidated above, and there
-    // are no succeeded nodes to re-run.
+    // a transaction over a task that has none: the evidence is invalidated above, and there are no
+    // succeeded nodes to re-run.
     let graph: ReturnType<typeof loadGraph>;
-    try { graph = loadGraph(this.store, taskId); } catch { return []; }
-    const reset = new Set<string>();
+    try { graph = loadGraph(this.store, taskId); } catch { this.invalidateAllEvidence(taskId); return []; }
+
+    // What this advance actually changed. Unknown means every eligible node re-checks, which is the
+    // old (safe) behaviour.
+    const changedPaths = this.changedPathsBetween(taskId, from, to);
+    const candidates: { id: string; closurePaths: string[] }[] = [];
     for (const [id, spec] of graph.plan.nodes) {
       if (!rechecksAfterIntegrationChange(spec, graph.status(id))) continue;
-      reset.add(id);
+      candidates.push({ id, closurePaths: this.closureProducedPaths(taskId, graph, id) });
+    }
+    const stale = staleRecheckTargets({ changedPaths, candidates });
+
+    // A node whose closure did not move keeps its verdict; only re-bind its evidence to the new sha so
+    // the completion judgement (which compares evidence.commit_sha to the integration sha) still holds.
+    for (const candidate of candidates) {
+      if (stale.has(candidate.id) || !to) continue;
+      this.store.db.prepare('UPDATE evidence SET commit_sha=? WHERE task_id=? AND node_id=? AND valid=1').run(to, taskId, candidate.id);
+    }
+    for (const id of stale) this.store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND node_id=? AND valid=1').run(taskId, id);
+
+    const reset = new Set<string>(stale);
+    for (const id of stale) {
       for (const dependent of graph.plan.dependents(id)) {
         if (!['preparing', 'running'].includes(graph.status(dependent))) reset.add(dependent);
       }
@@ -538,8 +593,65 @@ export class GitIntegration {
         if (tree) rebases.push({ path: tree.path, sha: task.integration_sha });
       }
     }
-    this.store.event(taskId, 'git.recheck', { reason: 'Integration commit changed' });
+    this.store.event(taskId, 'git.recheck', { reason: 'Integration commit changed', reset: [...reset], rebased: candidates.filter(c => !stale.has(c.id)).map(c => c.id) });
     return rebases;
+  }
+
+  /** Every evidence row goes, the pre-HB-209 behaviour, used when the graph itself cannot be read. */
+  private invalidateAllEvidence(taskId: string) {
+    this.store.db.prepare('UPDATE evidence SET valid=0 WHERE task_id=? AND valid=1').run(taskId);
+  }
+
+  /** Repo-relative paths the advance `from..to` touched, or null when it cannot be computed. */
+  private changedPathsBetween(taskId: string, from: string | null, to: string | null): string[] | null {
+    if (!from || !to || from === to) return from === to ? [] : null;
+    const integration = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${taskId}`) as { path: string } | undefined;
+    const cwd = integration?.path ?? this.repoRoot(taskId);
+    if (!cwd) return null;
+    const diff = git(cwd, ['diff', '--name-only', from, to]);
+    if (diff.code !== 0) return null;
+    return diff.stdout.split('\n').map(line => line.trim()).filter(Boolean);
+  }
+
+  /**
+   * The files a node's dependency closure wrote: its own output paths, then every ancestor's, so a
+   * change anywhere upstream of this node counts as touching it.
+   */
+  private closureProducedPaths(taskId: string, graph: ReturnType<typeof loadGraph>, nodeId: string): string[] {
+    const paths = new Set<string>();
+    const seen = new Set<string>();
+    const visit = (id: string) => {
+      // A dependency may name a container; only its leaves produce files.
+      for (const leaf of graph.plan.leaves(id)) {
+        if (seen.has(leaf)) continue;
+        seen.add(leaf);
+        for (const path of this.producedPaths(taskId, leaf)) paths.add(path);
+        for (const dependency of graph.plan.dependencies.get(leaf) ?? []) visit(dependency);
+      }
+    };
+    visit(nodeId);
+    return [...paths];
+  }
+
+  /** The repo-relative paths one node produced: its declared deliverable plus its submitted changes. */
+  private producedPaths(taskId: string, nodeId: string): string[] {
+    const paths = new Set<string>();
+    const specRow = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as { spec: string } | undefined;
+    if (specRow) {
+      try {
+        const spec = JSON.parse(specRow.spec) as NodeSpec & { deliverable?: { path?: unknown } };
+        if (typeof spec.deliverable?.path === 'string' && spec.deliverable.path.trim()) paths.add(spec.deliverable.path.trim());
+      } catch { /* an unreadable spec leaves only the submitted changes as known output */ }
+    }
+    const row = this.store.db.prepare(`SELECT result FROM operations WHERE task_id=? AND node_id=? AND state='succeeded' ORDER BY rowid DESC LIMIT 1`).get(taskId, nodeId) as { result: string | null } | undefined;
+    if (!row?.result) return [...paths];
+    try {
+      const result = JSON.parse(row.result) as { output?: { changes?: { path?: unknown }[] } };
+      for (const change of result.output?.changes ?? []) {
+        if (typeof change.path === 'string' && change.path.trim()) paths.add(change.path.trim());
+      }
+    } catch { /* a result we cannot read leaves the deliverable paths as the only known output */ }
+    return [...paths];
   }
 
   /**
