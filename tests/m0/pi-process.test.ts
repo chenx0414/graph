@@ -61,6 +61,40 @@ test('different subagents run in independent Pi processes with their own capabil
   await second.close();
 }, 120_000);
 
+test('an image prompt reaches the Pi worker when its payload exceeds stdin backpressure threshold', async () => {
+  const { root, project } = await workspace('pi-process-image');
+  const gate = new CallBroker(join(root, 'gate.sqlite'), 'agent-image');
+  cleanup.push(() => gate.close());
+  const contexts: unknown[] = [];
+  const process = await openPiProcess({
+    binding: { instanceId: 'agent-image', nodeId: 'master', definitionVersion: 'main@1' },
+    workspace: project,
+    stateDir: join(root, 'state'),
+    model: modelA,
+    stream: (_model, context) => {
+      contexts.push(structuredClone(context.messages));
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: 'start', partial: { ...reply(modelA, ''), content: [], stopReason: 'pending' } });
+      stream.push({ type: 'done', reason: 'stop', message: reply(modelA, 'I can see the image.') });
+      return stream;
+    },
+    tools: [],
+    broker: gate,
+    bundleDigest: 'a'.repeat(64),
+    toolPolicyDigest: '1'.repeat(64),
+    runtimePolicyDigest: '2'.repeat(64),
+    readOnly: true,
+  });
+  cleanup.push(() => process.close());
+  const image = { type: 'image' as const, mimeType: 'image/png', data: Buffer.alloc(64 * 1024, 42).toString('base64') };
+  const inspect = await process.prompt('What is in this image?', [image]);
+  expect((contexts[0] as { content?: { data?: string }[] }[]).some(message =>
+    Array.isArray(message.content) && message.content.some(part => part.data === image.data))).toBe(true);
+  const messages = inspect.messages as { role?: string; content?: { type?: string; text?: string }[] }[];
+  expect(messages.some(message => message.role === 'assistant' && Array.isArray(message.content) &&
+    message.content.some(part => part.type === 'text' && part.text === 'I can see the image.'))).toBe(true);
+}, 120_000);
+
 test('a bound Pi extension registers its declared tool inside the isolated Agent process', async () => {
   const { root, project } = await workspace('pi-extension');
   const extension = join(root, 'extension.ts');
