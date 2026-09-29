@@ -61,6 +61,22 @@ import { cleanAttachments, isImageAttachment } from './attachments.ts';
 
 const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
+/**
+ * Bounds for the compatibility decision snapshot.
+ *
+ * When the master declares no decisions the harness freezes the conversation's consumed user
+ * messages instead. That is deliberate: it is how a constraint the user states in chat reaches the
+ * node doing the work (pinned by tests/m8/conversation.test.ts). But it had no bound, so one real
+ * task carried 636 entries of its whole chat history into every node.
+ *
+ * The window keeps BOTH ends. Dropping the oldest instead would defeat the feature, because the
+ * original request and the constraints stated with it are the oldest messages there are.
+ */
+const DECISION_DIGEST_MAX_MESSAGES = 20;
+const DECISION_DIGEST_HEAD = 6;
+const DECISION_DIGEST_TAIL = DECISION_DIGEST_MAX_MESSAGES - DECISION_DIGEST_HEAD;
+const DECISION_DIGEST_MAX_CHARS = 4_000;
+
 function asThinkingLevel(value: string): ThinkingLevel {
   if (!THINKING_LEVELS.includes(value as ThinkingLevel)) throw new RuntimeError('invalid_input', 'A valid thinking level is required');
   return value as ThinkingLevel;
@@ -1826,8 +1842,18 @@ export async function openTaskRuntime(options: {
             if (declared) snapshot = curated.map(item => `- ${item}`).join('\n');
             else if (conversation) {
               const since = conversationRow(store, conversation.id).binding_since_seq;
-              const rows = store.db.prepare("SELECT seq,text FROM messages WHERE conversation_id=? AND role='user' AND state='delivered' AND seq>? ORDER BY seq").all(conversation.id, since) as { seq: number; text: string }[];
-              if (rows.length) snapshot = rows.map(row => `- [msg ${row.seq}] ${row.text.slice(0, 240)}`).join('\n');
+              const scope = "conversation_id=? AND role='user' AND state='delivered' AND seq>?";
+              const count = store.db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE ${scope}`).get(conversation.id, since) as { n: number };
+              const rows = count.n <= DECISION_DIGEST_MAX_MESSAGES
+                ? store.db.prepare(`SELECT seq,text FROM messages WHERE ${scope} ORDER BY seq`).all(conversation.id, since) as { seq: number; text: string }[]
+                : [
+                    ...store.db.prepare(`SELECT seq,text FROM messages WHERE ${scope} ORDER BY seq LIMIT ?`).all(conversation.id, since, DECISION_DIGEST_HEAD),
+                    ...(store.db.prepare(`SELECT seq,text FROM messages WHERE ${scope} ORDER BY seq DESC LIMIT ?`).all(conversation.id, since, DECISION_DIGEST_TAIL) as { seq: number; text: string }[]).reverse(),
+                  ] as { seq: number; text: string }[];
+              const lines = rows.map(row => `- [msg ${row.seq}] ${row.text.slice(0, 240)}`);
+              // Over budget: give way from the middle, so neither end is sacrificed.
+              while (lines.length > 1 && lines.join('\n').length > DECISION_DIGEST_MAX_CHARS) lines.splice(Math.floor((lines.length - 1) / 2), 1);
+              if (lines.length) snapshot = lines.join('\n');
             }
             store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)')
               .run(taskId, version, proposal.requirementVersion, canonicalJson(proposal), snapshot);

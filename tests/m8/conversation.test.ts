@@ -1544,3 +1544,46 @@ test('the master can withdraw its own unconfirmed draft without losing it', asyn
   await runtime.supervisor(anchorTaskId).propose({ ...draft, summary: '新方案' }, 'draft-2');
   expect((await runtime.conversations.view(created.conversationId)).proposal?.version).toBe(3);
 });
+
+// The conversation and execution status is the master's monitoring picture: the draft version, the
+// master's own budget, the state of the feature tasks, the questions awaiting the main Agent. A node
+// doing one job acts on none of it, and in fact it never reaches one: the status is only rebuilt for
+// a task in the chatting phase, so a feature task node has no conversation digest to begin with.
+// This pins that shape -- the constraint flow below is the part that must keep working.
+test('the conversation status stays with the master while the constraints still reach the workers', async () => {
+  const root = await temp('status-scope');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const seen: Operation[] = [];
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }],
+    actions: {
+      master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })),
+      work: scripted(operation => { seen.push(operation); return { outcome: 'completed', output: { done: true }, usage }; }),
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '约束：预算有限，登录先不改。', requestId: 'create' });
+  await runtime.host.runReady();
+  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await runtime.supervisor(anchorTaskId).propose({
+    requirementVersion: 1, summary: '最小可用版',
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    nodes: [
+      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
+      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
+    ],
+  }, 'draft');
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  await runtime.host.runReady();
+
+  expect(seen).toHaveLength(1);
+  // The constraint the user stated is what this node has to obey.
+  expect(seen[0]!.context.briefing).toContain('Decisions and constraints from the conversation');
+  expect(seen[0]!.context.briefing).toContain('预算有限，登录先不改');
+  // The master's monitoring picture is not this node's business.
+  expect(seen[0]!.context.briefing).not.toContain('Conversation and execution status');
+});
