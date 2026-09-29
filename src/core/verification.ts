@@ -26,6 +26,8 @@ export type ReviewReport = { schemaVersion: 1 } & (
 type Source = Pick<DependencySource, 'nodeId' | 'operationId' | 'activationId'>;
 export type VerificationDecision = { kind: 'verification'; outcome: 'pass' | 'rework'; subjects: ArtifactVersion[];
   reports: Source[]; blockers: { id: string; reason: string; evidence: Proof[]; files?: string[] }[];
+  /** What the reviewers actually said, so a rework carries the finding and not only the verdict. */
+  reviewText?: { node: string; verdict?: string; reason?: string; files?: string[] }[];
   /** Files a blocker names that no node's declared scope covers: the main Agent must extend a node. */
   unowned?: string[];
   ranking?: { candidateId: string; score: number; eligible: boolean }[]; winner?: string };
@@ -72,11 +74,24 @@ function sameArtifact(left: ArtifactVersion, right: ArtifactVersion) {
   return left.id === right.id && left.path === right.path && left.digest === right.digest
     && left.nodeId === right.nodeId && left.operationId === right.operationId && left.activationId === right.activationId;
 }
+/**
+ * Content identity: the same bytes at the same path are the same artifact, whoever produced them
+ * and in whichever activation. A rework that changes nothing about the subject's content leaves the
+ * digest and path untouched; keying the gate on operationId/activationId instead made a passing
+ * review fail with "Review does not apply to the current artifact version" the moment the subject
+ * was re-activated, which sent a lane back to rework with nothing to fix.
+ */
+function sameContent(left: ArtifactVersion, right: ArtifactVersion) {
+  return left.nodeId === right.nodeId && left.path === right.path && left.digest === right.digest;
+}
 function subject(context: VerificationContext, node: string, value: unknown): ArtifactVersion {
   const reported = artifactVersion(value);
-  const artifact = source(context, node).artifacts.find(item => sameArtifact(item, reported));
-  if (!artifact) invalid('Review does not apply to the current artifact version');
-  return artifact;
+  const current = source(context, node).artifacts;
+  // Prefer the exact producer version when the review still points at the live one; otherwise fall
+  // back to the same content and report the current version, so downstream subjects stay current.
+  return current.find(item => sameArtifact(item, reported))
+    ?? current.find(item => sameContent(item, reported))
+    ?? invalid('Review does not apply to the current artifact version');
 }
 function reachable(plan: GraphPlan, from: string, target: string) {
   return new Set(plan.dependencies.get(from)!.flatMap(id => [id, ...plan.leaves(id)])).has(target);
@@ -156,8 +171,30 @@ function collectReports(config: VerifierConfig, context: VerificationContext, de
     decision.reports.push({ nodeId: current.nodeId, operationId: current.operationId, activationId: current.activationId });
     const report = context.dependencies[node];
     if (!record(report) || report.schemaVersion !== 1 || !record(report.body) || report.body.kind !== config.kind) invalid(`Missing or malformed review report from ${node}`);
+    // A gate can fail for a structural reason (an unresolved subject) while the reviewer passed its
+    // judgement; the rework briefing must still carry what that reviewer found, or the lane is sent
+    // back to fix an empty message.
+    const text = summarizeReview(report.body);
+    if (text) decision.reviewText = [...(decision.reviewText ?? []), { node, ...text }];
     return { node, body: report.body, subject: report.subject };
   });
+}
+/** One reviewer's own words: verdict, reason and the files it named, across every verifier kind. */
+function summarizeReview(body: Record<string, unknown>): { verdict?: string; reason?: string; files?: string[] } | null {
+  const files = new Set<string>();
+  const collect = (value: unknown) => {
+    if (!record(value) || typeof value.verdict !== 'string') return null;
+    for (const path of Array.isArray(value.files) ? value.files : []) if (typeof path === 'string') files.add(path);
+    return { verdict: value.verdict, reason: typeof value.reason === 'string' ? value.reason : undefined };
+  };
+  const judges = body.dimensions ? Object.values(body.dimensions as Record<string, unknown>)
+    : body.checks ? Object.values(body.checks as Record<string, unknown>)
+    : body.kind === 'independent' ? [body] : [];
+  const judged = judges.map(collect).filter(entry => entry !== null);
+  const notPassed = judged.filter(entry => entry!.verdict !== 'pass');
+  const chosen = (notPassed.length ? notPassed : judged)[0];
+  if (!chosen) return null;
+  return { ...(chosen.verdict ? { verdict: chosen.verdict } : {}), ...(chosen.reason ? { reason: chosen.reason } : {}), ...(files.size ? { files: [...files] } : {}) };
 }
 
 function remember(decision: VerificationDecision, artifact: ArtifactVersion) {
