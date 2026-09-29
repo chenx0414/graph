@@ -1,5 +1,6 @@
 import type { Json, NodeSpec, Operation } from '../core/types.ts';
 import { isImageAttachment } from '../core/attachments.ts';
+import { agentChoosesItsOwnRoute } from '../core/router-action.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
 export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attempt'>, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[]; agentCombinations?: { id: string; name: string; description: string; recommendedGrade: string; status: string }[] }; graph?: NodeSpec[]; focus?: string; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean } }) {
@@ -137,9 +138,25 @@ function focusBriefing(own: string, graph: readonly NodeSpec[]) {
     'Task graph (program checks run these inputs; confirmed check inputs must stay unchanged):',
     mine ? `Your node: ${nodeHeader(mine)}` : `Your node: ${own}`,
     ...(mine ? inputLines(mine.input) : []),
+    ...routerInstruction(mine),
     ...(checks.length ? ['Checks that read your output:', ...checks.map(node => `- ${checkLine(node)}`)] : []),
     ...(others.length ? [`Other lanes (ids only): ${others.map(node => node.id).join(', ')}`] : []),
   ].join('\n');
+}
+
+/**
+ * An Agent router chooses its own branch: nothing else can. Without this line the briefing never told
+ * the Agent that its structured result must carry `route`, so a router could finish the work and still
+ * be refused at settle time for a field it was never asked for (observed with review lanes that wrote
+ * their report but submitted no route). A program router declares how it maps status or a field, so it
+ * needs no such instruction.
+ */
+function routerInstruction(node: NodeSpec | undefined): string[] {
+  if (!node || !node.routes?.length || !agentChoosesItsOwnRoute(node)) return [];
+  return [
+    `You are a router: your branch is yours to choose from ${node.routes.join(', ')}.`,
+    `When you call submit_result, outputJson must include a "route" field whose value is exactly one of: ${node.routes.join(', ')}. A result with no route is refused, and the branch you name decides what runs next.`,
+  ];
 }
 
 /** How much of one failing check's output a rework briefing carries before it hands off to the file. */
