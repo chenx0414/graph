@@ -126,11 +126,41 @@ test('Pi executes a real tool after a leaked text call, then completes with veri
   } finally { await instance.close(); }
 });
 
-test('text before a real tool call does not expose analysis markup in Pi events or session history', async () => {
+test('an earlier tool-use message with private markup is cleaned in model context without losing its tool call', async () => {
+  const server = await openaiServer([]);
+  cleanup.push(() => server.close());
+  const bad = {
+    ...reply(server.model, 'Working. <review_of_last_turn>private resume note</review_of_last_turn>'),
+    stopReason: 'toolUse' as const,
+    content: [
+      { type: 'text' as const, text: 'Working. <review_of_last_turn>private resume note</review_of_last_turn>' },
+      { type: 'toolCall' as const, id: 'inspection', name: 'inspect', arguments: {} },
+    ],
+  };
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Continue.', timestamp: 1 }, bad] });
+  const seen: unknown[] = [];
+  const stream = guardHandoffResponses((_model, request) => {
+    seen.push(request);
+    const events = createAssistantMessageEventStream();
+    events.push({ type: 'done', reason: 'stop', message: reply(server.model, 'Done.') });
+    return events;
+  }, { enabled: () => true, onRecovery() {} });
+  for await (const _event of await stream(server.model, context, {})) { /* drain */ }
+  expect(JSON.stringify(context.messages)).toContain('private resume note');
+  expect(JSON.stringify(seen)).not.toContain('private resume note');
+  expect(JSON.stringify(seen)).toContain('inspection');
+});
+
+test.each([
+  { name: 'analysis', privateText: '<analysis>Internal diagnostic steps.</analysis>' },
+  { name: 'review of last turn', privateText: '<review_of_last_turn>Resume the pending operation.</review_of_last_turn>' },
+  { name: 'review of last turn without separators', privateText: '<reviewoflast_turn>Resume the pending operation.</reviewoflast_turn>' },
+  { name: 'review of last turn with spaces', privateText: '<review of last_turn>Resume the pending operation.</review of last_turn>' },
+])('text before a real tool call does not expose $name markup in Pi events or session history', async ({ privateText }) => {
   const root = await mkdtemp(join(tmpdir(), 'graph-tool-analysis-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const server = await openaiServer([
-    { chunks: [...'Checking the parser. <analysis>Internal diagnostic steps.</analysis>'], tools: [{ id: 'inspection', name: 'inspect', arguments: '{}' }] },
+    { chunks: [...`Checking the parser. ${privateText}`], tools: [{ id: 'inspection', name: 'inspect', arguments: '{}' }] },
     { text: 'The inspection is complete.' },
   ]);
   cleanup.push(() => server.close());
@@ -150,8 +180,8 @@ test('text before a real tool call does not expose analysis markup in Pi events 
   try {
     await instance.prompt('Inspect and answer.');
     expect(server.requests).toHaveLength(2);
-    expect(JSON.stringify(events)).not.toContain('<analysis>');
-    expect(await readFile(instance.inspect().sessionFile, 'utf8')).not.toContain('<analysis>');
+    expect(JSON.stringify(events)).not.toContain(privateText);
+    expect(await readFile(instance.inspect().sessionFile, 'utf8')).not.toContain(privateText);
   } finally { await instance.close(); }
 });
 

@@ -12,6 +12,7 @@ test('assistant transcript hides analysis from saved narration and an attached l
       message({ id: 'user', seq: 1, role: 'user', text: 'Show <analysis> literally.' }),
       { ...message({ id: 'narration', seq: 2, role: 'activity', text: 'Checking. <analysis>private steps</analysis> Continuing.', operationId: 'op' }), kind: 'activity' },
       message({ id: 'old-final', seq: 3, role: 'assistant', text: 'Old reply </analysis> done.' }),
+      { ...message({ id: 'review', seq: 4, role: 'activity', text: 'Working. <review_of_last_turn>private resume note</review_of_last_turn> Next.', operationId: 'op' }), kind: 'activity' },
     ],
     streaming: [{ operationId: 'op', entryId: 'next', partId: '0', text: 'Now <analysis>more private steps', length: 32, updatedAt: 1, ordinal: 2 }],
     liveTools: [], busy: true,
@@ -19,6 +20,8 @@ test('assistant transcript hides analysis from saved narration and an attached l
   expect(JSON.stringify(rows)).not.toContain('private steps');
   expect(JSON.stringify(rows)).not.toContain('<analysis>private');
   expect(JSON.stringify(rows)).not.toContain('</analysis>');
+  expect(JSON.stringify(rows)).not.toContain('private resume note');
+  expect(JSON.stringify(rows)).not.toContain('<review_of_last_turn>');
   expect(JSON.stringify(rows)).toContain('Show <analysis> literally.');
   expect(JSON.stringify(rows)).toContain('Checking.  Continuing.');
 });
