@@ -1,0 +1,16 @@
+independent recount (python walker, documented source-extension rule applied)
+files 197 lines 53800 bytes 7859068
+   src/catalog 16 2526
+   src/core 44 13863
+   src/git 3 1270
+   src/runtime 55 13467
+   src/server 16 4738
+   src/web 63 17936
+   ext .cjs 1 40
+   ext .css 4 3988
+   ext .html 1 13
+   ext .json 1 1
+   ext .mjs 1 79
+   ext .ts 158 39909
+   ext .tsx 31 9770
+skipped by extension rule: ['src/web/assets/graph-icon.png']
