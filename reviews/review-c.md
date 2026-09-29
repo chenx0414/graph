@@ -1,29 +1,38 @@
-# 独立审查：车道 c —— `scripts/diag-c.mjs` —— **fail**（第 3 轮，阻塞项未修）
+# 独立审查：车道 c —— `scripts/diag-c.mjs` —— **pass**（第 4 轮，阻塞项已修）
 
 - 审查节点：`review-c`（agent 路由器，`routes ['pass','fail']`，`input.route.declared=null`）
-- 被审对象：impl-c operation `1dbafb9d-c346-4616-9a3e-5bdcbf616262`，提交 `989ad2f`
-- 被审文件指纹：`sha256(scripts/diag-c.mjs) = e40ab06ea1dbef8f419b8be1766067f0e560ca367e6819d3d3c1b1ef1c0dba16`（= 第 1/2 轮同一 digest，**主体本轮未变**）
-- 第 2 轮结论：fail，1 个阻塞项（`reviews/review-c@2`，digest `fee46503…`）
-- **本轮结论：fail，1 个阻塞项，原样存在。** impl-c 明确选择不改（把「do not change」当作我的指令），见 §2.6
-- 复跑方式：`node /tmp/review-c-e2e/harness.mjs <repo-root>`（黑盒，12 项，脚本内容见 §5，可原样粘走）
-
-> **本轮定位**：这是一次**未回边的重跑**。被审文件与第 2 轮逐字节相同，阻塞项原封不动，因此本轮的全部工作是**在同一主体上从零重验 12 项检查**并复核触发条件，不是在新主体上复审。结论与第 2 轮一致，并按实测把触发条件写得更精确（§2.1）。
+- 被审对象：impl-c operation `bef076e1-2388-4f75-9ed9-d7ce995474c1`（输出 v2），提交 `eedc7a6`
+- 被审文件指纹：`sha256(scripts/diag-c.mjs) = a69d212ed54bc1a6e843d759d39192bfe052b267d86ec810402fa6260f4fcc1e`
+  = 制品 `summaries/impl-c-diag-c-evidence@2`（id `3dda2e28-907e-47d9-9dc8-2ff144cb9e12`）的 digest，两者逐字节对齐
+- 第 3 轮结论：fail，阻塞项 `silent-no-op-under-symlinked-argv1`（`reviews/review-c@5`，digest `aeb0d0ac…`）
+- **本轮结论：pass。** 阻塞项已修并用**独立**黑盒 harness 实测先红后绿；16/16 通过；真实仓库输出与被审版本逐字节相同。
+- 复跑方式：`node /tmp/review-c-e2e/harness-v2.mjs <repo-root> [subject-copy]`（harness 源文随本报告作为制品发布）
 
 ---
 
 ## 0. 审查对象绑定
 
 ```
-$ git show --name-status --format='%H %s' 989ad2f
-989ad2fac4329650bf4e7e5d7ace30714e9cb547 diagnostics: add read-only npm scripts integrity checker (scripts/diag-c.mjs)
-A	scripts/diag-c.mjs
+$ git show --name-status --format='%H %s' eedc7a6
+eedc7a6d98a93e4f513e2a9788b615ee960755c4 diagnostics: make diag-c run when argv[1] keeps a symlink
+M	scripts/diag-c.mjs
 
-$ git show --stat 989ad2f
- scripts/diag-c.mjs | 197 +++++++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 197 insertions(+)
+$ git diff --stat eedc7a6^ eedc7a6 -- scripts/diag-c.mjs
+ scripts/diag-c.mjs | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
 ```
 
-车道提交恰好等于「新增 `scripts/diag-c.mjs` 一个文件」，197 行全为新增，既有文件的 M/D/R 数为 0。
+车道提交**只改一个既有文件**，无新增/删除/其他文件改动。与第 3 轮被审版本的全部差异就是两处（导入行 + 守卫，外加一段解释注释）：
+
+```
+-import { existsSync, readFileSync, statSync } from 'node:fs';
++import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++/** …两侧都 realpath 的原因… */
++if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
+```
+
+impl-c 采用的是我第 3 轮给的**修法 A**，且**导入与守卫在同一个提交里一起改**（我上轮警告的 `ReferenceError` 坑已避开）。impl-c 交接里的数字（10 insertions / 2 deletions、单文件、digest `e40ab06e` → `a69d212e`）逐条对上。
 
 ---
 
@@ -31,187 +40,135 @@ $ git show --stat 989ad2f
 
 | lookFor | 结论 | 证据 |
 |---|---|---|
-| 脚本是否只读 | ✅ | §3.4 F9（1027 文件指纹跨一次运行不变）、静态只 import `node:` 内置 |
-| 是否只用 node 内置模块 | ✅ | §3.3 F10：`node:fs, node:path, node:url` |
-| 是否确实只新增这一个文件 | ✅ | §0 的 `git show --name-status` |
-| 检查结果是否正确 | ⚠️ **诊断内容正确，但存在一条会把它变成静默假阴文的入口守卫** | §2 |
-| 运行是否可重复 | ✅ | §3.2 F8（3 次运行输出逐字节相同） |
+| 脚本是否只读 | ✅ | §3 F9（1028 文件指纹跨一次运行不变），静态只 import `node:` 内置 |
+| 是否只用 node 内置模块 | ✅ | §3 F10：`node:fs, node:path, node:url` |
+| 是否只动本车道那一个文件 | ✅ | §0 的 `--name-status` / `--stat` |
+| 检查结果是否正确 | ✅ | §2 的先红后绿：缺陷版 7/16，修复版 16/16；真实仓库输出逐字节不变（§4） |
+| 运行是否可重复 | ✅ | §3 F8（3 次运行 sha256 相同 `87319e29153655fc…`） |
 
 ---
 
-## 2. 【阻塞】入口守卫会在符号链接路径下**静默 no-op：0 字节输出 + 退出码 0
+## 2. 阻塞项处置：`silent-no-op-under-symlinked-argv1` —— 已修，先红后绿
 
-### 2.1 精确触发条件（本轮实测校正，以此为准）
+**我不采信 impl-c 自己的 harness。** 用我自己的黑盒 harness 跑两个被审对象，只改第 2 个参数（被审文件副本）：
 
-`scripts/diag-c.mjs:195`：
-
-```js
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main();
-}
-```
-
-- `resolve()` **只做词法规范化，不解析符号链接**；而 `import.meta.url` 在 Node 中是**实路径**。
-- 因此只要 `process.argv[1]` 是**绝对路径**且路径中**至少一段仍保留符号链接**，等式恒假，`main()` 永不执行。
-- macOS 上 `/tmp → /private/tmp`、`/var → /private/var`，**`$TMPDIR` 全程在 `/var/folders/…` 下**——三者都是默认落点。
-
-**会踩到（实测）**：绝对路径 + 保留符号链接（`/tmp/...`、`/var/...`、`$TMPDIR/...`、任何被 symlink 的目录）；`argv[1]` 本身是**符号链接文件**。
-**不会踩到（实测）**：**相对调用**（`node scripts/diag-c.mjs`）是安全的——`process.cwd()` 走 `getcwd()`，返回实路径，两侧都实，守卫为真。**这一点第 2 轮报错过一次，本轮已复核并更正，不要去追相对路径这条线。**
-**注意**：显式传根目录参数**救不了**——守卫在读参数之前就已经短路了。
-
-### 2.2 复现（3 分钟，可原样粘走）
-
-```bash
-mkdir -p /tmp/reviewc-canon/scripts
-cp scripts/diag-c.{c,a,b}.mjs /tmp/reviewc-canon/scripts/
-cd /tmp/reviewc-canon
-
-# A) 走符号链接的绝对路径 —— 静默
-node /tmp/reviewc-canon/scripts/diag-c.mjs; echo "exit=$?"
-# → exit=0，stdout 0 字节，stderr 0 字节
-
-# B) 对照：同一文件，realpath 拼写 —— 正常报错
-node /private/tmp/reviewc-canon/scripts/diag-c.mjs; echo "exit=$?"
-# → exit=1，stderr 60 字节：diag-c: no package.json found at /private/tmp/reviewc-canon
-```
-
-本轮在另一条独立路径上再次复现（`$TMPDIR` 基线 `/var/folders/dk/…/T/tmp.7jKVGwUuE7`）：`exit=0 stdout=0B stderr=0B`，同一文件 realpath 拼写下 `exit=1`。**两次、两条不同路径，复现一致。**
-
-### 2.3 为什么这条足以判 fail
-
-- **它直接反证文件自己写下的退出码契约**：脚本在无问题时打印 `Problems: 0` / `OK: …` 并退出 0，在有问题时打印 `Problems: N` 并退出 1。守卫短路后「**有问题的仓库**」也走退出 0 那条路，且**一个字节都不打印**——**与一次干净的正常运行在 stdout、stderr、退出码三者上完全无法区分**。
-- **失败方向最坏**：完整性检查工具的失败模式必须是「响亮地失败」。静默假阴性比误报危险得多——它会让 `merge`/`full-tests`/任何引用它的人拿到一个「绿」而毫无察觉。
-- **传入根目录参数不能规避**（实测 §2.1），所以这不是「换个用法就行」的用法问题，是脚本自身的缺陷。
-
-### 2.4 对照取证：这是 diag-c **自己**的守卫，不是环境、不是兄弟脚本
-
-同一目录、同一绝对符号链接路径、同一份复制文件：
-
-| 被调用 | exit | stdout | stderr |
+| 被审对象 | 摘要 | harness 退出码 | 结果 |
 |---|---|---|---|
-| `scripts/diag-c.mjs` | **0** | **0 B** | **0 B** |
-| `scripts/diag-a.mjs` | 0 | 35 B | 0 B |
-| `scripts/diag-b.mjs` | 1 | 0 B | 84 B |
-
-兄弟脚本 `diag-a.mjs` / `diag-b.mjs` 用的是顶层 `await main()`，**根本没有这个守卫**，同一调用下都有输出。全仓扫描：
+| 修复前 `e40ab06e…`（`git show eedc7a6^:scripts/diag-c.mjs`） | **7/16** | 1 | F1–F7、F12、F13 红 |
+| 修复后 `a69d212e…`（本工作副本） | **16/16** | 0 | 全绿 |
 
 ```
-$ grep -rn "process.argv\[1\]" scripts/ src/
-scripts/diag-c.mjs:195:if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-src/server/cli.ts:164:if (import.meta.url === `file://${process.argv[1]}`) await main();
+$ node /tmp/review-c-e2e/harness-v2.mjs "$PWD" /tmp/review-c-e2e/diag-c-prefix.mjs   # 修复前
+FAIL  F12 symlinked-directory argv[1] diagnoses the repo (not silent exit 0) :: exit=0 stdout=0B stderr=0B
+FAIL  F13 symlinked-file argv[1] diagnoses the repo (not silent exit 0) :: exit=0 stdout=0B stderr=0B
+FAIL  F1  … exit=0      ← 见下方「比上轮更严重的一面」
+…
+7/16 checks passed
+
+$ node /tmp/review-c-e2e/harness-v2.mjs "$PWD"                                  # 修复后
+PASS  F12 symlinked-directory argv[1] diagnoses the repo (not silent exit 0) :: exit=1 stdout=0B stderr=123B
+PASS  F13 symlinked-file argv[1] diagnoses the repo (not silent exit 0) :: exit=1 stdout=0B stderr=123B
+…
+16/16 checks passed
 ```
 
-`scripts/` 下**只有 diag-c 用这个写法**。而本仓库对「比较路径必须先实规范化」是有既有认知的——`src/runtime/restricted-process.ts:315`、`src/core/artifact-workspace.ts:242` 都用 `realpath`/`realpathSync` 做同一件事。**所以既不是仓库惯例，也不是兄弟车道惯例。**
+### 2.1 比上轮更精确的一面：受害面不止「符号链接拼写」
 
-### 2.5 修法（在**副本**上验证过，两种都成立，均不改动仓库文件）
+harness 的 fixture 沙箱建在 `os.tmpdir()`（macOS 上 `/var/folders/…`，`/var → /private/var` 本身就是符号链接）。把修复前的被审文件放进这个沙箱后，**所有**用例（F1–F7）一起变红：不是只有符号链接那条路径静默，而是**只要 `argv[1]` 保留任意一段符号链接，整个诊断就是一个 0 字节 + exit 0 的空转**。第 3 轮我只证明了单条命令，本轮把它变成了「整个工具静默」。
 
-| 修法 | 改动 | 符号链接下 | 真仓库输出 |
-|---|---|---|---|
-| A. 两侧 `realpathSync` | `if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)))`（并把 `realpathSync` 加进 `node:fs` 的 import） | `exit=1` + 正确诊断 ✅ | 与现版本**逐字节相同**（stdout/stderr diff 为空，exit 0/0）✅ |
-| B. 删掉守卫，改顶层调用 | 用 `main();` 取代整个 `if` 块，与 `diag-a`/`diag-b` 对齐 | `exit=1` + 正确诊断 ✅ | 与现版本**逐字节相同** ✅ |
+顺带一个对照事实：同一份修复前文件、同一台机器，只是把路径写成真路径拼写（`/private/tmp/…`），输出 409 字节、exit 0 —— 也就是说**故障完全由 `argv[1]` 的拼写决定，与被检查的仓库无关**。修复后两种拼写结果逐字节相同（§3 F14，409B vs 409B）。
 
-两种修法都让 14 项 harness 中的 F13/F14 转绿（见 §3）。**impl-c 只需要改这两行之一。**
+### 2.2 检查设计上的自查（透明起见）
 
-> 提醒一个坑：`realpathSync` 必须同时加进 import。第一版副本我只改了守卫没改 import，运行时在守卫处抛 `ReferenceError: realpathSync is not defined`——**这个是响亮失败，不会静默**，但会让 `--run typecheck`/`lint` 之外的使用者困惑。改的时候两处一起改。
-
-### 2.6 为什么它还在
-
-impl-c 在交接里写明读到了我上一轮那条「不要改 `scripts/diag-c.mjs`」的**证据冻结**要求（用于让被审字节与制品逐字节对齐），并据此选择**不修**，把这个决定交回给我路由。这在流程上说得通，但结果就是**缺陷随交付物原样进入集成**。**本轮把它作为阻塞项退回 impl-c**（见 §6）。
+- 第 3 轮的 F11 是**钉缺陷**的断言（要求守卫里「不得出现 realpath」）。它对修复后的正确实现**必然变红**，所以本轮把它改成**行为中性的对称性断言**：两侧要么都 realpath、要么都不。真正的判别力由 F12/F13 承担（上表已证明它们对修复前为红）。
+- 本轮 F14 在修复前的被审文件上**也是绿的**（`linked 0/0` vs `canonical 0/0` 逐字节相等——两个都空）。这条我如实记为**非判别性**，不要把它算作证据；判别的是 F12/F13。
 
 ---
 
-## 3. 其余 11 项全部复验通过（本轮从零重跑）
+## 3. 16 项检查（黑盒：`node <被审文件> [root]`；不 import 被审对象、不 mock）
 
-harness：`/tmp/review-c-e2e/harness.mjs`（黑盒：只把真实文件当 `node <file> [root]` 调用，不 import 被审对象，不 mock）。fixture 现场生成在 `$TMPDIR/review-c-fixtures`，transcript 落在 `…/transcript.txt`。
-
-| # | 检查 | 结果 |
+| # | 检查 | 修复后结果 |
 |---|---|---|
-| F1 | 引用不存在的子命令 `ghost` 能被发现（连同它的引用者） | PASS `exit=1` `- check: references missing subcommand \`ghost\`` |
+| F1 | 引用不存在的子命令 `ghost` 能被发现（连同引用者） | PASS `exit=1` |
 | F2 | 引用不存在的文件 `scripts/nope.mjs` 能被发现 | PASS `exit=1` |
-| F3 | 环 `a → b → a` 能被发现且不死循环 | PASS `exit=1` `Problems: 1` |
+| F3 | 环 `a → b → a` 能被发现且不死循环 | PASS `exit=1` |
 | F4 | 没有 `check` 脚本的仓库被点名 | PASS `exit=1` |
-| F5 | 干净 fixture 退出 0 且打印 `Problems: 0` | PASS |
+| F5 | 干净 fixture 退出 0 且打印 `Problems: 0` | PASS `exit=0` |
 | F6 | 没有 `package.json` 的目录退出 1 并给消息 | PASS `diag-c: no package.json found at …` |
-| F7 | 真仓库退出 0，且计数与我**独立**重算一致 | PASS `scripts: 30 total, 5 reachable from \`check\`` |
-| F8 | 三次运行逐字节相同 | PASS `sha256 b570098d88d7db3d…` |
-| F9 | 只读：整仓指纹跨一次运行不变 | PASS `1028 files`（比上一轮多的 1 个是本评审自己写的 `reviews/review-c.md`；差值是本报告，不是被审脚本写的东西） |
+| F7 | 真仓库退出 0，计数与我**独立**重算一致 | PASS `scripts: 30 total, 5 reachable from \`check\`` |
+| F8 | 三次运行逐字节相同 | PASS `87319e29153655fc…` |
+| F9 | 只读：整仓指纹跨一次运行不变 | PASS `1028 files` |
 | F10 | 只 import `node:` 内置 | PASS `node:fs, node:path, node:url` |
-| F11 | 入口守卫形态（本轮从源码直接抽取） | PASS（断言里**同时**要求「无 realpath」，正是缺陷所在） |
-| **F12** | **符号链接绝对调用必须给出诊断，而不是沉默** | **FAIL `exit=0 stdout=0B stderr=0B`** ← 阻塞项 |
+| F11 | 守卫两侧规范化**对称** | PASS `argv1_realpath=true metaurl_realpath=true` |
+| **F12** | **符号链接目录拼写的绝对调用必须给出诊断** | PASS `exit=1 stderr=123B` |
+| **F13** | **`argv[1]` 本身就是符号链接时必须给出诊断** | PASS `exit=1 stderr=123B` |
+| F14 | 符号链接拼写与规范拼写逐字节一致 | PASS `409B = 409B`（**非判别**，见 §2.2） |
+| F15 | 相对调用仍只执行一次（守卫没有变过敏） | PASS `Problems: 0` 出现 1 次 |
+| F16 | 仍可作为模块 import 而不执行 `main()` | PASS `exports=diagnose,findCycles,reachableScripts,referencedFiles,referencedScripts` |
 
-`node /tmp/review-c-e2e/harness.mjs <repo-root>` → **11/12**（唯一红项即 F12）。
-带上修法副本时：修法 A **13/14**、修法 B **13/14**（F12 恒红，因为它测的是**未被修的被审本体**；转绿的是 F13 符号链接下正确报错、F14 真仓库输出逐字节不变）。
-
-### 3.1 F7 的独立重算（不采信被审脚本自己的数字）
-
-- `scripts: 30 total` —— `Object.keys(pkg.scripts).length = 30` ✅
-- `5 reachable from \`check\`` —— 我用**自己写的**一遍广度优先（只跟 `--run X` / `npm run X` 且 `X` 在 scripts 里）重算，得 5 ✅
-
-### 3.2 F8 的重复性
-
-同一条命令连跑三次，`sha256(stdout + stderr + exit)` 三次相同：`b570098d88d7db3d…`。
-
-### 3.3 F9 / F10 只读与内置模块
-
-- 指纹法：跑之前/之后对全仓（排除 `node_modules`/`.git`/`build`）做「相对路径 + 大小 + 内容 sha256」的汇总哈希，`1028 files` 前后一致。
-- 静态：全文只 import `node:fs` / `node:path` / `node:url`；无任何写/执行调用。
-
-### 3.4 仓库自带门禁
-
-```
-node --run typecheck     → exit 0
-node --run lint          → exit 0（No unawaited expect().resolves/.rejects chains found.）
-node --run check:evidence→ exit 0（Acceptance evidence is unchanged.）
-```
+- F12/F13 用的符号链接是 harness **自己创建**的（`symlinkSync` 到真实目录），不依赖本机 `/tmp`、`/var`、`$TMPDIR` 恰好是符号链接。
+- F7 的 `reachable=5` 是我自己写的第二遍广度优先算出来的，不采信脚本自己的数字。
 
 ---
 
-## 4. 【图级风险，不属于车道 c 的必改项】`node --run test` 在集成侧已经红
-
-本工作副本已含车道 c 的交付物。实测：
+## 4. 修复不改变任何既有行为（真仓库 A/B）
 
 ```
-Test Files  42 failed | 175 passed (217)
-     Tests  128 failed | 1340 passed (1468)
-  Duration  214.90s
+$ node /private/tmp/review-c-e2e/diag-c-prefix.mjs "$PWD" > real2-prefix.out   # 修复前，真路径拼写
+$ node "$PWD/scripts/diag-c.mjs"                          > real2-fixed.out     # 修复后
+$ shasum -a 256 real2-*.out real2-*.err
+16d0dae38b19ef02f0874b079df11389fa3bb60a80d627de7a5980a9e555556f  real2-fixed.out   (409 B)
+16d0dae38b19ef02f0874b079df11389fa3bb60a80d627de7a5980a9e555556f  real2-prefix.out  (409 B)
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  real2-*.err      (0 B，两份相同)
+$ diff real2-prefix.out real2-fixed.out   # 无差异
 ```
 
-**与车道 c 无关的证据**：
+stdout 409 字节逐字节相同，stderr 0 字节，exit 0/0。**修复是纯入口守卫的等价加固，没有顺带改动任何检查逻辑或输出格式。**
 
-- 车道提交只新增 `scripts/diag-c.mjs` 一个文件（§0），既有文件 M/D/R 为 0；
-- 全仓只有 `tests/m2/verification.test.ts:229` 出现过字符串 `diag-a`（另一个 harness 用例的字面量，与本车道文件无关），**没有任何测试引用 `scripts/diag-c.mjs`**；
-- 失败集中在 `tests/console/*`、`tests/m0/*`、`tests/m3/*`、`tests/m7/*`、`tests/m8/*`（pi-process、compaction、context-model、simple-tier-e2e、node-prompt…），日志里 `scripts/diag-c` 出现 **0** 次。
+## 5. 仓库自带门禁（本工作副本实测）
 
-**后果**：`full-tests`（`node --run check`）会在集成副本上红，而它触发的回边指向 `merge`——**修 `merge` 的 README 修不了 42 个测试文件的失败**。这是**操作者层面的决定**，不是任何一条车道能修的。请在 `full-tests` 之前先定性：红基线是已知环境/基线问题（另开一条处置），还是本图需要先修的回归。
+```
+node --run typecheck      → exit 0
+node --run lint           → exit 0（No unawaited expect().resolves/.rejects chains found.）
+node --run check:evidence → exit 0（Acceptance evidence is unchanged.）
+node --run test           → Test Files 42 failed | 175 passed (217)
+                            Tests      128 failed | 1340 passed (1468)
+                            Duration   208.92s
+```
+
+与第 3 轮在同一工作副本上的数字**完全相同**；把两轮的失败文件清单排序后 `diff` 为**空**（42 个文件，逐个相同）；两份日志里 `diag-c` 出现 **0 次**。
 
 ---
 
-## 5. 复跑脚本（自包含，粘走即用）
+## 6. 【非阻塞观察】修法 A 引入了一条新的导入面脆弱性
 
-```bash
-# 黑盒 harness（会自己生成 fixture），输出 PASS/FAIL + transcript 路径
-node /tmp/review-c-e2e/harness.mjs "$(pwd)"            # 本体：期望 11/12，F12 红
-node /tmp/review-c-e2e/harness.mjs "$(pwd)" /path/to/fixed-copy.mjs   # 修好后的副本：期望 13/14
+实测（harness 的 INFO 探针）：
 
-# 只看阻塞项（30 秒）
-mkdir -p /tmp/reviewc-canon/scripts && cp scripts/diag-c.mjs /tmp/reviewc-canon/scripts/
-node /tmp/reviewc-canon/scripts/diag-c.mjs; echo "exit=$? （期望 1 且有输出；现在 0 且 0 字节）"
-node /private/tmp/reviewc-canon/scripts/diag-c.mjs; echo "exit=$? （对照组，期望 1）"
+```
+$ node -e "process.argv[1]='/nonexistent/stale.mjs'; try{ await import('<repo>/scripts/diag-c.mjs'); print('import ok') }catch(e){ print('THREW '+e.code) }"
+THREW ENOENT                     # 修复前同一探针：import ok
 ```
 
-原始 transcript 随本报告作为制品发布（`reviews/review-c-e2e-transcript@1`），可与任何人在同一条命令下对上。
+`scripts/diag-c.mjs:201` 的 `realpathSync(resolve(process.argv[1]))` 在 `argv[1]` 指向**不存在的路径**时抛 `ENOENT`，而这一句在模块**求值期**执行。于是「模块可被安全 import」这条属性——正是我上轮推荐修法 A（而不是删掉守卫的修法 B）的理由——在 `process.argv[1]` 是陈旧路径的宿主进程里不再成立。
+
+- **为什么判非阻塞**：全仓 `grep -rn "diag-c" package.json src tests docs scripts` 只命中该文件自身——没有任何 npm script、测试或模块 import 它，今天不可达；`node <脚本>` 正常调用时 `argv[1]` 必然存在。
+- **若要收口**（一行，可选）：`realpathSync(resolve(process.argv[1]), { throwIfNoEntry: false })`，或把守卫体包进 `try/catch`；`argv[1]` 不可解析时守卫为假、`main()` 不执行，正是想要的行为。
+- 归属文件：`scripts/diag-c.mjs:201`。**不在本轮验收口径内**，不建议为此再开一轮返工。
 
 ---
 
-## 6. 路由决定：**fail** → 按图声明的回边退回 `impl-c`
+## 7. 【图级风险，非车道 c】`node --run check` 仍因既有原因红
 
-```
-loops: [{ from: 'review-c', to: 'impl-c', case: 'fail' }]
-acceptance: [{ id: 'c-pass', checkNode: 'review-c', … }]
-```
+`full-tests` 会在集成副本上红（§5 的 42 个失败文件：`tests/console/*`、`tests/m0/*`、`tests/m3/*`、`tests/m7/*`、`tests/m8/*`）。**与车道 c 无关**：本车道只改 `scripts/diag-c.mjs` 一个文件，既有文件 M/D/R 为 0；全仓无任何测试或脚本引用它；失败文件集合与第 3 轮逐个相同，日志中 0 次提及。
 
-- 返工范围（**只有** `scripts/diag-c.mjs` 一行守卫 + 一行 import，或改成顶层调用）：`scripts/diag-c.mjs:195` 与 `:24`。
-- 返工后的验收口径：F12 转绿、F13/F14 成立、F1–F11 不回退、`node --run typecheck` / `lint` 仍为 0。**判 pass 的条件就是这一条，其余 11 项本轮已全部实测通过，不需要再证明一遍。**
-- 明确不要做的事：不要动 `diag-a` / `diag-b` / 任何既有文件；不要新增依赖。
+**后果不变**：图声明的回边是 `review-c --fail--> impl-c`（只重跑车道 c），而 `full-tests` 的红不是任何一条车道能修的。请操作者在跑 `full-tests` / `merge` 之前先定性：红基线是已知环境/基线问题（另开处置），还是本图需要先修的回归。**这条不需要 review-c 再动一次。**
 
-**一句话返工单**：把 `scripts/diag-c.mjs:195` 的守卫两侧都套 `realpathSync`（并把它加进第 24 行的 `node:fs` import），或者直接删掉守卫改成和 `diag-a`/`diag-b` 一样的顶层 `main();`；改完用 `node /tmp/reviewc-canon/scripts/diag-c.mjs` 验证不再静默。
+---
+
+## 8. 路由决定：**pass**
+
+- 上一轮的阻塞项已修，且经**独立**先红后绿验证（修复前 7/16，修复后 16/16，§2）。
+- 无回归：真仓库输出逐字节不变、门禁 typecheck/lint/check:evidence 全 0、全量测试失败集合与上轮逐个相同（§4、§5）。
+- 遗留仅 §6 一条非阻塞加固建议，不构成验收缺口。
+
+**验收口径结论**：`c-pass` 判据（`scripts/diag-c.mjs` 只读、仅 node 内置、单文件、结果正确、可重复）全部满足，本轮独立实测通过。
