@@ -21,7 +21,7 @@
  * Exit code: 0 when the script graph is complete, 1 when a problem is found.
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -192,6 +192,14 @@ function main() {
   console.log('OK: every referenced subcommand, file and script chain resolves.');
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/**
+ * Run only when this file is the entry point.
+ *
+ * Both sides go through realpathSync: `import.meta.url` is already resolved, so comparing it with a
+ * lexical `resolve(argv[1])` is false whenever argv[1] keeps a symlink - macOS /tmp, $TMPDIR, or a
+ * symlinked checkout. That made the script a silent no-op (0 bytes out, exit 0, identical to a clean
+ * run), the worst possible failure for a checker whose contract is "exit 0 = no problems".
+ */
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   main();
 }
