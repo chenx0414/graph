@@ -292,10 +292,21 @@ export class ArtifactWorkspace {
     return relative;
   }
 
+  /**
+   * The tasks whose task-scope artifacts a caller may see.
+   *
+   * A main agent dispatches subagents into their own feature tasks, and those tasks publish what they
+   * produce, so visibility follows the conversation: a task sees its own artifacts plus those of every
+   * task in the same conversation. Promotion stays the separate, explicit act that turns one artifact
+   * into project-wide knowledge for later tasks, which is why nothing crosses a conversation boundary
+   * without it. A task with no conversation sees only its own, exactly as before.
+   */
+  private readonly visibleTasks = '(id=? OR (conversation_id IS NOT NULL AND conversation_id=(SELECT conversation_id FROM tasks WHERE id=?)))';
+
   private assertScope(record: ArtifactRecord, taskId: string) {
     const task = this.store.task(taskId);
     const visible = record.scope === 'task'
-      ? record.ownerId === taskId
+      ? Boolean(this.store.db.prepare(`SELECT 1 FROM tasks WHERE ${this.visibleTasks} AND id=?`).get(taskId, taskId, record.ownerId))
       : Boolean(task.project_id && record.projectId === task.project_id);
     if (!visible) throw new RuntimeError('not_found', 'Artifact not found in this task workspace');
     return record;
@@ -467,8 +478,8 @@ export class ArtifactWorkspace {
 
   list(input: ArtifactQuery): ArtifactPage {
     const task = this.store.task(input.taskId);
-    const conditions = ['((scope=\'task\' AND owner_id=?)' + (task.project_id ? ' OR (scope=\'project\' AND project_id=?)' : '') + ')'];
-    const params: unknown[] = task.project_id ? [input.taskId, task.project_id] : [input.taskId];
+    const conditions = [`((scope=\'task\' AND owner_id IN (SELECT id FROM tasks WHERE ${this.visibleTasks}))` + (task.project_id ? ' OR (scope=\'project\' AND project_id=?)' : '') + ')'];
+    const params: unknown[] = task.project_id ? [input.taskId, input.taskId, task.project_id] : [input.taskId, input.taskId];
     return this.page(conditions, params, input);
   }
 
