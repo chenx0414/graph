@@ -14,6 +14,8 @@ import {
   type NodeTone,
 } from './insights.ts';
 
+import { loopChannels } from './graph-edges.ts';
+
 const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
 
