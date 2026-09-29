@@ -1,0 +1,47 @@
+# review-a v5 evidence — impl-a output v4 (operation e73037e4)
+worktree HEAD: 6648c80716b106e40285a2c344a6b5618199f7e9
+generated: 2026-09-29T08:04:48Z
+
+$ shasum -a 256 scripts/diag-a.mjs
+3903d76f458c4fa218f8799357d10d51e58cd264cb67583f802918bf0fb6f1ed  scripts/diag-a.mjs
+$ git show --stat d437df4 | tail -2
+ scripts/diag-a.mjs | 195 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 195 insertions(+)
+$ git log --oneline --diff-filter=A -- scripts/diag-a.mjs
+d437df4 graph:impl-a:cc9eb9d0-7c39-42bf-b1a9-23bc95180d7e
+$ grep -nE '^import' scripts/diag-a.mjs
+19:import { readdirSync, readFileSync } from 'node:fs';
+20:import { dirname, join, relative, sep } from 'node:path';
+21:import { fileURLToPath } from 'node:url';
+$ grep -cE 'writeFile|appendFile|mkdir|unlink|rename|createWriteStream|openSync|exec|spawn' scripts/diag-a.mjs
+0
+
+## 3 runs (read-only check afterwards)
+$ node scripts/diag-a.mjs   # run 1
+[diag-a] 测试文件 216 个，用例 1422 项（tests/**/*.test.ts；每个 test/it 声明计 1 项，test.each 按声明计 1）
+exit=0 stderr_bytes=0
+$ node scripts/diag-a.mjs   # run 2
+[diag-a] 测试文件 216 个，用例 1422 项（tests/**/*.test.ts；每个 test/it 声明计 1 项，test.each 按声明计 1）
+exit=0 stderr_bytes=0
+$ node scripts/diag-a.mjs   # run 3
+[diag-a] 测试文件 216 个，用例 1422 项（tests/**/*.test.ts；每个 test/it 声明计 1 项，test.each 按声明计 1）
+exit=0 stderr_bytes=0
+c835b16890b8efaa3665d985499b3a69873272c573e42247a6168fa31de5abe6  /tmp/diag-a-run1.txt
+c835b16890b8efaa3665d985499b3a69873272c573e42247a6168fa31de5abe6  /tmp/diag-a-run2.txt
+c835b16890b8efaa3665d985499b3a69873272c573e42247a6168fa31de5abe6  /tmp/diag-a-run3.txt
+$ git status --porcelain -- . ':(exclude)reviews/review-a-v5-evidence.txt'   # after the runs
+(no output = diag-a.mjs touched nothing; the only new path is this review file)
+
+## independent recount (naive line-anchored regex, no comment/string stripping)
+files 216 declarations 1422
+
+## vitest runtime cross-check (runtime cases - declarations = loop-generated tests)
+runtime lines:     1426
+   tests/console/daemon-console.test.ts decl 1 runtime 3 extra 2
+   tests/console/schema-version.test.ts decl 4 runtime 6 extra 2
+cause: tests/console/daemon-console.test.ts:17 and tests/console/schema-version.test.ts:92 call test() inside a for-loop,
+       so one declaration registers several runtime cases - exactly the contract the script header documents.
+
+## objective constraints
+node --run typecheck exit=0
+node --run lint exit=0
