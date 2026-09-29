@@ -62,7 +62,7 @@ export type ConversationSummary = {
 };
 type ConversationNode = { id: string; kind: string; role: string | null; status: string; used: number | null; budget: number | null; unlimited?: boolean; model: string | null; definitionVersion: string | null; stallCount: number; outputVersion: number };
 type ConversationTask = {
-  id: string; request: string; phase: string; status: string; paused: boolean; targetBranch: string | null;
+  id: string; request: string; phase: string; status: string; paused: boolean; targetBranch: string | null; createdAt: number;
   acceptedProposalVersion: number | null; integrationSha: string | null;
   openQuestions: { id: string; nodeId: string; kind: string; data: Record<string, unknown> }[];
   nodes: ConversationNode[];
@@ -1019,11 +1019,7 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
           inert={!drawerOpen}
         >
           <div className="drawer-inner">
-            <div className="drawer-head">
-              <div className="grow">
-                <h2>{drawerSection === 'draft' ? `草稿 v${proposal?.version ?? ""}` : `任务 · ${tasks.length}`}</h2>
-              </div>
-            </div>
+            {drawerSection === 'draft' && <div className="drawer-head"><div className="grow"><h2>{`草稿 v${proposal?.version ?? ""}`}</h2></div></div>}
 
             {drawerOpen && !view.projectId && deferredInitPanelIds.includes('bind-project') && (
               <section className="drawer-section drawer-bind-card" data-testid="bind-project" data-panel="bind-project">

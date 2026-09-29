@@ -1,4 +1,5 @@
 import { toolActivity } from './tool-activity.ts';
+import { messageAttachments } from '../core/conversation-projection.ts';
 import type {
   ConversationMessage,
   LiveText,
@@ -12,6 +13,7 @@ export type TranscriptTool = {
   summary: string;
   done: boolean;
   error: boolean;
+  attachments?: ReturnType<typeof messageAttachments>;
 };
 
 export type TranscriptRsi = {
@@ -74,6 +76,7 @@ function durableTool(message: ConversationMessage): TranscriptTool {
     summary: message.text,
     done: message.state !== 'pending',
     error: toolError(message),
+    attachments: messageAttachments(message),
   };
 }
 

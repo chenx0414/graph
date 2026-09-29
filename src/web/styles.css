@@ -3600,8 +3600,10 @@ html[data-drawer-expanded="true"] .app-shell { width:var(--drawer-base-width); m
 .sidebar-label .sidebar-add, .sidebar-project .sidebar-new-chat { opacity: 0; transition: opacity 120ms; }
 .sidebar-label:hover .sidebar-add, .sidebar-label:focus-within .sidebar-add, .sidebar-project summary:hover .sidebar-new-chat, .sidebar-project summary:focus-within .sidebar-new-chat { opacity: 1; }
 @media (hover: none) { .sidebar-label .sidebar-add, .sidebar-project .sidebar-new-chat { opacity: 1; } }
-.drawer-all-tasks { display: flex; flex-direction: column; }
-.drawer-all-tasks .drawer-task-detail { order: -1; display: flex; flex-direction: column; }
+.drawer-all-tasks { display: flex; flex-direction: column; min-width: 0; }
+.drawer-task-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.drawer-task-controls select { min-width: 0; flex: 1 1 130px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
+.drawer-all-tasks .drawer-task-detail { display: flex; flex-direction: column; }
 .drawer-task-detail > .drawer-entry-links { order: -1; }
 .drawer-entry-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
 .drawer-entry-links > .btn { padding: 16px 10px; background: var(--panel-soft); border: 1px solid var(--border); font-size: 13px; font-weight: 600; justify-content: center; }
@@ -3624,6 +3626,18 @@ html[data-drawer-expanded="true"] .app-shell { width:var(--drawer-base-width); m
 .node-prompt-card > .stack { padding: 14px; }
 .task-graph-title { margin: 0; font-size: clamp(20px, 2.1vw, 30px); line-height: 1.3; overflow-wrap: anywhere; white-space: normal; }
 .task-graph-page .graph-wrap { height: clamp(640px, calc(100vh - 210px), 1080px); }
+.graph-wrap { position: relative; }
+.graph-message-edge { cursor: pointer; }
+.graph-edge-inspector { position: absolute; z-index: 10; right: 12px; bottom: 12px; width: min(340px, calc(100% - 24px)); max-height: 45%; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); font-size: 12px; }
+.graph-edge-inspector > button { float: right; border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
+.graph-edge-inspector ol { padding-left: 18px; }
+.graph-edge-inspector li { margin-top: 10px; overflow-wrap: anywhere; }
+.graph-edge-inspector time { color: var(--muted); }
+.graph-edge-inspector p { white-space: pre-wrap; }
+.graph-edge-inspector pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.tool-group-images { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px 12px; }
+.tool-group-images a { display: inline-flex; max-width: 100%; }
+.tool-group-images img { display: block; max-width: min(280px, 100%); max-height: 240px; object-fit: contain; border-radius: 8px; }
 .task-graph-page .node-head { font-size: 14px; }
 .task-graph-page .node-card { padding: 10px 13px; }
 .node-prompt-popover { margin: 0; border: 0; max-height: none; overflow: visible; position: relative; background: transparent; }

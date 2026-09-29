@@ -182,7 +182,7 @@
 .drawer-draft-pages { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
 /* The task navigation: every task, then the selected task's detail. */
-.drawer-task-nav { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; max-height: 220px; overflow: auto; }
+.drawer-task-nav { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; overflow: visible; }
 .drawer-task-nav-item {
   display: flex;
   align-items: center;

@@ -176,8 +176,8 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: true,
     },
     propose_graph: {
-      name: 'propose_graph', label: 'Propose graph', description: 'Submit a validated task graph proposal for the user to confirm. proposalJson is a JSON object with requirementVersion, summary, acceptance[{id,description,checkNode}], nodes[NodeSpec], optional containers, loops and decisions. Agent nodes require definitionVersion and model; every acceptance checkNode must reference a mandatory program node. Keep decisions current: they are frozen with this draft version and passed to workers after confirmation.',
-      parameters: Type.Object({ proposalJson: Type.String(), requestId: Type.String() }),
+      name: 'propose_graph', label: 'Propose graph', description: 'Submit a task graph for user confirmation. Prefer the proposal object directly (no escaped JSON string): { requirementVersion, summary, nodes: [{id,kind,action,dependsOn?,definitionVersion?,model?}], acceptance: [{id,description,checkNode}], containers?, loops?, decisions? }. Node order is not execution order: dependsOn names the preceding nodes. Agent nodes require definitionVersion and model. Every acceptance checkNode must be a mandatory program node. proposalJson remains accepted for older clients.',
+      parameters: Type.Object({ proposal: Type.Optional(Type.Any()), proposalJson: Type.Optional(Type.String()), requestId: Type.String() }),
       available: main && Boolean(features.supervisor),
       externallyGated: false,
     },

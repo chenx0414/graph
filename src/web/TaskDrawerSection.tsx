@@ -1,14 +1,13 @@
+import { useState } from 'react';
 import { TASK_LABEL } from './labels.ts';
-import { costText } from './shared.tsx';
 import { Icon, Pill } from './ui.tsx';
 
 export interface DrawerTask {
   id: string;
   request: string;
   status: string;
-  targetBranch?: string | null;
-  integrationSha?: string | null;
-  cost?: { unknown?: boolean; amount?: number };
+  projectId?: string;
+  createdAt?: number;
 }
 
 const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
@@ -24,11 +23,33 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
   projectId: string | null;
   origin: 'conversation' | 'workspace';
 }) {
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [projectFilter, setProjectFilter] = useState('all');
   const selected = tasks.find(task => task.id === selectedId) ?? tasks[0] ?? null;
+  const statuses = [...new Set(tasks.map(task => task.status))];
+  const projects = [...new Set(tasks.map(task => task.projectId).filter((id): id is string => Boolean(id)))];
+  const visible = tasks.map((task, index) => ({ task, index }))
+    .filter(({ task }) => (statusFilter === 'all' || task.status === statusFilter) && (projectFilter === 'all' || task.projectId === projectFilter))
+    .sort((left, right) => {
+      const byTime = (right.task.createdAt ?? right.index) - (left.task.createdAt ?? left.index) || right.index - left.index;
+      return sort === 'newest' ? byTime : -byTime;
+    });
   const artifactsHref = `#/artifacts${projectId ? `?project=${encodeURIComponent(projectId)}` : ''}`;
   return (
-    <section className="drawer-section drawer-all-tasks" data-testid={origin === 'conversation' ? 'conversation-tasks' : 'drawer-workspace-tasks'}>
+    <section className="drawer-all-tasks" data-testid={origin === 'conversation' ? 'conversation-tasks' : 'drawer-workspace-tasks'}>
       <div className="drawer-section-head"><h3>任务导航</h3><span>{tasks.length} 个任务</span></div>
+      {tasks.length > 0 && <div className="drawer-task-controls">
+        <select aria-label="任务排序" data-testid="task-sort" value={sort} onChange={event => setSort(event.target.value as typeof sort)}>
+          <option value="newest">创建时间：新到旧</option><option value="oldest">创建时间：旧到新</option>
+        </select>
+        <select aria-label="筛选任务状态" data-testid="task-status-filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+          <option value="all">全部状态</option>{statuses.map(status => <option key={status} value={status}>{TASK_LABEL[status] ?? status}</option>)}
+        </select>
+        {projects.length > 0 && <select aria-label="筛选项目" data-testid="task-project-filter" value={projectFilter} onChange={event => setProjectFilter(event.target.value)}>
+          <option value="all">全部项目</option>{projects.map(id => <option key={id} value={id}>{id}</option>)}
+        </select>}
+      </div>}
       {tasks.length === 0 && (
         <div className="drawer-init-note" data-testid={origin === 'conversation' ? 'no-conversation-tasks' : 'drawer-workspace-empty'} data-panel="task-empty">
           <div className="thread-card-title">尚无功能任务</div>
@@ -37,7 +58,7 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
       )}
       {tasks.length > 0 && (
         <nav className="drawer-task-nav" data-testid="drawer-task-nav" aria-label="全部任务">
-          {tasks.map(task => (
+          {visible.map(({ task }) => (
             <button key={task.id} type="button" className="drawer-task-nav-item"
               data-testid={origin === 'conversation' ? `conversation-task-${task.id}` : `drawer-workspace-task-${task.id}`}
               data-active={task.id === selected?.id} aria-pressed={task.id === selected?.id}
@@ -48,15 +69,10 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
           ))}
         </nav>
       )}
+      {tasks.length > 0 && visible.length === 0 && <p className="muted">没有符合筛选条件的任务。</p>}
       <div className="drawer-task-detail" data-testid="drawer-task-detail">
         {selected ? (
           <>
-            <dl className="kv">
-              <dt>状态</dt><dd>{TASK_LABEL[selected.status] ?? selected.status}</dd>
-              {selected.targetBranch !== undefined && <><dt>目标分支</dt><dd>{selected.targetBranch ?? '未确认'}</dd></>}
-              {selected.integrationSha !== undefined && <><dt>集成提交</dt><dd className="mono">{selected.integrationSha ?? '尚无'}</dd></>}
-              {selected.cost && <><dt>费用</dt><dd>{costText(selected.cost)}</dd></>}
-            </dl>
             <div className="drawer-entry-links" data-testid="drawer-entry-links">
               <a className="btn btn-sm" data-testid={`task-graph-tab-${selected.id}`} href={`#/tasks/${selected.id}/graph`}><Icon name="graph" size={14} /><span>任务图</span></a>
               <a className="btn btn-sm" data-testid="drawer-task-artifacts" href={artifactsHref}><Icon name="box" size={14} /><span>共享产物</span></a>

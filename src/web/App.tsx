@@ -43,7 +43,7 @@ import { composeSlashDirective, extractSlashTargets } from './SlashCommands.tsx'
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
-  acceptedProposalVersion: number | null; updatedAt: number | null; openQuestions?: number;
+  acceptedProposalVersion: number | null; createdAt: number; updatedAt: number | null; openQuestions?: number;
 };
 type Startup = { mode: 'view' | 'execute'; configured: boolean; modelCount: number; enabledModelCount: number; effectiveRevision?: number; limitAliases?: Record<string, string> };
 type TaskView = {
@@ -95,6 +95,8 @@ export type Settings_ = {
 };
 type GraphPayload = {
   nodes: NodeView[];
+  messages?: { id: string; source: string; target: string; text: string; createdAt: number }[];
+  handoffs?: { id: string; source: string; target: string; mode: string; text: string; createdAt: number }[];
   containers: { id: string; parent?: string; nodes: string[] }[];
   loops: { from: string; to: string; reason?: string }[];
   revisions: { version: number; reason: string }[];
@@ -373,7 +375,6 @@ export function App() {
         <WindowDrawer open={detailOpen}>
           <aside className="detail-drawer" data-testid="detail-drawer" data-section="task" data-open="true" role="complementary">
             <div className="drawer-inner">
-              <div className="drawer-head"><div className="grow"><h2>任务 · {tasks.length}</h2></div></div>
               <TaskDrawerSection tasks={tasks} selectedId={selectedDrawerTaskId} onSelect={setSelectedDrawerTaskId}
                 projectId={currentProjectId} origin="workspace" />
             </div>

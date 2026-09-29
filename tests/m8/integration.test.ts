@@ -199,7 +199,7 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
   expect(await page.getByTestId('drawer-mode-tabs').count()).toBe(0);
   await page.getByTestId('drawer-task-detail').waitFor();
-  expect(await page.getByTestId('drawer-task-detail').innerText()).toContain('目标分支');
+  expect(await page.getByTestId('drawer-task-detail').innerText()).toContain('任务图');
   await page.waitForFunction(() => document.querySelectorAll('[data-testid^="conversation-task-"]').length === 1);
   const taskId = await page.evaluate(async () => {
     const conversationId = location.hash.replace('#/conversations/', '');

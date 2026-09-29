@@ -32,7 +32,7 @@ function declaredRouteCase(submitted: Json | undefined): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 import { agentTools } from './agent-tools.ts';
-import { conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
+import { appendMessage, conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
 import type { CapabilityPermissionRequest } from './capabilities.ts';
 import type { CapabilityOperation } from './capability-bundle.ts';
@@ -914,6 +914,24 @@ export function createPiAdapter(options: {
             if (record && record.type === 'tool') record.state = event.isError ? 'error' : 'done';
             activeConversationTools.delete(event.toolCallId);
             persistConversationActivity(options.store, conversation.id, operation.id, operation.attempt, conversationActivityRecords(activity, ''), activeConversationTools);
+            if (event.toolName === 'read' && !event.isError) {
+              const parts: unknown[] = Array.isArray(event.result.content) ? event.result.content : [];
+              const images = parts
+                .map((item: unknown) => item as { type: string; data?: string; mimeType?: string })
+                .filter((item): item is { type: 'image'; data: string; mimeType: string } => item.type === 'image' && typeof item.data === 'string' && typeof item.mimeType === 'string');
+              const attachments = images.flatMap((item, index) => {
+                if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(item.mimeType)) return [];
+                const size = Math.floor(item.data.length * 3 / 4);
+                if (size > 5 * 1024 * 1024) return [];
+                return [{ name: `${summary || '图片'}${images.length > 1 ? ` ${index + 1}` : ''}`, type: item.mimeType, size, text: '', data: item.data }];
+              });
+              if (attachments.length) {
+                const row = options.store.db.prepare("SELECT id,data FROM messages WHERE conversation_id=? AND operation_id=? AND role='tool' AND json_extract(data,'$.toolCallId')=? ORDER BY seq DESC LIMIT 1")
+                  .get(conversation.id, operation.id, event.toolCallId) as { id: string; data: string } | undefined;
+                if (row) appendMessage(options.store, { conversationId: conversation.id, role: 'tool', kind: 'tool', text: `read: ${summary}`,
+                  data: { ...JSON.parse(row.data) as Record<string, Json>, attachments }, state: 'done', operationId: operation.id, turn: operation.attempt, messageId: row.id });
+              }
+            }
             options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError, ordinal: toolOrdinals.get(event.toolCallId) ?? nextOrdinal() });
           }
         };
