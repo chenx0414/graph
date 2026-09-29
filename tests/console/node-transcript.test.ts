@@ -13,3 +13,15 @@ test('a settled node folds intermediate narration and tools while keeping its fi
   const running = buildTranscriptRows({ ...input, messages: nodeMessages(entries, [{ id: 'operation', state: 'dispatched', workerActive: true }], true), busy: true });
   expect(running.some(row => row.kind === 'activity' && row.collapsed)).toBe(false);
 });
+
+test('a peer Agent message reads as an incoming prompt attributed to its sender, not as this node speaking', () => {
+  const peer: Entry = { seq: 9, id: 'peer', role: 'assistant', kind: 'chat', text: '先处理空值', data: { peer: true, from: 'sibling' }, operationId: 'operation', createdAt: 9 };
+  const [message] = nodeMessages([peer], [{ id: 'operation', state: 'completed' }], false);
+  // It is an incoming message (role user), so the target chat shows it like a prompt...
+  expect(message).toMatchObject({ role: 'user', kind: 'chat', text: '先处理空值' });
+  // ...and it stays marked with the sender so the UI can say who sent it.
+  expect(message!.data).toMatchObject({ peer: true, from: 'sibling' });
+  // A normal assistant row is untouched by this path.
+  const [plain] = nodeMessages([entry(1, 'assistant', 'message', '完成')], [{ id: 'operation', state: 'completed' }], false);
+  expect(plain!.role).toBe('assistant');
+});

@@ -77,3 +77,45 @@ test('live messages steer only their operation and retries do not deliver twice'
     expect(runtime.nodeRun(taskId, 'work').entries.filter(entry => entry.role === 'user')).toHaveLength(1);
   } finally { finish(); }
 });
+
+test('a peer message to a finished node reactivates it and reaches the next briefing like a user prompt', async () => {
+  const { runtime, taskId, store, lane, checks } = await setup();
+  await runtime.host.drive();
+  expect(store.task(taskId).phase).toBe('completed');
+  const before = runtime.nodeRun(taskId, 'work');
+  expect(before.node.status).toBe('succeeded');
+
+  const receipt = await runtime.sendPeerMessage(taskId, 'sibling', { to: 'work', text: '请补充边界情况', requestId: 'peer-1' });
+  expect(receipt).toMatchObject({ state: 'rework' });
+  // The delivery is a real node entry the node chat window reads, marked as coming from a peer.
+  const entry = runtime.nodeRun(taskId, 'work').entries.find(item => item.kind === 'chat');
+  expect(entry?.text).toBe('请补充边界情况');
+  expect(entry?.data).toMatchObject({ from: 'sibling' });
+
+  await runtime.host.drive();
+  expect(runtime.nodeRun(taskId, 'work').instance?.id).toBe(before.instance?.id);
+  expect(lane.briefings.at(-1)).toContain('请补充边界情况');
+  // The sibling is untouched: only the addressed node and its descendants rerun.
+  expect(runtime.nodeRun(taskId, 'sibling').operations.length).toBe(1);
+  expect(checks).toHaveLength(2);
+});
+
+test('a peer message to a running node steers that operation instead of restarting it', async () => {
+  const delivered: string[] = [];
+  let finish!: () => void;
+  const waiting = new Promise<void>(resolve => { finish = resolve; });
+  const { runtime, taskId } = await setup({ kind: 'agent', reserveTokens: 100,
+    steer: async (operation, text) => { delivered.push(`${operation.nodeId}:${text}`); return { ordinal: 1 }; },
+    prepare: async () => async () => { await waiting; return { outcome: 'completed', output: laneResult(), usage: laneUsage }; },
+  });
+  try {
+    const dispatched = runtime.host.runReady();
+    await settle(() => runtime.nodeRun(taskId, 'work').node.status === 'running', async () => {});
+    const receipt = await runtime.sendPeerMessage(taskId, 'sibling', { to: 'work', text: '先处理空值', requestId: 'peer-live' });
+    expect(receipt).toMatchObject({ state: 'steered' });
+    finish();
+    await dispatched;
+    expect(delivered).toEqual(['work:先处理空值']);
+    expect(runtime.nodeRun(taskId, 'work').entries.filter(entry => entry.kind === 'chat')).toHaveLength(1);
+  } finally { finish(); }
+});

@@ -941,10 +941,15 @@ export class Execution {
             ? resultHandoffRepair(this.store, { taskId: node.task_id, nodeId: node.id, activationId: node.activation_id })
             : undefined;
           if (repair) intent.context.briefing = renderResultHandoffRepair(repair, { decisions: answers });
-          const userRework = this.store.db.prepare("SELECT text FROM node_entries WHERE task_id=? AND node_id=? AND json_extract(data,'$.reworkActivation')=? ORDER BY seq")
-            .all(node.task_id, node.id, node.activation_id) as { text: string }[];
+          const userRework = this.store.db.prepare("SELECT text,data FROM node_entries WHERE task_id=? AND node_id=? AND json_extract(data,'$.reworkActivation')=? ORDER BY seq")
+            .all(node.task_id, node.id, node.activation_id) as { text: string; data: string | null }[];
           intent.context.briefing = [
-            ...userRework.map(message => `User requested rework of this node and its downstream results. Continue in your existing session and address this message:\n${message.text}`),
+            ...userRework.map(message => {
+              const from = message.data ? (JSON.parse(message.data) as { from?: string }).from : undefined;
+              return from
+                ? `Peer Agent ${from} messaged you; treat this as an instruction for this turn and address it in your existing session:\n${message.text}`
+                : `User requested rework of this node and its downstream results. Continue in your existing session and address this message:\n${message.text}`;
+            }),
             intent.context.briefing,
             conversation && isSummaryLeakRetry(intent.context.previousOutput)
               ? '上一轮输出了内部会话摘要，没有回答用户。请沿用现有会话，完成上一轮用户的原始请求，只给用户正式答复；不要输出 <analysis>、<summary> 或交接摘要。已完成的调查和工具调用无需重复。'

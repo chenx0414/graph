@@ -1,4 +1,4 @@
-import { sendNodeMessage } from './node-messages.ts';
+import { sendNodeMessage, sendPeerMessage } from './node-messages.ts';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
@@ -483,6 +483,8 @@ export async function openTaskRuntime(options: {
       channels: {
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
+        // A thunk: `execution` is built below this point in the same scope.
+        peers: taskId => ({ deliver: (from, input) => sendPeerMessage(store, execution, taskId, from, input) }),
         // Thunks, not values: the conversation service is built below this point in the same scope.
         conversations: {
           service: {
@@ -1483,6 +1485,13 @@ export async function openTaskRuntime(options: {
     async sendNodeMessage(taskId: string, nodeId: string, input: { text: string; requestId: string }) {
       ensureOpen();
       const receipt = await sendNodeMessage(store, execution, taskId, nodeId, input);
+      if (options.autoWake) execution.kick();
+      return receipt;
+    },
+    /** One Agent of a graph messaging another; delivered like a user prompt to the target node. */
+    async sendPeerMessage(taskId: string, from: string, input: { to: string; text: string; requestId: string }) {
+      ensureOpen();
+      const receipt = await sendPeerMessage(store, execution, taskId, from, input);
       if (options.autoWake) execution.kick();
       return receipt;
     },

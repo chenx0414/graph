@@ -12,8 +12,9 @@ export { sameGraphReach } from './conversation-scope.ts';
  * `conversation-scope.ts` keeps every message inside one graph, so a subagent cannot command
  * another graph by naming it.
  *
- * There is deliberately no "only while the target is running" restriction: a message is durable,
- * and a node that has not started yet will still find it in its inbox.
+ * There is no "only while the target is running" restriction: a message is durable. It is delivered
+ * to the target like a user prompt - steering a running turn, or reactivating a finished node so the
+ * message becomes the input of its next turn (see `node-messages.ts`).
  */
 
 export interface PeerNode {
