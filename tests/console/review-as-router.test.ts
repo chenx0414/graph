@@ -113,7 +113,7 @@ test('an acceptance item bound to an agent router is proven by the review it wro
 });
 
 test('a routed rework hands the reviewer\'s own words to the implementer', async () => {
-  const { runtime, task, taskId, stateDir } = await setup(() => lane([{ route: 'fail', note: 'THE-LEGEND-IS-NOT-PERSISTENT' }, { route: 'pass', note: 'fine now' }]));
+  const { runtime, task, stateDir } = await setup(() => lane([{ route: 'fail', note: 'THE-LEGEND-IS-NOT-PERSISTENT' }, { route: 'pass', note: 'fine now' }]));
   // Run until the reviewer has sent the work back, so the implementer is pending its second round.
   for (let i = 0; i < 8; i++) {
     await runtime.host.runReady();
