@@ -150,6 +150,12 @@ export interface NodeSpec {
   routes?: string[];
   when?: { node: string; case: string };
   optional?: boolean;
+  /**
+   * A file this node promises to produce. The harness publishes it as a task-scope artifact when the
+   * node settles, so a deliverable does not depend on the node remembering a tool call, and a
+   * declared file that was never written fails the node instead of passing silently.
+   */
+  deliverable?: { path: string; namespace: string; name: string; title?: string; summary?: string };
   verifier?: VerifierConfig;
   replaces?: string;
   context?: ContextRequest;

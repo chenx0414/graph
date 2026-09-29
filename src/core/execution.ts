@@ -2,7 +2,8 @@ import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuati
 import { pendingWakes, renderWakes, wakeForTaskCompleted } from './wake-ledger.ts';
 import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { assertWithinBudget, recordModelUse } from './budget-ledger.ts';
@@ -20,6 +21,7 @@ import { briefing, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
+import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { attemptConflictMerge } from '../git/conflict-merge.ts';
 import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
 import { RuntimeError, type ActionAdapter, type Answer, type AttachmentInput, type ContextHandoffPackage, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
@@ -115,6 +117,7 @@ export class Execution {
   private readonly models?: () => ModelEntry[];
   private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined);
   private readonly git?: GitIntegration;
+  private readonly artifacts?: ArtifactWorkspace;
   private readonly scratchRoot?: string;
   private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean };
@@ -125,13 +128,14 @@ export class Execution {
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy; mergeResolvers?: MergeResolverChannels } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy; mergeResolvers?: MergeResolverChannels; artifacts?: ArtifactWorkspace } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
     if (extras.models) this.models = extras.models;
     if (extras.preferences) this.preferences = extras.preferences;
     if (extras.git) this.git = extras.git;
+    if (extras.artifacts) this.artifacts = extras.artifacts;
     if (extras.scratchRoot) this.scratchRoot = extras.scratchRoot;
     if (extras.program) this.program = extras.program;
     if (extras.systemContext) this.systemContext = extras.systemContext;
@@ -571,6 +575,64 @@ export class Execution {
     const work = this.execute(node);
     this.pending.add(work);
     try { return await work; } finally { this.pending.delete(work); this.wakeDrive(); }
+  }
+
+  private declaredDeliverable(operation: Operation): NodeSpec['deliverable'] {
+    const row = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
+      .get(operation.taskId, operation.nodeId) as { spec: string } | undefined;
+    return row ? (JSON.parse(row.spec) as NodeSpec).deliverable : undefined;
+  }
+
+  /**
+   * Publish the deliverable a node declared, or refuse the result.
+   *
+   * The declaration is the graph's promise that this file will exist, so the node does not have to
+   * remember a tool call for it: in the simple tier study three lanes each wrote a note and only one
+   * of them also published it, because nothing in the graph had asked. A file that was never written,
+   * or is empty, is a defect in the work rather than a pass with a hole in it, so the settle does not
+   * go through and the node is not reported succeeded.
+   *
+   * Reading stays in ArtifactWorkspace.publish, which is where the workspace containment, symlink and
+   * size rules already live; this only decides whether there is anything to publish at all.
+   *
+   * Only a node that declared a deliverable reaches this: the caller resolves the declaration first,
+   * so the common settle path gains no await and no read.
+   */
+  private async publishDeliverable(
+    operation: Operation,
+    deliverable: NonNullable<NodeSpec['deliverable']>,
+    result: OperationResult,
+  ): Promise<OperationResult> {
+    const refused = (reason: string): OperationResult => ({
+      ...result,
+      outcome: 'failed',
+      output: { deliverable: `${deliverable.path} ${reason}` },
+    });
+    const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(this.store.task(operation.taskId).project_id) as { root: string } | undefined;
+    const workspace = operation.workspace ?? project?.root;
+    if (!workspace) return refused('was declared as this node deliverable but the task has no workspace');
+    const info = await stat(resolve(workspace, deliverable.path)).catch(() => undefined);
+    if (!info?.isFile()) return refused('was declared as this node deliverable but was never written');
+    if (info.size === 0) return refused('was declared as this node deliverable but is empty');
+    const artifacts = this.artifacts;
+    if (!artifacts) return result;
+    await artifacts.publish({
+      taskId: operation.taskId,
+      workspace,
+      namespace: deliverable.namespace,
+      name: deliverable.name,
+      sourcePath: deliverable.path,
+      ...(deliverable.title ? { title: deliverable.title } : {}),
+      ...(deliverable.summary ? { summary: deliverable.summary } : {}),
+      producer: {
+        nodeId: operation.nodeId,
+        instanceId: operation.instanceId!,
+        operationId: operation.id,
+        activationId: operation.activationId,
+      },
+      requestId: `node-deliverable:${operation.id}`,
+    });
+    return result;
   }
 
   private async execute(node: ExecutionNodeRow): Promise<boolean> {
@@ -1027,6 +1089,11 @@ export class Execution {
           else result = { ...result, outcome: 'failed', output: { conflicts: merged.conflicts } };
         }
       }
+      // A deliverable the graph declared is published here, before the result is settled: a file
+      // nobody wrote must not be reported as a passed node. The declaration is resolved first so a
+      // node that declares nothing keeps settling exactly as it did, without a new await.
+      const declared = result.outcome === 'completed' && this.artifacts ? this.declaredDeliverable(operation) : undefined;
+      if (declared) result = await this.publishDeliverable(operation, declared, result);
       try {
         this.report(operation.id, operation.generation, result);
       } catch (error) {
