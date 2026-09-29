@@ -684,7 +684,13 @@ export async function openRestrictedExecutor() {
               pid: spawned.pid,
               write(message) {
                 if (!spawned.stdin || spawned.stdin.destroyed) return false;
-                try { return spawned.stdin.write(`${JSON.stringify(message)}\n`); }
+                try {
+                  // Writable.write() returns false for backpressure even when the
+                  // message was accepted into its queue. The control API returns
+                  // whether writing was possible, not whether a drain is needed.
+                  spawned.stdin.write(`${JSON.stringify(message)}\n`);
+                  return true;
+                }
                 catch { return false; }
               },
               end() {
