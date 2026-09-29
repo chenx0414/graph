@@ -1,5 +1,6 @@
 import { toolActivity } from './tool-activity.ts';
 import { assistantVisibleText } from '../core/assistant-visible-text.ts';
+import { withoutUnexecutedToolCall } from '../runtime/unexecuted-tool-call.ts';
 import { messageAttachments } from '../core/conversation-projection.ts';
 import type {
   ConversationMessage,
@@ -247,10 +248,10 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   input = { ...input,
     messages: input.messages.filter(message => !isReceipt(message)).map(message => {
       const visible = message.role === 'assistant' || message.role === 'activity'
-        ? { ...message, text: assistantVisibleText(message.text) } : message;
+        ? { ...message, text: assistantVisibleText(withoutUnexecutedToolCall(message.text)) } : message;
       return visible.operationId ? { ...visible, operationId: root(visible.operationId), ...(messageOrdinal(visible) !== undefined ? { data: { ...visible.data, ordinal: messageOrdinal(visible)! + offset(visible.operationId) } } : {}) } : visible;
     }),
-    streaming: input.streaming.map(item => ({ ...item, text: assistantVisibleText(item.text), operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
+    streaming: input.streaming.map(item => ({ ...item, text: assistantVisibleText(withoutUnexecutedToolCall(item.text)), operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
     liveTools: input.liveTools.map(item => ({ ...item, operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
   };
   const rows: TranscriptRow[] = [];
