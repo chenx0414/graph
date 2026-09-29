@@ -132,6 +132,14 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
         </span>
         <Icon name="chevron" size={14} className="tool-group-chevron" />
       </button>
+      {row.tools.some(tool => tool.attachments?.length) && <div className="tool-group-images" data-testid="tool-read-images">
+        {row.tools.flatMap(tool => tool.attachments ?? []).map((attachment, index) => {
+          const source = attachmentImageSource(attachment);
+          return source ? <a href={source} target="_blank" rel="noreferrer" key={`${attachment.name}-${index}`}>
+            <img className="message-attachment-image" src={source} alt={attachment.name} loading="lazy" />
+          </a> : null;
+        })}
+      </div>}
       <div className="tool-group-content" aria-hidden={!open}>
         <div className="tool-group-content-inner">
           <ol className="tool-activity-list">
@@ -168,7 +176,7 @@ function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration'
  */
 function CollapsedTurn({ row, markdown = true }: { row: Extract<TranscriptRow, { kind: 'activity' }>; markdown?: boolean }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const open = manualOpen ?? !row.collapsed;
+  const open = manualOpen ?? (!row.collapsed || row.rows.some(child => child.kind === 'tools' && child.tools.some(tool => tool.attachments?.length)));
   return (
     <div className="collapsed-turn" data-testid="collapsed-turn" data-open={open}>
       <button

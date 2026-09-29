@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, type EdgeProps, type NodeProps } from '@xyflow/react';
 import { graphNodeLabel, graphNodeVisualKind, type GraphNodeVisualKind } from '../core/graph-presentation.ts';
 import {
@@ -17,6 +18,8 @@ const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
 
 type GraphPayload = {
+  messages?: { id: string; source: string; target: string; text: string; createdAt: number }[];
+  handoffs?: { id: string; source: string; target: string; mode: string; text: string; createdAt: number }[];
   nodes: {
     id: string; kind: string; action?: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null;
     context?: {
@@ -148,7 +151,16 @@ function GridLoopEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style
   );
 }
 
-const edgeTypes = { grid: GridEdge, gridLoop: GridLoopEdge };
+function MessageEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth, data }: EdgeProps) {
+  const bend = Math.max(70, Math.abs(targetX - sourceX) * 0.35);
+  const path = `M ${sourceX} ${sourceY} C ${sourceX + bend} ${sourceY - 48}, ${targetX - bend} ${targetY - 48}, ${targetX} ${targetY}`;
+  return <>
+    <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />
+    <EdgeLabel text={String((data as { edgeLabel?: string } | undefined)?.edgeLabel ?? '消息')} x={(sourceX + targetX) / 2} y={(sourceY + targetY) / 2 - 36} color="#6366f1" />
+  </>;
+}
+
+const edgeTypes = { grid: GridEdge, gridLoop: GridLoopEdge, message: MessageEdge };
 
 export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
   graph: GraphPayload;
@@ -156,6 +168,7 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
   onSelect: (id: string) => void;
   selected?: string | null;
 }) {
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const containerById = new Map(graph.containers.map(container => [container.id, container]));
   const nodeContainer = new Map(graph.nodes.map(node => [node.id, node.container]));
   const edgePolicy = new Map<string, string>();
@@ -222,6 +235,11 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const targetIsNode = graph.nodes.some(node => node.id === edge.target);
       const policy = edgePolicy.get(`${edge.source}:${edge.target}`);
       const resultHandoff = policy === 'result_handoff';
+      const edgeData = {
+        ...(loop ? { leftX: minNodeLeft - 64 - loopLane++ * 24 } : edge.points?.length ? { points: edge.points } : {}),
+        ...(policy ? { edgeLabel: resultHandoff ? '结果交接' : '仅证据交接', edgeLabelColor: resultHandoff ? '#b45309' : '#475569' } : {}),
+        ...(branch ? { edgeLabel: `case: ${branch}`, edgeLabelColor: '#0f766e' } : {}),
+      };
       return {
         id: edge.id, source: edge.source, target: edge.target, type: loop ? 'gridLoop' : 'grid',
         ...(loop
@@ -234,17 +252,8 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
               ...(targetIsNode ? { targetHandle: 'target-top' } : {}),
             }),
         className: loop ? 'grid-edge grid-loop-edge' : 'grid-edge',
-        ...(loop ? { data: { leftX: minNodeLeft - 64 - loopLane++ * 24 } } : {}),
-        ...(!loop && edge.points?.length ? { data: { points: edge.points } } : {}),
-        ...(policy ? {
-          label: resultHandoff ? '结果交接' : '仅证据交接',
-          labelStyle: { fill: resultHandoff ? '#b45309' : '#475569', fontSize: 11 },
-          labelBgStyle: { fill: '#ffffff', fillOpacity: 0.92 },
-          labelBgPadding: [4, 2] as [number, number],
-          labelBgBorderRadius: 4,
-        } : {}),
+        data: edgeData,
         ...(branch ? {
-          data: { ...(edge as { points?: unknown }).points !== undefined ? {} : {}, edgeLabel: `case: ${branch}`, edgeLabelColor: '#0f766e' },
           animated: false,
           style: { stroke: '#0f766e', strokeDasharray: '2 3' },
           markerEnd: { type: MarkerType.ArrowClosed, color: '#0f766e' },
@@ -254,6 +263,27 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
           : branch ? {} : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),
       };
     });
+  const messageGroups = new Map<string, NonNullable<GraphPayload['messages']>>();
+  for (const message of graph.messages ?? []) {
+    if (hidden.has(message.source) || hidden.has(message.target)) continue;
+    if (!graph.nodes.some(node => node.id === message.source) || !graph.nodes.some(node => node.id === message.target)) continue;
+    const key = `${message.source}\u0000${message.target}`;
+    messageGroups.set(key, [...(messageGroups.get(key) ?? []), message]);
+  }
+  for (const [key, messages] of messageGroups) {
+    const [source, target] = key.split('\u0000') as [string, string];
+    edges.push({ id: `message:${source}:${target}`, source, target, type: 'message',
+      sourceHandle: 'source-right', targetHandle: 'target-left', className: 'graph-message-edge',
+      style: { stroke: '#6366f1', strokeDasharray: '5 5' },
+      markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1' },
+      data: { edgeLabel: `${messages.length} 条消息`, edgeLabelColor: '#6366f1' },
+    });
+  }
+  const currentEdge = edges.find(edge => edge.id === selectedEdge);
+  const currentMessages = currentEdge?.id.startsWith('message:')
+    ? messageGroups.get(`${currentEdge.source}\u0000${currentEdge.target}`) ?? [] : [];
+  const currentHandoffs = currentEdge && !currentEdge.id.startsWith('message:')
+    ? (graph.handoffs ?? []).filter(item => item.source === currentEdge.source && item.target === currentEdge.target) : [];
   // The four-state legend is rendered here so every view that draws a task
   // graph (task page and conversation drawer) shows the same permanent legend.
   const statuses = graph.nodes.map(node => node.status);
@@ -273,6 +303,7 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       </ul>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false} nodesConnectable={false} elementsSelectable
         edgeTypes={edgeTypes}
+        onEdgeClick={(_event, edge) => setSelectedEdge(edge.id)}
         onNodeClick={(_event, node) => onSelect(node.id)} fitView fitViewOptions={{ padding: 0.18 }}
         snapToGrid snapGrid={[GRID, GRID]} proOptions={{ hideAttribution: false }}>
         <Background variant={BackgroundVariant.Dots} gap={GRID} size={1.5} color="#b8c1cc" style={{ opacity: 0.52 }} />
@@ -287,6 +318,13 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
           }}
         />
       </ReactFlow>
+      {currentEdge && <aside className="graph-edge-inspector" data-testid="graph-edge-inspector">
+        <button type="button" aria-label="关闭边详情" onClick={() => setSelectedEdge(null)}>×</button>
+        <strong>{currentEdge.source} → {currentEdge.target}</strong>
+        {currentMessages.length ? <ol>{currentMessages.map(message => <li key={message.id}><time>{new Date(message.createdAt).toLocaleString()}</time><p>{message.text}</p></li>)}</ol>
+          : currentHandoffs.length ? <ol>{currentHandoffs.map(handoff => <li key={handoff.id}><time>{new Date(handoff.createdAt).toLocaleString()} · {handoff.mode === 'result_handoff' ? '结果交接' : '证据交接'}</time><pre>{handoff.text}</pre></li>)}</ol>
+            : <p>{currentEdge.id.startsWith('message:') ? '尚无消息' : '目标节点尚未接收这条边的交接内容。'}</p>}
+      </aside>}
     </div>
   );
 }

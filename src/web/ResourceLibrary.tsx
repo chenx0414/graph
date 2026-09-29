@@ -388,6 +388,7 @@ function AgentCombinationEditor(input: {
   );
   const firstIdentity = selected('identity').values().next().value as string | undefined;
   const [identity, setIdentity] = useState(firstIdentity ?? '');
+  const [systemPrompt, setSystemPrompt] = useState(input.initial?.systemPrompt ?? '');
   const [skillKeys, setSkillKeys] = useState(() => selected('skill'));
   const [mcpKeys, setMcpKeys] = useState(() => selected('mcp'));
   const [extensionKeys, setExtensionKeys] = useState(() => new Set([
@@ -441,7 +442,7 @@ function AgentCombinationEditor(input: {
     setError('');
     try {
       const resources: AgentCombination['resources'] = [];
-      if (identity) resources.push({ ...binding(identity), role: 'identity' });
+      if (identity && !systemPrompt.trim()) resources.push({ ...binding(identity), role: 'identity' });
       for (const key of skillKeys) resources.push({ ...binding(key), role: 'skill' });
       for (const key of mcpKeys) resources.push({ ...binding(key), role: 'mcp' });
       for (const key of extensionKeys) {
@@ -454,6 +455,7 @@ function AgentCombinationEditor(input: {
           combination: {
             id, name, description, ...(mode ? { mode } : {}), recommendedGrade: grade, review: main ? false : review,
             tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
+            ...(systemPrompt.trim() ? { systemPrompt: systemPrompt.trim() } : {}),
             resources,
           },
         }),
@@ -533,8 +535,11 @@ function AgentCombinationEditor(input: {
           </div>
           <label><span>标签</span><input value={tags} onChange={event => setTags(event.target.value)} placeholder="编码, 实现" /></label>
           <section className="recipe-section">
-            <h3>身份 Prompt</h3>
-            <select value={identity} onChange={event => setIdentity(event.target.value)}>
+            <h3>System Prompt</h3>
+            <p className="muted">直接编写这个 Agent 的身份、专业知识、工作方式和输出要求。保存后生成新定义版本；Graph 的运行规则仍会自动附加。</p>
+            <textarea data-testid="agent-recipe-system-prompt" value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} rows={14} maxLength={40000} placeholder="你是一名……\n专业领域：……\n工作方式：……\n输出要求：……" />
+            <p className="muted">也可以选择现有 Prompt 库文件；填写上方文本时，以配方内文本为准。</p>
+            <select value={identity} disabled={Boolean(systemPrompt.trim())} onChange={event => setIdentity(event.target.value)}>
               <option value="">不绑定身份 Prompt</option>
               {promptCapabilities.map(item => <option key={`${item.id}@${item.version}`} value={`${item.id}@${item.version}`}>{item.name ?? item.id} · {item.id}@{item.version}</option>)}
             </select>

@@ -418,6 +418,30 @@ function ConfiguredModelsPanel({ draft, credentialState, mutate, onManage, onEdi
   );
 }
 
+function ConfiguredProvidersPanel({ draft, credentialState, onEdit, onDelete }: {
+  draft: RawConfig;
+  credentialState: Record<string, boolean>;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const credentials = Object.entries(draft.credentials ?? {});
+  return <Card title={`已配置厂商 · ${credentials.length}`} icon="link" subtitle="管理已保存的厂商账户及其关联模型" testid="configured-providers">
+    {credentials.length === 0 ? <p className="muted">尚未配置厂商。</p> : <div className="configured-models-list">
+      {credentials.map(([id, credential]) => {
+        const count = (draft.models?.entries ?? []).filter(model => model.credentialId === id).length;
+        return <div className="configured-model-item" key={id} data-testid={`configured-provider-${id}`}>
+          <div className="configured-model-main"><strong>{credential.displayName || id}</strong><span className="muted">{credential.platform || id} · {id} · {count} 个模型</span></div>
+          <div className="configured-model-meta"><Pill tone={credentialState[id] ? 'success' : 'warn'}>{credentialState[id] ? '凭据就绪' : '凭据缺失'}</Pill></div>
+          <div className="configured-model-actions">
+            <Button size="sm" data-testid={`configured-provider-edit-${id}`} onClick={() => onEdit(id)}>编辑</Button>
+            <Button size="sm" data-testid={`configured-provider-delete-${id}`} onClick={() => onDelete(id)}>删除</Button>
+          </div>
+        </div>;
+      })}
+    </div>}
+  </Card>;
+}
+
 /** Sidebar sections and their fixed order (B-0). Plain data so the console
  * tests can assert navigation without rendering the page. */
 export interface SettingsSection {
@@ -529,7 +553,22 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
   const [manualId, setManualId] = useState('');
   const [note, setNote] = useState('');
   const [selectedVendorId, setSelectedVendorId] = useState('');
-  useEffect(() => { if (focusCredentialId) setSelectedVendorId(focusCredentialId); }, [focusCredentialId]);
+  useEffect(() => {
+    if (!focusCredentialId) return;
+    setSelectedVendorId(focusCredentialId);
+    const credential = draft.credentials?.[focusCredentialId];
+    if (!credential) return;
+    const model = draft.models?.entries.find(entry => entry.credentialId === focusCredentialId);
+    const savedPlatform = credential.platform ?? model?.provider ?? focusCredentialId;
+    const platform = platforms.some(item => item.id === savedPlatform) ? savedPlatform : 'custom';
+    setPlatformId(platform);
+    setAccount({ credentialId: focusCredentialId, credentialRef: credential.secretRef,
+      ...(credential.displayName ? { label: credential.displayName } : {}) });
+    if (platform === 'custom') {
+      setCustom({ platformId: 'custom', credentialId: focusCredentialId, credentialRef: credential.secretRef,
+        label: credential.displayName ?? focusCredentialId, baseUrl: model?.baseUrl ?? '', api: model?.api ?? 'openai-completions' });
+    }
+  }, [focusCredentialId, platforms]);
   const probedVendor = useRef<string | null>(null);
   const [concurrency, setConcurrency] = useState<ConcurrencyDraft>({ credentialLimit: '', sharedGroupId: '', sharedGroupLimit: '' });
 
@@ -564,10 +603,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
   const accountHasNoValue = credentialState[active.credentialId] === false && !keyResolved[active.credentialId];
   const resolved = !accountHasNoValue && Boolean(keyResolved[active.credentialId] || credentialState[active.credentialId] || selected?.credentialConfigured);
   const requiredProblems = missingRequiredModelFields(draft.models?.entries ?? []);
-
-  useEffect(() => {
-    setAccount({});
-  }, [platformId]);
 
   useEffect(() => {
     setConcurrency(readConcurrency(draft, active.credentialId));
@@ -617,6 +652,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
 
   const choosePlatform = (id: string) => {
     setPlatformId(id);
+    setAccount({});
     setPicks([]);
     setProbeModels([]);
     setVerification(null);
@@ -1230,8 +1266,39 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
         setEditorOpen(true);
       }} onEdit={credentialId => {
         setFocusCredentialId(credentialId);
-        setEditorTarget('settings-models');
+        setEditorTarget('settings-credentials');
         setEditorOpen(true);
+      }} />
+      <ConfiguredProvidersPanel draft={draft} credentialState={credentialState} onEdit={credentialId => {
+        setFocusCredentialId(credentialId);
+        setEditorTarget('settings-credentials');
+        setEditorOpen(true);
+      }} onDelete={credentialId => {
+        const secretRef = draft.credentials?.[credentialId]?.secretRef;
+        const sharedSecret = Object.entries(draft.credentials ?? {}).some(([id, item]) => id !== credentialId && item.secretRef === secretRef);
+        const linked = draft.models?.entries.filter(entry => entry.credentialId === credentialId).length ?? 0;
+        if (!window.confirm(`删除厂商账户「${draft.credentials?.[credentialId]?.displayName ?? credentialId}」及其 ${linked} 个关联模型？`)) return;
+        mutate(next => {
+          const credential = next.credentials?.[credentialId];
+          if (next.credentials) delete next.credentials[credentialId];
+          if (next.models) {
+            next.models.entries = next.models.entries.filter(entry => entry.credentialId !== credentialId);
+            const remaining = new Set(next.models.entries.map(entry => entry.id));
+            for (const grade of GRADES as (keyof NonNullable<NonNullable<RawConfig['models']>['preferences']>)[]) {
+              const preferences = next.models.preferences;
+              if (preferences?.[grade]) preferences[grade] = preferences[grade]!.filter(id => remaining.has(id));
+            }
+            if (!next.models.entries.length) delete next.models;
+          }
+          if (next.limits?.credentials) delete next.limits.credentials[credentialId];
+          const group = credential?.sharedLimitGroupId;
+          if (group && !Object.values(next.credentials ?? {}).some(item => item.sharedLimitGroupId === group) && next.limits?.sharedGroups) delete next.limits.sharedGroups[group];
+        });
+        setCredentialState(current => { const next = { ...current }; delete next[credentialId]; return next; });
+        if (focusCredentialId === credentialId) setFocusCredentialId(null);
+        if (bridge && secretRef && !sharedSecret) void bridge.saveSecret(secretRef, null).then(result => {
+          if (!result.stored) toast(`厂商配置已删除，但密钥移除失败：${result.message ?? '钥匙串不可用'}`, 'danger');
+        }).catch(reason => toast(`厂商配置已删除，但密钥移除失败：${String(reason)}`, 'danger'));
       }} />
       <div className="model-editor-shell">
         <button type="button" className="model-editor-toggle" data-testid="model-editor-toggle" aria-expanded={editorOpen} onClick={() => setEditorOpen(value => !value)}>

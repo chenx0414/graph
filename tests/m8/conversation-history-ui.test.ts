@@ -39,7 +39,7 @@ async function temp(name: string) {
 async function clickOlder(page: Page) {
   const button = page.getByTestId('load-older');
   if (await button.count() === 0) {
-    await page.waitForTimeout(150);
+    await button.waitFor({ state: 'visible', timeout: 2_000 }).catch(() => undefined);
     return;
   }
   try {
@@ -83,8 +83,10 @@ test('history pages to the earliest record, survives new messages, and never cro
   await thread.evaluate(element => { element.scrollTop = 0; });
   await userMessages().filter({ hasText: 'A-message-101' }).waitFor();
   expect(await userMessages().count()).toBe(400);
-  await page.getByTestId('load-older').click();
-  await userMessages().filter({ hasText: 'A-message-000' }).waitFor();
+  const earliest = userMessages().filter({ hasText: 'A-message-000' });
+  const firstPageDeadline = Date.now() + 30_000;
+  while (await earliest.count() === 0 && Date.now() < firstPageDeadline) await clickOlder(page);
+  await earliest.waitFor();
   expect(await userMessages().count()).toBe(501);
   expect(await page.getByTestId('load-older').count()).toBe(0);
 
@@ -209,11 +211,15 @@ test('interleaved conversations page by their own records, not by global sequenc
   await userMessages().filter({ hasText: 'A-500' }).waitFor();
   expect(await userMessages().count()).toBe(200);
 
-  await page.getByTestId('load-older').click();
-  await userMessages().filter({ hasText: 'A-101' }).waitFor();
+  const middle = userMessages().filter({ hasText: 'A-101' });
+  const middleDeadline = Date.now() + 30_000;
+  while (await middle.count() === 0 && Date.now() < middleDeadline) await clickOlder(page);
+  await middle.waitFor();
   expect(await userMessages().count()).toBe(400);
-  await page.getByTestId('load-older').click();
-  await userMessages().filter({ hasText: 'A-000' }).waitFor();
+  const earliest = userMessages().filter({ hasText: 'A-000' });
+  const earliestDeadline = Date.now() + 30_000;
+  while (await earliest.count() === 0 && Date.now() < earliestDeadline) await clickOlder(page);
+  await earliest.waitFor();
   expect(await userMessages().count()).toBe(501);
   expect(await page.getByTestId('load-older').count()).toBe(0);
   expect(await userMessages().filter({ hasText: 'B-' }).count()).toBe(0);
@@ -226,9 +232,7 @@ test('interleaved conversations page by their own records, not by global sequenc
   await userMessages().filter({ hasText: 'A-760' }).waitFor();
   const deadline = Date.now() + 20_000;
   while (await userMessages().count() < 761 && Date.now() < deadline) {
-    const button = page.getByTestId('load-older');
-    if (await button.count() > 0) await button.click();
-    await page.waitForTimeout(200);
+    await clickOlder(page);
   }
   expect(await userMessages().count()).toBe(761);
   expect(await userMessages().filter({ hasText: 'A-501' }).count()).toBe(1);

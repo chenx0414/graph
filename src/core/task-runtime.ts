@@ -31,6 +31,7 @@ import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { nodePromptView } from './node-prompt.ts';
+import { renderPredecessorHandoffs } from './predecessor-handoff.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
 import { skillUsage } from '../runtime/skill-usage.ts';
@@ -851,13 +852,14 @@ export async function openTaskRuntime(options: {
       ensureOpen();
       const rows = store.db.prepare(`SELECT t.id,t.project_id AS projectId,t.request,t.phase,t.paused,t.accepted_proposal AS acceptedProposalVersion,
         t.conversation_id AS conversationId,
+        (SELECT MIN(timestamp) FROM events WHERE task_id=t.id) AS createdAt,
         (SELECT MAX(timestamp) FROM events WHERE task_id=t.id) AS updatedAt,
         (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open' AND owner='user') AS openQuestions
-        FROM tasks t WHERE t.phase!='chatting' ORDER BY t.created_seq`).all() as { id: string; projectId: string; request: string; phase: string; paused: number; acceptedProposalVersion: number | null; conversationId: string | null; updatedAt: number | null; openQuestions: number }[];
+        FROM tasks t WHERE t.phase!='chatting' ORDER BY t.created_seq`).all() as { id: string; projectId: string; request: string; phase: string; paused: number; acceptedProposalVersion: number | null; conversationId: string | null; createdAt: number; updatedAt: number | null; openQuestions: number }[];
       return rows.map(row => ({
         id: row.id, projectId: row.projectId, request: row.request, phase: row.phase, conversationId: row.conversationId,
         status: row.paused ? 'paused' : row.openQuestions > 0 ? 'blocked' : row.phase,
-        acceptedProposalVersion: row.acceptedProposalVersion, updatedAt: row.updatedAt, openQuestions: row.openQuestions,
+        acceptedProposalVersion: row.acceptedProposalVersion, createdAt: row.createdAt, updatedAt: row.updatedAt, openQuestions: row.openQuestions,
       }));
     },
     async projects() {
@@ -1045,14 +1047,14 @@ export async function openTaskRuntime(options: {
           accepted: acceptedVersions.has(row.version),
         };
       });
-      const tasks = (store.db.prepare("SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; request: string; phase: string; paused: number; target_branch: string | null; accepted_proposal: number | null; integration_sha: string | null }[]).map(task => {
+      const tasks = (store.db.prepare("SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha,(SELECT MIN(timestamp) FROM events WHERE task_id=tasks.id) AS createdAt FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; request: string; phase: string; paused: number; target_branch: string | null; accepted_proposal: number | null; integration_sha: string | null; createdAt: number }[]).map(task => {
         const nodes = store.db.prepare('SELECT n.id,n.spec,n.status,n.stall_count,n.output_version,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(task.id) as { id: string; spec: string; status: string; stall_count: number; output_version: number; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null }[];
         const questions = store.db.prepare('SELECT id,node_id,kind,status,data,owner FROM questions WHERE task_id=? ORDER BY rowid').all(task.id) as { id: string; node_id: string; kind: string; status: string; data: string; owner: string }[];
         const open = questions.filter(question => question.status === 'open');
         const openForUser = open.filter(question => question.owner === 'user');
         const evidence = store.db.prepare('SELECT acceptance_id,valid FROM evidence WHERE task_id=? ORDER BY rowid').all(task.id) as { acceptance_id: string; valid: number }[];
         return {
-          id: task.id, request: task.request, phase: task.phase, paused: Boolean(task.paused),
+          id: task.id, request: task.request, phase: task.phase, paused: Boolean(task.paused), createdAt: task.createdAt,
           status: task.paused ? 'paused' : openForUser.length ? 'blocked' : task.phase,
           targetBranch: task.target_branch, acceptedProposalVersion: task.accepted_proposal, integrationSha: task.integration_sha,
           openQuestions: openForUser.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind, data: JSON.parse(question.data) as Json })),
@@ -1483,6 +1485,33 @@ export async function openTaskRuntime(options: {
       const receipt = await sendNodeMessage(store, execution, taskId, nodeId, input);
       if (options.autoWake) execution.kick();
       return receipt;
+    },
+    graphMessages(taskId: string) {
+      ensureOpen();
+      const task = store.task(taskId);
+      if (!task.conversation_id) return [];
+      return (store.db.prepare(`SELECT id,node_id AS source,to_node_id AS target,text,created_at AS createdAt
+        FROM messages WHERE conversation_id=? AND kind='agent_message'
+        AND json_extract(data,'$.taskId')=? ORDER BY seq`).all(task.conversation_id, taskId) as {
+          id: string; source: string; target: string; text: string; createdAt: number;
+        }[]);
+    },
+    graphHandoffs(taskId: string) {
+      ensureOpen();
+      store.task(taskId);
+      const rows = store.db.prepare(`SELECT r.node_id AS target,r.operation_id AS operationId,h.package,h.created_at AS createdAt
+        FROM context_handoffs h JOIN context_resolutions r ON r.handoff_id=h.id
+        WHERE h.task_id=? ORDER BY h.created_at,r.rowid`).all(taskId) as {
+          target: string; operationId: string; package: string; createdAt: number;
+        }[];
+      return rows.flatMap(row => {
+        const parsed = JSON.parse(row.package) as { predecessorHandoffs?: import('./types.ts').PredecessorHandoffProjection[] };
+        return (parsed.predecessorHandoffs ?? []).map(projection => ({
+          id: `${projection.sourceOperationId}:${row.operationId}`,
+          source: projection.sourceNodeId, target: row.target, mode: projection.mode,
+          text: renderPredecessorHandoffs([projection]), createdAt: row.createdAt,
+        }));
+      });
     },
     /** Read-only node detail: real session entries, operations and usage. */
     nodeRun(taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {

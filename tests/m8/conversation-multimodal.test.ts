@@ -60,6 +60,13 @@ test('a multimodal Main Agent receives image content from the workspace read too
   expect(JSON.stringify(provider.requests[1])).not.toContain('Current model does not support images');
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.questions).toEqual([]);
+  const readMessage = view.messages.find(message => message.role === 'tool' && message.data && typeof message.data === 'object'
+    && !Array.isArray(message.data) && Array.isArray(message.data.attachments));
+  expect(readMessage).toBeDefined();
+  expect(readMessage!.data).toMatchObject({ attachments: [{ type: 'image/png' }] });
+  expect(JSON.stringify(view)).not.toContain('iVBORw0KGgo');
+  expect(runtime.conversations.attachment(readMessage!.id, 0).bytes.subarray(0, 8))
+    .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text)
     .toContain('tiny transparent square');
 }, 120_000);
