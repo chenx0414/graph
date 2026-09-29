@@ -208,7 +208,9 @@ function selfTest() {
     if (problems.length) {
       console.error('diag-b --self-test: FAIL');
       for (const problem of problems) console.error(`- ${problem}`);
-      process.exit(1);
+      // Set the code instead of process.exit: exiting here would skip the finally that removes the fixture.
+      process.exitCode = 1;
+      return;
     }
     console.log('diag-b --self-test: PASS (4 files, 10 lines; module + extension buckets match the fixture)');
   } finally {
