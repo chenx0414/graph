@@ -69,7 +69,8 @@ export class GraphPlan {
     const seen = new Set<string>();
     for (const loop of this.loops) {
       if (!this.nodes.has(loop.from) || !this.nodes.has(loop.to) || loop.from === loop.to) invalid('Loop endpoints must be distinct existing nodes');
-      const key = `${loop.from}->${loop.to}`;
+      const key = `${loop.from}->${loop.to}${loop.case === undefined ? '' : `#${loop.case}`}`;
+      if (loop.case !== undefined && !this.nodes.get(loop.from)?.routes?.includes(loop.case)) invalid('A loop case must name a branch the router declared');
       if (seen.has(key)) invalid('Loops must be unique');
       seen.add(key);
       if (!this.ancestors(loop.from).has(loop.to)) invalid('Loop must return to an upstream node');
@@ -121,6 +122,8 @@ export class GraphState {
     if (this.plan.nodes.has(id)) { const output = this.states.get(id)?.output; return this.status(id) !== 'skipped' && output ? JSON.parse(output) as Json : null; }
     return Object.fromEntries(this.plan.containers.get(id)!.outputs.map(output => [output, this.output(output)]));
   }
+  /** The case a router node took, or null when it took none. */
+  route(id: string): string | null { return this.states.get(id)?.route ?? null; }
   readiness(id: string): 'ready' | 'waiting' | 'skip' {
     for (const condition of this.plan.conditions.get(id)!) {
       if (this.status(condition.node) === 'skipped') return 'skip';

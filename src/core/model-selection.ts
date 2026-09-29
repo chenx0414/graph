@@ -79,6 +79,14 @@ export function independentReviewReady(store: TaskStore, taskId: string, catalog
   const graph = loadGraph(store, taskId);
   const reviewers = [...graph.plan.nodes.values()].filter(spec => spec.kind === 'agent' && isReviewer(spec, catalog));
   if (!reviewers.length) return false;
+  // A review router IS the verdict, so "the review passed" is readable without a gate: the reviewer
+  // declares branches, it succeeded, and its own route did not send the work back. This is the shape
+  // where the reviewer replaced `graph.verify`, and without it a real delivery could never leave.
+  for (const spec of reviewers) {
+    if (!spec.routes?.length || graph.status(spec.id) !== 'succeeded') continue;
+    const route = graph.route(spec.id);
+    if (!graph.plan.loops.some(loop => loop.from === spec.id && loop.case !== undefined && loop.case === route)) return true;
+  }
   for (const spec of graph.plan.nodes.values()) {
     if (spec.action !== 'graph.verify' || !spec.verifier) continue;
     if (!spec.verifier.reportNodes.some(id => reviewers.some(reviewer => reviewer.id === id))) continue;

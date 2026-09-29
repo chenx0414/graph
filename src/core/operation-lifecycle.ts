@@ -2,8 +2,9 @@ import { pendingRsiContinuation, releaseRsiContinuation } from './rsi-continuati
 import { consumeWakes, releaseWakes, pendingWakes, wakeForAnswer } from './wake-ledger.ts';
 import { retryDecision, MAX_TRANSIENT_RETRIES } from './transient-retry.ts';
 import { resolveRouteCase, ROUTE_SOURCE_KEY, type RouteSource } from './router-action.ts';
-import { randomUUID } from 'node:crypto';
-import { isAbsolute } from 'node:path';
+import { randomUUID, createHash } from 'node:crypto';
+import { isAbsolute, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
 import {
   addBudget,
@@ -152,6 +153,10 @@ function routeSourceOf(spec: NodeSpec): RouteSource | null {
   if (!route || typeof route !== 'object' || Array.isArray(route)) return null;
   const record = route as Record<string, unknown>;
   if (typeof record['declared'] === 'string') return { declared: record['declared'] };
+  // `declared: null` is an Agent router saying the case comes from the Agent itself: the reviewer
+  // submits `route` with its own result, and the harness only checks it against the declared cases.
+  // A program cannot speak for itself this way, so it stays refused (a program must map status or a field).
+  if (record['declared'] === null) return spec.kind === 'agent' ? { declared: null } : null;
   const byField = record['byField'];
   if (byField && typeof byField === 'object' && !Array.isArray(byField)) {
     const fieldRecord = byField as Record<string, unknown>;
@@ -1129,7 +1134,35 @@ export class OperationLifecycle {
       this.clearStaleHandoffRejections(operation, proposal);
     }
     const rework = result.outcome === 'completed' && isReworkDecision(result.output);
-    if (result.outcome === 'completed' && !rework && proposal.acceptance.some(item =>
+    // A router asks for rework with its route, not with a verification verdict: the graph says which
+    // branch means "go back" by giving the loop that case. Reaching here with that case means the
+    // reviewer judged the work not done, so the loop target runs again and this review does not.
+    const routed = result.outcome === 'completed' && result.route !== undefined
+      ? loadGraph(this.store, operation.taskId).plan.loops.filter(loop => loop.from === operation.nodeId && loop.case === result.route)
+      : [];
+    const agentRouter = operation.kind === 'agent' && Boolean(nodeSpec.routes?.length);
+    // An Agent router bound to an acceptance item: its verdict IS the acceptance, so the harness
+    // records the evidence instead of demanding it. The durable record is the review the graph made
+    // it write: the declared deliverable, pinned by its exact bytes. A router that just sent the work
+    // back (a routed loop) proved nothing yet, so it records nothing. A program check proves the same
+    // item with the evidence objects it submits, which the loop below validates either way.
+    if (agentRouter && !rework && !routed.length && result.outcome === 'completed'
+      && !result.evidence?.length && proposal.acceptance.some(item => item.checkNode === operation.nodeId)) {
+      const deliverable = nodeSpec.deliverable;
+      if (!deliverable) throw new RuntimeError('invalid_evidence', 'An Agent router bound to an acceptance item must declare a deliverable: the review it writes is the evidence');
+      const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(this.store.task(operation.taskId).project_id) as { root: string } | undefined;
+      const workspace = operation.workspace ?? project?.root;
+      const path = workspace ? resolve(workspace, deliverable.path) : undefined;
+      const body = path ? readFileSync(path) : undefined;
+      if (!path || !body || !body.length) throw new RuntimeError('invalid_evidence', `The review ${deliverable.path} is the acceptance evidence but was not written`);
+      const note = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
+        ? (result.output as Record<string, unknown>)['note'] : undefined;
+      const summary = typeof note === 'string' && note.trim() ? note.trim().slice(0, 800) : `${operation.nodeId} passed its own review`;
+      result = { ...result, evidence: proposal.acceptance
+        .filter(item => item.checkNode === operation.nodeId)
+        .map(item => ({ acceptanceId: item.id, summary, artifact: { path, digest: createHash('sha256').update(body).digest('hex') } })) };
+    }
+    if (result.outcome === 'completed' && !rework && !routed.length && proposal.acceptance.some(item =>
       item.checkNode === operation.nodeId && !result.evidence?.some(evidence => evidence.acceptanceId === item.id))) {
       throw new RuntimeError('invalid_evidence', 'Completed check is missing required acceptance evidence');
     }
@@ -1138,9 +1171,9 @@ export class OperationLifecycle {
       throw new RuntimeError('invalid_evidence', 'Only a completed check may produce acceptance evidence');
     }
     for (const evidence of result.evidence ?? []) {
-      if (operation.kind !== 'program'
+      if ((operation.kind !== 'program' && !agentRouter)
         || !proposal.acceptance.some(item => item.id === evidence.acceptanceId && item.checkNode === operation.nodeId)) {
-        throw new RuntimeError('invalid_evidence', 'Evidence must come from the assigned program check');
+        throw new RuntimeError('invalid_evidence', 'Evidence must come from the assigned program check or Agent router');
       }
       if (!evidence.summary.trim() || !isAbsolute(evidence.artifact.path) || !/^[a-f0-9]{64}$/.test(evidence.artifact.digest)
         || ((evidence.artifact.artifactId === undefined) !== (evidence.artifact.version === undefined))
@@ -1241,6 +1274,16 @@ export class OperationLifecycle {
       .run(operation.taskId, operation.nodeId, operation.activationId);
     if (rework) {
       this.handleRework(operation, result);
+    } else if (routed.length) {
+      // The reviewer said the work is not done, and the graph said which branch means that. Send the
+      // implementer back and let the reviewer run again; nothing downstream of a failed review may.
+      reactivate(this.store, operation.taskId, routed.map(loop => loop.to));
+      this.store.event(operation.taskId, 'graph.rework', {
+        from: operation.nodeId,
+        to: routed.map(loop => loop.to),
+        via: 'route',
+        route: result.route,
+      });
     } else if (result.outcome === 'completed' && proposal.acceptance.some(item => item.checkNode === operation.nodeId)) {
       for (const loop of loadGraph(this.store, operation.taskId).plan.loops.filter(item => item.from === operation.nodeId)) {
         this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(operation.taskId, loop.to);

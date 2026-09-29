@@ -50,14 +50,18 @@ function reworkDelta(input: { store: TaskStore; graph: readonly NodeSpec[]; prop
     const last = input.store.db.prepare('SELECT state,result FROM operations WHERE task_id=? AND node_id=? AND result IS NOT NULL ORDER BY rowid DESC LIMIT 1')
       .get(input.taskId, node.id) as { state: string; result: string } | undefined;
     if (!last) return [];
-    const settled = JSON.parse(last.result) as { outcome?: string; output?: Json };
+    const settled = JSON.parse(last.result) as { outcome?: string; output?: Json; route?: string };
     const output = settled.output ?? null;
     const rework = isReworkDecision(output);
-    if (!rework && last.state !== 'failed' && last.state !== 'blocked') return [];
+    // A review router asks for rework with its route, and its output is an ordinary note rather than a
+    // verification verdict — so a routed round is read the same way, from the loop the graph declared.
+    const routed = settled.route !== undefined
+      && (input.proposal?.loops ?? []).some(loop => loop.from === node.id && loop.to === input.own && loop.case === settled.route);
+    if (!rework && !routed && last.state !== 'failed' && last.state !== 'blocked') return [];
     return [{
       id: node.id,
       label: `${node.kind} ${node.action}`,
-      status: rework ? `${last.state}, verdict rework` : last.state,
+      status: rework ? `${last.state}, verdict rework` : routed ? `${last.state}, routed ${settled.route}` : last.state,
       output: output === null ? '(no output recorded)' : JSON.stringify(output, null, 2),
     }];
   });

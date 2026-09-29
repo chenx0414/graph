@@ -32,8 +32,8 @@ export type RouteSource =
   | { byStatus: Readonly<Record<string, string>> }
   /** Tool node: read one field of its own output and map its value onto a case. */
   | { byField: { path: string; values: Readonly<Record<string, string>> } }
-  /** Agent node: the case it declared for itself. */
-  | { declared: string };
+  /** Agent node: the case it declared for itself, or `null` when the case comes from the Agent's own `result.route`. */
+  | { declared: string | null };
 
 export type RouteDecision = { case: string } | { refusal: string };
 
@@ -54,6 +54,12 @@ function field(output: Json | null, path: string): unknown {
 export function resolveRouteCase(input: RouteDecisionInput): RouteDecision {
   const source = input.source;
   if ('declared' in source) {
+    // An Agent router that speaks for itself must actually have spoken. Reaching here with no case
+    // means the Agent declared branches but submitted no `route`, which is a refusal — never a
+    // silent default, or every branch would skip and the graph would look finished when it is not.
+    if (source.declared === null) {
+      return { refusal: `节点 ${input.nodeId} 由自己选择分支，但提交的结果里没有 route（已声明：${input.routes.join(', ') || '无'}）。` };
+    }
     return declared(input.routes, source.declared, '节点自述');
   }
   if ('byField' in source) {
