@@ -69,13 +69,22 @@ test('a dependency artifact is named by artifactId and version so artifact_read 
   expect(text).toContain('artifact_read');
 });
 
+test('a node that declares a deliverable is told to write the file, and that publishing an artifact is not enough', () => {
+  const text = briefing(nodeOperation('review'), { request: 'r', acceptance: [], graph: focusedGraph, focus: 'review' });
+  expect(text).toContain('reviews/review.md');
+  // The settle refuses a node whose declared file was never written; the briefing must say so up front,
+  // because a model otherwise satisfies "shared artifact" by calling artifact_publish and skips the file.
+  expect(text).toMatch(/write .*reviews\/review\.md|reviews\/review\.md.*written/i);
+  expect(text).toMatch(/publish|artifact_publish/i);
+});
+
 /** A real-shaped graph: two sibling lanes, one check that reads the focused lane, one review lane. */
 const focusedGraph: NodeSpec[] = [
   { id: 'impl-a', kind: 'agent' as const, action: 'work', role: 'worker', definitionVersion: 'coder@1', model: 'm', input: { files: ['src/a.ts', 'tests/a.test.ts'], focus: '实现 A 的改动' } },
   { id: 'impl-b', kind: 'agent' as const, action: 'work', role: 'worker', definitionVersion: 'coder@1', model: 'm', input: { files: ['src/b.ts'], focus: '实现 B 的改动' } },
   { id: 'check-a', kind: 'program' as const, action: 'graph.command', dependsOn: ['impl-a'], input: { command: 'node', args: ['node_modules/vitest/vitest.mjs', 'run', 'tests/a.test.ts'] } },
   { id: 'check-all', kind: 'program' as const, action: 'graph.command', dependsOn: ['impl-a', 'impl-b'], input: { command: 'node', args: ['--run', 'check'] } },
-  { id: 'review', kind: 'agent' as const, action: 'review', role: 'worker', definitionVersion: 'reviewer@1', model: 'm', dependsOn: ['impl-a'] },
+  { id: 'review', kind: 'agent' as const, action: 'review', role: 'worker', definitionVersion: 'reviewer@1', model: 'm', dependsOn: ['impl-a'], routes: ['pass', 'fail'], input: { route: { declared: null } }, deliverable: { path: 'reviews/review.md', namespace: 'reviews', name: 'review' } },
 ];
 const nodeOperation = (focus: string): Operation => ({
   id: 'operation', taskId: 'task', nodeId: focus, instanceId: 'instance', generation: 1,

@@ -147,9 +147,22 @@ function focusBriefing(own: string, graph: readonly NodeSpec[]) {
     mine ? `Your node: ${nodeHeader(mine)}` : `Your node: ${own}`,
     ...(mine ? inputLines(mine.input) : []),
     ...routerInstruction(mine),
+    ...deliverableInstruction(mine),
     ...(checks.length ? ['Checks that read your output:', ...checks.map(node => `- ${checkLine(node)}`)] : []),
     ...(others.length ? [`Other lanes (ids only): ${others.map(node => node.id).join(', ')}`] : []),
   ].join('\n');
+}
+
+/**
+ * A node that declared a deliverable must WRITE THAT FILE. The settle reads the file's bytes and
+ * refuses the node when it is missing or empty, so a model that satisfies "put it in a shared
+ * artifact" by calling artifact_publish alone and never writes the file loses the turn - observed
+ * with a review lane that published its report and submitted pass, then was refused at settle for a
+ * file it never wrote. The instruction names the path so the two are never confused.
+ */
+function deliverableInstruction(node: NodeSpec | undefined): string[] {
+  if (!node?.deliverable) return [];
+  return [`You must WRITE the file ${node.deliverable.path} before you finish: it is this node's declared deliverable, and node that never wrote it does not succeed. Publishing a shared artifact (artifact_publish) does not satisfy this on its own; write the file.`];
 }
 
 /**
