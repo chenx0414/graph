@@ -957,7 +957,7 @@ export class Execution {
           ].filter(Boolean).join('\n\n');
           // The briefing already handed this node its dependencies' artifacts; record the reader so the
           // artifact-to-reader edge is observable without asking the node to read them again through a tool.
-          this.artifacts?.recordReferences?.({
+          this.artifacts?.recordReferences({
             taskId: node.task_id,
             nodeId: node.id,
             artifacts: Object.values(dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts
