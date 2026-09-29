@@ -1,0 +1,39 @@
+diag-b - source size and module distribution (read-only)
+root: /Users/macmini/Library/Application Support/Graph/state/worktrees/zhong-deng-dang-graph-xing-zhuang-a-ben-a2d46de9/review-b/src
+source files: 197, lines: 53800, size: 7.5 MB
+
+By module directory
+module       files  lines      size   share
+-----------  -----  -----  --------  ------
+src/web         63  17936  791.0 KB   33.3%
+src/core        44  13863  726.9 KB   25.8%
+src/runtime     55  13467  664.2 KB   25.0%
+src/server      16   4738  215.2 KB    8.8%
+src/catalog     16   2526    5.1 MB    4.7%
+src/git          3   1270   66.1 KB    2.4%
+total          197  53800    7.5 MB  100.0%
+
+By extension
+ext    files  lines
+-----  -----  -----
+.ts      158  39909
+.tsx      31   9770
+.css       4   3988
+.mjs       1     79
+.cjs       1     40
+.html      1     13
+.json      1      1
+
+Largest files
+file                             lines      size
+-------------------------------  -----  --------
+src/web/styles.css                3656  142.1 KB
+src/core/task-runtime.ts          2394  155.4 KB
+src/runtime/pi-adapter.ts         1376   85.7 KB
+src/core/operation-lifecycle.ts   1344   66.0 KB
+src/runtime/capabilities.ts       1324   59.8 KB
+src/web/Settings.tsx              1315   73.8 KB
+src/core/execution.ts             1201   66.0 KB
+src/server/usage.ts               1151   46.7 KB
+src/web/Conversation.tsx          1105   54.1 KB
+src/runtime/rsi.ts                1077   50.0 KB
