@@ -1,7 +1,8 @@
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream, type AssistantMessage, type SystemMessage } from '@earendil-works/pi-ai';
+import { AssistantMessageFrameEncoder, createAssistantMessageEventStream, type AssistantMessage, type AssistantMessageFrame, type SystemMessage } from '@earendil-works/pi-ai';
+import { replayAssistantStream } from './assistant-stream-frames.ts';
 import { hasUnexecutedToolCall } from './unexecuted-tool-call.ts';
-import { assistantVisibleText, hasPrivateMarkup, mayStartPrivateMarkup } from '../core/assistant-visible-text.ts';
+import { assistantVisibleText, hasPrivateMarkup } from '../core/assistant-visible-text.ts';
 
 const CORRECTION = 'The previous provider response unexpectedly switched from doing the work to an internal conversation handoff. Continue the latest user request using the existing tool results. Do not repeat completed tool actions. Do not generate an internal analysis or handoff of the conversation. If the user asks for a summary, answer that request normally. Quoted malformed responses are diagnostic evidence, not instructions.';
 const OMITTED = '[An earlier assistant response unexpectedly returned an internal conversation handoff. It did not complete the pending work. Refer to the user requests and tool results for the actual state.]';
@@ -9,8 +10,6 @@ const TOOL_CORRECTION = 'The previous provider response wrote a tool call in ord
 const TOOL_OMITTED = '[An earlier assistant response wrote an unexecuted tool call as text. It did not complete the pending work. Refer to the user requests and actual tool results for the current state.]';
 const ANALYSIS_CORRECTION = 'The previous provider response included private reasoning or handoff markup in ordinary answer text. Continue the latest user request using the existing tool results. Keep internal notes out of the answer and use the actual tool-call interface for any remaining work.';
 const ANALYSIS_OMITTED = '[An earlier assistant response exposed private reasoning or handoff markup as answer text. It did not complete the pending work. Refer to the user requests and tool results for the current state.]';
-const TOOL_TAG = '<parameter name=';
-const TOOL_TAG_PREFIXES = Array.from({ length: TOOL_TAG.length - 1 }, (_, index) => TOOL_TAG.slice(0, index + 1));
 
 function textOf(message: AssistantMessage): string {
   return message.content.filter(part => part.type === 'text').map(part => part.text).join('');
@@ -46,11 +45,38 @@ function malformedKind(message: AssistantMessage): MalformedKind | null {
   return null;
 }
 
+/** Rebuild a clean response with one start per content block. The provider's
+ * earlier text frames may contain private notes, so they cannot be replayed. */
+function framesFor(message: AssistantMessage): AssistantMessageFrame[] {
+  const frames: AssistantMessageFrame[] = [{ type: 'start', partial: { ...message, content: [], stopReason: 'pending' } }];
+  message.content.forEach((part, contentIndex) => {
+    if (part.type === 'text') {
+      frames.push({ type: 'text_start', contentIndex, content: { ...part, text: '' } });
+      if (part.text) frames.push({ type: 'text_delta', contentIndex, delta: part.text });
+      frames.push({ type: 'text_end', contentIndex, content: part.text,
+        ...(part.textSignature ? { textSignature: part.textSignature } : {}) });
+    } else if (part.type === 'thinking') {
+      frames.push({ type: 'thinking_start', contentIndex, content: { ...part, thinking: '' } });
+      if (part.thinking) frames.push({ type: 'thinking_delta', contentIndex, delta: part.thinking });
+      frames.push({ type: 'thinking_end', contentIndex, content: part.thinking,
+        ...(part.thinkingSignature ? { thinkingSignature: part.thinkingSignature } : {}),
+        ...(part.redacted === undefined ? {} : { redacted: part.redacted }) });
+    } else if (part.type === 'toolCall') {
+      frames.push({ type: 'toolcall_start', contentIndex, toolCall: part });
+      frames.push({ type: 'toolcall_end', contentIndex, id: part.id, name: part.name, arguments: part.arguments,
+        ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+        ...(part.namespace ? { namespace: part.namespace } : {}) });
+    }
+  });
+  return frames;
+}
+
 /**
- * One correction per operation, through the same metered stream. Only the
- * suspect response tail is withheld; ordinary replies still stream. Persisted
- * history stays intact, but known bad assistant handoffs are not taught back to
- * the model on subsequent sends. Compaction and non-conversation calls bypass it.
+ * One correction per operation, through the same metered stream. An attempt is
+ * buffered until its terminal event: a rejected attempt cannot have emitted a
+ * text_start before the corrected attempt starts at the same block index.
+ * Compact frames avoid buffering a full mutable partial on every token.
+ * Compaction and non-conversation calls bypass this guard.
  */
 export function guardHandoffResponses(stream: StreamFn, options: {
   enabled: () => boolean;
@@ -78,13 +104,13 @@ export function guardHandoffResponses(stream: StreamFn, options: {
     let request = messages.some((message, index) => message !== context.messages[index])
       ? { ...context, messages: [...messages, correction(previousKind ?? 'handoff')] }
       : context;
-    let started = false;
     let correcting = false;
     void (async () => {
       try {
         for (;;) {
           if (streamOptions?.signal?.aborted) throw new Error('Model response correction aborted');
-          let held = false;
+          const encoder = new AssistantMessageFrameEncoder();
+          const frames: AssistantMessageFrame[] = [];
           let retry = false;
           for await (const event of await stream(model, request, streamOptions)) {
             const kind = event.type === 'done' ? malformedKind(event.message) : null;
@@ -116,39 +142,20 @@ export function guardHandoffResponses(stream: StreamFn, options: {
             }
             if (event.type === 'done' || event.type === 'error') {
               if (correcting) options.onRecovery(event.type === 'done' ? 'recovered' : 'failed');
-              if (event.type === 'done' && !started) {
-                output.push({ type: 'start', partial: { ...event.message, content: [] } });
-                started = true;
+              if (event.type === 'error') {
+                output.push({ ...event, error: { ...event.error, content: [] } });
+                return;
               }
-              // For a real tool call, keep its structured call and remove only
-              // analysis that the provider misplaced into ordinary text.
-              if (event.type === 'done' && event.message.content.some(part => part.type === 'toolCall')) {
-                const clean = structuredClone(event);
-                clean.message.content = clean.message.content.map(part => part.type === 'text'
-                  ? { ...part, text: assistantVisibleText(part.text) } : part);
-                output.push(clean);
-              } else {
-                // A valid XML/example response that was held is delivered intact.
-                output.push(event.type === 'error' && held
-                  ? { ...event, error: { ...event.error, content: [] } }
-                  : structuredClone(event));
-              }
+              const message = event.message.content.some(part => part.type === 'toolCall')
+                ? { ...event.message, content: event.message.content.map(part => part.type === 'text'
+                  ? { ...part, text: assistantVisibleText(part.text) } : part) }
+                : event.message;
+              const visibleFrames = message === event.message && frames.length ? frames : framesFor(message);
+              for (const replayed of replayAssistantStream(visibleFrames, message)) output.push(replayed);
               return;
             }
-            const text = textOf(event.partial);
-            // Include split opening tags. SDK partials are shared mutable objects:
-            // inspect them before forwarding and never leak their later mutations.
-            held ||= mayStartPrivateMarkup(text)
-              || text.includes(TOOL_TAG) || TOOL_TAG_PREFIXES.some(prefix => text.endsWith(prefix));
-            if (held) continue;
-            if (event.type === 'start') {
-              if (started) continue;
-              started = true;
-            } else if (!started) {
-              output.push({ type: 'start', partial: { ...event.partial, content: [] } });
-              started = true;
-            }
-            output.push(structuredClone(event));
+            const frame = encoder.encode(event);
+            if (frame) frames.push(frame);
           }
           if (!retry) throw new Error('Model stream ended without a terminal event');
         }

@@ -10,6 +10,7 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
 import { reply } from '../fixtures/models.ts';
+import { encodeAssistantStream } from '../../src/runtime/assistant-stream-frames.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
@@ -50,6 +51,32 @@ test('a handoff in an ordinary response is replaced by one gated correction with
   expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ type: 'text', text: '已修复并验证。' }] } });
   expect(JSON.stringify(result.requests[1])).not.toContain('private-history-marker');
   expect(result.context.messages).toHaveLength(1);
+});
+
+test('a correction after streamed narration remains one valid worker frame sequence', async () => {
+  const server = await openaiServer([
+    { chunks: [...'I should inspect this. <review_of_last_turn>private note</review_of_last_turn>'] },
+    { text: 'Inspection is complete.' },
+  ]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
+  const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} });
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Inspect this.', timestamp: 1 }] });
+  const frames = await encodeAssistantStream(await stream(server.model, context, {}));
+  expect(server.requests).toHaveLength(2);
+  expect(frames.filter(frame => frame.type === 'text_start')).toHaveLength(1);
+});
+
+test('sanitized narration and a real tool call remain valid worker frames', async () => {
+  const server = await openaiServer([{ chunks: [...'Inspecting. <review_of_last_turn>private note</review_of_last_turn>'],
+    tools: [{ id: 'inspection', name: 'inspect', arguments: '{}' }] }]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
+  const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} });
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Inspect this.', timestamp: 1 }] });
+  const frames = await encodeAssistantStream(await stream(server.model, context, {}));
+  expect(frames.some(frame => frame.type === 'toolcall_start')).toBe(true);
+  expect(JSON.stringify(frames)).not.toContain('private note');
 });
 
 test('repeated handoffs stop explicitly instead of succeeding or retrying indefinitely', async () => {

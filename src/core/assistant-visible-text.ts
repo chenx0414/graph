@@ -11,14 +11,6 @@ export function hasPrivateMarkup(text: string): boolean {
   return OPENING.test(text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, ''));
 }
 
-/** Keep a possible opening marker out of live text until its full spelling is known. */
-export function mayStartPrivateMarkup(text: string): boolean {
-  const lower = text.toLowerCase();
-  return ['<analysis', '<review', '</analysis', '</review'].some(start =>
-    lower.includes(start) || Array.from({ length: start.length - 1 }, (_, index) => start.slice(0, index + 1))
-      .some(prefix => lower.endsWith(prefix)));
-}
-
 /** Remove private markup emitted as ordinary assistant text. Fenced examples stay visible. */
 export function assistantVisibleText(text: string): string {
   return text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g).map(part => {
