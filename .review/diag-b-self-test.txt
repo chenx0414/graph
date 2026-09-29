@@ -1,0 +1,1 @@
+diag-b --self-test: PASS (4 files, 10 lines; module + extension buckets match the fixture)
