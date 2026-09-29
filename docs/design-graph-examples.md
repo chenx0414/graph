@@ -1,187 +1,190 @@
-# Graph 设计范例：三档分级
+# Graph 设计范例
 
-本页是「graph 设计范例」的第 1 份产物。目标只有一个：**让 main agent 设计图时，先判档，再选形状**——而不是每次从零发明一张图。
+这是「graph 设计范例」的第 **1** 份产物：**简单档**。
+另外两份（**中等档**、**复杂档**）是后续待做，本页只留占位与判定线，不提前写。
 
-本页只定义**语义**，不写代码、不改 prompt。落地形态（进 `main` 提示词，还是进 `templates.ts` / `architecture-catalog.ts`）由下一步决定。
+**本页给谁看**：设计图的 **main agent**。目标只有一个——**判档，然后照着一个已验证的形状写，而不是每次从零发明一张图**。
 
-## 已确认的决策（使用者 v11 回答）
+---
 
-1. **别脱节**：`templates.ts` 的可执行形状与 `architecture-catalog.ts` 的玩家可见目录必须**对应上**，不能各说各话。→ 这是一条硬性约束，不是可选项。
-2. **判定线**：同意「子任务之间需不需要中间状态在运行时来回传递」这条贯穿三档的判定线。
-3. **简单档可视化**：简单档**不需要**一张单独的 graph 视图，要找一种**更轻**的可视化方法。
-4. **简单档的角色**：简单档 subagent 是**普通 `agent` 节点**，但**需要新角色去承担任务**——例如 `research/SKILL.md` 就需要一个「能够检索的角色」。
-5. **Q1b 已定 = (b)+(c)**：这个角色是**真正不同的能力**（独立工具集 + 独立提示词身份）**加独立模型档**。→ **这不是「3 行改名」，是一套新定义。**
-6. **Q1c 已定 —— 使用者重新框定了整个问题（比我的框架更对）**：
+## 怎么用这页（操作顺序）
 
-> 「是或不是，是由 **main agent 自己定义**的。毕竢 subagent 的功能（即简单图）是 main agent **主动调用来帮自己完成任务**的，所以具体需要完成什么任务，就具体需要相应的角色去完成。所以 main agent **可以选择已有的配方，也可以自己自定义一个更合适的配方**。」
+1. **先判档**（下面那条唯一要记的规则），别先想节点。
+2. 选中某一档的「形状」后，**照抄那一档的范例**，只替换 `id` / `action` / `definitionVersion` / `model` / `input` / `deliverable`。
+3. 三个硬规则不要漏：**显式声明 `decisions`**、**每个交回东西的节点声明 `deliverable`**、**每个子任务写成一个自包含的任务**。
 
-**这句话把「角色从哪来」这个问题彻底解掉了**：
-- 不存在「简单档必须用 `literature-search` 这个内置角色」的说法——那只是**一个可选选项**。
-- `literature-search@1` 是**不是**你要的检索角色，不再是一个需要事先定死的问题：**有就用，不够就自己造。**
-- 于是「要不要新增 `role` 枚举值」这个毁掉大半篇幅的争论**整段作废**：角色不是枚举，是**配方（recipe）**，main 可以现造。
-
-**实测旁证（`docs/agent/agent-recipes.md`）**：main 确实能**自己定义**配方——
-- `POST /api/catalog/combinations`（新建）→ 返回 `{combination, definition}`，其中 `definitionVersion`（如 `my-reviewer@1`）就是交给 `propose_graph` 的版本号。
-- 另有 compile / 改描述 / delete 三条路由。
-- **硬边界**：配方只能**引用已存在的能力**，**不能创造能力或授予权限**（「能力必须先存在于资源库」）。
-
-**所以完整链路是**：main 判档 → 选/造配方 → 配方引用能力 → 节点带 `definitionVersion` + `model` 派发。简单档的「角色」就在这条链的配方那一环，**不需要新枚举、不需要新字段**。
-
-**同时落地了 Q4b/Q5 的答案（使用者）**：目录的每条架构应**用 `id` 硬绑定到可执行模板**（不脱节）；目录该列「**档**」。
-
-## 为什么需要这页（现状是实测的，不是推测）
-
-- `src/core/templates.ts` 有 8 个**可执行**形状：`pipeline` / `fanout` / `router` / `supervisorWorkers` / `evaluateOptimize` / `adversarial` / `multiview` / `jury`。
-- `src/catalog/architecture-catalog.ts` 有一份**玩家可见**的架构目录（顺序执行、条件路由、扇出与汇合、流水线、主管与工人、评估与优化、对抗式验证、多视角与评委）。
-- 两者**脱节**：目录没有分级，模板也没被 main 当成「选型菜单」。
-- **真正的缺口在最低档**：全库 129 个任务里，只有 **12 个**任务的图包含非 master 的 agent 节点；agent 节点的 action 分布是 `master 117 / work 23 / review 13`。也就是说 **main 几乎总是自己干，而不是「派生一个子智能体、拿回结果、会话结束」**。三档里最常用的那一档，正是目前最缺的那一档。
+---
 
 ## 一条贯穿三档的判定线（唯一需要记的规则）
 
 > **子任务之间需不需要「中间状态」在运行时来回传递？**
-> 不需要 → 简单档。需要，但方向单一（实现 → 审查 → 返工）→ 中等档。需要在**多个视角/多个候选之间**反复交换与仲裁 → 复杂档。
+> 不需要 → **简单档**。需要，但方向单一（实现 → 审查 → 返工）→ **中等档**。需要在**多个视角/多个候选之间**反复交换与仲裁 → **复杂档**。
 
-这条线决定了图的**形状**，因为：
+这条线决定图的**形状**：
 - **简单档**的子任务彼此独立，谁也不需要知道别人的中间产物，因此**没有回边、没有跨节点上下文**——这正是它能廉价的原因。
-- **中等档**引入了**单一方向的返工环**（审查不通过就回到实现）。
+- **中等档**引入**单一方向的返工环**（审查不通过就回到实现）。
 - **复杂档**引入**多条回边 + 候选/评委之间的证据交换**。
 
 ---
 
-## 简单档：单 subagent
+# 简单档：把任务分给多个 subagent，产物自动交回 main
 
-**语义**：`subagent = 由 main 自动派生、独立负责一个子任务、执行完把**结构化结果**交回 main，然后该 subagent 的会话结束。`
+## 语义（使用者定义）
 
-**形状**：n 个互不依赖的 `agent` 节点（`dependsOn` 为空或只依赖彼此独立的前置），主 Agent 等待并汇总。
+> 简单档 = 把一个任务**分到多个 subagent**（例如三个），**subagent 结束后自动把产物发布给 main**。
 
-**适合**：多个互不依赖的调研、多方评审、多维度数据分析。
-**不适合**：任务之间强依赖、必须按顺序执行；子任务高度耦合、需要频繁互相传递中间状态。
+三个要点，缺一不可：
+1. 子任务**互不依赖**（`dependsOn` 为空），所以可以**真并行**；
+2. 子任务结束时**自动发布自己的产物**——不需要 main 去要，也不依赖 subagent「记得」调用工具；
+3. main 结束后**能直接读到**这些产物。
 
-**你给的例子**：用 `research` skill 时，可以把它当成简单档 subagent。**Q3 已定**：简单档要真的可用；`research/SKILL.md` 现在说的「spin up a background agent」**实际没走 Graph**，需要能表达成简单档图（并且它需要一个「检索角色」，见下）。
+## 形状
 
-**可视化（Q3 已定）**：简单档**不需要一张单独的 graph 视图**——它没有回边、没有分支、没有容器，画成图只会是一排孤立方框，信息量为零。要一种**更轻**的方式（例如任务卡上的一行「派生了 N 个子任务，各自状态」）。具体形态留待落地方案时提。
-
-### 简单档的角色 = main 自己选/造的配方（Q1c 已定）
-
-使用者把问题重新框对了：**简单档的角色不是预设的，是 main 为具体子任务而选/造的配方。**
-
-实测已证 Chain 存在（见上「已确认的决策」第 6 条）：main 能通过 HTTP 路由**新建配方**，配方引用**已存在的能力**，编译出 `definitionVersion` 交给 `propose_graph`。
-
-因此（b)+(c) 的「独立能力集 + 独立模型档」由**三个已有物件**共同承担：
-
-| (b)+(c) 想要 | 已有物件 | 现状 |
-|---|---|---|
-| 独立工具集 | 配方引用的**能力**（skill / mcp / 扩展） | ✅ 存在 |
-| 独立提示词身份 | 配方的 agent prompt（如 `prompt-literature-search`） | ✅ 存在 |
-| 独立模型档 | `recommendedGrade` / `NodeSpec.model` | ✅ 存在 |
-| 这个角色本身 | **配方** `literature-search`（仅为一个选项） | ✅ 存在 |
-
-**结论（奥卡姆剃刀）**：
-1. ❌ **不需要新 `role` 枚举值**——角色不是枚举，是配方，main 可现造。
-2. ❌ **不需要新字段**——`definitionVersion` + `model` 已足够。
-3. ✅ `literature-search@1` **是不是你要的检索角色，不需要事先回答**：有就用，不够就自己造。
-
-**真正的短板不在「有没有角色」，而在「main 现在几乎不派生任何非 master 子节点」**（全库 129 个任务里只 12 个）。这才是简单档要解决的问题。
-
-### 实战观察（2026-09-28，真实任务 `95050211`）
-
-用简单档真跑了一次（3 个互不依赖的 agent 并行调研 `pi-subagents@0.73.1`，验收通过）。四条观察：
-
-1. **真并行是事实**：三个子任务在 **1 毫秒**内同时派发，各自独立跑 ~140 秒。简单档不需要任何新机制。
-2. **角色 = 配方，已被实证**：3 个节点都是普通 `agent` + `definitionVersion`，没有新 `role` 枚举。
-3. **main 必须显式声明 `decisions`（这是本页最重要的一条规则）**。
-   - 草稿的 `decisions` 字段有两个分支：**显式声明** → 用你策展的那几条（`validateProposal` 已限制 ≤50 条、每条 ≤800 字）；**字段缺失** → harness **回退**成「把该会话里已投递的使用者消息全部 dump 出来」。
-   - 那次我没声明，于是掉进回退，`decision_digest` 变成了 **636 条**——我自己的对话历史（含 `continue`、`/agent_browser` 这类噪音）。
-   - **显式给 `[]` 就是「冻结零约束」，不会被回填**；只有**字段缺失**才走回退。所以：**设计图时总是显式声明 `decisions`，哪怕写 `[]`**。
-   - 这也符合奥卡姆：**约束由 main 给出，而不是让 harness 去猜**。
-4. **子任务确实会收到会话里的约束，这是设计意图**：`tests/m8/conversation.test.ts` 明确钉住两件事——「一个已确认任务把会话的 decisions 与约束带给它的 workers」与「同一次绑定里，早期的约束能在后续十轮讨论后仍然存活」。所以回退不是事故：它存在的理由就是**让使用者随口说的约束（「登录先不改」「不要动 login.ts」）真的能到达干活的节点**。
-   - 由此：**给子任务派活时要把活描述成一个自包含的任务**，因为它同时看得见会话级约束（这是好事）。
-   - 真正要修的是**无界增长**：回退读整个会话、没有上限（实测 636 条）。现已改为**保头保尾窗口**（最早 6 条 + 最近 14 条，总条数 ≤20、总字数 ≤4000，超预算时从中间开始丢）——因为**最老的几条正是原始请求与早期约束所在处**，只留最近会恰好把这个特性的意义丢掉。
-   - 另一个候选修法（**语义过滤**：把 `continue`、slash 命令、短确认这类非约束从源头剔除）尚未做，记在 backlog。
-   - 曾经想过的「子节点不下发」是**错的**，而且**无需修**：「会话与执行状态」本来就只对 `chatting` 阶段的任务重建（`execution.ts:699`），普通 feature task 的节点根本没有这段东西；而 `decisions` 是刻意下发的。
-
----
-
-## 中等档：并行实现 + 评审返工环
-
-**语义**：2–3 个 subagent **并行实现** → 1–2 个 subagent 评审 → **评审不通过则把评审结果返回实现 subagent 返工**，循环至通过 → **交由 main 测试**。
-
-**形状**（直接映射现有可执行实体，**不需要新形状**）：
+n 个互不依赖的 `agent` 节点 + 1 个收尾的 program 验收节点。
 
 ```
-containers: 一个「实现组」容器 outputs: [评审节点]
 nodes:
-  impl-a ─┐
-  impl-b ─┼─→ review ─→ gate(graph.verify)
-  impl-c ─┘         │            │
-                    └────────────┘
-loops: [{ from: gate, to: impl-a/b/c }]   // 评审不通过 → 回到实现
+  research-auth      agent,  dependsOn: []          deliverable: notes/...-auth.md
+  research-surface   agent,  dependsOn: []          deliverable: notes/...-surface.md
+  research-lessons   agent,  dependsOn: []          deliverable: notes/...-lessons.md
+  check-notes        program dependsOn: [三个]      （验收项唯一允许的 checkNode）
 ```
 
-- 并行实现 = `fanout` 的语义（n 个无相互依赖的 agent）。
-- 评审返工环 = **`loops` 的一条回边**，门由 `graph.verify` 担任（**门路由必须由产物表达**，这是第 1 项固化的语义：readiness 只认 `succeeded`，「检查没过」由产物 outcome 表达，不由节点失败表达）。
-- 「交由 main 测试」 = 环通过后，再由 main 自己验（main 不派节点，而是自己跑）。
+**没有** `container`、**没有** `routes`、**没有** `when`、**没有** loop。简单档里出现这些，说明判错档了。
 
-**映射**：`evaluateOptimize` 就是这一档的骨架（`implement ⇄ gate`），中等档只是把 `implement` 从 1 个扩成 2–3 个并加 `review`。
+## 可直接照抄的范例（真跑通过的一张图）
+
+```json
+{
+  "requirementVersion": 1,
+  "summary": "并行调研 pi-subagents@0.73.1，产出可复核的调研笔记",
+  "decisions": [],
+  "acceptance": [
+    { "id": "notes-exist", "description": "三份笔记真实写入仓库，且引文可回溯到一手来源", "checkNode": "check-notes" }
+  ],
+  "nodes": [
+    {
+      "id": "research-auth", "kind": "agent", "action": "research",
+      "definitionVersion": "coder@10", "model": "<模型 id>",
+      "input": { "question": "pi-subagents@0.73.1 的授权模型：agent 如何获得调用 subagents 的权限？写 notes/pi-subagents-auth.md" },
+      "deliverable": { "path": "notes/pi-subagents-auth.md", "namespace": "research", "name": "pi-subagents-auth-notes", "title": "授权模型调研笔记" }
+    },
+    {
+      "id": "research-surface", "kind": "agent", "action": "research",
+      "definitionVersion": "coder@10", "model": "<模型 id>",
+      "input": { "question": "工具面与工作流 API：subagent 参数、workflowScript 的 runs.run/runs.all/runs.lanes 语义。写 notes/pi-subagents-surface.md" },
+      "deliverable": { "path": "notes/pi-subagents-surface.md", "namespace": "research", "name": "pi-subagents-surface-notes", "title": "工具面与工作流 API 调研笔记" }
+    },
+    {
+      "id": "research-lessons", "kind": "agent", "action": "research",
+      "definitionVersion": "coder@10", "model": "<模型 id>",
+      "input": { "question": "提炼「agent 学会调用 subagent」的可迁移教训，哪些值得 Graph 简单档借鉴。写 notes/pi-subagents-lessons.md" },
+      "deliverable": { "path": "notes/pi-subagents-lessons.md", "namespace": "research", "name": "pi-subagents-lessons-notes", "title": "可迁移教训" }
+    },
+    {
+      "id": "check-notes", "kind": "program", "action": "graph.command",
+      "dependsOn": ["research-auth", "research-surface", "research-lessons"],
+      "input": { "command": "node", "args": ["scripts/check-pi-subagents-notes.mjs"] }
+    }
+  ]
+}
+```
+
+> `definitionVersion` 只是「角色」的载体。**main 可以自己造配方**（`POST /api/catalog/combinations` → 返回 `definitionVersion`），也可以直接用现成的（如 `coder@10`）。配方只能**引用已存在的能力**，不能创造能力或授予权限。
+
+## 三条硬规则（简单档最容易踩的三个坑，都是实测出来的）
+
+### 1. 总是显式声明 `decisions`，哪怕写 `[]`
+
+草稿的 `decisions` 有两个分支：
+- **显式声明** → 用你策展的那几条（`validateProposal` 限 ≤50 条、每条 ≤800 字）；
+- **字段缺失** → harness **回退**成「把该会话里已投递的使用者消息 dump 出来」。
+
+那次我没声明，回退把 `decision_digest` 变成 **636 条**——我自己的对话历史（含 `continue`、`/agent_browser`）。**给 `[]` 就是「冻结零约束」**，只有**字段缺失**才走回退。
+→ **约束由 main 给出，而不是让 harness 去猜**（奥卡姆）。
+
+> 顺带一个设计意图，别误解：子任务**确实会**收到会话里的约束，这是刻意的——使用者随口说的「登录先不改」必须能到达干活的节点（`tests/m8/conversation.test.ts` 钉住这条）。回退窗口已改为**保头保尾**（最早 6 + 最近 14，≤20 条、≤4000 字，超预算从中间丢），因为**最老的几条正是原始请求与早期约束所在处**。
+
+### 2. 要交回东西的节点，就声明 `deliverable`
+
+**不要**依赖 subagent 记得调用 `artifact_publish`。声明即可，harness 负责落地：
+
+```json
+"deliverable": { "path": "notes/x.md", "namespace": "research", "name": "x-notes", "title": "…", "summary": "…" }
+```
+
+行为（已实现，`validateProposal` 与结算期都会把关）：
+
+| 事项 | 规则 |
+|---|---|
+| `path` | **相对路径**，不得以 `/` 开头、不得含 `..` 或空段（否则 harness 会读到节点无权交出的文件） |
+| `namespace` | 只能是 `plans` / `research` / `reviews` / `deliverables` / `summaries` |
+| `name`、`namespace` | 小写 slug |
+| `title` / `summary` | 可选；非空且有界（≤300 / ≤2000 字符） |
+| 发布时机 | 节点**成功结算**时由 harness 发布为 **task 级产物**，`producer` = 该节点 |
+| 文件不存在或是空的 | **节点不会 `succeeded`**（报错原因写在结果里，如 `notes/x.md was declared as this node deliverable but was never written`） |
+
+最后一行是这个字段存在的**全部理由**：图许诺了一个文件，**「通过了但没有文件」就是缺陷**，不该静默通过。—— 这次的教训正是：三个节点都只写了「写 notes/xxx.md」，**没有任何节点被要求发产物**，于是三条车道只有一条自己顺手发了。
+
+### 3. 每个子任务写成一个**自包含**的任务
+
+子任务**看得见会话级约束**（好事），但它**看不见别的车道的中间产物**（简单档没有跨节点上下文）。所以 `input` 里要把这件事讲全：要什么、写成哪个文件、算做到什么程度。不要把关键信息留在别处等它猜。
+
+## 产物怎么回到 main（这一段是本轮的新能力）
+
+| 谁 | 能看见什么 |
+|---|---|
+| 发布它的那个车道 | 自己发布的 task 级产物 |
+| **main agent** | **本任务 + 同一会话内所有任务的 task 级产物** ← 这是重点 |
+| 用户（控制台「共享产物」页） | 项目级 + **该项目所有任务**的 task 级产物 |
+| 本项目**未来的任务** | 只有**项目级**（即被晋升过的） |
+
+所以：
+- **产物可见性跟着「会话」走**，main **不需要**晋升就能读到子任务交回的产物。
+- **晋升（promote）是另一回事**：它把一份产物变成**项目级共享知识**，让**未来的任务**也能发现它。**不要给每个 subagent 产物都晋升**——那会把某一次图的工作材料灌进之后所有图。晋升应当是对「这份结论值得成为项目记忆」的**显式判断**。
+
+## 收尾与验收
+
+- 收尾放一个 **program 节点**（如跑一个检查脚本），验收项的 `checkNode` **必须指向它**（acceptance 只接受强制 program 节点）。
+- 检查脚本要**与验收措辞同强度**。这次的教训：验收项写的是「三份笔记**与一份汇总**」，而脚本只查那三份笔记，**比验收项弱**，于是「一份汇总」从来没被写出来却仍然通过。
+- 验收要么断言**交付表面**（文件真的在主线 / 产物真的在项目级），要么就别在验收项里许诺它。
+
+## 什么适合 / 什么不适合
+
+- **适合**：多个互不依赖的调研、多方评审、多维度数据分析、并行产出多份笔记。
+- **不适合**：子任务之间有强依赖、必须按顺序执行、需要频繁互相传递中间状态 → 那是**中等档**。
+
+## 已实证的数字（不是推测）
+
+- **真并行**：三个子任务在 **1 毫秒**内同时派发，各自独立跑 ~**140 秒**。
+- **不需要新机制**：3 个节点都是普通 `agent` + `definitionVersion` + `model`，没有新 `role` 枚举。
+- **真缺口**：全库 129 个任务里只有 **12 个**含非 master 的 agent 节点（`master 117 / work 23 / review 13`）。main 几乎总在自己干——三档里最常用的那一档，正是最缺的那一档。
+
+## 可视化（已定）
+
+简单档**不需要**一张单独的 graph 视图：它没有回边、没有分支、没有容器，画成图只会是一排孤立方框。要更轻的方式（例如任务卡上一行「派生了 N 个子任务，各自状态」）。
 
 ---
 
-## 复杂档：评估与优化 / 多视角与评委 / 对抗式验证 / 路由
+# 中等档 / 复杂档（待做）
 
-**语义**：如你所给的图——含评估与优化、多视角与评委、对抗式验证、路由。特征是**多条回边 + 候选/评委之间的证据交换 + 条件路由**。
+**本页不写它们**，只留判定线（见上）。两份待做的范例各要回答：
 
-**形状**（全部已有可执行实体）：
-
-| 子形状 | 现有模板 | 特征 |
-|---|---|---|
-| 评估与优化 | `evaluateOptimize` | `implement ⇄ gate` 单环 |
-| 对抗式验证 | `adversarial` | `implement → critic → gate`，**有效反例阻塞通过**（critic 主动找反例） |
-| 多视角与评委 | `multiview` / `jury` | 多维度独立判断 → 评委按硬性规则汇总；`jury` 含**候选 A/B 两条回边 + `absorb` 以 `evidence_only` 吸收双方证据** |
-| 路由 | `router` | `route` 工具节点按 `byField`/`byStatus` 选 case，`when: {node, case}` 决定走哪条分支 |
-
-**复杂档通常不是单选，而是组合**（你原话：「三者都要（按优先级可组合）」）。组合的上限是**图的判据**，不是本页能事先定死的。
-
-**本页只固化一条**：复杂档里出现**两条以上回边**、或**候选之间交换证据**（`context.predecessors` 的 `evidence_only`），才配称复杂档；只有一条回边的是中等档。
+- **中等档**：`work → review → 返工` 的**单一方向回边**怎么表达（容器 + `outputs`、`rework` 决策、返工时的证据传递）。
+- **复杂档**：多视角/多候选之间的**证据交换与仲裁**（≥2 条回边、`evidence_only` 上下文、评委/对抗式形状）。
 
 ---
 
-## 三档速查表
+## 附：仍然有效的历史决策（v11 使用者回答）
 
-| 档 | 一句话判据 | 回边 | 跨节点上下文 | 现有模板 | 需要新实体吗 |
-|---|---|---|---|---|---|
-| **简单** | 子任务互不依赖，各自独立出结果 | 无 | 无 | **缺**（只有 `fanout` 骨架） | **不要**——普通 agent 节点 + 配方（definition）已足够，实测见下 |
-| **中等** | 并行实现，单一方向的评审返工环 | 1 条 | 无（各自独立） | `evaluateOptimize` + `fanout` | 否 |
-| **复杂** | 多回边 / 候选交换证据 / 条件路由 | ≥2 条 | `evidence_only` 交换 | `adversarial` / `multiview` / `jury` / `router` | 否 |
+1. **别脱节（硬约束）**：`templates.ts` 的可执行形状 ↔ `architecture-catalog.ts` 的玩家可见目录必须对应上。
+2. **判定线**：同意上面的「中间状态」判定线。
+3. **简单档可视化**：不要单独的 graph 视图。
+4. **简单档的角色 = main 自己选/造的配方**：不是新 `role` 枚举，是配方；配方只能引用已存在的能力，不能创造能力或授予权限。
+5. 目录每条架构用 `id` **硬绑定**到可执行模板；目录该列「**档**」。
 
-**可视化的轻重也不同**：中等/复杂档回边与分支必须画出来（第 1 项已交付）；**简单档不画图，用更轻的方式**（Q3）。
+## 开放问题
 
-### 简单档已实测可用（第 2 步产物）
-
-用**生产形状**（`begin`+`accept`+`await drive()`，真本地模型服务器）实测一条「派生 → 独立干活 → 交回结构化结果」的链路：
-
-- 派生 worker **确实**被给了 `submit_result`；master 专属的 `artifact_promote` **没有**泄漏。
-- 三个节点全部 `succeeded`，**恰好 3 次请求**——链在**一次 `drive()` 内**排空。
-- 结构化结果（`result_handoff@1`）真的被下游读到。
-
-**结论**：简单档**不需要新实体**——普通 `agent` 节点 + `definitionVersion`（角色=配方）+ `model` 就完整表达了。可重复的验收制品：`tests/console/simple-tier-e2e.test.ts`。
-
----
-
-## 本页的开放问题（下一步前要定的）
-
-**已定**：
-- **Q1** → 简单档 subagent = 普通 `agent` 节点；角色 = **main 自己选/造的配方**。
-- **Q1b** → (b)+(c)：独立能力集（工具+提示词）+ 独立模型档。
-- **Q1c** → `literature-search@1` 是不是你要的角色，**不需事先定**——main 可选择已有配方，也可自定义更合适的。
-- **Q2** → 已选 3→1→2（本页是「3」）。
-- **Q3** → 简单档要真的可用；**不要**单独的 graph 视图，要更轻的可视化。
-- **Q4** → 「别脱节」是硬约束。
-- **Q4b** → 目录每条架构**用 `id` 硬绑定到可执行模板**。
-- **Q5** → 目录列「**档**」。
-
-**已被实测推翻、不再问的假设**：
-- ❌ 要新造 `role: 'research'`（角色是配方，不是枚举）。
-- ❌ 要新字段（`definitionVersion` + `model` 已足够）。
-- ❌ 必须用 `literature-search` 当简单档角色（它只是一个选项）。
-
-**下一步剩下的真问题**：main 现在**几乎不派生任何非 master 子节点**（129 任务里只 12 个）——这才是简单档要解决的。
+- 简单档的「更轻的可视化」具体形态。
+- 中等档的返工环与模板/目录的绑定方式（第 2 份范例要先答）。
+- `decisions` 回退的**语义过滤**（剔除 `continue`、slash 命令、短确认）——已记 harness backlog，判据未定。
