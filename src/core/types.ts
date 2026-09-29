@@ -161,7 +161,15 @@ export interface NodeSpec {
   context?: ContextRequest;
 }
 export interface ContainerSpec { id: string; parent?: string; dependsOn?: string[]; when?: { node: string; case: string }; outputs: string[] }
-export interface LoopSpec { from: string; to: string }
+/**
+ * A loop returns work to an upstream node.
+ *
+ * `case` is how a ROUTER asks for that return: when the router settles with this route, the work
+ * goes back to `to` instead of downstream. It is the same word as `when.case` on purpose — a graph
+ * already names its branches, so "which branch means rework" is a declaration, never a magic string.
+ * A loop with no `case` keeps the older meaning: it is driven by a verification verdict.
+ */
+export interface LoopSpec { from: string; to: string; case?: string }
 export interface Proposal {
   requirementVersion: number;
   summary: string;

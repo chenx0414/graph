@@ -24,7 +24,7 @@ export function validateProposal(proposal: Proposal) {
     if (node.optional !== undefined && typeof node.optional !== 'boolean') invalid('Optional status must be declared as a boolean');
     if (node.dependsOn !== undefined && !Array.isArray(node.dependsOn)) invalid('Dependencies must be a list');
     if (new Set(node.dependsOn).size !== (node.dependsOn ?? []).length) invalid('Dependencies must be unique');
-    if (node.routes && (node.kind !== 'program' || !node.routes.length || new Set(node.routes).size !== node.routes.length || node.routes.some(route => !text(route)))) invalid('Routers require unique named cases');
+    if (node.routes && (!node.routes.length || new Set(node.routes).size !== node.routes.length || node.routes.some(route => !text(route)))) invalid('Routers require unique named cases');
     if (node.deliverable !== undefined) {
       const { path, namespace, name, title, summary } = node.deliverable;
       const slug = (value: unknown) => typeof value === 'string' && /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(value.toLowerCase());
@@ -61,6 +61,13 @@ export function validateProposal(proposal: Proposal) {
   if (!Array.isArray(proposal.acceptance) || !proposal.acceptance.length) invalid('At least one acceptance check is required');
   if (new Set(proposal.acceptance.map(item => item.id)).size !== proposal.acceptance.length) invalid('Acceptance IDs must be unique');
   for (const item of proposal.acceptance) {
-    if (!text(item.id) || !text(item.description) || nodes.get(item.checkNode)?.kind !== 'program' || nodes.get(item.checkNode)?.optional) invalid('Each acceptance item requires an assigned mandatory program check');
+    const check = nodes.get(item.checkNode);
+    // An acceptance item may be bound to a mandatory program check, or to a mandatory Agent router:
+    // when review IS the router, "this reviewer passed its own judgement" is the evidence, and
+    // there is no separate program to bind to. A node that is neither (an ordinary Agent, or an
+    // optional node) still cannot carry acceptance.
+    const mandatory = check && !check.optional;
+    const isRouter = check?.kind === 'program' || (check?.kind === 'agent' && Boolean(check.routes?.length));
+    if (!text(item.id) || !text(item.description) || !mandatory || !isRouter) invalid('Each acceptance item requires an assigned mandatory program check or Agent router');
   }
 }
