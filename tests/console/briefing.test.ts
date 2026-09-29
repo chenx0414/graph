@@ -167,3 +167,24 @@ test('a rework with no recorded failure says so instead of inventing one', () =>
   expect(text).not.toContain('Acceptance this evidence blocks');
   expect(text).not.toContain('truncated');
 });
+
+// Failure mode (HB-208): an Agent router decides its own branch, but nothing in the briefing said the
+// structured result must carry `route`. Live, a reviewer wrote its report and still got refused at
+// settle time for a field it was never asked for. The briefing is the one place that must say it.
+const routerGraph: NodeSpec[] = [
+  { id: 'work', kind: 'agent' as const, action: 'implement', definitionVersion: 'coder@1', model: 'm', input: { objective: 'do it' } },
+  { id: 'review', kind: 'agent' as const, action: 'review', definitionVersion: 'reviewer@1', model: 'm', dependsOn: ['work'], routes: ['pass', 'fail'], input: { route: { declared: null }, focus: '只看 work' } },
+  { id: 'gate', kind: 'program' as const, action: 'graph.verify', dependsOn: ['review'], input: {}, routes: ['ship', 'fix'], verifier: { kind: 'independent', reportNodes: ['review'] } },
+];
+
+test('an Agent router is told its result must carry a route naming a declared branch', () => {
+  const text = briefing(nodeOperation('review'), { request: 'r', acceptance: [], graph: routerGraph, focus: 'review' });
+  expect(text).toContain('You are a router: your branch is yours to choose from pass, fail.');
+  expect(text).toContain('outputJson must include a "route" field whose value is exactly one of: pass, fail');
+});
+
+test('a program router gets no such instruction: it maps status or a field, it does not speak for itself', () => {
+  const text = briefing(nodeOperation('gate'), { request: 'r', acceptance: [], graph: routerGraph, focus: 'gate' });
+  expect(text).not.toContain('Your branch is yours to choose');
+  expect(text).not.toContain('outputJson must include a "route"');
+});

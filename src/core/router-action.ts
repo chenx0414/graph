@@ -82,3 +82,17 @@ export function resolveRouteCase(input: RouteDecisionInput): RouteDecision {
 
 /** Where the routing instruction lives on the router node, so the loader and the docs agree. */
 export const ROUTE_SOURCE_KEY = 'route';
+
+/**
+ * Whether this node decides its branch for itself (`declared: null` on an Agent node). Only an Agent
+ * can speak for itself; a program must map a status or a field instead. The briefing uses this to tell
+ * the Agent its structured result has to carry `route`, and the loader uses it to build the source.
+ */
+export function agentChoosesItsOwnRoute(node: { kind: string; input?: Json }): boolean {
+  if (node.kind !== 'agent') return false;
+  const input = node.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const route = (input as Record<string, unknown>)[ROUTE_SOURCE_KEY];
+  if (!route || typeof route !== 'object' || Array.isArray(route)) return false;
+  return (route as Record<string, unknown>)['declared'] === null;
+}
