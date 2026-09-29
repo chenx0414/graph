@@ -107,11 +107,20 @@ nodes:
 
 ### 2. 要交回东西的节点，就声明 `deliverable`
 
-**不要**依赖 subagent 记得调用 `artifact_publish`。声明即可，harness 负责落地：
+**声明是保底通道**：声明即落地，**不要**依赖 subagent 记得调用 `artifact_publish`。harness 负责落地：
 
 ```json
 "deliverable": { "path": "notes/x.md", "namespace": "research", "name": "x-notes", "title": "…", "summary": "…" }
 ```
+
+同时 `artifact_publish` **仍然对子 agent 开放**，用于**除交付物之外的额外产物**（例如评审顺手写的复现 harness、实现者的自测脚本）。两条通道并存：
+
+| 通道 | 用途 | 保证 |
+|---|---|---|
+| **`deliverable` 声明（保底）** | 这个节点**必须**交出的那一份东西 | 节点结算时 harness 代发；**文件不存在/为空则节点不 succeeded** |
+| **agent 自调 `artifact_publish`** | 交付物**之外**的附加产物 | agent 自己决定，发布即成为 task 级产物 |
+
+**为什么保底不能取消**：代发挂在「节点成功结算」上，「声明了却没写」是**机械失败**。若把交付物也改成纯 agent 自 publish，「忘了发」就不再是失败，而是**静默通过**——验收证据会神不知鬼不觉地消失。
 
 行为（已实现，`validateProposal` 与结算期都会把关）：
 

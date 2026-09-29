@@ -4,8 +4,11 @@ import { agentChoosesItsOwnRoute } from '../core/router-action.ts';
 
 /** Task briefing package: goal, acceptance, decisions, and dependency artifact locations. */
 export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attempt'>, extra: { request: string; summary?: string; acceptance: { id: string; description: string; checkNode: string }[]; capabilities?: { id: string; version: string }[]; catalog?: { definitions?: string[]; capabilities?: string[]; agentCombinations?: { id: string; name: string; description: string; recommendedGrade: string; status: string }[] }; graph?: NodeSpec[]; focus?: string; review?: { kind: string }[]; conversation?: string; decisions?: string; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean } }) {
-  const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact =>
-    `${artifact.uri ?? artifact.path} (${artifact.digest})`)));
+  const artifacts = Object.values(operation.dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts.map(artifact => {
+    const ref = artifact.uri ?? artifact.path;
+    const key = artifact.artifactId && artifact.version !== undefined ? `${artifact.artifactId}@${artifact.version}` : undefined;
+    return key ? `${ref} (${artifact.digest}, artifactId ${key})` : `${ref} (${artifact.digest})`;
+  })));
   const catalogDefinitions = extra.catalog?.definitions ?? [];
   const catalogCapabilities = extra.catalog?.capabilities ?? [];
   const catalogAgentCombinations = extra.catalog?.agentCombinations ?? [];
@@ -68,7 +71,12 @@ export function briefing(operation: Omit<Operation, 'id' | 'generation' | 'attem
       : extra.review?.length
         ? `Your result feeds a graph.verify ${extra.review[0]!.kind} gate; submit the report schema that gate expects, including exact artifact versions from the dependency inputs.`
         : '',
-    artifacts.length ? `Artifacts:\n${artifacts.map(item => `- ${item}`).join('\n')}` : '',
+    artifacts.length ? [
+      `Artifacts:\n${artifacts.map(item => `- ${item}`).join('\n')}`,
+      // Name the read tool and the key so a node reads a dependency's artifact instead of
+      // reaching into the shared object store by path, which leaves no reader record.
+      'To read a dependency artifact, call artifact_read with its artifactId (the part before "@") and version; the file you already hold in the work copy is the same bytes.',
+    ].join('\n') : '',
     operation.context.answers.length ? `Answers: ${JSON.stringify(operation.context.answers)}` : '',
   ].filter(Boolean).join('\n');
 }
