@@ -10,6 +10,12 @@
 > **第 3 轮复核（同一会话再次返工，HEAD `bf47906`，已含 review-b/review-c 的报告文件）**：判定不变，仍为 **pass**，0 阻塞项。
 > 车道 a 的 5 条 lookFor 在新 HEAD 上**逐条重跑仍全部成立**，且 `scripts/diag-a.mjs` 的 blob 从车道提交到 HEAD **一字节未变**（`8a4185ba…` == `8a4185ba…`），数字仍是 `218 / 1431`（`find`/`grep` 独立复算吻合，连跑 3 次同摘要）。三个 diag 脚本合跑对 **1030** 个文件零改动。
 > 门禁复跑：`typecheck` / `lint` / `check:evidence` 全 0；`test` 仍红（42 文件 / 128 of 1468）。
+
+> **第 4 轮复核（HEAD `640199f`，已并入 review-b 的 `reviews/review-b.md`）**：判定不变，仍为 **pass**，0 阻塞项。
+> 车道 a 的 5 条 lookFor 在新 HEAD 上**逐条重跑仍全部成立**，`scripts/diag-a.mjs` 的 blob 仍是 `8a4185ba…`（车道提交 / HEAD / 工作副本三处一致）；数字仍是 `218 / 1431`（`find`/`grep` 独立复算吻合，连跑 3 次同摘要 `7dae6b3d…`）。三个 diag 脚本合跑对 1030 个文件的指纹 diff 为空。
+> 门禁复跑：`typecheck` / `lint` / `check:evidence` 全 0；`test` 1（42 文件 / 128 of 1468）。
+> 本轮 A/B 对照**独立复现**为 42/128 → **4/4**，基线提交 `7165551` 同样 4/4 且报错逐字相同。
+> 本轮修正并补充两点：(a) 上一轮探针记录的 5/5 中，第 5 个（`tests/m8/settings-ui.test.ts`）经证是我自己**并发跑两套 vitest** 造成的负载抖动，单独复跑 4 次全绿（探针 3/3、工作副本 1/1），不是缺陷，真实基线是 4；(b) §4.5 的阻塞比上轮记录的**更早也更硬** —— `integration` 副本上不仅 `typecheck`，`node --run test` 同样在第一步就 `vitest: command not found`（真实退出码 1）。详见 §8。
 > 本轮把 §4 的归因**从「已证明与车道无关」升级为「已证明是既有的环境基线」**：A/B 对照本轮为 128 → **4**，且这 4 个在**车道之前的基线提交 `7165551`** 上用同样的硬链接依赖**同样失败**（`Test Files 4 failed (4)`），因此它们与三个 diag 车道无因果关系、也不是本任务能修的代码缺陷。`integration` 副本仍然没有 `node_modules`（`tsc: command not found`），§4.5 的死锁风险**今天依然成立**。详见 §4.3 / §4.5 / §7。
 
 ---
@@ -204,6 +210,8 @@ Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@earendil-works/pi-ai'
 | 审查工作副本 `review-a`（HEAD `bf47906`） | 软链到 `13-Graph/node_modules` | **42 文件 / 128 用例失败** |
 | 对照副本 `/tmp/rev-a3-probe`（同一份源码） | `cp -al` 硬链接实体目录 | **5 文件 / 5 用例失败** |
 | 对照副本 + `git init -q` | 同上 | **4 文件 / 4 用例失败** |
+
+> **第 4 轮修正**：本表「对照副本 5 文件 / 5 用例」那一行里的第 5 个（`tests/m8/settings-ui.test.ts`）**不是真失败**，是第 3 轮探针与工作副本全量 vitest 并发时的负载抖动；单独串行复跑为 4/4，该文件单独复跑 4 次全绿。详见 §8.2。基线行（4/4）本轮独立复现，报错逐字相同。
 | **基线对照 `/tmp/rev-a3-base`（提交 `7165551`，车道之前，无 diag 脚本）** | 同上硬链接 | **同样 4 文件 / 4 用例失败** |
 
 **124 of 128 的失败仅由软链造成**（工作副本 42 个失败文件中，37 个在硬链接副本上直接转绿；`comm -13` 证明硬链接副本没有引入任何新失败文件）。剩下 4 个**全都是环境项，与代码无关**：
@@ -253,6 +261,8 @@ $ cd ../integration && node --run typecheck
 /bin/sh: tsc: command not found
 typecheck-in-integration exit=1
 ```
+
+> **第 4 轮加强（HEAD `640199f`）**：`node --run test` 也一并实测，同样在第一步就死 —— `/bin/sh: vitest: command not found`，真实退出码 1。所以阻塞不止于 `typecheck`，**四个阶段一个都到不了**。见 §8.4。
 
 所以在 `integration` 副本上，`node --run check` 会在**第一步 `tsc`** 就失败（连 `typescript` 都解析不到），比 128 个用例失败更早、更彻底。**在修好 `integration` 的依赖之前，任何跑 `node --run check` 的 `full-tests` 都必然红 → 退回 `merge` → 而 `merge` 只拥有那段 README → 再次 `full-tests` 再次失败，循环至 stalled。这是可预见的死锁。**
 
@@ -333,6 +343,8 @@ node --run test                                                    # 基线红�
 2. 修好依赖后 `full-tests` 仍会红 4 个文件 —— 这 4 个是环境基线（沙箱 PATH 缺 `npm`/`git`、兄弟项目 `12-MediaBookmarks` 不在盘上），应判为基线而非回归；**不要**让 `merge` 去改这 4 个用例对应的实现。
 3. `merge` 写 README 时遵守 §2.1 的硬约束：不得把「218 = 本仓测试套件数」或 `scripts/diag-a.mjs:8-9` 那句括号注释原样抄入。
 
+**第 4 轮复核（HEAD `640199f`）**：判定不变，仍为 **pass**，0 阻塞项，2 条非阻塞发现维持原判，§8 给出逐条重跑结果与两项修正。
+
 ---
 
 ## 7. 第 3 轮证据的一次性复现脚本（R23：可复跑产物）
@@ -375,3 +387,116 @@ ls -ld ../integration/node_modules            # → No such file or directory
 ```
 
 本轮实际产物路径：`/tmp/rev-a3-test.txt`（工作副本全量 42/128）、`/tmp/rev-a3-probe-test.txt`（硬链接副本 5/5）、`/tmp/rev-a3-fp1.txt` / `rev-a3-fp2.txt`（1030 文件指纹）、`/tmp/rev-a3-wt-fail.txt` 与 `/tmp/rev-a3-probe-fail.txt`（两个失败文件清单，供 `comm -13` 求差）。
+
+---
+
+## 8. 第 4 轮：HEAD `640199f` 上的逐条重跑
+
+### 8.1 车道 a 自身的 5 条 lookFor（全部成立）
+
+| 检查 | 复跑命令 | 结果 |
+| --- | --- | --- |
+| 提交边界 | `git show --name-status d1d954a` | `A scripts/diag-a.mjs` 一个文件，无 M/D/R |
+| blob 未被下游改动 | `git rev-parse d1d954a:scripts/diag-a.mjs` / `HEAD:…` / `git hash-object` | 三处同为 `8a4185ba914e7e3bd0aadae52a705cfaf7f81388` |
+| 只读（静态） | `grep -nE "writeFile\|appendFile\|mkdir\|rm(\|unlink\|rename\|createWriteStream\|copyFile\|chmod\|truncate\|spawn\|exec\|process\.exit\|process\.env" scripts/diag-a.mjs` | 命中 **0** |
+| 只读（动态） | 1030 文件 `path+size+mtime` 指纹，`diag-a/b/c` 合跑前后 `diff` | 指纹**逐行相同**，`git status --porcelain` 为空 |
+| 仅 node 内置 | `grep -nE "^import\|require\(" scripts/diag-a.mjs` | 仅 `node:fs/promises`、`node:path`、`node:url` |
+| 统计正确性 | `node scripts/diag-a.mjs` | `diag-a: 218 test files, 1431 test cases`，exit 0，stderr 0 字节 |
+| 独立复算 | `find … \| wc -l` / `grep -rhE … \| wc -l` | **218** / **1431**，与脚本逐字吻合 |
+| 可重复 | 连跑 3 次 `\| shasum -a 256` | 三次同为 `7dae6b3d3f453a8dea026fe9257aec1459d7b156500ad354bfadd528938ccbf6` |
+| cwd 无关 | `(cd /tmp && node <repo>/scripts/diag-a.mjs)` | 同一行 |
+| 零耦合 | `git diff --name-only 7165551 HEAD -- tests/ src/` | **0** 个文件；全仓 `diag-a` 仅命中 `tests/m2/verification.test.ts:229,235` 的字符串字面量 |
+| 门禁 | `typecheck` / `lint` / `check:evidence` / `node --check` | 全部 exit 0，语法 OK |
+
+§2.1 仍然成立：`find` 出的非 `.test.ts` 测试文件仍是且仅是 `tests/fixtures/m7/web-server.test.js`，而 `vitest.config.ts:6` 的 include 是 `tests/**/*.test.ts`；vitest 本轮实跑 **217** 个文件（5/5、4/4、42/42 三次均为 217），218 − 217 = 1，差的正是这个 fixture；`tests/m7/adapters.ts:79` 用 `spawnSync(process.execPath, ['--test', …])` 跑它，确实不是 vitest 套件。
+
+### 8.2 修正一：上一轮探针的「第 5 个失败」是我自己造成的负载抖动
+
+第 3 轮记录探针为「5 文件 / 5 用例」，并把 `git init` 后的 4 个当作真基线。本轮复跑时，探针与工作副本的两套全量 vitest **被我并发启动**，探针报 5 个失败，多出的是 `tests/m8/settings-ui.test.ts`：
+
+```
+FAIL  tests/m8/settings-ui.test.ts > settings auto-save models, credentials and limits without leaking secrets
+AssertionError: expected true to be false   ❯ tests/m8/settings-ui.test.ts:232
+Caused by: Error: Matcher did not succeed in time.
+   230|   }, { timeout: 15_000 }).toBe(true);
+   231|   const revisionPill = page.getByTestId('effective-revision').locator(…
+   232|   await expect.poll(async () => (await revisionPill.innerText())).inclu…
+```
+
+该文件本次耗时 41861ms，其中该用例 22694ms，是典型的并行负载下的 `expect.poll` 超时。本轮证伪它不是缺陷的三条独立证据：
+
+1. 探针**单独**跑全量：`Test Files 4 failed | 213 passed (217)` / `Tests 4 failed | 1464 passed (1468)`，148.59s —— 比并发那次（232.54s）快 1.6 倍，与 CPU 争抢一致。
+2. `settings-ui` 在探针里单独连跑 3 次：`1 passed (1)` / `9 passed (9)`，三次全绿。
+3. 同一文件在工作副本（软链 `node_modules`）里单独跑：`1 passed (1)` / `9 passed (9)`，且它**不在**工作副本的 42 个失败名单里。
+
+加上 `git diff --name-only 7165551 HEAD -- tests/ src/` 为 **0**（三个车道从落地到 HEAD 没碰过任何 `tests/` 或 `src/` 文件），`settings-ui` 与本任务无因果关系。**基线失败数是 4，不是 5。**
+
+### 8.3 复现：基线红的归因仍然成立（A/B 42/128 → 4/4）
+
+| 副本 | `node_modules` 形态 | 结果 |
+| --- | --- | --- |
+| 工作副本 `review-a`（HEAD `640199f`） | 软链到 `13-Graph/node_modules` | **42 文件 / 128 of 1468 失败**，208.44s |
+| 探针 `/tmp/rev-a4-probe`（同一份源码，`cp -al` 硬链接 + `git init`） | 硬链接实体目录 | **4 文件 / 4 of 1468 失败**，148.59s |
+| **基线 `/tmp/rev-a4-base`（提交 `7165551`，车道之前，`scripts/diag-*.mjs` 数量 = 0）** | 同上硬链接 | **同样 4 文件 / 4 用例失败**（`4 failed \| 23 passed (27)`） |
+
+基线的 4 条报错与 HEAD 上探针的 4 条**逐字相同**（`/usr/bin/which npm` 失败、`spawnSync git ENOENT` ×2、`12-MediaBookmarks/src/config.js` 不在盘上），因此这 4 条是**既有的环境基线**：既不是三个 diag 车道造成的，也不是本任务范围内能修的代码缺陷。`7165551..640199f` 的全部改动是 **6 个纯新增文件**（3 个 diag 脚本 + 3 份评审报告），零既有文件被修改。
+
+### 8.4 修正二：`integration` 副本的阻塞比上轮记录的更早、更硬
+
+上轮只测了 `typecheck`。本轮把 `node --run test` 也测了，**两者都在第一步就死**：
+
+```
+$ ls -ld integration/node_modules
+ls: integration/node_modules: No such file or directory
+
+$ cd integration && node --run typecheck ; echo $?
+/bin/sh: tsc: command not found
+1
+
+$ cd integration && node --run test ; echo $?
+/bin/sh: vitest: command not found
+1
+```
+
+`integration` 副本的 HEAD 还停在 `547cf36`，落后于当前 `640199f`。所以在它上面跑 `node --run check`，**四个阶段一个都到不了**。这使 §4.5 的死锁从「第四阶段红」升级为「第一阶段就红」：`full-tests` 必红 → 回边到 `merge` → `merge` 只拥有那段 README、改不动依赖 → 再次 `full-tests` 再次红，循环至 stalled。
+
+**给图操作者**：这是环境问题，不是代码问题，也**不是** `full-tests → merge` 回边能修的。修法就是 §4.4 那一行 `cp -al`，必须由图操作者对 `integration` 副本执行，然后重跑 `full-tests`。修好之后 `full-tests` 仍会红 4 个文件（§8.3 的基线），应判为**基线**而非回归；**不要**让 `merge` 去改这 4 个用例对应的实现。
+
+### 8.5 第 4 轮一次性复现脚本（R23）
+
+```bash
+W="$(pwd)"; NM=/Users/macmini/workspace/13-Graph/node_modules
+P=/tmp/rev-a4-probe; B=/tmp/rev-a4-base
+
+# 1) 车道 a 本体
+node scripts/diag-a.mjs                                  # → diag-a: 218 test files, 1431 test cases
+for i in 1 2 3; do node scripts/diag-a.mjs | shasum -a 256; done   # → 3 次同一摘要
+find . -type f \( -name '*.test.*' -o -name '*.spec.*' \) -not -path './.git/*' -not -path '*/node_modules/*' | wc -l   # 218
+grep -rhE '^[[:space:]]*(it|test)([.][A-Za-z_$]+)*[[:space:]]*[(`]' --include='*.test.*' --include='*.spec.*' . \
+  --exclude-dir=.git --exclude-dir=node_modules | wc -l                                                                 # 1431
+node --run typecheck; node --run lint; node --run check:evidence    # 全部 exit 0
+
+# 2) 只读（三个 diag 脚本合跑）
+fp() { find . -path ./.git -prune -o -path '*/node_modules' -prune -o -type f -print0 | xargs -0 stat -f '%N %z %m' | sort; }
+fp > /tmp/f1; node scripts/diag-a.mjs >/dev/null; node scripts/diag-b.mjs >/dev/null 2>&1; node scripts/diag-c.mjs >/dev/null 2>&1; fp > /tmp/f2
+diff /tmp/f1 /tmp/f2 && git status --porcelain     # 皆空 ⇒ 只读
+
+# 3) A/B 对照：同样的源码，只把 node_modules 换成硬链接实体目录
+#    ⚠ 必须串行跑，不要和工作副本的全量 vitest 并发，否则 settings-ui 会负载抖动假失败（§8.2）
+rm -rf "$P"; mkdir -p "$P"
+(cd "$W" && tar -cf - --exclude=.git --exclude=node_modules .) | (cd "$P" && tar -xf -)
+cp -al "$NM" "$P/node_modules"; (cd "$P" && git init -q)
+(cd "$P" && node --run test)                       # → 4 files / 4 tests 失败
+
+# 4) 基线对照：车道之前的提交
+rm -rf "$B"; mkdir -p "$B"; (cd "$W" && git archive 7165551) | tar -x -C "$B"; cp -al "$NM" "$B/node_modules"
+(cd "$B" && node node_modules/vitest/vitest.mjs run tests/m0/restricted-process.test.ts tests/m7/delivery.test.ts tests/m7/page.test.ts tests/m7/production.test.ts)
+# → Test Files 4 failed (4)  ⇒ 既有基线，与三个 diag 车道无因果关系
+
+# 5) integration 副本的依赖缺口（§8.4）
+ls -ld ../integration/node_modules                  # → No such file or directory
+(cd ../integration && node --run typecheck; echo $?) # → tsc: command not found / 1
+(cd ../integration && node --run test;    echo $?)  # → vitest: command not found / 1
+```
+
+本轮实际产物路径：`/tmp/rev-a4-fp1.txt` / `rev-a4-fp2.txt`（1030 文件指纹）、`/tmp/rev-a4-wt-test.txt`（工作副本 42/128）、`/tmp/rev-a4-wt-fail.txt`（42 个失败文件）、`/tmp/rev-a4-probe-test.txt`（并发跑，5/5）、`/tmp/rev-a4-probe-test2.txt`（单独跑，4/4）、`/tmp/rev-a4-sui-1..3.txt` 与 `rev-a4-sui-wt.txt`（settings-ui 4 次复跑全绿）、`/tmp/rev-a4-base-test.txt`（基线 4/4）、`/tmp/rev-a4-int-tc.txt` / `rev-a4-int-test.txt`（integration 两个阶段的失败）。
