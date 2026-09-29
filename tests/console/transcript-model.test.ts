@@ -6,6 +6,21 @@ import {
   toolGroupSummary,
 } from '../../src/web/transcript-model.ts';
 
+test('assistant transcript hides analysis from saved narration and an attached live stream', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'user', seq: 1, role: 'user', text: 'Show <analysis> literally.' }),
+      { ...message({ id: 'narration', seq: 2, role: 'activity', text: 'Checking. <analysis>private steps</analysis> Continuing.', operationId: 'op' }), kind: 'activity' },
+    ],
+    streaming: [{ operationId: 'op', entryId: 'next', partId: '0', text: 'Now <analysis>more private steps', length: 32, updatedAt: 1, ordinal: 2 }],
+    liveTools: [], busy: true,
+  });
+  expect(JSON.stringify(rows)).not.toContain('private steps');
+  expect(JSON.stringify(rows)).not.toContain('<analysis>private');
+  expect(JSON.stringify(rows)).toContain('Show <analysis> literally.');
+  expect(JSON.stringify(rows)).toContain('Checking.  Continuing.');
+});
+
 test('an rsi system message becomes a self-improvement report row', () => {
   const rows = buildTranscriptRows({
     messages: [{

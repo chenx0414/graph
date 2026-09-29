@@ -126,6 +126,35 @@ test('Pi executes a real tool after a leaked text call, then completes with veri
   } finally { await instance.close(); }
 });
 
+test('text before a real tool call does not expose analysis markup in Pi events or session history', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tool-analysis-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const server = await openaiServer([
+    { chunks: [...'Checking the parser. <analysis>Internal diagnostic steps.</analysis>'], tools: [{ id: 'inspection', name: 'inspect', arguments: '{}' }] },
+    { text: 'The inspection is complete.' },
+  ]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
+  const events: unknown[] = [];
+  const instance = await openPiInstance({
+    binding: { instanceId: 'main', nodeId: 'main', definitionVersion: 'main@1' },
+    workspace: root, stateDir: join(root, 'state'), model: server.model, modelRuntime: server.runtime,
+    stream: guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} }),
+    onEvent: event => events.push(structuredClone(event)),
+    tools: [externallyGated({
+      name: 'inspect', label: 'inspect', description: 'Inspect the fixture',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [{ type: 'text' as const, text: 'checked' }], details: {} }),
+    })],
+  });
+  try {
+    await instance.prompt('Inspect and answer.');
+    expect(server.requests).toHaveLength(2);
+    expect(JSON.stringify(events)).not.toContain('<analysis>');
+    expect(await readFile(instance.inspect().sessionFile, 'utf8')).not.toContain('<analysis>');
+  } finally { await instance.close(); }
+});
+
 test.each([
   '工作摘要：测试已完成，下一步提交。',
   '<summary>这是用户要求的摘要。</summary>',

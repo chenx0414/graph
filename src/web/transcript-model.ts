@@ -1,4 +1,5 @@
 import { toolActivity } from './tool-activity.ts';
+import { assistantVisibleText } from '../core/assistant-visible-text.ts';
 import { messageAttachments } from '../core/conversation-projection.ts';
 import type {
   ConversationMessage,
@@ -244,8 +245,12 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   const isReceipt = (message: ConversationMessage) => message.data?.reloadReceipt === true
     || (message.role === 'assistant' && message.text.startsWith('RSI 改动已提交，等待重载。') && message.text.includes('重载确认后会自动继续'));
   input = { ...input,
-    messages: input.messages.filter(message => !isReceipt(message)).map(message => message.operationId ? { ...message, operationId: root(message.operationId), ...(messageOrdinal(message) !== undefined ? { data: { ...message.data, ordinal: messageOrdinal(message)! + offset(message.operationId) } } : {}) } : message),
-    streaming: input.streaming.map(item => ({ ...item, operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
+    messages: input.messages.filter(message => !isReceipt(message)).map(message => {
+      const visible = message.role === 'assistant' || message.role === 'activity'
+        ? { ...message, text: assistantVisibleText(message.text) } : message;
+      return visible.operationId ? { ...visible, operationId: root(visible.operationId), ...(messageOrdinal(visible) !== undefined ? { data: { ...visible.data, ordinal: messageOrdinal(visible)! + offset(visible.operationId) } } : {}) } : visible;
+    }),
+    streaming: input.streaming.map(item => ({ ...item, text: assistantVisibleText(item.text), operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
     liveTools: input.liveTools.map(item => ({ ...item, operationId: root(item.operationId), ordinal: item.ordinal + offset(item.operationId) })),
   };
   const rows: TranscriptRow[] = [];

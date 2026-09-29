@@ -60,6 +60,9 @@ export async function openaiServer(plans: ResponsePlan[]) {
       for (const chunk of plan.chunks) {
         res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta: { role: 'assistant', content: chunk }, finish_reason: null }] })}\n\n`);
       }
+      if (plan.tools) {
+        res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta: { tool_calls: delta.tool_calls }, finish_reason: null }] })}\n\n`);
+      }
     } else {
       res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     }
