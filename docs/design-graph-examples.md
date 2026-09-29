@@ -1,7 +1,7 @@
 # Graph 设计范例
 
-这是「graph 设计范例」的第 **1** 份产物：**简单档**。
-另外两份（**中等档**、**复杂档**）是后续待做，本页只留占位与判定线，不提前写。
+这是「graph 设计范例」的第 **2** 份产物：**中等档**（第 1 份是**简单档**）。
+另一份（**复杂档**）是后续待做，本页只留占位与判定线，不提前写。
 
 **本页给谁看**：设计图的 **main agent**。目标只有一个——**判档，然后照着一个已验证的形状写，而不是每次从零发明一张图**。
 
@@ -166,12 +166,143 @@ nodes:
 
 ---
 
-# 中等档 / 复杂档（待做）
+# 中等档：并行实现 + 评审返工环
 
-**本页不写它们**，只留判定线（见上）。两份待做的范例各要回答：
+## 语义（使用者定义）
 
-- **中等档**：`work → review → 返工` 的**单一方向回边**怎么表达（容器 + `outputs`、`rework` 决策、返工时的证据传递）。
-- **复杂档**：多视角/多候选之间的**证据交换与仲裁**（≥2 条回边、`evidence_only` 上下文、评委/对抗式形状）。
+> 中等档 = 2–3 个 subagent **并行实现** → 1–2 个 subagent 评审 → **评审不通过就把评审结果返回实现者返工**，循环至通过 → 最后交由 main 测试。
+
+与简单档的差别只有一条（见判定线）：**子任务之间需要中间状态在运行时来回传递**，而且方向单一（实现 → 评审 → 返工）。
+
+## 先说结论：这一档不需要任何新实体
+
+返工环的机制**已经存在且已被测试钉住**（`tests/m2/loops.test.ts`）。缺的只是「多个实现者并行」这一形状的表达方式。你在建图时要用到：
+
+| 部件 | 用什么 |
+|---|---|
+| 并行实现者 | n 个互不依赖的 `agent` 节点（同简单档） |
+| 评审者 | 每个实现者一个 `agent` 评审节点，`dependsOn` 它要评的实现者 |
+| 门（决定通不通过） | **每个实现者一个** `program` 节点，`action: graph.verify` + `verifier` |
+| 返工回边 | `loops: [{ from: 门, to: 它评的那个实现者 }]`，**每个实现者一条** |
+
+## 形状（已实跑验证）
+
+```
+nodes:
+  impl-a   agent,   dependsOn: []            ┐
+  review-a agent,   dependsOn: [impl-a]      ├─ 一组 = 一个实现者 + 它的评审 + 它的门
+  gate-a   program  dependsOn: [impl-a, review-a]  verifier: multiview(subjectNode: impl-a)  ┘
+  impl-b   agent,   dependsOn: []
+  review-b agent,   dependsOn: [impl-b]
+  gate-b   program  dependsOn: [impl-b, review-b]  verifier: multiview(subjectNode: impl-b)
+loops: [{ from: gate-a, to: impl-a }, { from: gate-b, to: impl-b }]
+```
+
+## 可直接照抄的范例
+
+```json
+{
+  "requirementVersion": 1,
+  "summary": "两条车道并行实现，各自评审，评审不过就返工",
+  "decisions": [],
+  "acceptance": [
+    { "id": "a-ok", "description": "车道 a 通过评审", "checkNode": "gate-a" },
+    { "id": "b-ok", "description": "车道 b 通过评审", "checkNode": "gate-b" }
+  ],
+  "loops": [
+    { "from": "gate-a", "to": "impl-a" },
+    { "from": "gate-b", "to": "impl-b" }
+  ],
+  "nodes": [
+    { "id": "impl-a", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
+    { "id": "impl-b", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
+    { "id": "review-a", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-a"] },
+    { "id": "review-b", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-b"] },
+    { "id": "gate-a", "kind": "program", "action": "graph.verify", "dependsOn": ["impl-a", "review-a"],
+      "verifier": { "kind": "multiview", "subjectNode": "impl-a", "reportNodes": ["review-a"],
+        "dimensions": [{ "id": "correctness", "required": true, "reportNode": "review-a" }] } },
+    { "id": "gate-b", "kind": "program", "action": "graph.verify", "dependsOn": ["impl-b", "review-b"],
+      "verifier": { "kind": "multiview", "subjectNode": "impl-b", "reportNodes": ["review-b"],
+        "dimensions": [{ "id": "correctness", "required": true, "reportNode": "review-b" }] } }
+  ]
+}
+```
+
+> `graph.verify` 门是 `program` 节点，`verifier` 只允许出现在它上面（`validateVerifierConfig` 硬校验）。它必须有 `dependsOn` 到实现者与评审者。
+
+## 五条硬规则（都是实测出来的）
+
+### 1. 每个实现者要一个**自己的门**，不是一个大评审
+
+- `multiview` / `adversarial` 的 `subjectNode` **只能是一个节点**（一个被评对象）。
+- `jury` 虽能列多个 candidates，但它**永远不产生 blockers**，所以 `outcome` 永远是 `pass` —— **它驱动不了返工环**。
+- 所以「多个并行实现者 + 返工」= **n 个门**（每个实现者一组）。
+
+### 2. 每个实现者要一条**自己的** `loops` 条目
+
+- `loops[].to` **只能是节点，不能是容器**（`GraphPlan` 校验 `this.nodes.has(...)`，而 `reactivate` 按 nodes 表查）。
+- 一条 `{from: gate, to: impl}` 只激活那一个实现者；要返工两个，就写两条。
+- 门的 `from` 只对自己声明的 loops 生效：`handleRework` 取 `loops.filter(l => l.from === 当前节点)`。
+
+### 3. 门的判定是**产物**，不是节点失败
+
+门永远以 `outcome: completed` 结算，把决定写在 output 里（`{kind:'verification', outcome:'rework'|'pass', blockers:[...]}`）。readiness 只认 `succeeded`；「检查没过」由**产物 outcome** 表达。这与第 1 项固化的语义一致，也让 `graph.rework` 事件可追溯。
+
+### 4. 返工是**复用原 instance**，不是重开一个
+
+实测语义（`tests/m2/loops.test.ts`）：
+
+| 事情 | 行为 |
+|---|---|
+| 被返工的实现者 | `reactivate` **round+1，复用原 instance**（同一 instanceId） |
+| 它作废的证据 | `evidence.valid=0` |
+| **未变的兄弟车道** | **不重跑**（实测：一条车道返工 1 次，另一条只跑了 1 次） |
+| 下游依赖被返工节点的节点 | activation 置 `invalidated`，需要重新满足 |
+| 循环上限 | **连续 3 轮无实质进展 → `stalled` 阻塞**（`stall_count`），循环有界，不会无限转 |
+
+「无实质进展」的判据是 blockers 的 id 集合：**上一次的某个 blocker id 这次消失了**才算有进展（`progress` 逻辑）；`invalid_evidence` 不算进展。
+
+### 5. 评审者必须交回一份**合规的 ReviewReport**，否则门会以 `invalid_evidence` 拒绝
+
+`multiview` 的评审报告形状（最少可用）：
+
+```json
+{
+  "schemaVersion": 1,
+  "subject": { "path": "/abs/path/to/被评产物", "digest": "<sha256>" },
+  "body": { "kind": "multiview",
+    "dimensions": { "correctness": { "verdict": "fail", "reason": "第一版不完整",
+      "evidence": [{ "path": "/abs/path/to/证据", "digest": "<sha256>" }] } } }
+}
+```
+
+要点：
+- **`subject` 必须是它评的那个产物**（`path` + `digest`），不是自由文本；
+- `verdict` 三值：`pass` / `fail` / `unresolved`；
+- **`evidence` 必须非空**，每项是**绝对路径 + sha256**，否则 `invalid_evidence`；
+- **`files`（可选）= 修复要动的仓库相对路径**。它有一个硬作用：门会检查这些文件是否落在某个节点的声明范围内，**不在任何节点范围内就写进 `unowned`**，提示 main 去扩那个节点的文件清单——而不是让某个车道瞎猜。
+
+## 收尾与验收
+- 每个门是 `program` 节点，可以作为**验收项的 `checkNode`**（acceptance 只接受强制 program 节点）；本范例用了两条验收项，一门一条。
+- 门通过时才会写 evidence（`evaluateVerifier` 只在 `pass` 时产出 evidence），所以「验收通过」= 真的过了评审。
+- main 自己最后仍要验（跑检查脚本 / 看 diff），门只保证评审规则通过。
+
+## 什么适合 / 什么不适合
+- **适合**：实现 → 独立评审 → 不通过就返工，且返工方向单一；多车道各改各的文件。
+- **不适合**：需要在**多个候选之间比较并选一个**（那是 `jury` / 复杂档）；需要多条互相交织的回边（复杂档）。
+
+## 已实证（不是推测）
+用上面那份可照抄的结构真跑（两条车道 + 两个门 + 两条回边）：`phase completed`；`workA` 跑 **2** 次（返工 1 次）、`workB` 只跑 **1** 次（未变的车道没被牵连）；`gateA` 的两次判定为 **`rework` → `pass`**、`gateB` 为 `pass`；两条验收项都拿到 valid evidence。
+
+---
+
+# 复杂档（待做）
+
+**本页不写它**，只留判定线（见上）。它要回答：
+
+- **多视角/多候选之间的证据交换与仲裁**（≥2 条回边、`context` 的 `evidence_only`、评委/对抗式形状）。
+- 复杂档通常不是单选而是**组合**；唯一可先固化的判据：**出现两条以上回边、或候选之间交换证据，才配称复杂档**。只有一条回边的是中等档。
+
 
 ---
 
