@@ -519,6 +519,7 @@ export async function openTaskRuntime(options: {
       ...(fallback ? { fallback } : {}),
       catalog,
       git,
+      artifacts,
       scratchRoot: stateDir,
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),

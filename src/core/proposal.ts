@@ -25,6 +25,22 @@ export function validateProposal(proposal: Proposal) {
     if (node.dependsOn !== undefined && !Array.isArray(node.dependsOn)) invalid('Dependencies must be a list');
     if (new Set(node.dependsOn).size !== (node.dependsOn ?? []).length) invalid('Dependencies must be unique');
     if (node.routes && (node.kind !== 'program' || !node.routes.length || new Set(node.routes).size !== node.routes.length || node.routes.some(route => !text(route)))) invalid('Routers require unique named cases');
+    if (node.deliverable !== undefined) {
+      const { path, namespace, name, title, summary } = node.deliverable;
+      const slug = (value: unknown) => typeof value === 'string' && /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(value.toLowerCase());
+      // The path is resolved inside the node's workspace when it is published, so it must stay
+      // there: a deliverable that points at an absolute path or walks out with `..` would make the
+      // harness read a file the node was never entitled to hand over.
+      if (!text(path) || path.startsWith('/') || path.split(/[/\\]/).some(part => part === '..' || part === '')) {
+        invalid('A deliverable path must be a relative path inside the workspace');
+      }
+      if (!['plans', 'research', 'reviews', 'deliverables', 'summaries'].includes(namespace)) invalid('A deliverable namespace must be plans, research, reviews, deliverables or summaries');
+      if (!slug(namespace) || !slug(name)) invalid('A deliverable namespace and name must be lowercase slugs');
+      if (title !== undefined && !text(title)) invalid('A deliverable title must be nonempty when given');
+      if (summary !== undefined && !text(summary)) invalid('A deliverable summary must be nonempty when given');
+      if (title !== undefined && title.length > 300) invalid('A deliverable title is too long');
+      if (summary !== undefined && summary.length > 2_000) invalid('A deliverable summary is too long');
+    }
   }
   const plan = new GraphPlan(proposal);
   validatePredecessorPolicies(proposal, plan, nodes);
