@@ -114,7 +114,7 @@ function declarations(features: AgentToolFeatures) {
     artifact_publish: {
       name: 'artifact_publish',
       label: 'Publish shared artifact',
-      description: `Publish an immutable artifact version from a file inside this Agent's private workspace or from direct text content. Allowed namespaces: ${(features.artifacts?.allowedNamespaces ?? []).join(', ')}. Publishing never overwrites an earlier version; use expectedVersion for compare-and-swap.`,
+      description: `Publish an immutable artifact version. Give either sourcePath or content, never both: content is the simplest when the report is text you already hold. Allowed namespaces: ${(features.artifacts?.allowedNamespaces ?? []).join(', ')}. sourcePath must name a regular file inside this operation's work copy - a report you wrote to /tmp is refused, so write the file into your work copy first and publish that path. Publishing never overwrites an earlier version; use expectedVersion for compare-and-swap. A deliverable your node declared is published for you when the node settles, so publishing those same bytes yourself adds no version.`,
       parameters: Type.Object({
         namespace: Type.String(),
         name: Type.String(),
@@ -398,7 +398,7 @@ function declarations(features: AgentToolFeatures) {
       ...(rsiArguments ? { prepareArguments: rsiArguments } : {}),
     },
     list_peers: {
-      name: 'list_peers', label: 'List peer Agents', description: 'List the other Agents of THIS graph with their status, so you can address one by id. A subagent may only talk to nodes of its own graph; naming another graph is refused. Combined with send_to_peer and read_peer_messages, this is how the Agents of one graph work together instead of each guessing what the others are doing.',
+      name: 'list_peers', label: 'List peer Agents', description: 'List the other Agents of THIS graph with their status, so you can address one by id. A subagent may only talk to nodes of its own graph; naming another graph is refused. Together with send_to_peer this is how the Agents of one graph work together instead of each guessing what the others are doing.',
       parameters: Type.Object({}),
       available: Boolean(features.peers),
       externallyGated: false,
@@ -410,12 +410,6 @@ function declarations(features: AgentToolFeatures) {
         text: Type.String(),
         requestId: Type.String(),
       }),
-      available: Boolean(features.peers),
-      externallyGated: false,
-    },
-    read_peer_messages: {
-      name: 'read_peer_messages', label: 'Read messages from peer Agents', description: 'Read the messages other Agents of this graph addressed to you, oldest first. Reading does not delete them: the inbox is the record of what your peers told you.',
-      parameters: Type.Object({}),
       available: Boolean(features.peers),
       externallyGated: false,
     },

@@ -2,7 +2,8 @@ import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuati
 import { pendingWakes, renderWakes, wakeForTaskCompleted } from './wake-ledger.ts';
 import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
@@ -597,6 +598,12 @@ export class Execution {
    * or is empty, is a defect in the work rather than a pass with a hole in it, so the settle does not
    * go through and the node is not reported succeeded.
    *
+   * The promise is that the file is published, not that it is published twice: when the newest
+   * version of that name already holds these exact bytes - because the node published its own review
+   * with the artifact tool - there is nothing new to publish and no version is minted. Measured
+   * 2026-09-30 on task 68543fed: every node declaring a deliverable produced two byte-identical
+   * versions, once from the node and once from here.
+   *
    * Reading stays in ArtifactWorkspace.publish, which is where the workspace containment, symlink and
    * size rules already live; this only decides whether there is anything to publish at all.
    *
@@ -621,6 +628,14 @@ export class Execution {
     if (info.size === 0) return refused('was declared as this node deliverable but is empty');
     const artifacts = this.artifacts;
     if (!artifacts) return result;
+    // Same bytes as the newest version of this name, whoever published them: nothing changed, so a
+    // new version would say something false about the work. Read through the same path the publish
+    // itself would, so the comparison is over the bytes that would have been stored.
+    const head = artifacts.head(operation.taskId, `${deliverable.namespace}/${deliverable.name}`);
+    if (head) {
+      const body = await readFile(resolve(workspace, deliverable.path));
+      if (createHash('sha256').update(body).digest('hex') === head.digest) return result;
+    }
     await artifacts.publish({
       taskId: operation.taskId,
       workspace,

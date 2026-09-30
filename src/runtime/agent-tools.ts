@@ -18,7 +18,6 @@ import type { ConversationToolChannel } from './conversation-tools.ts';
 export interface PeerChannel {
   list(): Promise<unknown>;
   send(input: { to: string; text: string; requestId: string }): Promise<unknown>;
-  inbox(): Promise<unknown>;
 }
 
 type Supervisor = {
@@ -620,10 +619,6 @@ export function agentTools(input: {
       if (!message) throw new Error('text is required');
       if (!requestId) throw new Error('A bounded requestId is required');
       return text(JSON.stringify(await input.peers.send({ to, text: message, requestId })));
-    },
-    read_peer_messages: async () => {
-      if (!input.peers) throw new Error('This Agent session has no graph peers');
-      return text(JSON.stringify({ messages: await input.peers.inbox() }));
     },
     list_agent_combinations: async (_id, params) => {
       const body = fields(params);
