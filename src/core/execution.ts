@@ -16,7 +16,7 @@ import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-a
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
 import { insertQuestion, isMasterParked } from './question-routing.ts';
 import { isReworkDecision } from './verification.ts';
-import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
+import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, RESULT_HANDOFF_SCHEMA_EXAMPLE, resultHandoffRepair } from './predecessor-handoff.ts';
 import { briefing, nodeContract, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
@@ -919,7 +919,7 @@ export class Execution {
                 reviewNode
                   ? 'Submit the normal independent_review JSON with an additional top-level "resultHandoff" object shaped as:'
                   : 'Call submit_result with outputJson exactly shaped as:',
-                '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<the path you wrote; relative to your work copy is fine>","digest":"<sha256, or omit it and the host hashes the file>","artifactId":"<shared artifact id when published>","version":"<exact shared version>","uri":"<artifact uri when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
+                RESULT_HANDOFF_SCHEMA_EXAMPLE,
                 'The host checks every file change against the bytes in your work copy, so name the files you actually wrote; keep every top-level field even when its list is empty. Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
               ].join('\n')
             : '';

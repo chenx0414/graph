@@ -72,6 +72,15 @@ function stringList(value: unknown, maxItems = 50, maxLength = 500): string[] | 
   return items.every((item): item is string => item !== undefined) ? items : undefined;
 }
 
+/**
+ * The literal shape a result_handoff@1 submission must have, shown verbatim in the worker's briefing. It
+ * is the ONE place the promised schema and the validator can disagree, and they did: the three string
+ * lists were shown as bare `[]` while the validator demands short strings, so a review lane sent objects
+ * in nextActions and was refused at settle for a field whose type it was never told. Every field names
+ * its element type, and a test parses this string against the validator's own rules.
+ */
+export const RESULT_HANDOFF_SCHEMA_EXAMPLE = '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<the path you wrote; relative to your work copy is fine>","digest":"<sha256, or omit it and the host hashes the file>","artifactId":"<shared artifact id when published>","version":"<exact shared version>","uri":"<artifact uri when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":["<path or uri>"]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":["<path or uri>"]}],"knownLimits":["<short string>"],"openQuestions":["<short string>"],"nextActions":["<short string>"]}';
+
 function evidenceRefs(value: unknown): string[] | undefined {
   return stringList(value, 20, 300);
 }
