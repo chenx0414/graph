@@ -172,7 +172,21 @@ function deliverableInstruction(node: NodeSpec | undefined): string[] {
  * deliverable file on retries after acting on both in round one).
  */
 export function nodeContract(node: NodeSpec | undefined): string[] {
-  return [...routerInstruction(node), ...deliverableInstruction(node)];
+  return [...routerInstruction(node), ...nonRouterInstruction(node), ...deliverableInstruction(node)];
+}
+
+/**
+ * A node that is NOT a router must not put `route` in its result at all: settle rejects any route a
+ * node did not declare. This rule has to be stated on every turn for the same reason as the router
+ * rule above - on a same-session rework the node is told its briefing is already in the session and
+ * must not re-read it, so a stale or guessed rule about `route` is what it acts on. Observed: a
+ * non-router review lane succeeded in round one and then added a stray `route` on its rework turn,
+ * hard-failing with "Router must return a declared case". Return nothing when the node IS a router
+ * (routerInstruction owns that case), so the two rules never contradict.
+ */
+function nonRouterInstruction(node: NodeSpec | undefined): string[] {
+  if (!node || node.routes?.length) return [];
+  return ['You are not a router: do NOT include a "route" field in your structured result. A result that carries an undeclared route is rejected, however good the rest of it is.'];
 }
 
 /**
