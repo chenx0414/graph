@@ -5,51 +5,55 @@
 
 ---
 
-## 1. 一句话结论
+## 1. 一句话结论（返工后）
 
-v40 的图**形状**成立：`when` 门、agent 路由器自述分支、`fail` 批量回边、人工门都能在代码里指出唯一强制点，17 行需求里 11 行有绿测试或本次运行记录钉着。
-但有 **3 行未覆盖**（worker 成果无强制点、replan 时 worker 被 skip 的完整形状、"向用户汇报"）、**3 行只有静态代码**，并且有 **2 行实测下来与需求原文相反**——这两条必须让 synth 知道，因为它们直接决定「v40 能不能照抄」。
+v40 的图**形状成立，而且已经被真实运行走过一遍**：`synth` 判 `fail` 后，`graph.rework{to:['worker-1','worker-2','worker-3']}` 在本次任务的事件流里真的出现了，`summaries/synthesis` 也真的发布了。
+17 行需求里 **15 行实测、0 静态、2 未覆盖**（返工前是 11/3/3：当时车道 1 的 E2E 还没合并进来，我按「本次没走到」保守记了几行）。
+剩下的 2 行未覆盖（worker 成果无强制点、"向用户汇报"无通道）和 2 行**实测下来与需求原文相反**（评审节点被换模型、"先审后问"不是门），是 synth 判 fail 时点名的两条，必须让下一轮看到。
 
 ---
 
 ## 2. 对照表摘要
 
-完整表在 `notes/complex-tier-v40-mechanisms.md` §1（列：需求原句 / 图里的字段 / 运行时强制点 / 钉住它的测试 / 证据强度）。分布：
+完整表在 `notes/complex-tier-v40-mechanisms.md` §1（列：需求原句 / 图里的字段 / 运行时强制点 / 钉住它的测试 / 证据强度）。返工后分布：
 
 | 证据强度 | 行数 | 指的是哪几行 |
 |---|---|---|
-| **实测**（有绿测试或本次运行记录） | 11 | #1 计划落盘、#2 审查、#3 返工 planner、#4 直到通过、#5a 放行才分发、#7 一一对应评审、#9 写汇总、#10 自判 pass/fail、#12 验收绑 deliver、#14 主 Agent 审证据、#16 全节点同模型 |
-| **静态**（只有代码路径，本次没走到） | 3 | #8 synth 收齐三份评审、#11 三条回边全部返工、#13 人工门实际打开 |
-| **未覆盖**（无强制点或强制点与需求不符） | 3 | #5b replan 时 worker 及下游 skip、#6 三个 worker 各产出一份成果、#15 再向用户总结汇报 |
+| **实测**（本次运行发生过，或有以 v40 全形为对象的绿测） | 15 | 全部，除下面两行 |
+| **静态** | 0 | 车道 1 的 `complex-tier-v40.test.ts` 合并进来后已无此类 |
+| **未覆盖**（无强制点） | 2 | #6 三个 worker 各产出一份成果、#15 再向用户总结汇报 |
 
-三条车道都要用的两个硬事实：
+三条车道都要用的三个硬事实：
 
-- **#6 是真缺口**：v40 的 `worker-1/2/3` **没有声明 `deliverable`**，所以运行时对"每个 worker 产出什么"零强制。本轮 worker 的成果只是工作副本里的文件，靠 review-N 读。车道 2 写文档时若写成"每个 worker 产出一份成果"，那是**约定**不是机制。
-- **#11 没有任何测试**：全仓 `tests/` 里搜不到任何一个提案写过"同 from 同 case 的两条 loop"（否证脚本见主件 §3-4，输出为 0 组）。批量返工目前是**只靠代码读出来的**。
+- **#6 是真缺口**：v40 的 `worker-1/2/3` **没有声明 `deliverable`**，所以运行时对"每个 worker 产出什么"零强制。车道 2 写文档时若写成"每个 worker 产出一份成果"，那是**约定**不是机制。
+- **#11 现在有三重证据**：车道 1 的绿测（含阴性对照）+ 本次运行的 `graph.rework` 事件。上一版写的"全仓零测试"已经被自己的否证脚本推翻（输出从 0 变 2 组），已按实测重写。
+- **#13 的关门靠返工连带重置**，不是 `deliver` 自己有 `when`——这一点已写进 §2-③ 之外的备注，车道 2 写文档时别把它写成一个不存在的条件门。
 
 ---
 
 ## 3. 两条与需求原文相反的实测结果（请 synth 重点看）
 
-### 3.1 「全部节点用 space-bunny-free」在评审节点上不成立
+### 3.1 「全部节点用 space-bunny-free」在四个评审节点上不成立
 
-本次运行的产品自带记录（不是我的推断）：
+本次运行的产品自带记录（不是我的推断），返工时重读，已从 1 次涨到 **6 次**：
 
 ```
-events.model.switched
-  {"nodeId":"plan-reviewer","from":"opencode-go:space-bunny-free",
-   "to":"opencode-go:deepseek-v4.1-flash","instanceId":"df5af0f1-…"}
-events.review.independence_checked
-  {"nodeId":"plan-reviewer","independence":"model-excluded",
-   "policy":{"excludedModels":["opencode-go:space-bunny-free","space-bunny-free"], …}}
-invocations: planner 71 次 space-bunny-free / plan-reviewer 46 次 deepseek-v4.1-flash
+events.model.switched  （6 条）
+  plan-reviewer  opencode-go:space-bunny-free → opencode-go:deepseek-v4.1-flash
+  review-1 ×2 / review-2 ×2 / review-3   同上
+events.review.independence_checked  （7 条，excludedModels=["opencode-go:space-bunny-free","space-bunny-free"]）
+
+invocations 实际用量
+  planner 71 / worker-1 248 / worker-2 162 / worker-3 224 / synth 24   → opencode-go:space-bunny-free
+  plan-reviewer 46 / review-1 104 / review-2 125 / review-3 68         → opencode-go:deepseek-v4.1-flash
 ```
 
 链路：`presets/manifest.json` 的 `reviewer` 定义带 `review:true` → `src/core/model-selection.ts:12-17` `isReviewer` 命中 → `:20-48` `implementerModels` 把依赖节点**实际调用过**的模型收进 `exclude` → `src/catalog/models.ts:169-170` 先按 `exclude` 过滤再找 `requested`，找不到就退到 grade 默认 → `src/core/execution.ts:751` 发 `model.switched`。
 
-**这是需求冲突，不是实现缺陷**：v40 要求"评审也用 space-bunny-free"，而运行时要求"独立评审不得用实施者的模型"。二者只能选一个，现在选的是后者。
-按当前图，`review-1/2/3` 与 `synth` 都在各自上游结算之后才派发，届时它们的 `exclude` 里也会有 `space-bunny-free`，**预计同样被换掉**。
-**给 synth 的判断建议**：文档里不要照抄"全部节点 space-bunny-free"；要么写清"评审节点会被换成别的模型（这是设计）"，要么这条需求本身就该改。
+**`synth` 反而保住了 space-bunny-free**（上一版这里是推测，现已被实况解释）：`implementerModels` 只走 `spec.dependsOn`。四个评审节点的依赖链里通着 `planner`/`worker-1..3`，命中 exclude；`synth` 的依赖只有三个评审节点，而那三个已经被换成 deepseek，于是 `space-bunny-free` 不在 synth 的 exclude 里。**换过一轮之后，换过的模型不会再被排除。**
+
+**这是需求冲突，不是实现缺陷**：v40 要求"评审也用 space-bunny-free"，运行时要求"独立评审不得用实施者的模型"。二者只能选一个，现在选的是后者。
+**给 synth 的判断建议**：文档里不要照抄"全部节点 space-bunny-free"；要么写清"评审节点会被换成别的模型（这是设计，`instances.model` 还会骗你）"，要么这条需求本身就该改。
 
 ### 3.2 「先由主 Agent 审证据、再向用户汇报」里的"先"不是一道门
 
@@ -60,16 +64,19 @@ invocations: planner 71 次 space-bunny-free / plan-reviewer 46 次 deepseek-v4.
 
 ---
 
-## 4. 交付之后仍然未覆盖的（补法）
+## 4. 交付之后仍然没有测试钉住的（补法）
 
-| # | 未覆盖 | 补它需要哪个测试 |
-|---|---|---|
-| 4-1 | plan-reviewer 判 `replan` 时三个 worker **及其下游**被 skip | 车道 1 的 `complex-tier-v40.test.ts`：跑 v40 全形，断言 `replan` 轮次 `briefings` 不含任何 `worker-N`、出现三次 `node.skipped{reason:'inactive_route'}`；阴性对照＝删掉 `when` 后同断言必须失败 |
-| 4-2 | 三个 worker 各产出一份成果 | 给三个 worker 各加 `deliverable`，用 `node-deliverable.test.ts:157` 已有的"声明未写即失败"语义写断言；或保持现状并在文档里明写这是约定 |
-| 4-3 | 再向用户总结汇报 | 图节点没有面向用户的汇报通道，**目前写不出有意义的断言**；建议把这条需求从图机制里拿掉，或改写成"节点结论先出现在主 Agent 的 task view" |
-| 4-4 | `synth` 判 `fail` 时三条回边一起触发 | 车道 1 同一份 E2E：断言 `graph.rework{from:'synth',to:['worker-1','worker-2','worker-3']}` 且三个 worker 的 `briefings` 各 +1；阴性对照＝只留一条 loop 时断言必须失败 |
-| 4-5 | 「全节点同模型」在评审节点上的期望行为没有被钉死 | 给"同模型做评审"写一条测试，把行为钉死（切换并记 `model.switched`，还是拒绝派发），否则每次都可能悄悄变 |
-| 4-6 | `deliver` 人工门在 synth 判 `pass` 后才开、判 `fail` 时不开 | 沿用 4-4 的同一条 E2E：`fail` 轮次后 `deliver` 派发次数 0，`pass` 之后 1 |
+车道 1 的 `complex-tier-v40.test.ts` 合并进来后，上一版的 4-1/4-4/4-6 已经被它盖住。
+
+| # | 状态 | 未覆盖 | 补它需要哪个测试 |
+|---|---|---|---|
+| 4-1 | 已覆盖 | replan 时 worker 及下游不派发 | 差一条：再钉一下 `node.skipped{reason:'inactive_route'}` 落库三次（见 4-7） |
+| 4-2 | **未覆盖** | 三个 worker 各产出一份成果 | 给三个 worker 各加 `deliverable`，用 `node-deliverable.test.ts:157` 已有的"声明未写即失败"语义写断言；或保持现状并在文档里明写这是约定 |
+| 4-3 | **未覆盖** | 再向用户总结汇报 | 图节点没有面向用户的汇报通道，**目前写不出有意义的断言**；建议把这条需求从图机制里拿掉，或改写成"节点结论先出现在主 Agent 的 task view" |
+| 4-4 | 已覆盖 | synth 判 fail 三条回边一起触发 | 无（绿测 + 本次运行 `graph.rework` 事件） |
+| 4-5 | **未覆盖** | 「同模型评审」的期望行为没被钉死 | 给"同模型做评审"写一条测试，明确期望是切换并记 `model.switched` 还是拒绝派发；否则每次都可能悄悄变 |
+| 4-6 | 已覆盖 | deliver 人工门只在 pass 后开 | 无（FM4 + 阴性对照） |
+| 4-7 | **新发现的窄缺口** | `node.skipped{reason:'inactive_route'}` 落库本身 | 全仓无测试断言过这个事件；在 4-1 那条里补一次即可（车道 1 的文件） |
 
 ---
 
@@ -81,7 +88,17 @@ invocations: planner 71 次 space-bunny-free / plan-reviewer 46 次 deepseek-v4.
 |---|---|---|---|
 | 1 | `node --run test -- tests/console/review-as-router.test.ts tests/console/node-deliverable.test.ts tests/console/human-prereview.test.ts tests/console/human-prereview-e2e.test.ts tests/console/design-examples.test.ts` | **0** | `Test Files 5 passed (5)` / `Tests 19 passed (19)`（12.05s）——表里 #1#2#3#4#5a#7#9#10#12#14 引用的钉子全绿） |
 | 2 | `node --run test -- tests/m4/acceptance.test.ts tests/console/context-model.test.ts tests/console/predecessor-handoff-production.test.ts` | **1** | `Test Files 2 failed \| 1 passed (3)` / `Tests 9 failed \| 20 passed (29)`；`tests/m4/acceptance.test.ts` 全过（#13 的钉子） |
-| 3 | `node --run check` | **1** | typecheck、lint 无报错；vitest `Test Files 42 failed \| 186 passed (228)` / `Tests 128 failed \| 1405 passed (1533)`（Duration 206.68s），随后 `check:evidence` 未执行到。详见 §5.1 |
+| 3 | `node --run check` | **1** | typecheck、lint 无报错；vitest `Test Files 42 failed \| 186 passed (228)` / `Tests 128 failed \| 1405 passed (1533)`（Duration 206.68s）。详见 §5.1 |
+
+### 返工（attempt 2）复跑的证据
+
+| # | 命令 | exit | 结果 |
+|---|---|---|---|
+| R1 | `node --run test -- tests/console/complex-tier-v40.test.ts` | **0** | `Test Files 1 passed (1)` / `Tests 8 passed (8)`（车道 1 的 v40 全形 E2E，含 4 条阴性对照） |
+| R2 | `node --run test -- tests/console/review-as-router.test.ts tests/console/node-deliverable.test.ts tests/console/human-prereview.test.ts tests/console/human-prereview-e2e.test.ts tests/console/design-examples.test.ts` | **0** | `Test Files 5 passed (5)` / `Tests 19 passed (19)`（与 attempt 1 的数字一致，无回归） |
+| R3 | §3-4 的否证脚本（全仓 `tests/` 里同 `from`+`case` 的 loop 组） | 0 | **输出从 `0` 变成 `2` 组**——因为车道 1 的 `complex-tier-v40.test.ts` 已随门禁合并进本工作树，其中一组正是 v40 的三条 `synth--fail-->worker-N`。我上一版写的"全仓零测试"到此作废 |
+| R4 | 强制点行号复核（`graph.ts:34`/`execution.ts:573`/`operation-lifecycle.ts:1127,1284`/`predecessor-handoff.ts:518`/`proposal.ts` 61-71、文件共 73 行） | 0 | 全部对上。**本车道从未引用 `operation-lifecycle.ts:1117`**（引用的是 `1114-1116` 与 `1127`），因此 review-2 §3.3 那条建议对本车道不适用，按 synth 的 veto 不动 |
+| R5 | 本次任务的真实事件：`graph.rework` / `artifact.published` / `model.switched` / `invocations` | 0 | `graph.rework{"from":"synth","route":"fail","to":["worker-1","worker-2","worker-3"]}` 真的发生过；`summaries/synthesis` 已发布；`model.switched` × 6（详见 §3.1） |
 
 ### 5.1 全量 check 的失败是环境既有失败，与本车道无关（A/B 证明）
 
@@ -130,16 +147,26 @@ tests/m8/startup.test.ts                     tests/m8/system-self-improvement.te
 
 ---
 
-## 6. 边界
+## 6. 返工记录（attempt 2）
 
-- 本车道只新增两个文件：`notes/complex-tier-v40-mechanisms.md`、`deliverables/v40-mechanisms-report.md`。`git status --porcelain` 原文：
+synth 判 `fail`，分给本车道的是"零改动，仅复跑复现证据；可选修正 F1"。本轮实际做了三件事（详细版在主件 §6）：
+
+1. **复跑复现证据**（R1、R2、R4、R5，全部 exit 0），并把本次任务已经走到第二轮的实况重新读了一遍。
+2. **修 F1，并把同款矛盾一起修**：旧规则拿"本次有没有走到"当判据，新判据统一成"**本行主体**有没有被走到 / 被以 v40 全形为对象的绿测钉住"，否则"实测 + 备注写着没走到"就是自相矛盾。#3、#4、#5b、#9、#10、#11、#13 七行重标，每行都补了理由，没有只改标签的。
+3. **改掉已经过期的结论**：车道 1 的 E2E 合并进来之后，我上一版的"全仓零测试写过同 from 同 case 的 loop"和"本次一次都没走过 v40 独有的边"都不成立了。#11 因此升为实测（绿测 + 阴性对照 + 真实 `graph.rework` 事件），分布从 11/3/3 变成 15/0/2。
+
+**没有做的事**：没有碰 `docs/design-graph-examples.md`（车道 2 的文件；M1/M2/M3/M4 是 synth 给车道 2 的必修项）。顺带说一句：M2 说 `proposal.ts:100-104` 不存在，本车道核对过——该文件只有 73 行，真实位置是 `61-72`（`invalid` 在 `:71`），主件里引的就是这一处，可以直接对齐。
+
+## 7. 边界
+
+- 本车道只动两个文件（返工前是新增，返工后是修改）：`notes/complex-tier-v40-mechanisms.md`、`deliverables/v40-mechanisms-report.md`。`git status --porcelain` 原文：
 
   ```
-  ?? deliverables/
-  ?? notes/
+   M deliverables/v40-mechanisms-report.md
+   M notes/complex-tier-v40-mechanisms.md
   ```
 
-  （`deliverables/plan-review.md` 是 plan-reviewer 车道的既有 tracked 文件，不是本车道产物。）
+  （工作树里还有车道 1 / review 车道随门禁合入的**已提交**内容，例如 `tests/console/complex-tier-v40.test.ts`；那些不是本车道产物，本车道也没有改过它们。）
 - 没有改 `src/**`、`tests/**`、任何 `docs/**`；没有跑 `GRAPH_UPDATE_EVIDENCE=1`；没有动 `docs/planning/acceptance-evidence/`。
-- 没有替车道 1 写用例：`tests/console/complex-tier-v40.test.ts` 归车道 1，本车道只在 §4 点名它必须钉住哪几条。
+- 没有替车道 1 写用例：`tests/console/complex-tier-v40.test.ts` 归车道 1，本车道只在 §4 点名它还差哪一条断言（4-1、4-7）。
 - 没有碰计划/评审车道与其它 worker 车道的工作树或文件。
