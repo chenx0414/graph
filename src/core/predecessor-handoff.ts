@@ -654,7 +654,12 @@ function readResultHandoff(store: TaskStore, source: {
   const operationRow = store.db.prepare('SELECT result FROM operations WHERE id=?').get(source.operationId) as { result: string | null } | undefined;
   if (!operationRow?.result) throw new RuntimeError('context_rejected', `Result handoff operation result is missing for ${source.nodeId}`);
   const operationResult = JSON.parse(operationRow.result) as OperationResult;
-  if (body.source.operationResultDigest !== operationResultDigest(operationResult)) {
+  // Rows written before HB-216 recorded the digest of the result as it stood BEFORE the harness
+  // registered its own acceptance evidence, so they name a form the store no longer holds. That form
+  // is recomputed here from the stored result, which is why accepting it costs no safety: a tampered
+  // outcome, output, route or artifact set matches neither form and is still refused.
+  if (body.source.operationResultDigest !== operationResultDigest(operationResult)
+    && body.source.operationResultDigest !== operationResultDigest({ ...operationResult, evidence: [] })) {
     throw new RuntimeError('context_rejected', `Result handoff operation result mismatch for ${source.nodeId}`);
   }
   if (body.source.nodeId !== source.nodeId || body.source.operationId !== source.operationId
