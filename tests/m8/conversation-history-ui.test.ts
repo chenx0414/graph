@@ -36,6 +36,27 @@ async function temp(name: string) {
  * `element was detached from the DOM` under full-suite load. The caller waits on the
  * outcome it needs and re-attempts, which is why a lost click here is not a failure.
  */
+/**
+ * Click "load older" and wait for that click to land.
+ *
+ * Re-checking the same condition immediately after the click is what made this a lost race: under
+ * full-suite load the render had not happened yet, the loop decided the click had failed, clicked
+ * again, and one page too many arrived - the `expected 501 to be 400` failure recorded twice (HB-235).
+ * The click itself stays tolerant, because the transcript can re-render under the handle while live
+ * records arrive; it is the *decision to click again* that has to wait for the outcome.
+ */
+async function clickOlderAndSettle(page: Page) {
+  const visible = () => page.getByTestId('message-user').filter({ visible: true }).count();
+  const before = await visible();
+  await clickOlder(page);
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (await page.getByTestId('load-older').count() === 0) return;
+    if (await visible() !== before) return;
+    await page.waitForTimeout(50);
+  }
+}
+
 async function clickOlder(page: Page) {
   const button = page.getByTestId('load-older');
   if (await button.count() === 0) {
@@ -213,14 +234,16 @@ test('interleaved conversations page by their own records, not by global sequenc
 
   const middle = userMessages().filter({ hasText: 'A-101' });
   const middleDeadline = Date.now() + 30_000;
-  while (await middle.count() === 0 && Date.now() < middleDeadline) await clickOlder(page);
+  while (await middle.count() === 0 && Date.now() < middleDeadline) await clickOlderAndSettle(page);
   await middle.waitFor();
-  expect(await userMessages().count()).toBe(400);
+  const afterOnePage = await userMessages().allInnerTexts();
+  expect(afterOnePage.length, `records loaded: ${afterOnePage.length}; first ${afterOnePage[0] ?? '-'}; last ${afterOnePage.at(-1) ?? '-'}`).toBe(400);
   const earliest = userMessages().filter({ hasText: 'A-000' });
   const earliestDeadline = Date.now() + 30_000;
-  while (await earliest.count() === 0 && Date.now() < earliestDeadline) await clickOlder(page);
+  while (await earliest.count() === 0 && Date.now() < earliestDeadline) await clickOlderAndSettle(page);
   await earliest.waitFor();
-  expect(await userMessages().count()).toBe(501);
+  const afterLastPage = await userMessages().allInnerTexts();
+  expect(afterLastPage.length, `records loaded: ${afterLastPage.length}; first ${afterLastPage[0] ?? '-'}; last ${afterLastPage.at(-1) ?? '-'}`).toBe(501);
   expect(await page.getByTestId('load-older').count()).toBe(0);
   expect(await userMessages().filter({ hasText: 'B-' }).count()).toBe(0);
 

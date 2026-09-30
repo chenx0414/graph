@@ -19,7 +19,9 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
     <div data-testid="error" className="hint-card" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', margin: '8px 0' }}>
       <Icon name="alert" />
       <span><strong>加载失败：</strong>{message}</span>
-      {onRetry && <Button size="sm" variant="danger" onClick={onRetry}>重试</Button>}
+      {message.includes('刷新页面')
+        ? <Button size="sm" variant="danger" onClick={() => location.reload()}>刷新页面</Button>
+        : onRetry && <Button size="sm" variant="danger" onClick={onRetry}>重试</Button>}
     </div>
   );
 }

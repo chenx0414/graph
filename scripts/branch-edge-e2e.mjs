@@ -50,7 +50,11 @@ try {
   await page.waitForSelector('#root > *', { timeout: 20000 });
   await page.goto(`http://127.0.0.1:${port}/#/tasks/t`, { waitUntil: 'load' });
   await page.waitForSelector('[data-testid="flow"]', { timeout: 25000 });
-  await page.waitForTimeout(1500);
+  // Wait for the edges to exist, not for a fixed delay: `.react-flow__edge` is empty for the first frames
+  // after the page opens, and reading then reports "the graph has no edges" for a graph that has them -
+  // which cost one false defect report (HB-198). The short settle after it lets the labels render.
+  await page.waitForFunction(() => document.querySelectorAll('.react-flow__edge').length > 0, null, { timeout: 15000 }).catch(() => undefined);
+  await page.waitForTimeout(500);
   // What the page itself received, not what the server would send: the two can differ.
   const api = await page.evaluate(async () => {
     const res = await fetch('/api/tasks/t/graph');
