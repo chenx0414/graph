@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 
 /**
- * Run one command as the host would run it: a direct process, the host environment, no sandbox.
+ * Run one command as the host would run it: a direct process, no seatbelt.
  *
  * This exists for the one case where the sandbox makes the proof worthless. A confirmed gate that
  * runs a project's own suite has to run the way that suite is run by the project itself; measured
@@ -9,16 +11,60 @@ import { spawn } from 'node:child_process';
  * the sandbox and 224 failed / 49 passed inside it, mostly the suite's own timeouts. A gate that
  * fails for reasons unrelated to the work is not evidence of anything.
  *
- * It is deliberately the plainest possible runner. It inherits `process.env`, because the toolchain
- * the check drives expects the host's PATH, HOME and credentials; it keeps the host's own temporary
- * directory; it starts the child in its own process group so a timeout can kill the whole tree. What
- * it does NOT do is decide whether it was allowed to run: which checks may use it is the caller's
- * rule (`graph.command`'s `sandbox` declaration, honoured only under full access), and this file
- * only runs what it is handed.
+ * It is deliberately the plainest possible runner: it starts the child in its own process group so a
+ * timeout can kill the whole tree, and it bounds what it keeps. What it does NOT do is decide
+ * anything - not whether it was allowed to run (that is `graph.command`'s `sandbox` declaration,
+ * honoured only under full access) and not what the command may see (that is `checkEnvironment`).
  */
 
 /** How much of one stream is kept: a check that prints more than this is flooding, not evidencing. */
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+/**
+ * The environment an unsandboxed check runs with.
+ *
+ * Leaving the sandbox lifts containment; it must not hand over the host's own environment. The first
+ * version of this inherited `process.env`, which gave a check the app's provider credentials
+ * (`GRAPH_SUBSCRIPTION_*`), the path of the live checkout, and a PATH without the toolchain - and
+ * every process the check spawned - so the environment is now built from a short allowlist of what a
+ * toolchain needs, plus whatever the host declared for checks. The allowlist is exactly the
+ * difference between "runs like the project" and "runs with everything the app has".
+ */
+export function checkEnvironment(input: {
+  executable: string;
+  /** What the host declared for checks; it wins over the allowlist. */
+  declared?: Record<string, string>;
+  /** Read for a few names only - never inherited wholesale. */
+  host?: Record<string, string | undefined>;
+}): Record<string, string> {
+  const host = input.host ?? {};
+  // A GUI-launched app gets a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that a developer's shell
+  // does not have: the toolchain a project's own suite drives - homebrew, /usr/local - lives outside
+  // it. Naming those directories is the difference between "runs like the project" and "runs like the
+  // app that started it"; measured 2026-09-30, the merge Agent had to prepend /opt/homebrew/bin by
+  // hand to run the same suite.
+  const path = [...new Set([
+    dirname(input.executable),
+    ...(host['PATH'] ?? '').split(':'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ].filter(Boolean))].join(':');
+  return {
+    PATH: path,
+    HOME: host['HOME'] ?? homedir(),
+    ...(host['TMPDIR'] ? { TMPDIR: host['TMPDIR'] } : {}),
+    LANG: host['LANG'] ?? 'en_US.UTF-8',
+    ...(host['LC_ALL'] ? { LC_ALL: host['LC_ALL'] } : {}),
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_ATTR_NOSYSTEM: '1',
+    ...(input.declared ?? {}),
+  };
+}
 
 export interface HostCommandResult {
   code: number | null;
@@ -30,7 +76,7 @@ export interface HostCommandInput {
   cwd: string;
   executable: string;
   args: string[];
-  /** Extra environment on top of the host's, not instead of it. */
+  /** The whole environment for the child. Build it with `checkEnvironment`. */
   env?: Record<string, string>;
   /** How long the command may run. No limit when omitted. */
   timeoutMs?: number;
@@ -42,7 +88,7 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
       cwd: input.cwd,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...(input.env ?? {}) },
+      env: { ...(input.env ?? {}) },
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

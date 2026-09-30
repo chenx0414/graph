@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { GitIntegration } from '../git/integration.ts';
 import type { RestrictedGate } from '../runtime/restricted-process.ts';
 import { openWorkspaceCommandRunner, resolveUnsandboxedCommand, validateWorkspaceCommand, type CommandResult } from '../runtime/workspace-command.ts';
-import { runHostCommand } from '../runtime/host-command.ts';
+import { runHostCommand, checkEnvironment } from '../runtime/host-command.ts';
 import { linkProjectDependencies } from '../runtime/project-dependencies.ts';
 import { prepareProjectCopy } from '../runtime/program-copy.ts';
 import { evaluateVerifier } from './verification.ts';
@@ -170,11 +170,16 @@ export function workspaceCommandNode(input: {
         const limit = timeoutMs === undefined ? {} : { timeoutMs };
         const run = async (): Promise<CommandResult> => {
           if (unsandboxed) {
-            // Out of the sandbox, in the same directory and with the same declared environment: the
-            // host's own PATH, HOME and credentials come along, which is the point - a toolchain that
-            // is not given them fails for reasons that say nothing about the work.
+            // Out of the sandbox, in the same directory and with a deliberately built environment: the
+            // host's own PATH, HOME and locale, but not the app's environment, which is not the
+            // check's business. The declared TMPDIR rule stays with the sandbox, which needs it.
             const resolved = resolveUnsandboxedCommand(command.command as string, command.args as string[]);
-            return runHostCommand({ cwd: runRoot, executable: resolved.executable, args: resolved.args, env: { ...checkEnv, ...(resolved.env ?? {}) }, ...limit });
+            const env = checkEnvironment({
+              executable: resolved.executable,
+              declared: { ...(input.program?.env ?? {}), ...(resolved.env ?? {}) },
+              host: process.env,
+            });
+            return runHostCommand({ cwd: runRoot, executable: resolved.executable, args: resolved.args, env, ...limit });
           }
           // The linked dependencies live outside the work copy, so the sandbox
           // needs a read grant for them as well.
