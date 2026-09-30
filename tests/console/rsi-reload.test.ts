@@ -53,7 +53,7 @@ test.each([
   await runtime.conversations.chat(created.conversationId, { text: 'Improve the harness and activate it. '.repeat(mode === 'activate' ? 400 : 1), requestId: 'improve' });
   await runtime.host.runReady();
   if (mode !== 'activate') {
-    expect(provider.requests).toHaveLength(3);
+    expect(masterTurns(provider.requests)).toHaveLength(3);
     expect((await rsi.status()).pendingRestart).toBeNull();
     const messages = (await runtime.conversations.view(created.conversationId)).messages;
     expect(messages.find(message => message.kind === 'rsi')?.data).toMatchObject({ status: mode === 'failed' ? 'checks_failed' : 'applied' });
@@ -66,7 +66,7 @@ test.each([
   // what made this assertion fail three times in a row on the activation gate while passing every
   // time it was run directly - the failure carried the summarization request, which is how the two
   // were told apart. Count the master's turns, and report any extra one with its content.
-  const turns = provider.requests.filter(request => !isSummarization(request));
+  const turns = masterTurns(provider.requests);
   const extra = turns.slice(2)
     .map(request => JSON.stringify(request).slice(0, 800))
     .join('\n');
@@ -83,7 +83,7 @@ test.each([
   if (paused) await runtime.conversations.pause(created.conversationId, 'pause');
   if (archived) await runtime.conversations.archive(created.conversationId, 'archive');
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(provider.requests).toHaveLength(2);
+  expect(masterTurns(provider.requests)).toHaveLength(2);
   await runtime.close();
   // Reopen the same ledger as a fresh daemon; queued messages stay undelivered
   // until the desktop acknowledges this exact restart.
@@ -107,12 +107,19 @@ test.each([
   expect(activated.messages.find(message => message.kind === 'rsi')?.data).toMatchObject({ activation: { state: 'active' } });
   expect(await resumedRuntime.host.runReady()).toEqual({ dispatched: 1 });
   expect(await resumedRuntime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(provider.requests).toHaveLength(3);
+  expect(masterTurns(provider.requests)).toHaveLength(3);
   const resumed = await resumedRuntime.conversations.view(created.conversationId);
   expect(resumed.messages.some(message => message.role === 'assistant' && message.text === 'This response must wait for the reload.')).toBe(true);
 }, 60_000);
 
-/** The SDK's summary request, recognised by the preamble it sends, not a turn of the master. */
-function isSummarization(request: unknown) {
-  return JSON.stringify(request).includes('context summarization assistant');
+/**
+ * The master's own turns.
+ *
+ * The SDK manages its own context window: when a conversation grows it asks the provider to summarize
+ * it, with a preamble of its own. That is not the master speaking, and counting it as a turn made this
+ * file's request counts fail on the activation gate while every direct run passed - the failure carried
+ * the summarization request, which is how the two were told apart. Every count here is a count of turns.
+ */
+function masterTurns(requests: readonly unknown[]) {
+  return requests.filter(request => !JSON.stringify(request).includes('context summarization assistant'));
 }
