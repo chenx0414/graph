@@ -231,3 +231,52 @@ $ node --run test -- tests/m1/recovery.test.ts
    「放行才开工」标证据强度，本车道这几条用例正好是它要的**实测**锚点：
    `tests/console/complex-tier-v40.test.ts` 的 FM1（`when` 门）、FM2/FM3（批量回边）、
    FM4（人工验收门）。
+
+---
+
+## 8. 返工回执（synth 判 fail 后的第 2 轮）
+
+**本车道零代码改动。** synth 的 `rework['worker-1']` 只要求「复跑 + 留证」，本车道文件
+（`tests/console/complex-tier-v40.test.ts`）在第 1 轮已合入 `8117681` 并在 HEAD 内，本轮**没有改它**。
+本节即该回执。
+
+### 8.1 复跑结果（本轮实测，原样摘录）
+
+```
+$ node --run test -- tests/console/complex-tier-v40.test.ts --reporter=verbose
+ ✓ FM1: a replan verdict sends the plan back and dispatches no worker at all 1772ms
+ ✓ FM1 negative control: with `when` deleted, the same replan verdict dispatches all three workers 1378ms
+ ✓ FM2: synth answering `fail` really fires the declared edges and the batch runs again 3407ms
+ ✓ FM2 negative control: an undeclared case is refused, and no rework happens at all 2208ms
+ ✓ FM3: one `fail` verdict sends all three workers back, in the declared order 4381ms
+ ✓ FM3 negative control: one `fail` loop instead of three reworks exactly one worker 2715ms
+ ✓ FM4: the human acceptance gate stays shut until synth passes, and opens exactly once 3364ms
+ ✓ FM4 negative control: with the `fail` loops deleted, the same failed verdict opens the gate 2363ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Duration  22.56s
+TEST exit=0
+```
+
+| 命令 | exit | 结果 |
+|---|---|---|
+| `node --run test -- tests/console/complex-tier-v40.test.ts` | **0** | `Tests 8 passed (8)`（期望值 8，与第 1 轮一致） |
+| `node --run typecheck` | **0** | 无输出 |
+| `node --run lint` | **0** | `No unawaited expect().resolves/.rejects chains found.` |
+| `node --run check:evidence` | **0** | `Acceptance evidence is unchanged.` |
+
+**无回归**：8 个用例的名字、红→绿记录、阴性对照与第 1 轮逐条相同；本车道本轮唯一改动是本节回执文本。
+
+### 8.2 对 synth 判定理由的回应
+
+synth 判 fail 的两条必修项都在 `docs/design-graph-examples.md`（车道 2 的文件），**与本车道无交集**，
+本车道不据此改动任何文件。本车道仅作两点澄清，供对齐用：
+
+1. **synth 简报里的第 4 条（「验收门靠返工连带重置守住：deliver 无 `when`，由 `reactivate` 沿
+   `dependents` 一起重置」）正是本车道 FM4 实测到的东西**，已写在本报告 §2 与用例文件头。
+   车道 2 的 M1/M2 修的是同一节文档里的另外两处（`predecessors` 默认值、行号），与此条不冲突。
+2. **synth 的 `vetoNote`（否决 review-2 §3.3 的 `operation-lifecycle.ts:1117` 行号建议）与本车道引用的
+   行号不冲突**：本车道文件头引用的是 `:1090-1108`（分支只从已声明的 case 里取）与 `:1114-1116`
+   （`routed` 用的是 `filter`），**从未引用 `:1117`**，因此照办 veto 不会让本车道文件产生新的错误引用。
+   本车道本轮也没有动这三处引用。
