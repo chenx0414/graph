@@ -6,6 +6,7 @@ import type { GitIntegration } from '../git/integration.ts';
 import type { RestrictedGate } from '../runtime/restricted-process.ts';
 import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
 import { linkProjectDependencies } from '../runtime/project-dependencies.ts';
+import { prepareProjectCopy } from '../runtime/program-copy.ts';
 import { evaluateVerifier } from './verification.ts';
 import type { TaskStore } from './store.ts';
 import { RuntimeError, type ActionAdapter, type NodeSpec, type Proposal } from './types.ts';
@@ -74,11 +75,15 @@ export function workspaceCommandNode(input: {
   return {
     kind: 'program',
     prepare: async operation => {
-      const command = spec.input as { command?: unknown; args?: unknown } | null;
+      const command = spec.input as { command?: unknown; args?: unknown; copy?: unknown } | null;
       if (!command || typeof command.command !== 'string'
         || !Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string')) {
         throw new RuntimeError('invalid_adapter', 'graph.command requires input {command, args}');
       }
+      if (command.copy !== undefined && command.copy !== 'project') {
+        throw new RuntimeError('invalid_adapter', "graph.command copy must be 'project' when given");
+      }
+      const projectCopy = command.copy === 'project';
       if (operation.accessPolicy?.commands !== 'host') validateWorkspaceCommand(command.command, command.args);
       const root = (store.db.prepare('SELECT root FROM projects WHERE id=?')
         .get(store.task(operation.taskId).project_id) as { root: string } | undefined)?.root;
@@ -91,8 +96,25 @@ export function workspaceCommandNode(input: {
       // dependency-free. The host may select the link; otherwise the project
       // root - host configuration, never worker or proposal input - provides it.
       const modulesPath = input.program?.nodeModulesPath ?? (root ? join(root, 'node_modules') : undefined);
+      // A check that runs the project's own command - its suite, its own entry
+      // point - declares `copy: 'project'` and runs in a prepared worktree beside
+      // the project root instead of under the host's state directory: that suite
+      // reads sibling repositories next to the project root and needs the
+      // dependencies to be ordinary files, not a link. Why, exactly, is in
+      // runtime/program-copy.ts. The node's work copy stays the one the harness
+      // manages; only where the command runs changes.
+      if (projectCopy && !root) throw new RuntimeError('invalid_adapter', 'graph.command copy requires a project root');
       return async () => {
-        const modules = await linkProjectDependencies(workspace, modulesPath);
+        const prepared = projectCopy && root
+          ? await prepareProjectCopy({ projectRoot: root, source: workspace, label: operation.nodeId })
+          : undefined;
+        if (projectCopy && !prepared) {
+          throw new RuntimeError('invalid_adapter', 'graph.command copy needs a work copy with a committed version');
+        }
+        const runRoot = prepared ?? workspace;
+        // The prepared copy holds the dependencies as ordinary files inside its
+        // own tree, so there is nothing outside it to grant.
+        const modules = prepared ? undefined : await linkProjectDependencies(workspace, modulesPath);
         const gate: RestrictedGate = {
           dispatch: (_id, _reservation, send) => {
             if (input.stopped() || store.task(operation.taskId).paused) {
@@ -116,7 +138,7 @@ export function workspaceCommandNode(input: {
         // because the sandbox spreads command.env over its computed TMPDIR.
         const checkScratch = join(input.scratchRoot ?? workspace, 'checks', operation.id);
         const runner = await openWorkspaceCommandRunner({
-          workspace,
+          workspace: runRoot,
           scratchDir: checkScratch,
           gate,
           localNetwork: true,
