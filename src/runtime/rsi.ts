@@ -10,6 +10,7 @@ import { appendMessage, conversationForTask, markOperationReplied, RSI_RELOAD_RE
 import type { TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import { checkedOutBranch, detectRepo, git, gitRaw, revParse } from '../git/git.ts';
+import { deployDrift, developmentCandidates, type DeployDrift } from './deploy-drift.ts';
 
 /**
  * Why a `from` value cannot be used as a revision, or undefined when it can.
@@ -151,6 +152,17 @@ export interface RsiStatus {
      */
     expected: { branch: string; upstream: string; ahead: number; behind: number }[];
     localOnly: number;
+    /**
+     * How the checkout the app runs from compares to the development checkout of the same repository.
+     *
+     * The daemon loads its source from this checkout while feature work lands in another one, so
+     * "committed" and "the app runs it" are different facts; this is where they are compared. Null when
+     * no development checkout is configured or sits beside this one - silence, not a claim of agreement.
+     *
+     * Absent unless the read asked for it (`status({ compare: true })`): the comparison walks both
+     * checkouts through git, and this status is polled every few seconds by the desktop app.
+     */
+    deploy?: DeployDrift | null;
     /** One line a reader can act on without reading the list. */
     note: string;
   } | null;
@@ -655,7 +667,7 @@ export class RsiService {
     return path;
   }
 
-  async status(): Promise<RsiStatus> {
+  async status(options: { compare?: boolean } = {}): Promise<RsiStatus> {
     const root = this.available && this.root ? this.root : null;
     const available = this.available;
     const branch = available ? checkedOutBranch(root!) ?? null : null;
@@ -706,7 +718,7 @@ export class RsiService {
       root,
       branch,
       ...(available ? {} : { reason: this.unavailableReason() }),
-      sync: available && root ? this.syncState(root) : null,
+      sync: available && root ? this.syncState(root, options.compare === true) : null,
       pendingRestart,
       lastActivation,
       activeOperations,
@@ -727,9 +739,9 @@ export class RsiService {
    * ahead of its remote across several sessions and nothing in the harness said so, so a broken push
    * channel looked exactly like a working one.
    */
-  private syncState(root: string) {
+  private syncState(root: string, compare: boolean) {
     const heads = git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']);
-    if (heads.code !== 0) return { unpublished: [], expected: [], localOnly: 0, note: '无法读取本地分支，未计算未发布的提交' };
+    if (heads.code !== 0) return { unpublished: [], expected: [], localOnly: 0, ...(compare ? { deploy: this.deployState(root) } : {}), note: '无法读取本地分支，未计算未发布的提交' };
     const unpublished: { branch: string; upstream: string; ahead: number; behind: number }[] = [];
     const expected: { branch: string; upstream: string; ahead: number; behind: number }[] = [];
     let localOnly = 0;
@@ -759,7 +771,19 @@ export class RsiService {
     }
     if (localOnly) parts.push(`另有 ${localOnly} 个本地分支从未发布`);
     const note = parts.join('；');
-    return { unpublished, expected, localOnly, note };
+    return { unpublished, expected, localOnly, ...(compare ? { deploy: this.deployState(root) } : {}), note };
+  }
+
+  /**
+   * How this checkout compares to the development line, when there is one to compare with.
+   *
+   * Several checkouts of the same repository can sit in one place; the one this checkout still agrees
+   * with most closely is the useful answer, and it is named in the note so the reader knows which.
+   */
+  private deployState(root: string): DeployDrift | null {
+    const drifts = developmentCandidates(root).map(candidate => deployDrift(root, candidate));
+    const size = (drift: DeployDrift) => drift.files.length + drift.missing.length + drift.extra.length;
+    return drifts.sort((left, right) => size(left) - size(right))[0] ?? null;
   }
 
   private unavailableReason() {

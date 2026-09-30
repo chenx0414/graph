@@ -466,7 +466,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       },
       appToken,
       rsi: {
-        status: () => rsiService.status(),
+        status: (options?: { compare?: boolean }) => rsiService.status(options),
         ack: (id: string) => server.runtime.host.ackRsiRestart(id),
       },
       snapshot: () => ({

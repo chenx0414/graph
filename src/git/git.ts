@@ -22,7 +22,7 @@ export interface GitIdentity {
   email: string;
 }
 
-function runGit(cwd: string, args: string[], input?: string, identity?: GitIdentity) {
+function runGit(cwd: string, args: string[], input?: string, identity?: GitIdentity, extraEnv?: Record<string, string>) {
   const result = spawnSync('git', [...flags, ...args], {
     cwd, encoding: 'utf8', timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'], ...(input !== undefined ? { input } : {}),
     env: {
@@ -31,6 +31,7 @@ function runGit(cwd: string, args: string[], input?: string, identity?: GitIdent
       GIT_COMMITTER_NAME: identity?.name ?? 'Graph', GIT_COMMITTER_EMAIL: identity?.email ?? 'graph@local',
       GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat', PAGER: 'cat', GIT_EDITOR: 'true', EDITOR: 'true',
       GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+      ...(extraEnv ?? {}),
     },
   });
   if (result.error) return { code: 1, stdout: '', stderr: result.error.message };
@@ -44,8 +45,8 @@ export function git(cwd: string, args: string[], input?: string, identity?: GitI
 
 /** Untrimmed variant: porcelain parsing must not lose the leading status space, and content that
  * must arrive byte for byte (mirroring a file out of a revision) must not lose its trailing newline. */
-export function gitRaw(cwd: string, args: string[], input?: string) {
-  return runGit(cwd, args, input);
+export function gitRaw(cwd: string, args: string[], input?: string, extraEnv?: Record<string, string>) {
+  return runGit(cwd, args, input, undefined, extraEnv);
 }
 
 export function hasHead(cwd: string) {

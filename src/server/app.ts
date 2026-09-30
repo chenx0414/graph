@@ -295,9 +295,13 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   app.get('/api/app/secret-requests', async () => ({
     requests: options.appServices ? options.appServices.pendingSecretRequests() : [],
   }));
-  app.get('/api/app/rsi/status', async () => {
+  // `?compare=1` adds the checkout comparison (`sync.deploy`), which walks both checkouts through git.
+  // The desktop polls this route every five seconds, so the comparison is opt-in rather than a cost
+  // every caller pays for.
+  app.get('/api/app/rsi/status', async request => {
     if (!options.appServices?.rsi) return { available: false, pendingRestart: null, canRestart: false };
-    return options.appServices.rsi.status();
+    const query = request.query as Record<string, unknown> | undefined;
+    return options.appServices.rsi.status({ compare: String(query?.compare ?? '') === '1' });
   });
   app.post('/api/app/rsi/restart-ack', async request => {
     if (!options.appServices?.rsi) throw new RuntimeError('invalid_config', 'The daemon was started without the app bridge');

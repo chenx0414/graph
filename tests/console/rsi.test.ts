@@ -250,6 +250,44 @@ test('status separates the self-improvement line from real unpublished work', as
 });
 
 
+test('status says when the checkout the app runs from has drifted from the development line', async () => {
+  const deployed = await repo();
+  const development = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(deployed, dir);
+
+  // The comparison walks both checkouts through git, and the desktop polls this status every five
+  // seconds, so a plain read does not pay for it: the field is absent until it is asked for.
+  expect((await rsi.status()).sync!.deploy).toBeUndefined();
+  // No checkout of this repository beside it and none configured: nothing to compare, and silence is
+  // the honest answer rather than a claim of agreement.
+  expect((await rsi.status({ compare: true })).sync!.deploy).toBeNull();
+
+  const origin = 'https://example.invalid/graph-drift-status.git';
+  shell(deployed, ['remote', 'add', 'origin', origin]);
+  shell(development, ['remote', 'add', 'origin', origin]);
+  await mkdir(join(development, 'tests'), { recursive: true });
+  await writeFile(join(development, 'tests', 'dev-only.test.ts'), '// the development line has this\n');
+  shell(development, ['add', '-A']);
+  shell(development, ['commit', '-m', 'a test the deployed checkout never received']);
+
+  const testOnly = (await rsi.status({ compare: true })).sync!.deploy;
+  expect(testOnly).toMatchObject({ missing: ['tests/dev-only.test.ts'], runtimeFiles: [] });
+  // Through realpath on both sides: the service resolves its own root, and where TMPDIR is a symlink
+  // (`/var` -> `/private/var` on macOS) the same directory has two spellings. This failed only inside
+  // the activation gate's runner, which is the environment that has the symlink.
+  expect(await realpath(testOnly!.root)).toBe(await realpath(development));
+  expect(testOnly!.note).toContain('部署检出与开发线');
+
+  // A difference under src/ is the one that changes what the app does, so it is called out separately.
+  await writeFile(join(development, 'src', 'keep.ts'), 'export const value = 42;\n');
+  shell(development, ['add', '-A']);
+  shell(development, ['commit', '-m', 'a runtime change the deployed checkout never received']);
+  const runtime = (await rsi.status({ compare: true })).sync!.deploy;
+  expect(runtime!.files).toEqual(['src/keep.ts']);
+  expect(runtime!.runtimeFiles).toEqual(['src/keep.ts']);
+});
+
 test('an activation that commits nothing new does not schedule a reload', async () => {
   const root = await repo();
   const { store, taskId, conversationId, dir } = ledger();
