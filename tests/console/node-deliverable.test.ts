@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
+import { ArtifactWorkspace } from '../../src/core/artifact-workspace.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, NodeSpec, Operation, OperationResult } from '../../src/core/types.ts';
 
@@ -89,6 +90,36 @@ test('a node that declares a deliverable has it published for it, without the no
   expect(published!.producer?.nodeId).toBe('work');
 
   expect(nodeStatus(stateDir, taskId, 'work')).toBe('succeeded');
+}, 90_000);
+
+test('the same bytes are published once, not twice: the harness does not re-publish what the node already published', async () => {
+  const { root, runtime, stateDir } = await fixture(async operation => {
+    const workspace = operation.workspace ?? root;
+    await mkdir(join(workspace, 'reviews'), { recursive: true });
+    await writeFile(join(workspace, 'reviews/lane.md'), '# lane review\n\nverdict: pass\n');
+    // The node publishes its own review through the product's own write path, which is what a
+    // reviewer Agent does with the artifact_publish tool. The harness then publishes the declared
+    // deliverable too; if it does that without looking, one review becomes two identical versions.
+    const own = new TaskStore(join(stateDir, 'tasks.sqlite'));
+    const artifacts = new ArtifactWorkspace(own, join(stateDir, 'artifact-workspace'));
+    await artifacts.publish({
+      taskId: operation.taskId, workspace, namespace: 'reviews', name: 'lane',
+      sourcePath: 'reviews/lane.md', title: 'lane review', requestId: `node-publish:${operation.id}`,
+      producer: { nodeId: operation.nodeId, instanceId: operation.instanceId!, operationId: operation.id, activationId: operation.activationId },
+    });
+    own.close();
+    return { outcome: 'completed', output: { wrote: 'reviews/lane.md' }, usage };
+  });
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: '调研一条车道', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose(graph({ path: 'reviews/lane.md', namespace: 'reviews', name: 'lane', title: 'lane review' }), 'draft');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  // Every version of that key, not just the latest: a duplicate version is the thing being ruled out.
+  const all = runtime.artifacts.list(taskId, { namespace: 'reviews', latestOnly: false });
+  const mine = all.artifacts.filter(item => item.name === 'lane');
+  expect(mine.map(item => item.version), 'identical bytes must not mint a second version').toEqual([1]);
+  expect(runtime.artifacts.list(taskId).artifacts.find(item => item.name === 'lane')!.title).toBe('lane review');
 }, 90_000);
 
 test('a declared deliverable that was never written fails the node instead of passing silently', async () => {

@@ -1,20 +1,22 @@
-import { randomUUID } from 'node:crypto';
-import { canonicalJson, type TaskStore } from '../core/store.ts';
-import { sameGraphReach } from './conversation-scope.ts';
-export { sameGraphReach } from './conversation-scope.ts';
+import { type TaskStore } from '../core/store.ts';
 
 /**
  * Agents of one graph talking to each other.
  *
- * A conversation message carries no recipient, which is why "worker A asks worker B" had no
- * carrier at all: the row said who wrote it and nothing about who it was for. This module adds
- * that address — `node_id` is the sender, `to_node_id` the recipient — and the reach rule from
- * `conversation-scope.ts` keeps every message inside one graph, so a subagent cannot command
- * another graph by naming it.
+ * A conversation message carries no recipient, which is why "worker A asks worker B" had no carrier
+ * at all: the row said who wrote it and nothing about who it was for. A peer message is addressed
+ * instead, and it is delivered rather than parked. `send_to_peer` reaches the target node as its own
+ * input — steering a running turn, or reactivating a finished node so the message becomes the input
+ * of its next turn (see `node-messages.ts`). That is why there is deliberately no inbox to poll: the
+ * target already received the words as a prompt, in its own chat window, and re-reading them from
+ * somewhere else would be a second, weaker copy of a fact it already has.
  *
- * There is no "only while the target is running" restriction: a message is durable. It is delivered
- * to the target like a user prompt - steering a running turn, or reactivating a finished node so the
- * message becomes the input of its next turn (see `node-messages.ts`).
+ * The reach rule is the graph itself. A subagent talks to the nodes of its own graph and to nobody
+ * else, because another graph's nodes are not in this list and `node-messages.ts` refuses a target it
+ * cannot find; the master's deliberate reach into other conversations lives in `conversation-tools.ts`.
+ *
+ * What stays here is the address list: which Agents of this graph exist, so one can be addressed by
+ * name and the briefing can say who else is in the room.
  */
 
 export interface PeerNode {
@@ -23,78 +25,12 @@ export interface PeerNode {
   role: string | null;
 }
 
-export interface NodeMessage {
-  id: string;
-  from: string;
-  to: string;
-  text: string;
-  createdAt: number;
-}
-
 /** Where the other Agents of this graph are, so one can be addressed by name. */
 export function peerNodes(store: TaskStore, taskId: string): PeerNode[] {
   store.task(taskId);
   const rows = store.db.prepare('SELECT id,status,json_extract(spec,\'$.role\') AS role FROM nodes WHERE task_id=? ORDER BY rowid')
     .all(taskId) as { id: string; status: string; role: string | null }[];
   return rows.map(row => ({ id: row.id, status: row.status, role: row.role }));
-}
-
-/** The conversation this graph's messages live on. */
-function conversationOf(store: TaskStore, taskId: string): string {
-  const row = store.db.prepare('SELECT conversation_id FROM tasks WHERE id=?').get(taskId) as { conversation_id: string | null } | undefined;
-  if (!row?.conversation_id) throw new Error(`任务 ${taskId} 没有会话，不能投递节点消息。`);
-  return row.conversation_id;
-}
-
-export interface SendNodeMessageInput {
-  taskId: string;
-  /** The sending node, as the runtime knows it. */
-  from: string;
-  /** The receiving node id; may be `task:node` to name another graph, which is then refused. */
-  to: string;
-  text: string;
-  requestId: string;
-}
-
-/**
- * Send one message to a peer node. The address is resolved before anything is written, so a
- * refusal never leaves a half-recorded message behind.
- */
-export function sendNodeMessage(store: TaskStore, input: SendNodeMessageInput): NodeMessage {
-  const [targetTask, targetNode] = input.to.includes(':') ? input.to.split(':', 2) as [string, string] : [input.taskId, input.to];
-  const nodes = peerNodes(store, input.taskId).map(node => node.id);
-  const refusal = sameGraphReach({
-    callerTask: input.taskId, callerNode: input.from, targetTask, targetNode,
-    ...(targetTask === input.taskId ? { knownNodes: nodes } : { knownTasks: taskIds(store) }),
-  });
-  if (refusal) throw new Error(refusal);
-  const conversationId = conversationOf(store, input.taskId);
-  // Idempotent by requestId: a retried send is the same fact, not a second message.
-  const existing = store.db.prepare('SELECT id,node_id,to_node_id,text,created_at FROM messages WHERE conversation_id=? AND request_id=?')
-    .get(conversationId, input.requestId) as { id: string; node_id: string | null; to_node_id: string | null; text: string; created_at: number } | undefined;
-  if (existing) {
-    return { id: existing.id, from: existing.node_id ?? input.from, to: existing.to_node_id ?? targetNode, text: existing.text, createdAt: existing.created_at };
-  }
-  const id = randomUUID();
-  const now = Date.now();
-  store.db.prepare("INSERT INTO messages(conversation_id,id,role,kind,text,data,state,node_id,to_node_id,request_id,turn,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .run(conversationId, id, 'assistant', 'agent_message', input.text,
-      canonicalJson({ kind: 'agent_message', from: input.from, to: targetNode, taskId: input.taskId }),
-      'done', input.from, targetNode, input.requestId, 0, now, now);
-  store.event(input.taskId, 'node.message_sent', { from: input.from, to: targetNode, messageId: id });
-  return { id, from: input.from, to: targetNode, text: input.text, createdAt: now };
-}
-
-/** Messages addressed to this node, oldest first. A node's own sends are not in its inbox. */
-export function nodeInbox(store: TaskStore, taskId: string, nodeId: string): NodeMessage[] {
-  const conversationId = conversationOf(store, taskId);
-  const rows = store.db.prepare("SELECT id,node_id,to_node_id,text,created_at FROM messages WHERE conversation_id=? AND to_node_id=? ORDER BY seq")
-    .all(conversationId, nodeId) as { id: string; node_id: string | null; to_node_id: string; text: string; created_at: number }[];
-  return rows.map(row => ({ id: row.id, from: row.node_id ?? 'unknown', to: row.to_node_id, text: row.text, createdAt: row.created_at }));
-}
-
-function taskIds(store: TaskStore): string[] {
-  return (store.db.prepare('SELECT id FROM tasks').all() as { id: string }[]).map(row => row.id);
 }
 
 /** How to describe a peer to the model, so it knows what it may address. */
