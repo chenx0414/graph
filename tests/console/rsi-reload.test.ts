@@ -37,6 +37,12 @@ test.each([
       ...(mixed ? [{ id: 'second-apply', name: 'apply_rsi_change', arguments: JSON.stringify({ title: 'Should wait', problem: 'Another improvement', changes: [{ path: 'helper.ts', action: 'write', content: 'export const helper = 2;\n' }] }) }] : []),
     ] },
     { text: 'This response must wait for the reload.' },
+    // Scripted twice on purpose: the SDK may compact a long conversation by asking for a summary, and
+    // that request takes the next plan like any other. The reply the continuation must produce is the
+    // same either way, so the script does not depend on whether the SDK compacted before it continued
+    // (measured on the activation gate, where the summary stole the plan reserved for the continuation
+    // and the failure surfaced three assertions later).
+    { text: 'This response must wait for the reload.' },
   ]);
   cleanup.push(() => provider.close());
   const options = {
