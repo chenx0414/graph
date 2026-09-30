@@ -148,7 +148,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     submit_result: {
-      name: 'submit_result', label: 'Submit result', description: 'Submit structured JSON output for this operation. A router node must include a "route" field naming one of the branches it declared.',
+      name: 'submit_result', label: 'Submit result', description: 'Submit structured JSON output for this operation. Include a "route" field ONLY when your briefing tells you that you are a router and names the branches: a non-router must omit "route" entirely, and any result carrying an undeclared route is rejected.',
       parameters: Type.Object({ outputJson: Type.String() }),
       available: features.role !== 'master',
       externallyGated: false,
