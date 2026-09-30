@@ -235,7 +235,24 @@ export function workspaceCommandNode(input: {
           writeFileSync(path, body);
           const digest = createHash('sha256').update(body).digest('hex');
           if (result.code !== 0) {
-            return { outcome: 'failed', output: { code: result.code, stderr: result.stderr.slice(-4_000) } };
+            return {
+              outcome: 'failed',
+              output: {
+                code: result.code,
+                // Where the whole run lives: the same file the passing path registers as evidence. A
+                // failure that reports only the tail of one channel makes its reader hunt the
+                // filesystem for a record the harness had already written and already knew the path
+                // of.
+                record: { path, digest },
+                // stdout is where a suite names the case that failed, so a summary that drops it
+                // leaves the reason out. It is reported under a name the retry classifier does not
+                // read on purpose: that classifier decides whether a failure looks like the
+                // environment, and a test's own output full of words like "connection reset" would
+                // turn a verdict on the work into three automatic reruns of it.
+                stdoutTail: result.stdout.slice(-4_000),
+                stderr: result.stderr.slice(-4_000),
+              },
+            };
           }
           return {
             outcome: 'completed',
