@@ -48,7 +48,8 @@ export interface AppServices {
   };
   /** Host-side view of the RSI restart queue, polled by the desktop app. */
   rsi?: {
-    status(): Promise<unknown>;
+    /** `compare` adds the checkout comparison (`sync.deploy`), which walks both checkouts through git. */
+    status(options?: { compare?: boolean }): Promise<unknown>;
     ack(id: string): Promise<unknown>;
   };
 }
