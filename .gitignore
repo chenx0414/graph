@@ -56,3 +56,5 @@ docs/planning/unified-console-rework-acceptance-2026-09-15.md
 docs/planning/unified-console-rework2-acceptance-2026-09-15.md
 docs/planning/unified-console-rework3-acceptance-2026-09-15.md
 docs/planning/unified-console-rework4-acceptance-2026-09-15.md
+# Publishing scratch: the artifact source must live in the work copy, and this keeps it out of commits.
+hb-backlog-*.md
