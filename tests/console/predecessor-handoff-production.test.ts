@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { installPresets } from '../../src/catalog/presets.ts';
+import { RESULT_HANDOFF_SCHEMA_EXAMPLE } from '../../src/core/predecessor-handoff.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -444,3 +445,21 @@ test('a result the harness refuses at settlement is a repair problem, not an unk
   expect(events.some(event => event.type === 'operation.unknown')).toBe(false);
   expect(events.some(event => event.type === 'context.result_noncompliant')).toBe(true);
 }, 120_000);
+
+test('the result_handoff schema example states the element type of every field, so a model cannot guess objects for a string list', () => {
+  // The validator demands short strings for knownLimits/openQuestions/nextActions and objects for
+  // changes/decisions/verification. The example showed the three string lists as bare `[]`, so a review
+  // lane sent objects in nextActions and was refused at settle - the schema it was told and the schema
+  // it must satisfy disagreed.
+  const example = JSON.parse(RESULT_HANDOFF_SCHEMA_EXAMPLE) as Record<string, unknown>;
+  for (const key of ['knownLimits', 'openQuestions', 'nextActions']) {
+    const value = example[key];
+    expect(Array.isArray(value)).toBe(true);
+    expect(typeof (value as unknown[])[0]).toBe('string');
+  }
+  for (const key of ['changes', 'decisions', 'verification']) {
+    const value = example[key];
+    expect(Array.isArray(value)).toBe(true);
+    expect(typeof (value as unknown[])[0]).toBe('object');
+  }
+});

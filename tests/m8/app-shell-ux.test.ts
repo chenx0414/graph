@@ -208,7 +208,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await expect.poll(async () => {
     const card = await page.getByTestId('proposal-draft').boundingBox();
     const toc = await page.getByTestId('drawer-draft-toc').boundingBox();
-    const links = await page.getByTestId('drawer-entry-links').boundingBox();
+    const links = await page.locator('[data-testid=proposal-draft] [data-testid=drawer-entry-links]').boundingBox();
     const tasks = await page.getByTestId('conversation-tasks').boundingBox();
     if (!card || !toc || !links || !tasks) return null;
     return { tocInside: toc.y + toc.height <= card.y + card.height + 1, linksInside: links.y + links.height <= card.y + card.height + 1, tasksBelow: tasks.y >= card.y + card.height - 1 };

@@ -72,6 +72,15 @@ function stringList(value: unknown, maxItems = 50, maxLength = 500): string[] | 
   return items.every((item): item is string => item !== undefined) ? items : undefined;
 }
 
+/**
+ * The literal shape a result_handoff@1 submission must have, shown verbatim in the worker's briefing. It
+ * is the ONE place the promised schema and the validator can disagree, and they did: the three string
+ * lists were shown as bare `[]` while the validator demands short strings, so a review lane sent objects
+ * in nextActions and was refused at settle for a field whose type it was never told. Every field names
+ * its element type, and a test parses this string against the validator's own rules.
+ */
+export const RESULT_HANDOFF_SCHEMA_EXAMPLE = '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<the path you wrote; relative to your work copy is fine>","digest":"<sha256, or omit it and the host hashes the file>","artifactId":"<shared artifact id when published>","version":"<exact shared version>","uri":"<artifact uri when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":["<path or uri>"]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":["<path or uri>"]}],"knownLimits":["<short string>"],"openQuestions":["<short string>"],"nextActions":["<short string>"]}';
+
 function evidenceRefs(value: unknown): string[] | undefined {
   return stringList(value, 20, 300);
 }
@@ -645,7 +654,12 @@ function readResultHandoff(store: TaskStore, source: {
   const operationRow = store.db.prepare('SELECT result FROM operations WHERE id=?').get(source.operationId) as { result: string | null } | undefined;
   if (!operationRow?.result) throw new RuntimeError('context_rejected', `Result handoff operation result is missing for ${source.nodeId}`);
   const operationResult = JSON.parse(operationRow.result) as OperationResult;
-  if (body.source.operationResultDigest !== operationResultDigest(operationResult)) {
+  // Rows written before HB-216 recorded the digest of the result as it stood BEFORE the harness
+  // registered its own acceptance evidence, so they name a form the store no longer holds. That form
+  // is recomputed here from the stored result, which is why accepting it costs no safety: a tampered
+  // outcome, output, route or artifact set matches neither form and is still refused.
+  if (body.source.operationResultDigest !== operationResultDigest(operationResult)
+    && body.source.operationResultDigest !== operationResultDigest({ ...operationResult, evidence: [] })) {
     throw new RuntimeError('context_rejected', `Result handoff operation result mismatch for ${source.nodeId}`);
   }
   if (body.source.nodeId !== source.nodeId || body.source.operationId !== source.operationId

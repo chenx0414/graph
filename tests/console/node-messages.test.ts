@@ -119,3 +119,23 @@ test('a peer message to a running node steers that operation instead of restarti
     expect(runtime.nodeRun(taskId, 'work').entries.filter(entry => entry.kind === 'chat')).toHaveLength(1);
   } finally { finish(); }
 });
+
+// A subagent talks to its own graph and to nobody else. This used to be stated by a separate reach
+// rule module whose only carrier was a passive inbox nothing read; the guarantee belongs where the
+// message is actually delivered, so it is asserted here against the real path.
+test('a peer message to a node outside this graph is refused and delivers nothing', async () => {
+  const { runtime, taskId, store } = await setup();
+  try {
+    // A node id that is not in this graph at all, and one that names another graph explicitly: with
+    // no inbox to write into, a refusal must leave no trace anywhere.
+    for (const to of ['ghost', 'another-task:work']) {
+      await expect(runtime.sendPeerMessage(taskId, 'work', { to, text: '越权', requestId: `outside-${to}` }))
+        .rejects.toMatchObject({ code: 'invalid_input' });
+    }
+    // A node cannot address itself either: the words would arrive as its own prompt.
+    await expect(runtime.sendPeerMessage(taskId, 'work', { to: 'work', text: '自言自语', requestId: 'outside-self' }))
+      .rejects.toMatchObject({ code: 'invalid_input' });
+    expect(store.db.prepare("SELECT COUNT(*) AS n FROM commands WHERE scope LIKE 'node-message:%'").get()).toMatchObject({ n: 0 });
+    expect(runtime.nodeRun(taskId, 'work').entries.filter(entry => entry.kind === 'chat')).toHaveLength(0);
+  } finally { await runtime.close(); }
+});

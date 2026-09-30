@@ -117,6 +117,15 @@
 /* The drawer no longer switches modes: the draft card and the task navigation
  * are always both visible, so `.drawer-mode-tabs` / `.drawer-mode-tab` (and the
  * draft's embedded pages, `.drawer-draft-pages`) have no producers. */
+
+/* The draft card sits at the top of the drawer and sizes to its own content.
+ * It must NOT grow: it used to carry `flex: 1 1 auto; min-height: 0` from the
+ * design where the card hosted an embedded task-graph page. With an unconfirmed
+ * draft that squeezed the card to its flex basis, so the version list and the
+ * two window links spilled out of the card and painted over the task
+ * navigation (measured: card 78..164, version list 298, links 349, task section
+ * from 176). Growing is the task section's job. */
+.drawer-draft-card { flex: 0 0 auto; display: flex; flex-direction: column; }
 .drawer-draft-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
 .drawer-draft-title { font-weight: 700; font-size: 13px; }
 .drawer-draft-summary { margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }

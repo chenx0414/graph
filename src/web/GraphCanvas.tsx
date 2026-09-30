@@ -14,6 +14,8 @@ import {
   type NodeTone,
 } from './insights.ts';
 
+import { loopChannels } from './graph-edges.ts';
+
 const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
 
@@ -196,7 +198,13 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
     .map(node => graph.layout.positions[node.id])
     .filter((position): position is NonNullable<typeof position> => Boolean(position));
   const minNodeLeft = Math.min(0, ...nodePositions.map(position => position.x));
-  let loopLane = 0;
+  // A rework back-edge leaves on its own lane's near side, so lanes side by side do not stack their
+  // arcs on the far-left gutter or travel across the lanes in between (see graph-edges.ts).
+  const loopEdges = graph.layout.edges.filter(edge => edge.id.startsWith('loop:'));
+  const loopChannelX = loopChannels(
+    loopEdges.map(edge => ({ id: edge.id, source: edge.source, target: edge.target })),
+    graph.layout.positions,
+  );
   const nodes = [
     ...graph.containers.map(container => {
       const position = graph.layout.positions[container.id] ?? { x: 0, y: 0, width: 240, height: 120 };
@@ -236,7 +244,9 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const policy = edgePolicy.get(`${edge.source}:${edge.target}`);
       const resultHandoff = policy === 'result_handoff';
       const edgeData = {
-        ...(loop ? { leftX: minNodeLeft - 64 - loopLane++ * 24 } : edge.points?.length ? { points: edge.points } : {}),
+        ...(loop
+          ? { leftX: loopChannelX[edge.id] ?? minNodeLeft - 64 }
+          : edge.points?.length ? { points: edge.points } : {}),
         ...(policy ? { edgeLabel: resultHandoff ? '结果交接' : '仅证据交接', edgeLabelColor: resultHandoff ? '#b45309' : '#475569' } : {}),
         ...(branch ? { edgeLabel: `case: ${branch}`, edgeLabelColor: '#0f766e' } : {}),
       };

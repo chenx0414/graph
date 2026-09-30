@@ -21,7 +21,7 @@ import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { insertQuestion } from '../core/question-routing.ts';
 import { isFullAccess } from '../core/access-policy.ts';
 import { openConversationTools, type ConversationToolService } from './conversation-tools.ts';
-import { nodeInbox, peerNodes, sendNodeMessage } from './agent-messaging.ts';
+import { peerNodes } from './agent-messaging.ts';
 
 /**
  * The branch an agent router declared in its submitted result, or undefined when it declared none.
@@ -123,6 +123,20 @@ export function toPiModel(entry: ModelEntry): Model<ModelApi> {
     // with every provider request.
     ...(headers ? { headers } : {}),
   };
+}
+
+/**
+ * The words a tool result carries, as the model saw them.
+ *
+ * Pi hands a tool result back as `{ content: [{ type: 'text', text }] }`, and on a failure the reason
+ * is in that text and nowhere else. A record that keeps only `isError` is a boolean nobody can
+ * diagnose with, so the reason is kept beside it, bounded - a failing command can return megabytes.
+ */
+export function toolResultText(result: unknown, limit = 2_000): string {
+  const content = (result as { content?: unknown } | undefined)?.content;
+  const parts = (Array.isArray(content) ? content : []).map(part => part as { type?: unknown; text?: unknown });
+  const joined = parts.filter(part => part.type === 'text' && typeof part.text === 'string').map(part => part.text as string).join('\n').trim();
+  return joined.length > limit ? `${joined.slice(0, limit)}…（已截断）` : joined;
 }
 
 /** One-line summary of a tool call for the conversation activity stream. */
@@ -456,19 +470,18 @@ export function createPiAdapter(options: {
               ...(artifactService ? { artifacts: artifactService } : {}),
               // A master session may hand work to any other conversation. The rules and the handoff
               // ledger live in `conversation-tools.ts`.
-              // A graph node may talk to the other Agents of its OWN graph. The reach rule lives in
-              // `conversation-scope.ts`: naming another graph is refused, which is what keeps a
-              // subagent from commanding the work of a different graph.
+              // A graph node may talk to the other Agents of its OWN graph. The reach rule is the
+              // graph itself: a node of another graph is not a peer, so naming one is refused.
               ...(spec.role !== 'master' ? {
                 peers: {
                   list: async () => peerNodes(options.store, operation.taskId).map(node => ({ id: node.id, role: node.role, status: node.status })),
-                  // Delivered like a user prompt to the target node, not parked in an inbox: the target's
-                  // own chat window shows it and its next dispatch reads it. Falls back to a passive record
-                  // only when the runtime exposed no delivery channel (there is no graph to wake).
-                  send: async request => channels?.peers
-                    ? channels.peers(operation.taskId).deliver(operation.nodeId, { to: request.to, text: request.text, requestId: request.requestId })
-                    : sendNodeMessage(options.store, { taskId: operation.taskId, from: operation.nodeId, to: request.to, text: request.text, requestId: request.requestId }),
-                  inbox: async () => nodeInbox(options.store, operation.taskId, operation.nodeId),
+                  // Delivered like a user prompt to the target node: the target's own chat window shows
+                  // it and its next dispatch reads it. There is deliberately no inbox to poll - a peer's
+                  // words arrive as a prompt, and reading them somewhere else is what the send already did.
+                  send: async request => {
+                    if (!channels?.peers) throw new Error('This Agent session has no graph peers');
+                    return channels.peers(operation.taskId).deliver(operation.nodeId, { to: request.to, text: request.text, requestId: request.requestId });
+                  },
                 },
               } : {}),
               ...(channels?.conversations && conversation && spec.role === 'master' ? {
@@ -857,10 +870,16 @@ export function createPiAdapter(options: {
             });
           }
           if (persistEntries && event.type === 'tool_execution_end') {
+            // A failure's reason lives in the result text and nowhere else. Recording only `isError`
+            // throws away the one account of what went wrong: measured 2026-09-30 on task 68543fed,
+            // 7 of 27 artifact_publish calls failed and every reason had to be recovered from the
+            // model's own prose, which is not a record anybody can audit.
+            const reason = event.isError ? toolResultText(event.result) : '';
             appendNodeEntry(options.store, {
               taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
               activationId: operation.activationId, operationId: operation.id, role: 'tool', kind: 'result',
-              text: event.isError ? '工具执行失败' : '工具执行完成', data: { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError },
+              text: event.isError ? `工具执行失败：${reason.slice(0, 400)}` : '工具执行完成',
+              data: { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError, ...(reason ? { message: reason } : {}) },
             });
           }
           // Pi context summarization is billed like any other send: tag the
@@ -941,7 +960,7 @@ export function createPiAdapter(options: {
                   data: { ...JSON.parse(row.data) as Record<string, Json>, attachments }, state: 'done', operationId: operation.id, turn: operation.attempt, messageId: row.id });
               }
             }
-            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError, ordinal: toolOrdinals.get(event.toolCallId) ?? nextOrdinal() });
+            options.store.event(operation.taskId, 'message.tool', { operationId: operation.id, phase: 'end', toolCallId: event.toolCallId, toolName: event.toolName, summary, isError: event.isError, ...(event.isError ? { message: toolResultText(event.result) } : {}), ordinal: toolOrdinals.get(event.toolCallId) ?? nextOrdinal() });
           }
         };
         try {

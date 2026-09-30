@@ -50,16 +50,19 @@ export function graphNodeRuntime(env: Record<string, string | undefined> = proce
 export function resolveNodeCommand(
   args: string[],
   runtime: { execPath: string; electron?: string | undefined } = graphNodeRuntime(),
+  /** The sandbox needs the shim to reach loopback; a host run does not, and must not be given it. */
+  options: { shim?: boolean } = {},
 ): ResolvedCommand {
   // --require makes the shim run before the check's own modules, and works in
   // Electron's Node mode where NODE_OPTIONS is ignored. `--check` only parses
   // a file and rejects extra options.
-  const shimArgs = args.includes('--check') ? args : ['--require', RESOLVER_SHIM, ...args];
-  if (!runtime.electron) return { executable: runtime.execPath, args: shimArgs, readPaths: [dirname(RESOLVER_SHIM)] };
+  const shim = options.shim === false || args.includes('--check') ? [] : ['--require', RESOLVER_SHIM];
+  const shimArgs = [...shim, ...args];
+  if (!runtime.electron) return { executable: runtime.execPath, args: shimArgs, ...(shim.length ? { readPaths: [dirname(RESOLVER_SHIM)] } : {}) };
   return {
     executable: runtime.execPath,
     args: shimArgs,
-    readPaths: [dirname(RESOLVER_SHIM), dirname(dirname(runtime.execPath))],
+    readPaths: shim.length ? [dirname(RESOLVER_SHIM), dirname(dirname(runtime.execPath))] : [dirname(dirname(runtime.execPath))],
     env: { ELECTRON_RUN_AS_NODE: '1' },
   };
 }
@@ -79,8 +82,7 @@ export function validateWorkspaceCommand(command: string, args: string[]): Resol
   throw new RuntimeError('permission', `Command ${command} is not allowed in a work copy`);
 }
 
-function resolveHostCommand(command: string, args: string[]): ResolvedCommand {
-  if (command === 'node') return resolveNodeCommand(args);
+function pathCommand(command: string, args: string[]): ResolvedCommand {
   const candidates = command.includes('/')
     ? [command]
     : (process.env.PATH ?? '').split(':').filter(Boolean).map(directory => `${directory}/${command}`);
@@ -91,6 +93,25 @@ function resolveHostCommand(command: string, args: string[]): ResolvedCommand {
     } catch { /* keep looking */ }
   }
   throw new RuntimeError('permission', `Command ${command} was not found on PATH`);
+}
+
+function resolveHostCommand(command: string, args: string[]): ResolvedCommand {
+  if (command === 'node') return resolveNodeCommand(args);
+  return pathCommand(command, args);
+}
+
+/**
+ * The command as the host itself would run it, for a check that declared `sandbox: false`.
+ *
+ * No allowlist and no sandbox shim: the whole point of the declaration is that the check runs the way
+ * the project runs it, and a suite that starts a thousand processes was never going to survive a
+ * seatbelt. The Node runtime is still the one that hosts Graph (a packaged app ships its own, and
+ * under Electron the binary only runs Node when the environment says so) - that is about which binary
+ * to launch, not about isolation.
+ */
+export function resolveUnsandboxedCommand(command: string, args: string[]): ResolvedCommand {
+  if (command === 'node') return resolveNodeCommand(args, graphNodeRuntime(), { shim: false });
+  return pathCommand(command, args);
 }
 
 /**
@@ -109,6 +130,8 @@ export async function openWorkspaceCommandRunner(input: {
   access?: ResolvedAccessPolicy;
   /** Let a host-mode command write Git metadata inside its own scratch directory only. */
   gitMetadataWritesInsideScratch?: boolean;
+  /** How long the command may run. Defaults to two minutes. */
+  timeoutMs?: number;
 }) {
   const workspace = await realpath(input.workspace);
   let acquired: Awaited<ReturnType<typeof acquireRestrictedExecutor>> | undefined;
@@ -136,7 +159,7 @@ export async function openWorkspaceCommandRunner(input: {
           allowGitMetadataWritesAll: input.access?.filesystem.gitMetadata === 'writable',
           ...(input.gitMetadataWritesInsideScratch ? { gitMetadataWritesInsideScratch: true } : {}),
         } : {}),
-        timeoutMs: 120_000,
+        timeoutMs: input.timeoutMs ?? 120_000,
         ...(Object.keys(environment).length ? { env: environment } : {}),
         ...(input.localNetwork ? { localNetwork: true } : {}),
       });

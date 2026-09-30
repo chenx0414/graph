@@ -69,13 +69,22 @@ test('a dependency artifact is named by artifactId and version so artifact_read 
   expect(text).toContain('artifact_read');
 });
 
+test('a node that declares a deliverable is told to write the file, and that publishing an artifact is not enough', () => {
+  const text = briefing(nodeOperation('review'), { request: 'r', acceptance: [], graph: focusedGraph, focus: 'review' });
+  expect(text).toContain('reviews/review.md');
+  // The settle refuses a node whose declared file was never written; the briefing must say so up front,
+  // because a model otherwise satisfies "shared artifact" by calling artifact_publish and skips the file.
+  expect(text).toMatch(/write .*reviews\/review\.md|reviews\/review\.md.*written/i);
+  expect(text).toMatch(/publish|artifact_publish/i);
+});
+
 /** A real-shaped graph: two sibling lanes, one check that reads the focused lane, one review lane. */
 const focusedGraph: NodeSpec[] = [
   { id: 'impl-a', kind: 'agent' as const, action: 'work', role: 'worker', definitionVersion: 'coder@1', model: 'm', input: { files: ['src/a.ts', 'tests/a.test.ts'], focus: '实现 A 的改动' } },
   { id: 'impl-b', kind: 'agent' as const, action: 'work', role: 'worker', definitionVersion: 'coder@1', model: 'm', input: { files: ['src/b.ts'], focus: '实现 B 的改动' } },
   { id: 'check-a', kind: 'program' as const, action: 'graph.command', dependsOn: ['impl-a'], input: { command: 'node', args: ['node_modules/vitest/vitest.mjs', 'run', 'tests/a.test.ts'] } },
   { id: 'check-all', kind: 'program' as const, action: 'graph.command', dependsOn: ['impl-a', 'impl-b'], input: { command: 'node', args: ['--run', 'check'] } },
-  { id: 'review', kind: 'agent' as const, action: 'review', role: 'worker', definitionVersion: 'reviewer@1', model: 'm', dependsOn: ['impl-a'] },
+  { id: 'review', kind: 'agent' as const, action: 'review', role: 'worker', definitionVersion: 'reviewer@1', model: 'm', dependsOn: ['impl-a'], routes: ['pass', 'fail'], input: { route: { declared: null } }, deliverable: { path: 'reviews/review.md', namespace: 'reviews', name: 'review' } },
 ];
 const nodeOperation = (focus: string): Operation => ({
   id: 'operation', taskId: 'task', nodeId: focus, instanceId: 'instance', generation: 1,
@@ -180,6 +189,20 @@ test('a rework briefing carries the failed evidence instead of the briefing agai
   expect(text).not.toContain('Task graph');
   expect(text).not.toContain('x'.repeat(REWORK_OUTPUT_LIMIT + 1));
   expect(text).toContain('Your node, its file list and every confirmed check input are unchanged.');
+});
+
+test('a rework briefing re-states the node standing contract so a retry does not lose its route or its deliverable', () => {
+  const text = reworkBriefing({
+    attempt: 2,
+    evidence: [{ id: 'review-a', label: 'agent review', status: 'running, routed fail', output: 'lane a is wrong' }],
+    acceptance: [],
+    contract: ['You are a router: your branch is yours to choose from pass, fail.', 'You must WRITE the file reviews/review-a.md before you finish: it is this node declared deliverable.'],
+  });
+  // The delta is still short, but the rules this node must satisfy on EVERY turn ride along: without them a
+  // same-session retry forgets its route (HB-208) and its deliverable (HB-213), which is exactly what happened.
+  expect(text).toMatch(/you are a router/i);
+  expect(text).toContain('WRITE the file reviews/review-a.md');
+  expect(text).not.toContain('Request:');
 });
 
 test('a rework with no recorded failure says so instead of inventing one', () => {

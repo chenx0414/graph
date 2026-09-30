@@ -10,6 +10,7 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
 import { reply } from '../fixtures/models.ts';
+import { encodeAssistantStream } from '../../src/runtime/assistant-stream-frames.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
@@ -18,6 +19,9 @@ afterEach(async () => { for (const close of cleanup.splice(0)) await close(); })
 const handoff = 'I will inspect the failing test.\n\n<analysis>\nLet me chronologically analyze this conversation.\n</analysis>\n\n<summary>\n1. Primary Request and Intent:\nFix the test.\n6. All user messages:\nprivate-history-marker\n7. Pending Tasks:\nFix it.\n8. Current Work:\nStill pending.\n9. Optional Next Step:\nRead the file.\n</summary>';
 const leakedToolCall = 'I found the likely cause. Let me inspect it.\n\n<parameter name="bash">\n<｜DSML｜ parameter name="command" string="true">grep -n unknown_usage src/core/operation-lifecycle.ts</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">300</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
 const directLeakedToolCall = 'The code looks right. Let me inspect the selector.\n\n<parameter name="bash">python3 - <<\'PY\'\nprint("inspect")\nPY</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">400</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
+const plainXmlLeak = 'Let me reproduce it. <analysis>I need to inspect the parser.</analysis>\n<parameter name="bash"><parameter name="command">rg parseStreamingJson src</parameter><parameter name="timeoutMs">60</parameter></invoke></analysis>';
+const analysisLeak = 'I found the cause.\n<analysis>I should run the regression test before answering.</analysis>';
+const bareParameters = 'Building v31.\n<parameter name="path">/tmp/shape-a-v31.json</parameter>\n<parameter name="content">{"loops":[]}</parameter>\nLet me call the tool.';
 
 async function replay(texts: string[], enabled = true) {
   const server = await openaiServer(texts.map(text => ({ chunks: [...text] })));
@@ -50,6 +54,32 @@ test('a handoff in an ordinary response is replaced by one gated correction with
   expect(result.context.messages).toHaveLength(1);
 });
 
+test('a correction after streamed narration remains one valid worker frame sequence', async () => {
+  const server = await openaiServer([
+    { chunks: [...'I should inspect this. <review_of_last_turn>private note</review_of_last_turn>'] },
+    { text: 'Inspection is complete.' },
+  ]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
+  const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} });
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Inspect this.', timestamp: 1 }] });
+  const frames = await encodeAssistantStream(await stream(server.model, context, {}));
+  expect(server.requests).toHaveLength(2);
+  expect(frames.filter(frame => frame.type === 'text_start')).toHaveLength(1);
+});
+
+test('sanitized narration and a real tool call remain valid worker frames', async () => {
+  const server = await openaiServer([{ chunks: [...'Inspecting. <review_of_last_turn>private note</review_of_last_turn>'],
+    tools: [{ id: 'inspection', name: 'inspect', arguments: '{}' }] }]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
+  const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} });
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Inspect this.', timestamp: 1 }] });
+  const frames = await encodeAssistantStream(await stream(server.model, context, {}));
+  expect(frames.some(frame => frame.type === 'toolcall_start')).toBe(true);
+  expect(JSON.stringify(frames)).not.toContain('private note');
+});
+
 test('repeated handoffs stop explicitly instead of succeeding or retrying indefinitely', async () => {
   const result = await replay([handoff, handoff]);
   expect(result.sends).toBe(2);
@@ -61,11 +91,14 @@ test('repeated handoffs stop explicitly instead of succeeding or retrying indefi
 test.each([
   { variant: 'nested parameter', text: leakedToolCall },
   { variant: 'direct command', text: directLeakedToolCall },
+  { variant: 'plain XML with analysis', text: plainXmlLeak },
 ])('a $variant tool call leaked as text is corrected before it can become a final reply', async ({ text }) => {
   const result = await replay([text, 'I used the tool and finished the check.']);
   expect(result.sends).toBe(2);
   expect(result.notices).toEqual(['retrying', 'recovered']);
   expect(JSON.stringify(result.events)).not.toContain('<｜DSML｜');
+  expect(JSON.stringify(result.events)).not.toContain('<parameter name=');
+  expect(JSON.stringify(result.events)).not.toContain('<analysis>');
   expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ text: 'I used the tool and finished the check.' }] } });
   expect(JSON.stringify(result.requests[1])).not.toContain('<｜DSML｜');
 });
@@ -76,6 +109,14 @@ test('a second leaked tool call fails clearly instead of claiming completion', a
   expect(result.notices).toEqual(['retrying', 'failed']);
   expect(result.events.at(-1)).toMatchObject({ type: 'error', error: { stopReason: 'error' } });
   expect(JSON.stringify(result.events)).not.toContain('<｜DSML｜');
+});
+
+test('analysis markup emitted as answer text is corrected before the final reply', async () => {
+  const result = await replay([analysisLeak, '回归测试通过。']);
+  expect(result.sends).toBe(2);
+  expect(result.notices).toEqual(['retrying', 'recovered']);
+  expect(JSON.stringify(result.events)).not.toContain('<analysis>');
+  expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ text: '回归测试通过。' }] } });
 });
 
 test('Pi executes a real tool after a leaked text call, then completes with verified output', async () => {
@@ -110,6 +151,83 @@ test('Pi executes a real tool after a leaked text call, then completes with veri
     const state = instance.inspect();
     expect(state.messages.at(-1)).toMatchObject({ role: 'assistant', content: [{ text: 'Inspection completed with the tool result.' }] });
     expect(await readFile(state.sessionFile, 'utf8')).not.toContain('<｜DSML｜');
+  } finally { await instance.close(); }
+});
+
+test('bare parameter text is retried as an actual tool call', async () => {
+  const result = await replay([bareParameters, 'The tool is unavailable here; I cannot submit v31.']);
+  expect(result.sends).toBe(2);
+  expect(JSON.stringify(result.events)).not.toContain('<parameter');
+  expect(result.events.at(-1)).toMatchObject({ type: 'done', message: { content: [{ text: 'The tool is unavailable here; I cannot submit v31.' }] } });
+});
+
+test('bare parameters beside a real tool call are removed without dropping the call', async () => {
+  const server = await openaiServer([{ chunks: [...bareParameters], tools: [{ id: 'real', name: 'inspect', arguments: '{}' }] }]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _r, send) { return send(); }, settle() {} };
+  const stream = guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} });
+  const context = normalizeContext({ messages: [{ role: 'user', content: 'Inspect.', timestamp: 1 }] });
+  const frames = await encodeAssistantStream(await stream(server.model, context, {}));
+  expect(frames.some(frame => frame.type === 'toolcall_start')).toBe(true);
+  expect(JSON.stringify(frames)).not.toContain('<parameter');
+});
+
+test('an earlier tool-use message with private markup is cleaned in model context without losing its tool call', async () => {
+  const server = await openaiServer([]);
+  cleanup.push(() => server.close());
+  const bad = {
+    ...reply(server.model, 'Working. <review_of_last_turn>private resume note</review_of_last_turn>'),
+    stopReason: 'toolUse' as const,
+    content: [
+      { type: 'text' as const, text: 'Working. <review_of_last_turn>private resume note</review_of_last_turn>' },
+      { type: 'toolCall' as const, id: 'inspection', name: 'inspect', arguments: {} },
+    ],
+  };
+  const context = normalizeContext({ messages: [{ role: 'user' as const, content: 'Continue.', timestamp: 1 }, bad] });
+  const seen: unknown[] = [];
+  const stream = guardHandoffResponses((_model, request) => {
+    seen.push(request);
+    const events = createAssistantMessageEventStream();
+    events.push({ type: 'done', reason: 'stop', message: reply(server.model, 'Done.') });
+    return events;
+  }, { enabled: () => true, onRecovery() {} });
+  for await (const _event of await stream(server.model, context, {})) { /* drain */ }
+  expect(JSON.stringify(context.messages)).toContain('private resume note');
+  expect(JSON.stringify(seen)).not.toContain('private resume note');
+  expect(JSON.stringify(seen)).toContain('inspection');
+});
+
+test.each([
+  { name: 'analysis', privateText: '<analysis>Internal diagnostic steps.</analysis>' },
+  { name: 'review of last turn', privateText: '<review_of_last_turn>Resume the pending operation.</review_of_last_turn>' },
+  { name: 'review of last turn without separators', privateText: '<reviewoflast_turn>Resume the pending operation.</reviewoflast_turn>' },
+  { name: 'review of last turn with spaces', privateText: '<review of last_turn>Resume the pending operation.</review of last_turn>' },
+])('text before a real tool call does not expose $name markup in Pi events or session history', async ({ privateText }) => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-tool-analysis-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const server = await openaiServer([
+    { chunks: [...`Checking the parser. ${privateText}`], tools: [{ id: 'inspection', name: 'inspect', arguments: '{}' }] },
+    { text: 'The inspection is complete.' },
+  ]);
+  cleanup.push(() => server.close());
+  const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
+  const events: unknown[] = [];
+  const instance = await openPiInstance({
+    binding: { instanceId: 'main', nodeId: 'main', definitionVersion: 'main@1' },
+    workspace: root, stateDir: join(root, 'state'), model: server.model, modelRuntime: server.runtime,
+    stream: guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} }),
+    onEvent: event => events.push(structuredClone(event)),
+    tools: [externallyGated({
+      name: 'inspect', label: 'inspect', description: 'Inspect the fixture',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [{ type: 'text' as const, text: 'checked' }], details: {} }),
+    })],
+  });
+  try {
+    await instance.prompt('Inspect and answer.');
+    expect(server.requests).toHaveLength(2);
+    expect(JSON.stringify(events)).not.toContain(privateText);
+    expect(await readFile(instance.inspect().sessionFile, 'utf8')).not.toContain(privateText);
   } finally { await instance.close(); }
 });
 

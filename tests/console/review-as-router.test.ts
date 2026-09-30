@@ -32,8 +32,9 @@ const coder = { definitionVersion: 'coder@1', model: 'scripted' };
 const REVIEW_PATH = 'reviews/review-a.md';
 
 /** A lane shaped exactly like the user's design: implement -> review(router) -> [pass] downstream. */
-function lane(steps: { route: string; note: string }[], options: { deliverable?: boolean } = {}) {
+function lane(steps: { route: string; note: string }[], options: { deliverable?: boolean; downstreamHandoff?: boolean } = {}) {
   const withDeliverable = options.deliverable !== false;
+  const withDownstreamHandoff = options.downstreamHandoff === true;
   let round = 0;
   const review: NodeSpec = {
     id: 'review-a', kind: 'agent', action: 'review-a', definitionVersion: 'reviewer@1', model: 'scripted-review',
@@ -48,7 +49,14 @@ function lane(steps: { route: string; note: string }[], options: { deliverable?:
     nodes: [
       { id: 'impl-a', kind: 'agent', action: 'impl-a', ...coder },
       review,
-      { id: 'after-a', kind: 'program', action: 'check', dependsOn: ['review-a'], when: { node: 'review-a', case: 'pass' } },
+      {
+        // A downstream edge that asks for the result handoff is what makes the harness require one
+        // from the router itself; without this the router's own submission is never inspected.
+        // Only an Agent node may carry a context mode, so the downstream is an Agent here.
+        id: 'after-a', kind: 'agent', action: 'after-a', ...coder, dependsOn: ['review-a'],
+        when: { node: 'review-a', case: 'pass' },
+        context: { predecessors: [{ source: 'review-a', mode: withDownstreamHandoff ? 'result_handoff' as const : 'evidence_only' as const }] },
+      },
     ],
     actions: {
       'impl-a': { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
@@ -61,8 +69,16 @@ function lane(steps: { route: string; note: string }[], options: { deliverable?:
           await mkdir(join(operation.workspace, 'reviews'), { recursive: true });
           await writeFile(join(operation.workspace, REVIEW_PATH), `# review-a\n${step.note}\n`);
         }
-        return { outcome: 'completed' as const, output: { note: step.note }, route: step.route, usage };
+        return {
+          outcome: 'completed' as const, output: { note: step.note }, route: step.route, usage,
+          ...(withDownstreamHandoff ? { resultHandoff: {
+            schemaVersion: 1 as const, objective: 'review the lane', outcome: 'completed' as const,
+            workSummary: `REVIEW_SUMMARY:${step.note}`, changes: [], decisions: [], verification: [],
+            knownLimits: [], openQuestions: [], nextActions: [],
+          } } : {}),
+        };
       } },
+      'after-a': { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed' as const, output: { downstream: true }, usage }) },
       check: { kind: 'program' as const, prepare: async () => async () => ({ outcome: 'completed' as const, output: { checked: true } }) },
     },
   } as { actions: Record<string, ActionAdapter>; nodes: NodeSpec[]; acceptance: Proposal['acceptance']; loops: LoopSpec[] };
@@ -143,4 +159,19 @@ test('a routed loop does not count as acceptance evidence', async () => {
   // The reviewer keeps sending the work back and the task never completes, so nothing is accepted.
   expect(view.evidence.length).toBe(0);
   expect(view.phase).not.toBe('completed');
+});
+
+test('the handoff of an Agent router bound to acceptance is readable by its downstream', async () => {
+  // Failure mode pinned here: the harness records the acceptance evidence for a router by REPLACING
+  // the result AFTER the handoff was settled. The handoff stores a digest of the result it was
+  // settled over, and the durable record then holds a different one, so every downstream read is
+  // refused with `context_rejected` — a router that is itself an acceptance check can never feed
+  // anything downstream. The two writes must happen in the order that keeps the digest true.
+  const { runtime, task } = await setup(() => lane([{ route: 'pass', note: 'looks right' }], { downstreamHandoff: true }));
+  for (let i = 0; i < 8; i++) await runtime.host.runReady();
+  const view = await task.view();
+  expect(view.operations.find(operation => operation.nodeId === 'review-a')?.state).toBe('succeeded');
+  expect(view.evidence).toMatchObject([{ acceptanceId: 'a-pass', nodeId: 'review-a' }]);
+  // The downstream edge runs: it could only do that if it read a handoff with a matching digest.
+  expect(view.operations.find(operation => operation.nodeId === 'after-a')?.state).toBe('succeeded');
 });

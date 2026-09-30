@@ -29,3 +29,11 @@ Graph 已有独立 Agent worktree、结构化 `ResultHandoff`、`Evidence` 和�
 文献检索 Agent 可以发布 `research/source-list@1`，写作者、审查者和用户都能读取同一冻结版本；Plan、Review Report 和交付文件也不再依赖私有 worktree 偶然存在。
 
 共享空间不取代任务图、handoff 或 Evidence。控制流仍由正式图边决定，验收仍由 Evidence 规则决定，artifact 只提供内容发现与版本化。项目级提升是显式动作，不会把某次任务的错误或敏感资料自动扩散到其他任务。
+
+## 增补（2026-09-30）：一个交付物发一次，失败必须留下原因
+
+形状 A 复跑（任务 `68543fed`）量出两条与本 ADR 直接相关的缺陷：
+
+**一、声明了 `deliverable` 的节点必然产出两份逐字节相同的版本。** 7 个节点里只有 review-a/b/c 声明了 deliverable，也只有它们出现「同名两版本、digest 相同」（`341eaad270` / `62cdf31714` / `14e5b5d323`），两次来自同一个 operation：一次是节点自己用 `artifact_publish` 发的，一次是 harness 结算时按声明补发的。原因是补发只检查「文件存在且非空」，不看同名最新版本是否已经是这些字节。**声明 deliverable 的语义是「怕节点忘了发」，不是「一定发两遍」**，所以：`ArtifactWorkspace.head()` 提供最新版本的 digest，`publishDeliverable` 在字节相同时**不新增版本**——版本链只表示「内容变了」。验收证据仍按**磁盘上的文件内容**登记，与是否新增版本无关。
+
+**二、`publish` 的「源文件必须位于本次操作的工作副本内」只能靠撞墙试出来。** 27 次 `artifact_publish` 里 7 次失败，全部是节点把报告写在 `/tmp` 再发布；而失败在记录里只剩一个布尔（`node_entries` 只有 `{isError:true}`、`tool-calls/*.jsonl` 只有 `isError` 与耗时），原因只存在于模型自己的下一句话里。因此：工具描述**开门见山**写明该约束并把 `content` 作为替代，拒绝消息给出**改法**（「写进工作副本再发布，或直接用 content 正文」），并且**任何工具失败都把原因写进记录**（`node_entries.data.message` 与结果行文本，有界截断；`message.tool` 事件同样带上）。

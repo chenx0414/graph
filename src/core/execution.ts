@@ -2,7 +2,8 @@ import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuati
 import { pendingWakes, renderWakes, wakeForTaskCompleted } from './wake-ledger.ts';
 import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
@@ -16,8 +17,8 @@ import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-a
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
 import { insertQuestion, isMasterParked } from './question-routing.ts';
 import { isReworkDecision } from './verification.ts';
-import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
-import { briefing, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
+import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, RESULT_HANDOFF_SCHEMA_EXAMPLE, resultHandoffRepair } from './predecessor-handoff.ts';
+import { briefing, nodeContract, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
@@ -76,6 +77,7 @@ function reworkDelta(input: { store: TaskStore; graph: readonly NodeSpec[]; prop
     attempt: input.attempt,
     evidence: failed,
     acceptance: input.proposal?.acceptance ?? [],
+    contract: nodeContract(input.graph.find(node => node.id === input.own)),
     ...(oversized ? { handlePath } : {}),
   });
 }
@@ -581,18 +583,6 @@ export class Execution {
     try { return await work; } finally { this.pending.delete(work); this.wakeDrive(); }
   }
 
-  /**
-   * Publish the deliverable a node declared, or refuse the result.
-   *
-   * The declaration is the graph's promise that this file will exist, so the node does not have to
-   * remember a tool call for it: in the simple tier study three lanes each wrote a note and only one
-   * of them also published it, because nothing in the graph had asked. A file that was never written,
-   * or is empty, is a defect in the work rather than a pass with a hole in it, so the settle does not
-   * go through and the node is not reported succeeded.
-   *
-   * Reading stays in ArtifactWorkspace.publish, which is where the workspace containment, symlink and
-   * size rules already live; this only decides whether there is anything to publish at all.
-   */
   private declaredDeliverable(operation: Operation): NodeSpec['deliverable'] {
     const row = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
       .get(operation.taskId, operation.nodeId) as { spec: string } | undefined;
@@ -607,6 +597,12 @@ export class Execution {
    * of them also published it, because nothing in the graph had asked. A file that was never written,
    * or is empty, is a defect in the work rather than a pass with a hole in it, so the settle does not
    * go through and the node is not reported succeeded.
+   *
+   * The promise is that the file is published, not that it is published twice: when the newest
+   * version of that name already holds these exact bytes - because the node published its own review
+   * with the artifact tool - there is nothing new to publish and no version is minted. Measured
+   * 2026-09-30 on task 68543fed: every node declaring a deliverable produced two byte-identical
+   * versions, once from the node and once from here.
    *
    * Reading stays in ArtifactWorkspace.publish, which is where the workspace containment, symlink and
    * size rules already live; this only decides whether there is anything to publish at all.
@@ -632,6 +628,14 @@ export class Execution {
     if (info.size === 0) return refused('was declared as this node deliverable but is empty');
     const artifacts = this.artifacts;
     if (!artifacts) return result;
+    // Same bytes as the newest version of this name, whoever published them: nothing changed, so a
+    // new version would say something false about the work. Read through the same path the publish
+    // itself would, so the comparison is over the bytes that would have been stored.
+    const head = artifacts.head(operation.taskId, `${deliverable.namespace}/${deliverable.name}`);
+    if (head) {
+      const body = await readFile(resolve(workspace, deliverable.path));
+      if (createHash('sha256').update(body).digest('hex') === head.digest) return result;
+    }
     await artifacts.publish({
       taskId: operation.taskId,
       workspace,
@@ -930,7 +934,7 @@ export class Execution {
                 reviewNode
                   ? 'Submit the normal independent_review JSON with an additional top-level "resultHandoff" object shaped as:'
                   : 'Call submit_result with outputJson exactly shaped as:',
-                '{"schemaVersion":1,"objective":"<bounded goal>","outcome":"completed|partial|blocked","workSummary":"<bounded work result summary>","changes":[{"kind":"file|artifact|external","path":"<the path you wrote; relative to your work copy is fine>","digest":"<sha256, or omit it and the host hashes the file>","artifactId":"<shared artifact id when published>","version":"<exact shared version>","uri":"<artifact uri when present>","summary":"<bounded summary>"}],"decisions":[{"decision":"...","rationale":"...","evidenceRefs":[]}],"verification":[{"summary":"...","result":"pass|fail|unknown","evidenceRefs":[]}],"knownLimits":[],"openQuestions":[],"nextActions":[]}',
+                RESULT_HANDOFF_SCHEMA_EXAMPLE,
                 'The host checks every file change against the bytes in your work copy, so name the files you actually wrote; keep every top-level field even when its list is empty. Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
               ].join('\n')
             : '';

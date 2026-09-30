@@ -119,6 +119,24 @@ test('rejects traversal and symbolic-link publication outside the private worksp
   })).rejects.toMatchObject({ code: 'invalid_artifact' });
 });
 
+test('a path outside the work copy is refused with the fix in the message, not just the rule', async () => {
+  // Measured 2026-09-30 on task 68543fed: 7 of 27 artifact_publish calls failed because the report
+  // had been written to /tmp, and each node had to rediscover the rule by failing. The refusal is
+  // the one place the caller reads, so it names what to do instead.
+  const { root, workspace, artifacts } = await fixture();
+  const report = join(root, 'report.md');
+  await writeFile(report, '# report\n');
+
+  await expect(artifacts.publish({
+    taskId: 't1', workspace, namespace: 'research', name: 'elsewhere',
+    sourcePath: '../report.md', producer: producer(), requestId: 'elsewhere',
+  })).rejects.toThrow(/work copy/);
+  await expect(artifacts.publish({
+    taskId: 't1', workspace, namespace: 'research', name: 'elsewhere-2',
+    sourcePath: '../report.md', producer: producer(), requestId: 'elsewhere-2',
+  })).rejects.toThrow(/content/);
+});
+
 test('publishes direct text content without first writing a private workspace file', async () => {
   const { workspace, artifacts } = await fixture();
   const plan = await artifacts.publish({

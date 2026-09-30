@@ -264,7 +264,7 @@ export class ArtifactWorkspace {
     if (!info.isFile()) throw new RuntimeError('invalid_artifact', 'sourcePath must be a regular file');
     if (info.nlink > 1) throw new RuntimeError('invalid_artifact', 'sourcePath may not be a multiply-linked file');
     const canonical = await realpath(candidate);
-    if (!within(workspace, canonical)) throw new RuntimeError('invalid_artifact', 'sourcePath escaped the operation workspace');
+    if (!within(workspace, canonical)) throw new RuntimeError('invalid_artifact', 'sourcePath escaped the operation workspace: write the report inside your work copy and publish that path, or pass its bytes as content');
     if (info.size > ARTIFACT_MAX_BYTES) throw new RuntimeError('artifact_quota', `Artifact exceeds the ${ARTIFACT_MAX_BYTES} byte limit`);
     const data = await readFile(canonical);
     if (data.length > ARTIFACT_MAX_BYTES) throw new RuntimeError('artifact_quota', `Artifact exceeds the ${ARTIFACT_MAX_BYTES} byte limit`);
@@ -364,6 +364,21 @@ export class ArtifactWorkspace {
       throw new RuntimeError('idempotency_conflict', 'requestId was already used with different artifact content');
     }
     return JSON.parse(previous.receipt) as T;
+  }
+
+  /**
+   * The newest published version of one logical key inside this task, or undefined.
+   *
+   * Used where a caller must not mint a version that is byte-identical to what it already holds:
+   * the same review published twice says nothing new, and a version chain that cannot be trusted to
+   * mean "something changed" stops being a record of anything.
+   */
+  head(taskId: string, logicalKey: string): ArtifactRecord | undefined {
+    this.store.task(taskId);
+    const row = this.store.db.prepare(
+      "SELECT * FROM artifacts WHERE scope='task' AND owner_id=? AND logical_key=? AND state='published' ORDER BY version DESC LIMIT 1",
+    ).get(taskId, logicalKey) as Record<string, unknown> | undefined;
+    return row ? mapArtifact(row) : undefined;
   }
 
   async publish(input: PublishArtifactInput): Promise<ArtifactRecord> {

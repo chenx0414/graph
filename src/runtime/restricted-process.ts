@@ -802,7 +802,10 @@ export async function openRestrictedExecutor() {
           // The sandbox child is a process-group leader: timeouts and completion
           // must reap its whole tree so a hung check cannot leak grandchildren.
           const killTree = () => { closePendingListeners(); try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } } };
-          const timer = command.timeoutMs ? setTimeout(killTree, command.timeoutMs) : undefined;
+          // A kill this side asked for is a limit, not a verdict on the work, and the record has to
+          // let a reader tell the two apart.
+          let timedOut = false;
+          const timer = command.timeoutMs ? setTimeout(() => { timedOut = true; killTree(); }, command.timeoutMs) : undefined;
           timer?.unref?.();
           const channel = child.stdio[3] as Duplex;
           channel.setEncoding('utf8');
@@ -844,7 +847,11 @@ export async function openRestrictedExecutor() {
           child.on('close', (code, signal) => {
             if (timer) clearTimeout(timer);
             killTree();
-            if (signal) stderr += `Process terminated by ${signal}\n`;
+            if (signal) {
+              stderr += timedOut
+                ? `Process terminated by ${signal}: it exceeded the ${command.timeoutMs}ms timeout\n`
+                : `Process terminated by ${signal}\n`;
+            }
             if (!command.preflight) command.broker.settle(invocationId, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
             void requests.then(() => resolve({ code, stdout, stderr }), reject);
           });
