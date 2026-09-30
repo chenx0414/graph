@@ -296,6 +296,44 @@ test('apply replaces exactly once and refuses ambiguous edits', async () => {
   expect(ambiguous.error).toContain('exactly once');
 });
 
+test('a copy takes the file exactly as a revision has it, which is what a mirror is', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(root, dir);
+  // The revision that holds the finished file: mirroring means naming it, not retyping its content
+  // (retyping is what silently drops a line, and the drop is only caught by a check run minutes later).
+  await writeFile(join(root, 'src', 'keep.ts'), 'export const value = 1;\nexport const added = 2;\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'the version to mirror']);
+  const wanted = shell(root, ['rev-parse', 'HEAD']).trim();
+  // Then the checkout drifts away from it, the way a half-mirrored checkout does.
+  await writeFile(join(root, 'src', 'keep.ts'), 'export const value = 1;\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'drift']);
+
+  const applied = await rsi.apply({
+    title: 'Mirror one file',
+    problem: 'The two checkouts drifted apart.',
+    changes: [{ path: 'src/keep.ts', action: 'copy', from: wanted }],
+  }, { store, taskId, conversationId });
+  expect(applied.status).toBe('applied');
+  expect(await readFile(join(root, 'src', 'keep.ts'), 'utf8')).toBe('export const value = 1;\nexport const added = 2;\n');
+});
+
+test('a copy names the revision and the path when that revision has no such file', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(root, dir);
+  const missing = await rsi.apply({
+    title: 'Mirror a file that is not there',
+    problem: 'Only the older checkout has it.',
+    changes: [{ path: 'src/not-in-this-revision.ts', action: 'copy', from: 'HEAD' }],
+  }, { store, taskId, conversationId });
+  expect(missing.status).toBe('rolled_back');
+  expect(missing.error).toContain('src/not-in-this-revision.ts');
+  expect(missing.error).toContain('HEAD');
+});
+
 test('apply deletes a file and rejects path escape and .git targets', async () => {
   const root = await repo();
   const { store, taskId, conversationId, dir } = ledger();

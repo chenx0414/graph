@@ -9,7 +9,23 @@ import { promisify } from 'node:util';
 import { appendMessage, conversationForTask, markOperationReplied, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import type { TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
-import { checkedOutBranch, detectRepo, git, revParse } from '../git/git.ts';
+import { checkedOutBranch, detectRepo, git, gitRaw, revParse } from '../git/git.ts';
+
+/**
+ * Why a `from` value cannot be used as a revision, or undefined when it can.
+ *
+ * One rule with two callers - the model-facing shape hint and the change parser - so the two cannot
+ * drift: a path smuggled into the revision, whitespace, a leading dash (an option, not a revision) and
+ * an empty value are refused in the same words, in the same place.
+ */
+export function revisionRefusal(from: unknown): string | undefined {
+  const rev = typeof from === 'string' ? from.trim() : '';
+  if (!rev) return 'must name the revision to copy the file from (for a mirror: the commit that holds the finished file)';
+  if (rev.length > 200 || rev.includes(':') || rev.startsWith('-') || /\s/.test(rev)) {
+    return `must be a revision only - "${rev}" carries something else (a path belongs in "path", not in the revision)`;
+  }
+  return undefined;
+}
 import { graphApplicationRoot } from './graph-root.ts';
 import { RUNTIME_NODE_ENV } from './workspace-command.ts';
 import { developerPath } from './developer-path.ts';
@@ -30,6 +46,7 @@ export interface RsiCommand {
 export type RsiFileChange =
   | { path: string; action: 'write'; content: string }
   | { path: string; action: 'replace'; edits: { oldText: string; newText: string }[] }
+  | { path: string; action: 'copy'; from: string }
   | { path: string; action: 'delete' };
 
 export interface RsiChangeInput {
@@ -336,7 +353,7 @@ export function rsiChangeShapeHint(args: unknown): string | undefined {
   const top = plainObject(args);
   if (!top) return undefined;
   const topLevel = ['title', 'problem', 'evidence', 'diagnosis', 'impact', 'risk', 'checks', 'activate', 'force'];
-  const changeKeys = ['path', 'action', 'content', 'edits'];
+  const changeKeys = ['path', 'action', 'content', 'edits', 'from'];
   for (const [index, change] of asArray(top['changes']).entries()) {
     if (Array.isArray(change)) return `changes[${index}] is an array: changes[] holds one object per file - flatten it.`;
     const entry = plainObject(change);
@@ -348,7 +365,14 @@ export function rsiChangeShapeHint(args: unknown): string | undefined {
     // properties path" - no index, no shape, so the same call comes back. Name it here instead.
     if (typeof entry['path'] !== 'string') {
       return `changes[${index}] is missing "path": every change needs one path per file. Write it as `
-        + '{path, action: "write", content} | {path, action: "replace", edits: [{oldText, newText}]} | {path, action: "delete"}.';
+        + '{path, action: "write", content} | {path, action: "replace", edits: [{oldText, newText}]}'
+        + ' | {path, action: "copy", from: "<revision>"} | {path, action: "delete"}.';
+    }
+    // A mirror names a revision instead of retyping content. Shape mistakes in that one field are
+    // answered here, before any file is touched, by the same rule the parser enforces.
+    if (entry['action'] === 'copy') {
+      const refusal = revisionRefusal(entry['from']);
+      if (refusal) return `changes[${index}].from ${refusal}`;
     }
     for (const [editIndex, edit] of asArray(entry['edits']).entries()) {
       if (Array.isArray(edit)) return `changes[${index}].edits[${editIndex}] is an array: edits[] holds one {oldText, newText} per edit - flatten it.`;
@@ -401,9 +425,17 @@ function normalizeChange(value: unknown, index: number): RsiFileChange {
     if (typeof body.content !== 'string') throw new RuntimeError('invalid_input', `changes[${index}].content must be a string`);
     return { path, action: 'write', content: body.content };
   }
+  if (body.action === 'copy') {
+    // A mirror is "this file exactly as that revision has it". Retyping the content instead is what
+    // silently drops a line, and the drop surfaces minutes later as an unrelated-looking check
+    // failure - so the revision is named and the content is read out of it, byte for byte.
+    const refusal = revisionRefusal(body.from);
+    if (refusal) throw new RuntimeError('invalid_input', `changes[${index}].from ${refusal}`);
+    return { path, action: 'copy', from: String(body.from).trim() };
+  }
   if (body.action === 'delete') return { path, action: 'delete' };
   if (body.action !== 'replace' || !Array.isArray(body.edits) || !body.edits.length) {
-    throw new RuntimeError('invalid_input', `changes[${index}] must be write, replace or delete`);
+    throw new RuntimeError('invalid_input', `changes[${index}] must be write, replace, copy or delete`);
   }
   const edits = body.edits.map((edit, editIndex) => {
     if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
@@ -832,6 +864,14 @@ export class RsiService {
         snapshots.set(path, existing);
         if (change.action === 'write') {
           final.set(path, change.content);
+        } else if (change.action === 'copy') {
+          const shown = gitRaw(root, ['show', `${change.from}:${path}`]);
+          if (shown.code !== 0) {
+            throw new RuntimeError('rsi_edit_conflict', `RSI copy of ${path} from ${change.from} found no such file in that revision`
+              + `${shown.stderr.trim() ? `: ${shown.stderr.trim().split('\n')[0]}` : ''}`
+              + '；检查两边是不是同一个仓库（13-Graph 与 live 检出是同一仓库的链接 worktree，对方的提交直接可见）');
+          }
+          final.set(path, shown.stdout);
         } else if (change.action === 'delete') {
           final.set(path, undefined);
         } else {
