@@ -215,6 +215,40 @@ test('status names what is ahead of its published copy instead of leaving it inv
   expect(level.sync!.note).not.toContain('main');
 });
 
+test('status separates the self-improvement line from real unpublished work', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(root, dir);
+
+  // This checkout commits self-improvement to an `rsi/*` work branch, which has no publisher by
+  // design - the application line is what gets pushed. Left in one list, that standing line buries the
+  // one branch a reader has to act on, which is what happened when every report carried
+  // "rsi/product-line is 382 commits ahead".
+  shell(root, ['switch', '-c', 'rsi/test-line']);
+  shell(root, ['update-ref', 'refs/remotes/origin/rsi/test-line', 'HEAD']);
+  await writeFile(join(root, 'src', 'keep.ts'), 'export const value = 7;\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'harness work nobody publishes']);
+
+  const state = await rsi.status();
+  expect(state.sync).toMatchObject({ unpublished: [] });
+  expect(state.sync!.expected).toEqual([{ branch: 'rsi/test-line', upstream: 'origin/rsi/test-line', ahead: 1, behind: 0 }]);
+  expect(state.sync!.note).toContain('按设计不推送');
+
+  // Main is a published line: ahead of its copy it is real debt, and it stays in the list even while
+  // the RSI line is present, so the two are never mixed up.
+  shell(root, ['switch', 'main']);
+  shell(root, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  await writeFile(join(root, 'src', 'keep.ts'), 'export const value = 8;\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'work nobody can see']);
+
+  const mixed = await rsi.status();
+  expect(mixed.sync!.unpublished).toEqual([{ branch: 'main', upstream: 'origin/main', ahead: 1, behind: 0 }]);
+  expect(mixed.sync!.expected.map(entry => entry.branch)).toEqual(['rsi/test-line']);
+  expect(mixed.sync!.note.startsWith('未发布：main')).toBe(true);
+});
+
 
 test('an activation that commits nothing new does not schedule a reload', async () => {
   const root = await repo();

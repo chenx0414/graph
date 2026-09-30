@@ -142,6 +142,14 @@ export interface RsiStatus {
    */
   sync: {
     unpublished: { branch: string; upstream: string; ahead: number; behind: number }[];
+    /**
+     * Self-improvement work branches, which have no publisher by design.
+     *
+     * The application line is what gets pushed; the `rsi/*` branch a change is committed to is a local
+     * working line. Kept apart from `unpublished` because a standing, always-true entry buries the one
+     * branch a reader has to act on - which is exactly what a single list produced, every report.
+     */
+    expected: { branch: string; upstream: string; ahead: number; behind: number }[];
     localOnly: number;
     /** One line a reader can act on without reading the list. */
     note: string;
@@ -712,8 +720,8 @@ export class RsiService {
   }
 
   /**
-   * Which local branches are ahead of the copy they were published to, and how many were never
-   * published at all.
+   * Which local branches are ahead of the copy they were published to, which of those are local work
+   * lines that are never published, and how many were never published at all.
    *
    * This exists because unpublished work is otherwise silent: the application line sat 61 commits
    * ahead of its remote across several sessions and nothing in the harness said so, so a broken push
@@ -721,8 +729,9 @@ export class RsiService {
    */
   private syncState(root: string) {
     const heads = git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']);
-    if (heads.code !== 0) return { unpublished: [], localOnly: 0, note: '无法读取本地分支，未计算未发布的提交' };
+    if (heads.code !== 0) return { unpublished: [], expected: [], localOnly: 0, note: '无法读取本地分支，未计算未发布的提交' };
     const unpublished: { branch: string; upstream: string; ahead: number; behind: number }[] = [];
+    const expected: { branch: string; upstream: string; ahead: number; behind: number }[] = [];
     let localOnly = 0;
     for (const branch of heads.stdout.split('\n').map(name => name.trim()).filter(Boolean)) {
       const upstream = `origin/${branch}`;
@@ -734,13 +743,23 @@ export class RsiService {
       if (counts.code !== 0) continue;
       const [behind, ahead] = counts.stdout.trim().split(/\s+/).map(Number);
       if (!Number.isFinite(ahead) || !Number.isFinite(behind) || (ahead === 0 && behind === 0)) continue;
-      unpublished.push({ branch, upstream, ahead: ahead as number, behind: behind as number });
+      const entry = { branch, upstream, ahead: ahead as number, behind: behind as number };
+      (branch.startsWith('rsi/') ? expected : unpublished).push(entry);
     }
     unpublished.sort((left, right) => left.branch.localeCompare(right.branch));
-    const note = unpublished.length
-      ? `未发布：${unpublished.map(item => `${item.branch} 领先 ${item.upstream} ${item.ahead} 个提交`).join('；')}`
-      : `所有已发布的分支都与它们的远端副本一致（另有 ${localOnly} 个本地分支从未发布）`;
-    return { unpublished, localOnly, note };
+    expected.sort((left, right) => left.branch.localeCompare(right.branch));
+    // Debt first when there is any, so the actionable line is never buried behind a standing one.
+    const parts: string[] = [
+      unpublished.length
+        ? `未发布：${unpublished.map(item => `${item.branch} 领先 ${item.upstream} ${item.ahead} 个提交`).join('；')}`
+        : '没有未发布的已发布分支',
+    ];
+    if (expected.length) {
+      parts.push(`本机自改进线按设计不推送：${expected.map(item => `${item.branch} 领先 ${item.upstream} ${item.ahead} 个提交`).join('；')}`);
+    }
+    if (localOnly) parts.push(`另有 ${localOnly} 个本地分支从未发布`);
+    const note = parts.join('；');
+    return { unpublished, expected, localOnly, note };
   }
 
   private unavailableReason() {

@@ -19,6 +19,17 @@ export interface ResponsePlan {
   holdOpen?: boolean;
   beforeReply?: () => Promise<void> | void;
 }
+/**
+ * A scripted provider: one plan per request, in arrival order.
+ *
+ * That includes requests the SDK makes for itself - notably the summary it asks for when it compacts a
+ * long conversation, which carries a preamble of its own and is not the master speaking. A test that
+ * wants such a summary answered scripts it as a plan (tests/m0/agent-session-contract.test.ts does); a
+ * test that counts provider requests must therefore say whether it means requests or the master's turns
+ * (tests/console/rsi-reload.test.ts learned this the hard way - counting requests made an assertion that
+ * passed in every direct run fail three times on the activation gate, because a summary had taken the
+ * plan the continuation was meant to speak). Do not special-case summaries here.
+ */
 export async function openaiServer(plans: ResponsePlan[]) {
   const requests: unknown[] = [];
   const authorizations: string[] = [];
