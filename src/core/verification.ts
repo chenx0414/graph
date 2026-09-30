@@ -89,9 +89,9 @@ function subject(context: VerificationContext, node: string, value: unknown): Ar
   const current = source(context, node).artifacts;
   // Prefer the exact producer version when the review still points at the live one; otherwise fall
   // back to the same content and report the current version, so downstream subjects stay current.
-  return current.find(item => sameArtifact(item, reported))
-    ?? current.find(item => sameContent(item, reported))
-    ?? invalid('Review does not apply to the current artifact version');
+  const artifact = current.find(item => sameArtifact(item, reported)) ?? current.find(item => sameContent(item, reported));
+  if (!artifact) invalid('Review does not apply to the current artifact version');
+  return artifact;
 }
 function reachable(plan: GraphPlan, from: string, target: string) {
   return new Set(plan.dependencies.get(from)!.flatMap(id => [id, ...plan.leaves(id)])).has(target);
@@ -179,6 +179,7 @@ function collectReports(config: VerifierConfig, context: VerificationContext, de
     return { node, body: report.body, subject: report.subject };
   });
 }
+
 /** One reviewer's own words: verdict, reason and the files it named, across every verifier kind. */
 function summarizeReview(body: Record<string, unknown>): { verdict?: string; reason?: string; files?: string[] } | null {
   const files = new Set<string>();

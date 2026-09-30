@@ -56,7 +56,7 @@ function producer(operationId = 'op-1') {
 }
 
 test('a task reads the task-scope artifacts of every task in its own conversation, and nothing across conversations', async () => {
-  const { store, workspace, artifacts } = await fixture();
+  const { workspace, artifacts } = await fixture();
   const source = join(workspace, 'auth.md');
   await writeFile(source, '# auth notes\n');
 

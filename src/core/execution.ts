@@ -582,18 +582,6 @@ export class Execution {
     try { return await work; } finally { this.pending.delete(work); this.wakeDrive(); }
   }
 
-  /**
-   * Publish the deliverable a node declared, or refuse the result.
-   *
-   * The declaration is the graph's promise that this file will exist, so the node does not have to
-   * remember a tool call for it: in the simple tier study three lanes each wrote a note and only one
-   * of them also published it, because nothing in the graph had asked. A file that was never written,
-   * or is empty, is a defect in the work rather than a pass with a hole in it, so the settle does not
-   * go through and the node is not reported succeeded.
-   *
-   * Reading stays in ArtifactWorkspace.publish, which is where the workspace containment, symlink and
-   * size rules already live; this only decides whether there is anything to publish at all.
-   */
   private declaredDeliverable(operation: Operation): NodeSpec['deliverable'] {
     const row = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
       .get(operation.taskId, operation.nodeId) as { spec: string } | undefined;
