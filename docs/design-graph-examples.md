@@ -330,11 +330,12 @@ nodes:
 
 ## v40 完整初稿（可直接照抄；下面这段 JSON 本身就被上面的测试真的验过）
 
+> **`requirementVersion: 15` 是什么**：它不是节点数、不是「第几轮」、也不是随便填的版本号——它是**你手上这份需求文本的版本**。同一张图改一个字段就是**新版本**（`must be a safe integer ≥ 1`，`src/core/proposal.ts:11`）；照抄时**填你自己这份需求的版本号**（新建图从 1 起），不要跟着抄 15。v40 用 15 是因为它是这条需求线的第 15 版。
+
 ```json
 {
   "requirementVersion": 15,
-  "summary": "复杂档 v40：planner 出计划 → plan-reviewer 审（不过就返工 planner）；放行后计划才分发给三个 worker；三个 worker 各一成果各一评审；synth 收齐三评审、写汇总、自判 pass/fail，判 fail 三条回边全部返工；通过后人工验收",
-  "decisions": [
+  "summary": "复杂档 v40：planner 出计划 → plan-reviewer 审（不过就返工 planner）；放行后计划才分发给三个 worker；三个 worker 各一成果各一评审；synth 收齐三评审、写汇总、自判 pass/fail，判 fail 三条回边全部返工；通过后人工验收",  "decisions": [
     "全轮 agent 节点用同一个模型；换模型只改 model 字段",
     "plan-reviewer 判 accept 才放行，判 replan 走回边返工 planner",
     "synth 判 fail 时三条回边一起触发 = 整批重做，不按评审名单挑人返工",
@@ -447,7 +448,9 @@ v40 之前，这一档还有一张**同样合法、但机制完全不同**的图
 |---|---|---|
 | action 含 `review`/`verify`/`jury`/`critic`，或 `context.purpose: 'review'`，或配方是 `reviewer@*` | `evidence_only` | 不红（拿到你本来想要的） |
 | action 含 `work`/`implement`/`rework`，或 `context.purpose: 'implement'/'rework'`，且源是 agent | **`result_handoff`** | **不红，但语义反了**——worker 会去继承 planner 的结果交接，而不是只读计划这份证据 |
-| 两者都不是（例：`synth` 的 action 是 `synthesize`） | 无默认 | **直接被拒**：`Fresh predecessor edge <节点> requires an explicit handoff policy`（`src/core/predecessor-handoff.ts:495-523`） |
+| 两者都不是（例：action 叫 `report`、既没 `purpose` 也没 `reviewer@*` 配方） | 无默认 | **直接被拒**：`Fresh predecessor edge <源节点> requires an explicit handoff policy`（`src/core/predecessor-handoff.ts:495-523`） |
+
+> 注意第三行**不能**拿本页的 `synth` 当例子：它虽然 action 叫 `synthesize`（不含 review/implement），但 JSON 里**显式写了 `context.purpose: 'review'`**，所以它命中的是**第一行**（默认 `evidence_only`），删掉它的 `predecessors` 不会红。真实会踩第三行的是那种「名字里既没有 review 也没有 implement」的节点。
 
 所以这一条真正的写法是：**显式写出 `mode`，不要依赖默认**。默认只在名字碰巧对上时才是你想要的；名字不对时它要么给你一个你不想要的 `result_handoff`（静默），要么让整张提案被拒（响亮）。上面那张 v40 JSON 里 `worker-N` 显式写 `evidence_only` 就是为了避开第一行那个「静默拿到 `result_handoff`」的坑。
 
@@ -512,25 +515,31 @@ v40 之前，这一档还有一张**同样合法、但机制完全不同**的图
 
 | 说法 | 强制点 | 上面那道测试守得住吗 |
 |---|---|---|
-| `when` 加依赖 + 校验 case 已声明 | `src/core/graph.ts:33-45` | **守得住**（删掉/改错 `when.case` 即红） |
-| 跨 agent 边的 handoff `mode` | `src/core/predecessor-handoff.ts:495-523` | **守得住**（删掉 `synth` 的 `predecessors` 即红） |
-| `loops` 端点存在、回到上游、组合唯一 | `src/core/graph.ts:71-76` + 测试第二个用例 | **守得住** |
-| 验收 `checkNode` 必须是强制的 program 门或 agent 路由器 | `src/core/proposal.ts:100-104` | **守得住** |
+| `when` 引用的 `case` 必须是已声明分支 | `src/core/graph.ts:45` | **部分守得住**（把 `case` 改成未声明的值即红）——但**删掉整个 `when` 不会红**：门被拆了，这道测试看不出来 |
+| 跨 agent 边的 handoff `mode` | `src/core/predecessor-handoff.ts:495-523` | **守不住**——本页的 `synth` 带 `context.purpose: 'review'`，`independentReviewReceiver`（`:30-33`）已把它归为评审、默认就是 `evidence_only`（`:49-53`），所以**只删掉它的 `predecessors` 仍然 ACCEPTED**。实测：只有**删掉整个 `context`**（连 `purpose` 一起没）才会红，那是另一个变异 |
+| `loops` 端点存在、回到上游 | `src/core/graph.ts:71-76` + 测试第二个用例 | **部分守得住**（端点指到非上游祖先即红）——但**漏写 `case` 的死边不会被发现** |
+| 验收 `checkNode` 必须是强制的 program 门或 agent 路由器 | `src/core/proposal.ts:61-72` | **守得住** |
+| 绑了验收的节点必须声明 `deliverable` | `src/core/execution.ts:586-598`、`:1157-1158` | **守不住**——删掉 `review-1` 的 `deliverable` 仍然 ACCEPTED（这条在**结算期**才生效，不在校验期） |
 | `when` 不满足即 `skip`（挡住下游） | `src/core/graph.ts:127-136`（`readiness`） | **守不住**——静态验证器不看运行时调度 |
 | 同一 `from`+`case` 的多条 loop 一起触发（整批返工） | `src/core/operation-lifecycle.ts:1114-1116`、`:1281-1289` | **守不住**——`validateProposal` 只查端点合法 |
 | `declared: null` 才是自判；写死=固定路由 | `src/core/router-action.ts:56-63`、`:91-98` | **守不住**——写成 `"pass"` 一样能过校验 |
 | `review_human_check` 存在、且它不是验收 | `src/runtime/agent-tool-definitions.ts:261`、`src/runtime/agent-tools.ts:438` | **守不住** |
 | `graph.verify` 旧形状的 `byField` / `byStatus` 行为 | `src/core/router-action.ts:65-81` | **守不住**——而且它那段是 `jsonc`，本来就不受测 |
 
-> 「守不住」不是缺陷，是这道门的边界：它只保证**这份照抄件能被产品接受**，不保证**每句机制说法都被测过**。后四行要靠真跑一张图的 E2E 用例来钉。
+> 「守不住」不是缺陷，是这道门的边界：它只保证**这份照抄件能被产品接受**，不保证**每句机制说法都被测过**。**更值得记住的是「部分守得住」那一类**——它比「守不住」更危险：它让你以为某个洞有门，实际只挡住了一半。删掉整个 `when`、漏写 `loops[].case` 都是这一类。
 
 ### 本节其余说法的出处（上面那张表没列的）
 
 | 说法 | 强制点 |
 |---|---|
-| 批量重激活全部目标 | `src/core/operation-lifecycle.ts:1281-1289` |
-| agent 节点可以当路由器 | `src/core/operation-lifecycle.ts:1117`、`src/core/proposal.ts:100-104` |
 | `when` 会把条件节点追加成一条依赖 | `src/core/graph.ts:40-47` |
+| 「像评审」的判定与「像实现」的判定 | `src/core/predecessor-handoff.ts:30-33`、`:41-46` |
+| handoff `mode` 的默认值与「无默认」 | `src/core/predecessor-handoff.ts:49-53` |
+| 跨 agent 边缺 policy 时被拒 | `src/core/predecessor-handoff.ts:495-523` |
+| 批量重激活全部目标 | `src/core/operation-lifecycle.ts:1281-1289` |
+| agent 节点可以当路由器 | `src/core/operation-lifecycle.ts:1117`、`src/core/proposal.ts:61-72` |
+| 路由器必须交回已声明的 case | `src/core/operation-lifecycle.ts:1106-1108` |
+| 声明了 deliverable 却没写 → 节点不 succeeded | `src/core/execution.ts:627` |
 | 上面那张 v40 JSON 被产品自己的 validator 接受 | `tests/console/design-examples.test.ts`（本页 = 它的输入） |
 | 「本页 JSON 的受测范围」那张表的三条事实 | `tests/console/design-examples.test.ts:18-45` |
 
