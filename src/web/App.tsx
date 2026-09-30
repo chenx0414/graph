@@ -361,12 +361,12 @@ export function App() {
         {tabs.tabs.map(tab => (
           <Activity key={tab.id} mode={tab.id === visibleTabId ? 'visible' : 'hidden'}>
             <WorkspacePage path={tab.id === visibleTabId ? path : tab.hash.slice(1)}
-              active={tab.id === visibleTabId} settings={settings} startup={startup} tasks={tasks}
+              active={tab.id === visibleTabId} settings={settings} startup={startup} tasks={tasks} conversations={conversations ?? []}
               reloadConversations={reloadConversations} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
               retitleWorkspaceTab={retitleWorkspaceTab} />
           </Activity>
         ))}
-        {pathname === '/' && <WorkspacePage path={path} active settings={settings} startup={startup} tasks={tasks}
+        {pathname === '/' && <WorkspacePage path={path} active settings={settings} startup={startup} tasks={tasks} conversations={conversations ?? []}
           reloadConversations={reloadConversations} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
           retitleWorkspaceTab={retitleWorkspaceTab} />}
 
@@ -386,8 +386,8 @@ export function App() {
   );
 }
 
-function WorkspacePage({ path, active, settings, startup, tasks, reloadConversations, detailOpen, setDetailOpen, retitleWorkspaceTab }: {
-  path: string; active: boolean; settings: Settings_ | null; startup: Startup | null; tasks: TaskSummary[];
+function WorkspacePage({ path, active, settings, startup, tasks, conversations, reloadConversations, detailOpen, setDetailOpen, retitleWorkspaceTab }: {
+  path: string; active: boolean; settings: Settings_ | null; startup: Startup | null; tasks: TaskSummary[]; conversations: ConversationSummary[];
   reloadConversations: () => void; detailOpen: boolean; setDetailOpen: (open: boolean) => void;
   retitleWorkspaceTab: (kind: WorkspaceTabKind, key: string, title: string) => void;
 }) {
@@ -421,6 +421,8 @@ function WorkspacePage({ path, active, settings, startup, tasks, reloadConversat
               <ArtifactIndex
                 projectId={queryParams.get('project') ?? settings?.projects[0]?.id ?? ''}
                 projects={settings?.projects ?? []}
+                tasks={tasks}
+                conversations={conversations}
               />
             )}
             {conversationMatch && (

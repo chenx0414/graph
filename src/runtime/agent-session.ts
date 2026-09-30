@@ -101,6 +101,9 @@ export interface AgentSession {
    * A manual compaction may instead be followed directly by close(). */
   compact(customInstructions?: string): Promise<void>;
   steer(text: string): Promise<void>;
+  /** Abort active model/tool work now. When text is present it becomes the next
+   * prompt in the same session, keeping the interrupted operation alive. */
+  interrupt(text?: string): Promise<void>;
   /** Soft-stop the running turn: let the in-flight tool call finish, then end
    * the turn instead of issuing another model request. The session (and its
    * transcript) is retained so the same conversation can be prompted again.
@@ -215,6 +218,9 @@ export function createInProcessAgentSessionTransport(options: { modelRuntime: Mo
           state.beginSteer();
           await instance.steer(text);
         },
+        async interrupt(text) {
+          await instance.interrupt(text);
+        },
         async stop() {
           await instance.stop();
         },
@@ -251,6 +257,9 @@ export function createRestrictedProcessAgentSessionTransport(): AgentSessionTran
         async steer(text) {
           state.beginSteer();
           await process.steer(text);
+        },
+        async interrupt(text) {
+          await process.interrupt(text);
         },
         async stop() {
           await process.stop();

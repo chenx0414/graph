@@ -76,3 +76,34 @@ test('steering without any capable adapter still fails loudly', async () => {
   liveTurn(store);
   await expect(execution.steer('op', '插队')).rejects.toThrow('does not support steering');
 });
+
+test('interruption reaches the live adapter and carries the queued replacement text', async () => {
+  const store = await fixture();
+  const interrupted: string[] = [];
+  const fallback = agentAdapter({
+    interrupt: async (_operation, text) => { interrupted.push(text ?? ''); },
+  });
+  const execution = new Execution(store, {}, { fallback });
+  liveTurn(store);
+  await execution.interrupt('op', '停止当前工具，改成检查测试覆盖。');
+  expect(interrupted).toEqual(['停止当前工具，改成检查测试覆盖。']);
+});
+
+test('a legacy steer-only adapter still accepts a queued interruption with text', async () => {
+  const store = await fixture();
+  const steered: string[] = [];
+  const fallback = agentAdapter({ steer: async (_operation, text) => { steered.push(text); } });
+  const execution = new Execution(store, {}, { fallback });
+  liveTurn(store);
+  await execution.interrupt('op', '旧适配器也要收到队列消息。');
+  expect(steered).toEqual(['旧适配器也要收到队列消息。']);
+});
+
+test('a textless interruption requires the hard interrupt seam', async () => {
+  const store = await fixture();
+  const execution = new Execution(store, {}, {
+    fallback: agentAdapter({ steer: async () => undefined }),
+  });
+  liveTurn(store);
+  await expect(execution.interrupt('op')).rejects.toThrow('does not support interruption');
+});

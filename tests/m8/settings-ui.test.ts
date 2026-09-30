@@ -339,6 +339,58 @@ test('configured vendor panel edits an account and removes its linked models', a
   await page.getByTestId('configured-providers').getByText('尚未配置厂商。').waitFor();
 }, 60_000);
 
+test('settings fills new and existing model prices from the local cc-switch snapshot', async () => {
+  const dir = await temp('cc-switch-pricing');
+  const stub = await stubProvider();
+  const path = await configFile(dir, stub.baseUrl);
+  const pricingPath = join(dir, '.cc-switch', 'model-pricing.json');
+  await mkdir(join(dir, '.cc-switch'), { recursive: true });
+  const writePricing = (localInput: number, manualInput: number) => writeFile(pricingPath, JSON.stringify({
+    version: 1,
+    models: [
+      { modelId: 'local', displayName: 'Local', inputCostPerMillion: localInput, outputCostPerMillion: 20, cacheReadCostPerMillion: 0.4, cacheCreationCostPerMillion: 5 },
+      { modelId: 'stub-manual', displayName: 'Stub Manual', inputCostPerMillion: manualInput, outputCostPerMillion: 8, cacheReadCostPerMillion: 0.2, cacheCreationCostPerMillion: 1 },
+    ],
+  }));
+  await writePricing(1, 2);
+  const daemon = await start(dir, path);
+  const api = await session(daemon.url);
+  const configured = async () => {
+    const response = await api.get('/api/config');
+    return (await response.json() as {
+      config: { models: { entries: { id: string; modelId?: string; cost?: { input?: number }; pricing?: { sourceUrl?: string } }[] } };
+    }).config.models.entries;
+  };
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/models`);
+  await page.getByTestId('configured-models').waitFor();
+  await expect.poll(async () => (await configured()).find(entry => entry.id === 'local')?.cost?.input).toBe(1);
+  expect((await configured()).find(entry => entry.id === 'local')?.pricing?.sourceUrl).toBe('~/.cc-switch/model-pricing.json');
+
+  await openModelEditor(page);
+  await page.getByTestId('model-vendor-select').selectOption('local');
+  await page.getByTestId('model-manual-id').fill('stub-manual');
+  await page.getByTestId('model-manual-add').click();
+  await page.getByTestId('model-add-selected').click();
+  const manual = page.locator('[data-testid^="provider-model-"]').filter({ hasText: 'stub-manual' });
+  await manual.waitFor();
+  expect(await manual.locator('[data-testid$="-price"]').innerText()).toContain('输入 2');
+  const index = (await manual.getAttribute('data-testid'))!.replace('provider-model-', '');
+  await page.getByTestId(`model-${index}-context`).fill('4096');
+  await page.getByTestId(`model-${index}-maxTokens`).fill('256');
+  await page.getByTestId(`model-${index}-grade`).selectOption('high');
+  await expect.poll(async () => (await configured()).find(entry => entry.modelId === 'stub-manual')?.cost?.input).toBe(2);
+
+  await writePricing(3, 4);
+  await page.reload();
+  await page.getByTestId('configured-models').waitFor();
+  await expect.poll(async () => (await configured()).find(entry => entry.id === 'local')?.cost?.input).toBe(3);
+  await expect.poll(async () => (await configured()).find(entry => entry.modelId === 'stub-manual')?.cost?.input).toBe(4);
+}, 90_000);
+
 test('chat composer toggles full access with one click and settings no longer hosts the control', async () => {
   const dir = await temp('access-mode');
   const stub = await stubProvider();

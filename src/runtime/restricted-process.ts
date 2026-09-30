@@ -294,10 +294,14 @@ export interface RestrictedCommand {
   env?: Record<string, string>;
   /** Keep stdin open so the trusted host can steer a long-running worker. */
   keepStdinOpen?: boolean;
+  /** Cancel this command and its process tree without changing its sandbox grants. */
+  signal?: AbortSignal;
   /** Exposes only the process control surface the trusted host needs. */
   onSpawn?: (process: RestrictedProcessControl) => void;
   /** Trusted host callback for streamed stdout; restricted workers cannot set it. */
   onStdout?: (chunk: string) => void;
+  /** Out-of-band worker cancellation, handled without waiting behind long requests. */
+  onCancel?: (request: unknown) => void;
   /** Preflight without creating a ledger invocation; used before spawning an Agent process. */
   preflight?: () => void;
 }
@@ -802,6 +806,12 @@ export async function openRestrictedExecutor() {
           // The sandbox child is a process-group leader: timeouts and completion
           // must reap its whole tree so a hung check cannot leak grandchildren.
           const killTree = () => { closePendingListeners(); try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } } };
+          const abort = () => {
+            killTree();
+            reject(new Error('Command aborted by user'));
+          };
+          if (command.signal?.aborted) abort();
+          else command.signal?.addEventListener('abort', abort, { once: true });
           // A kill this side asked for is a limit, not a verdict on the work, and the record has to
           // let a reader tell the two apart.
           let timedOut = false;
@@ -819,11 +829,26 @@ export async function openRestrictedExecutor() {
             while ((newline = pending.indexOf('\n')) !== -1) {
               const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
               pendingBytes -= Buffer.byteLength(line, 'utf8') + 1;
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(line);
+              } catch (error) {
+                stderr += `Invalid worker request: ${String(error)}\n`;
+                killTree();
+                return;
+              }
+              const operation = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? (parsed as { operation?: unknown }).operation
+                : undefined;
+              if (operation === 'cancel') {
+                command.onCancel?.(parsed);
+                continue;
+              }
               requests = requests.then(async () => {
                 let reply;
                 try {
                   if (!command.onRequest) throw new Error('Worker requests not enabled');
-                  reply = { ok: true, value: await command.onRequest(JSON.parse(line)) };
+                  reply = { ok: true, value: await command.onRequest(parsed) };
                 } catch (error) { reply = { ok: false, error: String(error) }; }
                 if (!channel.destroyed) channel.write(`${encodeWorkerReply(reply)}\n`);
               }).catch(error => {
@@ -846,6 +871,7 @@ export async function openRestrictedExecutor() {
           child.on('error', error => { closePendingListeners(); reject(error); });
           child.on('close', (code, signal) => {
             if (timer) clearTimeout(timer);
+            command.signal?.removeEventListener('abort', abort);
             killTree();
             if (signal) {
               stderr += timedOut

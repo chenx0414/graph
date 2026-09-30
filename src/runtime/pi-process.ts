@@ -291,6 +291,10 @@ export async function openPiProcess(options: PiProcessOptions) {
       }
       return requests(request);
     },
+    onCancel: request => {
+      const value = request && typeof request === 'object' && !Array.isArray(request) ? request as Record<string, unknown> : {};
+      if (typeof value.target === 'string') requests.cancel(value.target);
+    },
   }).then(result => {
     if (result.code !== 0) {
       const message = result.stderr.trim() || `Pi process exited with code ${result.code ?? 'signal'}`;
@@ -344,6 +348,11 @@ export async function openPiProcess(options: PiProcessOptions) {
     },
     async steer(text: string) {
       if (!control?.write({ operation: 'steer', text })) throw new Error('Pi process input is closed');
+    },
+    async interrupt(text?: string) {
+      if (!control?.write({ operation: 'interrupt', ...(text?.trim() ? { text: text.trim() } : {}) })) {
+        throw new Error('Pi process input is closed');
+      }
     },
     /** Ask the worker to soft-stop its running turn. Idempotent: a closed or
      * idle process accepts the request without throwing. */

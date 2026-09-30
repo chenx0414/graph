@@ -2,6 +2,8 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { Type } from '@earendil-works/pi-ai';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   createInProcessAgentSessionTransport,
   createRestrictedProcessAgentSessionTransport,
@@ -157,6 +159,117 @@ test.each(['in-process', 'restricted-process'] as const)(
     await fresh.close();
   },
   120_000,
+);
+
+test.each(['in-process', 'restricted-process'] as const)(
+  'the %s transport aborts an in-flight tool and continues with the queued interruption',
+  async kind => {
+    const root = await mkdtemp(join(tmpdir(), `graph-agent-interrupt-${kind}-`));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const workspace = join(root, 'project');
+    await mkdir(workspace);
+    const provider = await openaiServer([
+      { tools: [{ id: 'wait-1', name: 'wait_tool', arguments: '{}' }] },
+      { text: 'replacement completed' },
+    ]);
+    cleanup.push(() => provider.close());
+    const gate = new CallBroker(join(root, 'calls.sqlite'), `agent-interrupt-${kind}`);
+    cleanup.push(() => gate.close());
+    const started = Promise.withResolvers<void>();
+    const aborted = Promise.withResolvers<void>();
+    const waitTool: ToolDefinition = {
+      name: 'wait_tool',
+      label: 'Wait',
+      description: 'Wait until the user interrupts the turn.',
+      parameters: Type.Object({}),
+      execute: async (_id, _params, signal) => {
+        if (!signal) throw new Error('tool did not receive an AbortSignal');
+        started.resolve();
+        await new Promise<void>(resolve => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        aborted.resolve();
+        throw new Error('tool aborted');
+      },
+    };
+    const transport = kind === 'in-process'
+      ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
+      : createRestrictedProcessAgentSessionTransport();
+    const request: AgentSessionRequest = {
+      binding: { instanceId: `interrupt-${kind}`, nodeId: 'master', definitionVersion: 'master@1' },
+      workspace,
+      stateDir: join(root, 'state'),
+      model: provider.model,
+      stream: controlledOpenAIStream(gate, 'host-only-interrupt-key'),
+      tools: [waitTool],
+      bundleDigest: 'a'.repeat(64),
+      toolPolicyDigest: 'b'.repeat(64),
+      runtimePolicyDigest: 'c'.repeat(64),
+      readOnly: true,
+      broker: gate,
+    };
+    const session = await transport.open(request);
+    cleanup.push(() => session.close());
+
+    const prompt = session.prompt('start a waiting tool');
+    await bounded(started.promise, 15_000, 'tool start');
+    await bounded(session.interrupt('replacement prompt'), 15_000, 'interrupt');
+    const turn = await bounded(prompt, 15_000, 'interrupted prompt');
+    await bounded(aborted.promise, 15_000, 'tool abort');
+
+    expect(turn).toMatchObject({ finalAssistantText: 'replacement completed', stopReason: 'stop' });
+    expect(provider.requests).toHaveLength(2);
+    expect(JSON.stringify(provider.requests[1])).toContain('replacement prompt');
+  },
+  60_000,
+);
+
+test.each(['in-process', 'restricted-process'] as const)(
+  'the %s transport cancels the host model request before the provider answers',
+  async kind => {
+    const root = await mkdtemp(join(tmpdir(), `graph-agent-model-interrupt-${kind}-`));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const workspace = join(root, 'project');
+    await mkdir(workspace);
+    const releaseProvider = Promise.withResolvers<void>();
+    const provider = await openaiServer([{
+      text: 'the provider was too slow',
+      beforeReply: () => releaseProvider.promise,
+    }]);
+    cleanup.push(async () => {
+      releaseProvider.resolve();
+      await provider.close();
+    });
+    const gate = new CallBroker(join(root, 'calls.sqlite'), `agent-model-interrupt-${kind}`);
+    cleanup.push(() => gate.close());
+    const transport = kind === 'in-process'
+      ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
+      : createRestrictedProcessAgentSessionTransport();
+    const session = await transport.open({
+      binding: { instanceId: `model-interrupt-${kind}`, nodeId: 'master', definitionVersion: 'master@1' },
+      workspace,
+      stateDir: join(root, 'state'),
+      model: provider.model,
+      stream: controlledOpenAIStream(gate, 'host-only-model-interrupt-key'),
+      tools: [],
+      bundleDigest: 'a'.repeat(64),
+      toolPolicyDigest: 'b'.repeat(64),
+      runtimePolicyDigest: 'c'.repeat(64),
+      readOnly: true,
+      broker: gate,
+    });
+    cleanup.push(() => session.close());
+
+    const prompt = session.prompt('wait for a slow model');
+    await expect.poll(() => provider.requests.length, { timeout: 15_000 }).toBe(1);
+    await bounded(session.interrupt(), 15_000, 'model interrupt');
+    const turn = await bounded(prompt, 15_000, 'interrupted model prompt');
+    expect(turn.stopReason).toBe('aborted');
+    expect(provider.requests).toHaveLength(1);
+    releaseProvider.resolve();
+  },
+  60_000,
 );
 
 test.each(['in-process', 'restricted-process'] as const)(

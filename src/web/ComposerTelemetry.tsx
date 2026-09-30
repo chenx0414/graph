@@ -54,7 +54,11 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
     const close = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setOpen(false);
+    };
     document.addEventListener('pointerdown', close);
     document.addEventListener('keydown', escape);
     return () => {

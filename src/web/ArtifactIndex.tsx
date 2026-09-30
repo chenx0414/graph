@@ -14,7 +14,12 @@ import { ErrorBox } from './shared.tsx';
 
 type Page = { artifacts: ArtifactRecord[]; nextCursor: string | null; total: number };
 
-export function ArtifactIndex({ projectId, projects }: { projectId: string; projects: { id: string }[] }) {
+export function ArtifactIndex({ projectId, projects, tasks, conversations }: {
+  projectId: string;
+  projects: { id: string }[];
+  tasks: { id: string; projectId: string; request: string }[];
+  conversations: { anchorTaskId: string; projectId: string | null; title: string }[];
+}) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [moreLoading, setMoreLoading] = useState(false);
@@ -69,6 +74,12 @@ export function ArtifactIndex({ projectId, projects }: { projectId: string; proj
   const filtered = records.filter(record =>
     (scope === 'all' || record.scope === scope) &&
     `${record.title ?? ''} ${record.namespace}/${record.name}`.toLowerCase().includes(search.toLowerCase().trim()));
+  const taskTitles = new Map(tasks.map(task => [task.id, task.request]));
+  for (const conversation of conversations) {
+    if (conversation.projectId && !taskTitles.has(conversation.anchorTaskId)) {
+      taskTitles.set(conversation.anchorTaskId, conversation.title);
+    }
+  }
 
 
   return (
@@ -94,6 +105,7 @@ export function ArtifactIndex({ projectId, projects }: { projectId: string; proj
       <ArtifactList
         records={filtered}
         loading={loading}
+        tasks={[...taskTitles].map(([id, request]) => ({ id, request }))}
         onOpenDetail={record => { location.hash = `#/tasks/${record.taskId}/artifacts/${record.artifactId}?v=${record.version}`; }}
       />
     </div>

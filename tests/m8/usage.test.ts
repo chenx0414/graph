@@ -235,6 +235,7 @@ test('usage service normalizes the five supported subscription sources', async (
   expect(snapshot.plans.find(plan => plan.id === 'chatgpt')?.models[0]).toMatchObject({ id: 'gpt-5.6', supported: false });
   expect(snapshot.plans.find(plan => plan.id === 'grok')?.models[0]).toMatchObject({ id: 'grok-4.6' });
   expect(snapshot.pricing.models.map(model => model.modelId)).toEqual(['deepseek-v4-pro', 'gpt-5.6']);
+  expect(await service.pricing()).toEqual(snapshot.pricing);
   expect(await service.credentials()).toEqual({
     'opencode-go': 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
     'command-goat': 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY',
@@ -252,7 +253,7 @@ test('usage service normalizes the five supported subscription sources', async (
   expect(requests).toHaveLength(11);
 });
 
-test('the usage page shows subscription cards, refreshes, and keeps pricing visible', async () => {
+test('the usage page shows subscription cards and refreshes without model pricing', async () => {
   const root = await temp('ui');
   let forced = false;
   const snapshot: UsageSnapshot = {
@@ -293,6 +294,9 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
       forced = force;
       return snapshot;
     },
+    async pricing() {
+      return snapshot.pricing;
+    },
     async credentials() {
       return { 'opencode-go': 'OPENCODE_GO_API_KEY' };
     },
@@ -317,7 +321,8 @@ test('the usage page shows subscription cards, refreshes, and keeps pricing visi
   expect(await page.getByTestId('usage-plan-opencode-go').innerText()).toContain('OpenCode Go');
   expect(await page.getByTestId('usage-plan-command-goat').innerText()).toContain('$12.60');
   expect(await page.getByTestId('usage-plan-deepseek').innerText()).toContain('未检测到凭据');
-  expect(await page.getByTestId('usage-pricing').innerText()).toContain('GPT-5.6');
+  expect(await page.getByTestId('usage-pricing').count()).toBe(0);
+  expect(await page.getByTestId('usage-page').innerText()).not.toContain('模型定价');
   await page.getByTestId('usage-refresh').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="usage-refresh"]')?.textContent?.includes('刷新用量'));
   expect(forced).toBe(true);

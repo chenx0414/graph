@@ -233,6 +233,13 @@ export function createPiAdapter(options: {
       const ordinal = turnOrdinals.get(operation.id)?.();
       return ordinal === undefined ? {} : { ordinal };
     },
+    async interrupt(operation, text) {
+      const active = activeInstances.get(operation.id);
+      if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting interruption');
+      await active.interrupt(text);
+      const ordinal = text ? turnOrdinals.get(operation.id)?.() : undefined;
+      return ordinal === undefined ? {} : { ordinal };
+    },
     /** Soft-stop the turn an operation is running: the in-flight tool call
      * finishes, the turn ends before the next model request, and the session is
      * retained. Idempotent when the operation has no live session. */
@@ -466,8 +473,8 @@ export function createPiAdapter(options: {
               onAskUser: request => { askedQuestion ??= request; },
               ...(accessPolicy ? { access: accessPolicy } : {}),
               ...(readRoots.length ? { readRoots: [...readRoots] } : {}),
-              run: (command, args) => commands!.run(command, args),
-              ...(retrieval ? { fetch: (url: string) => retrieval.fetch(url) } : {}),
+              run: (command, args, signal) => commands!.run(command, args, signal),
+              ...(retrieval ? { fetch: (url: string, signal?: AbortSignal) => retrieval.fetch(url, signal) } : {}),
               ...(artifactService ? { artifacts: artifactService } : {}),
               // A master session may hand work to any other conversation. The rules and the handoff
               // ledger live in `conversation-tools.ts`.
@@ -1169,6 +1176,9 @@ export function createPiAdapter(options: {
             // error message; that is a failure, never a successful operation.
             if (result.stopReason === 'error') {
               return { outcome: 'failed', output: { error: result.errorMessage ?? 'Model request failed' }, usage: gate.total() };
+            }
+            if (result.stopReason === 'aborted') {
+              throw new RuntimeError('interrupted', '用户打断了当前模型思考或工具调用');
             }
             if (result.stopReason === 'length') {
               return {

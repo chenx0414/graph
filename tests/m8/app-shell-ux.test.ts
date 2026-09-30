@@ -305,7 +305,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.getByTestId('artifact-index').waitFor();
   expect(await page.locator('.tab[data-kind="page"][data-active="true"] .tab-title').innerText()).toContain('共享产物');
   expect(await page.getByTestId('drawer-artifacts-project').innerText()).toContain('不属于任何任务');
-  expect(await page.getByTestId('drawer-artifacts-own').innerText()).toContain('各任务的产物');
+  expect(await page.getByTestId('drawer-artifacts-own').innerText()).toContain('还没有任务图发布过产物');
   }, 60_000);
 
 test('a graph agent node opens the same chat transcript used by the main agent', async () => {
@@ -564,7 +564,7 @@ test('the composer suggestion and queue steering follow the three Enter states',
             usage,
           };
         },
-        steer: async (_operation, text) => { steered.push(text); },
+        interrupt: async (_operation, text) => { steered.push(text ?? ''); },
       },
     },
     master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
@@ -640,6 +640,57 @@ test('the composer suggestion and queue steering follow the three Enter states',
   // naming no condition. With room to spare, a real stall now fails inside the poll that was
   // still waiting and says which state never arrived.
 }, 420_000);
+
+test('Escape closes the model menu before it interrupts the running Agent', async () => {
+  const root = await temp('escape-interrupt');
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const interrupted: string[] = [];
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'),
+    actions: {
+      master: {
+        kind: 'agent',
+        reserveTokens: 100,
+        prepare: async () => async () => {
+          await gate;
+          return {
+            outcome: 'completed',
+            output: { text: '已打断。' },
+            usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+          };
+        },
+        interrupt: async (_operation, text) => {
+          interrupted.push(text ?? '');
+          release();
+        },
+      },
+    },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    autoDrive: true,
+    webDir,
+    startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  const created = await server.runtime.conversations.create({ text: '开始一个可打断的回合。', requestId: 'escape-interrupt' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('running');
+
+  await page.getByTestId('model-control').click();
+  await page.getByTestId('model-menu').waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('model-menu').waitFor({ state: 'detached' });
+  expect(interrupted).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect.poll(() => interrupted.length, { timeout: 10_000 }).toBe(1);
+  expect(interrupted[0]).toBe('');
+  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('succeeded');
+}, 60_000);
 
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');

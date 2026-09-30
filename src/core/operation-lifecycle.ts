@@ -491,6 +491,14 @@ export class OperationLifecycle {
     return await steer(operationFrom(row));
   }
 
+  async interrupt(operationId: string, interrupt: (operation: Operation) => Promise<{ ordinal?: number } | void>) {
+    const row = this.operationRow(operationId);
+    if (row.state !== 'dispatched' || !row.worker_active) {
+      throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting interruption');
+    }
+    return await interrupt(operationFrom(row));
+  }
+
   /** Reconcile an unknown external outcome and apply the verified transition. */
   async reconcile(
     id: string,
@@ -537,9 +545,9 @@ export class OperationLifecycle {
    * interrupted instead of silently replayable.
    */
   handleDispatchRefusal(operation: Operation, error: RuntimeError, reservation: number) {
-    const refusalCodes = ['paused', 'budget', 'unknown_usage', 'context_rejected'];
+    const refusalCodes = ['paused', 'budget', 'unknown_usage', 'context_rejected', 'interrupted'];
     if (!refusalCodes.includes(error.code)) return false;
-    if (isFullAccess(operation.accessPolicy)) {
+    if (isFullAccess(operation.accessPolicy) && error.code !== 'interrupted') {
       return this.transaction(() => {
         const row = this.operationRow(operation.id);
         if (!['dispatched', 'unknown'].includes(row.state)) return false;
@@ -600,6 +608,10 @@ export class OperationLifecycle {
         };
         this.store.event(operation.taskId, 'context.rejected', { nodeId: operation.nodeId, operationId: operation.id, ...data });
         this.block(operation.taskId, operation.nodeId, 'context_rejected', data, operation.id);
+      } else if (error.code === 'interrupted') {
+        this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?")
+          .run(operation.taskId, operation.nodeId);
+        recordConversationInterruption(this.store, operation, error.message);
       } else if (unknown || error.code === 'unknown_usage') {
         const existing = this.store.db.prepare("SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'")
           .get(operation.id) as { id: string } | undefined;

@@ -7,10 +7,10 @@
  * belongs to the project itself - promoted knowledge such as the harness backlog,
  * which no single task owns and which therefore has to stand on its own.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ArtifactRecord } from '../core/artifact-workspace.ts';
 import { api } from './api.ts';
-import { groupArtifacts } from './conversation-drawer.ts';
+import { groupArtifactsByTask } from './conversation-drawer.ts';
 import { ErrorBox } from './shared.tsx';
 import { Markdown } from './Markdown.tsx';
 import { Icon, Pill, Spinner, toast } from './ui.tsx';
@@ -35,18 +35,19 @@ function ArtifactRow({ record, onOpenDetail }: { record: ArtifactRecord; onOpenD
   );
 }
 
-function Group({ title, hint, records, onOpenDetail, testid }: {
+function Group({ title, hint, records, onOpenDetail, testid, action }: {
   title: string;
   hint: string;
   records: readonly ArtifactRecord[];
   onOpenDetail: (record: ArtifactRecord) => void;
   testid: string;
+  action?: ReactNode;
 }) {
   return (
     <section className="drawer-artifact-group" data-testid={testid}>
       <div className="drawer-section-head">
         <h3>{title}</h3>
-        <span>{records.length} 份文档</span>
+        <span className="drawer-artifact-group-meta">{action}{records.length} 份文档</span>
       </div>
       {records.length
         ? <ul className="list">{records.map(record => <ArtifactRow key={`${record.artifactId}:${record.version}`} record={record} onOpenDetail={onOpenDetail} />)}</ul>
@@ -56,27 +57,34 @@ function Group({ title, hint, records, onOpenDetail, testid }: {
 }
 
 /** The drawer's 「共享产物」 page: this entry's artifacts plus the project's own. */
-export function ArtifactList({ records, loading, onOpenDetail }: {
+export function ArtifactList({ records, loading, onOpenDetail, tasks }: {
   records: readonly ArtifactRecord[];
   loading?: boolean;
   onOpenDetail: (record: ArtifactRecord) => void;
+  tasks?: readonly { id: string; request: string }[];
 }) {
-  const groups = groupArtifacts(records);
+  const groups = groupArtifactsByTask(records, tasks ?? []);
   return (
     <div className="drawer-artifacts" data-testid="drawer-artifacts">
       {loading && <Spinner label="加载共享产物…" />}
-      {/* Both groups are read in the project-wide index, so their empty copy names the group
-          rather than a task: the same list has to read correctly for every task in a project. */}
-      <Group
-        testid="drawer-artifacts-own"
-        title="各任务的产物"
-        hint="还没有任务发布过产物。"
-        records={groups.own}
-        onOpenDetail={onOpenDetail}
-      />
+      <div className="drawer-artifact-graphs" data-testid="drawer-artifacts-own">
+        {groups.graphs.length
+          ? groups.graphs.map(group => (
+            <Group
+              key={group.taskId}
+              testid={`drawer-artifacts-graph-${group.taskId}`}
+              title={`任务图 · ${group.request}`}
+              hint="这个任务图还没有发布过产物。"
+              records={group.records}
+              onOpenDetail={onOpenDetail}
+              action={<a className="drawer-artifact-graph-link" href={`#/tasks/${encodeURIComponent(group.taskId)}/graph`}><Icon name="graph" size={12} />任务图</a>}
+            />
+          ))
+          : <p className="muted" data-testid="drawer-artifacts-own-empty">还没有任务图发布过产物。</p>}
+      </div>
       <Group
         testid="drawer-artifacts-project"
-        title="不属于任何任务"
+        title="项目共享 · 不属于任何任务"
         hint="还没有提升到项目的产物。"
         records={groups.project}
         onOpenDetail={onOpenDetail}

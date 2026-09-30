@@ -286,6 +286,7 @@ export function turnFailureText(reason: string, kind: TurnFailureKind = 'run') {
   if (kind === 'setup') {
     return `主 Agent 本轮没有启动起来，回复没有完成。消息已保留，可以再发一次重试。${detail ? ` 原因：${detail}` : ''}`;
   }
+  if (/打断|中断|interrupted/i.test(reason)) return '已打断当前模型思考和工具调用。';
   if (/unterminated string|unexpected end of (json|input)|unexpected token|output token limit|truncat/i.test(reason)) {
     return '主 Agent 本轮的模型输出被截断，回复没有完成。消息已保留，可以再发一次或切换模型后重试。';
   }

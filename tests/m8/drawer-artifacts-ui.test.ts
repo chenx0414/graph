@@ -117,6 +117,9 @@ test('the shared-artifact index shows a task\'s artifacts apart from the project
   const own = page.getByTestId('drawer-artifacts-own');
   const project = page.getByTestId('drawer-artifacts-project');
   await own.waitFor();
+  await page.getByTestId(`drawer-artifacts-graph-${view.anchorTaskId}`).waitFor();
+  expect(await own.innerText()).toContain('任务图 · 共享产物索引。');
+  expect(await own.getByRole('link', { name: '任务图' }).getAttribute('href')).toBe(`#/tasks/${view.anchorTaskId}/graph`);
   await expect.poll(() => own.innerText()).toContain('只属于这个任务');
   await expect.poll(() => project.innerText()).toContain('Graph harness backlog');
   expect(await project.innerText()).toContain('不属于任何任务');

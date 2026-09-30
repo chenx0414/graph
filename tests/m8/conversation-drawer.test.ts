@@ -8,6 +8,7 @@ import {
   DRAWER_PANEL_IDS,
   defaultDrawerOpen,
   groupArtifacts,
+  groupArtifactsByTask,
   isEndedTask,
   drawerEntryLabel,
   drawerInitPanelIds,
@@ -32,6 +33,35 @@ const read = (relative: string) => readFileSync(join(process.cwd(), relative), '
 describe('drawer default state', () => {
   test('the drawer is collapsed by default', () => {
     expect(defaultDrawerOpen()).toBe(false);
+  });
+
+  test('the drawer body owns a stable vertical scrollbar', () => {
+    const styles = read('src/web/styles.css');
+    expect(styles).toMatch(/\.drawer-inner\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(styles).toMatch(/\.drawer-inner\s*\{[^}]*scrollbar-gutter:\s*stable/s);
+    expect(styles).toMatch(/\.drawer-inner::-webkit-scrollbar\s*\{[^}]*width:\s*10px/s);
+  });
+});
+
+describe('shared artifacts by task graph', () => {
+  test('groups task artifacts in task order and keeps project artifacts separate', () => {
+    const records = [
+      { scope: 'task', taskId: 'b', artifactId: 'b1' },
+      { scope: 'project', taskId: 'b', artifactId: 'shared' },
+      { scope: 'task', taskId: 'a', artifactId: 'a1' },
+      { scope: 'task', taskId: 'gone', artifactId: 'orphan' },
+      { scope: 'task', taskId: 'a', artifactId: 'a2' },
+    ];
+    const groups = groupArtifactsByTask(records, [
+      { id: 'a', request: '先做登录' },
+      { id: 'b', request: '再做权限' },
+    ]);
+    expect(groups.graphs.map(group => [group.taskId, group.request, group.records.map(record => record.artifactId)])).toEqual([
+      ['a', '先做登录', ['a1', 'a2']],
+      ['b', '再做权限', ['b1']],
+      ['gone', 'gone', ['orphan']],
+    ]);
+    expect(groups.project.map(record => record.artifactId)).toEqual(['shared']);
   });
 });
 

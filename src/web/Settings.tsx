@@ -97,6 +97,44 @@ type Startup = {
 type ApiError = Error & { code?: string; field?: string };
 
 const GRADES = ['low', 'medium', 'high', 'highest'];
+type CcSwitchPrice = {
+  modelId: string;
+  displayName: string;
+  inputCostPerMillion: number;
+  outputCostPerMillion: number;
+  cacheReadCostPerMillion: number;
+  cacheCreationCostPerMillion: number;
+};
+type CcSwitchPricing = { source: string; updatedAt: number | null; models: CcSwitchPrice[] };
+let ccSwitchPricingRequest: Promise<CcSwitchPricing> | null = null;
+
+function loadCcSwitchPricing(): Promise<CcSwitchPricing> {
+  ccSwitchPricingRequest ??= api<CcSwitchPricing>('/api/model-pricing').catch(() => ({
+    source: '~/.cc-switch/model-pricing.json',
+    updatedAt: null,
+    models: [],
+  }));
+  return ccSwitchPricingRequest;
+}
+
+function findCcSwitchPrice(modelId: string, pricing: CcSwitchPricing): CcSwitchPrice | undefined {
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) return undefined;
+  const exact = pricing.models.find(model => model.modelId.toLowerCase() === normalized);
+  if (exact) return exact;
+  const leaf = normalized.split('/').at(-1)!;
+  return pricing.models.find(model => model.modelId.toLowerCase() === leaf)
+    ?? pricing.models.find(model => normalized.endsWith(model.modelId.toLowerCase()) || model.modelId.toLowerCase().endsWith(normalized));
+}
+
+function ccSwitchCost(price: CcSwitchPrice): NonNullable<SnapshotMetadata['cost']> {
+  return {
+    input: price.inputCostPerMillion,
+    output: price.outputCostPerMillion,
+    cacheRead: price.cacheReadCostPerMillion,
+    cacheWrite: price.cacheCreationCostPerMillion,
+  };
+}
 
 /** Strip server-side display flags so the draft can be saved back verbatim. */
 function toDraft(config: ConfigResponse['config']): RawConfig {
@@ -508,9 +546,17 @@ function probeModelsFrom(response: ProbeResponse): ProbeModel[] {
 async function lookupSnapshot(providerId: string, modelId: string): Promise<SnapshotMetadata | null> {
   try {
     modelsDevModule ??= loadModelsDev();
-    const mod = await modelsDevModule;
-    const found = mod.lookupModelMetadata(providerId, modelId);
-    return found ?? null;
+    const [mod, pricing] = await Promise.all([modelsDevModule, loadCcSwitchPricing()]);
+    const found = mod.lookupModelMetadata(providerId, modelId) ?? null;
+    const price = findCcSwitchPrice(modelId, pricing);
+    if (!price) return found;
+    return {
+      ...(found ?? {}),
+      cost: ccSwitchCost(price),
+      currency: 'USD',
+      sourceUrl: pricing.source,
+      catalogRevision: `cc-switch:${pricing.updatedAt ?? 'unknown'}`,
+    };
   } catch {
     return null;
   }
@@ -1100,11 +1146,36 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
       const detected = detectedResponse.credentials;
       const merged = mergeSubscriptionCredentials(toDraft(response.config), detected);
       const next = merged.config;
+      const pricing = await loadCcSwitchPricing();
+      let pricingChanged = false;
       if (next.models) {
-        next.models.entries = await Promise.all(next.models.entries.map(async entry => ({
-          ...entry,
-          thinkingOptions: thinkingOptionsFromMetadata(await lookupSnapshot(entry.provider, entry.modelId ?? entry.id)),
-        })));
+        next.models.entries = await Promise.all(next.models.entries.map(async entry => {
+          const modelId = entry.modelId ?? entry.id;
+          const price = findCcSwitchPrice(modelId, pricing);
+          const cost = price ? ccSwitchCost(price) : undefined;
+          const catalogRevision = `cc-switch:${pricing.updatedAt ?? 'unknown'}`;
+          const priceChanged = Boolean(price) && (
+            JSON.stringify(entry.cost ?? null) !== JSON.stringify(cost ?? null)
+            || entry.pricing?.sourceUrl !== pricing.source
+            || entry.pricing?.catalogRevision !== catalogRevision
+            || entry.pricing?.status !== 'known'
+          );
+          if (priceChanged) pricingChanged = true;
+          return {
+            ...entry,
+            ...(price && cost ? {
+              cost,
+              pricing: {
+                currency: 'USD',
+                unit: 'per_million_tokens' as const,
+                sourceUrl: pricing.source,
+                catalogRevision,
+                status: 'known' as const,
+              },
+            } : {}),
+            thinkingOptions: thinkingOptionsFromMetadata(await lookupSnapshot(entry.provider, modelId)),
+          };
+        }));
       }
       clearTimeout(saveTimer.current);
       editVersion.current = merged.changed ? 1 : 0;
@@ -1118,10 +1189,14 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
         ...Object.fromEntries(Object.keys(detected).map(id => [id, true])),
       });
       setRevision(response.revision);
-      setDirty(merged.changed);
+      setDirty(merged.changed || pricingChanged);
       setError(null);
-      setStatus(merged.changed ? `已同步 ${Object.keys(detected).join('、')} 的凭据引用` : '');
-      if (merged.changed) scheduleSave(0);
+      setStatus(merged.changed
+        ? `已同步 ${Object.keys(detected).join('、')} 的凭据引用`
+        : pricingChanged
+          ? `已按 ${pricing.source} 更新模型定价`
+          : '');
+      if (merged.changed || pricingChanged) scheduleSave(0);
     } catch (reason) {
       setError(reason as ApiError);
     }

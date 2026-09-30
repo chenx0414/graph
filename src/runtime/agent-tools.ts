@@ -150,8 +150,8 @@ export function agentTools(input: {
   access?: ResolvedAccessPolicy;
   /** Discussion turns investigate without writing business files or running commands. */
   readOnly?: boolean;
-  run?: (command: string, args: string[]) => Promise<{ code: number | null; stdout: string; stderr: string }>;
-  fetch?: (url: string) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
+  run?: (command: string, args: string[], signal?: AbortSignal) => Promise<{ code: number | null; stdout: string; stderr: string }>;
+  fetch?: (url: string, signal?: AbortSignal) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
   /** How ask_user hands a question to the session that can durably record it. */
   onAskUser?: (question: { prompt: string; why: string; options: string[]; multiple: boolean }) => void;
@@ -204,8 +204,8 @@ export function agentTools(input: {
   // cap so a huge diff cannot flood the context — over the cap it re-reads --stat.
   const GIT_READ_SUBCOMMANDS = ['status', 'log', 'diff', 'show', 'blame', 'describe', 'rev-parse', 'ls-files', 'shortlog', 'grep', 'rev-list'];
   const GIT_OUTPUT_LIMIT = 20_000;
-  const gitText = async (args: string[]) => {
-    const result = await input.run!('git', args);
+  const gitText = async (args: string[], signal?: AbortSignal) => {
+    const result = await input.run!('git', args, signal);
     return `exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`;
   };
   const handlers: Record<AgentToolName, ToolDefinition['execute']> = {
@@ -335,12 +335,12 @@ export function agentTools(input: {
       input.onSubmit?.(output);
       return text('Recorded structured result');
     },
-    run_command: async (_id, params) => {
+    run_command: async (_id, params, signal) => {
       const body = fields(params);
-      const result = await input.run!(String(body.command), Array.isArray(body.args) ? body.args.map(String) : []);
+      const result = await input.run!(String(body.command), Array.isArray(body.args) ? body.args.map(String) : [], signal);
       return text(`exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`);
     },
-    git: async (_id, params) => {
+    git: async (_id, params, signal) => {
       const body = fields(params);
       const subcommand = String(body.subcommand ?? '').trim();
       if (!GIT_READ_SUBCOMMANDS.includes(subcommand)) throw new Error(`Only read-only git subcommands: ${GIT_READ_SUBCOMMANDS.join(', ')}`);
@@ -351,12 +351,12 @@ export function agentTools(input: {
       const path = typeof body.path === 'string' ? body.path.trim() : '';
       if (path && (path.startsWith('-') || /[\0\r\n]/.test(path))) throw new Error('Invalid git path');
       const base = [subcommand, ...args];
-      const full = await gitText(path ? [...base, '--', path] : base);
+      const full = await gitText(path ? [...base, '--', path] : base, signal);
       if (full.length <= GIT_OUTPUT_LIMIT) return text(full);
-      const summary = await gitText(path ? [subcommand, '--stat', ...args, '--', path] : [subcommand, '--stat', ...args]);
+      const summary = await gitText(path ? [subcommand, '--stat', ...args, '--', path] : [subcommand, '--stat', ...args], signal);
       return text(`output exceeded ${GIT_OUTPUT_LIMIT} characters; --stat summary follows\n\n${summary.slice(0, GIT_OUTPUT_LIMIT)}`);
     },
-    fetch: async (_id, params) => text(JSON.stringify(await input.fetch!(String(fields(params).url)))),
+    fetch: async (_id, params, signal) => text(JSON.stringify(await input.fetch!(String(fields(params).url), signal))),
     propose_graph: async (_id: string, params: unknown) => {
       const body = fields(params);
       const proposal = body.proposal !== undefined ? body.proposal as Proposal : JSON.parse(String(body.proposalJson)) as Proposal;
