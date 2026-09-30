@@ -132,6 +132,20 @@ export interface RsiStatus {
     force?: boolean;
   } | null;
   activeOperations: number;
+  /**
+   * Where this repository stands against the branches it has already published.
+   *
+   * The comparison uses the remote-tracking refs known locally - no fetch happens here - so it can
+   * overstate what is unpublished and never hides local work. A branch with no published copy at all
+   * is counted, not listed: this checkout holds dozens of task branches that were never meant to be
+   * pushed, and a wall of their names would bury the one branch that matters.
+   */
+  sync: {
+    unpublished: { branch: string; upstream: string; ahead: number; behind: number }[];
+    localOnly: number;
+    /** One line a reader can act on without reading the list. */
+    note: string;
+  } | null;
   /** In-flight operations that keep a normal reload waiting. */
   operations: {
     id: string;
@@ -684,6 +698,7 @@ export class RsiService {
       root,
       branch,
       ...(available ? {} : { reason: this.unavailableReason() }),
+      sync: available && root ? this.syncState(root) : null,
       pendingRestart,
       lastActivation,
       activeOperations,
@@ -694,6 +709,38 @@ export class RsiService {
       canRestart: Boolean(pendingRestart
         && (pendingRestart.force === true || (operationsKnown && activeOperations === 0))),
     };
+  }
+
+  /**
+   * Which local branches are ahead of the copy they were published to, and how many were never
+   * published at all.
+   *
+   * This exists because unpublished work is otherwise silent: the application line sat 61 commits
+   * ahead of its remote across several sessions and nothing in the harness said so, so a broken push
+   * channel looked exactly like a working one.
+   */
+  private syncState(root: string) {
+    const heads = git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']);
+    if (heads.code !== 0) return { unpublished: [], localOnly: 0, note: '无法读取本地分支，未计算未发布的提交' };
+    const unpublished: { branch: string; upstream: string; ahead: number; behind: number }[] = [];
+    let localOnly = 0;
+    for (const branch of heads.stdout.split('\n').map(name => name.trim()).filter(Boolean)) {
+      const upstream = `origin/${branch}`;
+      if (git(root, ['rev-parse', '--verify', '--quiet', `refs/remotes/${upstream}`]).code !== 0) {
+        localOnly += 1;
+        continue;
+      }
+      const counts = git(root, ['rev-list', '--left-right', '--count', `refs/remotes/${upstream}...${branch}`]);
+      if (counts.code !== 0) continue;
+      const [behind, ahead] = counts.stdout.trim().split(/\s+/).map(Number);
+      if (!Number.isFinite(ahead) || !Number.isFinite(behind) || (ahead === 0 && behind === 0)) continue;
+      unpublished.push({ branch, upstream, ahead: ahead as number, behind: behind as number });
+    }
+    unpublished.sort((left, right) => left.branch.localeCompare(right.branch));
+    const note = unpublished.length
+      ? `未发布：${unpublished.map(item => `${item.branch} 领先 ${item.upstream} ${item.ahead} 个提交`).join('；')}`
+      : `所有已发布的分支都与它们的远端副本一致（另有 ${localOnly} 个本地分支从未发布）`;
+    return { unpublished, localOnly, note };
   }
 
   private unavailableReason() {

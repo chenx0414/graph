@@ -183,6 +183,39 @@ test('refuses a change with no file key and names the shape', async () => {
   expect(error?.message).toContain('edits: [{oldText, newText}]');
 });
 
+test('status names what is ahead of its published copy instead of leaving it invisible', async () => {
+  const root = await repo();
+  const { store, taskId, conversationId, dir } = ledger();
+  const rsi = service(root, dir);
+
+  // A branch nobody has published is not "level": it has no published copy at all, and the surface
+  // says that much instead of implying everything is fine.
+  const beforeAny = await rsi.status();
+  expect(beforeAny.sync).toMatchObject({ unpublished: [], localOnly: 1 });
+
+  // Origin holds main at this commit, then two more commits land locally - the shape of a broken or
+  // forgotten push channel, which used to be invisible for as long as nobody asked.
+  shell(root, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  await writeFile(join(root, 'src', 'keep.ts'), 'export const value = 2;\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'work nobody can see']);
+  await writeFile(join(root, 'src', 'keep.ts'), 'export const value = 3;\n');
+  shell(root, ['add', '-A']);
+  shell(root, ['commit', '-m', 'and more']);
+
+  const ahead = await rsi.status();
+  expect(ahead.sync).toMatchObject({ unpublished: [{ branch: 'main', upstream: 'origin/main', ahead: 2, behind: 0 }] });
+  expect(ahead.sync!.note).toContain('main');
+  expect(ahead.sync!.note).toContain('2');
+
+  // Level again: the list empties and the note says so, rather than staying silent.
+  shell(root, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  const level = await rsi.status();
+  expect(level.sync).toMatchObject({ unpublished: [] });
+  expect(level.sync!.note).not.toContain('main');
+});
+
+
 test('an activation that commits nothing new does not schedule a reload', async () => {
   const root = await repo();
   const { store, taskId, conversationId, dir } = ledger();
