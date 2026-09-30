@@ -22,6 +22,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
+import { independentReviewReady } from '../../src/core/model-selection.ts';
+import { loadGraph } from '../../src/core/graph.ts';
+import { git } from '../../src/git/git.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, LoopSpec, NodeSpec, Proposal } from '../../src/core/types.ts';
 
@@ -115,6 +118,22 @@ test("a reviewer's 'pass' releases the downstream branch instead of looping", as
   const view = await task.view();
   expect(view.operations.filter(operation => operation.nodeId === 'impl-a' && operation.state === 'succeeded').length).toBe(1);
   expect(view.operations.find(operation => operation.nodeId === 'after-a')?.state).toBe('succeeded');
+  expect(view.phase).toBe('completed');
+});
+
+test("a reviewer's own 'pass' reads as an independent review", async () => {
+  // The completion guard asks whether an independent review happened before a delivery may finish. With
+  // a routed reviewer there is no gate to read, so the answer is the reviewer's own route: the graph
+  // names the branch that means "go back", and a route that is not that branch released the work.
+  const { runtime, task, taskId, stateDir } = await setup(() => lane([{ route: 'pass', note: 'looks right' }]));
+  for (let i = 0; i < 8; i++) await runtime.host.runReady();
+  const view = await task.view();
+  expect(view.nodes.every(node => ['succeeded', 'skipped'].includes(node.status))).toBe(true);
+
+  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  cleanup.push(async () => store.close());
+  expect(loadGraph(store, taskId).route('review-a')).toBe('pass');
+  expect(independentReviewReady(store, taskId)).toBe(true);
   expect(view.phase).toBe('completed');
 });
 
