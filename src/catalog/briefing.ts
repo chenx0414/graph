@@ -146,8 +146,7 @@ function focusBriefing(own: string, graph: readonly NodeSpec[]) {
     'Task graph (program checks run these inputs; confirmed check inputs must stay unchanged):',
     mine ? `Your node: ${nodeHeader(mine)}` : `Your node: ${own}`,
     ...(mine ? inputLines(mine.input) : []),
-    ...routerInstruction(mine),
-    ...deliverableInstruction(mine),
+    ...nodeContract(mine),
     ...(checks.length ? ['Checks that read your output:', ...checks.map(node => `- ${checkLine(node)}`)] : []),
     ...(others.length ? [`Other lanes (ids only): ${others.map(node => node.id).join(', ')}`] : []),
   ].join('\n');
@@ -163,6 +162,17 @@ function focusBriefing(own: string, graph: readonly NodeSpec[]) {
 function deliverableInstruction(node: NodeSpec | undefined): string[] {
   if (!node?.deliverable) return [];
   return [`You must WRITE the file ${node.deliverable.path} before you finish: it is this node's declared deliverable, and node that never wrote it does not succeed. Publishing a shared artifact (artifact_publish) does not satisfy this on its own; write the file.`];
+}
+
+/**
+ * The rules a node must satisfy on EVERY turn, whatever the attempt: it is a router (its result must
+ * carry a route) and it must write its declared deliverable as a file. `focusBriefing` states them
+ * once; `reworkDelta` re-states them, because a same-session retry otherwise loses them and a node
+ * can fail the exact contract it was first told (observed: a review lane dropped its route and its
+ * deliverable file on retries after acting on both in round one).
+ */
+export function nodeContract(node: NodeSpec | undefined): string[] {
+  return [...routerInstruction(node), ...deliverableInstruction(node)];
 }
 
 /**
@@ -189,7 +199,7 @@ export const REWORK_OUTPUT_LIMIT = 4_000;
  * re-sends what that session already holds. What a rework needs is the evidence that failed and what
  * that evidence demands; the whole output lives in a file the worker can read when 4,000 chars run out.
  */
-export function reworkBriefing(input: { attempt: number; evidence: { id: string; label: string; status: string; output: string }[]; acceptance: { id: string; description: string; checkNode: string }[]; handlePath?: string }) {
+export function reworkBriefing(input: { attempt: number; evidence: { id: string; label: string; status: string; output: string }[]; acceptance: { id: string; description: string; checkNode: string }[]; handlePath?: string; contract?: string[] }) {
   const failed = new Set(input.evidence.map(item => item.id));
   const blocked = input.acceptance.filter(item => failed.has(item.checkNode));
   const truncated = input.evidence.some(item => item.output.length > REWORK_OUTPUT_LIMIT);
@@ -201,6 +211,10 @@ export function reworkBriefing(input: { attempt: number; evidence: { id: string;
       : 'No downstream evidence is recorded as failed: re-run the checks your node feeds and report what you find.',
     blocked.length ? `Acceptance this evidence blocks:\n${blocked.map(item => `- ${item.id} (check ${item.checkNode}): ${item.description}`).join('\n')}` : '',
     truncated && input.handlePath ? `Evidence above is truncated; every whole output is in ${input.handlePath}` : '',
+    // The rules this node must satisfy on EVERY turn - it is a router, it must write its declared file -
+    // are not part of what "is already in this session" for a retry that may be unaware it dropped them.
+    // Re-state them, or a same-session rework forgets its route (HB-208) and its deliverable (HB-213).
+    input.contract?.length ? `Unchanged rules you must still satisfy this turn:\n${input.contract.join('\n')}` : '',
     'Fix only what the evidence above shows. Your node, its file list and every confirmed check input are unchanged.',
   ].filter(Boolean).join('\n');
 }

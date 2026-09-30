@@ -17,7 +17,7 @@ import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.
 import { insertQuestion, isMasterParked } from './question-routing.ts';
 import { isReworkDecision } from './verification.ts';
 import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, resultHandoffRepair } from './predecessor-handoff.ts';
-import { briefing, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
+import { briefing, nodeContract, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
@@ -76,6 +76,7 @@ function reworkDelta(input: { store: TaskStore; graph: readonly NodeSpec[]; prop
     attempt: input.attempt,
     evidence: failed,
     acceptance: input.proposal?.acceptance ?? [],
+    contract: nodeContract(input.graph.find(node => node.id === input.own)),
     ...(oversized ? { handlePath } : {}),
   });
 }
