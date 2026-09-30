@@ -1196,21 +1196,31 @@ export class Execution {
   }
 
   private deliver(taskId: string) {
-    if (!this.readyToComplete(taskId)) return;
-    if (this.git) {
+    for (let pass = 0; pass < 2; pass += 1) {
+      if (!this.readyToComplete(taskId)) return;
+      if (!this.git) break;
       const recovered = this.git.restore(taskId);
-      if (this.store.task(taskId).integration_branch) {
-        const result = recovered?.status === 'merged' ? recovered : this.git.tryDeliver(taskId);
-        if (result.status === 'recheck') return;
-        if (result.status === 'blocked') {
-          const task = this.store.task(taskId);
-          const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
-          const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(taskId, proposal.acceptance[0]!.checkNode) as ExecutionNodeRow;
-          this.store.transaction(() => this.block(node, String((result.data as { kind?: string })?.kind ?? 'git_conflict'), result.data ?? { reason: 'Git delivery blocked' }));
-          return;
-        }
-        if (result.status !== 'merged' && result.status !== 'skip') return;
+      if (!this.store.task(taskId).integration_branch) break;
+      const result = recovered?.status === 'merged' ? recovered : this.git.tryDeliver(taskId);
+      if (result.status === 'recheck') {
+        // The target branch had moved, so this pass only brought the integration up to date; when the
+        // trees stayed identical the evidence was re-bound and the delivery is owed right now. Looking
+        // again is what turns that into a delivery - stopping here left a task whose target keeps moving
+        // re-merging and re-checking forever, never delivering, holding the active slot (HB-201: the real
+        // task's events are a run of `git.recheck` and nothing else, with every node succeeded and every
+        // acceptance item valid). Only one retry: a second move means the target moves faster than this.
+        if (pass === 0) continue;
+        return;
       }
+      if (result.status === 'blocked') {
+        const task = this.store.task(taskId);
+        const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
+        const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(taskId, proposal.acceptance[0]!.checkNode) as ExecutionNodeRow;
+        this.store.transaction(() => this.block(node, String((result.data as { kind?: string })?.kind ?? 'git_conflict'), result.data ?? { reason: 'Git delivery blocked' }));
+        return;
+      }
+      if (result.status !== 'merged' && result.status !== 'skip') return;
+      break;
     }
     this.store.transaction(() => this.completeTask(taskId));
   }
