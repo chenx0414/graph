@@ -37,6 +37,12 @@ test.each([
       ...(mixed ? [{ id: 'second-apply', name: 'apply_rsi_change', arguments: JSON.stringify({ title: 'Should wait', problem: 'Another improvement', changes: [{ path: 'helper.ts', action: 'write', content: 'export const helper = 2;\n' }] }) }] : []),
     ] },
     { text: 'This response must wait for the reload.' },
+    // Scripted twice on purpose: the SDK may compact a long conversation by asking for a summary, and
+    // that request takes the next plan like any other. The reply the continuation must produce is the
+    // same either way, so the script does not depend on whether the SDK compacted before it continued
+    // (measured on the activation gate, where the summary stole the plan reserved for the continuation
+    // and the failure surfaced three assertions later).
+    { text: 'This response must wait for the reload.' },
   ]);
   cleanup.push(() => provider.close());
   const options = {
@@ -53,15 +59,25 @@ test.each([
   await runtime.conversations.chat(created.conversationId, { text: 'Improve the harness and activate it. '.repeat(mode === 'activate' ? 400 : 1), requestId: 'improve' });
   await runtime.host.runReady();
   if (mode !== 'activate') {
-    expect(provider.requests).toHaveLength(3);
+    expect(masterTurns(provider.requests)).toHaveLength(3);
     expect((await rsi.status()).pendingRestart).toBeNull();
     const messages = (await runtime.conversations.view(created.conversationId)).messages;
     expect(messages.find(message => message.kind === 'rsi')?.data).toMatchObject({ status: mode === 'failed' ? 'checks_failed' : 'applied' });
     expect(messages.some(message => message.role === 'assistant' && message.text === 'This response must wait for the reload.')).toBe(true);
     return;
   }
-  // Any further provider request after the activation recreates the observed self-blocking loop.
-  expect(provider.requests).toHaveLength(2);
+  // Any further provider request after the activation recreates the observed self-blocking loop, but
+  // the SDK's own window management is not the master speaking again: it compacts a long conversation
+  // by asking the provider to summarize it, with a preamble of its own. Counting that as a turn is
+  // what made this assertion fail three times in a row on the activation gate while passing every
+  // time it was run directly - the failure carried the summarization request, which is how the two
+  // were told apart. Count the master's turns, and report any extra one with its content.
+  const turns = masterTurns(provider.requests);
+  const extra = turns.slice(2)
+    .map(request => JSON.stringify(request).slice(0, 800))
+    .join('\n');
+  expect(turns, extra ? `after activation the master asked the provider again:\n${extra}` : undefined)
+    .toHaveLength(2);
   expect(await readFile(join(checkout, 'helper.ts'), 'utf8')).toBe('export const helper = 1;\n');
   const status = await rsi.status();
   expect(status).toMatchObject({ activeOperations: 0, canRestart: true });
@@ -73,7 +89,7 @@ test.each([
   if (paused) await runtime.conversations.pause(created.conversationId, 'pause');
   if (archived) await runtime.conversations.archive(created.conversationId, 'archive');
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(provider.requests).toHaveLength(2);
+  expect(masterTurns(provider.requests)).toHaveLength(2);
   await runtime.close();
   // Reopen the same ledger as a fresh daemon; queued messages stay undelivered
   // until the desktop acknowledges this exact restart.
@@ -97,7 +113,19 @@ test.each([
   expect(activated.messages.find(message => message.kind === 'rsi')?.data).toMatchObject({ activation: { state: 'active' } });
   expect(await resumedRuntime.host.runReady()).toEqual({ dispatched: 1 });
   expect(await resumedRuntime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(provider.requests).toHaveLength(3);
+  expect(masterTurns(provider.requests)).toHaveLength(3);
   const resumed = await resumedRuntime.conversations.view(created.conversationId);
   expect(resumed.messages.some(message => message.role === 'assistant' && message.text === 'This response must wait for the reload.')).toBe(true);
 }, 60_000);
+
+/**
+ * The master's own turns.
+ *
+ * The SDK manages its own context window: when a conversation grows it asks the provider to summarize
+ * it, with a preamble of its own. That is not the master speaking, and counting it as a turn made this
+ * file's request counts fail on the activation gate while every direct run passed - the failure carried
+ * the summarization request, which is how the two were told apart. Every count here is a count of turns.
+ */
+function masterTurns(requests: readonly unknown[]) {
+  return requests.filter(request => !JSON.stringify(request).includes('context summarization assistant'));
+}
