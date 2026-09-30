@@ -61,7 +61,14 @@ test.each([
     return;
   }
   // Any further provider request after the activation recreates the observed self-blocking loop.
-  expect(provider.requests).toHaveLength(2);
+  // A bare count does not say what that request was, and the cause is not reproducible outside this
+  // gate (the same suite in the same tree passes when a developer runs it): carry the request itself
+  // into the failure, so the next occurrence explains itself instead of costing another investigation.
+  const extra = provider.requests.slice(2)
+    .map(request => JSON.stringify(request).slice(0, 800))
+    .join('\n');
+  expect(provider.requests, extra ? `after activation the master asked the provider again:\n${extra}` : undefined)
+    .toHaveLength(2);
   expect(await readFile(join(checkout, 'helper.ts'), 'utf8')).toBe('export const helper = 1;\n');
   const status = await rsi.status();
   expect(status).toMatchObject({ activeOperations: 0, canRestart: true });
