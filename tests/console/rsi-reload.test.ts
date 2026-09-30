@@ -60,14 +60,17 @@ test.each([
     expect(messages.some(message => message.role === 'assistant' && message.text === 'This response must wait for the reload.')).toBe(true);
     return;
   }
-  // Any further provider request after the activation recreates the observed self-blocking loop.
-  // A bare count does not say what that request was, and the cause is not reproducible outside this
-  // gate (the same suite in the same tree passes when a developer runs it): carry the request itself
-  // into the failure, so the next occurrence explains itself instead of costing another investigation.
-  const extra = provider.requests.slice(2)
+  // Any further provider request after the activation recreates the observed self-blocking loop, but
+  // the SDK's own window management is not the master speaking again: it compacts a long conversation
+  // by asking the provider to summarize it, with a preamble of its own. Counting that as a turn is
+  // what made this assertion fail three times in a row on the activation gate while passing every
+  // time it was run directly - the failure carried the summarization request, which is how the two
+  // were told apart. Count the master's turns, and report any extra one with its content.
+  const turns = provider.requests.filter(request => !isSummarization(request));
+  const extra = turns.slice(2)
     .map(request => JSON.stringify(request).slice(0, 800))
     .join('\n');
-  expect(provider.requests, extra ? `after activation the master asked the provider again:\n${extra}` : undefined)
+  expect(turns, extra ? `after activation the master asked the provider again:\n${extra}` : undefined)
     .toHaveLength(2);
   expect(await readFile(join(checkout, 'helper.ts'), 'utf8')).toBe('export const helper = 1;\n');
   const status = await rsi.status();
@@ -108,3 +111,8 @@ test.each([
   const resumed = await resumedRuntime.conversations.view(created.conversationId);
   expect(resumed.messages.some(message => message.role === 'assistant' && message.text === 'This response must wait for the reload.')).toBe(true);
 }, 60_000);
+
+/** The SDK's summary request, recognised by the preamble it sends, not a turn of the master. */
+function isSummarization(request: unknown) {
+  return JSON.stringify(request).includes('context summarization assistant');
+}
