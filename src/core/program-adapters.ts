@@ -11,6 +11,9 @@ import { evaluateVerifier } from './verification.ts';
 import type { TaskStore } from './store.ts';
 import { RuntimeError, type ActionAdapter, type NodeSpec, type Proposal } from './types.ts';
 
+/** The longest a program check may be told to run: a day. */
+const MAX_CHECK_TIMEOUT_MS = 86_400_000;
+
 function proposalFor(store: TaskStore, taskId: string, proposalVersion: number) {
   const row = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?')
     .get(taskId, proposalVersion) as { spec: string } | undefined;
@@ -75,11 +78,21 @@ export function workspaceCommandNode(input: {
   return {
     kind: 'program',
     prepare: async operation => {
-      const command = spec.input as { command?: unknown; args?: unknown; copy?: unknown } | null;
+      const command = spec.input as { command?: unknown; args?: unknown; copy?: unknown; timeoutMs?: unknown } | null;
       if (!command || typeof command.command !== 'string'
         || !Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string')) {
         throw new RuntimeError('invalid_adapter', 'graph.command requires input {command, args}');
       }
+      // A check that runs the project's own suite takes minutes, and the default limit cut it at two.
+      // The limit is the node's to declare, up to a day; anything else is refused rather than
+      // quietly replaced, because a check that silently ran under a different limit would pass or
+      // fail for a reason its author never wrote down.
+      if (command.timeoutMs !== undefined
+        && (typeof command.timeoutMs !== 'number' || !Number.isSafeInteger(command.timeoutMs)
+          || command.timeoutMs < 1 || command.timeoutMs > MAX_CHECK_TIMEOUT_MS)) {
+        throw new RuntimeError('invalid_adapter', `graph.command timeoutMs must be a whole number of milliseconds between 1 and ${MAX_CHECK_TIMEOUT_MS}`);
+      }
+      const timeoutMs = command.timeoutMs as number | undefined;
       if (command.copy !== undefined && command.copy !== 'project') {
         throw new RuntimeError('invalid_adapter', "graph.command copy must be 'project' when given");
       }
@@ -149,6 +162,7 @@ export function workspaceCommandNode(input: {
           // this scratch), so the check may write Git metadata there; the workspace
           // and every other repository stay protected.
           gitMetadataWritesInsideScratch: true,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
         });
         try {
           const result = await runner.run(command.command as string, command.args as string[]);
