@@ -341,10 +341,6 @@ test('an evidence_only edge hides a predecessor result handoff from the Fresh Ag
     knownLimits: [],
     openQuestions: [],
     nextActions: [],
-    source: {
-      nodeId: 'work', instanceId: 'i-work', operationId: 'op-work', activationId: 'a-work', outputVersion: 1,
-      operationResultDigest: digest(result),
-    },
   };
   store.transaction(() => {
     store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
@@ -366,10 +362,29 @@ test('an evidence_only edge hides a predecessor result handoff from the Fresh Ag
         acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
         nodes: [workSpec, nextSpec, { id: 'check', kind: 'program', action: 'check', dependsOn: ['review'] }],
       }));
-    store.db.prepare(`INSERT INTO result_handoffs(id,task_id,node_id,instance_id,operation_id,activation_id,output_version,
-      schema_kind,schema_version,body,digest,created_at) VALUES('rh','t','work','i-work','op-work','a-work',1,'result_handoff',1,?,?,0)`)
-      .run(canonicalJson(handoff), digest(handoff));
+    // Written by the harness's own writer, not hand-rolled: a row this test composed itself would
+    // carry a fingerprint computed differently from the one the reader compares against, and the
+    // assertion below would then hold whether or not anything was tampered with.
+    settleResultHandoff(
+      store,
+      { id: 'op-work', taskId: 't', nodeId: 'work', instanceId: 'i-work', activationId: 'a-work', workspace: root } as Operation,
+      {
+        requirementVersion: 1,
+        summary: 'evidence only',
+        acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
+        nodes: [
+          workSpec,
+          { ...nextSpec, context: { purpose: 'implement' as const, predecessors: [{ source: 'work', mode: 'result_handoff' as const }] } },
+          { id: 'check', kind: 'program' as const, action: 'check', dependsOn: ['review'] },
+        ],
+      } as Proposal,
+      { ...result, resultHandoff: handoff },
+    );
+    // The real settle bumps the node's output version after the handoff is written, and the reader
+    // looks the row up under that version; a fixture that skips the bump would look under the old one.
+    store.db.prepare("UPDATE nodes SET output_version=output_version+1 WHERE task_id='t' AND id='work'").run();
   });
+  expect(store.db.prepare("SELECT count(*) AS n FROM result_handoffs WHERE node_id='work'").get()).toMatchObject({ n: 1 });
 
   const projected = buildPredecessorHandoffs(store, loadGraph(store, 't'), nextSpec);
   expect(projected.projections).toEqual([
@@ -378,14 +393,19 @@ test('an evidence_only edge hides a predecessor result handoff from the Fresh Ag
   expect(projected.projections[0]?.resultHandoff).toBeUndefined();
   expect(renderPredecessorHandoffs(projected.projections)).not.toContain('HANDOFF_SUMMARY_SENTINEL');
 
+  // The same row IS readable when the edge asks for it - the fingerprint matches the result the
+  // store holds. Without this half the assertion below could pass because nothing ever matched.
+  const asResultHandoff = () => buildPredecessorHandoffs(store, loadGraph(store, 't'), {
+    ...nextSpec,
+    context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
+  });
+  expect(asResultHandoff().projections[0]?.resultHandoff?.workSummary).toContain('HANDOFF_SUMMARY_SENTINEL');
+
   store.db.prepare("UPDATE operations SET result=? WHERE id='op-work'").run(canonicalJson({
     ...result,
     output: { text: 'TAMPERED_OPERATION_RESULT' },
   }));
-  expect(() => buildPredecessorHandoffs(store, loadGraph(store, 't'), {
-    ...nextSpec,
-    context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
-  })).toThrow(/operation result mismatch/);
+  expect(() => asResultHandoff()).toThrow(/operation result mismatch/);
 });
 
 test('a required result_handoff fails closed before the downstream Fresh Agent is dispatched', async () => {
