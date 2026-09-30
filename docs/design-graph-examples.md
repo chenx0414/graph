@@ -1,7 +1,6 @@
 # Graph 设计范例
 
-这是「graph 设计范例」的第 **2** 份产物：**中等档**（第 1 份是**简单档**）。
-另一份（**复杂档**）是后续待做，本页只留占位与判定线，不提前写。
+这是「graph 设计范例」的第 **3** 份产物：**简单档 → 中等档 → 复杂档**三档已齐。
 
 **本页给谁看**：设计图的 **main agent**。目标只有一个——**判档，然后照着一个已验证的形状写，而不是每次从零发明一张图**。
 
@@ -12,6 +11,8 @@
 1. **先判档**（下面那条唯一要记的规则），别先想节点。
 2. 选中某一档的「形状」后，**照抄那一档的范例**，只替换 `id` / `action` / `definitionVersion` / `model` / `input` / `deliverable`。
 3. 三个硬规则不要漏：**显式声明 `decisions`**、**每个交回东西的节点声明 `deliverable`**、**每个子任务写成一个自包含的任务**。
+
+各档一句话：**简单档**没有回边；**中等档**一条单向回边（实现↔评审）；**复杂档**≥2 条独立回边，且多个视角的判断汇总进一处机械判定。
 
 ---
 
@@ -297,13 +298,126 @@ nodes:
 
 ---
 
-# 复杂档（待做）
+# 复杂档：一个执行者 + N 个视角 + 机械判定，且**两条独立回边**
 
-**本页不写它**，只留判定线（见上）。它要回答：
+## 语义（使用者定义）
 
-- **多视角/多候选之间的证据交换与仲裁**（≥2 条回边、`context` 的 `evidence_only`、评委/对抗式形状）。
-- 复杂档通常不是单选而是**组合**；唯一可先固化的判据：**出现两条以上回边、或候选之间交换证据，才配称复杂档**。只有一条回边的是中等档。
+> 复杂档 = 一个常驻执行者产出成果 → **N 个互不依赖的评审**从各自视角看它 → 有一处**机械的通过判定** → 不通过就带着评审意见回执行者**返工**；同时**另一条独立的回路**在管「计划」（计划不合格就打回重规划）。通过之后才转写与交付。
 
+与中等档的差别就是判定线那一条：中等档是**单向**的实现→评审→返工；复杂档里**至少两条回边**，且**多个视角的判断被汇总后进入一处仲裁**。
+
+## 这一档的部件（先看这里，再看 JSON）
+
+| 图里的东西 | 用什么机制 | 为什么是它 |
+|---|---|---|
+| Worker（常驻执行者） | 普通 `agent` 节点 + `deliverable` | 与中档相同：它的产出是被评审的对象 |
+| Reviewer 1..N（多视角） | N 个 `agent` 节点，都 `dependsOn: [worker]`、彼此不依赖 | 真并行；每个视角独立上下文（`context.purpose: 'review'`） |
+| `Pass?`（通过判定） | **一个 `graph.verify` 程序节点**，`verifier.kind: 'multiview'` | 见下节：判定节点必须自己算结论 |
+| 不通过 → 回 Worker | `loops: [{ from: 'pass', to: 'worker', case: 'no' }]` | 分支名由**图**声明，判定节点自己给出 `route` |
+| Plan Reviewer → 回 Planner | 第二条 `loops`，`from` 是一个 **agent 路由器** | 独立回路：管计划，不管产出 |
+
+## 为什么 `Pass?` 必须是 `graph.verify`（本轮实测推翻了第一版写法）
+
+第一版把 `Pass?` 写成 `program` + `action: "route"` + `input.route.byField`，读「汇总节点的 verdict 字段」。**真实运行时走不通，两条独立原因**：
+
+1. **程序动作只有三个**：`graph.verify`、`graph.command`、`graph.human_check`。写别的（如 `route`）会被判 `No program adapter for route`；
+2. 更关键：**`byField` 读的是这个路由器自己的产物**，不是兄弟节点的产物。所以「判定节点」与「产出结论的节点」必须是同一个。
+
+`graph.verify` 正好是「自己算出结论」的那个节点：它**结算为 completed**，并在自己的产物里给出 `{ kind: 'verification', outcome: 'pass' | 'rework' }`。于是分支从**它自己的产物**读出来：
+
+```jsonc
+// 判定节点的关键两处：verifier（怎么算结论）+ input.route（结论怎么变成分支）
+{ "id": "pass", "kind": "program", "action": "graph.verify",
+  "dependsOn": ["worker", "reviewer-1", "reviewer-2"],
+  "routes": ["yes", "no"],
+  "verifier": {
+    "kind": "multiview", "subjectNode": "worker", "reportNodes": ["reviewer-1", "reviewer-2"],
+    "dimensions": [
+      { "id": "correctness", "required": true, "reportNode": "reviewer-1" },
+      { "id": "fidelity",    "required": true, "reportNode": "reviewer-2" }
+    ]
+  },
+  "input": { "route": { "byField": { "path": "outcome", "values": { "pass": "yes", "rework": "no" } } } } }
+```
+
+**不要用 `byStatus`**：一个「有结论」的判定节点，状态必然是 `completed`，`byStatus` 会把它永远映射到同一个分支——**返工分支就成了死代码**。
+
+## 一条容易漏的硬规则：跨 agent 的边要声明交接方式
+
+`worker ← planner`、`reviewer ← worker` 这类 **agent 到 agent** 的依赖，必须在 `context.predecessors` 里声明 `mode`（`evidence_only` 或 `result_handoff`），否则提案直接被拒：`Fresh predecessor edge reviewer-1 requires an explicit handoff policy`。初稿给每条这样的边都写了 `evidence_only`（评审只该看证据，不该继承实现者的对话）。
+
+## 完整初稿（可直接照抄的形状）
+
+`tests/console/complex-tier-shape.test.ts` 就是这张图的**可执行版本**，真跑通过：
+
+```json
+{
+  "requirementVersion": 1,
+  "summary": "一个执行者产出 → N 个视角评审 → 机械判定 → 不过就返工；另一条回路管计划",
+  "acceptance": [
+    { "id": "verdict", "description": "多视角判定节点给出通过结论", "checkNode": "pass" },
+    { "id": "plan-ok", "description": "计划评审接受计划", "checkNode": "plan-reviewer" }
+  ],
+  "loops": [
+    { "from": "pass", "to": "worker", "case": "no" },
+    { "from": "plan-reviewer", "to": "planner", "case": "replan" }
+  ],
+  "nodes": [
+    { "id": "planner", "kind": "agent", "action": "plan", "definitionVersion": "coder@10", "model": "<模型 id>" },
+    { "id": "worker", "kind": "agent", "action": "implement", "definitionVersion": "coder@10", "model": "<模型 id>", "dependsOn": ["planner"],
+      "context": { "predecessors": [{ "source": "planner", "mode": "evidence_only" }] } },
+    { "id": "reviewer-1", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-1.md", "namespace": "reviews", "name": "reviewer-1" } },
+    { "id": "reviewer-2", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-2.md", "namespace": "reviews", "name": "reviewer-2" } },
+    { "id": "pass", "kind": "program", "action": "graph.verify",
+      "dependsOn": ["worker", "reviewer-1", "reviewer-2"], "routes": ["yes", "no"],
+      "verifier": { "kind": "multiview", "subjectNode": "worker", "reportNodes": ["reviewer-1", "reviewer-2"],
+        "dimensions": [
+          { "id": "correctness", "required": true, "reportNode": "reviewer-1" },
+          { "id": "fidelity", "required": true, "reportNode": "reviewer-2" }] },
+      "input": { "route": { "byField": { "path": "outcome", "values": { "pass": "yes", "rework": "no" } } } } },
+    { "id": "haiku", "kind": "agent", "action": "write", "definitionVersion": "coder@10", "model": "<模型 id>", "dependsOn": ["pass"],
+      "when": { "node": "pass", "case": "yes" } },
+    { "id": "plan-reviewer", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["planner"],
+      "routes": ["accept", "replan"], "context": { "purpose": "review", "predecessors": [{ "source": "planner", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/plan-review.md", "namespace": "reviews", "name": "plan-review" },
+      "input": { "route": { "declared": null } } }
+  ]
+}
+```
+
+## 三条硬规则（都是本轮实测出来的）
+
+### 1. 两条回路必须各自可辨识，`case` 名字不要复用
+
+`pass --no--> worker` 与 `plan-reviewer --replan--> planner` 是两条独立回路，`from` 不同、`case` 不同。**回边只激活它指向的那个节点**：实测 `pass` 判 `rework` 时事件流写出 `graph.rework { from: 'pass', to: ['worker'] }`，兄弟的 `plan-reviewer`（在上游）与两条评审都**不**被点名返工。
+
+### 2. 判 fail 的评审必须真的留下东西
+
+给评审声明 `deliverable`。一个没有产出物、只表态的评审，一旦绑到验收项就会被判 `invalid_evidence`——这是「评审不能空口放行」的机械保证。
+
+### 3. `multiview` 的 `required: true` 维度全过才算 pass；建议项不阻塞
+
+与设计汇总「多视角验证要求所有必需维度通过，建议项不阻塞」一致。某维度写成 `required: false` 时，它不通过**不会**产生 blocker，图仍会走 `yes`。
+
+## 什么适合 / 什么不适合
+
+- **适合**：一个执行者 + 多个视角 + 一处机械判定 + ≥2 条独立回路（产出、计划、质量…）。
+- **不适合**：只有一个视角在评（那是中等档）；或要在**多个候选方案之间选一个胜者**——那用 `jury` 形状，本页不展开。
+
+## 已实证（不是推测）
+
+`tests/console/complex-tier-shape.test.ts`（3 个用例，按上面三条失败模式写成）：
+
+- **返工真的发生**：判 `rework` 时事件流出现 `graph.rework`，目标**只有 `worker`**；
+- **不通过不放行**：评审持续不通过时，交付分支 `haiku` **一次都没跑**，任务不 `completed`；
+- **`byStatus` 是死写法**：同一份产物，`byStatus` 永远得到 `{case:'yes'}`，`byField` 得到 `{case:'no'}`——钉住本轮真实踩过的坑。
+- 阴性对照：删掉 `loops` 里那条 `case: 'no'`，返工断言立刻失败（证明用例真的在测这条边）。
+
+全量门禁：**228 文件 / 1533 用例全绿**。
 
 ---
 
