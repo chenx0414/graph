@@ -42,8 +42,9 @@ export function git(cwd: string, args: string[], input?: string, identity?: GitI
   return { ...result, stdout: result.stdout.trim() };
 }
 
-/** Untrimmed variant: porcelain parsing must not lose the leading status space. */
-function gitRaw(cwd: string, args: string[], input?: string) {
+/** Untrimmed variant: porcelain parsing must not lose the leading status space, and content that
+ * must arrive byte for byte (mirroring a file out of a revision) must not lose its trailing newline. */
+export function gitRaw(cwd: string, args: string[], input?: string) {
   return runGit(cwd, args, input);
 }
 

@@ -81,3 +81,17 @@ test('an array where one object belongs is named, and a well-formed call passes 
   expect(prepare({ title: 't', problem: 'p', changes: [] })).toEqual({ title: 't', problem: 'p', changes: [] });
   expect(prepare('not an object')).toBe('not an object');
 });
+
+test('a copy without a revision, or with a path smuggled into it, is answered in the model\'s terms', () => {
+  // "copy" exists so a mirror can name a revision instead of retyping a file's whole content.
+  expect(() => prepare({ title: 't', problem: 'p', changes: [{ path: 'a.ts', action: 'copy' }] }))
+    .toThrow(/changes\[0\][^]*from/);
+  expect(() => prepare({ title: 't', problem: 'p', changes: [{ path: 'a.ts', action: 'copy', from: 'main:src/a.ts' }] }))
+    .toThrow(/changes\[0\][^]*from[^]*path/);
+});
+
+test('the apply_rsi_change description tells the model that copy exists', () => {
+  const tool = describeAgentTools({ rsi: { apply: true }, role: 'master' }).find(candidate => candidate.name === 'apply_rsi_change');
+  expect(tool?.description).toContain('"copy"');
+});
+
