@@ -200,6 +200,41 @@ test('an old artifact version cannot satisfy the current gate', async () => {
   expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'rework' });
 });
 
+test('a review of the same content under a new activation still satisfies the gate', async () => {
+  // The lane was re-activated without changing the subject's bytes (the digest and path are the
+  // same). The gate must key on content identity, not on operation/activation identity, or a passing
+  // review turns into a bogus rework the moment its subject is re-run.
+  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
+    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
+  };
+  const { runtime, task, root } = await setup(root => implementReviewGate(root, config, () => ({
+    schemaVersion: 1,
+    subject: { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('version one'), nodeId: 'implementation', operationId: 'an-older-operation', activationId: 'an-older-activation' },
+    body: { kind: 'multiview', dimensions: { correctness: { verdict: 'pass', reason: 'Content is unchanged and correct', evidence: [{ path: join(root, 'implementation.txt'), digest: digest('version one') }] } } },
+  })));
+  for (let i = 0; i < 3; i++) await runtime.host.runReady();
+  const view = await task.view();
+  expect(view.phase).toBe('completed');
+  expect(view.questions).toEqual([]);
+  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'pass' });
+});
+
+test('a rework carries what the reviewer actually said, not only the verdict', async () => {
+  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
+    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
+  };
+  const { runtime, task, root } = await setup(root => implementReviewGate(root, config, () => ({
+    schemaVersion: 1,
+    subject: { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('version one'), nodeId: 'implementation', operationId: 'old', activationId: 'old' },
+    body: { kind: 'multiview', dimensions: { correctness: { verdict: 'fail', reason: 'The digest is reported but never verified against the file on disk', files: ['scripts/diag-a.mjs'], evidence: [{ path: join(root, 'implementation.txt'), digest: digest('version one') }] } } },
+  })));
+  for (let i = 0; i < 3; i++) await runtime.host.runReady();
+  const view = await task.view();
+  expect(view.questions).toMatchObject([{ kind: 'rework' }]);
+  const output = view.operations.find(operation => operation.nodeId === 'gate')?.result?.output as { reviewText?: unknown } | undefined;
+  expect(output?.reviewText).toMatchObject([{ node: 'review', verdict: 'fail', reason: 'The digest is reported but never verified against the file on disk', files: ['scripts/diag-a.mjs'] }]);
+});
+
 test('invalid verifier placement and duplicate dimension IDs are rejected before confirmation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-verifier-invalid-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

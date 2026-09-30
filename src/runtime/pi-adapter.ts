@@ -98,7 +98,8 @@ export interface PiAdapterChannels {
   };
   rsi?: {
     readonly available: boolean;
-    status(): Promise<unknown>;
+    /** `compare` adds the checkout comparison (`sync.deploy`), which walks both checkouts through git. */
+    status(options?: { compare?: boolean }): Promise<unknown>;
     apply(input: unknown, context: { taskId: string; conversationId?: string; operationId?: string }): Promise<unknown>;
   };
 }
@@ -666,7 +667,9 @@ export function createPiAdapter(options: {
                     },
                   } : {}),
                   ...(channels.rsi && spec.role === 'master' && fullAccess ? {
-                    rsiStatus: async () => (await channels.rsi!.status()) as Record<string, unknown>,
+                    // The tool's reader is a person waiting for an answer, so the checkout comparison is worth
+                    // its walk here; the desktop's five-second poll of the same status does not ask for it.
+                    rsiStatus: async () => (await channels.rsi!.status({ compare: true })) as Record<string, unknown>,
                   } : {}),
                   ...(channels.rsi?.available && spec.role === 'master' && fullAccess ? {
                     rsiApply: async (input: unknown) => {
