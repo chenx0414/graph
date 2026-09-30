@@ -4,11 +4,13 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GitIntegration } from '../git/integration.ts';
 import type { RestrictedGate } from '../runtime/restricted-process.ts';
-import { openWorkspaceCommandRunner, validateWorkspaceCommand } from '../runtime/workspace-command.ts';
+import { openWorkspaceCommandRunner, resolveUnsandboxedCommand, validateWorkspaceCommand, type CommandResult } from '../runtime/workspace-command.ts';
+import { runHostCommand } from '../runtime/host-command.ts';
 import { linkProjectDependencies } from '../runtime/project-dependencies.ts';
 import { prepareProjectCopy } from '../runtime/program-copy.ts';
 import { evaluateVerifier } from './verification.ts';
 import type { TaskStore } from './store.ts';
+import { isFullAccess } from './access-policy.ts';
 import { RuntimeError, type ActionAdapter, type NodeSpec, type Proposal } from './types.ts';
 
 /** The longest a program check may be told to run: a day. */
@@ -78,7 +80,7 @@ export function workspaceCommandNode(input: {
   return {
     kind: 'program',
     prepare: async operation => {
-      const command = spec.input as { command?: unknown; args?: unknown; copy?: unknown; timeoutMs?: unknown } | null;
+      const command = spec.input as { command?: unknown; args?: unknown; copy?: unknown; timeoutMs?: unknown; sandbox?: unknown } | null;
       if (!command || typeof command.command !== 'string'
         || !Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string')) {
         throw new RuntimeError('invalid_adapter', 'graph.command requires input {command, args}');
@@ -97,6 +99,20 @@ export function workspaceCommandNode(input: {
         throw new RuntimeError('invalid_adapter', "graph.command copy must be 'project' when given");
       }
       const projectCopy = command.copy === 'project';
+      // A check may declare that it runs outside the OS sandbox. That is honoured only under full
+      // access, and refused otherwise rather than quietly run sandboxed: the declaration comes from
+      // the confirmed graph, and under full access an Agent can already run host commands, so the
+      // sandbox was the stronger constraint than the thing it was proving - measured 2026-09-30, the
+      // project's own suite passes 1480/1480 outside it and 224/49 inside it on the same copy. An
+      // author who wrote `sandbox: false` must never be handed a run that silently did something
+      // else; why the isolation is narrower here is in `runtime/host-command.ts`.
+      if (command.sandbox !== undefined && typeof command.sandbox !== 'boolean') {
+        throw new RuntimeError('invalid_adapter', 'graph.command sandbox must be true or false when given');
+      }
+      const unsandboxed = command.sandbox === false;
+      if (unsandboxed && !isFullAccess(operation.accessPolicy)) {
+        throw new RuntimeError('permission', 'graph.command sandbox:false requires full access: outside it a confirmed check must stay in the OS sandbox');
+      }
       if (operation.accessPolicy?.commands !== 'host') validateWorkspaceCommand(command.command, command.args);
       const root = (store.db.prepare('SELECT root FROM projects WHERE id=?')
         .get(store.task(operation.taskId).project_id) as { root: string } | undefined)?.root;
@@ -150,22 +166,49 @@ export function workspaceCommandNode(input: {
         // inside its temporary repository). A caller-declared TMPDIR still wins,
         // because the sandbox spreads command.env over its computed TMPDIR.
         const checkScratch = join(input.scratchRoot ?? workspace, 'checks', operation.id);
-        const runner = await openWorkspaceCommandRunner({
-          workspace: runRoot,
-          scratchDir: checkScratch,
-          gate,
-          localNetwork: true,
-          ...(operation.accessPolicy ? { access: operation.accessPolicy } : {}),
-          ...(extraReads.length ? { readPaths: extraReads } : {}),
-          env: { ...(input.program?.env ?? {}), TMPDIR: input.program?.env?.TMPDIR ?? checkScratch },
-          // Tests a check runs create their own repositories under TMPDIR (inside
-          // this scratch), so the check may write Git metadata there; the workspace
-          // and every other repository stay protected.
-          gitMetadataWritesInsideScratch: true,
-          ...(timeoutMs === undefined ? {} : { timeoutMs }),
-        });
-        try {
-          const result = await runner.run(command.command as string, command.args as string[]);
+        const checkEnv = { ...(input.program?.env ?? {}), TMPDIR: input.program?.env?.TMPDIR ?? checkScratch };
+        const limit = timeoutMs === undefined ? {} : { timeoutMs };
+        const run = async (): Promise<CommandResult> => {
+          if (unsandboxed) {
+            // Out of the sandbox, in the same directory and with the same declared environment: the
+            // host's own PATH, HOME and credentials come along, which is the point - a toolchain that
+            // is not given them fails for reasons that say nothing about the work.
+            const resolved = resolveUnsandboxedCommand(command.command as string, command.args as string[]);
+            return runHostCommand({ cwd: runRoot, executable: resolved.executable, args: resolved.args, env: { ...checkEnv, ...(resolved.env ?? {}) }, ...limit });
+          }
+          // The linked dependencies live outside the work copy, so the sandbox
+          // needs a read grant for them as well.
+          const extraReads = (await Promise.all([...(input.program?.readPaths ?? []), ...(modules ? [modules] : [])]
+            .map(path => realpath(path).catch(() => undefined))))
+            .filter((path): path is string => path !== undefined);
+          // The check runs in the OS sandbox, which grants writes only under the
+          // workspace and this scratch directory, so its temporary files must live
+          // there too: a host TMPDIR such as /var/folders is denied even in host
+          // mode, and any test that creates a temporary directory would fail (a real
+          // check failed exactly this way when git init tried to write .git/config
+          // inside its temporary repository). A caller-declared TMPDIR still wins,
+          // because the sandbox spreads command.env over its computed TMPDIR.
+          const runner = await openWorkspaceCommandRunner({
+            workspace: runRoot,
+            scratchDir: checkScratch,
+            gate,
+            localNetwork: true,
+            ...(operation.accessPolicy ? { access: operation.accessPolicy } : {}),
+            ...(extraReads.length ? { readPaths: extraReads } : {}),
+            env: checkEnv,
+            // Tests a check runs create their own repositories under TMPDIR (inside
+            // this scratch), so the check may write Git metadata there; the workspace
+            // and every other repository stay protected.
+            gitMetadataWritesInsideScratch: true,
+            ...limit,
+          });
+          try {
+            return await runner.run(command.command as string, command.args as string[]);
+          } finally {
+            await runner.close();
+          }
+        };
+        const result = await run();
           const proposal = proposalFor(store, operation.taskId, operation.proposalVersion);
           const acceptanceIds = proposal.acceptance
             .filter(item => item.checkNode === operation.nodeId)
@@ -176,6 +219,10 @@ export function workspaceCommandNode(input: {
             code: result.code,
             stdout: result.stdout,
             stderr: result.stderr,
+            // How this run was contained, recorded with it: the same check means something different
+            // outside the sandbox, and a reader of the evidence should not have to infer which one
+            // produced it.
+            sandboxed: !unsandboxed,
           }, null, 2)}\n`;
           const dir = join(input.scratchRoot ?? workspace, 'checks');
           mkdirSync(dir, { recursive: true });
@@ -194,9 +241,6 @@ export function workspaceCommandNode(input: {
               artifact: { path, digest },
             })),
           };
-        } finally {
-          await runner.close();
-        }
       };
     },
   };
