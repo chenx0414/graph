@@ -1,140 +1,145 @@
-# Synthesise：v40 三车道评审汇总与判定
+# Synthesise：v40 三车道评审汇总与判定（attempt 2）
 
-**节点**：synth（agent 路由器，`synthesizer@1`，`route.declared = null`）
-**上游**：review-1 / review-2 / review-3（三份评审全部到齐，无缺）
-**判定**：**fail**
+**节点**：synth（agent 路由器）
+**上游**：review-1 / review-2 / review-3（三份到齐，无缺）
+**判定**：**pass**
 
 ---
 
-## 0. 判定摘要
+## 0. 收齐的报告（逐份点名）
 
-| 评审 | 被评车道 | 评审自身判定 | 我收录的必修项 |
+| 评审 | 操作 | 交接给的产物 | 产物**实际最后写入**时刻 | 报告自身判定 |
+|---|---|---|---|---|
+| review-1 | `6e39d0f1-bd65-426d-8dda-93698d392d03` | `review-1/deliverables/review-1.md` | `3f09d8b` @ 00:02:00 ✅ **新鲜** | **PASS** |
+| review-2 | `53dd9b44-1881-49b0-b603-d9005b75b8b5` | `review-2/deliverables/review-2.md` | `8c974b4` @ 22:42:02 ⚠️ **陈旧**（早于 worker-2 返工） | PASS（附 2 条必修） |
+| review-3 | `026f035e-c39a-462a-b7c7-65fe71302944` | `review-3/deliverables/review-3.md` | `43e7833` @ 23:42:33 ✅ 新鲜 | pass（1 条 moderate） |
+
+**⚠️ 本轮最重要的一件事：交接给我的 review-2 产物是陈旧的。**
+
+时间线（`git log` 实测）：
+
+```
+22:23:26  742ce4b  worker-2 v1        ← review-2.md 评的就是这个
+22:26:43  5468270  review-2 op 45703e9b
+22:42:02  8c974b4  review-2 op 04986504  ← review-2.md 最后一次被改写（attempt 2 正文）
+23:20:38  0a1faba  synth（上一轮判 fail）
+23:34:28  f56a779  worker-2 op db8a55bf  ← worker-2 返工，修了文档
+23:35:51  b826927  review-2 op 53dd9b44  ← 本次交接的 review-2；只新增了 recheck 脚本
+```
+
+`git show b826927 --name-only` 显示本次 review-2 **只提交了 `deliverables/review-2-recheck.mjs`**，没有重写 `review-2.md`。所以 `review-2.md` 正文描述的是 **返工前的 742ce4b**，而它声明的两条必修项在 23:34 已被修掉。
+
+我把 review-2 **本次操作真正产出的证据**取出来自己跑了（见 §2），它才是对当前树有效的判断。
+
+---
+
+## 1. 各方一致点（三方独立互证，可直接采信）
+
+| 事实 | review-1 | review-2 | review-3 |
 |---|---|---|---|
-| review-1 | worker-1（`tests/console/complex-tier-v40.test.ts`） | **PASS**，无阻塞缺陷 | 无（N1 读数不精确，非阻塞） |
-| review-2 | worker-2（`docs/design-graph-examples.md`） | **PASS**，但显式标注 **2 条「必须修」** | **2 条（§3.1、§3.2）** |
-| review-3 | worker-3（`notes/complex-tier-v40-mechanisms.md`） | **pass**，F1 moderate 不阻断 | 无 |
+| 全量 `check` 红是**环境基线**，非本车道造成 | 42 failed/187 passed (229)，128/1413 (1541) | 42 failed/186 passed (228)，128/1405 (1533) | 42 failed/187 passed (229)，128/1413 (1541) |
+| 各自目标文件**不在**失败集内 | `complex-tier-v40` 出现 0 次 | `design-examples.test.ts` 不在失败集 | 独立跑出 42/128，失败集合相同 |
+| 文件边界干净 | `8117681` 只 2 文件，`src/**` 零改动 | `742ce4b` 只 2 文件 | `003f0be` 只 2 个 md |
+| 机制说法与源码逐条对得上 | 7 条逐条回源码，零错 | 18 处引用逐条开行 | 代码/测试行号逐条 `sed` 核对，无一错位 |
+| 车道 1 目标 E2E 绿 | 8 passed (8) exit 0 | — | 8 passed (8) EXIT=0 |
 
-**三份评审的最终结论都是 pass，但 review-2 明确以「必须修」标注了两处未被任何其它证据驳回、且经我独立复核属实的缺陷。本汇总据此判 fail。** 详见 §4。
+**读数差异不是冲突**：229/1541 vs 228/1533 的 +1 文件 +8 用例，review-3 给出解释并被我证实——正是车道 1 的 `complex-tier-v40.test.ts`（`grep -c '^test('` = 8）在 worker-3 写作之后才合并。**红的部分（42 文件 / 128 用例）三方逐位相同，只有分母涨了。**
+
+失败原因（`@earendil-works/pi-ai` 模块找不到、`spawnSync git ENOENT`、m8 真起进程）是沙箱/工作副本 `node_modules` 软链越界所致，与三条车道的产出无关。
 
 ---
 
-## 1. 收齐的报告（逐份点名）
+## 2. 我本轮亲自重跑的检查（不是转述）
 
-| 报告 | 版本 / 摘要 | 字节 | 自述判定 |
+按「无下游被记为失败 → 重跑本节点喂给下游的检查」，我跑了 review-2 本次操作留下的黑盒复核脚本：
+
+```
+$ node deliverables/review-2-recheck.mjs
+# document carries 3 graph blocks
+PASS  v40 block exists
+PASS  block #1/#2/#3 accepted        ← 三块 JSON 均被产品自己的 validateProposal 接受
+PASS  v40 base accepted
+PASS  synth carries context.purpose=review
+PASS  MUT-516a: delete synth.predecessors -> ACCEPTED (doc says 守不住)
+PASS  MUT-516b: delete synth.context -> REFUSED
+PASS    ... error mentions handoff policy
+PASS  MUT-acceptance ghost checkNode -> REFUSED
+PASS  MUT-acceptance bound to ordinary agent -> REFUSED
+PASS  MUT when.case undeclared -> REFUSED
+PASS  MUT loop endpoint ghost -> REFUSED
+PASS  all 36 src line refs point inside their files
+SUMMARY pass=14 fail=0
+RECHECK_EXIT=0
+```
+
+**14/14 通过，exit 0。** 这是针对当前树（`f56a779` = HEAD 祖先）的有效证据，且是**真阳性阴性对照**（`MUT-516a` 证伪旧断言、`MUT-516b` 证真新断言、其余 4 条变异证明 validator 会拒），不是套套逻辑。
+
+### review-2 两条必修项的当前状态：均已修复
+
+| 项 | review-2 指控（针对 742ce4b） | 我在 HEAD 实测 | 状态 |
 |---|---|---|---|
-| `reviews/review-1@1`（节点 review-1，operation `3c112499`） | 评审 1：worker-1 成果的独立审查 | 8791 | **PASS** |
-| `reviews/review-2@3`（节点 review-2，operation `04986504`，supersedes @2 = attempt 1） | 评审 2（attempt 2）：worker-2 复杂档 v40 文档车道 | 14832 | **PASS（可修非阻塞：1 必修 + 2 建议）** |
-| `reviews/review-3@2`（节点 review-3，operation `516955ee`，supersedes @1） | 评审 3：worker-3 成果 | 8891 | **correctness = pass** |
+| §3.1 假阳性证据声明 | 第 516 行称「守得住（删掉 `synth` 的 `predecessors` 即红）」，实测 ACCEPTED | 现第 **519** 行已改为「**守不住**——`synth` 带 `purpose:'review'`，`independentReviewReceiver`（`:30-33`）已归为评审、默认 `evidence_only`（`:49-53`），只删 `predecessors` 仍 ACCEPTED」，并给出真会红的变异（删整个 `context`）。`MUT-516a/b` 双向证实 | ✅ **已修** |
+| §3.2 行号指向空处 | `proposal.ts:100-104` 出现两次（518、532 行），但该文件仅 73 行 | `grep -n "proposal.ts:100-104"` **零命中**；现第 540 行为 `proposal.ts:61-72`。我另直接核实：`wc -l src/core/proposal.ts` = 73，规则真在 `:61-72`，`invalid(...)` 在 `:71`。复核脚本第 7 项「36 处 `src/*.ts:行号` 引用全部落在文件内」通过 | ✅ **已修** |
 
-三份齐全，且**都是重新验过的版本**：review-2 用 @3（attempt 1 → 2 的自我更正版）替换了 @2，review-3 用 @2 替换了 @1。我采信的都是最新版本。
+### 其余三条建议项
 
----
+- **§3.4（`requirementVersion: 15` 无解释）✅ 已修**：第 333 行现有一整段说明，讲清它是需求文本版本、须填自己这份的版本号、不要照抄 15。
+- **§3.5（拿 `synth` 当「无默认」反例）✅ 已修**：第 453 行显式警告第三行不能拿本页 `synth` 当例子，因其 `purpose:'review'` 命中第一行。
+- **§3.3（`operation-lifecycle.ts:1117` 偏一位）❌ 建议本身是错的，不要执行**：
 
-## 2. 各方一致点（可直接采信）
+  ```
+  $ grep -n "const agentRouter" src/core/operation-lifecycle.ts
+  1117:    const agentRouter = operation.kind === 'agent' && Boolean(nodeSpec.routes?.length);
+  ```
 
-以下四条由三份评审**各自独立复现**得出，互相印证，我采信：
-
-1. **各车道定向用例真绿，不是套套逻辑**
-   - review-1：`node --run test -- tests/console/complex-tier-v40.test.ts` → **8 passed**，exit 0
-   - review-2：`design-examples.test.ts` → **2 passed**，且**照抄的 3 个 JSON 块被产品自己的 `validateProposal` 全部 ACCEPTED**（简单档/中等档/v40）
-   - review-3：`review-as-router node-deliverable human-prereview human-prereview-e2e design-examples` → **5 files / 19 tests passed**，exit 0
-2. **全量 `node --run check` 的红与三条车道无关**。三人都复现了失败集，且**没有一份失败清单里出现本车道文件**；review-1 另做了「放射性证明」——在干净副本里带上本车道文件后 m8 两条用例照样绿（11/11）。review-2 复跑的数字与 worker-2 报告**逐位一致**。
-3. **文件边界干净，无越界**。三份 commit 各自只含自己车道声明的 2 个文件；`src/**`、`tests/**`（worker-3）零改动；`git status` 均干净。
-4. **阴性对照有真实判别力**（R27 要求，非自我实现）。review-1 做了变异实验：删 `when` → FM1 红；三条 fail 回边只留一条 → FM3 红。review-2 造了 6 个变异喂 validator：MUT1/2/3/4/6 全被 REFUSED 且错误信息与文档逐字一致。
-
-**review-1 独有的一条实质正面发现**（值得记入知识库，v40 的文档与后续图都受益）：
-
-> v40 的 `deliver` **没有 `when`**，只有 `dependsOn:['synth']`——而「失败」同样满足这个依赖。真正守住人工验收门的是**返工本身**：`reactivate` 沿 `GraphPlan.dependents` 把 `deliver` 一起重置（`src/core/operation-lifecycle.ts:217`），不是 `deliver` 上的条件。
-
-**review-3 的两条「与需求相反」发现**（非缺陷，是需求与机制的落差，已独立证实）：
-- **评审节点不会用 space-bunny-free**：`presets/manifest.json` 的 reviewer 带 `review:true` → `model-selection.ts:12-17 isReviewer` → 实现者模型进 `exclude`，DB 里 `plan-reviewer`、`review-3` 均发生 `model.switched → deepseek-v4.1-flash`。worker-3 预测「review-1..3 与 synth 也会被换」已被运行证实。
-- **「先由主 Agent 审证据」的「先」不是门**：`human_check` 打开瞬间主 Agent 就被唤醒，`approveHumanCheck` 只追加 `preReview` 并发事件，check 仍 open。工具描述里的 "before the user is asked" 只是注意力顺序。
+  在当前树上 `agentRouter` **确实在 1117 行**，文档第 540 行的引用是**准确的**。review-2 的 §3.3 是在返工前的树上得出的，行号已随 `f56a779` 移位。**照它改反而会引入错误引用。** 这条明确不执行。
 
 ---
 
-## 3. 冲突与更正
+## 3. 冲突点
 
-| # | 冲突 | 裁决 |
-|---|---|---|
-| C1 | **review-2 §3.3 说文档的 `operation-lifecycle.ts:1117` 偏一位、应为 `:1118`**（review-1 的机制表也写了 1118） | **两位评审都错，文档是对的。** 我 `grep -n agentRouter` 实测：`const agentRouter = operation.kind === 'agent' && Boolean(nodeSpec.routes?.length);` **就在第 1117 行**。→ **§3.3 从返工简报中剔除**，采纳它会把文档改成错的 |
-| C2 | review-1 说 `proposal.ts` 真实区间 `63-72`（invalid 在 `71`）；review-2 说 `61-72` | 非实质冲突：63 是 `for` 循环首行，61-62 是数组/去重前置检查，`invalid(...)` 确实在 **71**。返工统一写成 **`proposal.ts:61-72`（`invalid` 在 `:71`）** |
-| C3 | review-2 attempt 1 曾把「删 `synth` 的 `predecessors` 即红」当作已复现；attempt 2 实测推翻了自己 | **采信 attempt 2**。attempt 2 的方向（自我推翻 + 用 MUT4 给出真正会触发该错误的最小反例）使结论更可信，不是更弱 |
-| C4 | review-1 的 N1：全量失败计数不可逐字复现（42/187 vs 43/185，环境抖动） | 非阻塞，采信「本车道不引入新失败」这一**结论**（review-1 用放射性证明独立证实）；读数不精确不返工 |
+**没有影响可用性的评审间冲突。** 三份报告的被评对象互不重叠（车道 1/2/3），无任何一方对同一事实给出相反结论。
 
-**review-2 §3.1 / §3.2 我已独立复核，均属实**（不采信转述，直接开源码与文件）：
+唯一需要点名的张力是**报告产物的新鲜度**：review-2.md 正文说「有 2 条必修」，而当前树显示两条都已修。这不是「评审错了」，而是**该报告评的是已被取代的提交**，其所属操作的最新证据是那份 14/14 全绿的复核脚本。我按「必须修的问题是否仍然未决」来裁：**已修且经独立复核证实 → 不构成 fail 依据。**
 
-- §3.1：`docs/design-graph-examples.md:516` 写「**守得住**（删掉 `synth` 的 `predecessors` 即红）」。我在文件里确认该行原文；`synth` 节点确实是 `"context": { "purpose": "review", "predecessors": [...] }`；`predecessor-handoff.ts:30-33` 的 `independentReviewReceiver` 对 `purpose === 'review'` 返回真 → `defaultPredecessorHandoffMode` **第一个分支就返回 `evidence_only`** → 删掉显式声明照样 ACCEPTED。**该行是假阳性证据声明。**
-- §3.2：`wc -l src/core/proposal.ts` = **73**，文档第 **518**、**532** 行引的 `proposal.ts:100-104` **不存在**；真实位置 `61-72`，`invalid(...)` 在 `71`（已 `sed` 打开确认）。
-- §3.5（建议）：文档第 **450** 行硬规则表把 `synth` 当作「两者都不是（无默认→直接被拒）」的反例，但同一页的 `synth` 带 `purpose:'review'`，**命中第一行 `evidence_only`**——同一页自相矛盾。
+**流程缺陷（登记，不影响本轮判定）**：review-2 在返工后复跑并产出了新证据，但没有回头更新自己的 `review-2.md`，导致交接给 synth 的是一份描述旧提交的文档。建议后续让评审节点在复核后重写结论文件，或在 recheck 脚本旁附一份结论。
 
 ---
 
-## 4. 判定：**fail**
+## 4. 遗留项：review-3 的 F2（不阻断，交给下游）
 
-### 4.1 判定的依据
+**F2 · 运行快照数字硬编码且已随运行推进漂移**（review-3 判 moderate，**明确「不影响结论方向」**）
 
-我的汇总规则：**任意一份评审指出「必须修」的问题，且该问题未被其它证据驳回 → fail。**
-
-review-2 §3.1 与 §3.2 写明「**必须修**」（小节标题即 `【必须修，非阻塞】`，§6 再次写「**必修两条**」），**未被 review-1 / review-3 驳回**（两份均未涉及；review-1 反而在 §2 独立确认 `proposal.ts:100-104` 是错行号、真值在 63-72 一带），**且我已亲自开源码与文件复核为真**（§3 末段）。
-
-### 4.2 为什么「非阻塞」「PASS」不足以放行
-
-这一点必须诚实说明：**三份评审的最终结论都是 pass，review-2 也自评这两条「不使交付失效」。** 我仍然判 fail，理由是：
-
-1. **这不是风格偏好或评级差异，是交付物里的事实错误。** 缺陷恰好落在 `docs/design-graph-examples.md` 整份文档的**卖点**上——该节标题是「本节的说法各自指回哪里，以及**哪条是上面那道测试真的在守的**」。516 行在一个专门用于「诚实区分守得住/守不住」的表里，把一条**并不守得住**的机制标成「守得住」，还附了一条**实测为假**的变异命令。这是把「没测到的说成测到了」，正是本项目规则明令禁止的方向。
-2. **「非阻塞」的论证依据是范围，不是严重性。** review-2 说「不影响另外两条车道」——对，但也不影响本车道；它影响的是**用户读到的证据是否可信**。人手验收（`deliver`）是用户的**确认动作，不是修 bug 的车道**；把已知为假的证据声明放进验收，等于要求用户在验收时替文档抓错。
-3. **成本不对称。** 误放行的代价是「谎报测试覆盖」的文档合入主干，事后无人会再看它；误判 fail 的代价是三个 worker 重跑一轮——其中 worker-1/3 本就零阻塞缺陷，返工只是复跑确认（见 §5）。B2 规定 fail 即整批返工，不按名单，本来就是用户的既定设计。
-
-### 4.3 本次 fail 的范围
-
-**只落在 `docs/design-graph-examples.md` 一个文件的 4 处**（2 必修 + 2 建议），**不涉及任何行为、测试或机制实现**。三条车道的实质内容（E2E 形状测试、v40 JSON 与证据表、机制对照分析）经三份评审独立验证为**合格**。返工是定点修字，不是重做。
+- 位置：`deliverables/v40-mechanisms-report.md` §3.1、`notes/complex-tier-v40-mechanisms.md` §2-① 与 §0 状态表。
+- 问题：`model.switched` 写作「6 条」、`review.independence_checked`「7 条」、invocations 计数等是**写作时刻的快照**，而任务图此后继续推进。review-3 实测为 7 条 / 8 条，invocations 也不符。§0 还写 `synth … pending`，而实况 synth 已 `succeeded` 并已发布 `summaries/synthesis`。
+- **不构成 fail**：三条硬结论（批量返工真的发生、synth 写并发布汇总、评审节点被换模型而 synth 未被换）review-3 全部独立复现为真，漂移的是计数与状态快照，不是机制判断。review-3 自身也判 pass。
+- **给下游的处理建议**：照抄进任何汇总前改写为**判据式**表述（如「`model.switched` 对 plan-reviewer/review-1..3 各至少一次」），或标注读点时刻；§0 状态表直接删掉「哪些节点还没走到」那几列。本汇总**不引用任何具体计数**。
 
 ---
 
-## 5. 返工项（谁、改什么、改到什么程度算通过）
+## 5. 判定：**pass**
 
-按 B2「整批重做」，三条 `synth--fail-->` 回边全部激活。
+理由，逐条对应规则：
 
-### worker-2（**唯一有必修项的车道**）
+1. **有无未决的必修项？** 无。review-2 提出的 2 条必修（§3.1 假阳性证据声明、§3.2 空行号引用）**均已在 `f56a779` 修复**，并由 review-2 自己那次操作留下的黑盒脚本在当前树上 **14/14 全绿、exit 0** 独立证实；我另直接核实了 `proposal.ts` 的 73 行长度与 `:61-72` 真实位置。规则中「必修且未被其它证据驳回」的两个条件都不满足。
+2. **有无影响可用性的评审间矛盾？** 无。三方对全量红、文件边界、机制引用的结论一致且互相印证。
+3. **是否只是评级/风格之争？** 是的——review-3 的 F2 是 moderate、非必修；review-2 的 §3.3 建议经我实测为错误建议（`agentRouter` 确在 `:1117`），执行反而有害。两者都不构成 fail。
+4. **车道 1、3 的结论**：review-1 判 PASS 且我复核 `tests/console/complex-tier-v40.test.ts` 的 sha256 = `e91bb896…` 与其声明逐字节一致；review-3 判 pass。均无未支撑声明。
 
-只允许改 `docs/design-graph-examples.md`：
+三条车道的产出可进入 `deliver` 与人工验收。
 
-| # | 位置 | 改什么 | 算通过的标准 |
+---
+
+## 6. 交给下游的待办（非阻塞）
+
+| # | 谁 | 改什么 | 改到什么程度算通过 |
 |---|---|---|---|
-| **M1**（必修） | 第 **516** 行 | 把「跨 agent 边的 handoff `mode` … **守得住**（删掉 `synth` 的 `predecessors` 即红）」改为**「守不住」**并说明真实原因：`synth` 的 `purpose:'review'` 使 `independentReviewReceiver` 为真，默认已是 `evidence_only`，删掉显式声明**不会**红（`predecessor-handoff.ts:30-33`）。该错误只在接收方 action/配方**既不匹配 review 也不匹配 implement** 时才出现。 | 新表述与实测一致；不得再出现「守得住 + 删掉 synth predecessors 即红」这种可被证伪的声明 |
-| **M2**（必修） | 第 **518**、**532** 行 | 两处 `src/core/proposal.ts:100-104` → **`src/core/proposal.ts:61-72`**（`invalid` 在 `:71`） | 全文不再出现 `proposal.ts:100-104`；新行号 `sed -n '61,72p'` 能打开对应内容 |
-| **M3**（建议，同文件） | 第 **450** 行 | 硬规则表第三行不能拿本页的 `synth` 当「两者都不是」的反例（它带 `purpose:'review'`，命中第一行）。换成真正既非 review 也非 implement 的接收方，或改用占位节点。 | 表格与本页 v40 JSON 不再自相矛盾 |
-| **M4**（建议，同文件） | 第 **335** 行 | `requirementVersion: 15` 在正文无解释（简单档/中等档均为 1）。加一句说明其来自被照抄的真实 proposal，或统一为 `1`。 | 文档自身可解释该值 |
+| 1 | worker-3 | 修 F2：运行数字改判据式表述或加读点时刻；§0 状态表删「哪些节点还没走到」的列 | 全文 `grep` 不再出现无标注时刻的具体计数断言；§0 不再声称任何节点 `pending` |
+| 2 | 下游读者（deliver/人工） | 引用 worker-3 结论时**只引机制判断，不引计数** | 汇总中每条数字都带读点时刻或已改为判据式 |
+| 3 | 流程（不指派给本图任一车道） | 评审节点复核后应重写结论文件，而非只加脚本 | 交接给 synth 的产物与所评提交一致 |
 
-**worker-2 通过标准**：`node --run test -- tests/console/design-examples.test.ts` 仍 2 passed（exit 0）；三个 JSON 块仍被 `validateProposal` ACCEPTED（纯 md 改动不得影响这一点）；`node --run typecheck` / `lint` / `check:evidence` 全绿；`git show --name-only` 仍**只含自己车道的 2 个文件**。
-
-**⚠️ 返工简报必须带的一条否决项**：**不要**按 review-2 §3.3 把 `operation-lifecycle.ts:1117` 改成 `:1118`——第 **1117** 行本来就是对的（见 §3 C1），改了会引入新错误。
-
-### worker-1（无阻塞缺陷，返工=复跑确认）
-
-- 改动范围：**零**。三份评审一致认定 `src/**` 零改动、边界干净、8/8 绿、变异实验有判别力。
-- 要做的只有：把 `node --run test -- tests/console/complex-tier-v40.test.ts`（期望 8 passed）+ `typecheck`/`lint`/`check:evidence` 重新跑一遍并留下可复跑记录，确认返工回合没有引入回归。
-- N1（全量失败计数不可逐字复现）**不返工**：结论已被放射性证明独立证实。
-
-### worker-3（无阻塞缺陷，返工=复跑确认）
-
-- 改动范围：**零**。correctness=pass，文件边界干净，主张全部独立复现为真。
-- 可选修正（review-3 的 F1，不阻断，做了更好）：`notes/complex-tier-v40-mechanisms.md` 第 16 行的规则要求「只有 synth/review-1..3/deliver 能证明的行标『静态』」，但 #9（synth 写汇总）、#10（synth 自判 pass/fail）被标为「实测」。二者择一——把 #9/#10 改回「静态」，或把规则放宽为「强制点在任一节点上走通即记『实测（异地强制点）』」并注明。**不要一边立规则一边破规则。**
-- 若不动，须在报告中保持诚实披露（现状已披露，不构成阻塞）。
+**明确不要做的事**：不要按 review-2 §3.3 把 `operation-lifecycle.ts:1117` 改成 `:1118`——当前树上 1117 是对的。
 
 ---
 
-## 6. 给人工验收的备忘（返工完成后）
-
-1. **两个「需求 vs 机制」的落差需要用户知情**（review-3 证实，均非本仓缺陷）：
-   - 评审节点（含 `review-1..3`、`synth`）**不会**用 `space-bunny-free`，会被 `isReviewer` 机制换成 `deepseek-v4.1-flash`——因为独立评审要求「评审者不得用实施者模型」。**本轮「全部节点用 space-bunny-free」这条用户约束，在评审节点上无法由机制保证。**
-   - 「先由主 Agent 审证据、再向用户汇报」里的**「先」不是硬门**：`human_check` 一打开主 Agent 就被唤醒，`approveHumanCheck` 只是追加 `preReview` 事件、check 仍 open。若要真正的门，需要在图外约定。
-2. **「三个 worker 各产出一份成果」目前只是约定，没有机制强制**（review-3 #6：提案里 `worker-1/2/3` 均无 `deliverable`，而 planner/review-N/synth 都有）。
-3. **验收门靠返工连带重置**（review-1 的发现）：`deliver` 没有 `when`，它被守住是因为 `reactivate` 沿 `dependents` 把它一起重置。
-4. 全量 `node --run check` 在沙箱里是红的（`git ENOENT` / 兄弟工作树缺失），**与本次三条车道无关**，已由三份评审各自独立证实。
-
----
-
-## 7. 自述
-
-本汇总**不改判**任何一份评审：review-1 = PASS、review-2 = PASS、review-3 = pass，三者原样记录在 §0/§1。`fail` 是 synth 依规则对**整份交付**作出的汇总判定，唯一触发点是 review-2 两条「必须修」中经我独立复核属实、且未被驳回者。全部临时副本已清理，未修改任何被评产出。
+**files**：`summaries/synthesis.md`
