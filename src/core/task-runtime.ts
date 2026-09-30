@@ -1497,11 +1497,16 @@ export async function openTaskRuntime(options: {
     },
     graphMessages(taskId: string) {
       ensureOpen();
-      const task = store.task(taskId);
-      if (!task.conversation_id) return [];
-      return (store.db.prepare(`SELECT id,node_id AS source,to_node_id AS target,text,created_at AS createdAt
-        FROM messages WHERE conversation_id=? AND kind='agent_message'
-        AND json_extract(data,'$.taskId')=? ORDER BY seq`).all(task.conversation_id, taskId) as {
+      store.task(taskId);
+      // A peer message is recorded where it is delivered: a chat entry on the target node carrying
+      // the sender (`node-messages.ts` writes it). Reading it here is what draws the canvas's message
+      // arcs, and reading anything else would draw a picture of a mechanism that no longer exists -
+      // the old `messages.kind='agent_message'` rows stopped being written when peer delivery was
+      // changed to hand the words to the target node, which left this reader reporting an empty
+      // graph while real messages went between its nodes.
+      return (store.db.prepare(`SELECT id,json_extract(data,'$.from') AS source,node_id AS target,text,created_at AS createdAt
+        FROM node_entries WHERE task_id=? AND kind='chat'
+        AND json_extract(data,'$.peer')=1 AND json_extract(data,'$.from') IS NOT NULL ORDER BY seq`).all(taskId) as {
           id: string; source: string; target: string; text: string; createdAt: number;
         }[]);
     },
