@@ -272,7 +272,11 @@ test('status says when the checkout the app runs from has drifted from the devel
   shell(development, ['commit', '-m', 'a test the deployed checkout never received']);
 
   const testOnly = (await rsi.status({ compare: true })).sync!.deploy;
-  expect(testOnly).toMatchObject({ root: development, missing: ['tests/dev-only.test.ts'], runtimeFiles: [] });
+  expect(testOnly).toMatchObject({ missing: ['tests/dev-only.test.ts'], runtimeFiles: [] });
+  // Through realpath on both sides: the service resolves its own root, and where TMPDIR is a symlink
+  // (`/var` -> `/private/var` on macOS) the same directory has two spellings. This failed only inside
+  // the activation gate's runner, which is the environment that has the symlink.
+  expect(await realpath(testOnly!.root)).toBe(await realpath(development));
   expect(testOnly!.note).toContain('部署检出与开发线');
 
   // A difference under src/ is the one that changes what the app does, so it is called out separately.
