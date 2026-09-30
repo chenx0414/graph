@@ -109,6 +109,8 @@ export async function openWorkspaceCommandRunner(input: {
   access?: ResolvedAccessPolicy;
   /** Let a host-mode command write Git metadata inside its own scratch directory only. */
   gitMetadataWritesInsideScratch?: boolean;
+  /** How long the command may run. Defaults to two minutes. */
+  timeoutMs?: number;
 }) {
   const workspace = await realpath(input.workspace);
   let acquired: Awaited<ReturnType<typeof acquireRestrictedExecutor>> | undefined;
@@ -136,7 +138,7 @@ export async function openWorkspaceCommandRunner(input: {
           allowGitMetadataWritesAll: input.access?.filesystem.gitMetadata === 'writable',
           ...(input.gitMetadataWritesInsideScratch ? { gitMetadataWritesInsideScratch: true } : {}),
         } : {}),
-        timeoutMs: 120_000,
+        timeoutMs: input.timeoutMs ?? 120_000,
         ...(Object.keys(environment).length ? { env: environment } : {}),
         ...(input.localNetwork ? { localNetwork: true } : {}),
       });
