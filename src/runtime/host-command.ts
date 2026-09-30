@@ -25,10 +25,10 @@ const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
  *
  * Leaving the sandbox lifts containment; it must not hand over the host's own environment. The first
  * version of this inherited `process.env`, which gave a check the app's provider credentials
- * (`GRAPH_SUBSCRIPTION_*`) and the path of the live checkout - and every process the check spawned - so
- * the environment is now built from a short allowlist of what a toolchain needs, plus whatever the
- * host declared for checks. The allowlist is exactly the difference between "runs like the project"
- * and "runs with everything the app has".
+ * (`GRAPH_SUBSCRIPTION_*`), the path of the live checkout, and a PATH without the toolchain - and
+ * every process the check spawned - so the environment is now built from a short allowlist of what a
+ * toolchain needs, plus whatever the host declared for checks. The allowlist is exactly the
+ * difference between "runs like the project" and "runs with everything the app has".
  */
 export function checkEnvironment(input: {
   executable: string;

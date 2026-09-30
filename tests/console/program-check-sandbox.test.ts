@@ -13,16 +13,18 @@
 //
 // Leaving the sandbox lifts containment, NOT what the command is allowed to see. The first version
 // of this ran the check with the host's whole environment, which handed it the app's own provider
-// credentials and the path of the live checkout - so the environment is now built from a short
-// allowlist plus whatever the host declared for checks. Both halves are pinned below.
+// credentials, the path of the live checkout, and a PATH without the toolchain - so the environment
+// is now built from a short allowlist plus whatever the host declared for checks. Both halves are
+// pinned below.
 //
 // 1. Under standard access a `sandbox: false` check is refused, and the refusal says why.
-// 2. Under full access it really runs outside the sandbox: the sandbox gives its children a listen
-//    guard, which an unsandboxed run does not have.
+// 2. Under full access it really runs outside the sandbox: the containment the sandbox imposes is
+//    gone, which shows up in where the run is allowed to put its temporary files.
 // 3. Declaring nothing keeps the old behaviour: sandboxed.
 // 4. Neither run is handed the app's own environment (its `GRAPH_*` secrets).
 // 5. The record says which way it ran, so evidence carries its own shape.
 
+import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -165,7 +167,9 @@ test('declaring nothing keeps the check inside the sandbox', async () => {
   expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
   const body = await recordBody(view);
   // A sandboxed check keeps its temporary files where the sandbox lets it write: inside the work copy.
-  expect(body.stdout).toContain(`tmp=${join(root, 'state', 'checks')}`);
+  // Both sides through realpath: macOS tmpdirs are reached through /private, and comparing an
+  // unresolved path with a resolved one passes on one machine and fails on the next.
+  expect(body.stdout).toContain(`tmp=${join(realpathSync(root), 'state', 'checks')}`);
   expect(body.sandboxed).toBe(true);
 });
 
