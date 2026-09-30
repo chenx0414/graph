@@ -183,182 +183,117 @@ nodes:
 
 与简单档的差别只有一条（见判定线）：**子任务之间需要中间状态在运行时来回传递**，而且方向单一（实现 → 评审 → 返工）。
 
-## 先说结论：这一档不需要任何新实体
+## 先说结论：这一档不需要独立的「门」
 
-返工环的机制**已经存在且已被测试钉住**（`tests/m2/loops.test.ts`）。缺的只是「多个实现者并行」这一形状的表达方式。你在建图时要用到：
+早期版本给每条车道配一个 `graph.verify` 门（`multiview` / `independent` 判定）。**现在不需要了**：评审节点自己就是路由器——它在结果里给出 `route`，图的 `loops` 声明哪个分支表示返工，harness 校验路由必须落在声明过的分支内；绑了验收项的评审，其证据由 harness 登记（钉在评审写的那份报告上）。省掉的是一整层实体，以及「评审说了算、门再判一次」的语义重复。
+
+建图要用到的部件只有四个：
 
 | 部件 | 用什么 |
 |---|---|
 | 并行实现者 | n 个互不依赖的 `agent` 节点（同简单档） |
-| 评审者 | 每个实现者一个 `agent` 评审节点，`dependsOn` 它要评的实现者 |
-| 门（决定通不通过） | **每个实现者一个** `program` 节点，`action: graph.verify` + `verifier` |
-| 返工回边 | `loops: [{ from: 门, to: 它评的那个实现者 }]`，**每个实现者一条** |
+| 评审（= 路由器） | 每个实现者一个 `agent` 评审节点：`dependsOn` 它要评的实现者，`routes: ['pass','fail']`，`input.route.declared: null` |
+| 评审必须留下的东西 | 该评审节点的 `deliverable`（例如 `reviews/review-a.md`）：未写或为空 → **结算失败**，评审不能空口放行 |
+| 返工回边 | `loops: [{ from: 'review-a', to: 'impl-a', case: 'fail' }]`，**每条车道一条** |
 
-## 两种形状（都实跑验证过）
+**验收怎么绑**：把验收项的 `checkNode` 指到评审节点上。评审判 pass → 该验收项成立（证据 = 评审写的那份报告，按磁盘内容登记）；路由退回的那一轮不算通过。
 
-「多个实现者 + 评审 + 返工」在 Graph 里有**两种都成立**的表达，选哪个看你的评审是一个还是一个：
-
-### 形状 A：每个实现者一条完整的车道（各自评审、各自的门、各自的回边）
-
-```
-nodes:
-  impl-a   agent,   dependsOn: []            ┐
-  review-a agent,   dependsOn: [impl-a]      ├─ 一组 = 一个实现者 + 它的评审 + 它的门
-  gate-a   program  dependsOn: [impl-a, review-a]  verifier: multiview(subjectNode: impl-a)  ┘
-  impl-b   agent,   dependsOn: []
-  review-b agent,   dependsOn: [impl-b]
-  gate-b   program  dependsOn: [impl-b, review-b]  verifier: multiview(subjectNode: impl-b)
-loops: [{ from: gate-a, to: impl-a }, { from: gate-b, to: impl-b }]
-```
-
-适用：**每条车道有自己的评审维度**（比如 a 的评审看性能、b 的评审看安全），或不同车道要用不同的 `verifier`。
-实测（两条车道 + 两个门 + 两条回边，只 a 首轮不过）：`phase completed`；**`impl-a` 跑 2 次（返工 1 次）、`impl-b` 只跑 1 次**（未变的车道没被牵连）；`gate-a: rework → pass`、`gate-b: pass`；验收项拿到 valid evidence。
-
-### 形状 B：一个统一的门，多条回边到各自实现者（推荐作为默认）
-
-```
-nodes:
-  impl-a   agent,   dependsOn: []                          ┐
-  impl-b   agent,   dependsOn: []                          ├─ n 个并行实现者
-  review-a agent,   dependsOn: [impl-a]                    │
-  review-b agent,   dependsOn: [impl-b]                    │
-  gate     program  dependsOn: [impl-a, impl-b, review-a, review-b]
-                    verifier: independent(reportNodes: [review-a, review-b])  ┘
-loops: [{ from: gate, to: impl-a }, { from: gate, to: impl-b }]
-```
-
-适用：**评审是统一的一道关**（一个评审者或一组评审者看全部车道），这也更贴近你说的「最后交由 main 测试」。
-实测（两条车道首轮都不过）：`phase completed`；门的首次判定 = **`rework[review-a|review-b]`** —— 一个门同时认出两条车道都不过；**`impl-a` 与 `impl-b` 都被返工（各跑 2 次）**；次轮 `pass[]` → 完成。
-
-> 关键在 `independent` 这种 `verifier`：**它没有 `subjectNode`，可以列多个 `reportNodes`**。所以一个门能同时判多条车道。这就是 B 成立的原因，也是 A 的 `multiview` 做不到的原因（见硬规则 1）。
-
-**怎么选**：一份统一评审 → B；每条车道自己的评审/不同判定标准 → A。B 更简单（一个门），推荐默认。
-
-## 可直接照抄的范例（形状 A）
+## 推荐形状：每个实现者一条完整车道
 
 ```json
 {
   "requirementVersion": 1,
-  "summary": "两条车道并行实现，各自评审，评审不过就返工",
-  "decisions": [],
+  "summary": "两条车道并行实现，各自评审；评审判 fail 就返工对应车道",
+  "decisions": ["评审即路由器：评审判 pass 即该车道验收成立，证据由 harness 钉在评审写的报告上"],
   "acceptance": [
-    { "id": "a-ok", "description": "车道 a 通过评审", "checkNode": "gate-a" },
-    { "id": "b-ok", "description": "车道 b 通过评审", "checkNode": "gate-b" }
+    { "id": "a-pass", "description": "车道 a 通过自己的评审", "checkNode": "review-a" },
+    { "id": "b-pass", "description": "车道 b 通过自己的评审", "checkNode": "review-b" }
   ],
   "loops": [
-    { "from": "gate-a", "to": "impl-a" },
-    { "from": "gate-b", "to": "impl-b" }
+    { "from": "review-a", "to": "impl-a", "case": "fail" },
+    { "from": "review-b", "to": "impl-b", "case": "fail" }
   ],
   "nodes": [
-    { "id": "impl-a", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
-    { "id": "impl-b", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
-    { "id": "review-a", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-a"] },
-    { "id": "review-b", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-b"] },
-    { "id": "gate-a", "kind": "program", "action": "graph.verify", "dependsOn": ["impl-a", "review-a"],
-      "verifier": { "kind": "multiview", "subjectNode": "impl-a", "reportNodes": ["review-a"],
-        "dimensions": [{ "id": "correctness", "required": true, "reportNode": "review-a" }] } },
-    { "id": "gate-b", "kind": "program", "action": "graph.verify", "dependsOn": ["impl-b", "review-b"],
-      "verifier": { "kind": "multiview", "subjectNode": "impl-b", "reportNodes": ["review-b"],
-        "dimensions": [{ "id": "correctness", "required": true, "reportNode": "review-b" }] } }
+    { "id": "impl-a", "kind": "agent", "action": "implement", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "input": { "files": ["scripts/diag-a.mjs"], "focus": "新增这一个只读脚本" } },
+    { "id": "review-a", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["impl-a"], "routes": ["pass", "fail"],
+      "deliverable": { "path": "reviews/review-a.md", "namespace": "reviews", "name": "review-a", "title": "车道 a 评审报告" },
+      "input": { "focus": "只评 impl-a 的产出", "lookFor": ["是否只读", "是否只新增了声明的那一个文件"], "route": { "declared": null } } },
+    { "id": "impl-b", "kind": "agent", "action": "implement", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "input": { "files": ["scripts/diag-b.mjs"], "focus": "新增这一个只读脚本" } },
+    { "id": "review-b", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["impl-b"], "routes": ["pass", "fail"],
+      "deliverable": { "path": "reviews/review-b.md", "namespace": "reviews", "name": "review-b", "title": "车道 b 评审报告" },
+      "input": { "focus": "只评 impl-b 的产出", "lookFor": ["是否只读", "是否只新增了声明的那一个文件"], "route": { "declared": null } } }
   ]
 }
 ```
 
-> `graph.verify` 门是 `program` 节点，`verifier` 只允许出现在它上面（`validateVerifierConfig` 硬校验）。它必须有 `dependsOn` 到实现者与评审者。
+## 要「整合 + 一道整份交付的门」时，加尾段
 
-## 可直接照抄的范例（形状 B）
+三条车道各自通过后，常常还要一件「把这些成果汇成一份东西」的活，以及**一道对整个交付的机械门**。尾段就三件事：
 
-```json
-{
-  "requirementVersion": 1,
-  "summary": "两条车道并行实现，一道统一评审，不过就返工对应车道",
-  "decisions": [],
-  "acceptance": [
-    { "id": "all-ok", "description": "两条车道都通过评审", "checkNode": "gate" }
-  ],
-  "loops": [
-    { "from": "gate", "to": "impl-a" },
-    { "from": "gate", "to": "impl-b" }
-  ],
-  "nodes": [
-    { "id": "impl-a", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
-    { "id": "impl-b", "kind": "agent", "action": "work", "definitionVersion": "coder@10", "model": "<模型 id>" },
-    { "id": "review-a", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-a"] },
-    { "id": "review-b", "kind": "agent", "action": "review", "definitionVersion": "reviewer@8", "model": "<模型 id>", "dependsOn": ["impl-b"] },
-    { "id": "gate", "kind": "program", "action": "graph.verify",
-      "dependsOn": ["impl-a", "impl-b", "review-a", "review-b"],
-      "verifier": { "kind": "independent", "reportNodes": ["review-a", "review-b"] } }
-  ]
-}
-```
+1. `merge`（agent）：把 n 条车道的成果汇成一份交付。**明确告诉它不要重复跑整套测试**——整份交付的测试由下游那道门跑一次，那是唯一跑全套的地方（实测：不写这句时，四个节点各跑了一次全套，每次约 2.5 分钟）。
+2. 门（`program`，`action: graph.command`）：跑项目自己的命令。它有三个声明值得知道：
+   - `copy: "project"`：在**项目根旁的新副本**里跑，依赖是硬链的真实文件（工作副本里的 `node_modules` 是软链，项目自己的套件在那种环境里会成批失败）；
+   - `timeoutMs`：这类检查要跑几分钟，默认两分钟会被切；**如实声明**，被切时记录会写明「是超过了你声明的上限」；
+   - `sandbox: false`：**在沙箱外按项目自己的方式跑**（默认 `true` 不变）。实测同一份副本、同一条 `node --run check`：沙箱内 **224 失败 / 49 通过**（以套件自身超时为主），沙箱外 **1480 / 1480 全绿**。该声明**只在完全访问下兑现**，否则一律拒绝并写明原因；走出沙箱只解除围栏，**不改变检查能看到什么**（环境仍由 harness 用允许清单构造）。
+3. 回边：`loops: [{ from: <门>, to: 'merge' }]` —— 整合不过就返工整合，而不是直接叫醒人。
 
-> B 的评审报告形状不同：`{ "schemaVersion": 1, "body": { "kind": "independent", "verdict": "pass"|"fail", "reason": "...", "evidence": [{ "path": "/abs", "digest": "<sha256>" }] } }`（无 `subject`）。
+最后再挂 `graph.human_check`，把「整份交付可不可以接受」留给人。
 
 ## 五条硬规则（都是实测出来的）
 
-### 1. `multiview` / `adversarial` **只能判一个**实现者，`independent` 能判多个
+### 1. 评审的路由必须落在声明过的分支内
 
-- `multiview` / `adversarial` 的 `subjectNode` **只能是一个节点**。所以想要 B 那种「一个门判多条车道」，**必须用 `independent`**（无 subjectNode，可列多个 `reportNodes`）。
-- `jury` 虽能列多个 candidates，但它**永远不产生 blockers**，所以 `outcome` 永远是 `pass` —— **它驱动不了返工环**。
+评审在结果里给 `route`；harness 只接受 `routes` 里声明过的值，并且只认**图里那条同名 case 的 `loops`** 才触发返工。`input.route.declared: null` 表示「分支由评审自己在结果里给出」；写死某个值则等于固定路由。
 
-### 2. 一个门的**所有** `loops` 回边会一起被激活
+### 2. 回边只激活它指向的那个节点
 
-- `handleRework` 取 `loops.filter(from === 当前节点)`，然后 `reactivate(loops.map(l => l.to))` —— **一次激活全部目标**。这就是 B 能一次返工两条车道的原因。
-- `loops[].to` **只能是节点，不能是容器**（`GraphPlan` 校验 + `reactivate` 按 `nodes` 表查）。
-- 只想返工其中一条时，门的 blockers 会用 `id`（= 评审节点名）指名是哪个；**固定回边会把整组一起重跑**，所以如果你需要「只返工失败的那条」，用 A。
+`loops: [{ from: 'review-a', to: 'impl-a', case: 'fail' }]` 只重跑 `impl-a`，**兄弟车道不动**（实测：a 返工 1 次时 b 只跑了 1 次）。`loops[].to` 只能是节点，不能是容器。
 
-### 3. 门的判定是**产物**，不是节点失败
+### 3. 绑了验收项的评审，**必须**声明 deliverable
 
-门永远以 `outcome: completed` 结算，把决定写在 output 里（`{kind:'verification', outcome:'rework'|'pass', blockers:[...]}`）。readiness 只认 `succeeded`；「检查没过」由**产物 outcome** 表达。这与第 1 项固化的语义一致，也让 `graph.rework` 事件可追溯。
+评审判 pass 时，harness 会把它写的那份报告登记成该验收项的证据；没写、写了空文件、或**声明了 deliverable 却不写**——都让该节点**结算失败**。这是「评审不能空口放行」的机械保证。
 
 ### 4. 返工是**复用原 instance**，不是重开一个
 
-实测语义（`tests/m2/loops.test.ts`）：
-
 | 事情 | 行为 |
 |---|---|
-| 被返工的实现者 | `reactivate` **round+1，复用原 instance**（同一 instanceId） |
+| 被返工的实现者 | 复用原 `instanceId`（接着上一轮的工作继续，而不是从零再来） |
 | 它作废的证据 | `evidence.valid=0` |
-| **未变的兄弟车道** | **不重跑**（实测：一条车道返工 1 次，另一条只跑了 1 次） |
-| 下游依赖被返工节点的节点 | activation 置 `invalidated`，需要重新满足 |
-| 循环上限 | **连续 3 轮无实质进展 → `stalled` 阻塞**（`stall_count`），循环有界，不会无限转 |
+| 未变的兄弟车道 | 不重跑 |
+| 循环上限 | 连续 3 轮无实质进展 → `stalled` 阻塞，循环有界 |
 
-「无实质进展」的判据是 blockers 的 id 集合：**上一次的某个 blocker id 这次消失了**才算有进展（`progress` 逻辑）；`invalid_evidence` 不算进展。
+返工简报由 harness 自动带上评审自己写的话，实现者不必另找来源。
 
-### 5. 评审者必须交回一份**合规的评审报告**，否则门会以 `invalid_evidence` 拒绝
+### 5. 一个交付物只发一次，一次失败必须留下原因
 
-形状 A（`multiview`）的最少可用报告：
-
-```json
-{
-  "schemaVersion": 1,
-  "subject": { "path": "/abs/path/to/被评产物", "digest": "<sha256>" },
-  "body": { "kind": "multiview",
-    "dimensions": { "correctness": { "verdict": "fail", "reason": "第一版不完整",
-      "evidence": [{ "path": "/abs/path/to/证据", "digest": "<sha256>" }] } } }
-}
-```
-
-形状 B（`independent`）：去掉 `subject`，`body` 是 `{ kind: 'independent', verdict, reason, evidence }`。
-
-共同要点：
-- `verdict` 三值：`pass` / `fail` / `unresolved`；
-- **`evidence` 必须非空**，每项是**绝对路径 + sha256**，否则 `invalid_evidence`；
-- **`files`（可选）= 修复要动的仓库相对路径**。它有一个硬作用：门会检查这些文件是否落在某个节点的声明范围内，**不在任何节点范围内就写进 `unowned`**，提示 main 去扩那个节点的文件清单——而不是让某个车道瞎猜。
+- 声明了 `deliverable` 的节点，如果它自己已经用 `artifact_publish` 发过**同样的字节**，harness 结算时**不会再发一版**（版本链只表示「内容变了」）。
+- 任何工具失败都会把**原因**写进记录（结果行文本 + `data.message`）；`artifact_publish` 的源文件必须位于**本次操作的工作副本**内，否则拒绝——拒绝消息会给出改法（写进工作副本，或直接用 `content`）。
 
 ## 收尾与验收
-- 门是 `program` 节点，可以作为**验收项的 `checkNode`**（acceptance 只接受强制 program 节点）：A 里一门一条，B 里一个门一条。
-- 门通过时才会写 evidence（`evaluateVerifier` 只在 `pass` 时产出 evidence），所以「验收通过」= 真的过了评审。
-- main 自己最后仍要验（跑检查脚本 / 看 diff），门只保证评审规则通过。
+- 验收项的 `checkNode` 指到**评审节点**（agent 路由器）或**程序门**（`graph.command`）；两者都能作为强制 program/node 检查。
+- 评审通过 → 验收项拿到 valid evidence，且证据钉在**评审写的那份报告**上（不是评审的话）。
+- main 自己最后仍要验（看 diff / 跑脚本）；门只保证「这条命令真的退出 0」。
 
 ## 什么适合 / 什么不适合
-- **适合**：实现 → 评审 → 不通过就返工，返工方向单一（实现 → 评审 → 实现）。
-- **不适合**：需要在**多个候选之间比较并选一个**（那是 `jury` / 复杂档）；需要多条互相交织的回边（复杂档）。
+- **适合**：实现 → 评审 → 不通过就返工；返工方向单一（实现 → 评审 → 实现）。
+- **不适合**：在**多个候选之间比较并选一个**（那是复杂档）。
 
 ## 已实证（不是推测）
-- **形状 A**（两条车道 + 两个门 + 两条回边，只 a 首轮不过）：`phase completed`；`impl-a` 跑 **2** 次、`impl-b` 只跑 **1** 次；`gate-a: rework → pass`、`gate-b: pass`；两条验收项都拿到 valid evidence。
-- **形状 B**（两条车道 + 一个门 + 两条回边，两条车道首轮都不过）：`phase completed`；门首次判定 **`rework[review-a|review-b]`**；**两条车道都被返工（各跑 2 次）**；次轮 `pass[]`。
-- 两份可照抄的 JSON 都经真 `validateProposal` 接受。
+- **整套形状**（3 条车道 + 3 个评审路由器 + merge + 全量测试门 + 人工验收；真任务 `68543fed`，9 个节点全部 succeeded、4 条验收项全部 valid）：
+  - 三条评审各自判 pass，证据随集成 SHA 重绑后仍 valid；
+  - **返工路径真跑过**：其中一条车道的评审判过 fail、走了图声明的回边，只重跑它自己的实现者；
+  - merge 整合后，门 **`completed`、code 0、217 文件 / 1480 用例全绿、139 秒、`sandboxed:false`**；
+  - 任务从 `full-tests:blocked` 一路推进到 `human-accept` 并通过人工验收。
+- **门的三种跑法对照**（同一份集成副本、同一条 `node --run check`）：沙箱内 224 失败/49 通过 → 沙箱外但环境错 178 失败/1278 通过 → **沙箱外且环境对 1480/1480**。
+- 本节的 JSON 与真任务用的图同构（真任务那份见 `docs/adr/0029-check-outside-the-sandbox.md` 与 harness backlog）。
+
+## 旧形状（历史，不再推荐）
+
+早期这一档用**每车道一个 `graph.verify` 门**（`verifier: multiview(subjectNode)` / 统一门用 `independent(reportNodes)`）来表达同一个回路，`loops` 从门出发。它跑通过，但需要多一层实体与一份 `verifier` 配置，且「评审判了、门再判一次」的语义是重复的。保留这段只为读历史设计：**新图请用上面的「评审即路由器」**，`graph.verify` 相关的硬规则（`multiview` 只能判一个实现者、`jury` 永远不产生 blockers 等）随之失效。
 
 ---
 
