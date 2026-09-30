@@ -92,6 +92,38 @@ test('a node that declares a deliverable has it published for it, without the no
   expect(nodeStatus(stateDir, taskId, 'work')).toBe('succeeded');
 }, 90_000);
 
+test("a declared deliverable is the artifact the node's dependent receives", async () => {
+  const { root, runtime, stateDir } = await fixture(async operation => {
+    const workspace = operation.workspace ?? root;
+    await mkdir(join(workspace, 'notes'), { recursive: true });
+    await writeFile(join(workspace, 'notes/lane.md'), '# lane notes\n');
+    return { outcome: 'completed', output: { wrote: 'notes/lane.md' }, usage };
+  });
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: '调研一条车道', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose(graph({ path: 'notes/lane.md', namespace: 'research', name: 'lane-notes', title: 'lane notes' }), 'draft');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive();
+
+  // What a dependent receives is the harness's own record of the node's products, and a verifier gate
+  // reads exactly this list to match a review to the work it reviewed (`subject()` in verification.ts).
+  // Publishing the file without recording it here left every source's `artifacts` empty, so no real
+  // Agent node could ever be matched by a gate (HB-205; measured on a task whose three review nodes each
+  // declared and published a report, while the node that depended on them saw an empty list).
+  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  const row = store.db.prepare("SELECT spec FROM operations WHERE task_id=? AND node_id='check' ORDER BY rowid DESC LIMIT 1").get(taskId) as { spec: string };
+  store.close();
+  const sources = (JSON.parse(row.spec) as { dependencySources: Record<string, { artifacts: { id: string; path: string; digest: string; artifactId: string; version: number }[] }[]> }).dependencySources;
+  const artifacts = sources['work']![0]!.artifacts;
+  expect(artifacts).toHaveLength(1);
+  expect(artifacts[0]!.id).toBe('research/lane-notes');
+  // The path is absolute, the way every artifact reference in a result has to be.
+  expect(artifacts[0]!.path.endsWith('/notes/lane.md')).toBe(true);
+  expect(artifacts[0]!.digest).toMatch(/^[a-f0-9]{64}$/);
+  // And it points at the published version, not at a copy the dependent would have to re-read.
+  expect(artifacts[0]!.artifactId).toBeTruthy();
+  expect(artifacts[0]!.version).toBeGreaterThanOrEqual(1);
+}, 90_000);
+
 test('the same bytes are published once, not twice: the harness does not re-publish what the node already published', async () => {
   const { root, runtime, stateDir } = await fixture(async operation => {
     const workspace = operation.workspace ?? root;

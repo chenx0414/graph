@@ -74,6 +74,22 @@ const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'hi
  * original request and the constraints stated with it are the oldest messages there are.
  */
 const DECISION_DIGEST_MAX_MESSAGES = 20;
+
+/**
+ * Whether a user message says anything worth carrying into every node's briefing.
+ *
+ * The fallback exists so a constraint the user states in chat reaches the worker, and that is exactly
+ * why it cannot be a length rule: "别动 login" is shorter than "好的，继续吧" and is the kind of line the
+ * fallback is for. What it can drop is a message that states no decision at all - a slash command, or a
+ * bare acknowledgement or continuation - because those cost window space in every briefing while reading
+ * like a constraint to a model that is looking for one (HB-190).
+ */
+export function statesADecision(text: string) {
+  const bare = text.trim().replace(/[。.!！？?，,、;；:：\s]+$/u, '').trim();
+  if (!bare) return false;
+  if (bare.startsWith('/')) return false;
+  return !/^(?:continue|go on|ok(?:ay)?|yes|yep|thanks|thank you|继续|接着(?:做|干)?|好的|好|是|是的|对|可以|行|收到|谢谢|多谢)$/i.test(bare);
+}
 const DECISION_DIGEST_HEAD = 6;
 const DECISION_DIGEST_TAIL = DECISION_DIGEST_MAX_MESSAGES - DECISION_DIGEST_HEAD;
 const DECISION_DIGEST_MAX_CHARS = 4_000;
@@ -1894,7 +1910,7 @@ export async function openTaskRuntime(options: {
                     ...store.db.prepare(`SELECT seq,text FROM messages WHERE ${scope} ORDER BY seq LIMIT ?`).all(conversation.id, since, DECISION_DIGEST_HEAD),
                     ...(store.db.prepare(`SELECT seq,text FROM messages WHERE ${scope} ORDER BY seq DESC LIMIT ?`).all(conversation.id, since, DECISION_DIGEST_TAIL) as { seq: number; text: string }[]).reverse(),
                   ] as { seq: number; text: string }[];
-              const lines = rows.map(row => `- [msg ${row.seq}] ${row.text.slice(0, 240)}`);
+              const lines = rows.filter(row => statesADecision(row.text)).map(row => `- [msg ${row.seq}] ${row.text.slice(0, 240)}`);
               // Over budget: give way from the middle, so neither end is sacrificed.
               while (lines.length > 1 && lines.join('\n').length > DECISION_DIGEST_MAX_CHARS) lines.splice(Math.floor((lines.length - 1) / 2), 1);
               if (lines.length) snapshot = lines.join('\n');

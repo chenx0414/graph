@@ -634,9 +634,11 @@ export class Execution {
     const head = artifacts.head(operation.taskId, `${deliverable.namespace}/${deliverable.name}`);
     if (head) {
       const body = await readFile(resolve(workspace, deliverable.path));
-      if (createHash('sha256').update(body).digest('hex') === head.digest) return result;
+      if (createHash('sha256').update(body).digest('hex') === head.digest) {
+        return this.withDeliverableArtifact(result, deliverable, head, resolve(workspace, deliverable.path));
+      }
     }
-    await artifacts.publish({
+    const published = await artifacts.publish({
       taskId: operation.taskId,
       workspace,
       namespace: deliverable.namespace,
@@ -652,7 +654,33 @@ export class Execution {
       },
       requestId: `node-deliverable:${operation.id}`,
     });
-    return result;
+    return this.withDeliverableArtifact(result, deliverable, published, resolve(workspace, deliverable.path));
+  }
+
+  /**
+   * Record a node's declared deliverable as that node's product, which is how its dependents receive it.
+   *
+   * Publishing the file is only half the record: a verifier gate matches a review to the artifact it
+   * reviewed by reading `dependencySources[<node>].artifacts` (`subject()` in verification.ts), so a
+   * deliverable that was published but never appended here left every dependent with an empty list and
+   * no real Agent node could be matched by a gate at all (HB-205).
+   */
+  private withDeliverableArtifact(
+    result: OperationResult,
+    deliverable: NonNullable<NodeSpec['deliverable']>,
+    artifact: { artifactId: string; version: number; digest: string },
+    path: string,
+  ): OperationResult {
+    return {
+      ...result,
+      artifacts: [...(result.artifacts ?? []), {
+        id: `${deliverable.namespace}/${deliverable.name}`,
+        path,
+        digest: artifact.digest,
+        artifactId: artifact.artifactId,
+        version: artifact.version,
+      }],
+    };
   }
 
   private async execute(node: ExecutionNodeRow): Promise<boolean> {
