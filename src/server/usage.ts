@@ -83,14 +83,16 @@ export interface ModelPrice {
   cacheCreationCostPerMillion: number;
 }
 
+export interface ModelPricingSnapshot {
+  source: string;
+  updatedAt: number | null;
+  models: ModelPrice[];
+}
+
 export interface UsageSnapshot {
   generatedAt: number;
   plans: UsagePlan[];
-  pricing: {
-    source: string;
-    updatedAt: number | null;
-    models: ModelPrice[];
-  };
+  pricing: ModelPricingSnapshot;
   summary: {
     configured: number;
     connected: number;
@@ -102,6 +104,8 @@ export interface UsageSnapshot {
 
 export interface UsageService {
   get(force?: boolean): Promise<UsageSnapshot>;
+  /** Lightweight local price snapshot, without querying subscription providers. */
+  pricing(): Promise<ModelPricingSnapshot>;
   /** Detected subscription providers mapped to the credential ref Graph should use. */
   credentials(): Promise<Record<string, string>>;
   /** Secret values imported from local subscription configuration or login files.
@@ -1048,16 +1052,27 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
     };
   }
 
-  async function load(): Promise<UsageSnapshot> {
-    const generatedAt = Date.now();
-    const current = options.loadConfig ? await options.loadConfig() : { config: null as unknown as GraphConfig, env };
-    const [openCodeConfig, pricingRaw, pricingInfo] = await Promise.all([
-      readJson(openCodeConfigPath).catch(() => null),
+  async function loadPricing(): Promise<ModelPricingSnapshot> {
+    const [pricingRaw, pricingInfo] = await Promise.all([
       readJson(pricingPath).catch(() => null),
       stat(pricingPath).catch(() => null),
     ]);
+    return {
+      source: '~/.cc-switch/model-pricing.json',
+      updatedAt: pricingInfo?.mtimeMs ?? null,
+      models: parseModelPrices(pricingRaw),
+    };
+  }
+
+  async function load(): Promise<UsageSnapshot> {
+    const generatedAt = Date.now();
+    const current = options.loadConfig ? await options.loadConfig() : { config: null as unknown as GraphConfig, env };
+    const [openCodeConfig, pricing] = await Promise.all([
+      readJson(openCodeConfigPath).catch(() => null),
+      loadPricing(),
+    ]);
     const credentials = await credentialInventory();
-    const prices = parseModelPrices(pricingRaw);
+    const prices = pricing.models;
     // One runner per platform, so an extra account of the same platform reuses the
     // platform's own fetcher instead of duplicating its rules.
     const runners: Record<UsageProviderId, (credential: Credential) => Promise<UsagePlan>> = {
@@ -1113,11 +1128,7 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
     const snapshot: UsageSnapshot = {
       generatedAt,
       plans,
-      pricing: {
-        source: '~/.cc-switch/model-pricing.json',
-        updatedAt: pricingInfo?.mtimeMs ?? null,
-        models: prices,
-      },
+      pricing,
       summary: summarize(plans),
     };
     cached = snapshot;
@@ -1131,6 +1142,7 @@ export function createUsageService(options: UsageServiceOptions = {}): UsageServ
       inFlight = load().finally(() => { inFlight = null; });
       return inFlight;
     },
+    pricing: loadPricing,
     async credentials() {
       const inventory = await credentialInventory();
       return Object.fromEntries(

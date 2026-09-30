@@ -104,6 +104,40 @@ export function groupArtifacts<T extends { scope: string }>(records: readonly T[
   };
 }
 
+export interface ArtifactGraphGroup<T> {
+  taskId: string;
+  request: string;
+  records: T[];
+}
+
+/** Shared artifacts grouped by the graph that produced them. Project-scoped
+ * records stay separate because they deliberately belong to no single graph. */
+export function groupArtifactsByTask<T extends { scope: string; taskId: string }>(
+  records: readonly T[],
+  tasks: readonly { id: string; request: string }[],
+): { graphs: ArtifactGraphGroup<T>[]; project: T[] } {
+  const taskRequests = new Map(tasks.map(task => [task.id, task.request]));
+  const byTask = new Map<string, T[]>();
+  for (const record of records) {
+    if (record.scope === 'project') continue;
+    const group = byTask.get(record.taskId) ?? [];
+    group.push(record);
+    byTask.set(record.taskId, group);
+  }
+  const orderedIds = [
+    ...tasks.map(task => task.id).filter(id => byTask.has(id)),
+    ...[...byTask.keys()].filter(id => !taskRequests.has(id)),
+  ];
+  return {
+    graphs: orderedIds.map(taskId => ({
+      taskId,
+      request: taskRequests.get(taskId) ?? taskId,
+      records: byTask.get(taskId)!,
+    })),
+    project: records.filter(record => record.scope === 'project'),
+  };
+}
+
 /** Everything the drawer hosts: the draft versions, the draft pages, the task
  * navigation list with its empty state, one selected task's execution detail
  * and the project-binding initialization panel. Everything here is reached by

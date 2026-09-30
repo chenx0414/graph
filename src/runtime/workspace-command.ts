@@ -137,7 +137,7 @@ export async function openWorkspaceCommandRunner(input: {
   let acquired: Awaited<ReturnType<typeof acquireRestrictedExecutor>> | undefined;
   let closed = false;
   return {
-    async run(command: string, args: string[]): Promise<CommandResult> {
+    async run(command: string, args: string[], signal?: AbortSignal): Promise<CommandResult> {
       const hostCommands = input.access?.commands === 'host';
       const resolved = hostCommands ? resolveHostCommand(command, args) : validateWorkspaceCommand(command, args);
       if (!acquired) acquired = await acquireRestrictedExecutor();
@@ -160,6 +160,7 @@ export async function openWorkspaceCommandRunner(input: {
           ...(input.gitMetadataWritesInsideScratch ? { gitMetadataWritesInsideScratch: true } : {}),
         } : {}),
         timeoutMs: input.timeoutMs ?? 120_000,
+        ...(signal ? { signal } : {}),
         ...(Object.keys(environment).length ? { env: environment } : {}),
         ...(input.localNetwork ? { localNetwork: true } : {}),
       });

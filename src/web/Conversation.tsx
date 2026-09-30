@@ -477,6 +477,7 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [steering, setSteering] = useState(false);
+  const [interrupting, setInterrupting] = useState(false);
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
   const { branch, setBranch } = useTargetBranch(settings?.projects ?? null, view?.projectId ?? null);
@@ -492,6 +493,36 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
   const [dismissedQueue, setDismissedQueue] = useState<string[]>([]);
   const busy = view?.master?.status === 'preparing' || view?.master?.status === 'running';
+  const interruptTurn = useCallback(async () => {
+    if (interrupting) return;
+    setInterrupting(true);
+    setActionError('');
+    try {
+      await api(`/api/conversations/${id}/interrupt`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `interrupt-${crypto.randomUUID()}` }),
+      });
+      toast('已打断当前模型思考和工具调用。', 'info');
+      reload();
+      onChanged?.();
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setActionError(message);
+      toast(message, 'danger');
+    } finally {
+      setInterrupting(false);
+    }
+  }, [id, interrupting, onChanged, reload]);
+  useEffect(() => {
+    if (!busy) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      void interruptTurn();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy, interruptTurn]);
   const transcriptFollow = useTranscriptFollow(view?.id ?? null, Boolean(busy));
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
@@ -663,7 +694,7 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
     }
   }
   async function steerQueued() {
-    if (steering || !queuedMessages.length) return;
+    if (steering || interrupting || !queuedMessages.length) return;
     setSteering(true);
     setActionError('');
     try {
@@ -684,7 +715,7 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
     }
   }
   async function submitEnter() {
-    if (sending || steering) return;
+    if (sending || steering || interrupting) return;
     if (text.trim() || attachments.length) return send();
     if (busy && queuedMessages.length) return steerQueued();
     if (!busy && promptSuggestion) return send(promptSuggestion);
@@ -694,7 +725,7 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
    * outputting, resume when paused, and send + auto-continue when paused with
    * something to send. */
   async function submitPrimary() {
-    if (sending || steering || pauseAction) return;
+    if (sending || steering || interrupting || pauseAction) return;
     const action = primaryState.action;
     if (action === 'pause') { await changePaused(true); return; }
     if (action === 'resume') { await changePaused(false); return; }

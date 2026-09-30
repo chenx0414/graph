@@ -320,6 +320,17 @@ export class Execution {
     });
   }
 
+  async interrupt(operationId: string, text?: string) {
+    return await this.lifecycle.interrupt(operationId, async operation => {
+      const adapter = Object.hasOwn(this.actions, operation.action) ? this.actions[operation.action] : this.fallback;
+      if (adapter?.interrupt) return await adapter.interrupt(operation, text);
+      // Scripted and legacy adapters expose only the old steering seam. Keep the
+      // queue contract intact there; production Pi uses interrupt() for a hard stop.
+      if (adapter?.steer && text) return await adapter.steer(operation, text);
+      throw new RuntimeError('interrupt_unavailable', 'The active Agent does not support interruption');
+    });
+  }
+
   /** Called only inside the authenticated user command transaction. */
   answer(taskId: string, questionId: string, answer: Answer) {
     this.lifecycle.answer(taskId, questionId, answer, this.models);

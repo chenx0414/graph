@@ -1182,7 +1182,7 @@ export async function openTaskRuntime(options: {
       const operation = JSON.parse(active.spec) as Operation;
       const combined = messages.map(steeringText).filter(Boolean).join('\n\n');
       if (!combined) throw new RuntimeError('invalid_input', 'Queued messages do not contain steerable text');
-      const steered = await execution.steer(active.id, combined);
+      const steered = await execution.interrupt(active.id, combined);
 
       const receipt = store.transaction(() => {
         const ids = messages.map(message => message.id);
@@ -1193,6 +1193,22 @@ export async function openTaskRuntime(options: {
         return { conversationId, state: 'steered' as const, steered: ids.length, cursor };
       });
       return receipt;
+    },
+    async interrupt(conversationId: string, input: { requestId: string }) {
+      ensureOpen();
+      conversationRow(store, conversationId);
+      const active = store.db.prepare(`
+        SELECT o.id
+        FROM operations o
+        JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+        JOIN tasks t ON t.id=o.task_id
+        WHERE t.conversation_id=? AND json_extract(n.spec,'$.role')='master'
+          AND o.state='dispatched' AND o.worker_active=1
+        ORDER BY o.rowid DESC LIMIT 1
+      `).get(conversationId) as { id: string } | undefined;
+      if (!active) return { conversationId, state: 'idle' as const, requestId: input.requestId };
+      await execution.interrupt(active.id);
+      return { conversationId, state: 'interrupted' as const, requestId: input.requestId };
     },
     async bind(conversationId: string, input: { projectId: string; requestId: string }) {
       ensureOpen();

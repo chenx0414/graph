@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { Socket } from 'node:net';
@@ -95,6 +96,9 @@ async function main() {
     waiting.push({ resolve, reject });
     channel.write(`${JSON.stringify(value)}\n`);
   });
+  const notify = (value: unknown) => {
+    if (!channel.destroyed) channel.write(`${JSON.stringify(value)}\n`);
+  };
 
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(), modelsPath: null,
@@ -106,14 +110,23 @@ async function main() {
     apiKey: 'graph-host-broker-placeholder',
     models: [config.model],
   });
-  const stream: import('@earendil-works/pi-agent-core').StreamFn = async (model, context) => {
-    const response = await request({ operation: 'model', context, events: true }) as {
-      frames: AssistantMessageFrame[];
-      settlement: AssistantMessage;
-    };
-    const output = createAssistantMessageEventStream();
-    for (const event of replayAssistantStream(response.frames, response.settlement)) output.push(event);
-    return output;
+  const stream: import('@earendil-works/pi-agent-core').StreamFn = async (model, context, options) => {
+    const target = randomUUID();
+    const signal = options?.signal;
+    const cancel = () => notify({ operation: 'cancel', target });
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const response = await request({ operation: 'model', target, context, events: true }) as {
+        frames: AssistantMessageFrame[];
+        settlement: AssistantMessage;
+      };
+      const output = createAssistantMessageEventStream();
+      for (const event of replayAssistantStream(response.frames, response.settlement)) output.push(event);
+      return output;
+    } finally {
+      signal?.removeEventListener('abort', cancel);
+    }
   };
   // The host sent JSON, so a declaration seam that is a function cannot travel: anything the host attached
   // by value has to be re-attached here by name, or the real Agent process simply never runs it.
@@ -127,9 +140,39 @@ async function main() {
       ...(tool.promptGuidelines?.length ? { promptGuidelines: tool.promptGuidelines } : {}),
       ...(prepareArguments ? { prepareArguments } : {}),
       parameters: Type.Unsafe(tool.parameters as never),
-      execute: async (id, params) => await request({
-        operation: 'tool', id, name: tool.name, args: params,
-      }) as never,
+      execute: async (id, params, signal) => {
+        const abortedResult = {
+          content: [{ type: 'text' as const, text: 'Operation aborted by user' }],
+          details: {},
+          terminate: true,
+        };
+        const pending = request({
+          operation: 'tool', id, name: tool.name, args: params,
+        });
+        if (!signal) return await pending as never;
+        if (signal.aborted) {
+          notify({ operation: 'cancel', target: id });
+          return abortedResult as never;
+        }
+        return await new Promise<never>((resolve, reject) => {
+          let settled = false;
+          const finish = (complete: () => void) => {
+            if (settled) return;
+            settled = true;
+            complete();
+          };
+          const abort = () => {
+            notify({ operation: 'cancel', target: id });
+            // A cancelled tool must end the batch, not look like a tool error
+            // the model can answer with another request.
+            finish(() => resolve(abortedResult as never));
+          };
+          signal.addEventListener('abort', abort, { once: true });
+          pending
+            .then(value => finish(() => resolve(value as never)), error => finish(() => reject(error)))
+            .finally(() => signal.removeEventListener('abort', abort));
+        }) as never;
+      },
     });
   });
   const proxiedTools = new Set(config.tools.map(tool => tool.name));
@@ -241,6 +284,10 @@ async function main() {
     } else if (command.operation === 'steer' && typeof command.text === 'string') {
       void session.steer(command.text).catch(error => {
         process.stderr.write(`Pi steer failed: ${String(error)}\n`);
+      });
+    } else if (command.operation === 'interrupt') {
+      void session.interrupt(typeof command.text === 'string' ? command.text : undefined).catch(error => {
+        process.stderr.write(`Pi interrupt failed: ${String(error)}\n`);
       });
     } else if (command.operation === 'stop') {
       void session.stop().catch(error => {

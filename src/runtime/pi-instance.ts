@@ -318,8 +318,20 @@ export async function openPiInstance(options: PiInstanceOptions) {
     ...tool,
     execute: async (...args: Parameters<ToolDefinition['execute']>) => {
       const id = randomUUID();
+      const signal = args[2];
       const result = options.broker!.dispatch(id, 0, () => tool.execute(...args));
-      try { return await result; }
+      try {
+        const value = await result;
+        if (signal?.aborted) {
+          return { content: [{ type: 'text' as const, text: 'Operation aborted by user' }], details: {}, terminate: true };
+        }
+        return value;
+      } catch (error) {
+        if (signal?.aborted) {
+          return { content: [{ type: 'text' as const, text: 'Operation aborted by user' }], details: {}, terminate: true };
+        }
+        throw error;
+      }
       finally { options.broker!.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }); }
     },
   }) ?? [];
@@ -351,6 +363,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   // Graph's terminal tool result ends this operation even in a mixed batch.
   // Let Pi persist all results, then stop before another model request.
   let stopRequested = false;
+  const interruptRequests: string[] = [];
   const beforeToolCall = session.agent.beforeToolCall;
   session.agent.beforeToolCall = async (context, signal) => stopRequested
     ? { block: true, terminate: true, reason: 'The operation has completed; continue after the pending reload.' }
@@ -420,11 +433,24 @@ export async function openPiInstance(options: PiInstanceOptions) {
 
   return {
     async prompt(text: string, options?: PromptOptions) {
-      stopRequested = false;
-      await session.prompt(text, options);
+      let next: { text: string; options?: PromptOptions } | undefined = { text, ...(options ? { options } : {}) };
+      while (next) {
+        stopRequested = false;
+        await session.prompt(next.text, next.options);
+        const steering = interruptRequests.shift();
+        next = steering ? { text: steering, options: { expandPromptTemplates: false } } : undefined;
+      }
     },
     async steer(text: string) {
       await session.prompt(text, { streamingBehavior: 'steer', expandPromptTemplates: false });
+    },
+    /** Abort now, then continue in the same session with the next queued user
+     * message. The prompt wrapper owns that continuation, so the caller's
+     * operation does not settle between the interrupt and the replacement turn. */
+    async interrupt(text?: string) {
+      const steering = text?.trim();
+      if (steering) interruptRequests.push(steering);
+      await session.abort();
     },
     /** Soft-stop the running turn: end after the in-flight tool call finishes,
      * before the next model request. The session stays alive (no dispose), so a

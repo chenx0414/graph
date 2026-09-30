@@ -275,6 +275,9 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     app.post('/api/usage/refresh', async () => options.usage!.get(true));
     app.get('/api/usage/credentials', async () => ({ credentials: await options.usage!.credentials() }));
   }
+  app.get('/api/model-pricing', async () => options.usage
+    ? options.usage.pricing()
+    : { source: '~/.cc-switch/model-pricing.json', updatedAt: null, models: [] });
   // Provider directory + probe on the console's session-cookie `/api` face.
   // The page cannot read the desktop app token, so these must NOT live under
   // `/api/app/*`.
@@ -569,6 +572,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const params = request.params as { conversationId: string };
     const body = request.body as { requestId: string };
     return runtime.conversations.steer(params.conversationId, { requestId: body.requestId });
+  });
+  app.post('/api/conversations/:conversationId/interrupt', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { requestId: string };
+    return runtime.conversations.interrupt(params.conversationId, { requestId: body.requestId });
   });
   app.get('/api/conversations/:conversationId/events', async request => {
     const params = request.params as { conversationId: string };

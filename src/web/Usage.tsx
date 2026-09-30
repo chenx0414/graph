@@ -38,19 +38,9 @@ interface UsagePlan {
   updatedAt: number;
 }
 
-interface ModelPrice {
-  modelId: string;
-  displayName: string;
-  inputCostPerMillion: number;
-  outputCostPerMillion: number;
-  cacheReadCostPerMillion: number;
-  cacheCreationCostPerMillion: number;
-}
-
 interface UsageSnapshot {
   generatedAt: number;
   plans: UsagePlan[];
-  pricing: { source: string; updatedAt: number | null; models: ModelPrice[] };
   summary: { configured: number; connected: number; warnings: number; limited: number; unconfigured: number };
 }
 
@@ -112,14 +102,6 @@ function windowTone(window: UsageWindow): 'success' | 'warn' | 'danger' {
   return 'success';
 }
 
-function pricingPriority(modelId: string): number {
-  if (/gpt-5\.6|gpt-5\.5|gpt-6/i.test(modelId)) return 0;
-  if (/deepseek-v4\.1|deepseek-v4/i.test(modelId)) return 1;
-  if (/grok-4\.6|grok-4\.5|grok-build/i.test(modelId)) return 2;
-  if (/claude-(opus|sonnet)/i.test(modelId)) return 3;
-  return 10;
-}
-
 export function UsagePage() {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -160,16 +142,12 @@ export function UsagePage() {
   const tightest = configured
     .flatMap(plan => plan.windows.map(window => ({ plan, window })))
     .sort((left, right) => right.window.usedPercent - left.window.usedPercent)[0] ?? null;
-  const pricing = [...snapshot.pricing.models]
-    .sort((left, right) => pricingPriority(left.modelId) - pricingPriority(right.modelId) || left.displayName.localeCompare(right.displayName))
-    .slice(0, 12);
-
   return (
     <section className="usage-page" data-testid="usage-page">
       <header className="usage-page-head">
         <div>
           <h2>订阅与额度</h2>
-          <p>统一查看已接入订阅的用量窗口、剩余额度和本地模型价格快照。</p>
+          <p>统一查看已接入订阅的用量窗口和剩余额度。</p>
         </div>
         <Button icon="refresh" disabled={refreshing} onClick={() => void load(true)} data-testid="usage-refresh">
           {refreshing ? '刷新中…' : '刷新用量'}
@@ -188,7 +166,6 @@ export function UsagePage() {
           tone={tightest && tightest.window.usedPercent >= 80 ? 'warn' : undefined}
           progress={tightest?.window.usedPercent}
         />
-        <Stat label="模型定价" value={snapshot.pricing.models.length} hint="来自本地 cc-switch 快照" />
       </div>
 
       <div className="usage-section-head">
@@ -270,35 +247,6 @@ export function UsagePage() {
           </article>
         ))}
       </div>
-
-      <Card
-        className="usage-pricing-card"
-        title="模型定价"
-        icon="usage"
-        subtitle={`${snapshot.pricing.source} · ${pricing.length} / ${snapshot.pricing.models.length} 个常用模型`}
-      >
-        {!pricing.length ? <p className="muted">未找到本地模型定价快照。</p> : (
-          <div className="usage-pricing-table" data-testid="usage-pricing">
-            <div className="usage-pricing-row usage-pricing-head">
-              <span>模型</span>
-              <span>输入 / 百万</span>
-              <span>输出 / 百万</span>
-              <span>缓存读取</span>
-            </div>
-            {pricing.map(model => (
-              <div className="usage-pricing-row" key={model.modelId}>
-                <span>
-                  <strong>{model.displayName}</strong>
-                  <small>{model.modelId}</small>
-                </span>
-                <span>${model.inputCostPerMillion}</span>
-                <span>${model.outputCostPerMillion}</span>
-                <span>${model.cacheReadCostPerMillion}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
     </section>
   );
 }

@@ -268,6 +268,9 @@ export interface ActionAdapter {
    * turn ordinal the injected message was given, so the transcript can keep it at
    * the place it interrupted instead of at the top of the turn. */
   steer?(operation: Operation, text: string): Promise<{ ordinal?: number } | void>;
+  /** Abort active model/tool work now. Text, when present, becomes the next
+   * prompt in the same session and the operation continues until it settles. */
+  interrupt?(operation: Operation, text?: string): Promise<{ ordinal?: number } | void>;
   /** Soft-stop the turn an operation is running: finish the in-flight tool call,
    * then end the turn before the next model request, keeping the session. No-op
    * when the operation has no live session. */

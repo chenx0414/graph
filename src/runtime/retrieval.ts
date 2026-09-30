@@ -62,7 +62,7 @@ export function createRetrievalBroker(input: { domains: string[]; gate: Restrict
   const domains = normalizeDomains(input.domains);
   return {
     domains,
-    async fetch(urlText: string): Promise<RetrievalResult> {
+    async fetch(urlText: string, signal?: AbortSignal): Promise<RetrievalResult> {
       const url = checkedUrl(urlText, domains, input.unrestricted === true);
       const invocationId = randomUUID();
       let failure: unknown;
@@ -70,6 +70,9 @@ export function createRetrievalBroker(input: { domains: string[]; gate: Restrict
       await input.gate.dispatch(invocationId, 0, async () => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 20_000);
+        const abort = () => controller.abort(signal?.reason);
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
         try {
           const response = await fetch(url, { redirect: 'error', signal: controller.signal, headers: { accept: 'text/*, application/json;q=0.9, application/xml;q=0.8' } });
           if (!response.ok) throw new RuntimeError('retrieval_failed', `Retrieval answered HTTP ${response.status}`);
@@ -81,6 +84,7 @@ export function createRetrievalBroker(input: { domains: string[]; gate: Restrict
           failure = error instanceof RuntimeError ? error : new RuntimeError('retrieval_failed', `Retrieval failed: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
           clearTimeout(timer);
+          signal?.removeEventListener('abort', abort);
           input.gate.settle(invocationId, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
         }
       });
