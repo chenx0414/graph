@@ -117,6 +117,14 @@ export class Execution {
   private readonly driveWaiters: (() => void)[] = [];
   private readonly store: TaskStore;
   private mergeResolvers?: MergeResolverChannels;
+  /**
+   * §13.8: the v2 graph lane. A task on the v2 kernel has no `nodes` rows, so the old scan
+   * can never see it and its queues stay inert. This hook names the v2 graphs that
+   * currently have queued work, and runs one when the drive loop drains it. It is injected
+   * (rather than built here) because the kernel, the resident host and the node config all
+   * live in the runtime that opens this executor.
+   */
+  private readonly graphs?: () => { taskId: string; run: () => Promise<{ drained: boolean }> }[];
   private readonly actions: Record<string, ActionAdapter>;
   private readonly fallback?: ActionAdapter;
   private readonly catalog?: Catalog;
@@ -134,7 +142,7 @@ export class Execution {
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy; mergeResolvers?: MergeResolverChannels; artifacts?: ArtifactWorkspace } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; graphs?: () => { taskId: string; run: () => Promise<{ drained: boolean }> }[]; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy; mergeResolvers?: MergeResolverChannels; artifacts?: ArtifactWorkspace } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
@@ -148,6 +156,7 @@ export class Execution {
     if (extras.access) this.access = extras.access;
     if (extras.dispatchAllowed) this.dispatchAllowed = extras.dispatchAllowed;
     if (extras.mergeResolvers) this.mergeResolvers = extras.mergeResolvers;
+    if (extras.graphs) this.graphs = extras.graphs;
     this.autoWake = Boolean(extras.autoWake);
     this.unsubscribeStore = store.onEvent(type => {
       if (this.autoWake && type === 'problem.routed') queueMicrotask(() => this.kick());
@@ -436,6 +445,9 @@ export class Execution {
       let dispatched = 0;
       const running = new Set<Promise<boolean>>();
       while (!this.stopping) {
+        // §13.8: drain the v2 lane first. A v2 graph has no `nodes` rows, so only this
+        // hook can see it; a refused or throwing run must never kill the drive loop.
+        dispatched += await this.pumpGraphs();
         const ready = this.readyNodes();
         const started: Promise<boolean>[] = [];
         for (const node of ready) {
@@ -470,7 +482,9 @@ export class Execution {
     if (this.stopping || this.pumping) return { dispatched: 0 };
     this.pumping = true;
     try {
-      let dispatched = 0;
+      // §13.8: the v2 lane is drained here too, so a task on the new kernel makes progress
+      // on the same host tick as the old path rather than waiting for an explicit call.
+      let dispatched = await this.pumpGraphs();
       for (const node of this.readyNodes()) {
         const spec = JSON.parse(node.spec) as NodeSpec;
         if (this.remainingSlots(spec.kind) <= 0) continue;
@@ -481,6 +495,25 @@ export class Execution {
     } finally {
       this.pumping = false;
     }
+  }
+
+  /**
+   * Run every v2 graph that currently has queued work. Graphs run one at a time so a
+   * rework loop cannot starve another task, and a failure is contained to its own graph:
+   * a graph that throws is reported as not drained and the loop moves on.
+   */
+  private async pumpGraphs(): Promise<number> {
+    if (!this.graphs) return 0;
+    let dispatched = 0;
+    let pending: { taskId: string; run: () => Promise<{ drained: boolean }> }[];
+    try { pending = this.graphs(); } catch { return 0; }
+    for (const graph of pending) {
+      if (this.stopping || this.dispatchAllowed?.() === false) break;
+      if (this.store.task(graph.taskId).paused) continue;
+      dispatched += 1;
+      try { await graph.run(); } catch { /* a broken graph must not stop the drive loop */ }
+    }
+    return dispatched;
   }
 
   /** Ensure a newly queued message is dispatched even if no drive loop is active. */
