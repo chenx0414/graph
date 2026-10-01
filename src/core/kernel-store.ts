@@ -266,6 +266,11 @@ export class KernelStore {
     });
   }
 
+  /** Terminal execution state; the submission (if any) is already recorded. */
+  finishExecution(executionId: string, state: 'completed' | 'failed'): void {
+    this.store.db.prepare('UPDATE kernel_executions SET state=?, ended_at=? WHERE id=?').run(state, Date.now(), executionId);
+  }
+
   execution(executionId: string): ExecutionRow | null {
     const row = this.store.db.prepare('SELECT * FROM kernel_executions WHERE id=?').get(executionId) as
       { id: string; task_id: string; node_id: string; revision_version: number; attempt: number; state: string; submission_id: string | null; missing_required: number; started_at: number; ended_at: number | null } | undefined;
