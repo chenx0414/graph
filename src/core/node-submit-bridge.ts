@@ -116,6 +116,8 @@ export class NodeSubmitBridge {
         outputs: request.outputs as SubmitOutputSet,
         submissionId: request.submissionId,
       });
+      // A successful submit clears any earlier missing-required mark on this execution.
+      this.kernel.db.prepare('UPDATE kernel_executions SET missing_required=0 WHERE id=?').run(this.executionId);
       return {
         accepted: true,
         submissionId: receipt.submissionId,
@@ -128,6 +130,11 @@ export class NodeSubmitBridge {
     } catch (error) {
       if (!(error instanceof RuntimeError)) throw error;
       const { defects, missingRequired } = classify(error);
+      // Record the gap on the execution, so it survives a process restart and is the
+      // durable record the driver reads back rather than a transient return value (§7).
+      if (missingRequired.length > 0) {
+        this.kernel.db.prepare('UPDATE kernel_executions SET missing_required=1 WHERE id=?').run(this.executionId);
+      }
       return {
         accepted: false,
         submissionId: null,
