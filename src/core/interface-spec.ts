@@ -54,6 +54,12 @@ export interface ModuleDefinition {
   /** once-modules must name the inputs a rule needs, so a missing field is never read as false (§4). */
   requiredInputs?: string[];
   rules?: ModuleRule[];
+  /**
+   * A command module's main-authored code (§9): an entry file exporting
+   * `evaluate({inputs,state,trigger})`, plus the version this instance runs. The
+   * code is never imported into the daemon; it runs in the isolated module process.
+   */
+  code?: { entry: string; version: number };
 }
 
 export interface ModuleRule {

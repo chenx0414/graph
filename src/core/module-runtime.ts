@@ -182,6 +182,63 @@ export class ModuleRuntime {
     return { emitted: false, waiting: false, triggered: false, outputs: {}, reasons: [] };
   }
 
+  /**
+   * Accept one input and judge by a main-authored command module (§9).
+   *
+   * The module's `evaluate()` runs in its own ISOLATED process (§9, §15.7) through
+   * the caller-injected evaluator; its outputs become a transition carrying the
+   * code version, so a result can always be traced to the code that produced it.
+   * A defect keeps the input and pauses the module.
+   */
+  async deliverCustom(
+    moduleId: string,
+    inputName: string,
+    value: Json,
+    evaluate: (input: { entry: string; inputs: Record<string, Json>; state: Json; trigger: 'each' | 'once' }) => Promise<{ ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[]; error?: string }>,
+  ): Promise<ModuleEvaluation> {
+    const definition = this.definition();
+    const module = definition.modules[moduleId];
+    if (!module) throw new RuntimeError('invalid_definition', `Revision ${this.revisionVersion} has no module ${moduleId}`);
+    if (!module.code) throw new RuntimeError('invalid_definition', `Command module ${moduleId} declares no code entry`);
+    if (!Object.keys(module.inputs).includes(inputName)) {
+      throw new RuntimeError('invalid_input', `Module ${moduleId} has no input ${inputName}`);
+    }
+    // §9: the input is stored FIRST, so a defect keeps it rather than losing it.
+    this.kernel.setModuleInput(this.taskId, moduleId, inputName, value, 'deliver');
+    const inputs: Record<string, Json> = {};
+    for (const name of Object.keys(module.inputs)) {
+      const row = this.kernel.moduleInput(this.taskId, moduleId, name);
+      if (row?.delivered) inputs[name] = row.value;
+    }
+    const stateRow = this.kernel.db.prepare('SELECT state FROM kernel_modules WHERE task_id=? AND module_id=?').get(this.taskId, moduleId) as { state: string } | undefined;
+    const state = stateRow ? JSON.parse(stateRow.state) as Json : null;
+    const result = await evaluate({ entry: module.code.entry, inputs, state, trigger: module.trigger });
+    if (!result.ok) {
+      this.kernel.setNodeQueuePaused(this.taskId, moduleId, true);
+      throw new RuntimeError('module_defect', result.error ?? 'command module failed');
+    }
+    const emitted = Object.keys(result.outputs).length > 0;
+    this.kernel.recordModuleTransition(this.taskId, {
+      moduleId,
+      inputName,
+      inputValue: inputs as Json,
+      stateBefore: state,
+      stateAfter: result.state,
+      verdict: emitted ? Object.keys(result.outputs).join(',') : null,
+      outputs: result.outputs,
+      // §9: the transition records the CODE version, not a rule version.
+      ruleVersion: module.code.version,
+      reason: result.diagnostics.length ? result.diagnostics.join(' | ') : 'command module evaluate()',
+    });
+    return {
+      emitted,
+      waiting: false,
+      triggered: this.latch(moduleId),
+      outputs: result.outputs,
+      reasons: result.diagnostics,
+    };
+  }
+
   private record(
     moduleId: string,
     environment: { inputs: Record<string, Json>; state: Json },
