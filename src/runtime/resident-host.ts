@@ -127,8 +127,12 @@ export class ResidentHost {
     // only guards a worker that never does.
     return new Promise<ResidentInspect>((resolve, reject) => {
       let settled = false;
-      const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error('resident worker did not become ready')); } }, 20_000);
-      this.readyResolvers.push(inspect => { if (settled) return; settled = true; clearTimeout(timer); resolve(inspect); });
+      const finish = (action: () => void) => { if (settled) return; settled = true; clearTimeout(timer); action(); };
+      const timer = setTimeout(() => finish(() => reject(new Error('resident worker did not become ready'))), 20_000);
+      this.readyResolvers.push(inspect => finish(() => resolve(inspect)));
+      // A worker that dies before it is ready must fail now, not after the timeout: a
+      // misconfigured node would otherwise hang the graph and hide the startup error.
+      this.child?.once('exit', (code, signal) => finish(() => reject(new Error(`resident worker exited before ready (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})`))));
     });
   }
 

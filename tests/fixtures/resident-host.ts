@@ -73,7 +73,12 @@ export async function spawnResident(options: {
   });
   let resolveReady: (inspect: AgentSessionInspect & { processId: number }) => void;
   const readyInspect = (inspect: AgentSessionInspect & { processId: number }) => { ready = inspect; resolveReady?.(inspect); };
-  const readyPromise = new Promise<AgentSessionInspect & { processId: number }>(resolve => { resolveReady = resolve; });
+  const readyPromise = new Promise<AgentSessionInspect & { processId: number }>((resolve, reject) => {
+    resolveReady = resolve;
+    // A worker that dies before it is ready must fail now, not hang: the spike harness
+    // mirrors the production host, which rejects on an early exit too.
+    child.once('exit', (code, signal) => reject(new Error(`resident worker exited before ready (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})`)));
+  });
   if (ready) resolveReady!(ready);
   const inspect0 = await readyPromise;
 

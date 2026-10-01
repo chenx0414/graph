@@ -39,6 +39,15 @@ export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'on
   piExtensionTools: string[];
   systemPrompt: string;
   allowedToolNames: string[];
+  /**
+   * The provider transport the HOST resolved for this node (§3: the host binds identity and
+   * meters traffic, so the worker must not invent a credential). When absent the worker falls
+   * back to the spike credential, which only a local test provider accepts.
+   */
+  transport?: {
+    apiKey: string;
+    api: 'openai-completions' | 'anthropic-messages';
+  };
 };
 
 /**

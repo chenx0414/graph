@@ -93,7 +93,12 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     dispatch: <T>(_id: string, _reservation: number, send: () => T): T => send(),
     settle: (): void => undefined,
   };
-  const stream = controlledOpenAIStream(permissiveGate, 'spike-credential', undefined, 'openai-completions');
+  // The host owns the credential (§3): it writes the resolved transport into the config, so
+  // the worker reaches the provider with the same key the host meters. Only when the config
+  // carries none - a spike or a local test - does the worker fall back to a placeholder.
+  const stream = config.transport
+    ? controlledOpenAIStream(permissiveGate, config.transport.apiKey, undefined, config.transport.api)
+    : controlledOpenAIStream(permissiveGate, 'spike-credential', undefined, 'openai-completions');
 
   const session = await openPiInstance({
     binding: config.binding,
