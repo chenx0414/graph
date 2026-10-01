@@ -75,6 +75,34 @@ export interface SubmitReceipt {
   noRecipients: boolean;
 }
 
+export interface QueueRow {
+  seq: number;
+  taskId: string;
+  nodeId: string;
+  kind: string;
+  payload: Json;
+  state: 'queued' | 'claimed' | 'done' | 'failed';
+  createdAt: number;
+}
+
+export interface NodeStateRow {
+  attempts: number;
+  resubmitsUsed: number;
+  retriesAllowed: number | null;
+  resubmitsAllowed: number | null;
+  paused: boolean;
+  rebinds: number;
+}
+
+interface QueueRowDb {
+  seq: number; task_id: string; node_id: string; kind: string; payload: string; state: string; created_at: number;
+}
+
+const queueRow = (row: QueueRowDb): QueueRow => ({
+  seq: row.seq, taskId: row.task_id, nodeId: row.node_id, kind: row.kind,
+  payload: json<Json>(row.payload), state: row.state as QueueRow['state'], createdAt: row.created_at,
+});
+
 export interface ModuleInputRow {
   moduleId: string;
   name: string;
@@ -157,6 +185,12 @@ export class KernelStore {
         seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id),
         node_id TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'queued', created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS kernel_node_state(
+        task_id TEXT NOT NULL REFERENCES tasks(id), node_id TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0, resubmits_used INTEGER NOT NULL DEFAULT 0,
+        retries_allowed INTEGER, resubmits_allowed INTEGER,
+        paused INTEGER NOT NULL DEFAULT 0, rebinds INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(task_id,node_id));
       CREATE INDEX IF NOT EXISTS kernel_deliveries_execution ON kernel_deliveries(submission_id);
       CREATE INDEX IF NOT EXISTS kernel_deliveries_to ON kernel_deliveries(task_id,to_endpoint);
       CREATE INDEX IF NOT EXISTS kernel_queue_node ON kernel_queue(task_id,node_id,state);
@@ -351,6 +385,92 @@ export class KernelStore {
       protocol: row.protocol, revisionVersion: row.revision_version, seq: row.seq,
       state: 'accepted' as const, createdAt: row.created_at,
     }));
+  }
+
+  // ---- node queue and per-node retry state (§7) -------------------------------
+
+  /** Append one input to a node's serial queue. Returns the accepted row. */
+  enqueue(taskId: string, input: { nodeId: string; kind: string; payload: Json }): QueueRow {
+    return this.store.transaction(() => {
+      const createdAt = Date.now();
+      const result = this.store.db.prepare('INSERT INTO kernel_queue(task_id,node_id,kind,payload,state,created_at) VALUES(?,?,?,?,?,?)')
+        .run(taskId, input.nodeId, input.kind, canonicalJson(input.payload), 'queued', createdAt);
+      const seq = Number(result.lastInsertRowid);
+      return { seq, taskId, nodeId: input.nodeId, kind: input.kind, payload: input.payload, state: 'queued' as const, createdAt };
+    });
+  }
+
+  /** The oldest queued item for a node, or null when the node has nothing queued. */
+  nextQueued(taskId: string, nodeId: string): QueueRow | null {
+    const row = this.store.db.prepare("SELECT * FROM kernel_queue WHERE task_id=? AND node_id=? AND state='queued' ORDER BY seq LIMIT 1")
+      .get(taskId, nodeId) as QueueRowDb | undefined;
+    return row ? queueRow(row) : null;
+  }
+
+  /** Mark an item claimed; a claimed item is the node's one running execution. */
+  claimQueued(taskId: string, seq: number): QueueRow {
+    return this.store.transaction(() => {
+      const row = this.store.db.prepare('SELECT * FROM kernel_queue WHERE task_id=? AND seq=?').get(taskId, seq) as QueueRowDb | undefined;
+      if (!row) throw new RuntimeError('invalid_queue', `Unknown queue item ${seq}`);
+      if (row.state !== 'queued') throw new RuntimeError('invalid_queue', `Queue item ${seq} is ${row.state}`);
+      this.store.db.prepare("UPDATE kernel_queue SET state='claimed' WHERE task_id=? AND seq=?").run(taskId, seq);
+      return { ...queueRow(row), state: 'claimed' };
+    });
+  }
+
+  finishQueued(taskId: string, seq: number, state: 'done' | 'failed'): void {
+    this.store.db.prepare('UPDATE kernel_queue SET state=? WHERE task_id=? AND seq=?').run(state, taskId, seq);
+  }
+
+  /** Per-node retry state, created on first read so a fresh node reports zeroes. */
+  nodeState(taskId: string, nodeId: string): NodeStateRow {
+    const row = this.store.db.prepare('SELECT * FROM kernel_node_state WHERE task_id=? AND node_id=?').get(taskId, nodeId) as
+      { attempts: number; resubmits_used: number; retries_allowed: number | null; resubmits_allowed: number | null; paused: number; rebinds: number } | undefined;
+    return row
+      ? { attempts: row.attempts, resubmitsUsed: row.resubmits_used, retriesAllowed: row.retries_allowed, resubmitsAllowed: row.resubmits_allowed, paused: row.paused === 1, rebinds: row.rebinds }
+      : { attempts: 0, resubmitsUsed: 0, retriesAllowed: null, resubmitsAllowed: null, paused: false, rebinds: 0 };
+  }
+
+  private ensureNodeState(taskId: string, nodeId: string): void {
+    this.store.db.prepare('INSERT OR IGNORE INTO kernel_node_state(task_id,node_id) VALUES(?,?)').run(taskId, nodeId);
+  }
+
+  noteNodeAttempt(taskId: string, nodeId: string): void {
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      this.store.db.prepare('UPDATE kernel_node_state SET attempts=attempts+1 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
+    });
+  }
+
+  noteNodeResubmit(taskId: string, nodeId: string, allowed: number): void {
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      const used = this.nodeState(taskId, nodeId).resubmitsUsed;
+      if (used >= allowed) throw new RuntimeError('invalid_queue', `Node ${nodeId} already used its ${allowed} auto-resubmit(s)`);
+      this.store.db.prepare('UPDATE kernel_node_state SET resubmits_used=resubmits_used+1 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
+    });
+  }
+
+  setNodeQueuePaused(taskId: string, nodeId: string, paused: boolean): void {
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      this.store.db.prepare('UPDATE kernel_node_state SET paused=? WHERE task_id=? AND node_id=?').run(paused ? 1 : 0, taskId, nodeId);
+    });
+  }
+
+  configureNodeRetries(taskId: string, nodeId: string, config: { retriesAllowed?: number; resubmitsAllowed?: number }): void {
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      if (config.retriesAllowed !== undefined) this.store.db.prepare('UPDATE kernel_node_state SET retries_allowed=? WHERE task_id=? AND node_id=?').run(config.retriesAllowed, taskId, nodeId);
+      if (config.resubmitsAllowed !== undefined) this.store.db.prepare('UPDATE kernel_node_state SET resubmits_allowed=? WHERE task_id=? AND node_id=?').run(config.resubmitsAllowed, taskId, nodeId);
+    });
+  }
+
+  noteNodeRebind(taskId: string, nodeId: string): void {
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      this.store.db.prepare('UPDATE kernel_node_state SET rebinds=rebinds+1 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
+    });
   }
 
   // ---- module inputs and transitions -----------------------------------------
