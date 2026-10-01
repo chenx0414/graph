@@ -58,3 +58,6 @@ docs/planning/unified-console-rework3-acceptance-2026-09-15.md
 docs/planning/unified-console-rework4-acceptance-2026-09-15.md
 # Publishing scratch: the artifact source must live in the work copy, and this keeps it out of commits.
 hb-backlog-*.md
+
+# Ephemeral vitest json report for the suite-baseline guard (HB-255)
+tests/.suite-report.json
