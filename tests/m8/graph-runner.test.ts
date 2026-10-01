@@ -94,7 +94,7 @@ describe('GraphRunner — driving a v2 graph to completion (§13.8)', () => {
     const values = new Map([['a', { n: 1 }], ['b', { n: 2 }]]);
 
     const runner = new GraphRunner({
-      kernel, graphId: 'g1', host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json',
+      kernel, graphId: 'g1', hostFor: () => host, workerEntry: 'x', config: () => ({}), cwd: '/tmp', configPath: () => '/tmp/cfg.json',
       // The node's submit: each node submits its own scripted output.
       submit: (executionId) => {
         const nodeId = kernel.execution(executionId)!.nodeId;
@@ -120,7 +120,7 @@ describe('GraphRunner — driving a v2 graph to completion (§13.8)', () => {
     const modules = new ModuleRuntime(kernel, 'g1', revision);
 
     const runner = new GraphRunner({
-      kernel, graphId: 'g1', host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json',
+      kernel, graphId: 'g1', hostFor: () => host, workerEntry: 'x', config: () => ({}), cwd: '/tmp', configPath: () => '/tmp/cfg.json',
       submit: (executionId) => {
         attempts += 1;
         const passed = attempts >= 3;
@@ -143,7 +143,7 @@ describe('GraphRunner — driving a v2 graph to completion (§13.8)', () => {
     const { kernel } = opened();
     const host = fakeHost();
     const runner = new GraphRunner({
-      kernel, graphId: 'g1', host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json',
+      kernel, graphId: 'g1', hostFor: () => host, workerEntry: 'x', config: () => ({}), cwd: '/tmp', configPath: () => '/tmp/cfg.json',
       submit: () => undefined,
     });
     const result = await runner.drain();
@@ -156,7 +156,7 @@ describe('GraphRunner — driving a v2 graph to completion (§13.8)', () => {
     const host = fakeHost();
     let submits = 0;
     const runner = new GraphRunner({
-      kernel, graphId: 'g1', host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json',
+      kernel, graphId: 'g1', hostFor: () => host, workerEntry: 'x', config: () => ({}), cwd: '/tmp', configPath: () => '/tmp/cfg.json',
       submit: () => { submits += 1; },
     });
     await runner.drain();
@@ -169,7 +169,7 @@ describe('GraphRunner — driving a v2 graph to completion (§13.8)', () => {
     new NodeQueue(kernel, 'g1').enqueue({ nodeId: 'a', kind: 'delivery', input: 'in', value: { go: true } as never });
     const host = fakeHost();
     const runner = new GraphRunner({
-      kernel, graphId: 'g1', host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json',
+      kernel, graphId: 'g1', hostFor: () => host, workerEntry: 'x', config: () => ({}), cwd: '/tmp', configPath: () => '/tmp/cfg.json',
       // a never submits: its retry budget is spent and it fails.
       submit: () => undefined,
     });
@@ -187,7 +187,7 @@ describe('GraphRunner — driving a v2 graph to completion (§13.8)', () => {
     new NodeQueue(kernel, 'g1').enqueue({ nodeId: 'a', kind: 'delivery', input: 'in', value: { go: true } as never });
     const host = fakeHost();
     const runner = new GraphRunner({
-      kernel, graphId: 'g1', host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json',
+      kernel, graphId: 'g1', hostFor: () => host, workerEntry: 'x', config: () => ({}), cwd: '/tmp', configPath: () => '/tmp/cfg.json',
       submit: (executionId) => ({ missing: new NodeSubmitBridge(kernel, executionId).submit({ outputs: { out: { enable: true, value: { n: 1 } } }, submissionId: `s-${executionId}` }).missingRequired }),
     });
 

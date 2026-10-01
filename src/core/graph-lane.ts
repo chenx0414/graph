@@ -17,15 +17,19 @@ import { NodeSubmitBridge } from './node-submit-bridge.ts';
 
 export interface GraphLaneOptions {
   kernel: KernelStore;
-  /** Build the resident host for one graph; the runtime owns model, prompts and grants. */
-  host: (graphId: string) => RunnerHost;
+  /**
+   * Build the resident host for one NODE. §7 gives each node its own long-lived process, so
+   * the lane resolves a host per node, not per graph: a host carries a node's identity and
+   * session lineage, and sharing one across nodes would share the wrong session.
+   */
+  host: (graphId: string, nodeId: string) => RunnerHost;
   /** The worker entry the host spawns. */
   workerEntry: string;
-  /** The serialized worker config, resolved once per graph. */
-  config: (graphId: string) => unknown;
+  /** The serialized worker config, resolved per node. */
+  config: (graphId: string, nodeId: string) => unknown;
   cwd: string;
   /** Where the host writes its config file (must be inside a granted write root). */
-  configPath: (graphId: string) => string;
+  configPath: (graphId: string, nodeId: string) => string;
   /** The first-turn briefing text for a node. */
   initialContext?: (graphId: string, nodeId: string) => string;
   /** How many passes may make no progress before a run reports itself stuck. */
@@ -69,15 +73,14 @@ export class GraphLane {
     const kernel = this.options.kernel;
     const revision = kernel.latestRevision(graphId);
     if (!revision) return { drained: true, executions: 0, blockedNodes: [] };
-    const host = this.options.host(graphId);
     const runner = new GraphRunner({
       kernel,
       graphId,
-      host,
+      hostFor: (nodeId: string) => this.options.host(graphId, nodeId),
       workerEntry: this.options.workerEntry,
-      config: this.options.config(graphId),
+      config: (nodeId: string) => this.options.config(graphId, nodeId),
       cwd: this.options.cwd,
-      configPath: this.options.configPath(graphId),
+      configPath: (nodeId: string) => this.options.configPath(graphId, nodeId),
       // The node's submit runs here, in the host, where the kernel and the execution
       // identity live: the bridge classifies a refusal and reports any missing-required
       // gap so the next turn can ask for exactly what is missing.

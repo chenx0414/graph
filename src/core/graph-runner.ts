@@ -33,11 +33,17 @@ export interface RunnerHost extends ExecutorHost {
 export interface GraphRunnerOptions {
   kernel: KernelStore;
   graphId: string;
-  host: RunnerHost;
+  /**
+   * The resident host for one node. §7 gives each node its own long-lived Pi process, so
+   * the runner asks for a host PER NODE rather than sharing one across the graph: a host
+   * carries a node's identity and session lineage, and two nodes sharing one would share
+   * the wrong session.
+   */
+  hostFor: (nodeId: string) => RunnerHost;
   workerEntry: string;
-  config: unknown;
+  config: (nodeId: string) => unknown;
   cwd: string;
-  configPath: string;
+  configPath: (nodeId: string) => string;
   /** Runs the node's submit for one execution; returns any missing-required gap. */
   submit: (executionId: string) => { missing: string[] } | void;
   /** The first-turn briefing for a node. */
@@ -137,7 +143,7 @@ export class GraphRunner {
       if (!kernel.nextQueued(this.options.graphId, nodeId)) continue;
 
       const driver = new NodeTurnDriver({
-        kernel, graphId: this.options.graphId, nodeId, host: this.options.host,
+        kernel, graphId: this.options.graphId, nodeId, host: this.options.hostFor(nodeId),
         initialContext: () => this.options.initialContext ? this.options.initialContext(nodeId) : '',
         submit: (executionId) => {
           const execution = kernel.execution(executionId);
@@ -150,9 +156,9 @@ export class GraphRunner {
         },
       });
       const executor = new NodeExecutor({
-        kernel, graphId: this.options.graphId, host: this.options.host,
-        workerEntry: this.options.workerEntry, config: this.options.config,
-        cwd: this.options.cwd, configPath: this.options.configPath,
+        kernel, graphId: this.options.graphId, host: this.options.hostFor(nodeId),
+        workerEntry: this.options.workerEntry, config: this.options.config(nodeId),
+        cwd: this.options.cwd, configPath: this.options.configPath(nodeId),
       });
       await executor.runNode(nodeId, (executionId, attempt, injection) => driver.run(executionId, attempt, injection));
     }
