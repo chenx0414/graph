@@ -83,7 +83,9 @@ export function reviewEvidence(input: { graphId: string; artifactVersion: number
 
 export class ArtifactProvenance {
   private readonly db;
-  constructor(private readonly store: TaskStore) {
+  private readonly store: TaskStore;
+  constructor(store: TaskStore) {
+    this.store = store;
     this.db = store.db;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS kernel_artifacts(

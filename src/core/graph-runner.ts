@@ -58,7 +58,11 @@ export interface RunResult {
 }
 
 export class GraphRunner {
-  constructor(private readonly options: GraphRunnerOptions) {}
+  private readonly options: GraphRunnerOptions;
+
+  constructor(options: GraphRunnerOptions) {
+    this.options = options;
+  }
 
   private nodeIds(): string[] {
     return (this.options.kernel.db.prepare('SELECT node_id FROM kernel_nodes WHERE task_id=? ORDER BY node_id').all(this.options.graphId) as { node_id: string }[])

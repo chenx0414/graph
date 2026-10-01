@@ -135,7 +135,12 @@ type Node =
 class Parser {
   private position = 0;
   private readonly refs = new Set<string>();
-  constructor(private readonly tokens: Token[], private readonly source: string) {}
+  private readonly tokens: Token[];
+  private readonly source: string;
+  constructor(tokens: Token[], source: string) {
+    this.tokens = tokens;
+    this.source = source;
+  }
 
   parse(): { node: Node; refs: string[] } {
     const node = this.parseOr();

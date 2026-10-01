@@ -1,4 +1,5 @@
 import type { VerifierConfig } from './verification.ts';
+import type { GraphDefinition } from './interface-spec.ts';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -175,6 +176,14 @@ export interface Proposal {
   summary: string;
   acceptance: { id: string; description: string; checkNode: string }[];
   nodes: NodeSpec[];
+  /**
+   * §13.8 switchover: a draft may carry a v2 graph definition (the shape §5's
+   * `graph_create(definition)` takes). When present, confirmation materialises a v2
+   * graph instead of the old declarative rows, and the task runs on the new kernel.
+   * A draft without it keeps the old path, so the two can exist side by side while the
+   * switchover lands.
+   */
+  definition?: GraphDefinition;
   containers?: ContainerSpec[];
   loops?: LoopSpec[];
   /** Master-authored decisions/constraints frozen with this draft version. */

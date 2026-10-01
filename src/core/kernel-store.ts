@@ -160,7 +160,11 @@ export class KernelStore {
   /** The running database, shared with TaskStore so the kernel does not get a second file. */
   get db() { return this.store.db; }
 
-  constructor(readonly store: TaskStore) {
+  /** The task store this kernel shares a database file with. */
+  readonly store: TaskStore;
+
+  constructor(store: TaskStore) {
+    this.store = store;
     store.db.exec(`
       CREATE TABLE IF NOT EXISTS kernel_revisions(
         task_id TEXT NOT NULL REFERENCES tasks(id), version INTEGER NOT NULL,

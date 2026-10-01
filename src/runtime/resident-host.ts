@@ -62,7 +62,11 @@ export class ResidentHost {
   private spawns = 0;
   private readyResolvers: ((inspect: ResidentInspect) => void)[] = [];
 
-  constructor(private readonly options: ResidentHostOptions) {}
+  private readonly options: ResidentHostOptions;
+
+  constructor(options: ResidentHostOptions) {
+    this.options = options;
+  }
 
   /** Start (or restart) the process. Idempotent while the process is alive. */
   async start(): Promise<ResidentInspect> {

@@ -101,8 +101,10 @@ function classify(error: RuntimeError): { defects: SubmitDefect[]; missingRequir
 export class NodeSubmitBridge {
   readonly executionId: string;
   readonly nodeId: string;
+  private readonly kernel: KernelStore;
 
-  constructor(private readonly kernel: KernelStore, executionId: string) {
+  constructor(kernel: KernelStore, executionId: string) {
+    this.kernel = kernel;
     this.executionId = executionId;
     const execution = kernel.execution(executionId);
     if (!execution) throw new RuntimeError('invalid_submit', `Unknown execution ${executionId}`);

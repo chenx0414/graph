@@ -26,6 +26,9 @@ import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
 import { awaitPauseContinuation, resumePauseContinuations } from './pause-continuation.ts';
 import { acquireOwner } from './owner.ts';
+import { materializeGraph } from './confirm-graph.ts';
+import { KernelStore } from './kernel-store.ts';
+import { parseGraphDefinition } from './interface-spec.ts';
 import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
@@ -1280,12 +1283,20 @@ export async function openTaskRuntime(options: {
         store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,1,1,1,?,?,?,1,?,?)')
           .run(taskId, conversation.project_id, proposal.summary, input.targetBranch, phase, sequence, conversationId, decisionDigest);
         store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)').run(taskId, 1, 1, row.spec, row.decision_snapshot);
+        // §13.8 switchover: a draft that carries a v2 graph definition creates a v2 graph
+        // (§5 graph_create takes exactly this definition). The old declarative rows would
+        // put this task on the old executor, so they are skipped entirely. The confirmed
+        // record above is shared by both paths - it is the confirmation, not the run.
+        if (proposal.definition) {
+          materializeGraph(new KernelStore(store), taskId, parseGraphDefinition(proposal.definition), 'Confirmed conversation draft');
+        } else {
         store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,1,?,?,0)').run(taskId, row.spec, 'Confirmed conversation draft');
         for (const node of proposal.nodes) {
           const instanceId = node.kind === 'agent' ? randomUUID() : null;
           store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
           if (instanceId) insertInstance(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
           createActivation(store, taskId, node.id, 1);
+        }
         }
         if (phase === 'running') store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
         // The anchor requirement advances on confirmation only: chat never

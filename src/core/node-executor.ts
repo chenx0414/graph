@@ -58,7 +58,10 @@ export class NodeExecutor {
   private readonly kernel: KernelStore;
   private readonly graphId: string;
 
-  constructor(private readonly options: NodeExecutorOptions) {
+  private readonly options: NodeExecutorOptions;
+
+  constructor(options: NodeExecutorOptions) {
+    this.options = options;
     this.kernel = options.kernel;
     this.graphId = options.graphId;
     this.queue = new NodeQueue(options.kernel, options.graphId);

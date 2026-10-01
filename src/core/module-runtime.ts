@@ -39,12 +39,19 @@ interface CompiledModule {
 
 export class ModuleRuntime {
   private compiled: CompiledModule | undefined;
+  private readonly kernel: KernelStore;
+  private readonly taskId: string;
+  private readonly revisionVersion: number;
 
   constructor(
-    private readonly kernel: KernelStore,
-    private readonly taskId: string,
-    private readonly revisionVersion: number,
-  ) {}
+    kernel: KernelStore,
+    taskId: string,
+    revisionVersion: number,
+  ) {
+    this.kernel = kernel;
+    this.taskId = taskId;
+    this.revisionVersion = revisionVersion;
+  }
 
   private definition(): GraphDefinition {
     const revision = this.kernel.revision(this.taskId, this.revisionVersion);

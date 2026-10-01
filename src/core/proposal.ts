@@ -3,12 +3,30 @@ import { GraphPlan } from './graph.ts';
 import { validateVerifierConfig } from './verification.ts';
 import { validateContextRequest } from './context.ts';
 import { validatePredecessorPolicies } from './predecessor-handoff.ts';
+import { parseGraphDefinition } from './interface-spec.ts';
 
 /** Validate static structure before any node or instance is created. */
 export function validateProposal(proposal: Proposal) {
   const invalid = (reason: string): never => { throw new RuntimeError('invalid_proposal', reason); };
   const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
   if (!Number.isSafeInteger(proposal.requirementVersion) || proposal.requirementVersion < 1 || !text(proposal.summary)) invalid('A requirement version and summary are required');
+  // §13.8 switchover: a draft may carry a v2 graph definition. When it does, the
+  // definition IS the graph (§5), so it is validated as the definition and the old
+  // declarative shape is not required. An acceptance check must then name a node or
+  // module that really exists in that definition, which is the v2 spelling of
+  // "a mandatory check this graph can actually run".
+  if (proposal.definition !== undefined) {
+    const definition = parseGraphDefinition(proposal.definition);
+    if (proposal.decisions !== undefined && (!Array.isArray(proposal.decisions) || proposal.decisions.length > 50
+      || proposal.decisions.some(item => typeof item !== 'string' || !item.trim() || item.length > 800))) invalid('Decisions must be a bounded list of nonempty strings');
+    if (!Array.isArray(proposal.acceptance) || !proposal.acceptance.length) invalid('At least one acceptance check is required');
+    if (new Set(proposal.acceptance.map(item => item.id)).size !== proposal.acceptance.length) invalid('Acceptance IDs must be unique');
+    for (const item of proposal.acceptance) {
+      const known = Object.hasOwn(definition.nodes, item.checkNode) || Object.hasOwn(definition.modules, item.checkNode);
+      if (!text(item.id) || !text(item.description) || !known) invalid('Each acceptance item must name a node or module in the graph definition');
+    }
+    return;
+  }
   if (!Array.isArray(proposal.nodes) || !proposal.nodes.length || proposal.nodes.length > 1000) invalid('Expected 1–1000 nodes');
   const nodes = new Map(proposal.nodes.map(node => [node.id, node]));
   if (nodes.size !== proposal.nodes.length) invalid('Node IDs must be unique');

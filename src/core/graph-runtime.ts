@@ -45,7 +45,13 @@ export interface CreatedGraph {
 }
 
 export class GraphRuntime {
-  constructor(private readonly kernel: KernelStore, private readonly graphId: string) {}
+  private readonly kernel: KernelStore;
+  private readonly graphId: string;
+
+  constructor(kernel: KernelStore, graphId: string) {
+    this.kernel = kernel;
+    this.graphId = graphId;
+  }
 
   private taskRow(): { id: string } | undefined {
     return this.kernel.db.prepare('SELECT id FROM tasks WHERE id=?').get(this.graphId) as { id: string } | undefined;

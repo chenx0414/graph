@@ -46,11 +46,19 @@ export type QueueCompletion =
   | { kind: 'failed'; reason: string };
 
 export class NodeQueue {
+  private readonly kernel: KernelStore;
+  private readonly taskId: string;
+  private readonly defaults: { defaultRetries?: number; defaultResubmits?: number };
+
   constructor(
-    private readonly kernel: KernelStore,
-    private readonly taskId: string,
-    private readonly defaults: { defaultRetries?: number; defaultResubmits?: number } = {},
-  ) {}
+    kernel: KernelStore,
+    taskId: string,
+    defaults: { defaultRetries?: number; defaultResubmits?: number } = {},
+  ) {
+    this.kernel = kernel;
+    this.taskId = taskId;
+    this.defaults = defaults;
+  }
 
   /** Append one input; returns the accepted row. Refuses a re-send after a successful submit. */
   enqueue(input: QueueInput): QueueRow {

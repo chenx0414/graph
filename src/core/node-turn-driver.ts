@@ -51,7 +51,11 @@ export interface NodeTurnDriverOptions {
 }
 
 export class NodeTurnDriver {
-  constructor(private readonly options: NodeTurnDriverOptions) {}
+  private readonly options: NodeTurnDriverOptions;
+
+  constructor(options: NodeTurnDriverOptions) {
+    this.options = options;
+  }
 
   private submissionExists(executionId: string): boolean {
     const row = this.options.kernel.db.prepare('SELECT 1 FROM kernel_submissions WHERE execution_id=? LIMIT 1').get(executionId);
