@@ -262,3 +262,48 @@ export function protocolReferenced(definition: GraphDefinition, protocolId: stri
   for (const io of Object.values(definition.outputs)) refs.push({ protocol: io.protocol, ...(io.version === undefined ? {} : { version: io.version }) });
   return refs.some(ref => ref?.protocol === protocolId);
 }
+
+/**
+ * §4: the target input's schema is the receiving authority — its protocol, not the
+ * producer's, decides what a value must satisfy. Validation is deliberately small
+ * and never `eval`s: `type`, `required`, `properties` and array `items` only.
+ * A conforming value returns null; any defect returns a field-level message.
+ */
+export function validateProtocolValue(spec: ProtocolSpec, value: Json, path = ''): string | null {
+  const where = path || '(root)';
+  const typeOk = (): boolean => {
+    switch (spec.type) {
+      case 'object': return isRecord(value) && !Array.isArray(value);
+      case 'array': return Array.isArray(value);
+      case 'string': return typeof value === 'string';
+      case 'number': return typeof value === 'number' && Number.isFinite(value);
+      case 'integer': return typeof value === 'number' && Number.isSafeInteger(value);
+      case 'boolean': return typeof value === 'boolean';
+      case 'null': return value === null;
+      default: return true; // An open/unknown type asserts nothing.
+    }
+  };
+  if (!typeOk()) return `${where}: expected ${spec.type}`;
+  if (spec.type === 'object' && isRecord(value)) {
+    for (const key of spec.required ?? []) {
+      if (value[key] === undefined) return `${where}: missing required property ${key}`;
+    }
+    const properties = (spec.properties ?? {}) as Record<string, ProtocolSpec>;
+    for (const [key, child] of Object.entries(properties)) {
+      const item = value[key];
+      if (item === undefined) continue;
+      const defect = validateProtocolValue(child, item, path ? `${path}.${key}` : key);
+      if (defect) return defect;
+    }
+  }
+  if (spec.type === 'array' && Array.isArray(value)) {
+    const items = spec.items as ProtocolSpec | undefined;
+    if (items) {
+      for (const [index, item] of value.entries()) {
+        const defect = validateProtocolValue(items, item, `${path}[${index}]`);
+        if (defect) return defect;
+      }
+    }
+  }
+  return null;
+}
