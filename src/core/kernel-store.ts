@@ -384,6 +384,22 @@ export class KernelStore {
     throw new RuntimeError('invalid_submit', `Execution ${execution.id} already submitted; only one valid submission per execution is allowed`);
   }
 
+  /** Every delivery accepted through one edge, newest first (§10 edge history). */
+  deliveriesForEdge(taskId: string, edgeId: string): DeliveryRow[] {
+    const rows = this.store.db.prepare(
+      'SELECT * FROM kernel_deliveries WHERE task_id=? AND edge_id=? ORDER BY seq DESC')
+      .all(taskId, edgeId) as {
+      id: string; task_id: string; submission_id: string; edge_id: string | null; from_endpoint: string;
+      to_endpoint: string; value: string; protocol: string; revision_version: number; seq: number; state: string; created_at: number;
+    }[];
+    return rows.map(row => ({
+      id: row.id, taskId: row.task_id, submissionId: row.submission_id, edgeId: row.edge_id,
+      fromEndpoint: row.from_endpoint, toEndpoint: row.to_endpoint, value: json<Json>(row.value),
+      protocol: row.protocol, revisionVersion: row.revision_version, seq: row.seq,
+      state: 'accepted' as const, createdAt: row.created_at,
+    }));
+  }
+
   deliveriesFor(executionId: string): DeliveryRow[] {
     const rows = this.store.db.prepare(`
       SELECT d.* FROM kernel_deliveries d
