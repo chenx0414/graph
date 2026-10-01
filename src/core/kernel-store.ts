@@ -31,7 +31,8 @@ export interface RevisionRow {
 export interface DeliveryRow {
   id: string;
   taskId: string;
-  submissionId: string;
+  /** Null when the delivery came from a module's emit rather than a node submission (§3). */
+  submissionId: string | null;
   edgeId: string | null;
   fromEndpoint: string;
   toEndpoint: string;
@@ -40,6 +41,8 @@ export interface DeliveryRow {
   revisionVersion: number;
   seq: number;
   state: 'accepted';
+  /** Where this delivery came from: a node's submission, or a module's judgment. */
+  source: 'submission' | 'module';
   createdAt: number;
 }
 
@@ -73,6 +76,24 @@ export interface SubmitReceipt {
   deliveries: DeliveryRow[];
   /** True when the submission had no enabled recipients (§6). */
   noRecipients: boolean;
+}
+
+/** The stored shape of a delivery row, shared by the read paths. */
+interface DeliveryRowDb {
+  id: string; task_id: string; submission_id: string | null; edge_id: string | null; from_endpoint: string;
+  to_endpoint: string; value: string; protocol: string; revision_version: number; seq: number; state: string;
+  created_at: number; source?: string;
+}
+
+function deliveryRow(row: DeliveryRowDb): DeliveryRow {
+  return {
+    id: row.id, taskId: row.task_id, submissionId: row.submission_id, edgeId: row.edge_id,
+    fromEndpoint: row.from_endpoint, toEndpoint: row.to_endpoint, value: json<Json>(row.value),
+    protocol: row.protocol, revisionVersion: row.revision_version, seq: row.seq,
+    state: 'accepted' as const,
+    source: row.source === 'module' ? 'module' as const : 'submission' as const,
+    createdAt: row.created_at,
+  };
 }
 
 export interface QueueRow {
@@ -171,7 +192,7 @@ export class KernelStore {
         created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kernel_deliveries(
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
-        submission_id TEXT NOT NULL REFERENCES kernel_submissions(id), edge_id TEXT,
+        submission_id TEXT REFERENCES kernel_submissions(id), edge_id TEXT,
         from_endpoint TEXT NOT NULL, to_endpoint TEXT NOT NULL, value TEXT NOT NULL,
         protocol TEXT NOT NULL, revision_version INTEGER NOT NULL, seq INTEGER NOT NULL,
         state TEXT NOT NULL DEFAULT 'accepted', created_at INTEGER NOT NULL,
@@ -197,6 +218,15 @@ export class KernelStore {
       CREATE INDEX IF NOT EXISTS kernel_executions_node ON kernel_executions(task_id,node_id);
       CREATE INDEX IF NOT EXISTS kernel_transitions_module ON kernel_module_transitions(task_id,module_id);
     `);
+    // §3: a Delivery carries an edge id OR a direct source. A module's emit is not a
+    // submission, so the column becomes nullable and a `source` tells the two apart.
+    // Existing databases are migrated in place rather than reset.
+    const deliveryColumns = new Set(
+      (this.store.db.prepare('PRAGMA table_info(kernel_deliveries)').all() as { name: string }[]).map(column => column.name),
+    );
+    if (!deliveryColumns.has('source')) {
+      this.store.db.exec("ALTER TABLE kernel_deliveries ADD COLUMN source TEXT NOT NULL DEFAULT 'submission'");
+    }
   }
 
   // ---- revisions (immutable) -------------------------------------------------
@@ -366,7 +396,8 @@ export class KernelStore {
         deliveries.push({
           id, taskId: execution.taskId, submissionId: request.submissionId, edgeId: target.edgeId,
           fromEndpoint: execution.nodeId, toEndpoint: target.toEndpoint, value: target.value,
-          protocol: target.protocol, revisionVersion: revision.version, seq, state: 'accepted', createdAt,
+          protocol: target.protocol, revisionVersion: revision.version, seq, state: 'accepted',
+          source: 'submission' as const, createdAt,
         });
       }
       this.store.db.prepare('UPDATE kernel_executions SET submission_id=?, missing_required=0 WHERE id=?').run(request.submissionId, executionId);
@@ -388,32 +419,46 @@ export class KernelStore {
   deliveriesForEdge(taskId: string, edgeId: string): DeliveryRow[] {
     const rows = this.store.db.prepare(
       'SELECT * FROM kernel_deliveries WHERE task_id=? AND edge_id=? ORDER BY seq DESC')
-      .all(taskId, edgeId) as {
-      id: string; task_id: string; submission_id: string; edge_id: string | null; from_endpoint: string;
-      to_endpoint: string; value: string; protocol: string; revision_version: number; seq: number; state: string; created_at: number;
-    }[];
-    return rows.map(row => ({
-      id: row.id, taskId: row.task_id, submissionId: row.submission_id, edgeId: row.edge_id,
-      fromEndpoint: row.from_endpoint, toEndpoint: row.to_endpoint, value: json<Json>(row.value),
-      protocol: row.protocol, revisionVersion: row.revision_version, seq: row.seq,
-      state: 'accepted' as const, createdAt: row.created_at,
-    }));
+      .all(taskId, edgeId) as unknown as DeliveryRowDb[];
+    return rows.map(deliveryRow);
   }
 
   deliveriesFor(executionId: string): DeliveryRow[] {
     const rows = this.store.db.prepare(`
       SELECT d.* FROM kernel_deliveries d
       JOIN kernel_submissions s ON s.id = d.submission_id
-      WHERE s.execution_id = ? ORDER BY d.seq`).all(executionId) as {
-      id: string; task_id: string; submission_id: string; edge_id: string | null; from_endpoint: string;
-      to_endpoint: string; value: string; protocol: string; revision_version: number; seq: number; state: string; created_at: number;
-    }[];
-    return rows.map(row => ({
-      id: row.id, taskId: row.task_id, submissionId: row.submission_id, edgeId: row.edge_id,
-      fromEndpoint: row.from_endpoint, toEndpoint: row.to_endpoint, value: json<Json>(row.value),
-      protocol: row.protocol, revisionVersion: row.revision_version, seq: row.seq,
-      state: 'accepted' as const, createdAt: row.created_at,
-    }));
+      WHERE s.execution_id = ? ORDER BY d.seq`).all(executionId) as unknown as DeliveryRowDb[];
+    return rows.map(deliveryRow);
+  }
+
+  /**
+   * Land one delivery that a MODULE emitted, not a node submission (§2, §3, §6).
+   * It carries no submissionId — §3 says a Delivery holds an edge id OR a direct
+   * source — and writes the delivery with its landing.
+   */
+  recordModuleDelivery(taskId: string, input: {
+    moduleId: string; edgeId: string; fromEndpoint: string; toEndpoint: string;
+    value: Json; protocol: string; revisionVersion: number;
+  }): DeliveryRow {
+    return this.store.transaction(() => {
+      const id = randomUUID();
+      const createdAt = Date.now();
+      const seq = ((this.store.db.prepare('SELECT COALESCE(MAX(seq),0) AS s FROM kernel_deliveries WHERE task_id=?').get(taskId) as { s: number }).s) + 1;
+      this.store.db.prepare('INSERT INTO kernel_deliveries(id,task_id,submission_id,edge_id,from_endpoint,to_endpoint,value,protocol,revision_version,seq,state,created_at,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, taskId, null, input.edgeId, input.fromEndpoint, input.toEndpoint, canonicalJson(input.value), input.protocol, input.revisionVersion, seq, 'accepted', createdAt, 'module');
+      return {
+        id, taskId, submissionId: null, edgeId: input.edgeId,
+        fromEndpoint: input.fromEndpoint, toEndpoint: input.toEndpoint, value: input.value,
+        protocol: input.protocol, revisionVersion: input.revisionVersion, seq,
+        state: 'accepted' as const, source: 'module' as const, createdAt,
+      };
+    });
+  }
+
+  /** Queue a delivery for a node without a submission, in acceptance order (§7). */
+  enqueueDelivery(taskId: string, nodeId: string, payload: Json): void {
+    this.store.db.prepare('INSERT INTO kernel_queue(task_id,node_id,kind,payload,created_at) VALUES(?,?,?,?,?)')
+      .run(taskId, nodeId, 'delivery', canonicalJson(payload), Date.now());
   }
 
   // ---- node queue and per-node retry state (§7) -------------------------------
