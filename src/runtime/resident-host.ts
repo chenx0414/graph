@@ -37,6 +37,13 @@ export interface ResidentHostOptions {
   configPath: string;
   /** Optional node runtime spawner; the default uses node's child_process. */
   spawnImpl?: typeof spawn;
+  /**
+   * Answers a node's tool call (HB-262). A tool like `submit` must run in the host, where
+   * the kernel and the execution identity live, so the node's call arrives here and this
+   * returns the result the node sees. Returning `ok:false` is how a refusal reaches the
+   * model as a correctable error rather than an exception (§5).
+   */
+  onToolCall?: (name: string, args: unknown) => { ok: boolean; text: string } | Promise<{ ok: boolean; text: string }>;
 }
 
 const defaultWorkerEntry = fileURLToPath(new URL('./resident-worker-entry.ts', import.meta.url));
@@ -89,7 +96,18 @@ export class ResidentHost {
       const line = this.buffer.slice(0, newline);
       this.buffer = this.buffer.slice(newline + 1);
       if (line.trim()) {
-        const message = JSON.parse(line) as { operation?: string; requestId?: string; inspect?: ResidentInspect };
+        const message = JSON.parse(line) as { operation?: string; requestId?: string; inspect?: ResidentInspect; name?: string; args?: unknown };
+        // A node asking the host to run a tool (HB-262). The answer goes back on stdin,
+        // the reverse direction of this channel, so the node's call resolves with it.
+        if (message.operation === 'tool_call' && message.requestId) {
+          const requestId = message.requestId;
+          void Promise.resolve(this.options.onToolCall
+            ? this.options.onToolCall(String(message.name), message.args)
+            : { ok: false, text: `the host does not offer a tool named ${String(message.name)}` })
+            .then(answer => { this.stdin?.write(`${JSON.stringify({ operation: 'tool_result', requestId, ...answer })}\n`); })
+            .catch(error => { this.stdin?.write(`${JSON.stringify({ operation: 'tool_result', requestId, ok: false, text: error instanceof Error ? error.message : String(error) })}\n`); });
+          return;
+        }
         if (message.operation === 'ready' && message.inspect) this.resolveReady(message.inspect);
         const resolve = message.requestId ? this.pending.get(message.requestId) : undefined;
         if (resolve) { this.pending.delete(message.requestId!); resolve(message); }

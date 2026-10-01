@@ -26,6 +26,8 @@ export async function spawnResident(options: {
   workerEntry: string;
   config: unknown;
   cwd: string;
+  /** Answers a node's tool call; the host executes it and returns the result (HB-262). */
+  onToolCall?: (name: string, args: unknown) => { ok: boolean; text: string };
 }): Promise<ResidentHandle> {
   const configPath = join(options.cwd, 'resident-worker.json');
   await writeFile(configPath, JSON.stringify(options.config), { mode: 0o600 });
@@ -51,7 +53,15 @@ export async function spawnResident(options: {
       const line = text.slice(0, newline);
       text = text.slice(newline + 1);
       if (line.trim()) {
-        const message = JSON.parse(line) as { operation?: string; requestId?: string; inspect?: AgentSessionInspect & { processId: number } };
+        const message = JSON.parse(line) as { operation?: string; requestId?: string; inspect?: AgentSessionInspect & { processId: number }; name?: string; args?: unknown };
+        // A node asking the host to run a tool. The host answers on stdin, which is
+        // the reverse direction of this channel, and the node's call resolves with it.
+        if (message.operation === 'tool_call' && message.requestId) {
+          const answer = options.onToolCall
+            ? options.onToolCall(String(message.name), message.args)
+            : { ok: false, text: `the host does not offer a tool named ${String(message.name)}` };
+          stdin.write(`${JSON.stringify({ operation: 'tool_result', requestId: message.requestId, ...answer })}\n`);
+        }
         if (message.operation === 'ready' && message.inspect) readyInspect?.(message.inspect);
         const resolve = message.requestId ? pending.get(message.requestId) : undefined;
         if (resolve) { pending.delete(message.requestId!); resolve(message); }

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { ImageContent, Model, Api } from '@earendil-works/pi-ai';
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from './pi-instance.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import { sdkPromptOptions } from './prompt-options.ts';
@@ -57,6 +58,23 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     });
   };
 
+  /**
+   * The host side of a node's tool call (HB-262).
+   *
+   * The node runs here, but a tool like `submit` must execute in the host: §5 requires
+   * the HOST to bind the executionId and the sender, and the model must not be able to
+   * forge either. So the call travels out on this channel and the answer comes back on
+   * stdin. Only tools the host actually offered are callable — an undeclared name never
+   * becomes a tool the model can see in the first place.
+   */
+  const toolPending = new Map<string, (reply: { ok: boolean; text: string }) => void>();
+  const callHost = (name: string, args: unknown): Promise<{ ok: boolean; text: string }> =>
+    new Promise(resolve => {
+      const requestId = `tool-${randomUUID()}`;
+      toolPending.set(requestId, resolve);
+      notify({ operation: 'tool_call', requestId, name, args });
+    });
+
   const credentials = new InMemoryCredentialStore();
   const modelRuntime = await ModelRuntime.create({
     credentials, modelsPath: null,
@@ -85,10 +103,16 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     modelRuntime,
     stream,
     thinkingLevel: config.thinkingLevel,
-    tools: [],
-    nativeTools: [],
+    tools: forwardingTools(config, (name, args) => callHost(name, args)),
+    nativeTools: config.nativeTools ?? [],
+    // A forwarding tool makes no model call, so it reserves nothing from the send gate.
+    // The gate exists to meter model traffic; the host meters whatever the call does.
+    broker: { dispatch: <T>(_id: string, _reservation: number, send: () => T): T => send(), settle: (): void => undefined },
     systemPrompt: config.systemPrompt,
-    allowedToolNames: [],
+    // The host declares which tools this node may call; an empty list means the node
+    // offered tools are exactly the ones the host named, so passing it through is what
+    // makes them callable at all (HB-262).
+    allowedToolNames: config.allowedToolNames ?? [],
     bundleDigest: config.bundleDigest,
     toolPolicyDigest: config.toolPolicyDigest,
     runtimePolicyDigest: config.runtimePolicyDigest,
@@ -102,34 +126,87 @@ export async function runResidentWorker(configPath: string): Promise<void> {
   notify({ operation: 'ready', inspect: inspect() });
 
   const commands = createInterface({ input: process.stdin })[Symbol.asyncIterator]();
+  // The reader must stay responsive WHILE a turn runs: a tool the node calls is answered
+  // by the host on this same stdin, so blocking the reader to await the turn would
+  // deadlock — the turn waits for the tool result, and the tool result waits for the
+  // reader (HB-262). Each command is therefore handled without holding the loop.
+  const inFlight: Promise<void>[] = [];
   for await (const line of commands) {
     if (!line.trim()) continue;
     let command: Record<string, unknown>;
     try { command = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
     const requestId = typeof command.requestId === 'string' ? command.requestId : undefined;
     const reply = (value: Record<string, unknown>) => notify({ ...value, ...(requestId ? { requestId } : {}) });
+    // The host's answer to a tool call this node made (HB-262).
+    if (command.operation === 'tool_result' && requestId) {
+      const resolve = toolPending.get(requestId);
+      if (resolve) {
+        toolPending.delete(requestId);
+        resolve({ ok: command.ok === true, text: String(command.text ?? '') });
+      }
+      continue;
+    }
     if (command.operation === 'inspect') { reply({ operation: 'inspect_result', inspect: inspect() }); continue; }
     if (command.operation === 'start-turn') {
       if (closed) { reply({ operation: 'turn_result', error: 'resident worker is closed' }); continue; }
       if (running) { reply({ operation: 'turn_result', error: 'resident worker already has a running turn' }); continue; }
       running = true;
-      try {
-        await session.prompt(String(command.text ?? ''), sdkPromptOptions(command.images as ImageContent[] | undefined));
-        reply({ operation: 'turn_result', turn: { id: randomUUID(), text: String(command.text ?? ''), inspect: inspect() } });
-      } catch (error) {
-        reply({ operation: 'turn_result', error: error instanceof Error ? error.message : String(error) });
-      } finally {
-        running = false;
-      }
+      const text = String(command.text ?? '');
+      const images = command.images as ImageContent[] | undefined;
+      inFlight.push((async () => {
+        try {
+          await session.prompt(text, sdkPromptOptions(images));
+          reply({ operation: 'turn_result', turn: { id: randomUUID(), text, inspect: inspect() } });
+        } catch (error) {
+          reply({ operation: 'turn_result', error: error instanceof Error ? error.message : String(error) });
+        } finally {
+          running = false;
+        }
+      })());
       continue;
     }
     if (command.operation === 'close') {
       closed = true;
+      // Let any turn already running finish before the session goes away, so a node is
+      // never killed mid-submission.
+      await Promise.allSettled(inFlight);
       await session.close();
       await writeAll(process.stdout, `${JSON.stringify({ operation: 'closed', ...(requestId ? { requestId } : {}) })}\n`);
       process.exit(0);
     }
   }
+}
+
+/**
+ * Build the node's callable tools from the config the host wrote.
+ *
+ * Each declared tool becomes a real Pi tool whose execution is a round trip to the host:
+ * the node sees an ordinary tool, but the work happens where the kernel and the
+ * execution identity live (§5). A tool the config does not declare is never handed to
+ * the session at all, so the model cannot call it.
+ */
+function forwardingTools(
+  config: PiWorkerConfig,
+  callHost: (name: string, args: unknown) => Promise<{ ok: boolean; text: string }>,
+): ToolDefinition[] {
+  const declared = config.tools ?? [];
+  const allowed = new Set(config.allowedToolNames ?? []);
+  return declared
+    .filter(tool => allowed.size === 0 || allowed.has(tool.name))
+    .map(tool => ({
+      name: tool.name,
+      label: tool.label,
+      description: tool.description,
+      ...(tool.promptSnippet ? { promptSnippet: tool.promptSnippet } : {}),
+      ...(tool.promptGuidelines ? { promptGuidelines: tool.promptGuidelines } : {}),
+      parameters: tool.parameters as never,
+      async execute(_toolCallId: string, params: unknown) {
+        const answer = await callHost(tool.name, params);
+        // A refusal is returned as the tool's result so the model can correct itself
+        // rather than losing the turn to an exception (§5).
+        return { content: [{ type: 'text' as const, text: answer.text }], details: {}, ...(answer.ok ? {} : { isError: true }) };
+      },
+    }));
 }
 
 /** Write a line without truncating multibyte text: a string write can return true while its UTF-8 bytes still fill the pipe. */
