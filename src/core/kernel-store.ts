@@ -205,15 +205,23 @@ export class KernelStore {
   publishRevision(taskId: string, input: { definition: GraphDefinition; reason: string; version?: number }): RevisionRow {
     if (!input.reason.trim()) throw new RuntimeError('invalid_definition', 'A revision reason is required');
     const definition = parseGraphDefinition(input.definition);
-    return this.store.transaction(() => {
-      const next = input.version ?? ((this.store.db.prepare('SELECT COALESCE(MAX(version),0) AS v FROM kernel_revisions WHERE task_id=?').get(taskId) as { v: number }).v + 1);
-      const existing = this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? AND version=?').get(taskId, next);
-      if (existing) throw new RuntimeError('invalid_definition', `Revision ${next} already exists and is immutable`);
-      const createdAt = Date.now();
-      this.store.db.prepare('INSERT INTO kernel_revisions(task_id,version,definition,reason,created_at) VALUES(?,?,?,?,?)')
-        .run(taskId, next, canonicalJson(definition), input.reason, createdAt);
-      return { taskId, version: next, definition, reason: input.reason, createdAt };
-    });
+    return this.store.transaction(() => this.insertRevision(taskId, definition, input.reason, input.version));
+  }
+
+  /**
+   * Insert a revision WITHOUT opening its own transaction, so a caller that must
+   * write a graph and its first revision atomically (§5 whole-or-nothing) can do
+   * both inside one transaction instead of nesting an illegal second BEGIN.
+   */
+  insertRevision(taskId: string, definition: GraphDefinition, reason: string, version?: number): RevisionRow {
+    if (!reason.trim()) throw new RuntimeError('invalid_definition', 'A revision reason is required');
+    const next = version ?? ((this.store.db.prepare('SELECT COALESCE(MAX(version),0) AS v FROM kernel_revisions WHERE task_id=?').get(taskId) as { v: number }).v + 1);
+    const existing = this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? AND version=?').get(taskId, next);
+    if (existing) throw new RuntimeError('invalid_definition', `Revision ${next} already exists and is immutable`);
+    const createdAt = Date.now();
+    this.store.db.prepare('INSERT INTO kernel_revisions(task_id,version,definition,reason,created_at) VALUES(?,?,?,?,?)')
+      .run(taskId, next, canonicalJson(definition), reason, createdAt);
+    return { taskId, version: next, definition, reason, createdAt };
   }
 
   revision(taskId: string, version: number): RevisionRow | null {
