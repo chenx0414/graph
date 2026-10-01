@@ -434,6 +434,21 @@ v40 之前，这一档还有一张**同样合法、但机制完全不同**的图
 
 **坑**：v40 刻意删掉了 `verify-delivery` 机械门（与主 Agent 验收重复）。所以这一档**没有机械兜底**：如果主 Agent 忘了调 `review_human_check` 就把问题抛给用户，用户看到的是一堆没被审过的证据。删掉机械门是你自己的决定，但要知道**兜底同时也没了**。
 
+## 真跑回执（v40 在真任务里跑完的记录，不是形状体检）
+
+上面每一节都指回源码行。这一节不同：它是**这张图真的被派成任务、在真 worktree 里跑完一遍**的收据。任务 `4c251059-89d9-4876-a281-380c9559c88c`，目标分支 `main`，积分点 `41adb96f325e`，`phase=completed`，10 个节点全 `succeeded`，验收项 `human-accept` = `valid`。
+
+**真跑才看得见的四件事：**
+
+1. **`when` 闸门真的挡住了下游。** `plan-reviewer` 判 `accept` 之后三个 worker 才被派发——它们的入边同时挂 `planner`（拿计划正文）与 `plan-reviewer`（等放行）。这是第 1 节的机制在真任务里的兑现，不是纸面推断。
+2. **agent 路由器真的自己判了 `fail` 并触发回边。** 事件流实测写着 `graph.rework { from:'synth', route:'fail', to:['worker-1','worker-2','worker-3'], via:'route' }`——`synth` 收齐三份评审、写汇总、自述 `route`，整条 `declared:null` 的路第一次在复杂档真跑里走通。三条 `fail` 回边一次性把三个 worker `reactivate`（第 2 节的「整批返工」），返工只重跑被点的车道。
+3. **返工回合是这批缺陷的集中地。** 两个真缺陷都只在这一趟暴露：review 车道在**第一轮**提交干净结果并成功，**返工轮**却多带了一个 `route` 字段，被 `src/core/operation-lifecycle.ts:1108` 硬拒（`Router must return a declared case`）。根因是返工简报说「你的简报已在本会话里，不要重读」，而非路由器节点从没有被明确告知「不要带 route」——`nodeContract` 只为路由器发 route 规则。
+4. **汇总节点真的会「不盲信上游」。** 交接给 `synth` 的 `review-2` 产物是**陈旧的**（描述的是返工前的 commit）；`synth` 没有照单全收，改用 review-2 本轮真产出的黑盒复核脚本重跑，并对一条错误建议发了更正（`agentRouter` 确实在 `operation-lifecycle.ts:1117`，不是 `:1118`）。
+
+**这一趟顺带在 harness 上修掉的两个缺陷**（源码改动，见 Git 历史）：`submit_result` 的工具描述无条件提 `route`（诱导非路由器提交 `route`）；非路由器节点的**每回合契约**里缺「不要带 route」这条规则（`src/catalog/briefing.ts` 的 `nodeContract`）。
+
+**还没修的一条**：草稿里写的 `model` 会被该配方自带的模型按下（`plan-reviewer`/`review-1..3` 草稿写 `space-bunny-free`，实际跑在 `deepseek-v4.1-flash`）。控制台显示的是草稿，不是真跑的模型。
+
 ## 五条硬规则（每条都附「不这么写会怎样」）
 
 ### 1. agent 路由器自判分支，必须写 `input.route.declared: null`
