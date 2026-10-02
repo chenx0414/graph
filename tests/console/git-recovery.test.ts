@@ -7,6 +7,8 @@ import { afterEach, expect, test } from 'vitest';
 import { canonicalJson, TaskStore } from '../../src/core/store.ts';
 import { GitIntegration } from '../../src/git/integration.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -129,9 +131,9 @@ test('rework restores a released integration checkout at its recorded tip withou
   cleanup.push(() => runtime.close());
   await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'rework', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'rework',
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({ requirementVersion: 1, summary: 'rework',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [{ id: 'check', kind: 'program', action: 'check' }] }, 'proposal');
+    nodes: [{ id: 'check', kind: 'program', action: 'check' }] } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
   cleanup.push(async () => store.close());

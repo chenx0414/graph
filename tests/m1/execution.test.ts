@@ -7,7 +7,8 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { taskGate } from '../../src/runtime/task-gate.ts';
 import { fullAccessPolicy, standardAccessPolicy, type AccessPolicy } from '../../src/core/access-policy.ts';
-import { RuntimeError, type ActionAdapter } from '../../src/core/types.ts';
+import { RuntimeError, type ActionAdapter, type Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -34,10 +35,10 @@ test('confirmed work reaches a program check after restart and retains delivery 
   cleanup.push(async () => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Implement title search', requestId: 'begin' });
   const task = runtime.user.task(taskId);
-  const proposal = await runtime.supervisor(taskId).propose({
+  const proposal = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Title search', acceptance: [{ id: 'search', description: 'Search works', checkNode: 'verify' }],
     nodes: [{ id: 'build', kind: 'agent', action: 'build', definitionVersion: 'coder@1', model: 'scripted' }, { id: 'verify', kind: 'program', action: 'verify', dependsOn: ['build'] }],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
   await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
@@ -76,10 +77,10 @@ async function singleAgent(actions: Record<string, ActionAdapter>, access?: () =
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Work', requestId: 'begin' });
   const task = runtime.user.task(taskId);
-  const proposal = await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'Work',
+  const proposal = await runtime.supervisor(taskId).propose(withLiftedDefinition({ requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [{ id: 'work', kind: 'agent', action: 'work', model: 'scripted', definitionVersion: 'worker@1' }, { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] }],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   return { runtime, task, options, taskId };
 }

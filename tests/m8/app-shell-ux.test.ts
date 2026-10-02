@@ -12,6 +12,8 @@ import { startGraphDaemon } from '../../src/server/start.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
 import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -152,7 +154,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
       { id: 'check', kind: 'program' as const, action: 'check', dependsOn: ['work'] },
     ],
   };
-  await server.runtime.supervisor(view.anchorTaskId).propose(firstProposal, 'draft-1');
+  await server.runtime.supervisor(view.anchorTaskId).propose(withLiftedDefinition(firstProposal), 'draft-1');
   await server.runtime.supervisor(view.anchorTaskId).propose({
     requirementVersion: 1,
     summary: '第二版增加审查',

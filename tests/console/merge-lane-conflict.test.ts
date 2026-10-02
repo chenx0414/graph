@@ -6,7 +6,8 @@ import { TaskStore } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { GitIntegration } from '../../src/git/integration.ts';
 import { git, mergeConflictFiles } from '../../src/git/git.ts';
-import type { NodeSpec } from '../../src/core/types.ts';
+import type { Proposal, NodeSpec } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -42,7 +43,7 @@ async function collidingLanes(project: string, stateDir: string) {
       { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['a', 'b'], input: { command: 'node', args: ['-v'] } },
     ],
   };
-  await runtime.supervisor(taskId).propose(proposal, 'proposal');
+  await runtime.supervisor(taskId).propose(withLiftedDefinition(proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const row = store.db.prepare('SELECT integration_branch FROM tasks WHERE id=?').get(taskId) as { integration_branch: string };
   return { store, integration, taskId, integrationBranch: row.integration_branch };

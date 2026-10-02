@@ -5,6 +5,8 @@ import { afterEach, expect, test } from 'vitest';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
@@ -71,7 +73,7 @@ test('the merge recipe compiles, and its identity really becomes the system prom
 
   // A node that cites the recipe must receive the merge identity as its system prompt.
   const { taskId } = await server.runtime.user.begin({ projectId: 'project', request: 'merge lanes', requestId: 'begin' });
-  await server.runtime.supervisor(taskId).propose({
+  await server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1,
     summary: 'merge lanes',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -79,7 +81,7 @@ test('the merge recipe compiles, and its identity really becomes the system prom
       { id: 'merge-lane', kind: 'agent', action: 'work', definitionVersion: 'matt-merge@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['merge-lane'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await server.runtime.host.runReady();
 

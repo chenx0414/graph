@@ -9,6 +9,8 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -124,14 +126,14 @@ for (const fixture of ['v13', 'v17'] as const) {
     cleanup.push(() => runtime.close());
     await installPresets(runtime.catalog, presetsRoot);
     const { taskId } = await runtime.user.begin({ projectId: 'legacy', request: 'Upgrade chain worker', requestId: 'upgrade-begin' });
-    await runtime.supervisor(taskId).propose({
+    await runtime.supervisor(taskId).propose(withLiftedDefinition({
       requirementVersion: 1, summary: 'Upgrade chain',
       acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
       nodes: [
         { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
         { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
       ],
-    }, 'upgrade-propose');
+    } as Proposal), 'upgrade-propose');
     await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'upgrade-accept' });
     await runtime.host.runReady();
     const after = await inspect(dbPath);

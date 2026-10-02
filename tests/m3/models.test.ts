@@ -5,6 +5,8 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import type { ModelEntry } from '../../src/catalog/models.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -27,14 +29,14 @@ test('a Pi agent records one invocation per request, restores the session, and d
   cleanup.push(async () => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def-1');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Ship the feature', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Ship the feature',
     acceptance: [{ id: 'works', description: 'Feature works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
@@ -76,7 +78,7 @@ test('review excludes the implementer model and missing candidates become a dura
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Review', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Review',
     acceptance: [{ id: 'works', description: 'Reviewed', checkNode: 'check' }],
     nodes: [
@@ -84,7 +86,7 @@ test('review excludes the implementer model and missing candidates become a dura
       { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'writer', dependsOn: ['work'] },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['review'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
@@ -108,7 +110,7 @@ test('a review with no remaining candidate opens a durable model problem', async
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Review', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Review',
     acceptance: [{ id: 'works', description: 'Reviewed', checkNode: 'check' }],
     nodes: [
@@ -116,7 +118,7 @@ test('a review with no remaining candidate opens a durable model problem', async
       { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'writer', dependsOn: ['work'] },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['review'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
@@ -138,14 +140,14 @@ test('a requested missing model is replaced from the same grade without changing
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Switch', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Switch',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'gone' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   const view = await runtime.user.task(taskId).view();

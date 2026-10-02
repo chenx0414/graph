@@ -6,7 +6,8 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { scriptedLane, laneUsage, laneResult, settle } from '../fixtures/lane.ts';
-import type { ActionAdapter } from '../../src/core/types.ts';
+import type { ActionAdapter , Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 async function setup(worker?: ActionAdapter) {
@@ -24,11 +25,11 @@ async function setup(worker?: ActionAdapter) {
   } });
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'message node', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'message node', acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }], nodes: [
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({ requirementVersion: 1, summary: 'message node', acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }], nodes: [
     { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
     { id: 'sibling', kind: 'agent', action: 'sibling', definitionVersion: 'coder@1', model: 'scripted' },
     { id: 'check', kind: 'program', action: 'check', dependsOn: ['work', 'sibling'] },
-  ] }, 'proposal');
+  ] } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const store = new TaskStore(join(root, 'state/tasks.sqlite')); cleanup.push(() => store.close());
   return { runtime, taskId, store, lane, checks };

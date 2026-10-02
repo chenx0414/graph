@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { NodeSpec } from '../../src/core/types.ts';
+import type { NodeSpec , Proposal } from '../../src/core/types.ts';
 import { scriptedLane, settle } from '../fixtures/lane.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -320,7 +321,7 @@ test('a worker Agent can inspect the Graph source tree with the native read tool
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
 
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Read a file.', requestId: 'worker-source-read-begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1,
     summary: 'Read a file',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
@@ -328,7 +329,7 @@ test('a worker Agent can inspect the Graph source tree with the native read tool
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'worker-source-read-proposal');
+  } as Proposal), 'worker-source-read-proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'worker-source-read-accept' });
   await runtime.host.drive();
 
@@ -697,11 +698,11 @@ test('a task node follows the latest definition of its own recipe on its next di
     { id: 'worker-b', kind: 'agent', action: 'worker', role: 'worker', model: 'local', definitionVersion: 'worker@1', dependsOn: ['worker-a'] },
     { id: 'check', kind: 'program', action: 'check', dependsOn: ['worker-a', 'worker-b'] },
   ];
-  const proposal = await runtime.supervisor(taskId).propose({
+  const proposal = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: '两个 worker',
     acceptance: [{ id: 'works', description: '两项工作都完成', checkNode: 'check' }],
     nodes,
-  }, 'lane-proposal');
+  } as Proposal), 'lane-proposal');
   await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'lane-accept' });
 
   await settle(() => lane.briefings.length >= 1, () => runtime.host.runReady());

@@ -13,6 +13,8 @@ import { taskGate } from '../../src/runtime/task-gate.ts';
 import { tokenUsageTotal, type TokenUsage } from '../../src/runtime/call-broker.ts';
 import { TaskStore, SCHEMA_VERSION } from '../../src/core/store.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -321,14 +323,14 @@ test('a real auto-compaction is booked as its own invocation and keeps the origi
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Compaction', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Compaction',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
 
@@ -411,14 +413,14 @@ async function workerRuntime(root: string, provider: Awaited<ReturnType<typeof c
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Compaction gate', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Compaction gate',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   return { runtime, taskId };
 }
@@ -497,14 +499,14 @@ test('a pause during auto-compaction stops the summary request through the task 
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Paused compaction', requestId: 'begin' });
   taskIdRef = taskId;
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Paused compaction',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
 

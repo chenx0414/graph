@@ -17,6 +17,8 @@ import { afterEach, expect, test } from 'vitest';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -89,12 +91,12 @@ async function runChain(links: number) {
       });
 
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: `chain of ${links}`, requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1,
     summary: `chain of ${links}`,
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [...nodes, { id: 'check', kind: 'program', action: 'check', dependsOn: [ids[ids.length - 1]!] }],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
 

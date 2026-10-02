@@ -7,6 +7,8 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { testModelRuntime } from '../fixtures/models.ts';
 import { withIndependentReview } from '../fixtures/review-gate.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -44,14 +46,14 @@ test('a git-backed work-check graph without an independent reviewer cannot merge
   });
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'No review', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'No review',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
@@ -75,7 +77,7 @@ test('a completed reviewer agent without a program-owned review gate cannot merg
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Review gate', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Review gate',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
@@ -83,7 +85,7 @@ test('a completed reviewer agent without a program-owned review gate cannot merg
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
       { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'scripted', dependsOn: ['check'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
@@ -116,10 +118,10 @@ test('a structured failing independent review does not merge', async () => {
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Failing review', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Failing review',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: reviewed.nodes,
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
@@ -140,7 +142,7 @@ test('review model exclusion walks through program nodes to the implementer', as
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Same model', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Same model',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
@@ -148,7 +150,7 @@ test('review model exclusion walks through program nodes to the implementer', as
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
       { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'writer', dependsOn: ['check'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
@@ -173,10 +175,10 @@ test('a dirty target checkout in another worktree is not overwritten', async () 
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Worktree target', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Worktree target',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: reviewed.nodes,
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
@@ -198,10 +200,10 @@ test('a human rejection keeps the check blocked and asks the main Agent for rewo
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Human reject', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Human reject',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: reviewed.nodes,
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
@@ -229,10 +231,10 @@ test('a human check is bound to the current activation and commit', async () => 
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Human', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Human',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: reviewed.nodes,
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
@@ -272,7 +274,7 @@ test('unknown usage keeps the instance blocked across a later integration rechec
   });
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Unknown recheck', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Unknown recheck',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
@@ -281,7 +283,7 @@ test('unknown usage keeps the instance blocked across a later integration rechec
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
       { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'scripted', dependsOn: ['check'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const running = runtime.host.drive();

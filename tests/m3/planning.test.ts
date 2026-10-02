@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter } from '../../src/core/types.ts';
+import type { ActionAdapter , Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -17,7 +18,7 @@ test('the master discusses, proposes a validated graph, and workers receive a br
   const actions: Record<string, ActionAdapter> = {
     master: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
       expect(operation.context.messages?.some(message => message.text.includes('Ship title search'))).toBe(true);
-      await runtime.supervisor(operation.taskId).propose({
+      await runtime.supervisor(operation.taskId).propose(withLiftedDefinition({
         requirementVersion: operation.requirementVersion, summary: 'Title search',
         acceptance: [{ id: 'works', description: 'Search ignores case', checkNode: 'check' }],
         nodes: [
@@ -25,7 +26,7 @@ test('the master discusses, proposes a validated graph, and workers receive a br
           { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted', dependsOn: ['master'] },
           { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
         ],
-      }, 'plan');
+      } as Proposal), 'plan');
       return { outcome: 'completed', output: { planned: true }, usage };
     } },
     work: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
@@ -49,10 +50,10 @@ test('the master discusses, proposes a validated graph, and workers receive a br
   expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
   const planned = await task.view();
   expect(planned.proposalVersion).toBe(1);
-  await expect(runtime.supervisor(taskId).propose({
+  await expect(runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Bad', acceptance: [{ id: 'works', description: 'x', checkNode: 'missing' }],
     nodes: [{ id: 'check', kind: 'program', action: 'check' }],
-  }, 'bad')).rejects.toMatchObject({ code: 'invalid_proposal' });
+  } as Proposal), 'bad')).rejects.toMatchObject({ code: 'invalid_proposal' });
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   expect((await task.view()).phase).toBe('completed');
@@ -74,18 +75,18 @@ test('a new feature starts a queued task while the original confirmed scope cont
   });
   cleanup.push(() => runtime.close());
   const first = await runtime.user.begin({ projectId: 'project', request: 'Original', requestId: 'begin-1' });
-  const proposed = await runtime.supervisor(first.taskId).propose({
+  const proposed = await runtime.supervisor(first.taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Original',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [{ id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' }, { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] }],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(first.taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   const second = await runtime.user.begin({ projectId: 'project', request: 'New feature', requestId: 'begin-2' });
-  const next = await runtime.supervisor(second.taskId).propose({
+  const next = await runtime.supervisor(second.taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'New feature',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [{ id: 'check', kind: 'program', action: 'check' }],
-  }, 'proposal-2');
+  } as Proposal), 'proposal-2');
   await runtime.user.task(second.taskId).accept({ proposalVersion: next.proposalVersion, targetBranch: 'main', requestId: 'accept-2' });
   expect((await runtime.user.task(second.taskId).view()).phase).toBe('queued');
   await runtime.host.drive();

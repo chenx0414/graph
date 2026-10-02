@@ -10,7 +10,8 @@ import { GraphRuntime } from '../../src/core/graph-runtime.ts';
 import { materializeGraph } from '../../src/core/confirm-graph.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
-import type { ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
+import type { ActionAdapter, Operation, OperationResult , Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -131,12 +132,12 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
 
     // The draft carries a v2 definition and empty old-shaped nodes: the definition is
     // the graph, so nothing old-shaped is required.
-    await runtime.supervisor(anchorTaskId).propose({
+    await runtime.supervisor(anchorTaskId).propose(withLiftedDefinition({
       requirementVersion: 1, summary: '两节点链',
       acceptance: [{ id: 'works', description: '链跑通', checkNode: 'b' }],
       nodes: [],
       definition: DEFINITION,
-    }, 'proposal-v2');
+    } as Proposal), 'proposal-v2');
 
     const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
 
@@ -156,7 +157,11 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     store.db.close();
   });
 
-  test('W6: a draft without a definition still confirms the old way (no regression)', async () => {
+  // W6 used to assert the opposite: that a draft without a definition still confirms the
+  // old way. ADR 0030 discards the old kernel, so that is no longer a promise to keep -
+  // it is the behaviour being removed. The case now pins what replaced it: the refusal is
+  // loud, happens before anything is written, and leaves no old-shaped rows behind.
+  test('W6: a draft without a definition is refused, writing nothing old-shaped', async () => {
     const root = await mkdtemp(join(tmpdir(), 'confirm-graph-old-'));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const project = join(root, 'project');
@@ -172,20 +177,25 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     await runtime.host.runReady();
     const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
     await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-    await runtime.supervisor(anchorTaskId).propose({
+    const before = (await runtime.user.task(anchorTaskId).view()).proposalVersion;
+    const rejected = runtime.supervisor(anchorTaskId).propose({
       requirementVersion: 1, summary: '旧方案',
       acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
       nodes: [
         { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
         { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
       ],
-    }, 'proposal-old');
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    } as Proposal, 'proposal-old');
+    await expect(rejected).rejects.toMatchObject({ code: 'invalid_proposal' });
+    // The refusal happens before anything is written: the proposal version does not move,
+    // and no old-shaped row appears for this task.
+    expect((await runtime.user.task(anchorTaskId).view()).proposalVersion).toBe(before);
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-    const oldNodes = store.db.prepare('SELECT COUNT(*) AS n FROM nodes WHERE task_id=?').get(confirmed.taskId) as { n: number };
-    expect(oldNodes.n).toBe(2);
+    // Only the master node every task starts with - the refused draft contributed nothing.
+    const oldRows = store.db.prepare('SELECT id FROM nodes WHERE task_id=?').all(anchorTaskId) as { id: string }[];
+    expect(oldRows.map(row => row.id)).toEqual(['master']);
     const kernel = new KernelStore(store);
-    expect(kernel.latestRevision(confirmed.taskId)).toBeNull();
+    expect(kernel.latestRevision(anchorTaskId)).toBeNull();
     store.db.close();
   });
 });

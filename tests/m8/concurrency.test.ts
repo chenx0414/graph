@@ -12,6 +12,8 @@ import { createModelScheduler, type SlotRequest } from '../../src/runtime/model-
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import type { SendGate } from '../../src/runtime/controlled-openai.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -214,14 +216,14 @@ test('a queued runtime send re-checks the pause gate and releases the slot witho
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Queued send', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Queued send',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
 
   const held = await scheduler.acquire({ credentialId: 'cred', limit: 1 });

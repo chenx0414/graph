@@ -32,9 +32,10 @@ import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
-import type { ActionAdapter, Json, NodeSpec } from '../../src/core/types.ts';
+import type { ActionAdapter, Json, NodeSpec , Proposal } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { checkEnvironment } from '../../src/runtime/host-command.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -102,11 +103,11 @@ async function run(root: string, input: unknown, options: { fullAccess?: boolean
   });
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Run the check',
     acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }],
     nodes: nodes.map(node => node.id === 'check' ? { ...node, input: input as Json } : node),
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();

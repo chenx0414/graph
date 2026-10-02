@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -54,14 +56,14 @@ async function subagentRun(name: string, plans: ResponsePlan[]) {
   });
   cleanup.push(() => daemon.close());
   const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'p', request: 'tool failure', requestId: 'begin' });
-  await daemon.server.runtime.supervisor(taskId).propose({
+  await daemon.server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'tool failure',
     acceptance: [{ id: 'works', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['-e', 'process.exit(0)'] } },
     ],
-  }, 'proposal-tool-failure');
+  } as Proposal), 'proposal-tool-failure');
   await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await daemon.server.runtime.host.runReady();

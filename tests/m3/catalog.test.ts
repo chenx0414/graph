@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ModelEntry } from '../../src/catalog/models.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -24,7 +26,7 @@ test('the same definition can dispatch two instances on different models, and bo
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'v1');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Two instances', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Two instances',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
@@ -32,7 +34,7 @@ test('the same definition can dispatch two instances on different models, and bo
       { id: 'right', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'two' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['left', 'right'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   const second = runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'v2');
   expect(second).toMatchObject({ version: 2, key: 'coder@2' });

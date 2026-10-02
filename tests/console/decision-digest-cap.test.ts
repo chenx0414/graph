@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import type { ActionAdapter, OperationResult } from '../../src/core/types.ts';
+import type { ActionAdapter, OperationResult , Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -61,7 +62,7 @@ test('the fallback drops what states nothing and keeps a short constraint', asyn
   });
   seed.close();
 
-  await runtime.supervisor(created.taskId).propose({
+  await runtime.supervisor(created.taskId).propose(withLiftedDefinition({
     requirementVersion: 1,
     summary: '无声明决策',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -69,7 +70,7 @@ test('the fallback drops what states nothing and keeps a short constraint', asyn
       { id: 'master', kind: 'agent', role: 'master', action: 'master', definitionVersion: 'master@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['master'], input: { command: 'node', args: ['--version'] } },
     ],
-  }, 'draft');
+  } as Proposal), 'draft');
 
   const read = new TaskStore(join(stateDir, 'tasks.sqlite'));
   const row = read.db.prepare('SELECT decision_snapshot FROM proposals WHERE task_id=? AND version=1').get(created.taskId) as { decision_snapshot: string | null };
@@ -114,7 +115,7 @@ test('the fallback decision snapshot is bounded at both ends, not just the recen
   seed.close();
 
   // No `decisions` on the proposal: this is the compatibility fallback path.
-  await runtime.supervisor(created.taskId).propose({
+  await runtime.supervisor(created.taskId).propose(withLiftedDefinition({
     requirementVersion: 1,
     summary: '无声明决策',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -122,7 +123,7 @@ test('the fallback decision snapshot is bounded at both ends, not just the recen
       { id: 'master', kind: 'agent', role: 'master', action: 'master', definitionVersion: 'master@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['master'], input: { command: 'node', args: ['--version'] } },
     ],
-  }, 'draft');
+  } as Proposal), 'draft');
 
   const read = new TaskStore(join(stateDir, 'tasks.sqlite'));
   const row = read.db.prepare('SELECT decision_snapshot FROM proposals WHERE task_id=? AND version=1').get(created.taskId) as { decision_snapshot: string | null } | undefined;

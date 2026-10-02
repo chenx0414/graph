@@ -7,8 +7,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
+import type { Proposal, ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -1520,7 +1521,7 @@ test('the master can withdraw its own unconfirmed draft without losing it', asyn
       { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
     ],
   };
-  await runtime.supervisor(anchorTaskId).propose(draft, 'draft-1');
+  await runtime.supervisor(anchorTaskId).propose(withLiftedDefinition(draft), 'draft-1');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
 
   // Only a draft that exists and is still the current one can be withdrawn.

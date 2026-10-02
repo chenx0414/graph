@@ -5,7 +5,8 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
-import type { NodeSpec } from '../../src/core/types.ts';
+import type { NodeSpec , Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -49,11 +50,11 @@ async function launch(): Promise<Page> {
 }
 
 async function propose(server: Awaited<ReturnType<typeof openGraphServer>>, taskId: string, nodes: NodeSpec[]) {
-  await server.runtime.supervisor(taskId).propose({
+  await server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: '实时记录',
     acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
     nodes,
-  }, `proposal-${taskId}`);
+  } as Proposal), `proposal-${taskId}`);
   await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: `accept-${taskId}` });
 }
 

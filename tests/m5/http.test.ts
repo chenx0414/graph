@@ -5,7 +5,8 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { createApp } from '../../src/server/app.ts';
 import type { AppServices } from '../../src/server/host.ts';
-import type { ActionAdapter } from '../../src/core/types.ts';
+import type { ActionAdapter , Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -41,19 +42,19 @@ test('HTTP session can begin a task, talk to the master channel, confirm require
   expect(settings.projects).toMatchObject([{ id: 'project' }]);
   const begun = JSON.parse((await post('/api/tasks', { projectId: 'project', request: 'Add search', requestId: 'begin' })).body);
   await post(`/api/tasks/${begun.taskId}/say`, { text: 'Case insensitive', requestId: 'say' });
-  const proposed = await runtime.supervisor(begun.taskId).propose({
+  const proposed = await runtime.supervisor(begun.taskId).propose(withLiftedDefinition({
     requirementVersion: 2, summary: 'Search',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [{ id: 'check', kind: 'program', action: 'check' }],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const accepted = await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   expect(accepted.statusCode).toBe(200);
   const queued = JSON.parse((await post('/api/tasks', { projectId: 'project', request: 'Second feature', requestId: 'begin-2' })).body);
-  await runtime.supervisor(queued.taskId).propose({
+  await runtime.supervisor(queued.taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Second',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [{ id: 'check', kind: 'program', action: 'check' }],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await post(`/api/tasks/${queued.taskId}/accept`, { proposalVersion: 1, targetBranch: 'main', requestId: 'accept-2' });
   const list = JSON.parse((await get('/api/tasks')).body);
   expect(list).toMatchObject([{ phase: 'running' }, { phase: 'queued' }]);
@@ -73,7 +74,7 @@ test('pause over HTTP shows pausing then paused, and answering one question leav
     check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: '/tmp/x', digest: 'a'.repeat(64) } }] }) },
   });
   const begun = JSON.parse((await post('/api/tasks', { projectId: 'project', request: 'Work', requestId: 'begin' })).body);
-  await runtime.supervisor(begun.taskId).propose({
+  await runtime.supervisor(begun.taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
@@ -81,7 +82,7 @@ test('pause over HTTP shows pausing then paused, and answering one question leav
       { id: 'other', kind: 'agent', action: 'other', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work', 'other'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const running = runtime.host.runReady();
   await sent.promise;
@@ -125,14 +126,14 @@ test('event cursor reconnects after the HTTP client disconnects while the host k
     check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: '/tmp/x', digest: 'a'.repeat(64) } }] }) },
   });
   const begun = JSON.parse((await post('/api/tasks', { projectId: 'project', request: 'Work', requestId: 'begin' })).body);
-  await runtime.supervisor(begun.taskId).propose({
+  await runtime.supervisor(begun.taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   const first = JSON.parse((await get(`/api/tasks/${begun.taskId}/events?after=0`)).body) as { cursor: number; type: string }[];
   expect(first.some(event => event.type === 'task.created')).toBe(true);
   const cursor = first[first.length - 1]!.cursor;

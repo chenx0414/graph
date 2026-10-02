@@ -18,8 +18,9 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec } from '../../src/core/types.ts';
+import type { ActionAdapter, NodeSpec , Proposal } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -68,11 +69,11 @@ async function failingRun() {
   const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: { work } });
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
+  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Run the check',
     acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }],
     nodes,
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));

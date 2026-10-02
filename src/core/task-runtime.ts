@@ -851,7 +851,14 @@ export async function openTaskRuntime(options: {
             graphVersion: task.graph_version,
             proposal: proposal ? JSON.parse(proposal.spec) as Proposal : null, messages,
             ...(() => {
-              const graph = task.accepted_proposal ? loadGraph(store, taskId) : undefined;
+              // A task accepted on the v2 kernel has an accepted proposal but no old-shaped
+              // rows at all, so loadGraph would throw on it. It genuinely has no containers
+              // and no loops - those are old-kernel concepts - so report them empty rather
+              // than failing the whole view.
+              let graph: ReturnType<typeof loadGraph> | undefined;
+              if (task.accepted_proposal) {
+                try { graph = loadGraph(store, taskId); } catch { graph = undefined; }
+              }
               return { containers: graph ? graph.containers() : [], loops: graph ? graph.plan.loops : [] };
             })(),
             revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),

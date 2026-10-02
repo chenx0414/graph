@@ -10,6 +10,8 @@ import { openConfigStore, sanitizeConfig } from '../../src/server/config-service
 import { loadGraphConfig } from '../../src/server/config.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
 import type { ModelEntry } from '../../src/catalog/models.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -41,14 +43,14 @@ const checkAction = (root: string) => ({
 
 async function runOneTask(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, model: string, request: string) {
   const { taskId } = await runtime.user.begin({ projectId: 'project', request, requestId: `begin-${request}` });
-  await runtime.supervisor(taskId).propose({
+  await runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: request,
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, `proposal-${request}`);
+  } as Proposal), `proposal-${request}`);
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: `accept-${request}` });
   await runtime.host.runReady();
   await runtime.host.runReady();

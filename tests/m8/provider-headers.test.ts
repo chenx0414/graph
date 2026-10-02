@@ -5,6 +5,8 @@ import { afterEach, expect, test } from 'vitest';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
 import { parseGraphConfig } from '../../src/server/config.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -48,14 +50,14 @@ test('configured model headers reach the provider on a real dispatch', async () 
   });
   cleanup.push(() => daemon.close());
   const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'p', request: 'header task', requestId: 'begin' });
-  await daemon.server.runtime.supervisor(taskId).propose({
+  await daemon.server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'headers',
     acceptance: [{ id: 'works', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['-e', 'process.exit(0)'] } },
     ],
-  }, 'proposal-headers');
+  } as Proposal), 'proposal-headers');
   await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   for (let attempt = 0; attempt < 100; attempt += 1) {
     await daemon.server.runtime.host.runReady();
@@ -135,14 +137,14 @@ test('OpenCode Go adds its routing header to connection tests and real dispatche
   expect(provider.headerList[0]?.['x-opencode-session']).toBeTruthy();
 
   const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'p', request: 'header task', requestId: 'begin' });
-  await daemon.server.runtime.supervisor(taskId).propose({
+  await daemon.server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'headers',
     acceptance: [{ id: 'works', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'opencode-go:deepseek-v4.1-flash' },
       { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['-e', 'process.exit(0)'] } },
     ],
-  }, 'proposal-opencode-headers');
+  } as Proposal), 'proposal-opencode-headers');
   await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   for (let attempt = 0; attempt < 100; attempt += 1) {
     await daemon.server.runtime.host.runReady();
@@ -192,14 +194,14 @@ test('an unresolved credential only disables its own model, not dispatch for oth
   expect(daemon.enabledModelCount).toBe(1);
 
   const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'p', request: 'partial credentials', requestId: 'begin' });
-  await daemon.server.runtime.supervisor(taskId).propose({
+  await daemon.server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'partial',
     acceptance: [{ id: 'works', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'usable' },
       { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['-e', 'process.exit(0)'] } },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   for (let attempt = 0; attempt < 100; attempt += 1) {
     await daemon.server.runtime.host.runReady();

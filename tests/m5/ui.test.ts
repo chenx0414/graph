@@ -6,6 +6,8 @@ import { build } from 'vite';
 import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -36,14 +38,14 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   const server = await openGraphServer({ ...runtimeOptions, autoDrive: true, webDir });
   cleanup.push(() => server.close());
   const { taskId } = await server.runtime.user.begin({ projectId: 'project', request: 'Show graph', requestId: 'begin' });
-  await server.runtime.supervisor(taskId).propose({
+  await server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Show graph',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'implement', kind: 'agent', action: 'implement', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['implement'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -162,14 +164,14 @@ test('the graph follows runtime events and a budget question accepts a token inc
   });
   cleanup.push(() => server.close());
   const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'UI live state', requestId: 'one' });
-  await server.runtime.supervisor(taskId).propose({
+  await server.runtime.supervisor(taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Live',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'plan-one');
+  } as Proposal), 'plan-one');
   await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-one' });
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -180,14 +182,14 @@ test('the graph follows runtime events and a budget question accepts a token inc
   await server.runtime.host.drive();
   await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
   const next = await server.runtime.user.begin({ projectId: 'p', request: 'Budget question', requestId: 'two' });
-  await server.runtime.supervisor(next.taskId).propose({
+  await server.runtime.supervisor(next.taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'Budget',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'expensive', kind: 'agent', action: 'expensive', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['expensive'] },
     ],
-  }, 'plan-two');
+  } as Proposal), 'plan-two');
   await server.runtime.user.task(next.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-two' });
   await server.runtime.host.drive();
   // The task page is gone; a budget question is answered where questions are answered.

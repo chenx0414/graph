@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import type { Proposal } from '../../src/core/types.ts';
+import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.splice(0)) await action(); });
@@ -53,14 +55,14 @@ test('a subagent node reports the system prompt and briefing it really sent', as
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const begun = await server.runtime.user.begin({ projectId: 'p', request: '看清 subagent 读到的提示词', requestId: 'begin' });
   const userTask = server.runtime.user.task(begun.taskId);
-  await server.runtime.supervisor(begun.taskId).propose({
+  await server.runtime.supervisor(begun.taskId).propose(withLiftedDefinition({
     requirementVersion: 1, summary: 'node prompt',
     acceptance: [{ id: 'ok', description: '有产出', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', input: { files: ['src/a.ts'], focus: '写下结果' } },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  }, 'proposal');
+  } as Proposal), 'proposal');
   await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await server.runtime.host.drive();
   await waitFor(() => provider.requests.length >= 1, 30_000);
