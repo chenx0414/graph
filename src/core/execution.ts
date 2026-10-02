@@ -506,14 +506,36 @@ export class Execution {
     if (!this.graphs) return 0;
     let dispatched = 0;
     let pending: { taskId: string; run: () => Promise<{ drained: boolean }> }[];
-    try { pending = this.graphs(); } catch { return 0; }
+    // A lane that cannot even list its graphs is a real failure, not an idle tick.
+    try { pending = this.graphs(); }
+    catch (error) { this.reportGraphFailure(null, error); return 0; }
     for (const graph of pending) {
       if (this.stopping || this.dispatchAllowed?.() === false) break;
       if (this.store.task(graph.taskId).paused) continue;
       dispatched += 1;
-      try { await graph.run(); } catch { /* a broken graph must not stop the drive loop */ }
+      try { await graph.run(); } catch (error) { this.reportGraphFailure(graph.taskId, error); }
     }
     return dispatched;
+  }
+
+  /**
+   * Make a graph that could not run visible (HB-272).
+   *
+   * The host tick fires every 40ms, so a graph that always fails would otherwise repeat
+   * its own failure forever, and one that fails once would be indistinguishable from a
+   * graph with nothing to do. The reason is recorded once per graph: the first failure is
+   * the diagnosis, and a tick that repeats it adds noise, not information.
+   */
+  private reportGraphFailure(taskId: string | null, error: unknown): void {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (taskId) {
+      if (this.store.db.prepare("SELECT 1 FROM events WHERE task_id=? AND type='graph.failed' LIMIT 1").get(taskId)) return;
+    }
+    try {
+      this.store.transaction(() => { this.store.event(taskId, 'graph.failed', { reason }); });
+    } catch {
+      // Recording must never be the thing that breaks the tick.
+    }
   }
 
   /** Ensure a newly queued message is dispatched even if no drive loop is active. */
