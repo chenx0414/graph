@@ -15,7 +15,7 @@ function entry(baseUrl: string, id = 'local') {
   return { id, provider: 'graph-openai' as const, grade: 'high' as const, api: 'openai-completions' as const, baseUrl, contextWindow: 32_000, maxTokens: 256 };
 }
 
-const proposal = (requirementVersion: number): Proposal => ({
+const proposal = (requirementVersion: number): Proposal => withLiftedDefinition({
   requirementVersion,
   summary: 'Case-insensitive title search',
   acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
@@ -24,7 +24,7 @@ const proposal = (requirementVersion: number): Proposal => ({
     { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['master'] },
     { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
   ],
-});
+} as Proposal);
 
 test('a production master receives tools, proposes a graph, and wakes on a later user message', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-master-'));
