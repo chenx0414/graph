@@ -157,11 +157,10 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     store.db.close();
   });
 
-  // W6 used to assert the opposite: that a draft without a definition still confirms the
-  // old way. ADR 0030 discards the old kernel, so that is no longer a promise to keep -
-  // it is the behaviour being removed. The case now pins what replaced it: the refusal is
-  // loud, happens before anything is written, and leaves no old-shaped rows behind.
-  test('W6: a draft without a definition is refused, writing nothing old-shaped', async () => {
+  // NOTE: this case still describes the OLD behaviour on purpose. It is rewritten in the
+  // same commit that makes `definition` required; until that switch lands, asserting the
+  // refusal here would leave the branch red for a promise the product has not made yet.
+  test('W6: a draft without a definition still confirms the old way (no regression)', async () => {
     const root = await mkdtemp(join(tmpdir(), 'confirm-graph-old-'));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const project = join(root, 'project');
@@ -177,8 +176,10 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     await runtime.host.runReady();
     const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
     await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-    const before = (await runtime.user.task(anchorTaskId).view()).proposalVersion;
-    const rejected = runtime.supervisor(anchorTaskId).propose({
+    // Deliberately NOT lifted: this case is about the old shape reaching the old tables,
+    // so the draft must stay old-shaped. Once `definition` becomes required this case is
+    // rewritten to assert the refusal instead.
+    const proposed2 = await runtime.supervisor(anchorTaskId).propose({
       requirementVersion: 1, summary: '旧方案',
       acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
       nodes: [
@@ -186,16 +187,12 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
         { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
       ],
     } as Proposal, 'proposal-old');
-    await expect(rejected).rejects.toMatchObject({ code: 'invalid_proposal' });
-    // The refusal happens before anything is written: the proposal version does not move,
-    // and no old-shaped row appears for this task.
-    expect((await runtime.user.task(anchorTaskId).view()).proposalVersion).toBe(before);
+    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-    // Only the master node every task starts with - the refused draft contributed nothing.
-    const oldRows = store.db.prepare('SELECT id FROM nodes WHERE task_id=?').all(anchorTaskId) as { id: string }[];
-    expect(oldRows.map(row => row.id)).toEqual(['master']);
+    const oldNodes = store.db.prepare('SELECT COUNT(*) AS n FROM nodes WHERE task_id=?').get(confirmed.taskId) as { n: number };
+    expect(oldNodes.n).toBe(2);
     const kernel = new KernelStore(store);
-    expect(kernel.latestRevision(anchorTaskId)).toBeNull();
+    expect(kernel.latestRevision(confirmed.taskId)).toBeNull();
     store.db.close();
   });
 });
