@@ -1,7 +1,8 @@
 import { pendingRsiContinuation, releaseRsiContinuation } from './rsi-continuation.ts';
 import { consumeWakes, releaseWakes, pendingWakes, wakeForAnswer } from './wake-ledger.ts';
 import { retryDecision, MAX_TRANSIENT_RETRIES } from './transient-retry.ts';
-import { resolveRouteCase, ROUTE_SOURCE_KEY, type RouteSource } from './router-action.ts';
+import { resolveRouteCase } from './router-action.ts';
+import { backEdges, routeSourceOf } from './legacy-routing.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -139,37 +140,6 @@ export interface OperationRun {
 export interface OperationLifecycleHooks {
   advance(taskId: string): void;
   canReplayBeforeSend?(operation: Operation): boolean;
-}
-
-/**
- * How this router was told to pick its case, read from its own declared `input.route`.
- * A node that declares `routes` but no source is refused at settle time rather than silently
- * routing nothing — an unroutable router is a graph defect, not a quiet no-op.
- */
-function routeSourceOf(spec: NodeSpec): RouteSource | null {
-  const declaredInput = spec.input;
-  if (!declaredInput || typeof declaredInput !== 'object' || Array.isArray(declaredInput)) return null;
-  const route = (declaredInput as Record<string, unknown>)[ROUTE_SOURCE_KEY];
-  if (!route || typeof route !== 'object' || Array.isArray(route)) return null;
-  const record = route as Record<string, unknown>;
-  if (typeof record['declared'] === 'string') return { declared: record['declared'] };
-  // `declared: null` is an Agent router saying the case comes from the Agent itself: the reviewer
-  // submits `route` with its own result, and the harness only checks it against the declared cases.
-  // A program cannot speak for itself this way, so it stays refused (a program must map status or a field).
-  if (record['declared'] === null) return spec.kind === 'agent' ? { declared: null } : null;
-  const byField = record['byField'];
-  if (byField && typeof byField === 'object' && !Array.isArray(byField)) {
-    const fieldRecord = byField as Record<string, unknown>;
-    if (typeof fieldRecord['path'] === 'string' && fieldRecord['values'] && typeof fieldRecord['values'] === 'object' && !Array.isArray(fieldRecord['values'])) {
-      return { byField: { path: fieldRecord['path'], values: fieldRecord['values'] as Record<string, string> } };
-    }
-    return null;
-  }
-  const byStatus = record['byStatus'];
-  if (byStatus && typeof byStatus === 'object' && !Array.isArray(byStatus)) {
-    return { byStatus: byStatus as Record<string, string> };
-  }
-  return null;
 }
 
 function operationFrom(row: OperationDbRow) {
@@ -921,10 +891,9 @@ export class OperationLifecycle {
   }
 
   private handleRework(operation: Operation, result: OperationResult) {
-    const graph = loadGraph(this.store, operation.taskId);
-    const loops = graph.plan.loops.filter(loop => loop.from === operation.nodeId);
+    const loops = backEdges(this.store, operation.taskId, operation.nodeId);
     const decision = result.output as unknown as VerificationDecision;
-    const requestedTargets = loops.length ? loops.map(loop => loop.to) : decision.subjects.map(subject => subject.nodeId);
+    const requestedTargets = loops.length ? loops : decision.subjects.map(subject => subject.nodeId);
     const targets = [...new Set(requestedTargets.length ? requestedTargets : [operation.nodeId])];
     let halt = false;
     for (const target of targets) {
@@ -966,10 +935,10 @@ export class OperationLifecycle {
       }, operation.id);
       return;
     }
-    reactivate(this.store, operation.taskId, loops.map(loop => loop.to));
+    reactivate(this.store, operation.taskId, loops);
     this.store.event(operation.taskId, 'graph.rework', {
       from: operation.nodeId,
-      to: loops.map(loop => loop.to),
+      to: loops,
     });
   }
 
@@ -1124,7 +1093,7 @@ export class OperationLifecycle {
     // branch means "go back" by giving the loop that case. Reaching here with that case means the
     // reviewer judged the work not done, so the loop target runs again and this review does not.
     const routed = result.outcome === 'completed' && result.route !== undefined
-      ? loadGraph(this.store, operation.taskId).plan.loops.filter(loop => loop.from === operation.nodeId && loop.case === result.route)
+      ? backEdges(this.store, operation.taskId, operation.nodeId, result.route)
       : [];
     const agentRouter = operation.kind === 'agent' && Boolean(nodeSpec.routes?.length);
     // An Agent router bound to an acceptance item: its verdict IS the acceptance, so the harness
@@ -1293,16 +1262,16 @@ export class OperationLifecycle {
     } else if (routed.length) {
       // The reviewer said the work is not done, and the graph said which branch means that. Send the
       // implementer back and let the reviewer run again; nothing downstream of a failed review may.
-      reactivate(this.store, operation.taskId, routed.map(loop => loop.to));
+      reactivate(this.store, operation.taskId, routed);
       this.store.event(operation.taskId, 'graph.rework', {
         from: operation.nodeId,
-        to: routed.map(loop => loop.to),
+        to: routed,
         via: 'route',
         route: result.route,
       });
     } else if (result.outcome === 'completed' && proposal.acceptance.some(item => item.checkNode === operation.nodeId)) {
-      for (const loop of loadGraph(this.store, operation.taskId).plan.loops.filter(item => item.from === operation.nodeId)) {
-        this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(operation.taskId, loop.to);
+      for (const target of backEdges(this.store, operation.taskId, operation.nodeId)) {
+        this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(operation.taskId, target);
       }
     }
     this.hooks.advance(operation.taskId);
