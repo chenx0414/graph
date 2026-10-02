@@ -41,8 +41,8 @@ export interface GraphRunnerOptions {
    * the wrong session.
    */
   hostFor: (nodeId: string) => RunnerHost | Promise<RunnerHost>;
-  /** The node's workspace, where a declared deliverable must exist. */
-  workspace?: () => string | undefined;
+  /** The node's own workspace (its work copy), where a declared deliverable must exist. */
+  workspace?: (nodeId: string) => string | undefined;
   /** The artifact store a declared deliverable is published to. */
   artifacts?: () => ArtifactWorkspace | undefined;
   /** Runs the node's submit for one execution; returns any missing-required gap. */
@@ -159,7 +159,7 @@ export class GraphRunner {
       });
       const executor = new NodeExecutor({
         kernel, graphId: this.options.graphId, host: nodeHost,
-        ...(this.options.workspace ? { workspace: this.options.workspace } : {}),
+        ...(this.options.workspace ? { workspace: () => this.options.workspace!(nodeId) } : {}),
         ...(this.options.artifacts ? { artifacts: this.options.artifacts } : {}),
       });
       await executor.runNode(nodeId, (executionId, attempt, injection) => driver.run(executionId, attempt, injection));

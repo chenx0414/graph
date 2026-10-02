@@ -562,6 +562,7 @@ export async function openTaskRuntime(options: {
         credentialFor: liveCredentialFor,
         instancesDir: join(stateDir, 'instances'),
         stateDir,
+        git,
         artifacts,
         workspaceFor: (graphId: string) => {
           const row = store.db.prepare('SELECT p.root AS root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?').get(graphId) as { root: string } | undefined;

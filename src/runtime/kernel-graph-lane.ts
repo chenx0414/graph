@@ -10,6 +10,7 @@ import { ResidentHost } from './resident-host.ts';
 import { nodeSessionRequest, type NodeSessionRequest } from './kernel-node-host.ts';
 import { toPiModel } from './pi-adapter.ts';
 import type { SendGate } from './controlled-openai.ts';
+import type { GitIntegration } from '../git/integration.ts';
 
 /**
  * The production wiring of the v2 graph lane (Issue #1 §13.8).
@@ -39,6 +40,12 @@ export interface KernelGraphLaneOptions {
   stateDir: string;
   /** The project workspace for a graph, resolved from its task row. */
   workspaceFor: (graphId: string) => string | undefined;
+  /**
+   * The real Git integration, used to give each node its OWN work copy. The old kernel gave
+   * every agent a worktree seeded from the integration tip; a v2 node keeps the same
+   * isolation, so two nodes never edit one tree (HB-276).
+   */
+  git?: GitIntegration;
   /** The artifact store a node's declared deliverable is published to. */
   artifacts?: ArtifactWorkspace;
   /** The gate for a node; absent means an unmetered passthrough (tests). */
@@ -66,14 +73,26 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const hosts = new Map<string, ResidentHost>();
   const sessions = new Map<string, NodeSessionRequest>();
 
+  /** The workspace a node works in: its own work copy when Git can provide one. */
+  const nodeWorkspace = (graphId: string, nodeId: string): string | undefined => {
+    const admitted = options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined;
+    // A work copy is keyed by the node's admitted instance, which is stable for the life of
+    // the node, so a rework keeps the commits the node already made.
+    if (options.git && admitted?.instance_id) {
+      const copy = options.git.workspace(graphId, admitted.instance_id, nodeId, 'agent', 'work');
+      if (copy) return copy;
+    }
+    return options.workspaceFor(graphId);
+  };
+
   const sessionFor = async (graphId: string, nodeId: string): Promise<NodeSessionRequest> => {
     const key = `${graphId}/${nodeId}`;
     const cached = sessions.get(key);
     if (cached) return cached;
     const revision = options.kernel.latestRevision(graphId);
     if (!revision) throw new Error(`graph ${graphId} has no revision to run`);
-    const workspace = options.workspaceFor(graphId);
-    if (!workspace) throw new Error(`graph ${graphId} has no project workspace`);
+    const workspace = nodeWorkspace(graphId, nodeId);
+    if (!workspace) throw new Error(`graph ${graphId} node ${nodeId} has no workspace`);
     const session = await nodeSessionRequest({
       kernel: options.kernel,
       catalog: options.catalog,
@@ -90,9 +109,9 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
 
   return new GraphLane({
     kernel: options.kernel,
-    // A node's declared deliverable is settled from its workspace into the shared artifact
-    // store, so work the node produced is published without a tool call (§13.8, HB-275).
-    workspace: (graphId: string) => options.workspaceFor(graphId),
+    // A node's declared deliverable is settled from its own work copy into the shared
+    // artifact store, so work the node produced is published without a tool call (§13.8).
+    workspace: nodeWorkspace,
     ...(options.artifacts ? { artifacts: () => options.artifacts } : {}),
     // The worker config: the node's own session plus the credential the host resolved.
     config: async (graphId, nodeId) => {
@@ -102,7 +121,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (!model) throw new Error(`no configured model for recipe ${recipe}`);
       const credential = options.credentialFor(model);
       if (!credential) throw new Error(`no credential bound for model ${model.id}`);
-      const workspace = options.workspaceFor(graphId) ?? options.stateDir;
+      const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
       return {
         binding: session.binding,
         workspace,
@@ -134,7 +153,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const cached = hosts.get(nodeId);
       if (cached) return cached;
       await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
-      const workspace = options.workspaceFor(graphId) ?? options.stateDir;
+      const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
       const host = new ResidentHost({
         workerEntry,
         cwd: workspace,

@@ -28,8 +28,12 @@ export interface GraphLaneOptions {
   config: (graphId: string, nodeId: string) => Promise<unknown> | unknown;
   /** The first-turn briefing text for a node. */
   initialContext?: (graphId: string, nodeId: string) => string;
-  /** The node's workspace, where a declared deliverable must exist. */
-  workspace?: (graphId: string) => string | undefined;
+  /**
+   * The node's workspace. Per NODE, not per graph: §7 gives each node its own process and
+   * the old kernel gave each agent its own work copy, so two nodes must never be handed
+   * the same tree to edit (HB-276).
+   */
+  workspace?: (graphId: string, nodeId: string) => string | undefined;
   /** The artifact store a declared deliverable is published to. */
   artifacts?: (graphId: string) => ArtifactWorkspace | undefined;
   /** How many passes may make no progress before a run reports itself stuck. */
@@ -83,7 +87,7 @@ export class GraphLane {
       // fabricates a submission: the driver decides from the kernel alone whether the
       // execution is done.
       submit: () => undefined,
-      ...(this.options.workspace ? { workspace: () => this.options.workspace!(graphId) } : {}),
+      ...(this.options.workspace ? { workspace: (nodeId: string) => this.options.workspace!(graphId, nodeId) } : {}),
       ...(this.options.artifacts ? { artifacts: () => this.options.artifacts!(graphId) } : {}),
       ...(this.options.initialContext ? { initialContext: (nodeId: string) => this.options.initialContext!(graphId, nodeId) } : {}),
       ...(this.options.maxStuckPasses !== undefined ? { maxStuckPasses: this.options.maxStuckPasses } : {}),
