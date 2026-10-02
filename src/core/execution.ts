@@ -601,6 +601,10 @@ export class Execution {
     }
     if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as ExecutionNodeRow[];
     if (task.phase !== 'running') return [];
+    // §13.8: a task on the v2 kernel has a kernel revision and no old graph rows, so the old
+    // scan must leave it alone - the v2 lane owns it. Trying to load an old graph here would
+    // throw and take down the whole host tick.
+    if (this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return [];
     let nodes: ExecutionNodeRow[];
     let graph: ReturnType<typeof loadGraph>;
     while (true) {

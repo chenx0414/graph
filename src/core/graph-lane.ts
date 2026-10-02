@@ -1,6 +1,5 @@
 import type { KernelStore } from './kernel-store.ts';
 import { GraphRunner, type RunnerHost, type RunResult } from './graph-runner.ts';
-import { NodeSubmitBridge } from './node-submit-bridge.ts';
 
 /**
  * The production run hookup for the v2 kernel (Issue #1 §13.8).
@@ -20,16 +19,12 @@ export interface GraphLaneOptions {
   /**
    * Build the resident host for one NODE. §7 gives each node its own long-lived process, so
    * the lane resolves a host per node, not per graph: a host carries a node's identity and
-   * session lineage, and sharing one across nodes would share the wrong session.
+   * session lineage, and sharing one across nodes would share the wrong session. Assembling
+   * a real session (its prompt, tools and credential) is asynchronous, so this is awaited.
    */
-  host: (graphId: string, nodeId: string) => RunnerHost;
-  /** The worker entry the host spawns. */
-  workerEntry: string;
+  host: (graphId: string, nodeId: string, config: unknown) => Promise<RunnerHost> | RunnerHost;
   /** The serialized worker config, resolved per node. */
-  config: (graphId: string, nodeId: string) => unknown;
-  cwd: string;
-  /** Where the host writes its config file (must be inside a granted write root). */
-  configPath: (graphId: string, nodeId: string) => string;
+  config: (graphId: string, nodeId: string) => Promise<unknown> | unknown;
   /** The first-turn briefing text for a node. */
   initialContext?: (graphId: string, nodeId: string) => string;
   /** How many passes may make no progress before a run reports itself stuck. */
@@ -76,25 +71,13 @@ export class GraphLane {
     const runner = new GraphRunner({
       kernel,
       graphId,
-      hostFor: (nodeId: string) => this.options.host(graphId, nodeId),
-      workerEntry: this.options.workerEntry,
-      config: (nodeId: string) => this.options.config(graphId, nodeId),
-      cwd: this.options.cwd,
-      configPath: (nodeId: string) => this.options.configPath(graphId, nodeId),
-      // The node's submit runs here, in the host, where the kernel and the execution
-      // identity live: the bridge classifies a refusal and reports any missing-required
-      // gap so the next turn can ask for exactly what is missing.
-      submit: (executionId) => {
-        const execution = kernel.execution(executionId);
-        if (!execution) return { missing: [] };
-        const bridge = new NodeSubmitBridge(kernel, executionId);
-        try {
-          const receipt = bridge.submit({ outputs: {}, submissionId: `lane-${executionId}` });
-          return { missing: receipt.missingRequired };
-        } catch {
-          return { missing: [] };
-        }
-      },
+      hostFor: async (nodeId: string) => this.options.host(graphId, nodeId, await this.options.config(graphId, nodeId)),
+      // A node submits through its own `submit` tool, which the host executes over the real
+      // execution (HB-262) - so by the time this runs, the kernel already holds whatever the
+      // node submitted, and the refusal text already went back to the model. This never
+      // fabricates a submission: the driver decides from the kernel alone whether the
+      // execution is done.
+      submit: () => undefined,
       ...(this.options.initialContext ? { initialContext: (nodeId: string) => this.options.initialContext!(graphId, nodeId) } : {}),
       ...(this.options.maxStuckPasses !== undefined ? { maxStuckPasses: this.options.maxStuckPasses } : {}),
     });

@@ -29,6 +29,8 @@ import { acquireOwner } from './owner.ts';
 import { materializeGraph } from './confirm-graph.ts';
 import { KernelStore } from './kernel-store.ts';
 import { parseGraphDefinition } from './interface-spec.ts';
+import { kernelGraphLane } from '../runtime/kernel-graph-lane.ts';
+import { NodeSubmitBridge } from './node-submit-bridge.ts';
 import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
 import { applyRevision } from './revision.ts';
@@ -346,13 +348,20 @@ export async function openTaskRuntime(options: {
     graphHome: options.catalog?.capabilityRoot ? resolve(options.catalog.capabilityRoot, '..') : resolve(homedir(), '.graph'),
   });
   const liveEntries = () => options.live?.entries() ?? options.models?.entries ?? [];
+  // §13.8: the v2 kernel shares this database, so its tables must exist as soon as the
+  // runtime opens - the host loop queries them every tick, and an older database is
+  // migrated here rather than by the first graph that happens to run.
+  const kernel = new KernelStore(store);
   /**
    * The merge Agent's own credential binding, taken from the same live configuration the
    * dispatcher uses, so a merge turn never borrows a key from an unrelated model.
    */
   const liveCredentialFor = (entry: ModelEntry) => options.live
     ? options.live.credentialFor(entry)
-    : options.models?.credentialFor?.(entry);
+    : options.models?.credentialFor?.(entry)
+    // A static model configuration carries one key for every entry rather than a resolver;
+    // the v2 lane needs the same key the old adapter uses, or no node could run.
+    ?? (options.models?.apiKey ? { apiKey: options.models.apiKey } : undefined);
   /**
    * Resolve a lane collision with a real merge Agent turn.
    *
@@ -542,6 +551,33 @@ export async function openTaskRuntime(options: {
       catalog,
       git,
       artifacts,
+      // §13.8: a confirmed v2 graph runs here. The lane names the v2 graphs with queued work
+      // and drains each through the real kernel, a per-node resident host and the node's own
+      // recipe-defined session. It exists only when models are configured: without a model a
+      // node cannot run, and the graph lane must not pretend otherwise.
+      ...(options.models || options.live ? { graphs: () => kernelGraphLane({
+        kernel,
+        catalog,
+        directory: liveEntries,
+        credentialFor: liveCredentialFor,
+        instancesDir: join(stateDir, 'instances'),
+        stateDir,
+        workspaceFor: (graphId: string) => {
+          const row = store.db.prepare('SELECT p.root AS root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?').get(graphId) as { root: string } | undefined;
+          return row?.root;
+        },
+        onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) => {
+          if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
+          const execution = store.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          if (!execution) return { ok: false, text: 'no execution is running for this node' };
+          const bridge = new NodeSubmitBridge(kernel, execution.id);
+          const request = args as { outputs: Record<string, { enable?: boolean; value?: unknown }> };
+          const receipt = bridge.submit({ outputs: request.outputs ?? {}, submissionId: `v2-${execution.id}` });
+          return receipt.accepted
+            ? { ok: true, text: JSON.stringify({ accepted: true, deliveries: receipt.deliveries.length }) }
+            : { ok: false, text: bridge.refusalMessage(receipt) };
+        },
+      }).runnable() } : {}),
       scratchRoot: stateDir,
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),

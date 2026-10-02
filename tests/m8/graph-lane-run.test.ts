@@ -61,11 +61,8 @@ function fakeHost(): RunnerHost & { turns: string[] } {
 function laneFor(kernel: KernelStore, host: RunnerHost, seen?: { configs: unknown[] }) {
   return new GraphLane({
     kernel,
-    host: () => host,
-    workerEntry: 'entry.ts',
-    config: (graphId) => { seen?.configs.push(graphId); return { graphId }; },
-    cwd: '/tmp',
-    configPath: (graphId) => `/tmp/${graphId}.json`,
+    host: async (_graphId: string, nodeId: string, config: unknown) => { seen?.configs.push(nodeId); void config; return host; },
+    config: (graphId: string) => { void graphId; return {}; },
   });
 }
 
@@ -118,13 +115,15 @@ describe('GraphLane — the host loop runs a v2 graph (§13.8)', () => {
     }
   });
 
-  test('L5: the lane resolves the host and config per graph', async () => {
+  test('L5: the lane resolves the host and config per NODE, not per graph', async () => {
     const { kernel, store } = opened();
     new NodeQueue(kernel, 'g1').enqueue({ nodeId: 'a', kind: 'delivery', input: 'in', value: { go: true } as never });
     const seen = { configs: [] as unknown[] };
     const lane = laneFor(kernel, fakeHost(), seen);
     await lane.runnable()[0]!.run();
-    expect(seen.configs).toEqual(['g1']);
+    // The node the graph ran is the node whose host was resolved: §7 gives each node its
+    // own process, so a host is never shared across nodes.
+    expect(seen.configs).toEqual(['a']);
     store.close();
   });
 });

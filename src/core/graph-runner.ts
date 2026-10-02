@@ -39,11 +39,7 @@ export interface GraphRunnerOptions {
    * carries a node's identity and session lineage, and two nodes sharing one would share
    * the wrong session.
    */
-  hostFor: (nodeId: string) => RunnerHost;
-  workerEntry: string;
-  config: (nodeId: string) => unknown;
-  cwd: string;
-  configPath: (nodeId: string) => string;
+  hostFor: (nodeId: string) => RunnerHost | Promise<RunnerHost>;
   /** Runs the node's submit for one execution; returns any missing-required gap. */
   submit: (executionId: string) => { missing: string[] } | void;
   /** The first-turn briefing for a node. */
@@ -142,8 +138,9 @@ export class GraphRunner {
       if (kernel.nodeState(this.options.graphId, nodeId).paused) continue;
       if (!kernel.nextQueued(this.options.graphId, nodeId)) continue;
 
+      const nodeHost = await this.options.hostFor(nodeId);
       const driver = new NodeTurnDriver({
-        kernel, graphId: this.options.graphId, nodeId, host: this.options.hostFor(nodeId),
+        kernel, graphId: this.options.graphId, nodeId, host: nodeHost,
         initialContext: () => this.options.initialContext ? this.options.initialContext(nodeId) : '',
         submit: (executionId) => {
           const execution = kernel.execution(executionId);
@@ -156,9 +153,7 @@ export class GraphRunner {
         },
       });
       const executor = new NodeExecutor({
-        kernel, graphId: this.options.graphId, host: this.options.hostFor(nodeId),
-        workerEntry: this.options.workerEntry, config: this.options.config(nodeId),
-        cwd: this.options.cwd, configPath: this.options.configPath(nodeId),
+        kernel, graphId: this.options.graphId, host: nodeHost,
       });
       await executor.runNode(nodeId, (executionId, attempt, injection) => driver.run(executionId, attempt, injection));
     }

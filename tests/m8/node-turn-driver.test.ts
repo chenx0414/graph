@@ -207,7 +207,7 @@ describe('NodeExecutor + NodeTurnDriver + real kernel — the composed path (HB-
         return { missing: bridge.submit({ outputs: { out: { enable: true, value: { n: 5 } } }, submissionId: `s-${executionId}` }).missingRequired };
       },
     });
-    const executor = new NodeExecutor({ kernel, graphId: 'g1', host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json' });
+    const executor = new NodeExecutor({ kernel, graphId: 'g1', host });
 
     const outcome = await executor.runNode('a', (executionId, attempt, injection) => driver.run(executionId, attempt, injection));
 

@@ -121,11 +121,8 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
 
     const lane = new GraphLane({
       kernel,
-      host: (_graphId, nodeId) => hostFor(nodeId),
-      workerEntry,
+      host: async (_graphId: string, nodeId: string) => hostFor(nodeId),
       config: () => ({}),
-      cwd: workspace,
-      configPath: (_graphId, nodeId) => join(dir, `worker-${nodeId}.json`),
       initialContext: (_graphId, nodeId) => `Graph node ${nodeId}. Submit the required output.`,
     });
 

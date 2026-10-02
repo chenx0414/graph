@@ -61,7 +61,7 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
     queue.enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: { go: true } as never });
 
     const host = fakeHost();
-    const exec = new NodeExecutor({ kernel, graphId, host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json' });
+    const exec = new NodeExecutor({ kernel, graphId, host });
     const outcome = await exec.runNode('n1', async (executionId, attempt) => {
       if (attempt === 1) kernel.submit(executionId, { outputs: { out: { enable: true, value: { ok: true } } }, submissionId: 's1' });
     });
@@ -82,7 +82,7 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
 
     const host = fakeHost();
     let turns = 0;
-    const exec = new NodeExecutor({ kernel, graphId, host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json' });
+    const exec = new NodeExecutor({ kernel, graphId, host });
     // Three attempts, none submit.
     const outcome = await exec.runNode('n1', async () => { turns += 1; });
 
@@ -101,7 +101,7 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
 
     const host = fakeHost();
     const injections: string[][] = [];
-    const exec = new NodeExecutor({ kernel, graphId, host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json' });
+    const exec = new NodeExecutor({ kernel, graphId, host });
     const outcome = await exec.runNode('n1', async (executionId, attempt, injection) => {
       if (injection) injections.push(injection.missing);
       // First two turns report the same missing-required gap; the resubmit budget is 1.
@@ -125,7 +125,7 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
     const host = fakeHost();
     let running = 0;
     let maxRunning = 0;
-    const exec = new NodeExecutor({ kernel, graphId, host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json' });
+    const exec = new NodeExecutor({ kernel, graphId, host });
     const outcome = await exec.runNode('n1', async (executionId) => {
       running += 1; maxRunning = Math.max(maxRunning, running);
       kernel.submit(executionId, { outputs: { out: { enable: true, value: { ok: true } } }, submissionId: `s-${executionId}` });
@@ -147,7 +147,7 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
 
     const host = fakeHost(false); // the process is dead before the first turn
     const seen: string[] = [];
-    const exec = new NodeExecutor({ kernel, graphId, host, workerEntry: 'x', config: {} as never, cwd: '/tmp', configPath: '/tmp/cfg.json' });
+    const exec = new NodeExecutor({ kernel, graphId, host });
     const outcome = await exec.runNode('n1', async (executionId, attempt) => {
       seen.push(executionId);
       if (attempt === 1) return; // crash before submitting

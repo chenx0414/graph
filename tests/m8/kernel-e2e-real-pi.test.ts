@@ -134,7 +134,7 @@ describe('§14 E2E — a real Pi process drives a real execution into a real ker
         return { missing: bridge.submit({ outputs: {}, submissionId: `j-${executionId}` }).missingRequired };
       },
     });
-    const executor = new NodeExecutor({ kernel, graphId: 'g1', host, workerEntry, config: {} as never, cwd: workspace, configPath });
+    const executor = new NodeExecutor({ kernel, graphId: 'g1', host });
 
     const outcome = await executor.runNode('a', (executionId, attempt, injection) => driver.run(executionId, attempt, injection));
 

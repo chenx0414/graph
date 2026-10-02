@@ -44,11 +44,9 @@ export type TurnRunner = (
 export interface NodeExecutorOptions {
   kernel: KernelStore;
   graphId: string;
+  /** The node's resident host. The host owns the worker config and the process, so the
+   * executor does not carry them: spawning is not its business (Issue #1 §7). */
   host: ExecutorHost;
-  workerEntry: string;
-  config: unknown;
-  cwd: string;
-  configPath: string;
 }
 
 export type NodeOutcome = 'done' | 'failed' | 'idle';
