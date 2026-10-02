@@ -21,7 +21,6 @@ import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, NodeSpec , Proposal } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -81,11 +80,11 @@ test('a full-access check creates a repository with the git its own PATH resolve
   });
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Run the check',
     acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }],
     nodes: nodes.map(node => node.id === 'check' ? { ...node, input: { command: 'node', args: ['scripts/mkrepo.mjs'] } } : node),
-  } as Proposal), 'proposal');
+  }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();

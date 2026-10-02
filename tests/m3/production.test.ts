@@ -24,7 +24,7 @@ const proposal = (requirementVersion: number): Proposal => withLiftedDefinition(
     { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['master'] },
     { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
   ],
-} as Proposal);
+});
 
 test('a production master receives tools, proposes a graph, and wakes on a later user message', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-master-'));
@@ -123,14 +123,14 @@ test('a production Pi session may exceed a single-call reservation without block
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
@@ -156,14 +156,14 @@ test('unknown usage on a production request blocks the next provider call', asyn
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
   const view = await runtime.user.task(taskId).view();
@@ -189,14 +189,14 @@ test('reconciling unknown usage accumulates the known calls and applies the resu
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
   const blocked = await runtime.user.task(taskId).view();
@@ -230,14 +230,14 @@ test('a production request that exceeds the budget cannot send a follow-up call'
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
   expect(provider.requests).toHaveLength(1);
@@ -260,14 +260,14 @@ test('a production worker receives the task graph with the check commands', asyn
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--test', 'test/specific.test.js'] } },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   const prompt = JSON.stringify(provider.requests[0]);
@@ -299,7 +299,7 @@ test('a production reviewer receives the independent review report schema', asyn
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
@@ -308,7 +308,7 @@ test('a production reviewer receives the independent review report schema', asyn
       { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'reader', dependsOn: ['check'] },
       { id: 'review-gate', kind: 'program', action: 'graph.verify', dependsOn: ['review'], verifier: { kind: 'independent', reportNodes: ['review'] } },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   const reviewRequest = provider.requests.map(request => JSON.stringify(request)).find(text => text.includes('graph.verify independent gate'));
@@ -337,14 +337,14 @@ test('a production worker writes the workspace through tools', async () => {
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Write the feature', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   const view = await runtime.user.task(taskId).view();

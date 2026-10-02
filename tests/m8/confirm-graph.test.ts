@@ -11,7 +11,6 @@ import { materializeGraph } from '../../src/core/confirm-graph.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import type { ActionAdapter, Operation, OperationResult , Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -80,8 +79,13 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     // A display-only row would have no instance id and the executor could not run it.
     const a = s.db.prepare("SELECT instance_id FROM kernel_nodes WHERE task_id='t1' AND node_id='a'").get() as { instance_id: string | null };
     expect(a.instance_id).toBeTruthy();
-    // The queue is empty but the node is live: GraphRunner can enqueue and drain it.
-    expect(kernel.nextQueued('t1', 'a')).toBeNull();
+    // The entry node is queued at materialisation. This used to assert the opposite -
+    // "the queue is empty but the node is live" - on the belief that GraphRunner would
+    // enqueue it. Nothing did: GraphLane.runnable() only names graphs holding a queued
+    // item, so a confirmed graph with no incoming edge sat forever with every node idle.
+    const queued = kernel.nextQueued('t1', 'a');
+    expect(queued).not.toBeNull();
+    expect(queued!.kind).toBe('start');
     expect(kernel.nodeState('t1', 'a').paused).toBe(false);
   });
 
@@ -132,12 +136,12 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
 
     // The draft carries a v2 definition and empty old-shaped nodes: the definition is
     // the graph, so nothing old-shaped is required.
-    await runtime.supervisor(anchorTaskId).propose(withLiftedDefinition({
+    await runtime.supervisor(anchorTaskId).propose({
       requirementVersion: 1, summary: '两节点链',
       acceptance: [{ id: 'works', description: '链跑通', checkNode: 'b' }],
       nodes: [],
       definition: DEFINITION,
-    } as Proposal), 'proposal-v2');
+    }, 'proposal-v2');
 
     const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
 

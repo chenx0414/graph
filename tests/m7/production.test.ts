@@ -11,7 +11,6 @@ import { passingReviewAction } from '../fixtures/review-gate.ts';
 import { mediaBookmarksActions } from './adapters.ts';
 import { cloneMediaBookmarks, mediaBookmarksSource } from './clone.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -63,7 +62,7 @@ test('production Pi writes the Bilibili web on a clone through workspace tools a
     request: '为本机 MediaBookmarks 增加 B站 Web：确认登录、采集、进度与失败原因、浏览收藏和笔记、导出 Markdown。',
     requestId: 'begin',
   });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: '本机 Web 复用 CLI：B站登录态、采集进度与失败原因、收藏与笔记、Markdown 导出。采集使用项目内 .browser-profile，禁止并发采集，不共享日常 Chrome。',
     acceptance: [
@@ -80,7 +79,7 @@ test('production Pi writes the Bilibili web on a clone through workspace tools a
       { id: 'review-gate', kind: 'program', action: 'graph.verify', dependsOn: ['review'], verifier: { kind: 'independent', reportNodes: ['review'] } },
       { id: 'login', kind: 'program', action: 'graph.human_check', dependsOn: ['review-gate'] },
     ],
-  } as Proposal), 'm7-prod-plan');
+  }, 'm7-prod-plan');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();

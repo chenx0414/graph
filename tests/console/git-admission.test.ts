@@ -5,7 +5,6 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter , Proposal } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -42,14 +41,14 @@ async function runtimeFor(rootPath: string, actions: Record<string, ActionAdapte
 
 async function taskFor(runtime: Awaited<ReturnType<typeof runtimeFor>>) {
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Work', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   return { taskId, task: runtime.user.task(taskId), proposalVersion: proposed.proposalVersion };
 }
 

@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { NodeSpec , Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
@@ -34,9 +33,9 @@ test('the master shares ten global slots, releases its slot while waiting, and r
   const task = runtime.user.task(taskId);
   const agents: NodeSpec[] = [{ id: 'master', kind: 'agent', role: 'master', action: 'master', model: 'scripted', definitionVersion: 'master@1' },
     ...Array.from({ length: 11 }, (_, i): NodeSpec => ({ id: `worker-${i}`, kind: 'agent', action: 'worker', model: 'scripted', definitionVersion: 'worker@1' }))];
-  const proposal = await runtime.supervisor(taskId).propose(withLiftedDefinition({ requirementVersion: 1, summary: 'Parallel work', acceptance: [{ id: 'works', description: 'All work checked', checkNode: 'check' }],
+  const proposal = await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'Parallel work', acceptance: [{ id: 'works', description: 'All work checked', checkNode: 'check' }],
     nodes: [...agents, { id: 'check', kind: 'program', action: 'check', dependsOn: agents.map(node => node.id) }],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   const first = runtime.host.runReady();
   await nineWorkers.promise;
@@ -69,7 +68,7 @@ test('resolving the final blocker completes the task and durably advances the qu
   cleanup.push(() => runtime.close());
   const create = async (requestId: string, nodes: NodeSpec[]) => {
     const { taskId } = await runtime.user.begin({ projectId: 'project', request: requestId, requestId });
-    const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({ requirementVersion: 1, summary: requestId, acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes } as Proposal), 'proposal');
+    const proposed = await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: requestId, acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes }, 'proposal');
     const task = runtime.user.task(taskId);
     await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: `accept-${requestId}` });
     return task;

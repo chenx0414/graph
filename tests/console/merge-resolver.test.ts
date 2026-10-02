@@ -13,7 +13,6 @@ import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import type { ModelEntry } from '../../src/catalog/models.ts';
 import type { AgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -143,7 +142,7 @@ test('a runtime with models configured builds a merge resolver of its own, and a
   cleanup.push(() => runtime.close());
   await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'collide', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'collide',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [
@@ -151,7 +150,7 @@ test('a runtime with models configured builds a merge resolver of its own, and a
       { id: 'lane2', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['lane1', 'lane2'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
 
@@ -221,7 +220,7 @@ async function collidingRuntime(name: string, options2: { defaultBudgetTokens?: 
   }
   await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'collide', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'collide',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [
@@ -229,7 +228,7 @@ async function collidingRuntime(name: string, options2: { defaultBudgetTokens?: 
       { id: 'lane2', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['lane1', 'lane2'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   const events = (type: string) => (store.db.prepare('SELECT data FROM events WHERE task_id=? AND type=? ORDER BY cursor')

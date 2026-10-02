@@ -8,7 +8,6 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -68,14 +67,14 @@ async function retrievalTask(plans: ResponsePlan[], network: { retrievalDomains?
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Research the API.', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Research the API',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   return { runtime, provider, workspace, task };

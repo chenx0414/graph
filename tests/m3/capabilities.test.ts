@@ -15,7 +15,6 @@ import { capabilityConfigViews } from '../../src/catalog/capability-config.ts';
 import { loadCapabilities } from '../../src/runtime/capabilities.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -110,14 +109,14 @@ async function installCapability(
 
 async function checkedTask(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, workspace: string) {
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Use the bound capability.', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Use the bound capability',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   return runtime.user.task(taskId);
 }

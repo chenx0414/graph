@@ -7,7 +7,6 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { installPresets, loadPresetBootstrap } from '../../src/catalog/presets.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -40,14 +39,14 @@ async function runtimeAt(root: string, provider?: Awaited<ReturnType<typeof open
 async function taskFor(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, workspace: string) {
   await writeFile(join(workspace, 'note.txt'), 'bootstrap prompt test\n');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Use bootstrap', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Use bootstrap',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   return runtime.user.task(taskId);
 }

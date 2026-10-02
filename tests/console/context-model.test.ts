@@ -26,7 +26,6 @@ import {
 } from '../../src/core/predecessor-handoff.ts';
 import type { NodeSpec, Operation, Proposal } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -173,7 +172,7 @@ test('a fork creates a new session from the source leaf and shares its budget sc
   await installPresets(runtime.catalog, presetsRoot);
 
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'fork exact state', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: 'Fork the exact implementation state for exploration.',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -191,7 +190,7 @@ test('a fork creates a new session from the source leaf and shares its budget sc
       },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work', 'explore'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
 
@@ -275,7 +274,7 @@ test('a result_handoff edge injects the predecessor work summary into the next F
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'result handoff pipeline', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: 'Carry the first implementation result into the next Fresh Agent.',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -286,7 +285,7 @@ test('a result_handoff edge injects the predecessor work summary into the next F
       },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
 
@@ -441,7 +440,7 @@ test('a required result_handoff fails closed before the downstream Fresh Agent i
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'missing handoff', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: 'Reject a pipeline whose predecessor omits its result handoff.',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -453,7 +452,7 @@ test('a required result_handoff fails closed before the downstream Fresh Agent i
       },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
 
@@ -657,7 +656,7 @@ test('workspace-relative file changes in a result_handoff are resolved and verif
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'relative handoff', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: 'A worker may name its own work copy files with workspace-relative paths.',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -669,7 +668,7 @@ test('workspace-relative file changes in a result_handoff are resolved and verif
       },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
 
@@ -724,7 +723,7 @@ test('a fork fails closed when the source policy digest no longer matches', asyn
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'policy mismatch', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: 'Reject a fork whose source policy changed.',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -737,7 +736,7 @@ test('a fork fails closed when the source policy digest no longer matches', asyn
       },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work', 'explore'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
 
@@ -906,7 +905,7 @@ test('a runtime context rejection is visible as an event and does not send the r
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'reject fork', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: 'Reject a fork that changes the Agent definition without rebrand.',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -919,7 +918,7 @@ test('a runtime context rejection is visible as an event and does not send the r
       },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['source', 'rejected'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
 

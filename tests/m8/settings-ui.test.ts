@@ -8,7 +8,6 @@ import { build } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -445,14 +444,14 @@ test('removing a model bound to an unfinished task is refused and the daemon kee
   const daemon = await start(dir, path);
   const api = await session(daemon.url);
   const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'sample', request: 'Keep binding', requestId: 'begin' });
-  await daemon.server.runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await daemon.server.runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Keep binding',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   expect(daemon.server.runtime.modelsInUse()).toContain('local');
   const document = {

@@ -21,6 +21,8 @@ export interface MaterializedGraph {
   definition: GraphDefinition;
   nodeIds: string[];
   moduleIds: string[];
+  /** The entry nodes queued at materialisation, so the graph has somewhere to start. */
+  roots: string[];
 }
 
 export function materializeGraph(
@@ -52,5 +54,26 @@ export function materializeGraph(
     kernel.admitModule(taskId, revision.version, moduleId, { moduleType: declared.type, trigger: declared.trigger });
   }
 
-  return { revision: { version: revision.version }, definition: revision.definition, nodeIds, moduleIds };
+  // A graph with no incoming edge has nothing to trigger it, so its entry nodes are queued
+  // here. Without this a confirmed v2 graph is admitted and then sits forever with every
+  // node idle: `GraphLane.runnable()` only names graphs holding a queued item, and nothing
+  // else ever enqueues one. An edge arriving later routes normally - this only seeds what
+  // nothing else would start.
+  const targeted = new Set(
+    Object.values(revision.definition.edges)
+      .flatMap(edge => [edge.from.split('.')[0]!, edge.to.split('.')[0]!]),
+  );
+  const roots = nodeIds.filter(nodeId => !targeted.has(nodeId));
+  if (roots.length === 0 && nodeIds.length > 0) {
+    // A cycle has no entry point by definition; start from the first admitted node so the
+    // graph is runnable and the cycle surfaces as work rather than as silence.
+    roots.push(nodeIds[0]!);
+  }
+  for (const nodeId of roots) {
+    // Not `kernel.enqueue`, which opens its own transaction: materialisation already runs
+    // inside the caller's (see the note above), and nesting a second BEGIN aborts it.
+    kernel.enqueueInCurrentTransaction(taskId, { nodeId, kind: 'start', payload: {} as never });
+  }
+
+  return { revision: { version: revision.version }, definition: revision.definition, nodeIds, moduleIds, roots };
 }

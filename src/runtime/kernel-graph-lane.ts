@@ -5,6 +5,7 @@ import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import { GraphLane } from '../core/graph-lane.ts';
+import type { RunnerHost } from '../core/graph-runner.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { ResidentHost } from './resident-host.ts';
 import { nodeSessionRequest, type NodeSessionRequest } from './kernel-node-host.ts';
@@ -55,6 +56,22 @@ export interface KernelGraphLaneOptions {
    * where the execution identity lives, so the model can never forge it.
    */
   onToolCall?: (graphId: string, nodeId: string, name: string, args: unknown) => { ok: boolean; text: string } | Promise<{ ok: boolean; text: string }>;
+  /**
+   * A scripted stand-in for a node's real Pi process.
+   *
+   * §7's lane is otherwise unreachable without a configured model and credential: `config`
+   * resolves a real session and `host` starts a real resident process. That is right in
+   * production and useless in a test - most of the suite drives nodes through a scripted
+   * ActionAdapter and configures no model at all, so a v2 graph could be created but never
+   * ran. This seam lets a test run a v2 graph end to end without inventing a provider.
+   *
+   * It is deliberately NOT a second execution path: the scripted host submits through the
+   * same `onToolCall` and the same NodeSubmitBridge, so the kernel settles the submission,
+   * checks the required outputs and advances the graph exactly as a real turn would. Only
+   * the process that produces the tool call is replaced.
+   */
+  scriptedTurn?: (graphId: string, nodeId: string, text: string, turn: number) =>
+    { outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] } | Promise<{ outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] }>;
 }
 
 /** The first configured model of the grade a definition recommends. */
@@ -106,6 +123,22 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     sessions.set(key, session);
     return session;
   };
+
+  const turns = new Map<string, number>();
+  const scriptedHost = (graphId: string, nodeId: string): RunnerHost => ({
+    start: async () => ({ processId: 0 }),
+    alive: () => true,
+    turn: async (text: string) => {
+      const turn = (turns.get(nodeId) ?? 0) + 1;
+      turns.set(nodeId, turn);
+      const scripted = await options.scriptedTurn!(graphId, nodeId, text, turn);
+      // The submission travels the real path: onToolCall -> NodeSubmitBridge -> kernel.
+      const result = options.onToolCall
+        ? await options.onToolCall(graphId, nodeId, 'submit', { outputs: scripted.outputs ?? {} })
+        : { ok: false, text: 'the lane has no tool channel' };
+      return { turnId: `scripted-${nodeId}-${turn}`, inspect: { ...result, missing: scripted.missing ?? [] } };
+    },
+  });
 
   return new GraphLane({
     kernel: options.kernel,
@@ -166,5 +199,12 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       hosts.set(nodeId, host);
       return host;
     },
+    // The scripted stand-ins go LAST so they win: `config` above resolves a real session
+    // and throws without a configured model, which is exactly what a scripted node must
+    // not need. Spreading them earlier would be silently overridden by the real ones.
+    ...(options.scriptedTurn ? {
+      host: (graphId: string, nodeId: string) => scriptedHost(graphId, nodeId),
+      config: (graphId: string, nodeId: string) => ({ nodeId, graphId, scripted: true }),
+    } : {}),
   });
 }

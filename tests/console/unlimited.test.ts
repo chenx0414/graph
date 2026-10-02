@@ -5,7 +5,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter , Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -17,14 +16,14 @@ async function setup(actions: Record<string, ActionAdapter>, limits?: { defaultB
   const runtime = await openTaskRuntime(options);
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Unlimited work', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Unlimited',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   return { root, options, runtime, taskId, task: runtime.user.task(taskId) };
 }

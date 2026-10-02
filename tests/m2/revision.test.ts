@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, NodeSpec, Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -18,10 +17,10 @@ async function setup(actions: Record<string, ActionAdapter>, nodes: NodeSpec[], 
   const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions, limits: { defaultBudgetTokens: 20_000_000 } };
   const runtime = await openTaskRuntime(options); cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Revise the graph', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Revise the graph',
     acceptance: extra.acceptance ?? [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes, ...extra,
-  } as Proposal), 'proposal');
+  }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   return { root, runtime, task, taskId, options, supervisor: runtime.supervisor(taskId) };

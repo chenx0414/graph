@@ -101,7 +101,9 @@ describe('§13.8 E2E — a confirmed v2 graph runs to completion on the host loo
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
     cleanup.push(() => store.close());
     const kernel = new KernelStore(store);
-    kernel.enqueue(confirmed.taskId, { nodeId: 'a', kind: 'delivery', payload: { go: true } as never });
+    // No manual enqueue: materialisation now queues the graph's entry nodes itself. A
+    // graph with no incoming edge has nothing else to start it, so this is product
+    // behaviour, not a test convenience - adding a delivery here would run node `a` twice.
 
     // The loop: pump repeatedly until the graph is drained. `pump()` is the production tick
     // (host.ts drives it every 40ms), so this runs the same path the product does.

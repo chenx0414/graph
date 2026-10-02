@@ -7,7 +7,6 @@ import { chromium, type Page } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -76,14 +75,14 @@ test('the node detail shows the system prompt and briefing the subagent really r
   cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const begun = await server.runtime.user.begin({ projectId: 'p', request: '看 subagent 的提示词', requestId: 'begin' });
-  await server.runtime.supervisor(begun.taskId).propose(withLiftedDefinition({
+  await server.runtime.supervisor(begun.taskId).propose({
     requirementVersion: 1, summary: '节点的提示词',
     acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
     nodes: [
       { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', input: { files: ['src/a.ts'], focus: '写下结果' } },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await server.runtime.user.task(begun.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await server.runtime.host.drive();
   await waitFor(() => provider.requests.length >= 1, 30_000);

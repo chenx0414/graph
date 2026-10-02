@@ -553,9 +553,11 @@ export async function openTaskRuntime(options: {
       artifacts,
       // §13.8: a confirmed v2 graph runs here. The lane names the v2 graphs with queued work
       // and drains each through the real kernel, a per-node resident host and the node's own
-      // recipe-defined session. It exists only when models are configured: without a model a
-      // node cannot run, and the graph lane must not pretend otherwise.
-      ...(options.models || options.live ? { graphs: () => kernelGraphLane({
+      // recipe-defined session. It exists when models are configured - without a model a
+      // node cannot run - or when the caller supplied scripted actions, which stand in for
+      // the node's process (see `scriptedTurn`). The scripted path still submits through
+      // the real bridge and kernel, so it exercises settlement rather than faking it.
+      ...(options.models || options.live || options.actions ? { graphs: () => kernelGraphLane({
         kernel,
         catalog,
         directory: liveEntries,
@@ -568,6 +570,26 @@ export async function openTaskRuntime(options: {
           const row = store.db.prepare('SELECT p.root AS root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?').get(graphId) as { root: string } | undefined;
           return row?.root;
         },
+        ...(options.actions && !(options.models || options.live) ? {
+          scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number) => {
+            // The test drives the node with its own ActionAdapter: the same one the old
+            // executor used, so a migrated test keeps the result it was written to expect.
+            const adapter = options.actions![nodeId] ?? options.actions![nodeId.replace(/-/g, '')];
+            if (!adapter) return { missing: ['out'] };
+            const operation = store.db.prepare("SELECT spec FROM kernel_nodes WHERE task_id=? AND node_id=?").get(graphId, nodeId) as { spec: string } | undefined;
+            const prepared = await adapter.prepare({
+              nodeId, instanceId: nodeId, turn, action: nodeId, attempt: turn, kind: 'agent',
+              ...(operation ? { input: JSON.parse(operation.spec) } : {}),
+            } as never);
+            const result = await prepared();
+            const output = (result as { output?: unknown }).output;
+            const value = output === null || output === undefined
+              ? { text: `${nodeId} done` }
+              : (typeof output === 'object' ? output as Record<string, unknown> : { text: String(output) });
+            const accepted = result.outcome === 'completed';
+            return { outputs: accepted ? { out: { enable: true, value } } : {}, missing: accepted ? [] : ['out'] };
+          },
+        } : {}),
         onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) => {
           if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
           const execution = store.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
@@ -794,6 +816,13 @@ export async function openTaskRuntime(options: {
             if (task.accepted_proposal !== null) throw new RuntimeError('already_accepted', 'Task already has confirmed requirements');
             if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
             const proposal = JSON.parse(row.spec) as Proposal;
+            // §13.8 switchover: a draft carrying a v2 graph definition creates a v2 graph.
+            // Only the conversation confirm path did this, so a task confirmed through this
+            // entry point - which is what the HTTP API uses - wrote old declarative rows even
+            // for a v2 draft, and the graph never reached the kernel.
+            if (proposal.definition) {
+              materializeGraph(new KernelStore(store), taskId, parseGraphDefinition(proposal.definition), 'Confirmed task graph');
+            } else {
             store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,?,?,?,?)').run(taskId, 1, row.spec, 'Confirmed task graph', 0);
             for (const node of proposal.nodes) {
               const existing = store.db.prepare('SELECT instance_id FROM nodes WHERE task_id=? AND id=?').get(taskId, node.id) as { instance_id: string | null } | undefined;
@@ -805,6 +834,7 @@ export async function openTaskRuntime(options: {
               store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
               if (instanceId) insertInstance(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
               createActivation(store, taskId, node.id, 1);
+            }
             }
             const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
             const phase = !active_task || active_task === taskId ? 'running' : 'queued';

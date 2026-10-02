@@ -12,7 +12,6 @@ import { openRestrictedExecutor } from '../../src/runtime/restricted-process.ts'
 import { git as runGit } from '../../src/git/git.ts';
 import type { ActionAdapter, Operation , Proposal } from '../../src/core/types.ts';
 import { withIndependentReview } from '../fixtures/review-gate.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -75,11 +74,11 @@ test('duplicate commands and reports do not double-merge or change a settled res
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const first = await runtime.user.begin({ projectId: 'project', request: 'Idempotent merge', requestId: 'begin' });
   expect(await runtime.user.begin({ projectId: 'project', request: 'Idempotent merge', requestId: 'begin' })).toEqual(first);
-  const proposed = await runtime.supervisor(first.taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(first.taskId).propose({
     requirementVersion: 1, summary: 'Idempotent merge',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: reviewed.nodes,
-  } as Proposal), 'proposal');
+  }, 'proposal');
   const task = runtime.user.task(first.taskId);
   const accepted = await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   expect(await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' })).toEqual(accepted);
@@ -117,11 +116,11 @@ test('unknown usage after a git write waits for the user and does not replay the
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Unknown usage', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Unknown usage',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: reviewed.nodes,
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
   const blocked = await runtime.user.task(taskId).view();

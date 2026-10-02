@@ -6,7 +6,6 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { git } from '../../src/git/git.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -61,7 +60,7 @@ async function fixture(name: string, resolve: (input: { prompt: string; workspac
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'collide', requestId: 'begin' });
   // Two lanes must be admitted together; the sequential requirement here is the merge order,
   // not the dispatch order, so the check waits for both.
-  await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  await runtime.supervisor(taskId).propose({
     requirementVersion: 1,
     summary: 'collide',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
@@ -70,7 +69,7 @@ async function fixture(name: string, resolve: (input: { prompt: string; workspac
       { id: 'lane2', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm', input: { files: ['shared.ts'] } },
       { id: 'check', kind: 'program', action: 'check', dependsOn: ['lane1', 'lane2'] },
     ],
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   // The ledger of what happened is durable state, so it is read the same way a recovery test does.

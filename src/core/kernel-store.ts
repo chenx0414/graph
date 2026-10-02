@@ -468,6 +468,17 @@ export class KernelStore {
   // ---- node queue and per-node retry state (§7) -------------------------------
 
   /** Append one input to a node's serial queue. Returns the accepted row. */
+  /**
+   * `enqueue` without its own transaction, for callers already inside one (materialisation
+   * runs inside the confirmation's transaction; nesting a second BEGIN aborts it).
+   */
+  enqueueInCurrentTransaction(taskId: string, input: { nodeId: string; kind: string; payload: Json }): QueueRow {
+    const createdAt = Date.now();
+    const result = this.store.db.prepare('INSERT INTO kernel_queue(task_id,node_id,kind,payload,state,created_at) VALUES(?,?,?,?,?,?)')
+      .run(taskId, input.nodeId, input.kind, canonicalJson(input.payload), 'queued', createdAt);
+    return { seq: Number(result.lastInsertRowid), taskId, nodeId: input.nodeId, kind: input.kind, payload: input.payload, state: 'queued' as const, createdAt };
+  }
+
   enqueue(taskId: string, input: { nodeId: string; kind: string; payload: Json }): QueueRow {
     return this.store.transaction(() => {
       const createdAt = Date.now();

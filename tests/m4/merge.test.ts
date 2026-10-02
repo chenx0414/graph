@@ -7,7 +7,6 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter, NodeSpec , Proposal } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { passingReviewAction, withIndependentReview } from '../fixtures/review-gate.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -33,10 +32,10 @@ async function start(root: string, actions: Record<string, ActionAdapter>, nodes
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Merge', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Merge',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: reviewed.nodes,
-  } as Proposal), 'proposal');
+  }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   return { runtime, task, taskId };
@@ -126,11 +125,11 @@ test('a merge already present on the target is treated as complete after restore
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Restore merge', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(withLiftedDefinition({
+  const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Restore merge',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
     nodes: reviewed.nodes,
-  } as Proposal), 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.runReady();
   const view = await runtime.user.task(taskId).view();
