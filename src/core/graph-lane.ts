@@ -1,4 +1,5 @@
 import type { KernelStore } from './kernel-store.ts';
+import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { GraphRunner, type RunnerHost, type RunResult } from './graph-runner.ts';
 
 /**
@@ -27,6 +28,10 @@ export interface GraphLaneOptions {
   config: (graphId: string, nodeId: string) => Promise<unknown> | unknown;
   /** The first-turn briefing text for a node. */
   initialContext?: (graphId: string, nodeId: string) => string;
+  /** The node's workspace, where a declared deliverable must exist. */
+  workspace?: (graphId: string) => string | undefined;
+  /** The artifact store a declared deliverable is published to. */
+  artifacts?: (graphId: string) => ArtifactWorkspace | undefined;
   /** How many passes may make no progress before a run reports itself stuck. */
   maxStuckPasses?: number;
 }
@@ -78,6 +83,8 @@ export class GraphLane {
       // fabricates a submission: the driver decides from the kernel alone whether the
       // execution is done.
       submit: () => undefined,
+      ...(this.options.workspace ? { workspace: () => this.options.workspace!(graphId) } : {}),
+      ...(this.options.artifacts ? { artifacts: () => this.options.artifacts!(graphId) } : {}),
       ...(this.options.initialContext ? { initialContext: (nodeId: string) => this.options.initialContext!(graphId, nodeId) } : {}),
       ...(this.options.maxStuckPasses !== undefined ? { maxStuckPasses: this.options.maxStuckPasses } : {}),
     });

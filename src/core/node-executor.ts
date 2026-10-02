@@ -1,5 +1,7 @@
 import type { KernelStore } from './kernel-store.ts';
+import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { NodeQueue } from './node-queue.ts';
+import { settleDeliverable } from './node-deliverable.ts';
 import { RuntimeError } from './types.ts';
 
 /**
@@ -47,6 +49,10 @@ export interface NodeExecutorOptions {
   /** The node's resident host. The host owns the worker config and the process, so the
    * executor does not carry them: spawning is not its business (Issue #1 §7). */
   host: ExecutorHost;
+  /** The node's workspace, where a declared deliverable must exist. */
+  workspace?: () => string | undefined;
+  /** The artifact store a declared deliverable is published to. */
+  artifacts?: () => ArtifactWorkspace | undefined;
 }
 
 export type NodeOutcome = 'done' | 'failed' | 'idle';
@@ -110,6 +116,11 @@ export class NodeExecutor {
       // A submit that landed in the kernel is the success signal, whatever the
       // turn reported: the node writes its outputs through the submission surface.
       if (this.hasValidSubmission(executionId)) {
+        // A node's deliverable is a promise about a file, and the promise is settled with
+        // the submission: a file that was never written, or that is empty, must fail the
+        // node here rather than let it pass with the work missing.
+        const settled = await this.settleDeliverable(executionId, nodeId);
+        if (!settled.ok) return this.fail(executionId, nodeId, seq, settled.reason);
         this.kernel.finishExecution(executionId, 'completed');
         this.queue.complete(seq, { kind: 'submitted' });
         return 'done';
@@ -134,6 +145,30 @@ export class NodeExecutor {
         return this.fail(executionId, nodeId, seq, `no valid submission after ${attempt} attempt(s)`);
       }
     }
+  }
+
+  /**
+   * Settle the node's deliverable promise, if it made one.
+   *
+   * A node that declared no deliverable, or a runtime with no artifact store or workspace
+   * wired yet, settles as a promise kept: the absence of the machinery must not fail work
+   * that made no promise. Once a promise IS declared, the file has to be there.
+   */
+  private async settleDeliverable(executionId: string, nodeId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const workspace = this.options.workspace?.();
+    const artifacts = this.options.artifacts?.();
+    if (!workspace || !artifacts) return { ok: true };
+    const execution = this.kernel.execution(executionId);
+    if (!execution) return { ok: true };
+    return settleDeliverable({
+      kernel: this.kernel,
+      artifacts,
+      graphId: this.graphId,
+      nodeId,
+      revisionVersion: execution.revisionVersion,
+      executionId,
+      workspace,
+    });
   }
 
   private fail(executionId: string, nodeId: string, seq: number, reason: string): NodeOutcome {

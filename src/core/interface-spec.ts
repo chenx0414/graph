@@ -44,6 +44,20 @@ export interface NodeDefinition extends NodeInterface {
   acceptance?: string[];
   /** Required outputs a submission must enable:true (§4). */
   submission: { required?: string[]; requiredAnyOf?: string[] };
+  /**
+   * A file this node promises to produce. The kernel publishes it as a task-scope
+   * artifact when the node's execution completes, so the promise does not depend on the
+   * node remembering a tool call, and a declared file that was never written (or is
+   * empty) fails the node instead of passing silently.
+   */
+  deliverable?: {
+    /** Path relative to the node's workspace; it may not escape it. */
+    path: string;
+    namespace: 'plans' | 'research' | 'reviews' | 'deliverables' | 'summaries';
+    name: string;
+    title?: string;
+    summary?: string;
+  };
 }
 
 export interface ModuleDefinition {
@@ -172,6 +186,23 @@ function validateNode(definition: GraphDefinition, id: string, node: NodeDefinit
   }
   for (const anyOf of node.submission?.requiredAnyOf ?? []) {
     if (!node.outputs?.[anyOf]) invalid(`Node ${id} requiredAnyOf names undeclared output ${anyOf}`);
+  }
+  // A deliverable is a promise about a real file, so an unusable declaration must be
+  // refused at creation rather than discovered as a failure minutes later.
+  if (node.deliverable !== undefined) {
+    const d = node.deliverable;
+    if (!d || typeof d !== 'object') invalid(`Node ${id} deliverable must be an object`);
+    const slug = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
+    if (typeof d.path !== 'string' || !d.path.trim()) invalid(`Node ${id} deliverable requires a path`);
+    // An absolute path or a walk out would point at a file the node was never entitled to
+    // publish, so the declaration is refused instead of resolved later.
+    if (d.path.startsWith('/') || d.path.split(/[\\/]/).some(part => part === '..' || part === '')) {
+      invalid(`Node ${id} deliverable path must be a relative path inside the workspace`);
+    }
+    if (!['plans', 'research', 'reviews', 'deliverables', 'summaries'].includes(d.namespace)) {
+      invalid(`Node ${id} deliverable namespace must be plans, research, reviews, deliverables or summaries`);
+    }
+    if (typeof d.name !== 'string' || !slug.test(d.name.toLowerCase())) invalid(`Node ${id} deliverable name must be a lowercase slug`);
   }
 }
 

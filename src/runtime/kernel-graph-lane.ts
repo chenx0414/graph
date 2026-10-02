@@ -5,6 +5,7 @@ import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import { GraphLane } from '../core/graph-lane.ts';
+import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { ResidentHost } from './resident-host.ts';
 import { nodeSessionRequest, type NodeSessionRequest } from './kernel-node-host.ts';
 import { toPiModel } from './pi-adapter.ts';
@@ -38,6 +39,8 @@ export interface KernelGraphLaneOptions {
   stateDir: string;
   /** The project workspace for a graph, resolved from its task row. */
   workspaceFor: (graphId: string) => string | undefined;
+  /** The artifact store a node's declared deliverable is published to. */
+  artifacts?: ArtifactWorkspace;
   /** The gate for a node; absent means an unmetered passthrough (tests). */
   gateFor?: (graphId: string, nodeId: string) => SendGate | undefined;
   /**
@@ -87,6 +90,10 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
 
   return new GraphLane({
     kernel: options.kernel,
+    // A node's declared deliverable is settled from its workspace into the shared artifact
+    // store, so work the node produced is published without a tool call (§13.8, HB-275).
+    workspace: (graphId: string) => options.workspaceFor(graphId),
+    ...(options.artifacts ? { artifacts: () => options.artifacts } : {}),
     // The worker config: the node's own session plus the credential the host resolved.
     config: async (graphId, nodeId) => {
       const session = await sessionFor(graphId, nodeId);
