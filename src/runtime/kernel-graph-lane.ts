@@ -146,7 +146,14 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const result = options.onToolCall
         ? await options.onToolCall(graphId, nodeId, 'submit', { outputs: scripted.outputs ?? {} })
         : { ok: false, text: 'the lane has no tool channel' };
-      return { turnId: `scripted-${nodeId}-${turn}`, inspect: { ...result, missing: scripted.missing ?? [] } };
+      // A scripted turn still costs something, and must say so: HB-289 holds a metered turn
+      // that reports no usage, so a scripted host that stayed silent would park every node
+      // it was meant to drive. Zero is the honest figure - the script spends no tokens.
+      return {
+        turnId: `scripted-${nodeId}-${turn}`,
+        inspect: { ...result, missing: scripted.missing ?? [] },
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      };
     },
   });
 

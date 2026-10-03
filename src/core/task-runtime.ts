@@ -580,12 +580,18 @@ export async function openTaskRuntime(options: {
           scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number) => {
             // The test drives the node with its own ActionAdapter: the same one the old
             // executor used, so a migrated test keeps the result it was written to expect.
-            const adapter = options.actions![nodeId] ?? options.actions![nodeId.replace(/-/g, '')];
+            // The adapter is keyed by ACTION, not by node id. The old executor looked it up
+            // the same way, and a migrated test keeps the result it was written to expect
+            // only if the lookup does too: a graph may name a node `n0` while the action it
+            // performs is `work`, and a graph-command node has no adapter at all.
+            const row = store.db.prepare("SELECT spec,kind FROM kernel_nodes WHERE task_id=? AND node_id=?").get(graphId, nodeId) as { spec: string; kind: string } | undefined;
+            const spec = row ? JSON.parse(row.spec) as { task?: string; recipe?: string } : undefined;
+            const action = spec?.task ?? nodeId;
+            const adapter = options.actions![action] ?? options.actions![nodeId];
             if (!adapter) return { missing: ['out'] };
-            const operation = store.db.prepare("SELECT spec FROM kernel_nodes WHERE task_id=? AND node_id=?").get(graphId, nodeId) as { spec: string } | undefined;
             const prepared = await adapter.prepare({
-              nodeId, instanceId: nodeId, turn, action: nodeId, attempt: turn, kind: 'agent',
-              ...(operation ? { input: JSON.parse(operation.spec) } : {}),
+              nodeId, instanceId: nodeId, turn, action, attempt: turn, kind: 'agent',
+              ...(spec ? { input: spec as unknown as Json } : {}),
             } as never);
             const result = await prepared();
             const output = (result as { output?: unknown }).output;

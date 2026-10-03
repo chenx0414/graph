@@ -200,3 +200,58 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     store.db.close();
   });
 });
+
+/**
+ * Issue #1 HB-290: a graph's entry nodes are the ones nothing points at.
+ *
+ * The original rule counted BOTH endpoints of every edge as "targeted", so in any
+ * connected graph every node looked targeted, the root set was always empty, and the
+ * cycle fallback picked an arbitrary node. For a chain that is the far end: the queue
+ * held the check node and the chain had nothing to start it, so every node stayed idle.
+ *
+ * E1 a chain starts at its head, not its tail
+ * E2 a graph with no edges queues every node
+ * E3 a genuine cycle still starts somewhere, rather than silently never running
+ */
+describe('HB-290: entry nodes are the ones nothing points at', () => {
+  const chain = (ids: string[]) => ({
+    schemaVersion: 2, name: 'chain',
+    protocols: { out: { type: 'object', required: ['v'], properties: { v: { type: 'string' } } } },
+    nodes: Object.fromEntries(ids.map((id, index) => [id, {
+      recipe: 'worker@1', task: id,
+      inputs: { in: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } },
+      submission: { required: ['out'] },
+    }])),
+    modules: {},
+    edges: Object.fromEntries(ids.slice(1).map((id, index) => [`${ids[index]}->${id}`, { from: `${ids[index]}.out`, to: `${id}.in`, enabled: true }])),
+    inputs: {}, outputs: {},
+  });
+
+  const materialize = (definition: unknown) => {
+    const store = new TaskStore(join(tmpdir(), `h290-${Math.random().toString(36).slice(2)}.sqlite`));
+    store.db.prepare("INSERT INTO projects(id,root,grants) VALUES('p','/tmp/p','{}')").run();
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('t','p','w','running',1)").run();
+    const kernel = new KernelStore(store);
+    materializeGraph(kernel, 't', definition as never, 'e');
+    const queued = (store.db.prepare("SELECT node_id FROM kernel_queue WHERE task_id='t' AND kind='start' ORDER BY node_id").all() as { node_id: string }[]).map(r => r.node_id);
+    store.db.close();
+    return queued;
+  };
+
+  test('E1: a chain starts at its head, not its tail', () => {
+    // Node ids sort so that the LAST node comes first alphabetically - the case that hid
+    // the bug, because the arbitrary fallback then chose the tail.
+    expect(materialize(chain(['n0', 'n1', 'check']))).toEqual(['n0']);
+  });
+
+  test('E2: a graph with no edges queues every node', () => {
+    expect(materialize(chain(['only']))).toEqual(['only']);
+  });
+
+  test('E3: a genuine cycle still starts somewhere rather than silently never running', () => {
+    const cyclic = chain(['a', 'b']);
+    const definition = cyclic as unknown as { edges: Record<string, { from: string; to: string; enabled: boolean }> };
+    definition.edges['b->a'] = { from: 'b.out', to: 'a.in', enabled: true };
+    expect(materialize(cyclic).length).toBe(1);
+  });
+});

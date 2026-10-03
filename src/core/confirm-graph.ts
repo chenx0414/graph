@@ -59,11 +59,14 @@ export function materializeGraph(
   // node idle: `GraphLane.runnable()` only names graphs holding a queued item, and nothing
   // else ever enqueues one. An edge arriving later routes normally - this only seeds what
   // nothing else would start.
-  const targeted = new Set(
-    Object.values(revision.definition.edges)
-      .flatMap(edge => [edge.from.split('.')[0]!, edge.to.split('.')[0]!]),
+  // An entry node is one nothing points AT. Counting both endpoints of every edge made every
+  // node in a connected graph look targeted, so roots was always empty and the fallback
+  // below picked an arbitrary node - which for a chain is the far end, leaving the graph
+  // with nothing to start it.
+  const fed = new Set(
+    Object.values(revision.definition.edges).map(edge => edge.to.split('.')[0]!),
   );
-  const roots = nodeIds.filter(nodeId => !targeted.has(nodeId));
+  const roots = nodeIds.filter(nodeId => !fed.has(nodeId));
   if (roots.length === 0 && nodeIds.length > 0) {
     // A cycle has no entry point by definition; start from the first admitted node so the
     // graph is runnable and the cycle surfaces as work rather than as silence.
