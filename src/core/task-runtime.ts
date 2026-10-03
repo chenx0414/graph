@@ -406,7 +406,13 @@ export async function openTaskRuntime(options: {
     options.live ? options.live.preferences() : options.models?.preferences;
   // `null` is the legitimate unlimited default: it must never fall back to a
   // stale finite startup value when live configuration is present.
-  const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : options.limits?.defaultBudgetTokens ?? null;
+  /** The project's workspace for a graph, resolved from its task row. */
+const projectRootFor = (store: TaskStore) => (graphId: string) => {
+  const row = store.db.prepare('SELECT p.root AS root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?').get(graphId) as { root: string } | undefined;
+  return row?.root;
+};
+
+const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : options.limits?.defaultBudgetTokens ?? null;
   const masterModel = () => {
     const master = options.master;
     if (!master) return undefined;
@@ -572,10 +578,9 @@ export async function openTaskRuntime(options: {
         stateDir,
         git,
         artifacts,
-        workspaceFor: (graphId: string) => {
-          const row = store.db.prepare('SELECT p.root AS root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?').get(graphId) as { root: string } | undefined;
-          return row?.root;
-        },
+        // The scripted turn needs the same workspace the lane gives a node, so it is named
+        // here rather than inlined twice.
+        workspaceFor: projectRootFor(store),
         ...(options.actions && !(options.models || options.live) ? {
           scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number) => {
             // The test drives the node with its own ActionAdapter: the same one the old
@@ -589,9 +594,27 @@ export async function openTaskRuntime(options: {
             const action = spec?.task ?? nodeId;
             const adapter = options.actions![action] ?? options.actions![nodeId];
             if (!adapter) return { missing: ['out'] };
+            // The adapter is written against the OLD executor's Operation, and reads real
+            // fields from it - `workspace` to find its own work copy, `input` for what to do.
+            // Handing it a thin object made every adapter that reads either field fail
+            // silently, which is why so many migrated graphs simply never ran.
+            //
+            // The old node's own fields live in the confirmed proposal, not in the v2
+            // definition (the definition keeps a fixed shape and drops `input`), so that is
+            // where they are read from - by node id, which is what the test named.
+            const confirmed = store.db.prepare('SELECT p.spec AS spec FROM proposals p JOIN tasks t ON t.accepted_proposal=p.version WHERE t.id=?').get(graphId) as { spec: string } | undefined;
+            const legacyNodes = confirmed ? (JSON.parse(confirmed.spec) as Proposal).nodes ?? [] : [];
+            const legacy = legacyNodes.find(node => node.id === nodeId);
+            const workspace = projectRootFor(store)(graphId);
             const prepared = await adapter.prepare({
-              nodeId, instanceId: nodeId, turn, action, attempt: turn, kind: 'agent',
-              ...(spec ? { input: spec as unknown as Json } : {}),
+              id: `op-${graphId}-${nodeId}-${turn}`,
+              nodeId, instanceId: (row ? (store.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined)?.instance_id : undefined) ?? nodeId,
+              taskId: graphId, activationId: undefined, turn, action, attempt: turn,
+              kind: adapter.kind, model: 'scripted', recipe: spec?.recipe ?? 'worker@1',
+              ...(workspace ? { workspace } : {}),
+              input: (legacy?.input ?? {}) as Json,
+              ...(legacy?.context ? { context: legacy.context } : {}),
+              dependencySources: {}, messages: [], images: [],
             } as never);
             const result = await prepared();
             const output = (result as { output?: unknown }).output;
