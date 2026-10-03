@@ -103,6 +103,9 @@ export class NodeExecutor {
   async runNode(nodeId: string, run: TurnRunner): Promise<NodeOutcome> {
     let last: NodeOutcome = 'idle';
     for (;;) {
+      // A node paused before its turn is never sent. The queued item stays, so resuming
+      // runs it with nothing lost - this is a hold, not a cancellation.
+      if (this.kernel.nodeState(this.graphId, nodeId).paused) return last;
       const item = this.queue.claim(nodeId);
       if (!item) return last;
       last = await this.runOne(nodeId, item.seq, run);

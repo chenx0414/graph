@@ -584,6 +584,25 @@ export class KernelStore {
   }
 
   /**
+   * Hold a node before its turn is sent.
+   *
+   * Pausing is not stopping: the node's queued work survives, so resuming lets it run with
+   * nothing lost. The old executor makes the same distinction - a node paused before its
+   * turn is never sent, while a turn already in flight drains rather than being torn down.
+   */
+  pauseNode(taskId: string, nodeId: string): void {
+    this.ensureNodeState(taskId, nodeId);
+    this.store.db.prepare('UPDATE kernel_node_state SET paused=1 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
+    this.store.event(taskId, 'graph.node.paused', { nodeId });
+  }
+
+  resumeNode(taskId: string, nodeId: string): void {
+    this.ensureNodeState(taskId, nodeId);
+    this.store.db.prepare('UPDATE kernel_node_state SET paused=0 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
+    this.store.event(taskId, 'graph.node.resumed', { nodeId });
+  }
+
+  /**
    * The graph's admitted nodes, for the newest revision.
    *
    * §13.7 needs this to show a user what a v2 graph is made of. A v2 task has no rows in
