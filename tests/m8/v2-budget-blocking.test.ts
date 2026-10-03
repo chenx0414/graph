@@ -127,9 +127,10 @@ test('M1: a node within budget runs, and its reservation is settled afterwards',
       reserveTokens: 100,
     });
     // The turn submits, so the execution settles and the hold is released.
+    // A real turn reports its usage; an unreported one is held instead (HB-289).
     const outcome = await executor.runNode('a', async (executionId) => {
       kernel.submit(executionId, { outputs: { out: { enable: true, value: { v: 'ok' } } }, submissionId: 's1' });
-      return { missing: [] };
+      return { missing: [], usage: { total: 100 } };
     });
     // The runner IS the turn in this harness, so submitting through it is the turn.
     expect(outcome).toBe('done');

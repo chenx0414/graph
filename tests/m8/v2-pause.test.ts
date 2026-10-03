@@ -87,3 +87,71 @@ test('P2: resuming the node lets the turn happen', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * Issue #1 HB-289: a turn whose cost is UNKNOWN holds its reservation and blocks.
+ *
+ * A turn that reports no usage cannot be charged and cannot be released either: releasing
+ * would hand back a hold for tokens that may already have been spent, and a node could
+ * then run past its budget by never reporting. So the hold stays and the node parks until
+ * someone resolves the question - the old executor's unknown-usage hold, which v2 had no
+ * equivalent for.
+ *
+ * Failure modes first (R24):
+ *   U1  an unreported turn leaves its reservation HELD and the node blocked
+ *   U2  recording the unknown usage charges the hold and unblocks the node
+ *   U3  releasing the hold returns it and unblocks the node
+ *   U4  a reported turn is not held - it settles normally
+ */
+
+test('U1/U4: a turn that reports nothing holds its reservation; one that reports settles', async () => {
+  const { root, store, kernel } = await setup();
+  try {
+    const limit = { budget: 10_000, unlimited: false };
+    kernel.enqueue('t1', { nodeId: 'a', kind: 'start', payload: {} as never });
+    const executor = new NodeExecutor({
+      kernel, graphId: 't1',
+      host: { start: async () => ({ processId: 1 }), alive: () => true, turn: async () => ({ turnId: 't', inspect: {} }) },
+      tokenBudget: limit, reserveTokens: 100,
+    });
+    const outcome = await executor.runNode('a', async () => ({ missing: ['out'] }));
+    // The hold is still there and the node is parked: nobody may run past the budget by
+    // simply never reporting.
+    expect(kernel.budgetState('t1', 'a', limit).reserved).toBe(100);
+    expect(kernel.nodeStatus('t1', 'a')).toBe('blocked');
+    expect(outcome).toBe('blocked');
+  } finally {
+    store.db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('U2: recording the unknown usage charges the hold and frees the node', async () => {
+  const { root, store, kernel } = await setup();
+  try {
+    const limit = { budget: 10_000, unlimited: false };
+    kernel.reserveNodeTokens('t1', 'a', limit, 100);
+    kernel.blockNode('t1', 'a', 'usage unknown');
+    kernel.reconcileNodeUsage('t1', 'a', 'record');
+    expect(kernel.budgetState('t1', 'a', limit)).toMatchObject({ used: 100, reserved: 0 });
+    expect(kernel.nodeStatus('t1', 'a')).toBe('idle');
+  } finally {
+    store.db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('U3: releasing the unknown hold returns it and frees the node', async () => {
+  const { root, store, kernel } = await setup();
+  try {
+    const limit = { budget: 10_000, unlimited: false };
+    kernel.reserveNodeTokens('t1', 'a', limit, 100);
+    kernel.blockNode('t1', 'a', 'usage unknown');
+    kernel.reconcileNodeUsage('t1', 'a', 'release');
+    expect(kernel.budgetState('t1', 'a', limit)).toMatchObject({ used: 0, reserved: 0 });
+    expect(kernel.nodeStatus('t1', 'a')).toBe('idle');
+  } finally {
+    store.db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -626,6 +626,29 @@ export class KernelStore {
   }
 
   /**
+   * Resolve a hold taken because a turn reported no usage.
+   *
+   * `record` charges the hold as spent - the tokens are gone, we just cannot say how many.
+   * `release` returns it, which is honest only when the send never happened. Either way the
+   * node is freed, because a parked node is a question someone has to answer.
+   */
+  reconcileNodeUsage(taskId: string, nodeId: string, decision: 'record' | 'release'): void {
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      const row = this.store.db.prepare('SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?').get(taskId, nodeId) as
+        { used: number; reserved: number };
+      if (decision === 'record') {
+        this.store.db.prepare('UPDATE kernel_node_state SET used=used+reserved,reserved=0,last_committed=used+reserved WHERE task_id=? AND node_id=?')
+          .run(taskId, nodeId);
+      } else {
+        this.store.db.prepare('UPDATE kernel_node_state SET reserved=0 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
+      }
+      this.store.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status='blocked'").run(taskId, nodeId);
+      this.store.event(taskId, 'graph.node.usage-reconciled', { nodeId, decision, held: row.reserved });
+    });
+  }
+
+  /**
    * Park a node that cannot proceed, without recording it as a failed attempt.
    *
    * `blocked` is a state an operator or the user can resolve (raise the budget, answer a

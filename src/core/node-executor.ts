@@ -159,6 +159,15 @@ export class NodeExecutor {
       if (metering && report?.usage && Number.isSafeInteger(report.usage.total) && report.usage.total > 0) {
         this.kernel.commitNodeUsage(this.graphId, nodeId, this.kernel.budgetState(this.graphId, nodeId, metering.limit).used + report.usage.total);
       }
+      // A metered turn that reported NO usage can be neither charged nor released: releasing
+      // would hand back a hold for tokens that may already have been spent, and a node could
+      // then run past its budget by never reporting. The hold stays and the node parks.
+      if (metering && !report?.usage) {
+        this.kernel.finishExecution(executionId, 'blocked');
+        this.kernel.blockNode(this.graphId, nodeId, 'turn reported no usage; its reservation is held until reconciled');
+        this.queue.complete(seq, { kind: 'blocked', reason: 'usage unknown' });
+        return 'blocked';
+      }
 
       // A submit that landed in the kernel is the success signal, whatever the
       // turn reported: the node writes its outputs through the submission surface.
