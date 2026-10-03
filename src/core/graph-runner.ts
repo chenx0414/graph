@@ -35,6 +35,12 @@ export interface GraphRunnerOptions {
   kernel: KernelStore;
   graphId: string;
   /**
+   * §9 metering, passed through to each node's executor. Absent means unmetered, which is
+   * right for a program node and for a runtime configured without limits.
+   */
+  tokenBudget?: { budget: number; unlimited: boolean };
+  reserveTokens?: number;
+  /**
    * The resident host for one node. §7 gives each node its own long-lived Pi process, so
    * the runner asks for a host PER NODE rather than sharing one across the graph: a host
    * carries a node's identity and session lineage, and two nodes sharing one would share
@@ -159,6 +165,8 @@ export class GraphRunner {
       });
       const executor = new NodeExecutor({
         kernel, graphId: this.options.graphId, host: nodeHost,
+        ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
+          ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
         ...(this.options.workspace ? { workspace: () => this.options.workspace!(nodeId) } : {}),
         ...(this.options.artifacts ? { artifacts: this.options.artifacts } : {}),
       });

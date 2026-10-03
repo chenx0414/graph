@@ -29,7 +29,7 @@ import { acquireOwner } from './owner.ts';
 import { materializeGraph } from './confirm-graph.ts';
 import { KernelStore } from './kernel-store.ts';
 import { parseGraphDefinition } from './interface-spec.ts';
-import { kernelGraphLane } from '../runtime/kernel-graph-lane.ts';
+import { DEFAULT_V2_RESERVE_TOKENS, kernelGraphLane } from '../runtime/kernel-graph-lane.ts';
 import { NodeSubmitBridge } from './node-submit-bridge.ts';
 import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
@@ -560,6 +560,12 @@ export async function openTaskRuntime(options: {
       ...(options.models || options.live || options.actions ? { graphs: () => kernelGraphLane({
         kernel,
         catalog,
+        // §9: a v2 node is metered like any other. Without this the ledger from HB-284
+        // was never consulted, because nothing told the lane what a turn might cost.
+        ...(() => {
+          const budget = liveBudget();
+          return budget === null ? {} : { tokenBudget: { budget, unlimited: false }, reserveTokens: DEFAULT_V2_RESERVE_TOKENS };
+        })(),
         directory: liveEntries,
         credentialFor: liveCredentialFor,
         instancesDir: join(stateDir, 'instances'),
@@ -902,9 +908,25 @@ export async function openTaskRuntime(options: {
             worktrees: (store.db.prepare('SELECT instance_id,node_id,path,branch FROM worktrees WHERE task_id=?').all(taskId) as { instance_id: string; node_id: string; path: string; branch: string }[])
               .map(row => ({ instanceId: row.instance_id, nodeId: row.node_id, path: row.path, branch: row.branch })),
             integrationSha: task.integration_sha,
-            nodes: rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget,
+            // A v2 graph's nodes live in `kernel_nodes`, not `nodes`. They are merged in so
+            // a user opening a v2 task sees the graph at all, and so a node parked on an
+            // exhausted budget reads as `blocked` instead of vanishing. They carry the same
+            // keys the legacy rows do - empty where a v2 node has no such thing - because a
+            // missing key breaks every consumer that reads it.
+            nodes: [
+              ...rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget,
               ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
               reserved: operationTotals.find(total => total.node_id === row.id)?.reserved ?? 0 })),
+              ...new KernelStore(store).listNodes(taskId).map(node => ({
+                ...({} as NodeSpec),
+                id: node.nodeId, kind: (node.kind === 'module' ? 'program' : 'agent') as NodeSpec['kind'],
+                action: node.nodeId, definitionVersion: '', model: '',
+                instanceId: node.instanceId, activationId: '', outputVersion: 0, stallCount: 0,
+                used: 0, unlimited: false, budget: null, reserved: 0,
+                optional: false, boundDefinition: '', selectedModel: '',
+                status: node.status, origin: 'v2' as const, revisionVersion: node.revisionVersion,
+              })),
+            ],
             evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid), ...(row.commit_sha ? { commitSha: row.commit_sha } : {}) })),
             invocations, cost,
             cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events').get() as { cursor: number }).cursor,

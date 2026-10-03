@@ -18,6 +18,14 @@ import { GraphRunner, type RunnerHost, type RunResult } from './graph-runner.ts'
 export interface GraphLaneOptions {
   kernel: KernelStore;
   /**
+   * §9: the token budget a node runs under, and what one turn is expected to cost.
+   *
+   * Absent means unmetered. The executor reserves before a turn and charges what it
+   * actually spent, parking a node it cannot afford rather than running it unbudgeted.
+   */
+  tokenBudget?: { budget: number; unlimited: boolean };
+  reserveTokens?: number;
+  /**
    * Build the resident host for one NODE. §7 gives each node its own long-lived process, so
    * the lane resolves a host per node, not per graph: a host carries a node's identity and
    * session lineage, and sharing one across nodes would share the wrong session. Assembling
@@ -80,6 +88,8 @@ export class GraphLane {
     const runner = new GraphRunner({
       kernel,
       graphId,
+      ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
+        ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
       hostFor: async (nodeId: string) => this.options.host(graphId, nodeId, await this.options.config(graphId, nodeId)),
       // A node submits through its own `submit` tool, which the host executes over the real
       // execution (HB-262) - so by the time this runs, the kernel already holds whatever the

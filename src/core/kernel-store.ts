@@ -583,6 +583,23 @@ export class KernelStore {
     this.store.db.prepare('UPDATE kernel_node_state SET reserved=MAX(0,reserved-?) WHERE task_id=? AND node_id=?').run(amount, taskId, nodeId);
   }
 
+  /**
+   * The graph's admitted nodes, for the newest revision.
+   *
+   * §13.7 needs this to show a user what a v2 graph is made of. A v2 task has no rows in
+   * the old `nodes` table, so without this a user opening one saw only the master node and
+   * no graph at all. It is also the only place a parked node's `blocked` status can be read
+   * from: without it a node that stopped on an exhausted budget is indistinguishable from
+   * one that was never scheduled.
+   */
+  listNodes(taskId: string): { nodeId: string; instanceId: string; kind: string; status: string; revisionVersion: number }[] {
+    const revision = this.latestRevision(taskId);
+    if (!revision) return [];
+    const rows = this.store.db.prepare('SELECT node_id,instance_id,kind,status,revision_version FROM kernel_nodes WHERE task_id=? AND revision_version=? ORDER BY node_id')
+      .all(taskId, revision.version) as { node_id: string; instance_id: string; kind: string; status: string; revision_version: number }[];
+    return rows.map(row => ({ nodeId: row.node_id, instanceId: row.instance_id, kind: row.kind, status: row.status, revisionVersion: row.revision_version }));
+  }
+
   /** A node's current state, as the kernel records it. */
   nodeStatus(taskId: string, nodeId: string): string {
     const row = this.store.db.prepare('SELECT status FROM kernel_nodes WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { status: string } | undefined;

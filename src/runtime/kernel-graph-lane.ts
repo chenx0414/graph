@@ -28,9 +28,19 @@ import type { GitIntegration } from '../git/integration.ts';
 
 const workerEntry = fileURLToPath(new URL('./resident-worker-entry.ts', import.meta.url));
 
+/** What one v2 turn is expected to cost when the runtime has not said otherwise. */
+export const DEFAULT_V2_RESERVE_TOKENS = 200_000;
+
 export interface KernelGraphLaneOptions {
   kernel: KernelStore;
   catalog: Catalog;
+  /**
+   * §9: the token budget a node runs under. Absent means unmetered - which is the right
+   * default for a program node, but NOT for an agent that can spend real tokens, so the
+   * runtime supplies one whenever limits are configured.
+   */
+  tokenBudget?: { budget: number; unlimited: boolean };
+  reserveTokens?: number;
   /** The models the runtime is configured with. */
   directory: () => ModelEntry[];
   /** Resolve the credential for a model entry; undefined means the node cannot run. */
@@ -142,6 +152,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
 
   return new GraphLane({
     kernel: options.kernel,
+    ...(options.tokenBudget && options.reserveTokens !== undefined
+      ? { tokenBudget: options.tokenBudget, reserveTokens: options.reserveTokens } : {}),
     // A node's declared deliverable is settled from its own work copy into the shared
     // artifact store, so work the node produced is published without a tool call (§13.8).
     workspace: nodeWorkspace,

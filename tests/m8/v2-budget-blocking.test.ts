@@ -72,6 +72,10 @@ test('M1/M3/M4: a node that cannot afford its turn is blocked, keeps its state, 
     expect(kernel.nodeStatus('t1', 'a')).toBe('blocked');
     // M4: a refused reservation leaves nothing held.
     expect(kernel.budgetState('t1', 'a', { budget: 10, unlimited: false }).reserved).toBe(0);
+    // V1: and the block is VISIBLE. A node parked on an exhausted budget that nobody can
+    // see is indistinguishable from one that was never scheduled.
+    expect(kernel.listNodes('t1').map(node => ({ id: node.nodeId, status: node.status })))
+      .toEqual([{ id: 'a', status: 'blocked' }]);
   } finally {
     store.db.close();
     await rm(root, { recursive: true, force: true });
