@@ -12,6 +12,7 @@ import { conversationDigest, conversationForTask, deliverMessages, pendingMessag
 import { isSummaryLeakRetry } from '../runtime/compaction.ts';
 import { digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
 import { loadGraph } from './graph.ts';
+import { KernelStore } from './kernel-store.ts';
 import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
 import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
@@ -513,7 +514,14 @@ export class Execution {
       if (this.stopping || this.dispatchAllowed?.() === false) break;
       if (this.store.task(graph.taskId).paused) continue;
       dispatched += 1;
-      try { await graph.run(); } catch (error) { this.reportGraphFailure(graph.taskId, error); }
+      try {
+        const result = await graph.run();
+        // A drained graph is the moment completion is possible. The old path reached
+        // `advance` from its own node scheduler; a v2 graph is driven from here, so
+        // nothing checked, and a task whose every node had succeeded sat at `running`
+        // forever with no failure and no completion.
+        if (result.drained) this.advance(graph.taskId);
+      } catch (error) { this.reportGraphFailure(graph.taskId, error); }
     }
     return dispatched;
   }
@@ -1262,6 +1270,7 @@ export class Execution {
   private readyToComplete(taskId: string) {
     const task = this.store.task(taskId);
     if (task.phase !== 'running' || !task.accepted_proposal) return false;
+    if (this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return this.v2ReadyToComplete(taskId);
     const graph = loadGraph(this.store, taskId);
     if ([...graph.plan.nodes.keys()].some(id => !['succeeded', 'skipped'].includes(graph.status(id)))) return false;
     if (this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId)) return false;
@@ -1277,6 +1286,30 @@ export class Execution {
       if (!task.integration_sha || task.integration_sha !== task.target_sha) return false;
     }
     return true;
+  }
+
+  /**
+   * §13.8: completion for a task running on the v2 kernel.
+   *
+   * The v2 equivalents of the checks above: every admitted node must have succeeded, an
+   * acceptance item is satisfied when the node it names succeeded (the node declares the
+   * acceptance it carries), and an open question still holds the task. A v2 task has no
+   * rows in `nodes` or `evidence`, so the old path could never complete one - a graph ran
+   * every node to success and the task stayed `running` forever.
+   */
+  private v2ReadyToComplete(taskId: string): boolean {
+    const task = this.store.task(taskId);
+    if (this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId)) return false;
+    const kernel = new KernelStore(this.store);
+    const nodes = kernel.listNodes(taskId);
+    if (nodes.length === 0) return false;
+    // A blocked node is unfinished work, not a finished one: parking it must not let the
+    // task claim completion.
+    if (nodes.some(node => node.status !== 'succeeded')) return false;
+    if (this.store.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND state='queued' LIMIT 1").get(taskId)) return false;
+    const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
+    const succeeded = new Set(nodes.filter(node => node.status === 'succeeded').map(node => node.nodeId));
+    return proposal.acceptance.every(item => succeeded.has(item.checkNode));
   }
 
   private completeTask(taskId: string) {

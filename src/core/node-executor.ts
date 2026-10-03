@@ -178,6 +178,7 @@ export class NodeExecutor {
         const settled = await this.settleDeliverable(executionId, nodeId);
         if (!settled.ok) { releaseHold(); return this.fail(executionId, nodeId, seq, settled.reason); }
         this.kernel.finishExecution(executionId, 'completed');
+        this.kernel.completeNode(this.graphId, nodeId);
         this.queue.complete(seq, { kind: 'submitted' });
         releaseHold();
         return 'done';

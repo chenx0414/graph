@@ -626,6 +626,17 @@ export class KernelStore {
   }
 
   /**
+   * Record that a node finished its work.
+   *
+   * The executor owns when a node is done; the kernel is where that fact lives. Without it
+   * a node that had succeeded still read `idle` in the view, and a graph that had finished
+   * looked like it had never started.
+   */
+  completeNode(taskId: string, nodeId: string): void {
+    this.store.db.prepare("UPDATE kernel_nodes SET status='succeeded' WHERE task_id=? AND node_id=?").run(taskId, nodeId);
+  }
+
+  /**
    * Resolve a hold taken because a turn reported no usage.
    *
    * `record` charges the hold as spent - the tokens are gone, we just cannot say how many.
