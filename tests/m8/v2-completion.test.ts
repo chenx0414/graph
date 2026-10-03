@@ -79,15 +79,12 @@ test('C1: a v2 node that submits reads succeeded', async () => {
   expect(statuses).toEqual({ work: 'succeeded' });
 }, 30_000);
 
-/**
- * C2 is deliberately NOT asserted end to end yet.
- *
- * A confirmed task gets an integration branch, and `advance()` deliberately hands such a
- * task to the Git delivery path before completing it - correctly, because a merge is owed.
- * That path (`git.tryDeliver`) is still the old kernel's, so a v2 task with a branch cannot
- * complete yet. Asserting `completed` here would be asserting a promise the product does not
- * keep. What this file pins is the half that exists: the node records its success.
- */
+test('C2: a v2 task whose nodes all succeeded reaches completed', async () => {
+  // No Git is configured here, so there is no integration branch and no merge to wait for.
+  // This pins the completion DECISION for a v2 graph, which is what was missing.
+  const { phase } = await run(1);
+  expect(phase).toBe('completed');
+}, 30_000);
 
 test('C3: a task with an unfinished node does not complete', async () => {
   const { phase } = await run(2);

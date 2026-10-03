@@ -516,11 +516,16 @@ export class Execution {
       dispatched += 1;
       try {
         const result = await graph.run();
-        // A drained graph is the moment completion is possible. The old path reached
-        // `advance` from its own node scheduler; a v2 graph is driven from here, so
-        // nothing checked, and a task whose every node had succeeded sat at `running`
-        // forever with no failure and no completion.
-        if (result.drained) this.advance(graph.taskId);
+        // A drained graph is the moment completion is possible. The old path reached the
+        // delivery from its own node scheduler settling an operation; a v2 task has no
+        // operations, so nothing reached it and a task whose every node had succeeded sat
+        // at `running` forever - no failure, no completion, and a merge still owed.
+        if (result.drained) {
+          this.advance(graph.taskId);
+          if (this.store.task(graph.taskId).phase === 'running' && this.store.task(graph.taskId).integration_branch) {
+            this.deliver(graph.taskId);
+          }
+        }
       } catch (error) { this.reportGraphFailure(graph.taskId, error); }
     }
     return dispatched;
@@ -1344,10 +1349,23 @@ export class Execution {
         return;
       }
       if (result.status === 'blocked') {
+        // A blocked delivery used to block the acceptance check's node - a row a v2 task does
+        // not have, so the lookup returned undefined and the blocking was silently lost: the
+        // task neither completed nor said why. On the v2 path the node the graph named is
+        // parked instead, with the reason on the timeline (HB-295).
         const task = this.store.task(taskId);
         const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
-        const node = this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(taskId, proposal.acceptance[0]!.checkNode) as ExecutionNodeRow;
-        this.store.transaction(() => this.block(node, String((result.data as { kind?: string })?.kind ?? 'git_conflict'), result.data ?? { reason: 'Git delivery blocked' }));
+        const reason = String((result.data as { kind?: string })?.kind ?? 'git_conflict');
+        const detail = (result.data ?? { reason: 'Git delivery blocked' }) as Json;
+        const checkNode = proposal.acceptance[0]?.checkNode;
+        const legacy = checkNode
+          ? this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(taskId, checkNode) as ExecutionNodeRow | undefined
+          : undefined;
+        this.store.transaction(() => {
+          if (legacy) this.block(legacy, reason, detail);
+          else if (checkNode) new KernelStore(this.store).blockNode(taskId, checkNode, `${reason}: ${JSON.stringify(detail)}`);
+          else this.store.event(taskId, 'graph.delivery.blocked', { reason, ...(detail as object) });
+        });
         return;
       }
       if (result.status !== 'merged' && result.status !== 'skip') return;
