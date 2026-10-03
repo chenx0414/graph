@@ -315,7 +315,12 @@ export class KernelStore {
   }
 
   /** Terminal execution state; the submission (if any) is already recorded. */
-  finishExecution(executionId: string, state: 'completed' | 'failed'): void {
+  /** Park a queued item without consuming it: the node can run again once unblocked. */
+  blockQueued(taskId: string, seq: number): void {
+    this.store.db.prepare("UPDATE kernel_queue SET state='queued' WHERE task_id=? AND seq=? AND state='running'").run(taskId, seq);
+  }
+
+  finishExecution(executionId: string, state: 'completed' | 'failed' | 'blocked'): void {
     this.store.db.prepare('UPDATE kernel_executions SET state=?, ended_at=? WHERE id=?').run(state, Date.now(), executionId);
   }
 
@@ -576,6 +581,24 @@ export class KernelStore {
     if (!Number.isSafeInteger(amount) || amount < 0) return;
     this.ensureNodeState(taskId, nodeId);
     this.store.db.prepare('UPDATE kernel_node_state SET reserved=MAX(0,reserved-?) WHERE task_id=? AND node_id=?').run(amount, taskId, nodeId);
+  }
+
+  /** A node's current state, as the kernel records it. */
+  nodeStatus(taskId: string, nodeId: string): string {
+    const row = this.store.db.prepare('SELECT status FROM kernel_nodes WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { status: string } | undefined;
+    return row?.status ?? 'idle';
+  }
+
+  /**
+   * Park a node that cannot proceed, without recording it as a failed attempt.
+   *
+   * `blocked` is a state an operator or the user can resolve (raise the budget, answer a
+   * question); `failed` is not. Marking an exhausted node `failed` would make a
+   * recoverable condition look terminal.
+   */
+  blockNode(taskId: string, nodeId: string, reason: string): void {
+    this.store.db.prepare("UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?").run(taskId, nodeId);
+    this.store.event(taskId, 'graph.node.blocked', { nodeId, reason });
   }
 
   /** Commit a reported total. A total at or below the last one is the same figure again. */

@@ -43,7 +43,12 @@ export interface RetryBudget {
 
 export type QueueCompletion =
   | { kind: 'submitted' }
-  | { kind: 'failed'; reason: string };
+  | { kind: 'failed'; reason: string }
+  /**
+   * Parked, not finished. A blocked node keeps its queued work so that raising the budget
+   * or answering the question lets it run again - the queue item is not consumed.
+   */
+  | { kind: 'blocked'; reason: string };
 
 export class NodeQueue {
   private readonly kernel: KernelStore;
@@ -100,6 +105,11 @@ export class NodeQueue {
     if (!nodeRow) throw new RuntimeError('invalid_queue', `Unknown queue item ${seq}`);
     if (outcome.kind === 'submitted') {
       this.kernel.finishQueued(this.taskId, seq, 'done');
+      return;
+    }
+    if (outcome.kind === 'blocked') {
+      // Left queued on purpose: the work is still wanted, it just cannot start yet.
+      this.kernel.blockQueued(this.taskId, seq);
       return;
     }
     this.kernel.finishQueued(this.taskId, seq, 'failed');

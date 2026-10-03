@@ -53,9 +53,20 @@ export interface NodeExecutorOptions {
   workspace?: () => string | undefined;
   /** The artifact store a declared deliverable is published to. */
   artifacts?: () => ArtifactWorkspace | undefined;
+  /**
+   * §9: this node's token budget, and how much one turn is expected to cost.
+   *
+   * A turn is reserved before it starts and the hold is released when the execution
+   * settles. Without it a v2 node had no ceiling at all: the old ledger is keyed on
+   * `instances`, which a v2 node cannot have a row in.
+   *
+   * Absent means unmetered - a program node, or a runtime that was never given limits.
+   */
+  tokenBudget?: { budget: number; unlimited: boolean };
+  reserveTokens?: number;
 }
 
-export type NodeOutcome = 'done' | 'failed' | 'idle';
+export type NodeOutcome = 'done' | 'failed' | 'idle' | 'blocked';
 
 export class NodeExecutor {
   private readonly queue: NodeQueue;
@@ -101,6 +112,26 @@ export class NodeExecutor {
     this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: revision.version });
 
     const budget = this.queue.retryBudget(nodeId);
+    // §9: hold what this turn may cost before spending any of it. A node that cannot
+    // afford the hold is parked rather than run unbudgeted.
+    const metering = this.options.tokenBudget && this.options.reserveTokens !== undefined
+      ? { limit: this.options.tokenBudget, amount: this.options.reserveTokens }
+      : undefined;
+    if (metering) {
+      try {
+        this.kernel.reserveNodeTokens(this.graphId, nodeId, metering.limit, metering.amount);
+      } catch (error) {
+        if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
+        this.kernel.finishExecution(executionId, 'blocked');
+        this.kernel.blockNode(this.graphId, nodeId, error.message);
+        this.queue.complete(seq, { kind: 'blocked', reason: error.message });
+        return 'blocked';
+      }
+    }
+    const releaseHold = () => {
+      if (metering) this.kernel.releaseNodeTokens(this.graphId, nodeId, metering.amount);
+    };
+
     let attempt = 0;
     let injection: { missing: string[] } | undefined;
 
@@ -120,9 +151,10 @@ export class NodeExecutor {
         // the submission: a file that was never written, or that is empty, must fail the
         // node here rather than let it pass with the work missing.
         const settled = await this.settleDeliverable(executionId, nodeId);
-        if (!settled.ok) return this.fail(executionId, nodeId, seq, settled.reason);
+        if (!settled.ok) { releaseHold(); return this.fail(executionId, nodeId, seq, settled.reason); }
         this.kernel.finishExecution(executionId, 'completed');
         this.queue.complete(seq, { kind: 'submitted' });
+        releaseHold();
         return 'done';
       }
 
@@ -137,6 +169,7 @@ export class NodeExecutor {
           continue;
         }
         // The gap was never filled and there is no resubmit left.
+        releaseHold();
         return this.fail(executionId, nodeId, seq, `required output(s) still missing: ${report.missing.join(', ')}`);
       }
 
