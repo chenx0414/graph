@@ -231,6 +231,20 @@ export class KernelStore {
     if (!deliveryColumns.has('source')) {
       this.store.db.exec("ALTER TABLE kernel_deliveries ADD COLUMN source TEXT NOT NULL DEFAULT 'submission'");
     }
+    // §9 metering for v2 nodes. The old executor meters through `instances`, whose foreign
+    // key points at `nodes(task_id,id)` - a table a v2 node deliberately has no row in, so a
+    // v2 node could not be metered at all. The ledger therefore lives on the kernel's own
+    // node state, keyed by the instance the node was admitted with.
+    const budgetColumns = new Set(
+      (this.store.db.prepare('PRAGMA table_info(kernel_node_state)').all() as { name: string }[]).map(column => column.name),
+    );
+    for (const [column, ddl] of [
+      ['used', 'ALTER TABLE kernel_node_state ADD COLUMN used INTEGER NOT NULL DEFAULT 0'],
+      ['reserved', 'ALTER TABLE kernel_node_state ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0'],
+      ['last_committed', 'ALTER TABLE kernel_node_state ADD COLUMN last_committed INTEGER NOT NULL DEFAULT 0'],
+    ] as const) {
+      if (!budgetColumns.has(column)) this.store.db.exec(ddl);
+    }
   }
 
   // ---- revisions (immutable) -------------------------------------------------
@@ -518,6 +532,58 @@ export class KernelStore {
     return row
       ? { attempts: row.attempts, resubmitsUsed: row.resubmits_used, retriesAllowed: row.retries_allowed, resubmitsAllowed: row.resubmits_allowed, paused: row.paused === 1, rebinds: row.rebinds }
       : { attempts: 0, resubmitsUsed: 0, retriesAllowed: null, resubmitsAllowed: null, paused: false, rebinds: 0 };
+  }
+
+  // ---- metering (v2) ---------------------------------------------------------
+
+  /**
+   * What a node has spent and what it currently holds.
+   *
+   * The budget itself is passed in rather than stored, because §9 gives it to the runtime
+   * (limits, an explicit per-node override, or "unlimited") and the kernel only owns the
+   * counters. `committedUsage` is separate from `used` so a re-reported total is recognised
+   * as the same figure rather than charged twice - providers re-report a turn's usage.
+   */
+  budgetState(taskId: string, nodeId: string, budget: { budget: number; unlimited: boolean }): {
+    budget: number; unlimited: boolean; used: number; reserved: number;
+  } {
+    this.ensureNodeState(taskId, nodeId);
+    const row = this.store.db.prepare('SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?').get(taskId, nodeId) as
+      { used: number; reserved: number };
+    return { budget: budget.budget, unlimited: budget.unlimited, used: row.used, reserved: row.reserved };
+  }
+
+  /**
+   * Hold `amount` for work about to start, refusing it when the node cannot afford it.
+   *
+   * The check and the write are one transaction: a refusal must not leave a partial hold,
+   * because a node that silently reserved nothing would run unbudgeted.
+   */
+  reserveNodeTokens(taskId: string, nodeId: string, budget: { budget: number; unlimited: boolean }, amount: number): void {
+    if (!Number.isSafeInteger(amount) || amount < 0) throw new RuntimeError('invalid_adapter', 'A bounded token reservation is required');
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      const row = this.store.db.prepare('SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?').get(taskId, nodeId) as
+        { used: number; reserved: number };
+      if (!budget.unlimited && row.used + row.reserved + amount > budget.budget) {
+        throw new RuntimeError('budget', `Token budget exhausted for node ${nodeId}`);
+      }
+      this.store.db.prepare('UPDATE kernel_node_state SET reserved=reserved+? WHERE task_id=? AND node_id=?').run(amount, taskId, nodeId);
+    });
+  }
+
+  releaseNodeTokens(taskId: string, nodeId: string, amount: number): void {
+    if (!Number.isSafeInteger(amount) || amount < 0) return;
+    this.ensureNodeState(taskId, nodeId);
+    this.store.db.prepare('UPDATE kernel_node_state SET reserved=MAX(0,reserved-?) WHERE task_id=? AND node_id=?').run(amount, taskId, nodeId);
+  }
+
+  /** Commit a reported total. A total at or below the last one is the same figure again. */
+  commitNodeUsage(taskId: string, nodeId: string, total: number): void {
+    if (!Number.isSafeInteger(total) || total < 0) return;
+    this.ensureNodeState(taskId, nodeId);
+    this.store.db.prepare('UPDATE kernel_node_state SET used=?,last_committed=? WHERE task_id=? AND node_id=?')
+      .run(total, total, taskId, nodeId);
   }
 
   private ensureNodeState(taskId: string, nodeId: string): void {
