@@ -31,9 +31,17 @@ export const LIFTED_RECIPE = 'worker@1';
 /** The single protocol every lifted port speaks. */
 export const LIFTED_PROTOCOL = 'lifted-payload';
 
+/**
+ * Deliberately permissive: NO required properties.
+ *
+ * An earlier version required `value`, and the kernel correctly refused every lifted
+ * submission with `output_protocol_mismatch` - the old shape's outputs (`{ version: 1 }`,
+ * `{ stable: true }`, …) have no `value` field. A mechanical lift cannot know the shape a
+ * test's action returns, so it must not invent one: requiring a field the caller was never
+ * told about makes migration impossible for exactly the tests it is meant to help.
+ */
 const payload: GraphDefinition['protocols'][string] = {
   type: 'object',
-  required: ['value'],
   properties: { value: { type: 'string' }, text: { type: 'string' } },
 };
 
