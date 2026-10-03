@@ -78,6 +78,42 @@ test('M1/M3/M4: a node that cannot afford its turn is blocked, keeps its state, 
   }
 });
 
+test('U1: a turn that reports usage is charged, so the budget shrinks by what it cost', async () => {
+  const { root, store, kernel } = await setup();
+  try {
+    const limit = { budget: 10_000, unlimited: false };
+    const executor = new NodeExecutor({
+      kernel, graphId: 't1', host: hostThatTurns([]),
+      tokenBudget: limit, reserveTokens: 100,
+    });
+    // The node keeps retrying while required outputs are missing, so both attempts are
+    // charged - a turn that costs money must be charged even when it fails, or the budget
+    // under-counts exactly the turns that misbehave.
+    await executor.runNode('a', async () => ({ missing: ['out'], usage: { total: 250 } }));
+    expect(kernel.budgetState('t1', 'a', limit).used).toBe(500);
+  } finally {
+    store.db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('U2: a turn that reports nothing is not charged as zero-known; usage stays unknown', async () => {
+  const { root, store, kernel } = await setup();
+  try {
+    const limit = { budget: 10_000, unlimited: false };
+    const executor = new NodeExecutor({
+      kernel, graphId: 't1', host: hostThatTurns([]),
+      tokenBudget: limit, reserveTokens: 100,
+    });
+    await executor.runNode('a', async () => ({ missing: ['out'] }));
+    // Absent usage must leave the counter alone rather than write a zero that reads as free.
+    expect(kernel.budgetState('t1', 'a', limit).used).toBe(0);
+  } finally {
+    store.db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('M1: a node within budget runs, and its reservation is settled afterwards', async () => {
   const { root, store, kernel } = await setup();
   try {

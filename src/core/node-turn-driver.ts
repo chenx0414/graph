@@ -24,7 +24,8 @@ import type { KernelStore } from './kernel-store.ts';
 export interface DriverHost {
   start(): Promise<{ processId: number }>;
   alive(): boolean;
-  turn(text: string): Promise<{ turnId: string; inspect: unknown }>;
+  /** `usage` is what the turn cost (§9); absent means the transport reported nothing. */
+  turn(text: string): Promise<{ turnId: string; inspect: unknown; usage?: { total: number } | undefined }>;
 }
 
 /** What one turn produced, as the driver reports it back to the executor. */
@@ -33,6 +34,11 @@ export interface DriverReport {
   done: boolean;
   /** The required outputs still missing, when the node reported them. */
   missing?: string[];
+  /**
+   * What this turn cost (§9). Absent when the transport reported nothing; the budget must
+   * treat that as unknown rather than free.
+   */
+  usage?: { total: number } | undefined;
 }
 
 export interface NodeTurnDriverOptions {
@@ -90,24 +96,27 @@ export class NodeTurnDriver {
     // A crash rebuild keeps the same execution: rebuild before the turn, not instead of it.
     if (!this.options.host.alive()) await this.options.host.start();
 
-    await this.options.host.turn(this.promptFor(attempt, injection));
+    const turn = await this.options.host.turn(this.promptFor(attempt, injection));
+    // Kept for every exit below: a turn that costs something must be charged even when it
+    // fails or is resubmitted, or the budget under-counts exactly the turns that misbehave.
+    const usage = turn.usage ? { total: turn.usage.total } : undefined;
 
     // The node's submit runs against the kernel; a refusal is reported, not swallowed.
     const gap = this.options.submit(executionId);
 
     // The kernel decides: a real submission means done, whatever the process said.
-    if (this.submissionExists(executionId)) return { done: true };
+    if (this.submissionExists(executionId)) return { done: true, usage };
 
-    if (gap && gap.missing && gap.missing.length > 0) return { done: false, missing: gap.missing };
+    if (gap && gap.missing && gap.missing.length > 0) return { done: false, missing: gap.missing, usage };
 
     // The execution's own missing-required mark is the durable record of a refusal: it
     // survives a process restart, so a crash mid-submit still resumes as a resubmit.
     const row = this.options.kernel.db.prepare('SELECT missing_required FROM kernel_executions WHERE id=?').get(executionId) as { missing_required: number } | undefined;
     if (row?.missing_required === 1) {
       const names = this.options.missingRequiredNames?.(executionId) ?? [];
-      if (names.length > 0) return { done: false, missing: names };
-      return { done: false };
+      if (names.length > 0) return { done: false, missing: names, usage };
+      return { done: false, usage };
     }
-    return { done: false };
+    return { done: false, usage };
   }
 }

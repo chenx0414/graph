@@ -47,6 +47,14 @@ export interface AgentSessionTurn {
   finalAssistantText: string;
   stopReason?: string;
   errorMessage?: string;
+  /**
+   * What the assistant message for THIS turn reported.
+   *
+   * §9 metering needs it: without it a node's turns cost nothing and the budget can never
+   * be charged. The provider reports a cumulative-per-message figure, so this is the last
+   * assistant message's usage, not a delta.
+   */
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | undefined;
 }
 
 export interface AgentSessionRequest {
@@ -127,16 +135,48 @@ function assistantText(messages: unknown[]) {
   return '';
 }
 
+/**
+ * Read a provider usage report defensively.
+ *
+ * The shape comes from the SDK, and a model may omit or rename fields; a usage figure that
+ * cannot be read is absent rather than zero, because "unknown" and "free" must not look the
+ * same to a budget.
+ */
+export function normalizeAssistantUsage(raw: Record<string, unknown>): AgentSessionTurn['usage'] {
+  const number = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0);
+  const input = number(raw.input ?? raw.inputTokens ?? raw.promptTokens);
+  const output = number(raw.output ?? raw.outputTokens ?? raw.completionTokens);
+  const cacheRead = number(raw.cacheRead ?? raw.cacheReadTokens ?? raw.cachedInputTokens);
+  const cacheWrite = number(raw.cacheWrite ?? raw.cacheWriteTokens);
+  const declared = number(raw.total ?? raw.totalTokens);
+  return { input, output, cacheRead, cacheWrite, total: declared || input + output + cacheRead + cacheWrite };
+}
+
+/**
+ * The usage the newest assistant message reported, if any.
+ *
+ * Exported so the resident worker can charge §9 metering from the same read the in-process
+ * path uses, rather than inventing a second interpretation of the provider's report.
+ */
+export function lastTurnUsage(inspect: AgentSessionInspect): AgentSessionTurn['usage'] {
+  const lastAssistant = [...inspect.messages].reverse().find(message =>
+    Boolean(message && typeof message === 'object' && !Array.isArray(message)
+      && (message as { role?: unknown }).role === 'assistant')) as
+    { usage?: Record<string, unknown> } | undefined;
+  return lastAssistant?.usage ? normalizeAssistantUsage(lastAssistant.usage) : undefined;
+}
+
 function turn(inspect: AgentSessionInspect): AgentSessionTurn {
   const lastAssistant = [...inspect.messages].reverse().find(message => {
     return Boolean(message && typeof message === 'object' && !Array.isArray(message)
       && (message as { role?: unknown }).role === 'assistant');
-  }) as { stopReason?: string; errorMessage?: string } | undefined;
+  }) as { stopReason?: string; errorMessage?: string; usage?: Record<string, unknown> } | undefined;
   return {
     inspect,
     finalAssistantText: assistantText(inspect.messages),
     ...(lastAssistant?.stopReason ? { stopReason: lastAssistant.stopReason } : {}),
     ...(lastAssistant?.errorMessage ? { errorMessage: lastAssistant.errorMessage } : {}),
+    ...(lastAssistant?.usage ? { usage: normalizeAssistantUsage(lastAssistant.usage) } : {}),
   };
 }
 

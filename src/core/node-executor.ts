@@ -28,12 +28,19 @@ import { RuntimeError } from './types.ts';
 export interface ExecutorHost {
   start(): Promise<{ processId: number }>;
   alive(): boolean;
-  turn(text: string): Promise<{ turnId: string; inspect: unknown }>;
+  /**
+   * `usage` is what the turn cost (§9). Optional because not every transport reports it,
+   * and an absent figure must stay absent rather than become zero: "unknown" and "free"
+   * are different facts to a budget.
+   */
+  turn(text: string): Promise<{ turnId: string; inspect: unknown; usage?: { total: number } | undefined }>;
 }
 
 /** What a turn reported back: a missing-required gap, or nothing when it submitted. */
 export interface TurnReport {
   missing?: string[];
+  /** What this turn cost (§9), when the transport reported it. */
+  usage?: { total: number } | undefined;
 }
 
 /** Runs one attempt of a node's execution and reports any missing-required gap. */
@@ -143,6 +150,12 @@ export class NodeExecutor {
       if (!this.options.host.alive()) await this.options.host.start();
 
       const report = await run(executionId, attempt, injection);
+      // §9: charge what the turn actually cost. The reservation bounds the turn; this
+      // settles it, so a node that under-runs keeps its remainder. An unreported figure is
+      // left alone rather than assumed to be zero.
+      if (metering && report?.usage && Number.isSafeInteger(report.usage.total) && report.usage.total > 0) {
+        this.kernel.commitNodeUsage(this.graphId, nodeId, this.kernel.budgetState(this.graphId, nodeId, metering.limit).used + report.usage.total);
+      }
 
       // A submit that landed in the kernel is the success signal, whatever the
       // turn reported: the node writes its outputs through the submission surface.

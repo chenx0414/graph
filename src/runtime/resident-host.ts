@@ -24,6 +24,8 @@ export interface ResidentInspect extends AgentSessionInspect {
 export interface ResidentTurnResult {
   turnId: string;
   inspect: ResidentInspect;
+  /** What this turn cost, when the provider reported it (§9 metering). */
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | undefined;
 }
 
 export interface ResidentHostOptions {

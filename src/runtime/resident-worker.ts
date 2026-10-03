@@ -10,7 +10,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from './pi-instance.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import { sdkPromptOptions } from './prompt-options.ts';
-import type { AgentSessionInspect } from './agent-session.ts';
+import { lastTurnUsage, type AgentSessionInspect } from './agent-session.ts';
 import type { PiWorkerConfig } from './pi-process.ts';
 
 /**
@@ -161,7 +161,11 @@ export async function runResidentWorker(configPath: string): Promise<void> {
       inFlight.push((async () => {
         try {
           await session.prompt(text, sdkPromptOptions(images));
-          reply({ operation: 'turn_result', turn: { id: randomUUID(), text, inspect: inspect() } });
+          // The turn's usage travels back with it: §9 metering cannot charge a node whose
+          // turns report nothing, and "unknown" must not be mistaken for "free".
+          const snapshot = inspect();
+          const usage = lastTurnUsage(snapshot);
+          reply({ operation: 'turn_result', turn: { id: randomUUID(), text, inspect: snapshot, ...(usage ? { usage } : {}) } });
         } catch (error) {
           reply({ operation: 'turn_result', error: error instanceof Error ? error.message : String(error) });
         } finally {
