@@ -235,6 +235,14 @@ export class KernelStore {
     // key points at `nodes(task_id,id)` - a table a v2 node deliberately has no row in, so a
     // v2 node could not be metered at all. The ledger therefore lives on the kernel's own
     // node state, keyed by the instance the node was admitted with.
+    // A queue row that says `failed` without saying why is a dead end: the reason was
+    // carried in memory and dropped, so a failure could not be read back after a restart.
+    const queueColumns = new Set(
+      (this.store.db.prepare('PRAGMA table_info(kernel_queue)').all() as { name: string }[]).map(column => column.name),
+    );
+    if (!queueColumns.has('reason')) {
+      this.store.db.exec('ALTER TABLE kernel_queue ADD COLUMN reason TEXT');
+    }
     const budgetColumns = new Set(
       (this.store.db.prepare('PRAGMA table_info(kernel_node_state)').all() as { name: string }[]).map(column => column.name),
     );
@@ -623,6 +631,23 @@ export class KernelStore {
   nodeStatus(taskId: string, nodeId: string): string {
     const row = this.store.db.prepare('SELECT status FROM kernel_nodes WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { status: string } | undefined;
     return row?.status ?? 'idle';
+  }
+
+  /**
+   * Record that a node failed, keeping the reason where it can be read back.
+   *
+   * HB-272 makes a failure something a person has to act on, and a failure nobody can read
+   * is one nobody will. Both halves matter: the node's own status (so a graph view shows
+   * what happened) and an event (so the reason is on the timeline, not only in a row).
+   */
+  failNode(taskId: string, nodeId: string, reason: string): void {
+    this.store.db.prepare("UPDATE kernel_nodes SET status='failed' WHERE task_id=? AND node_id=?").run(taskId, nodeId);
+    this.store.event(taskId, 'graph.node.failed', { nodeId, reason });
+  }
+
+  /** Keep the reason on a queue row that just failed, so it survives a restart. */
+  noteQueueFailure(taskId: string, seq: number, reason: string): void {
+    this.store.db.prepare('UPDATE kernel_queue SET reason=? WHERE task_id=? AND seq=?').run(reason, taskId, seq);
   }
 
   /**

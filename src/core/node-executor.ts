@@ -232,6 +232,11 @@ export class NodeExecutor {
 
   private fail(executionId: string, nodeId: string, seq: number, reason: string): NodeOutcome {
     this.kernel.finishExecution(executionId, 'failed');
+    // The reason is kept in three places on purpose: the node's status for the graph view,
+    // an event for the timeline, and the queue row so it survives a restart. Dropping it in
+    // memory is what made an earlier failure take several probes to find.
+    this.kernel.noteQueueFailure(this.graphId, seq, reason);
+    this.kernel.failNode(this.graphId, nodeId, reason);
     this.queue.complete(seq, { kind: 'failed', reason });
     return 'failed';
   }
