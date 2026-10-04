@@ -591,6 +591,23 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             // performs is `work`, and a graph-command node has no adapter at all.
             const row = store.db.prepare("SELECT spec,kind FROM kernel_nodes WHERE task_id=? AND node_id=?").get(graphId, nodeId) as { spec: string; kind: string } | undefined;
             const spec = row ? JSON.parse(row.spec) as { task?: string; recipe?: string } : undefined;
+            // A command node is not an agent: it runs its command, with no recipe, no
+            // session and no model. Treating it as an Agent is what made a lifted check
+            // finish while having done nothing it was asked to do (HB-302).
+            const command = (spec as { command?: { run: string; args?: string[]; timeoutMs?: number } } | undefined)?.command;
+            if (command) {
+              const workspace = projectRootFor(store)(graphId);
+              const [program, ...args] = [command.run, ...(command.args ?? [])];
+              const run = await import('node:child_process');
+              const done = await new Promise<{ code: number; stdout: string; stderr: string }>(resolve => {
+                run.execFile(program, args, { cwd: workspace, timeout: command.timeoutMs ?? 60_000, encoding: 'utf8' },
+                  (error, stdout, stderr) => resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, stdout, stderr }));
+              });
+              const value = done.code === 0
+                ? { text: done.stdout || `${nodeId} ok` }
+                : { text: `${program} failed (${done.code}): ${done.stderr || done.stdout}` };
+              return { outputs: { out: { enable: true, value } }, missing: [] };
+            }
             const action = spec?.task ?? nodeId;
             const adapter = options.actions![action] ?? options.actions![nodeId];
             if (!adapter) return { missing: ['out'] };

@@ -58,6 +58,7 @@ function recipeFor(kernel: KernelStore, graphId: string, nodeId: string, revisio
   if (!revision) throw new Error(`graph ${graphId} has no revision ${revisionVersion}`);
   const node = revision.definition.nodes[nodeId];
   if (!node) throw new Error(`revision ${revisionVersion} of ${graphId} declares no node ${nodeId}`);
+  if (!node.recipe) throw new Error(`node ${nodeId} of graph ${graphId} is a command node and has no recipe to assemble`);
   return node.recipe;
 }
 
