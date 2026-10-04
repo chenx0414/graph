@@ -147,6 +147,27 @@ def ensure_imports(src, rel):
     return '\n'.join(lines[:at] + adds + lines[at:])
 
 
+LEGACY_ONLY_FIELDS = (
+    'input', 'context', 'container', 'routes', 'when', 'optional', 'verifier', 'replaces', 'deliverable',
+)
+
+
+def legacy_fields_left_behind(path):
+    """Which legacy node fields this file's proposals carry that the v2 shape cannot hold.
+
+    Scanned from the source rather than imported from the fixture: the tool runs over files
+    that are mid-rewrite, and a subprocess importing them would be a circular dependency on
+    exactly the code being changed. `role` is excluded - it does not change what a node does
+    under v2, so reporting it would only dilute the report.
+    """
+    src = open(path).read()
+    found = set()
+    for field in LEGACY_ONLY_FIELDS:
+        if re.search(r'\b%s\s*:' % field, src):
+            found.add(field)
+    return sorted(found)
+
+
 def migrate(path):
     rel = os.path.relpath(path, ROOT)
     src = open(path).read()
@@ -192,7 +213,11 @@ def migrate(path):
     if not sites:
         return 'no-call-shape-matched'
     open(path, 'w').write(ensure_imports(src, rel))
-    return 'lifted(%d)' % sites
+    # Say what the lift could not carry. A legacy field that vanishes with no trace looks
+    # exactly like a field that did not matter - `input` cost most of this migration that
+    # way - so the report is part of the tool's output, not an afterthought.
+    carried = legacy_fields_left_behind(path)
+    return 'lifted(%d)%s' % (sites, '; dropped: ' + ', '.join(carried) if carried else '')
 
 
 if __name__ == '__main__':
