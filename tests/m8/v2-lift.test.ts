@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import type { NodeSpec } from '../../src/core/types.ts';
-import { droppedLegacyFields, liftDefinition, withLiftedDefinition } from '../fixtures/v2-lift.ts';
+import { droppedLegacyFields, liftDefinition, takeCrossedContainerEdges, withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 /**
  * Issue #1 ADR 0030 / HB-279: the test-only lift from the old declarative proposal shape
@@ -127,5 +127,39 @@ describe('a routed node becomes a router module (HB-312)', () => {
     expect(liftDefinition(routed()).modules['gate']).toMatchObject({ trigger: 'each' });
     const plain = [{ id: 'a', kind: 'agent', action: 'a', definitionVersion: 'coder@1', model: 'm' }] as unknown as NodeSpec[];
     expect(liftDefinition(plain).modules).toEqual({});
+  });
+});
+
+/**
+ * Issue #1 HB-313: an edge that crosses a container boundary is not drawn.
+ *
+ * The old kernel isolated containers, so a `dependsOn` across groups either did not exist
+ * or meant something else. The lift turned every one of them into a flat edge, inventing a
+ * connection the graph never had - and it looked like a working graph, which is worse than
+ * an obvious failure.
+ *
+ *   L13 a cross-container edge is not drawn, and it is named
+ *   L14 edges within one container, and ungrouped nodes, are drawn as before
+ */
+describe('cross-container edges are reported, not drawn (HB-313)', () => {
+  const grouped = [
+    { id: 'a', kind: 'agent', action: 'a', definitionVersion: 'coder@1', model: 'm', container: 'one' },
+    { id: 'b', kind: 'agent', action: 'b', definitionVersion: 'coder@1', model: 'm', container: 'one', dependsOn: ['a'] },
+    { id: 'c', kind: 'agent', action: 'c', definitionVersion: 'coder@1', model: 'm', container: 'two', dependsOn: ['b'] },
+  ] as unknown as NodeSpec[];
+
+  test('L13: the crossing edge is absent from the definition and named in the report', () => {
+    takeCrossedContainerEdges();
+    const definition = liftDefinition(grouped);
+    expect(definition.edges['b->c']).toBeUndefined();
+    expect(takeCrossedContainerEdges()).toEqual(['b->c']);
+  });
+
+  test('L14: an edge inside one container is still drawn', () => {
+    takeCrossedContainerEdges();
+    const definition = liftDefinition(grouped);
+    expect(definition.edges['a->b']).toEqual({ from: 'a.out', to: 'b.in', enabled: true });
+    // only the one crossing is reported - the inside edge is drawn, not skipped
+    expect(takeCrossedContainerEdges()).toEqual(['b->c']);
   });
 });

@@ -44,6 +44,20 @@ const payload: GraphDefinition['protocols'][string] = {
   properties: { value: { type: 'string' }, text: { type: 'string' } },
 };
 
+/**
+ * Cross-container edges the last lift refused to draw.
+ *
+ * Drained by `takeCrossedContainerEdges()` after a lift. The old kernel isolated
+ * containers, so these connections mean nothing in a flat graph; they are recorded rather
+ * than dropped silently so the caller can say what was left out.
+ */
+const crossedContainerEdges: string[] = [];
+export function takeCrossedContainerEdges(): string[] {
+  const taken = [...crossedContainerEdges];
+  crossedContainerEdges.length = 0;
+  return taken;
+}
+
 export interface LiftOptions {
   /** The recipe id used for every lifted node. */
   recipe?: string;
@@ -68,12 +82,22 @@ export function liftDefinition(nodes: NodeSpec[], options: LiftOptions = {}): Gr
   // `dependsOn` becomes a real edge. The old shape's edges were scheduling-only; v2 edges
   // also carry data, so a lifted graph states that intent explicitly instead of leaving
   // it implied.
+  // An edge that crosses a container boundary is dropped and REPORTED rather than drawn.
+  // The old kernel isolated containers, so a cross-group `dependsOn` either did not exist
+  // or meant something else entirely; drawing it as a flat edge invented a connection the
+  // graph never had, and it would have looked like a working graph.
+  const groupOf = (id: string): string | undefined => nodes.find(node => node.id === id)?.container;
+  const crossing: string[] = [];
   const liftedEdges = Object.fromEntries(nodes.flatMap(node =>
-    (node.dependsOn ?? []).map(parent => [
-      `${parent}->${node.id}`,
-      { from: `${parent}.out`, to: `${node.id}.in`, enabled: true },
-    ]),
+    (node.dependsOn ?? []).map(parent => {
+      const from = groupOf(parent);
+      const to = groupOf(node.id);
+      const crosses = from !== undefined && to !== undefined && from !== to;
+      if (crosses) { crossing.push(`${parent}->${node.id}`); return undefined; }
+      return [`${parent}->${node.id}`, { from: `${parent}.out`, to: `${node.id}.in`, enabled: true }];
+    }).filter((entry): entry is [string, { from: string; to: string; enabled: boolean }] => entry !== undefined),
   ));
+  if (crossing.length > 0) crossedContainerEdges.push(...crossing);
 
   // A node that routes is a v2 router module (§13.4), not a node with a `routes` list -
   // the interface has no field for that, so the routes were simply lost. `when` becomes
