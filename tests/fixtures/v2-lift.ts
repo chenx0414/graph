@@ -1,6 +1,5 @@
 import type { GraphDefinition } from '../../src/core/interface-spec.ts';
 import type { NodeSpec, Proposal } from '../../src/core/types.ts';
-
 /**
  * Issue #1 ADR 0030 / HB-279: a test-only lift from the old declarative proposal shape
  * to the v2 graph definition a draft now has to carry.
@@ -95,4 +94,31 @@ export function liftDefinition(nodes: NodeSpec[], options: LiftOptions = {}): Gr
 export function withLiftedDefinition(proposal: Proposal, options: LiftOptions = {}): Proposal {
   if (proposal.definition) return proposal;
   return { ...proposal, definition: liftDefinition(proposal.nodes, options) };
+}
+/**
+ * The legacy fields a v2 definition has nowhere to put.
+ *
+ * `input` was dropped silently for most of this migration, and the only symptom was an
+ * adapter that quietly did nothing. Every one of these can bite the same way, so the lift
+ * names what it left behind instead of letting it disappear.
+ */
+export const LEGACY_ONLY_FIELDS = [
+  'input', 'context', 'container', 'routes', 'when', 'optional', 'verifier', 'replaces', 'deliverable', 'role',
+] as const;
+
+/** Which legacy fields the given nodes carry that the lifted definition does not hold. */
+export function droppedLegacyFields(nodes: NodeSpec[], definition: GraphDefinition): string[] {
+  const dropped = new Set<string>();
+  for (const node of nodes) {
+    const spec = node as unknown as Record<string, unknown>;
+    const lifted = definition.nodes[node.id] as unknown as Record<string, unknown> | undefined;
+    for (const field of LEGACY_ONLY_FIELDS) {
+      if (spec[field] === undefined) continue;
+      // `role` is not carried, but it does not change what the node does under v2.
+      if (field === 'role') continue;
+      if (lifted && lifted[field] !== undefined) continue;
+      dropped.add(field);
+    }
+  }
+  return [...dropped];
 }

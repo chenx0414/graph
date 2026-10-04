@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import type { NodeSpec } from '../../src/core/types.ts';
-import { liftDefinition, withLiftedDefinition } from '../fixtures/v2-lift.ts';
+import { droppedLegacyFields, liftDefinition, withLiftedDefinition } from '../fixtures/v2-lift.ts';
 
 /**
  * Issue #1 ADR 0030 / HB-279: the test-only lift from the old declarative proposal shape
@@ -55,5 +55,43 @@ describe('the test-only lift onto a v2 definition (HB-279)', () => {
     // grep exits 1 when nothing matched, which is the state we want; any output means
     // product code has started depending on the lift.
     expect(hits.stdout.trim()).toBe('');
+  });
+});
+/**
+ * Issue #1 HB-308: the lift must report what it cannot carry.
+ *
+ * The old shape carries fields the v2 definition has no place for: `context`, `container`,
+ * `routes`, `when`, `optional`, `verifier`, `replaces`, `deliverable`. They were dropped
+ * silently, which is indistinguishable from "that field did not matter" - and `input` was
+ * dropped exactly this way before anyone noticed (HB-301).
+ *
+ * The scripted lane reads `input` back from the confirmed proposal precisely because the
+ * definition cannot hold it. Anything else a test relies on needs the same treatment, or a
+ * report saying it was left behind.
+ *
+ *   L9  the lift lists the legacy fields it did not carry
+ *   L10 a node with none of them carries nothing, so nothing is reported
+ */
+describe('the lift reports what it cannot carry (HB-308)', () => {
+  const legacyFields = [
+    'input', 'context', 'container', 'routes', 'when', 'optional', 'verifier', 'replaces', 'deliverable', 'role',
+  ];
+
+  test('L9: every legacy field a node carries but the definition drops is named', () => {
+    const node = {
+      id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm',
+      input: { files: ['a.ts'] },
+      context: { purpose: 'implement' },
+      container: 'group', routes: ['r1'], when: 'a', optional: true,
+      verifier: { type: 'gate' }, replaces: 'x', deliverable: { path: 'out.md' }, role: 'worker',
+    } as unknown as NodeSpec;
+    const definition = liftDefinition([node]);
+    // Whatever the definition cannot hold must be visible, not silently gone.
+    expect(droppedLegacyFields([node], definition)).toEqual(expect.arrayContaining(legacyFields.filter(f => f !== 'role')));
+  });
+
+  test('L10: a plain node carries nothing, so nothing is reported', () => {
+    const node = { id: 'a', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' } as unknown as NodeSpec;
+    expect(droppedLegacyFields([node], liftDefinition([node]))).toEqual([]);
   });
 });
