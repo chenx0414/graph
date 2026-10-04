@@ -80,7 +80,7 @@ export interface KernelGraphLaneOptions {
    * checks the required outputs and advances the graph exactly as a real turn would. Only
    * the process that produces the tool call is replaced.
    */
-  scriptedTurn?: (graphId: string, nodeId: string, text: string, turn: number) =>
+  scriptedTurn?: (graphId: string, nodeId: string, text: string, turn: number, workspace?: string) =>
     { outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] } | Promise<{ outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] }>;
 }
 
@@ -141,7 +141,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     turn: async (text: string) => {
       const turn = (turns.get(nodeId) ?? 0) + 1;
       turns.set(nodeId, turn);
-      const scripted = await options.scriptedTurn!(graphId, nodeId, text, turn);
+      const scripted = await options.scriptedTurn!(graphId, nodeId, text, turn, nodeWorkspace(graphId, nodeId));
       // The submission travels the real path: onToolCall -> NodeSubmitBridge -> kernel.
       const result = options.onToolCall
         ? await options.onToolCall(graphId, nodeId, 'submit', { outputs: scripted.outputs ?? {} })

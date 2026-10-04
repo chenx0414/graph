@@ -582,7 +582,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         // here rather than inlined twice.
         workspaceFor: projectRootFor(store),
         ...(options.actions && !(options.models || options.live) ? {
-          scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number) => {
+          scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number, workspace?: string) => {
             // The test drives the node with its own ActionAdapter: the same one the old
             // executor used, so a migrated test keeps the result it was written to expect.
             // The adapter is keyed by ACTION, not by node id. The old executor looked it up
@@ -622,7 +622,6 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             const confirmed = store.db.prepare('SELECT p.spec AS spec FROM proposals p JOIN tasks t ON t.accepted_proposal=p.version WHERE t.id=?').get(graphId) as { spec: string } | undefined;
             const legacyNodes = confirmed ? (JSON.parse(confirmed.spec) as Proposal).nodes ?? [] : [];
             const legacy = legacyNodes.find(node => node.id === nodeId);
-            const workspace = projectRootFor(store)(graphId);
             const prepared = await adapter.prepare({
               id: `op-${graphId}-${nodeId}-${turn}`,
               nodeId, instanceId: (row ? (store.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined)?.instance_id : undefined) ?? nodeId,
