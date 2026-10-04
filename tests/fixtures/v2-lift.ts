@@ -75,12 +75,30 @@ export function liftDefinition(nodes: NodeSpec[], options: LiftOptions = {}): Gr
     ]),
   ));
 
+  // A node that routes is a v2 router module (§13.4), not a node with a `routes` list -
+  // the interface has no field for that, so the routes were simply lost. `when` becomes
+  // the router's trigger, and each route becomes a rule. The old shape named routes as
+  // bare strings; a rule needs a condition, so a route that named none emits on every run,
+  // which is the old default rather than a guess.
+  const liftedModules: Record<string, GraphDefinition['modules'][string]> = {};
+  for (const node of nodes) {
+    const routes = (node as unknown as { routes?: string[] }).routes;
+    if (!routes?.length) continue;
+    liftedModules[node.id] = {
+      type: 'router',
+      trigger: ((node as unknown as { when?: string }).when ?? 'each') as 'each' | 'once',
+      inputs: { out: { protocol: LIFTED_PROTOCOL } },
+      outputs: Object.fromEntries(routes.map((_target, index) => ['r' + index, { protocol: LIFTED_PROTOCOL }])),
+      rules: routes.map((_target, index) => ({ when: 'true', emit: { ['r' + index]: { from: node.id } } })),
+    };
+  }
+
   return {
     schemaVersion: 2,
     name: 'lifted',
     protocols: { [LIFTED_PROTOCOL]: payload },
     nodes: liftedNodes,
-    modules: {},
+    modules: liftedModules,
     edges: liftedEdges,
     inputs: Object.fromEntries(nodes.map(node => [`${node.id}.in`, { to: `${node.id}.in`, protocol: LIFTED_PROTOCOL }])),
     outputs: Object.fromEntries(nodes.map(node => [`${node.id}.out`, { from: `${node.id}.out`, protocol: LIFTED_PROTOCOL }])),

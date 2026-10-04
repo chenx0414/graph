@@ -95,3 +95,37 @@ describe('the lift reports what it cannot carry (HB-308)', () => {
     expect(droppedLegacyFields([node], liftDefinition([node]))).toEqual([]);
   });
 });
+
+/**
+ * Issue #1 HB-312: a node that routes becomes a v2 router module.
+ *
+ * The interface has no `routes` field, so a routed node's routes were dropped with no
+ * trace - the same failure `input` had. §13.4 already implements routers (each/once plus
+ * rule expressions), so the mapping is a lift concern, not a missing capability.
+ *
+ *   L11 a routed node lifts to a router module, and the definition still parses
+ *   L12 `when` becomes the router trigger; a node with no routes produces no module
+ */
+describe('a routed node becomes a router module (HB-312)', () => {
+  const routed = (when?: string) => ([
+    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
+    { id: 'gate', kind: 'agent', action: 'gate', definitionVersion: 'coder@1', model: 'm', dependsOn: ['work'],
+      ...(when ? { when } : {}), routes: ['work', 'other'] },
+  ] as unknown as NodeSpec[]);
+
+  test('L11: the routes survive as a router module the real parser accepts', () => {
+    const definition = liftDefinition(routed());
+    expect(definition.modules['gate']).toMatchObject({ type: 'router' });
+    expect(Object.keys(definition.modules['gate']!.outputs)).toHaveLength(2);
+    // The whole definition must still be legal - a module that does not parse is worse
+    // than no module at all.
+    expect(() => parseGraphDefinition(definition)).not.toThrow();
+  });
+
+  test('L12: `when` becomes the trigger, and an unrouted node produces no module', () => {
+    expect(liftDefinition(routed('once')).modules['gate']).toMatchObject({ trigger: 'once' });
+    expect(liftDefinition(routed()).modules['gate']).toMatchObject({ trigger: 'each' });
+    const plain = [{ id: 'a', kind: 'agent', action: 'a', definitionVersion: 'coder@1', model: 'm' }] as unknown as NodeSpec[];
+    expect(liftDefinition(plain).modules).toEqual({});
+  });
+});
