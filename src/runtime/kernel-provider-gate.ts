@@ -1,3 +1,4 @@
+import { modelIdentity, type ModelEntry } from '../catalog/models.ts';
 import type { KernelStore } from '../core/kernel-store.ts';
 import { RuntimeError } from '../core/types.ts';
 import type { SendGate } from './controlled-openai.ts';
@@ -5,7 +6,7 @@ import { tokenUsageTotal, type TokenUsage } from './call-broker.ts';
 
 /** Provider sends are admitted and charged by the host, independently of Pi turn boundaries. */
 export function kernelProviderGate(kernel: KernelStore, graphId: string, nodeId: string,
-  limit?: { budget: number; unlimited: boolean }): SendGate {
+  limit?: { budget: number; unlimited: boolean }, model?: ModelEntry): SendGate {
   return {
     dispatch(id, reservation, send) {
       if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('budget', 'Invalid provider reservation');
@@ -19,8 +20,8 @@ export function kernelProviderGate(kernel: KernelStore, graphId: string, nodeId:
         if (calls.some(call => call.state === 'unknown')) throw new RuntimeError('budget', 'Reconcile unknown provider usage before another send');
         const reserved = calls.reduce((total, call) => total + call.reserved, 0);
         if (limit && !limit.unlimited && state.used + reserved + reservation > limit.budget) throw new RuntimeError('budget', `Token budget exhausted for node ${nodeId}`);
-        kernel.db.prepare('INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at) VALUES(?,?,?,?,?,?,?)')
-          .run(id, graphId, nodeId, execution.id, reservation, 'inflight', Date.now());
+        kernel.db.prepare('INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at,model) VALUES(?,?,?,?,?,?,?,?)')
+          .run(id, graphId, nodeId, execution.id, reservation, 'inflight', Date.now(), model ? JSON.stringify({ id: model.id, identity: modelIdentity(model), provider: model.provider, api: model.api, baseUrl: model.baseUrl }) : null);
       });
       return send();
     },

@@ -1,3 +1,4 @@
+import type { TokenUsage } from '../runtime/call-broker.ts';
 import { wakeMaster, wakeForBlockedNode } from './wake-ledger.ts';
 import { randomUUID } from 'node:crypto';
 import type { TaskStore } from './store.ts';
@@ -264,6 +265,8 @@ export class KernelStore {
     for (const [name, declaration] of [['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
       if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
     }
+    const providerColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_provider_calls)').all() as { name: string }[]).map(row => row.name));
+    if (!providerColumns.has('model')) this.db.exec('ALTER TABLE kernel_provider_calls ADD COLUMN model TEXT');
     const bindingColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_node_bindings)').all() as { name: string }[]).map(row => row.name));
     if (!bindingColumns.has('role')) this.db.exec('ALTER TABLE kernel_node_bindings ADD COLUMN role TEXT');
     const deliveryColumns = new Set(
@@ -787,6 +790,20 @@ export class KernelStore {
     this.ensureNodeState(taskId, nodeId);
     this.store.db.prepare('UPDATE kernel_node_state SET paused=0 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
     this.store.event(taskId, 'graph.node.resumed', { nodeId });
+  }
+
+  /** Actual sends, including unknown holds; model identity is frozen at dispatch. */
+  providerCalls(taskId: string, nodeId?: string) {
+    const rows = this.db.prepare(`SELECT id,node_id,execution_id,reserved,state,usage,model,created_at,settled_at
+      FROM kernel_provider_calls WHERE task_id=? ${nodeId === undefined ? '' : 'AND node_id=?'} ORDER BY rowid`)
+      .all(...(nodeId === undefined ? [taskId] : [taskId, nodeId])) as {
+        id: string; node_id: string; execution_id: string; reserved: number; state: string;
+        usage: string | null; model: string | null; created_at: number; settled_at: number | null;
+      }[];
+    return rows.map(row => ({ id: row.id, nodeId: row.node_id, executionId: row.execution_id,
+      reserved: row.reserved, state: row.state, usage: row.usage ? JSON.parse(row.usage) as TokenUsage : null,
+      model: row.model ? JSON.parse(row.model) as { id: string; identity: string; provider: string; api: string; baseUrl: string } : null,
+      createdAt: row.created_at, settledAt: row.settled_at }));
   }
 
   /**

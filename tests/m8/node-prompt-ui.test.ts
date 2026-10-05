@@ -130,13 +130,18 @@ test('native graph chats keep a session and expose the actual provider prompt in
   const capabilityRoot = join(root, 'capabilities');
   await mkdir(capabilityRoot);
   const provider = await openaiServer([{ text: 'native first reply' }, { text: 'native second reply' }]);
+  const other = await openaiServer([{ text: 'wrong connection' }, { text: 'wrong connection' }]);
+  cleanup.push(() => other.close());
   cleanup.push(() => provider.close());
   const library = openAgentContextLibrary(join(root, 'prompts')); await library.ensure();
   await library.savePrompt('runtime/node.md', 'NODE RUNTIME FIRST: use the declared graph outputs.');
   const server = await openGraphServer({ agentContext: library, stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
     catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') }, actions: {},
     limits: { defaultBudgetTokens: 20_000_000 },
-    models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-test-key', modelRuntime: provider.runtime },
+    models: { entries: [
+      { id: 'other', modelId: 'same-upstream', provider: other.model.provider, grade: 'low', api: 'openai-completions', baseUrl: other.model.baseUrl, contextWindow: 32000, maxTokens: 256 },
+      { id: 'local', modelId: 'same-upstream', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 },
+    ], apiKey: 'local-test-key', modelRuntime: provider.runtime },
   });
   cleanup.push(() => server.close());
   await server.runtime.catalog.saveAgentCombination({ id: 'native', name: 'Native', description: 'native reviewer', recommendedGrade: 'medium', review: true, tags: [], resources: [], systemPrompt: 'Native identity.' });
@@ -151,6 +156,8 @@ test('native graph chats keep a session and expose the actual provider prompt in
     modules: {}, edges: { result: { from: 'build.result', to: 'observer.in', enabled: true } } }) }) as { graphId: string };
   await main.graphSend({ graphId: graph.graphId, nodeId: 'build/worker', text: 'first distinct input' });
   await server.runtime.host.drive();
+  expect(other.requests).toHaveLength(0);
+  expect(provider.requests).toHaveLength(1);
   const first = server.runtime.nodeRun(graph.graphId, 'build/worker');
   expect(first.session?.sessionId).toBeTruthy();
   expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').recorded?.text).toContain('NODE RUNTIME FIRST');
@@ -165,6 +172,16 @@ test('native graph chats keep a session and expose the actual provider prompt in
   const configs = await readdir(join(root, 'state', 'kernel-worker'));
   for (const config of configs) expect(await readFile(join(root, 'state', 'kernel-worker', config), 'utf8')).not.toContain('local-test-key');
   expect(second.instance?.used).toBe(100);
+  const calls = await main.graphInspect({ graphId: graph.graphId, query: 'provider_calls' }) as { id: string; model: { id: string; identity: string; baseUrl: string }; state: string; usage: { input: number; output: number } }[];
+  expect(calls).toHaveLength(2);
+  expect(new Set(calls.map(call => call.id)).size).toBe(2);
+  for (const call of calls) {
+    expect(call.model).toMatchObject({ id: 'local', identity: 'same-upstream', baseUrl: provider.model.baseUrl });
+    expect(call.state).toBe('settled');
+    expect(call.usage).toMatchObject({ input: 25, output: 10, cacheRead: 15 });
+  }
+  expect(second.invocations).toHaveLength(2);
+  expect(second.instance?.modelsUsed).toEqual(['local']);
   expect(second.entries.some(entry => entry.text.includes('native second reply'))).toBe(true);
   const body = provider.requests.at(-1) as { messages: { role: string; content: string }[] };
   const actual = body.messages.find(message => message.role === 'system' || message.role === 'developer')?.content;

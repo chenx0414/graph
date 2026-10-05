@@ -120,6 +120,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const sessions = new Map<string, NodeSessionRequest>();
   const sessionRevisions = new Map<string, string>();
   const hostConfigs = new Map<string, string>();
+  const boundModels = new Map<string, ModelEntry>();
 
   /** The workspace a node works in: its own work copy when Git can provide one. */
   const nodeWorkspace = (graphId: string, nodeId: string): string | undefined => {
@@ -261,7 +262,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     closeGraph: async graphId => {
       for (const key of [...hosts.keys()]) {
         if (!key.startsWith(`${graphId}/`)) continue;
-        await hosts.get(key)!.dispose(); hosts.delete(key); hostConfigs.delete(key);
+        await hosts.get(key)!.dispose(); hosts.delete(key); hostConfigs.delete(key); boundModels.delete(key);
         await sessions.get(key)?.close(); sessions.delete(key); sessionRevisions.delete(key);
       }
     },
@@ -273,6 +274,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       sessions.clear();
       sessionRevisions.clear();
       hostConfigs.clear();
+      boundModels.clear();
     },
     kernel: options.kernel,
     ...(options.tokenBudget && options.reserveTokens !== undefined
@@ -287,6 +289,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const recipe = session.binding.definitionVersion;
       const model = modelFor(options, recipe);
       if (!model) throw new Error(`no configured model for recipe ${recipe}`);
+      boundModels.set(`${graphId}/${nodeId}`, structuredClone(model));
       const credential = options.credentialFor(model);
       if (!credential) throw new Error(`no credential bound for model ${model.id}`);
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
@@ -336,6 +339,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (!session) throw new Error('Resident host has no prepared session');
       if (closing) throw new Error('Graph runtime is closing');
       if (!session.operation) throw new Error('Resident node has no resolved capability operation');
+      const model = boundModels.get(key);
+      if (!model || model.id !== (config as { model: { name: string } }).model.name) throw new Error('Resident host has no prepared model connection');
       const host = new ResidentHost({
         launch: residentLauncher({ config: config as never, configPath, workerEntry, operation: session.operation,
           ...(options.access ? { access: options.access() } : {}) }),
@@ -344,15 +349,13 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         configPath,
         config: config as never,
         onModelCall: async (raw, hostSignal) => {
-          const model = options.directory().find(entry => toPiModel(entry).id === (config as { model: { id: string } }).model.id);
-          if (!model) throw new Error('Bound model is no longer configured');
           const credential = options.credentialFor(model);
           if (!credential) throw new Error('Bound model credential unavailable');
           const context = raw as Context;
           if (!context || !Array.isArray(context.messages)) throw new Error('Invalid model context');
           let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
           let unknown = false;
-          const gate = kernelProviderGate(options.kernel, graphId, nodeId, options.tokenBudget);
+          const gate = kernelProviderGate(options.kernel, graphId, nodeId, options.tokenBudget, model);
           const observed: SendGate = {
             dispatch: (id, reservation, send) => gate.dispatch(id, reservation, send),
             settle: (id, cost) => { gate?.settle(id, cost); if (cost) {

@@ -1,3 +1,4 @@
+import { usageSourceOf } from '../runtime/call-broker.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { NodePromptView } from './node-prompt.ts';
 import { listNodeEntries } from './node-run.ts';
@@ -26,17 +27,22 @@ export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: stri
   const executions = kernel.db.prepare('SELECT id,attempt,state,submission_id,started_at,ended_at,retries_used,resubmits_used FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid').all(graphId, nodeId) as { id: string; attempt: number; state: string; submission_id: string | null; started_at: number; ended_at: number | null; retries_used: number; resubmits_used: number }[];
   const capability = kernel.db.prepare('SELECT loaded FROM node_capabilities WHERE task_id=? AND node_id=? ORDER BY seq DESC LIMIT 1').get(graphId, nodeId) as { loaded: string } | undefined;
   const loaded = capability ? JSON.parse(capability.loaded) : null;
+  const calls = kernel.providerCalls(graphId, nodeId);
   const settled = executions.filter(item => item.ended_at !== null);
   return {
     taskId: graphId, nodeId, context: null,
     node: { id: nodeId, kind: 'agent', action: definition.task, role: binding?.role ?? null, status: row.status, definitionVersion: definition.recipe },
     instance: { id: row.instanceId, model: binding?.model_id ?? null, definitionVersion: definition.recipe ?? null,
-      used: state?.used ?? 0, budget: null, unlimited: false, modelsUsed: binding?.model_id ? [binding.model_id] : [] },
+      used: state?.used ?? 0, budget: null, unlimited: false, modelsUsed: [...new Set(calls.flatMap(call => call.model ? [call.model.id] : []))] },
     session: session ? { sessionId: session.session_id, sessionFile: session.session_file } : null,
     capabilities: loaded?.facts ?? [], capabilityDigest: loaded?.digest ?? null, capabilityUsage: [],
     operations: executions.map(item => ({ ...item, activationId: item.id, workerActive: item.state === 'running', waitingSlot: false,
       reserved: 0, waitingMs: 0, runMs: item.ended_at === null ? null : item.ended_at - item.started_at,
-      dispatchedAt: item.started_at, settledAt: item.ended_at, result: null, usage: null })), invocations: [], questions: [], evidence: [],
+      dispatchedAt: item.started_at, settledAt: item.ended_at, result: null, usage: null })), invocations: calls.map(call => ({ id: call.id, operationId: call.executionId, model: call.model?.id ?? null,
+      modelIdentity: call.model?.identity ?? null, provider: call.model?.provider ?? null, state: call.state,
+      reserved: ['inflight', 'unknown'].includes(call.state) ? call.reserved : 0,
+      usage: call.usage, usageSource: usageSourceOf(call.usage), cost: null, purpose: 'node',
+      dispatchedAt: call.createdAt, settledAt: call.settledAt })), questions: [], evidence: [],
     timing: { totalMs: settled.length ? settled.reduce((total, item) => total + item.ended_at! - item.started_at, 0) : null,
       runMs: null, waitingMs: null, pauseMs: null, userWaitMs: null, inProgress: executions.some(item => item.state === 'running') },
     ...listNodeEntries(kernel.store, graphId, nodeId, query), phase: kernel.store.task(graphId).phase,

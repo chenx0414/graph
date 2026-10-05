@@ -73,6 +73,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
     async graphPatch(input) { return runtime(input.graphId).patch(input); },
     async graphInspect(input) {
       const graph = runtime(input.graphId);
+      if (input.query === 'provider_calls') return kernel.providerCalls(input.graphId, input.id);
       if (input.query === 'operations') return (kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,request,state,result,error,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId) as { request: string; result: string | null }[]).map(row => ({ ...row, request: JSON.parse(row.request), result: row.result ? JSON.parse(row.result) : null }));
       if (input.query === 'edge') return explainEdge(kernel, input.graphId, input.id!);
       if (input.query === 'module') return explainModule(kernel, input.graphId, input.id!);

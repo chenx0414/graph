@@ -16,7 +16,7 @@
 
 `graph_patch({graphId,baseRevision,changes:{definition,reason,retire?}})` 发布新 revision。baseRevision 过期时不写入。删除节点必须明确列在 retire 中；存在运行、排队或失败待处理工作时，先处理工作。当前执行保留原配置，后续 submit 使用届时的连接。
 
-`graph_inspect({graphId,query,id?})` 支持 summary（默认）、revision、nodes、results、edge、module、operations。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
+`graph_inspect({graphId,query,id?})` 支持 summary（默认）、revision、nodes、results、edge、module、operations、provider_calls。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
 
 ## 控制
 
@@ -52,6 +52,8 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 ## Provider 用量与恢复
 
 生产 resident worker 经 IPC 请求宿主执行模型调用，配置文件不含 provider 凭据。每次实际发送分别受预算与共享凭据名额约束；等待凭据释放全局执行名额，获得凭据后重新取得执行名额。
+
+`graph_inspect({graphId,query:"provider_calls",id?})` 返回实际模型发送记录，id 可限定节点。每条记录包含调用 ID、执行 ID、固定的连接/上游模型身份、状态、预留及已知用量。未知用量保持 null，不按零结算；使用返回的调用 ID 做 reconcile_usage。节点详情的调用历史与 modelsUsed 来自这些记录，旧记录缺少身份时保持未知。
 
 运行时重启会保留输入、提交和尝试计数；无法证明用量或副作用的执行暂停等待处理。`graph_control({graphId,action:"reconcile_usage",callId,usage:{input,output,cacheRead,cacheWrite}})` 显式结算未知 provider 调用；相同结算可重放，不同结算被拒绝。结算不自动恢复节点，之后由 main 明确 resume。已成功提交的输入不能通过 retry 重发。
 
