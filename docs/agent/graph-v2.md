@@ -82,3 +82,9 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 recipe 的 review 标记决定审查身份及规则；节点名称和任务文字不参与身份推断。节点运行指导使用可编辑的 runtime/node.md，描述实际 submit、具名输出、聊天和稳定产物引用，不注入旧 submit_result 指令。
 
 身份、通用规则、相应角色规则/工具指导及节点运行指导修改后，从下一次执行生效；受控重绑保留原会话历史。节点视图显示实际绑定角色，尚未绑定时保持未知。
+
+## 发布稳定代码版本
+
+已准备 Git 工作副本的 worker 可调用 `workspace_commit({paths:["src/feature.ts"],message:"实现异常处理"})`，只提交自己的工作副本中明确指定的路径，返回 repository、worktree 和完整 commit。reviewer 不提供该工具。它不发布产物，也不把改动交付目标分支。
+
+随后调用 `artifact_publish` 发布文件，并使用 `metadata:{kind:"code"}` 标记扩展名无法识别的代码文件。系统记录该文件所属 commit，并核对文件内容与 commit 中的字节一致；尚未提交的修改会被拒绝。将返回的产物 ID 和具体版本通过 submit 传给下游。发布后的内容保持稳定，工作副本后续编辑不会改变已发布版本。代码集成仍在任务执行结束时单独结算。

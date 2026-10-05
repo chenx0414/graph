@@ -162,6 +162,17 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       revisionVersion: revision.version,
       workspace,
       bindings: {
+        ...(options.git && options.kernel.store.task(graphId).integration_branch && role !== 'reviewer' ? {
+          commitWorkspace: async (input: { paths: string[]; message: string }) => options.git!.exclusive(graphId, () => {
+            const task = options.kernel.store.task(graphId);
+            const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+            if (!execution || closing || task.paused || options.kernel.nodeState(graphId, nodeId).paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Workspace commit is closed');
+            const unknown = options.kernel.db.prepare("SELECT 1 FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state='unknown' LIMIT 1").get(graphId, nodeId);
+            if (unknown) throw new RuntimeError('budget', 'Reconcile unknown provider usage before committing work');
+            const admitted = options.kernel.listNodes(graphId).find(node => node.nodeId === nodeId)!;
+            return options.git!.commitWorkspace({ ...input, id: execution.id, taskId: graphId, nodeId, instanceId: admitted.instanceId, recipe: recipe!, workspace });
+          }),
+        } : {}),
         peers: {
           list: async () => [...Object.keys(options.kernel.latestRevision(graphId)!.definition.nodes).map(id => ({ id, href: `graph://${graphId}/agents/${encodeURIComponent(id)}` })), { id: 'main', href: `graph://${graphId}/owner` }],
           send: async message => {

@@ -361,14 +361,14 @@ export class GitIntegration {
     return subdir ? join(path, subdir) : path;
   }
 
-  private agentIdentity(instanceId: string | null, nodeId: string): GitIdentity {
+  private agentIdentity(instanceId: string | null, nodeId: string, fallbackVersion?: string): GitIdentity {
     const row = instanceId
       ? this.store.db.prepare(`SELECT i.definition_version,d.spec FROM instances i
           LEFT JOIN definitions d ON d.id=substr(i.definition_version,1,instr(i.definition_version,'@')-1)
             AND d.version=CAST(substr(i.definition_version,instr(i.definition_version,'@')+1) AS INTEGER)
           WHERE i.id=?`).get(instanceId) as { definition_version: string | null; spec: string | null } | undefined
       : undefined;
-    const definitionVersion = row?.definition_version ?? nodeId;
+    const definitionVersion = row?.definition_version ?? fallbackVersion ?? nodeId;
     const definitionId = definitionVersion.split('@')[0] || nodeId;
     let name = definitionId;
     if (row?.spec) {
@@ -382,6 +382,28 @@ export class GitIntegration {
     }
     const slug = definitionId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent';
     return { name, email: `${slug}@agents.graph.local` };
+  }
+
+  /** An agent can publish a stable code version before its workflow submit. */
+  commitWorkspace(input: { id: string; taskId: string; nodeId: string; instanceId: string; recipe: string; workspace: string; paths: string[]; message: string }) {
+    if (!input.paths.length || input.paths.length > 256 || !input.message.trim() || input.message.length > 4096) throw new RuntimeError('invalid_input', 'Commit requires 1–256 paths and a bounded message');
+    if (input.paths.some(path => !path || path.length > 4096 || /[\\\0\r\n]/.test(path) || path.startsWith('/') || path.split('/').some(part => !part || part === '..' || part === '.git'))) throw new RuntimeError('permission', 'Commit paths must remain inside this node workspace');
+    const tree = this.store.db.prepare('SELECT path FROM worktrees WHERE task_id=? AND instance_id=?').get(input.taskId, input.instanceId) as { path: string } | undefined;
+    if (!tree || !pathInside(realpathSync(tree.path), realpathSync(input.workspace))) throw new RuntimeError('permission', 'Commit requires the admitted node worktree');
+    const identity = this.agentIdentity(input.instanceId, input.nodeId, input.recipe);
+    const added = git(input.workspace, ['--literal-pathspecs', 'add', '--', ...input.paths], undefined, identity);
+    if (added.code !== 0) throw new RuntimeError('git_error', added.stderr || 'Unable to stage requested files');
+    const changed = git(input.workspace, ['--literal-pathspecs', 'diff', '--quiet', 'HEAD', '--', ...input.paths]);
+    if (![0, 1].includes(changed.code)) throw new RuntimeError('git_error', changed.stderr || 'Unable to inspect requested files');
+    if (changed.code === 1) {
+      const result = git(input.workspace, ['--literal-pathspecs', 'commit', '--only', '--no-verify', '-m', input.message, '--', ...input.paths], undefined, identity);
+      if (result.code !== 0) throw new RuntimeError('git_error', result.stderr || 'Unable to commit requested files');
+    }
+    const commit = revParse(input.workspace, 'HEAD');
+    if (!commit) throw new RuntimeError('git_error', 'Committed version is unavailable');
+    if (changed.code === 1) this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(commit, input.taskId, input.nodeId, input.id, 'instance');
+    this.store.event(input.taskId, 'git.workspace.committed', { executionId: input.id, nodeId: input.nodeId, commit, paths: input.paths, created: changed.code === 1 });
+    return { repository: input.workspace, worktree: input.workspace, commit };
   }
 
   integrate(operation: Pick<Operation, 'id' | 'taskId' | 'nodeId' | 'instanceId' | 'kind'>) {

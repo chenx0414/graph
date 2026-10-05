@@ -46,7 +46,7 @@ export interface NodeSessionRequest {
 export interface NodeSessionOptions {
   retainCapabilities?: boolean;
   access?: ResolvedAccessPolicy;
-  bindings?: Pick<Parameters<typeof agentTools>[0], 'peers' | 'artifacts'>;
+  bindings?: Pick<Parameters<typeof agentTools>[0], 'peers' | 'artifacts' | 'commitWorkspace'>;
   kernel: KernelStore;
   catalog: Catalog;
   graphId: string;

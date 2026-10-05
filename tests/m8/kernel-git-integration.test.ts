@@ -23,8 +23,14 @@ test('native worker output is integrated from its own worktree and leaves the ta
   const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
   const provider = await openaiServer([
     { tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'implemented\n' }) }] },
+    { tools: [{ id: 'premature', name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'deliverables', name: 'code', sourcePath: 'feature.txt', metadata: { kind: 'code' }, requestId: 'premature' }) }] },
+    { tools: [{ id: 'outside', name: 'workspace_commit', arguments: JSON.stringify({ paths: ['../outside.txt'], message: 'must be refused' }) }] },
+    { tools: [{ id: 'commit', name: 'workspace_commit', arguments: JSON.stringify({ paths: ['feature.txt'], message: 'stable implementation' }) }] },
+    { tools: [{ id: 'publish', name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'deliverables', name: 'code', sourcePath: 'feature.txt', metadata: { kind: 'code' }, requestId: 'code' }) }] },
     { tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { summary: 'implemented' } } } }) }] },
     { text: 'implementation submitted' },
+    { tools: [{ id: 'later-write', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'later working version\n' }) }] },
+    { text: 'working file changed' },
   ]);
   cleanup.push(() => provider.close());
   const stateDir = join(root, 'state');
@@ -49,9 +55,20 @@ test('native worker output is integrated from its own worktree and leaves the ta
   const integration = disk.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${graph.graphId}`) as { path: string };
   expect(await readFile(join(integration.path, 'feature.txt'), 'utf8')).toBe('implemented\n');
   expect(disk.task(graph.graphId).integration_sha).not.toBe(original);
+  const published = runtime.artifacts.list(graph.graphId).artifacts;
+  expect(published).toHaveLength(1);
+  expect(published[0]?.metadata.code).toMatchObject({ commit: git(worker.path, ['rev-parse', 'HEAD']).stdout.trim() });
+  expect((await runtime.artifacts.read(graph.graphId, published[0]!.artifactId, published[0]!.version)).text).toBe('implemented\n');
   expect(git(project, ['rev-parse', 'HEAD']).stdout.trim()).toBe(original);
   expect(await readFile(join(project, 'feature.txt'), 'utf8')).toBe('before\n');
   expect(disk.db.prepare('SELECT state FROM kernel_executions WHERE task_id=?').get(graph.graphId)).toEqual({ state: 'completed' });
   expect(disk.db.prepare('SELECT COUNT(*) AS n FROM nodes WHERE task_id=?').get(graph.graphId)).toEqual({ n: 0 });
   expect(disk.db.prepare('SELECT COUNT(*) AS n FROM operations WHERE task_id=?').get(graph.graphId)).toEqual({ n: 0 });
+  const transcript = JSON.stringify(provider.requests);
+  expect(transcript).toContain('File differs from its commit');
+  expect(transcript).toContain('Commit paths must remain inside this node workspace');
+  await main.graphSend({ graphId: graph.graphId, nodeId: 'work', text: 'Change the working file for a later version, without publishing.' });
+  await runtime.host.drive();
+  expect(await readFile(join(worker.path, 'feature.txt'), 'utf8')).toBe('later working version\n');
+  expect((await runtime.artifacts.read(graph.graphId, published[0]!.artifactId, published[0]!.version)).text).toBe('implemented\n');
 }, 30000);

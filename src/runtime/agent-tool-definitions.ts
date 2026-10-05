@@ -5,6 +5,7 @@ import { rsiChangeShapeHint } from './rsi.ts';
 /** Facts about the host bindings, without executors or filesystem access. */
 export interface AgentToolFeatures {
   graphManagement?: boolean;
+  workspaceCommit?: boolean;
   role?: string;
   readOnly?: boolean;
   run?: boolean;
@@ -87,6 +88,13 @@ function declarations(features: AgentToolFeatures) {
       available: true,
       externallyGated: false,
     },
+    workspace_commit: {
+      name: 'workspace_commit', label: 'Commit workspace files',
+      description: 'Create a stable Git commit of the named paths in this node worktree before publishing code or submitting its commit reference. Returns repository, commit and worktree. Does not publish artifacts, integrate work or deliver to the target branch.',
+      parameters: Type.Object({ paths: Type.Array(Type.String(), { minItems: 1, maxItems: 256 }), message: Type.String() }),
+      available: Boolean(features.workspaceCommit) && !features.readOnly && !main && features.role !== 'reviewer',
+      externallyGated: false,
+    },
     artifact_list: {
       name: 'artifact_list',
       label: 'List shared artifacts',
@@ -132,6 +140,7 @@ function declarations(features: AgentToolFeatures) {
         summary: Type.Optional(Type.String()),
         tags: Type.Optional(Type.Array(Type.String())),
         expectedVersion: Type.Optional(Type.Number()),
+        metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
         requestId: Type.String(),
       }),
       available: Boolean(features.artifacts),

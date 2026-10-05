@@ -117,3 +117,11 @@
 - 新回归使用真实 Pi、HTTP fixture、临时 Git 和磁盘 SQLite：write_file 实际修改自己的 worktree，再 submit；集成文件及 SHA 更新，目标 main 保留原 SHA 和内容，旧 nodes/operations 都是零条。
 - 首版夹具误用了未开放的 write 工具，已纠正为 write_file。纠正后的回归在 d1f4eb3 上先证明 worker 文件已改，再因集成文件仍为 before 失败；修复后 3 文件 11 用例通过。
 - 这只是集成步骤，不是最终验收或目标分支交付：精确 commit 检查、独立模型历史、human acceptance、formal scope/config、Git 恢复仍需接线。特别需要补齐提交前发布代码稳定 commit 的宿主能力，不能依赖执行结束后自动提交来证明提前投递的代码版本。
+
+## 提交前的稳定代码发布
+
+- 第十一轮完整门禁通过：273 文件、1805 用例，198.22 秒；证据未改写；native Git 集成提交为 1ff39c6。
+- Git 工作副本已准备的 worker 获得 workspace_commit，使用可信执行身份并在 Git 排他边界内提交指定路径；拒绝工作副本外路径，不交付目标分支。reviewer 不开放该工具。
+- artifact_publish 传递 metadata，kind:code 文件也必须与记录的 commit 字节一致；不再只按代码扩展名校验。已发布内容不随工作副本后续修改变化。
+- 真实 Pi/Git/SQLite 回归在旧实现上因缺少稳定 commit 元数据失败；修复后进一步验证提交前发布被拒绝、越界提交被拒绝、稳定版本可发布、后续聊天改动保留原发布内容。4 文件 20 用例定向通过。
+- 最终验收、目标分支交付、原生模型历史与正式默认入口切换尚未完成；本节不代表完整 spec 验收。

@@ -148,6 +148,7 @@ export function agentTools(input: {
   workspace: string;
   role?: NodeSpec['role'] | 'reviewer';
   readRoots?: string[];
+  commitWorkspace?: (input: { paths: string[]; message: string }) => Promise<unknown>;
   access?: ResolvedAccessPolicy;
   /** Discussion turns investigate without writing business files or running commands. */
   readOnly?: boolean;
@@ -292,14 +293,21 @@ export function agentTools(input: {
         typeof body.maxBytes === 'number' ? body.maxBytes : undefined,
       )));
     },
+    workspace_commit: async (_id, params) => {
+      const body = fields(params);
+      if (!Array.isArray(body.paths) || body.paths.some(path => typeof path !== 'string') || typeof body.message !== 'string') throw new RuntimeError('invalid_input', 'workspace_commit requires paths and message');
+      return text(JSON.stringify(await input.commitWorkspace!({ paths: body.paths as string[], message: body.message })));
+    },
     artifact_publish: async (_id: string, params: unknown) => {
       const body = fields(params);
       const namespace = String(body.namespace).trim();
       if (!input.artifacts!.allowedNamespaces.includes(namespace)) throw new Error(`Namespace ${namespace} is not writable by this Agent`);
+      if (body.metadata !== undefined && (!body.metadata || typeof body.metadata !== 'object' || Array.isArray(body.metadata))) throw new RuntimeError('invalid_input', 'Artifact metadata must be an object');
       const tags = Array.isArray(body.tags) ? body.tags.map(String) : undefined;
       const expectedVersion = typeof body.expectedVersion === 'number' ? body.expectedVersion : undefined;
       return text(JSON.stringify(await input.artifacts!.publish({
         namespace,
+        ...(body.metadata ? { metadata: body.metadata as Record<string, unknown> } : {}),
         name: String(body.name),
         ...(typeof body.sourcePath === 'string' && body.sourcePath.trim() ? { sourcePath: body.sourcePath } : {}),
         ...(typeof body.content === 'string' ? { content: body.content } : {}),
@@ -651,6 +659,7 @@ export function agentTools(input: {
 
   const descriptions = describeAgentTools({
     graphManagement: Boolean(input.supervisor?.graphCreate),
+    workspaceCommit: Boolean(input.commitWorkspace),
     ...(input.role ? { role: input.role } : {}),
     readOnly: Boolean(input.readOnly),
     run: Boolean(input.run),

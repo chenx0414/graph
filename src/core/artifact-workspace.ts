@@ -395,7 +395,7 @@ export class ArtifactWorkspace {
     if (repository !== resolve(input.workspace)) throw new RuntimeError('permission', 'Publish code from this execution workspace; another repository requires its own authorized execution');
     try {
       const commit = (await runGit('git', ['-C', repository, 'rev-parse', '--verify', `${typeof supplied?.commit === 'string' ? supplied.commit : 'HEAD'}^{commit}`], { maxBuffer: 4096 })).stdout.trim();
-      if (fileCode) {
+      if (input.sourcePath) {
         const root = (await runGit('git', ['-C', repository, 'rev-parse', '--show-toplevel'], { maxBuffer: 4096 })).stdout.trim();
         const source = resolve(input.workspace, input.sourcePath!);
         const path = relative(root, source);
