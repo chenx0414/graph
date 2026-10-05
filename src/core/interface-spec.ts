@@ -73,7 +73,7 @@ export interface NodeDefinition extends NodeInterface {
 }
 
 export interface ModuleDefinition {
-  type: 'router' | 'command';
+  type: 'router' | 'command' | 'operation';
   trigger: 'each' | 'once';
   inputs: Record<string, ProtocolRef>;
   outputs: Record<string, ProtocolRef>;
@@ -89,6 +89,10 @@ export interface ModuleDefinition {
    * code is never imported into the daemon; it runs in the isolated module process.
    */
   code?: { entry: string; version: number };
+  /** Trusted host operation; it shares input, latch and delivery semantics with routers. */
+  operation?: { action: 'workspace.command'; version: number; command: string; args: string[];
+    output: string; timeoutMs?: number; sandbox?: boolean };
+
 }
 
 export interface ModuleRule {
@@ -231,7 +235,16 @@ function validateNode(definition: GraphDefinition, id: string, node: NodeDefinit
 }
 
 function validateModule(definition: GraphDefinition, id: string, module: ModuleDefinition): void {
-  if (module.type !== 'router' && module.type !== 'command') invalid(`Module ${id} has unsupported type ${String(module.type)}`);
+  if (module.type !== 'router' && module.type !== 'command' && module.type !== 'operation') invalid(`Module ${id} has unsupported type ${String(module.type)}`);
+  if (module.type === 'operation') {
+    const operation = module.operation;
+    if (!operation || operation.action !== 'workspace.command' || !Number.isSafeInteger(operation.version) || operation.version < 1
+      || typeof operation.command !== 'string' || !operation.command.trim() || !Array.isArray(operation.args)
+      || operation.args.some(arg => typeof arg !== 'string') || !module.outputs?.[operation.output]) invalid(`Module ${id} requires a versioned workspace.command operation and declared output`);
+    if (operation!.timeoutMs !== undefined && (!Number.isSafeInteger(operation!.timeoutMs) || operation!.timeoutMs < 1 || operation!.timeoutMs > 86400000)) invalid(`Module ${id} has invalid operation timeout`);
+    if (operation!.sandbox !== undefined && typeof operation!.sandbox !== 'boolean') invalid(`Module ${id} sandbox must be boolean`);
+    if (module.code || module.rules?.length) invalid(`Module ${id} operation cannot also declare code or rules`);
+  }
   if (module.trigger !== 'each' && module.trigger !== 'once') invalid(`Module ${id} trigger must be each or once`);
   for (const [port, ref] of Object.entries(module.inputs ?? {})) assertDeclaredProtocol(definition, ref, `Module ${id} input ${port}`);
   for (const [port, ref] of Object.entries(module.outputs ?? {})) assertDeclaredProtocol(definition, ref, `Module ${id} output ${port}`);

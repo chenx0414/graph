@@ -2,7 +2,7 @@ import { occupiedSlots, executionLimit } from '../runtime/execution-slots.ts';
 import { GraphRuntime } from './graph-runtime.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
-import { GraphRunner, type RunnerHost, type RunResult } from './graph-runner.ts';
+import { GraphRunner, type RunnerHost, type RunResult, type ModuleOperationRequest, type GraphRunnerOptions } from './graph-runner.ts';
 
 /**
  * The production run hookup for the v2 kernel (Issue #1 §13.8).
@@ -20,6 +20,7 @@ import { GraphRunner, type RunnerHost, type RunResult } from './graph-runner.ts'
 export interface GraphLaneOptions {
   kernel: KernelStore;
   close?: () => Promise<void>;
+  operation?: (graphId: string, request: ModuleOperationRequest) => ReturnType<NonNullable<GraphRunnerOptions['operation']>>;
   closeGraph?: (graphId: string) => Promise<void>;
   /**
    * §9: the token budget a node runs under, and what one turn is expected to cost.
@@ -111,6 +112,7 @@ export class GraphLane {
     const runner = new GraphRunner({
       kernel,
       graphId, signal: this.shutdown.signal,
+      ...(this.options.operation ? { operation: (request: ModuleOperationRequest) => this.options.operation!(graphId, request) } : {}),
       ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
         ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
       hostFor: async (nodeId: string) => {

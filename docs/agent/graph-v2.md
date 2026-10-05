@@ -16,14 +16,15 @@
 
 `graph_patch({graphId,baseRevision,changes:{definition,reason,retire?}})` 发布新 revision。baseRevision 过期时不写入。删除节点必须明确列在 retire 中；存在运行、排队或失败待处理工作时，先处理工作。当前执行保留原配置，后续 submit 使用届时的连接。
 
-`graph_inspect({graphId,query,id?})` 支持 summary（默认）、revision、nodes、results、edge、module。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
+`graph_inspect({graphId,query,id?})` 支持 summary（默认）、revision、nodes、results、edge、module、operations。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
 
 ## 控制
 
-`graph_control({graphId,action,nodeId?,moduleId?,seq?})`：
+`graph_control({graphId,action,nodeId?,moduleId?,seq?,operationId?})`：
 
 - pause/resume：有 nodeId 时控制该节点队列，否则控制整个 graph 的派发。
 - retry/skip/cancel：指定 seq 处理待执行队列项。仍在运行的项不能被这些操作重新领取；已成功提交的原输入不能重发。
+- cancel_operation：指定 operationId，取消 uncertain/failed 操作的原输入；不撤销已产生的副作用，也不生成成功结果。dispatched 操作必须先停止。取消可以重放；恢复后如需重做，由 main 显式重新投递。
 - reopen：指定 moduleId 清除一次汇合的触发锁存，保留输入，等待下一次投递再判断。
 - complete：关闭外部新输入，等待内部工作清空后完成；空闲不等于完成。
 - withdraw_complete：撤销完成请求，恢复外部输入。
@@ -53,3 +54,25 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 生产 resident worker 经 IPC 请求宿主执行模型调用，配置文件不含 provider 凭据。每次实际发送分别受预算与共享凭据名额约束；等待凭据释放全局执行名额，获得凭据后重新取得执行名额。
 
 运行时重启会保留输入、提交和尝试计数；无法证明用量或副作用的执行暂停等待处理。`graph_control({graphId,action:"reconcile_usage",callId,usage:{input,output,cacheRead,cacheWrite}})` 显式结算未知 provider 调用；相同结算可重放，不同结算被拒绝。结算不自动恢复节点，之后由 main 明确 resume。已成功提交的输入不能通过 retry 重发。
+
+## 宿主命令模块
+
+需要运行项目检查等外部命令时，声明 operation 模块，由宿主权限边界执行；纯判断代码继续使用隔离环境。例：
+
+```json
+{
+  "type": "operation",
+  "trigger": "each",
+  "inputs": {"start": {"protocol": "check-start"}},
+  "outputs": {"result": {"protocol": "check-result"}},
+  "operation": {
+    "action": "workspace.command", "version": 1,
+    "command": "node", "args": ["--run", "check"],
+    "output": "result", "timeoutMs": 120000
+  }
+}
+```
+
+结果包含 passed、code、commit、operationId、record、stdout/stderr 摘要和耗时；record 指向完整命令记录。非零退出码产生 passed:false。commit 记录命令开始前的 HEAD，本身不证明执行期间文件未变化，也不替代最终版本验收。sandbox 默认启用；sandbox:false 仅允许 full access。
+
+`graph_inspect({graphId,query:"operations"})` 查看持久操作记录。已保存结果在恢复时用于继续投递，不重新执行命令；派发后中断且没有可靠结果的操作标记 uncertain，暂停模块等待 main 检查。停止会终止命令进程组。

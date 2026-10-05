@@ -1,3 +1,4 @@
+import { executeModuleOperation } from './kernel-operation-broker.ts';
 import { waitForKernelExecutionSlot } from './execution-slots.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { randomUUID } from 'node:crypto';
@@ -215,6 +216,12 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   });
 
   return new GraphLane({
+    operation: async (graphId, request) => {
+      const workspace = options.git?.workspace(graphId, null, request.moduleId, 'program', 'graph.command') ?? options.workspaceFor(graphId);
+      if (!workspace) throw new Error('Operation module has no workspace');
+      return executeModuleOperation({ ...request, graphId, kernel: options.kernel, workspace, scratchRoot: options.stateDir,
+        ...(options.access ? { access: options.access() } : {}) });
+    },
     closeGraph: async graphId => {
       for (const key of [...hosts.keys()]) {
         if (!key.startsWith(`${graphId}/`)) continue;

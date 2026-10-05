@@ -76,3 +76,14 @@
 - runtime shutdown 先停止新执行及重试，dispose 常驻服务，再等待 kernel 写入者结算后关闭 SQLite；正在建立的会话会清理已取得能力，不会在关闭后缓存/启动新 worker。未知用量与原输入保留，提交后工作不能重放。
 - 真实 Pi 向悬挂 HTTP provider 发出一次请求后关闭 runtime：请求取消、execution blocked、queue queued、provider usage unknown、retries_used=0，并且磁盘状态可重新打开。3 个真实 browser/process 用例通过。
 - 未完成项仍包括最终验收/Git、正式入口与旧内核退役、节点局部配置/实际 reviewer 身份及历史统计、复杂 graph 增量布局等。还需核对异步配置准备与 execution 修订冻结的一致性、模块执行期间控制操作串行，以及副作用/预算恢复的完整路径。
+
+
+## 宿主操作模块与失败输入处理
+
+- 第七轮完整门禁通过：272 文件、1797 用例，165.84 秒；上一批提交 efdc82f。
+- 新 operation 模块通过正式 graph 输入/输出触发 workspace.command。生产没有模型的模块图也可运行；命令权限沿用现有 workspace runner，sandbox:false 要求 full access。没有新增独立工具节点。
+- 操作派发与结果保存有 durable ledger；保存结果后、投递前中断，重启从结果继续投递而不重做命令。真实文件副作用回归证明只执行一次。
+- 停止真实长时间命令会终止进程组，保留 uncertain 操作供 main 通过 operations 查询检查。cancel_operation 显式消费原输入，不撤销副作用、不伪造成功，重复取消幂等。
+- 完成请求不能跳过失败输入；retry/skip 同时恢复节点调度状态与等待中的完成请求。回归在移除修复时失败（completed 而预期 blocked），修复后通过。
+- 两个文件 26 个用例定向通过，包括真实命令运行、重开、恢复去重、停止和失败输入控制；后续细微防御修正纳入本轮全量门禁。
+- 完整 spec 仍未完成：最终版本验收与 Git 集成、正式产品入口/旧内核退役、节点配置与统计、模块控制串行及复杂图布局仍需继续。commit 字段只是命令启动前 HEAD，不能冒充精确版本验收证据。

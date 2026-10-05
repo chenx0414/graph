@@ -211,6 +211,10 @@ export class KernelStore {
         input_name TEXT NOT NULL, input_value TEXT NOT NULL, state_before TEXT NOT NULL,
         state_after TEXT NOT NULL, verdict TEXT, outputs TEXT NOT NULL,
         rule_version INTEGER NOT NULL, reason TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS kernel_module_operations(
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, module_id TEXT NOT NULL, delivery_id TEXT NOT NULL UNIQUE,
+        revision_version INTEGER NOT NULL, request TEXT NOT NULL, state TEXT NOT NULL,
+        result TEXT, error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER);
       CREATE TABLE IF NOT EXISTS kernel_provider_calls(
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL, node_id TEXT NOT NULL, execution_id TEXT NOT NULL,
         reserved INTEGER NOT NULL, state TEXT NOT NULL, usage TEXT, created_at INTEGER NOT NULL, settled_at INTEGER);

@@ -1,6 +1,8 @@
 import { wakeForBlockedNode } from './wake-ledger.ts';
 import { occupiedSlots, executionLimit } from '../runtime/execution-slots.ts';
 import { evaluateModule } from '../runtime/module-evaluator.ts';
+import type { ModuleDefinition } from './interface-spec.ts';
+import type { Json } from './types.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { NodeExecutor, type ExecutorHost } from './node-executor.ts';
@@ -34,10 +36,16 @@ export interface RunnerHost extends ExecutorHost {
   turn(text: string): Promise<{ turnId: string; inspect: unknown }>;
 }
 
+export interface ModuleOperationRequest {
+  moduleId: string; deliveryId: string; revisionVersion: number;
+  operation: NonNullable<ModuleDefinition['operation']>; inputs: Record<string, Json>; state: Json; signal?: AbortSignal;
+}
+
 export interface GraphRunnerOptions {
   kernel: KernelStore;
   graphId: string;
   signal?: AbortSignal;
+  operation?: (request: ModuleOperationRequest) => Promise<{ ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[] }>;
   /**
    * §9 metering, passed through to each node's executor. Absent means unmetered, which is
    * right for a program node and for a runtime configured without limits.
@@ -214,10 +222,17 @@ export class GraphRunner {
       const input = row.to_endpoint.slice(row.to_endpoint.indexOf('.') + 1);
       try {
         // Judgment and input consumption commit together; broadcasts recover via the outbox.
-        const definition = kernel.latestRevision(graphId)!.definition.modules[row.module_id]!;
-        const evaluation = definition.type === 'command'
-          ? await modules.deliverCustom(row.module_id, input, JSON.parse(row.value), evaluateModule, row.id)
-          : modules.consumeDelivery(row.module_id, input, JSON.parse(row.value), row.id);
+        const definition = kernel.revision(graphId, modules.revisionVersion)!.definition.modules[row.module_id]!;
+        const evaluation = definition.type === 'operation'
+          ? await modules.deliverOperation(row.module_id, input, JSON.parse(row.value), environment => {
+            if (!this.options.operation) throw new Error('Host operation broker is unavailable');
+            return this.options.operation({ moduleId: row.module_id, deliveryId: row.id, revisionVersion: modules.revisionVersion,
+              operation: definition.operation!, inputs: environment.inputs, state: environment.state,
+              ...(this.options.signal ? { signal: this.options.signal } : {}) });
+          }, row.id)
+          : definition.type === 'command'
+            ? await modules.deliverCustom(row.module_id, input, JSON.parse(row.value), evaluateModule, row.id)
+            : modules.consumeDelivery(row.module_id, input, JSON.parse(row.value), row.id);
         routeModuleOutputs(kernel, modules, graphId, row.module_id, evaluation, 0, true);
       } catch (error) {
         kernel.setNodeQueuePaused(graphId, row.module_id, true);

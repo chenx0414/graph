@@ -80,6 +80,7 @@ export interface HostCommandInput {
   env?: Record<string, string>;
   /** How long the command may run. No limit when omitted. */
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export async function runHostCommand(input: HostCommandInput): Promise<HostCommandResult> {
@@ -115,12 +116,16 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
     const killTree = () => {
       try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
     };
+    const abort = () => killTree();
+    if (input.signal?.aborted) abort();
+    else input.signal?.addEventListener('abort', abort, { once: true });
     const timer = input.timeoutMs === undefined ? undefined : setTimeout(() => { timedOut = true; killTree(); }, input.timeoutMs);
 
     const finish = (code: number | null, extraStderr = '') => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      input.signal?.removeEventListener('abort', abort);
       const reason = timedOut ? `Process terminated by SIGKILL: it exceeded the ${input.timeoutMs}ms timeout\n` : '';
       const tail = truncated ? `Output truncated at ${MAX_OUTPUT_BYTES} bytes\n` : '';
       resolve({

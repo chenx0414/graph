@@ -288,3 +288,30 @@ test.each(['completed', 'stopped'])('terminal %s graph cannot reopen through com
   expect(runtime.state()?.phase).toBe(phase);
   expect(kernel.latestRevision('t1')?.version).toBe(1);
 });
+
+
+test.each(['retry', 'skip'])('failed input requires explicit %s before completion can proceed', async action => {
+  const { kernel } = opened();
+  const graph = new GraphRuntime(kernel, 't1');
+  graph.create(definition());
+  kernel.admitNode('t1', 1, 'a', { instanceId: 'ia' });
+  graph.deliver({ nodeId: 'a', input: 'in', value: { n: 1 } });
+  const queued = kernel.nextQueued('t1', 'a')!;
+  // Model failure retains the original input even after the queue is resumed.
+  kernel.db.prepare("UPDATE kernel_queue SET state='failed' WHERE seq=?").run(queued.seq);
+  kernel.db.prepare("UPDATE kernel_nodes SET status='blocked' WHERE task_id='t1' AND node_id='a'").run();
+  graph.complete();
+  expect(graph.settleCompletion()).toBe('blocked');
+  const main = graphManagement(kernel, 't1');
+  await main.graphControl({ graphId: 't1', action, seq: queued.seq });
+  expect(graph.state()?.phase).toBe('completing');
+  expect(kernel.nodeState('t1', 'a').paused).toBe(false);
+  expect(kernel.listNodes('t1').find(node => node.nodeId === 'a')?.status).toBe('idle');
+  if (action === 'retry') {
+    expect(kernel.nextQueued('t1', 'a')?.payload).toMatchObject({ value: { n: 1 } });
+    expect(graph.settleCompletion()).toBe('completing');
+  } else {
+    expect(kernel.nextQueued('t1', 'a')).toBeNull();
+    expect(graph.settleCompletion()).toBe('completed');
+  }
+});

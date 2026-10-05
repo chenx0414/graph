@@ -14,7 +14,7 @@ export interface GraphManagement {
   graphCreate(input: { definition: GraphDefinition; targetBranch?: string; requestId?: string }): Promise<unknown>;
   graphPatch(input: { graphId: string; baseRevision: number; changes: PatchChange }): Promise<unknown>;
   graphInspect(input: { graphId: string; query?: string; id?: string }): Promise<unknown>;
-  graphControl(input: { graphId: string; action: string; nodeId?: string; moduleId?: string; seq?: number; callId?: string; usage?: TokenUsage }): Promise<unknown>;
+  graphControl(input: { graphId: string; action: string; nodeId?: string; moduleId?: string; seq?: number; operationId?: string; callId?: string; usage?: TokenUsage }): Promise<unknown>;
   graphSend(input: { graphId: string; nodeId?: string; input?: string; value?: Json; text?: string }): Promise<unknown>;
 }
 
@@ -73,6 +73,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
     async graphPatch(input) { return runtime(input.graphId).patch(input); },
     async graphInspect(input) {
       const graph = runtime(input.graphId);
+      if (input.query === 'operations') return kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,state,result,error,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId);
       if (input.query === 'edge') return explainEdge(kernel, input.graphId, input.id!);
       if (input.query === 'module') return explainModule(kernel, input.graphId, input.id!);
       if (input.query === 'results') return (kernel.db.prepare('SELECT * FROM kernel_graph_results WHERE task_id=? ORDER BY rowid').all(input.graphId) as { value: string }[]).map(row => ({ ...row, value: JSON.parse(row.value) }));
@@ -80,6 +81,19 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
     },
     async graphControl(input) {
       const graph = runtime(input.graphId);
+      if (input.action === 'cancel_operation') {
+        const operation = kernel.db.prepare('SELECT delivery_id,module_id,state FROM kernel_module_operations WHERE task_id=? AND id=?').get(input.graphId, input.operationId ?? '') as { delivery_id: string; module_id: string; state: string } | undefined;
+        if (!operation || !['uncertain', 'failed', 'cancelled'].includes(operation.state)) throw new RuntimeError('invalid_operation', 'Only an interrupted or failed operation can be cancelled; stop active work first');
+        if (operation.state === 'cancelled') return graph.state();
+        kernel.moduleTransaction(() => {
+          kernel.db.prepare("UPDATE kernel_module_operations SET state='cancelled' WHERE id=?").run(input.operationId!);
+          kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(operation.delivery_id);
+          kernel.setNodeQueuePaused(input.graphId, operation.module_id, false);
+          kernel.db.prepare("UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked' AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)").run(input.graphId, input.graphId);
+          kernel.store.event(input.graphId, 'graph.operation.cancelled', { operationId: input.operationId!, deliveryId: operation.delivery_id, moduleId: operation.module_id });
+        });
+        return graph.state();
+      }
       if (input.action === 'reconcile_usage') {
         if (!input.callId || !input.usage) throw new RuntimeError('invalid_input', 'reconcile_usage requires callId and usage');
         return reconcileKernelUsage(kernel, input.graphId, input.callId, input.usage);
@@ -110,6 +124,8 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
           kernel.db.prepare('UPDATE kernel_queue SET state=?,reason=?,generation=generation+? WHERE task_id=? AND seq=?')
             .run(input.action === 'retry' ? 'queued' : 'done', input.action, input.action === 'retry' ? 1 : 0, input.graphId, seq);
           kernel.db.prepare('UPDATE kernel_node_state SET paused=0 WHERE task_id=? AND node_id=?').run(input.graphId, row.node_id);
+          kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status IN ('blocked','failed')").run(input.graphId, row.node_id);
+          kernel.db.prepare("UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked' AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)").run(input.graphId, input.graphId);
           kernel.store.event(input.graphId, `graph.queue.${input.action}`, { seq: input.seq, nodeId: row.node_id });
         });
         return graph.state();

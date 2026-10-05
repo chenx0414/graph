@@ -30,6 +30,9 @@ export interface ModuleEvaluation {
   reasons: string[];
 }
 
+type EvaluationEnvironment = { inputs: Record<string, Json>; state: Json; trigger: 'each' | 'once'; limits?: ModuleDefinition['limits'] };
+type EvaluationResult = { ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[]; error?: string };
+
 interface CompiledModule {
   trigger: 'each' | 'once';
   requiredInputs: string[];
@@ -42,7 +45,7 @@ export class ModuleRuntime {
   private compiled: CompiledModule | undefined;
   private readonly kernel: KernelStore;
   private readonly taskId: string;
-  private readonly revisionVersion: number;
+  readonly revisionVersion: number;
 
   constructor(
     kernel: KernelStore,
@@ -230,16 +233,30 @@ export class ModuleRuntime {
    * A defect keeps the input and pauses the module.
    */
   async deliverCustom(
-    moduleId: string,
-    inputName: string,
-    value: Json,
-    evaluate: (input: { entry: string; inputs: Record<string, Json>; state: Json; trigger: 'each' | 'once'; limits?: ModuleDefinition['limits'] }) => Promise<{ ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[]; error?: string }>,
-    deliveryId?: string,
+    moduleId: string, inputName: string, value: Json,
+    evaluate: (input: EvaluationEnvironment & { entry: string }) => Promise<EvaluationResult>, deliveryId?: string,
+  ): Promise<ModuleEvaluation> {
+    const code = this.definition().modules[moduleId]?.code;
+    if (!code) throw new RuntimeError('invalid_definition', `Command module ${moduleId} declares no code entry`);
+    return this.deliverEvaluated(moduleId, inputName, value, environment => evaluate({ ...environment, entry: code.entry }), code.version, deliveryId);
+  }
+
+  async deliverOperation(
+    moduleId: string, inputName: string, value: Json,
+    evaluate: (input: EvaluationEnvironment) => Promise<EvaluationResult>, deliveryId: string,
+  ): Promise<ModuleEvaluation> {
+    const operation = this.definition().modules[moduleId]?.operation;
+    if (!operation) throw new RuntimeError('invalid_definition', `Module ${moduleId} declares no host operation`);
+    return this.deliverEvaluated(moduleId, inputName, value, evaluate, operation.version, deliveryId);
+  }
+
+  private async deliverEvaluated(
+    moduleId: string, inputName: string, value: Json,
+    evaluate: (input: EvaluationEnvironment) => Promise<EvaluationResult>, implementationVersion: number, deliveryId?: string,
   ): Promise<ModuleEvaluation> {
     const definition = this.definition();
     const module = definition.modules[moduleId];
     if (!module) throw new RuntimeError('invalid_definition', `Revision ${this.revisionVersion} has no module ${moduleId}`);
-    if (!module.code) throw new RuntimeError('invalid_definition', `Command module ${moduleId} declares no code entry`);
     if (!Object.keys(module.inputs).includes(inputName)) {
       throw new RuntimeError('invalid_input', `Module ${moduleId} has no input ${inputName}`);
     }
@@ -264,12 +281,12 @@ export class ModuleRuntime {
     if (held || missing.length) {
       this.kernel.moduleTransaction(() => {
         this.kernel.recordModuleTransition(this.taskId, { moduleId, inputName, inputValue: inputs, stateBefore: state, stateAfter: state,
-          verdict: null, outputs: {}, ruleVersion: module.code!.version, reason: held ? 'once held' : `waiting for ${missing.join(', ')}` });
+          verdict: null, outputs: {}, ruleVersion: implementationVersion, reason: held ? 'once held' : `waiting for ${missing.join(', ')}` });
         if (deliveryId) this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);
       });
       return { emitted: false, waiting: missing.length > 0, triggered: held, outputs: {}, reasons: [] };
     }
-    const result = await evaluate({ entry: module.code.entry, inputs, state, trigger: module.trigger, ...(module.limits ? { limits: module.limits } : {}) });
+    const result = await evaluate({ inputs, state, trigger: module.trigger, ...(module.limits ? { limits: module.limits } : {}) });
     if (!result.ok) {
       this.kernel.setNodeQueuePaused(this.taskId, moduleId, true);
       throw new RuntimeError('module_defect', result.error ?? 'command module failed');
@@ -290,7 +307,7 @@ export class ModuleRuntime {
       verdict: emitted ? Object.keys(result.outputs).join(',') : null,
       outputs: result.outputs,
       // §9: the transition records the CODE version, not a rule version.
-      ruleVersion: module.code!.version,
+      ruleVersion: implementationVersion,
       reason: result.diagnostics.length ? result.diagnostics.join(' | ') : 'command module evaluate()',
       });
       if (deliveryId) this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);

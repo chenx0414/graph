@@ -1,7 +1,15 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
+import { graphManagement } from '../../src/core/graph-service.ts';
+import { GraphRuntime } from '../../src/core/graph-runtime.ts';
+import { GraphRunner, type ModuleOperationRequest } from '../../src/core/graph-runner.ts';
+import { recoverKernelExecutions } from '../../src/core/kernel-recovery.ts';
+import { executeModuleOperation } from '../../src/runtime/kernel-operation-broker.ts';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { standardAccessPolicy } from '../../src/core/access-policy.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
 import { ModuleRuntime } from '../../src/core/module-runtime.ts';
@@ -19,9 +27,11 @@ import type { GraphDefinition } from '../../src/core/interface-spec.ts';
  *   C5  each trigger re-runs the module code on every accepted input
  */
 
+const runtimes: Awaited<ReturnType<typeof openTaskRuntime>>[] = [];
 const stores: TaskStore[] = [];
 const dirs: string[] = [];
 afterEach(async () => {
+  for (const runtime of runtimes.splice(0)) await runtime.close();
   for (const store of stores.splice(0)) store.db.close();
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
@@ -51,7 +61,7 @@ async function kernelWith(definition: GraphDefinition, moduleId: string) {
   store.db.prepare('INSERT OR IGNORE INTO projects(id,root,grants) VALUES(?,?,?)').run('p1', dir, '[]');
   store.db.prepare('INSERT OR IGNORE INTO tasks(id,project_id,request,requirement_version,latest_proposal,created_seq) VALUES(?,?,?,?,?,?)').run('t1', 'p1', 'go', 1, 0, 1);
   const revision = kernel.publishRevision('t1', { definition, reason: 'plan' });
-  kernel.admitModule('t1', revision.version, moduleId, { moduleType: 'command', trigger: 'each' });
+  kernel.admitModule('t1', revision.version, moduleId, { moduleType: definition.modules[moduleId]!.type, trigger: definition.modules[moduleId]!.trigger });
   return { kernel, dir, runtime: new ModuleRuntime(kernel, 't1', revision.version) };
 }
 
@@ -110,3 +120,100 @@ export function evaluate({ inputs }) {
     expect(kernel.moduleInput('t1', 'custom-route', 'review')?.value).toEqual({ passed: true });
   });
 });
+
+
+// This is the public runtime path: no agent, model, direct evaluator or fake tool node.
+test('host command module runs through permissions and once/reopen without requiring a model', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-host-operation-')); dirs.push(root);
+  const workspace = join(root, 'project'); await mkdir(workspace);
+  await writeFile(join(workspace, 'check.mjs'), "import {appendFileSync} from 'node:fs'; appendFileSync('runs.txt','run\\n'); console.log('check passed');");
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }], access: () => standardAccessPolicy() });
+  runtimes.push(runtime);
+  const parent = await runtime.user.begin({ projectId: 'p', request: 'operation module', requestId: 'parent' });
+  const main = runtime.supervisor(parent.taskId);
+  const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'checks',
+    protocols: { start: { type: 'object' }, result: { type: 'object', required: ['passed'], properties: { passed: { type: 'boolean' } } } },
+    nodes: {}, modules: { check: { type: 'operation', trigger: 'once', requiredInputs: ['start'],
+      inputs: { start: { protocol: 'start' } }, outputs: { result: { protocol: 'result' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.mjs'], output: 'result' } } },
+    edges: {}, inputs: { start: { to: 'check.start', protocol: 'start' } }, outputs: { result: { from: 'check.result', protocol: 'result' } } }) }) as { graphId: string };
+  await main.graphSend({ graphId: graph.graphId, input: 'start', value: {} });
+  await main.graphSend({ graphId: graph.graphId, input: 'start', value: {} });
+  await runtime.host.drive();
+  expect(await readFile(join(workspace, 'runs.txt'), 'utf8')).toBe('run\n');
+  const first = await main.graphInspect({ graphId: graph.graphId, query: 'results' }) as { value: { passed: boolean; record: string } }[];
+  expect(first).toHaveLength(1); expect(first[0]?.value.passed).toBe(true);
+  expect(JSON.parse(await readFile(first[0]!.value.record, 'utf8')).stdout).toContain('check passed');
+  await main.graphControl({ graphId: graph.graphId, action: 'reopen', moduleId: 'check' });
+  await runtime.host.drive();
+  expect(await readFile(join(workspace, 'runs.txt'), 'utf8')).toBe('run\n');
+  await main.graphSend({ graphId: graph.graphId, input: 'start', value: {} }); await runtime.host.drive();
+  expect(await readFile(join(workspace, 'runs.txt'), 'utf8')).toBe('run\nrun\n');
+  expect(await main.graphInspect({ graphId: graph.graphId, query: 'results' })).toHaveLength(2);
+}, 30_000);
+
+
+test('a persisted command result recovers after a landing failure without repeating its side effect', async () => {
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'recovery', protocols: { value: { type: 'object' } }, nodes: {},
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'value' } }, outputs: { result: { protocol: 'value' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.mjs'], output: 'result' } } },
+    edges: {}, outputs: { result: { from: 'check.result', protocol: 'value' } } });
+  const { kernel, dir } = await kernelWith(definition, 'check');
+  kernel.db.prepare("UPDATE tasks SET phase='running' WHERE id='t1'").run();
+  const workspace = join(dir, 'project'); await mkdir(workspace);
+  await writeFile(join(workspace, 'check.mjs'), "import {appendFileSync} from 'node:fs'; appendFileSync('runs.txt','once');");
+  new GraphRuntime(kernel, 't1').deliverEndpoint('check.start', {});
+  const run = (store: KernelStore, injectFailure: boolean) => new GraphRunner({ kernel: store, graphId: 't1',
+    hostFor: () => { throw new Error('operation may not start an agent'); }, submit: () => {},
+    operation: async (request: ModuleOperationRequest) => {
+      const result = await executeModuleOperation({ ...request, kernel: store, graphId: 't1', workspace, scratchRoot: dir });
+      if (injectFailure) throw new Error('interrupted before graph landing');
+      return result;
+    },
+  }).drain();
+  expect((await run(kernel, true)).blockedNodes).toContain('check');
+  expect(await readFile(join(workspace, 'runs.txt'), 'utf8')).toBe('once');
+  expect(kernel.db.prepare('SELECT state FROM kernel_module_operations').get()).toEqual({ state: 'settled' });
+  kernel.store.close(); stores.splice(stores.indexOf(kernel.store), 1);
+  const reopened = new TaskStore(join(dir, 'state.db')); stores.push(reopened);
+  const restored = new KernelStore(reopened); recoverKernelExecutions(restored);
+  restored.setNodeQueuePaused('t1', 'check', false);
+  expect((await run(restored, false)).drained).toBe(true);
+  expect(await readFile(join(workspace, 'runs.txt'), 'utf8')).toBe('once');
+  expect(restored.db.prepare('SELECT COUNT(*) AS count FROM kernel_module_operations').get()).toEqual({ count: 1 });
+  expect(restored.db.prepare('SELECT COUNT(*) AS count FROM kernel_graph_results').get()).toEqual({ count: 1 });
+}, 30_000);
+
+
+test('stopping a running command keeps uncertain side effects inspectable and cancellation never emits success', async () => {
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'stop command', protocols: { value: { type: 'object' } }, nodes: {},
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'value' } }, outputs: { result: { protocol: 'value' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['long.mjs'], output: 'result' } } },
+    edges: {}, outputs: { result: { from: 'check.result', protocol: 'value' } } });
+  const { kernel, dir } = await kernelWith(definition, 'check');
+  kernel.db.prepare("UPDATE tasks SET phase='running' WHERE id='t1'").run();
+  const workspace = join(dir, 'project'); await mkdir(workspace);
+  await writeFile(join(workspace, 'long.mjs'), "import {writeFileSync} from 'node:fs'; writeFileSync('started.txt','started'); setInterval(()=>{},1000);");
+  new GraphRuntime(kernel, 't1').deliverEndpoint('check.start', {});
+  const drive = new GraphRunner({ kernel, graphId: 't1', hostFor: () => { throw new Error('no agent'); }, submit: () => {},
+    operation: request => executeModuleOperation({ ...request, kernel, graphId: 't1', workspace, scratchRoot: dir }),
+  }).drain();
+  const main = graphManagement(kernel, 't1');
+  try {
+    await expect.poll(async () => readFile(join(workspace, 'started.txt'), 'utf8').catch(() => ''), { timeout: 20000 }).toBe('started');
+    const active = await main.graphInspect({ graphId: 't1', query: 'operations' }) as { id: string; state: string }[];
+    expect(active[0]?.state).toBe('dispatched');
+    await expect(main.graphControl({ graphId: 't1', action: 'cancel_operation', operationId: active[0]!.id })).rejects.toThrow(/stop active/);
+    await main.graphControl({ graphId: 't1', action: 'stop' });
+    await drive;
+    const interrupted = await main.graphInspect({ graphId: 't1', query: 'operations' }) as { id: string; state: string }[];
+    expect(interrupted[0]?.state).toBe('uncertain');
+    await main.graphControl({ graphId: 't1', action: 'cancel_operation', operationId: interrupted[0]!.id });
+    await main.graphControl({ graphId: 't1', action: 'cancel_operation', operationId: interrupted[0]!.id });
+    expect(await main.graphInspect({ graphId: 't1', query: 'results' })).toEqual([]);
+    expect(new GraphRuntime(kernel, 't1').settleStop()).toBe('stopped');
+  } finally {
+    await main.graphControl({ graphId: 't1', action: 'stop' });
+    await drive;
+  }
+}, 30000);

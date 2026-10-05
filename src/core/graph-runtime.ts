@@ -206,8 +206,9 @@ export class GraphRuntime {
     const queued = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.graphId) as { n: number };
     const running = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND state='running'").get(this.graphId) as { n: number };
     const pausedOrFailed = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_node_state WHERE task_id=? AND paused=1').get(this.graphId) as { n: number };
-    // A paused node is a failed node awaiting the main agent — blocked, not drained.
-    if (pausedOrFailed.n > 0) {
+    const failedInputs = this.kernel.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND state='failed' LIMIT 1").get(this.graphId);
+    // Failed deliveries need an explicit retry/skip even if the node's later queue was resumed.
+    if (pausedOrFailed.n > 0 || failedInputs) {
       this.setPhase('blocked');
       return 'blocked';
     }

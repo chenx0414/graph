@@ -1,9 +1,18 @@
+import { wakeForBlockedNode } from './wake-ledger.ts';
 import type { KernelStore } from './kernel-store.ts';
 
 /** Called once, after acquiring the runtime owner lock; never during a live tick. */
 export function recoverKernelExecutions(kernel: KernelStore): number {
   return kernel.moduleTransaction(() => {
     kernel.db.prepare("UPDATE kernel_provider_calls SET state='unknown' WHERE state='inflight'").run();
+    const interruptedOperations = kernel.db.prepare("SELECT id,task_id,module_id,delivery_id FROM kernel_module_operations WHERE state='dispatched'").all() as { id: string; task_id: string; module_id: string; delivery_id: string }[];
+    for (const operation of interruptedOperations) {
+      kernel.db.prepare("UPDATE kernel_module_operations SET state='uncertain',error='Runtime interrupted after dispatch' WHERE id=?").run(operation.id);
+      kernel.setNodeQueuePaused(operation.task_id, operation.module_id, true);
+      kernel.db.prepare("UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')").run(operation.task_id);
+      wakeForBlockedNode(kernel.store, operation.task_id, { nodeId: operation.module_id, incidentId: operation.id, reason: 'Host operation interrupted after dispatch; inspect side effects before resuming' });
+      kernel.store.event(operation.task_id, 'graph.operation.interrupted', { operationId: operation.id, moduleId: operation.module_id, deliveryId: operation.delivery_id });
+    }
     const rows = kernel.db.prepare("SELECT id,task_id,node_id,submission_id FROM kernel_executions WHERE state='running'").all() as {
       id: string; task_id: string; node_id: string; submission_id: string | null;
     }[];
@@ -19,6 +28,6 @@ export function recoverKernelExecutions(kernel: KernelStore): number {
       kernel.db.prepare("UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')").run(row.task_id);
       kernel.store.event(row.task_id, 'graph.execution.interrupted', { executionId: row.id, nodeId: row.node_id, submitted: Boolean(row.submission_id), reason });
     }
-    return rows.length;
+    return rows.length + interruptedOperations.length;
   });
 }

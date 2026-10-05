@@ -570,7 +570,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       // node cannot run - or when the caller supplied scripted actions, which stand in for
       // the node's process (see `scriptedTurn`). The scripted path still submits through
       // the real bridge and kernel, so it exercises settlement rather than faking it.
-      ...(options.models || options.live || options.actions ? { graphs: () => (residentGraphLane ??= kernelGraphLane({
+      graphs: () => (residentGraphLane ??= kernelGraphLane({
         access: () => resolvedAccessPolicy(),
         kernel,
         catalog,
@@ -670,7 +670,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             ? { ok: true, text: JSON.stringify({ accepted: true, deliveries: receipt.deliveries.length }) }
             : { ok: false, text: bridge.refusalMessage(receipt) };
         },
-      })).runnable() } : {}),
+      })).runnable(),
       scratchRoot: stateDir,
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
