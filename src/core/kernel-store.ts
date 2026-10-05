@@ -1,3 +1,4 @@
+import { wakeMaster, wakeForBlockedNode } from './wake-ledger.ts';
 import { randomUUID } from 'node:crypto';
 import type { TaskStore } from './store.ts';
 import { canonicalJson } from './store.ts';
@@ -595,8 +596,12 @@ export class KernelStore {
   private publishGraphOutputs(taskId: string, endpoint: string, value: Json, sourceId: string, revision: RevisionRow): void {
     for (const [name, output] of Object.entries(revision.definition.outputs)) {
       if (output.from !== endpoint) continue;
-      this.db.prepare('INSERT OR IGNORE INTO kernel_graph_results(id,task_id,output_name,source_id,value,protocol,revision_version,created_at) VALUES(?,?,?,?,?,?,?,?)')
-        .run(randomUUID(), taskId, name, sourceId, canonicalJson(value), output.protocol, revision.version, Date.now());
+      const resultId = randomUUID();
+      const published = this.db.prepare('INSERT OR IGNORE INTO kernel_graph_results(id,task_id,output_name,source_id,value,protocol,revision_version,created_at) VALUES(?,?,?,?,?,?,?,?)')
+        .run(resultId, taskId, name, sourceId, canonicalJson(value), output.protocol, revision.version, Date.now());
+      if (!published.changes) continue;
+      wakeMaster(this.store, { taskId, kind: 'graph_output', dedupeKey: `${taskId}:${name}:${sourceId}`,
+        data: { graphId: taskId, output: name, sourceId, resultId, revision: revision.version } });
       this.store.event(taskId, 'graph.output', { output: name, sourceId, value, revision: revision.version });
       if (revision.definition.completion?.on === name) {
         this.db.prepare('INSERT INTO kernel_lifecycle(task_id,completion_requested) VALUES(?,1) ON CONFLICT(task_id) DO UPDATE SET completion_requested=1').run(taskId);
@@ -811,6 +816,8 @@ export class KernelStore {
   failNode(taskId: string, nodeId: string, reason: string): void {
     this.store.db.prepare("UPDATE kernel_nodes SET status='failed' WHERE task_id=? AND node_id=?").run(taskId, nodeId);
     this.store.event(taskId, 'graph.node.failed', { nodeId, reason });
+    const execution = this.db.prepare('SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1').get(taskId, nodeId) as { id: string } | undefined;
+    wakeForBlockedNode(this.store, taskId, { nodeId, reason, ...(execution ? { incidentId: execution.id } : {}) });
   }
 
   /** Keep the reason on a queue row that just failed, so it survives a restart. */
@@ -862,6 +869,8 @@ export class KernelStore {
   blockNode(taskId: string, nodeId: string, reason: string): void {
     this.store.db.prepare("UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?").run(taskId, nodeId);
     this.store.event(taskId, 'graph.node.blocked', { nodeId, reason });
+    const execution = this.db.prepare('SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1').get(taskId, nodeId) as { id: string } | undefined;
+    wakeForBlockedNode(this.store, taskId, { nodeId, reason, ...(execution ? { incidentId: execution.id } : {}) });
   }
 
   /** Commit a reported total. A total at or below the last one is the same figure again. */

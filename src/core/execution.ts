@@ -190,6 +190,11 @@ export class Execution {
     ]);
   }
 
+  /** After resident transports are closed, finish all kernel writers before closing SQLite. */
+  async settleGraphShutdown(): Promise<void> {
+    await Promise.allSettled([...this.activeGraphs.values()]);
+  }
+
   /**
    * The token reservation one dispatch of this action needs, looked up exactly the way dispatch itself
    * looks it up (an action with no adapter of its own is served by the fallback). The budget tool asks

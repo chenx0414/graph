@@ -1,3 +1,4 @@
+import { TaskStore } from '../../src/core/store.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { mkdir, mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -175,3 +176,37 @@ test('native graph chats keep a session and expose the actual provider prompt in
   await server.runtime.host.drive();
   expect((await main.graphInspect({ graphId: graph.graphId })) as object).toBeTruthy();
 }, 30000);
+
+
+// A hanging real provider exposes late SQLite writes and accidental restart after shutdown.
+test('closing a native graph aborts its provider and settles durable writers before releasing SQLite', async () => {
+  const root = await temp('shutdown');
+  const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+  const sent = Promise.withResolvers<void>();
+  const provider = await openaiServer([{ beforeReply: async () => { sent.resolve(); await new Promise<void>(() => {}); } }]);
+  cleanup.push(() => provider.close());
+  const stateDir = join(root, 'state');
+  const server = await openGraphServer({ stateDir, projects: [{ id: 'p', root }], webDir, actions: {},
+    catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') }, limits: { defaultBudgetTokens: 20_000_000 },
+    models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-fixture', modelRuntime: provider.runtime },
+  });
+  cleanup.push(() => server.close());
+  await server.runtime.catalog.saveAgentCombination({ id: 'native', name: 'Native', description: 'worker', recommendedGrade: 'medium', review: false, tags: [], resources: [], systemPrompt: 'Work.' });
+  const parent = await server.runtime.user.begin({ projectId: 'p', request: 'shutdown', requestId: 'parent' });
+  const main = server.runtime.supervisor(parent.taskId);
+  const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'shutdown', protocols: {},
+    nodes: { worker: { recipe: 'native@1', task: 'reply', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }) }) as { graphId: string };
+  await main.graphSend({ graphId: graph.graphId, nodeId: 'worker', text: 'go' });
+  const drive = server.runtime.host.drive();
+  await sent.promise;
+  await server.close();
+  await drive;
+  const disk = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  try {
+    const execution = disk.db.prepare('SELECT state,retries_used FROM kernel_executions WHERE task_id=?').get(graph.graphId);
+    expect(execution).toEqual({ state: 'blocked', retries_used: 0 });
+    expect(disk.db.prepare('SELECT state FROM kernel_queue WHERE task_id=?').get(graph.graphId)).toEqual({ state: 'queued' });
+    expect(disk.db.prepare('SELECT state FROM kernel_provider_calls WHERE task_id=?').get(graph.graphId)).toEqual({ state: 'unknown' });
+    expect(provider.requests).toHaveLength(1);
+  } finally { disk.close(); }
+}, 30_000);

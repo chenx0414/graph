@@ -271,3 +271,20 @@ test('graph creation retries preparation with the same graph and refuses changed
   await expect(management.graphCreate({ ...input, definition: definition('different') })).rejects.toThrow(/requestId/);
   expect(kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_graph_owners').get()).toEqual({ n: 1 });
 });
+
+
+test.each(['completed', 'stopped'])('terminal %s graph cannot reopen through completion controls or patch', phase => {
+  const { kernel } = opened();
+  const runtime = new GraphRuntime(kernel, 't1');
+  runtime.create(definition());
+  runtime.complete();
+  if (phase === 'completed') runtime.settleCompletion();
+  else { runtime.stop(); runtime.settleStop(); }
+  expect(() => runtime.withdrawComplete()).toThrow(/not completing/);
+  expect(() => runtime.patch({ baseRevision: 1, changes: { reason: 'reopen', definition: definition('new') } })).toThrow(/Ended graph/);
+  if (phase === 'stopped') expect(() => runtime.complete()).toThrow(/Stopped graph/);
+  else expect(runtime.complete().phase).toBe('completed');
+  expect(runtime.stop().phase).toBe(phase);
+  expect(runtime.state()?.phase).toBe(phase);
+  expect(kernel.latestRevision('t1')?.version).toBe(1);
+});

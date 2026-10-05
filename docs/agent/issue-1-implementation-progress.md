@@ -65,3 +65,14 @@
 - 下一阶段仍是原清单中的 Git 集成与最终验收、正式入口切换、节点局部配置与统计、通知及完整退役；这些尚未交付。
 
 - 第五轮全量运行：272 文件中 271 通过；1792 通过、1 个 native UI 折叠边等待超时，163.68 秒。没有删除或放宽断言。子 graph 容器改为固定具名端口及已有布局尺寸，折叠时隐藏嵌套容器；浏览器等待边的观察上限明确为 10 秒，仍严格要求跨组边存在。单独 UI 5 用例通过；必须在同样全量负载复验，不能据单测宣告解决。日志 /tmp/graph-v2-fifth-integration-check.log。
+
+
+## 拥有者通知与停止收尾
+
+- 第六轮完整门禁通过：272 文件、1793 用例，164.41 秒；验收证据未改写。上述常驻权限/嵌套边界修复已提交 c0674be。
+- native kernel 公开输出原子写入结果与独立 graph_output wake，业务值仍由公开输出保存；运行失败、模块缺陷、完成及停止分别通知 main。peer 聊天写入会话并唤醒 main。
+- 两个 graph 的完成通知使用独立去重键，故障去重绑定 execution/delivery 事件，重试后新故障不被旧通知吞掉；terminal lifecycle 重复调用保持幂等，不能由 withdraw_complete 或 patch 重开已结束 graph。
+- owner boundary 回归在 c0674be 上得到空通知列表（预期为一个输出和两个完成），修复后通过。生命周期/通知/runner 定向 51 用例通过。
+- runtime shutdown 先停止新执行及重试，dispose 常驻服务，再等待 kernel 写入者结算后关闭 SQLite；正在建立的会话会清理已取得能力，不会在关闭后缓存/启动新 worker。未知用量与原输入保留，提交后工作不能重放。
+- 真实 Pi 向悬挂 HTTP provider 发出一次请求后关闭 runtime：请求取消、execution blocked、queue queued、provider usage unknown、retries_used=0，并且磁盘状态可重新打开。3 个真实 browser/process 用例通过。
+- 未完成项仍包括最终验收/Git、正式入口与旧内核退役、节点局部配置/实际 reviewer 身份及历史统计、复杂 graph 增量布局等。还需核对异步配置准备与 execution 修订冻结的一致性、模块执行期间控制操作串行，以及副作用/预算恢复的完整路径。

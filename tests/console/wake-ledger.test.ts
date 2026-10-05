@@ -2,6 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { KernelStore } from '../../src/core/kernel-store.ts';
+import { graphManagement } from '../../src/core/graph-service.ts';
+import { GraphRuntime } from '../../src/core/graph-runtime.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { insertQuestion } from '../../src/core/question-routing.ts';
 import {
@@ -178,4 +182,34 @@ test('a node blocked on the user still tells the master, because the graph is st
   });
   expect(permission.owner).toBe('user');
   expect(pendingWakes(store, 'anchor', 'master').map(wake => wake.kind)).toEqual(['node_blocked']);
+});
+
+
+// Native graph publication and lifecycle must actually reach the external owner's queue.
+// Calling the wake helper alone cannot detect a missing kernel-to-owner hookup.
+test('native outputs and two independent graph completions each wake the owner once', async () => {
+  const store = await fixture();
+  const kernel = new KernelStore(store);
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'native', protocols: { result: { type: 'object' } },
+    nodes: { worker: { recipe: 'worker@1', task: 'produce', inputs: {}, outputs: { out: { protocol: 'result' } }, submission: {} } },
+    modules: {}, edges: {}, outputs: { result: { from: 'worker.out', protocol: 'result' } } });
+  const owner = graphManagement(kernel, 'anchor');
+  const firstId = (await owner.graphCreate({ definition }) as { graphId: string }).graphId;
+  const secondId = (await owner.graphCreate({ definition }) as { graphId: string }).graphId;
+  const first = new GraphRuntime(kernel, firstId);
+  const second = new GraphRuntime(kernel, secondId);
+  kernel.startExecution(firstId, { executionId: 'native-exec', nodeId: 'worker', revisionVersion: 1 });
+  const submission = { submissionId: 'result-1', outputs: { out: { enable: true, value: { passed: true } } } };
+  kernel.submit('native-exec', submission); kernel.submit('native-exec', submission);
+  first.complete();
+  expect(first.settleCompletion()).toBe('completing');
+  kernel.finishExecution('native-exec', 'completed');
+  expect(first.settleCompletion()).toBe('completed');
+  expect(first.settleCompletion()).toBe('completed');
+  second.complete(); expect(second.settleCompletion()).toBe('completed');
+  const wakes = pendingWakes(store, 'anchor', 'master');
+  expect(wakes.map(wake => wake.kind)).toEqual(['graph_output', 'task_completed', 'task_completed']);
+  expect(wakes.map(wake => JSON.parse(wake.data!).graphId)).toEqual([firstId, firstId, secondId]);
+  expect(masterStatus(store).status).toBe('pending');
+  expect(store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='graph.completed'").get()).toEqual({ count: 2 });
 });

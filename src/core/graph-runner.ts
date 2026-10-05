@@ -1,3 +1,4 @@
+import { wakeForBlockedNode } from './wake-ledger.ts';
 import { occupiedSlots, executionLimit } from '../runtime/execution-slots.ts';
 import { evaluateModule } from '../runtime/module-evaluator.ts';
 import type { KernelStore } from './kernel-store.ts';
@@ -36,6 +37,7 @@ export interface RunnerHost extends ExecutorHost {
 export interface GraphRunnerOptions {
   kernel: KernelStore;
   graphId: string;
+  signal?: AbortSignal;
   /**
    * §9 metering, passed through to each node's executor. Absent means unmetered, which is
    * right for a program node and for a runtime configured without limits.
@@ -115,7 +117,7 @@ export class GraphRunner {
       for (;;) {
         const notification = new Promise<void>(resolve => { wake = resolve; });
         const task = kernel.store.task(this.options.graphId);
-        if (task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) {
+        if (this.options.signal?.aborted || task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) {
           await Promise.all(active.values());
           break;
         }
@@ -179,6 +181,7 @@ export class GraphRunner {
       });
       const executor = new NodeExecutor({
         maxItems: 1, kernel, graphId: this.options.graphId, host: nodeHost,
+        ...(this.options.signal ? { signal: this.options.signal } : {}),
         ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
           ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
         ...(this.options.workspace ? { workspace: () => this.options.workspace!(nodeId) } : {}),
@@ -218,9 +221,11 @@ export class GraphRunner {
         routeModuleOutputs(kernel, modules, graphId, row.module_id, evaluation, 0, true);
       } catch (error) {
         kernel.setNodeQueuePaused(graphId, row.module_id, true);
-        kernel.store.transaction(() => kernel.store.event(graphId, 'graph.module.failed', {
-          moduleId: row.module_id, deliveryId: row.id, reason: error instanceof Error ? error.message : String(error),
-        }));
+        const reason = error instanceof Error ? error.message : String(error);
+        kernel.store.transaction(() => {
+          kernel.store.event(graphId, 'graph.module.failed', { moduleId: row.module_id, deliveryId: row.id, reason });
+          wakeForBlockedNode(kernel.store, graphId, { nodeId: row.module_id, reason, incidentId: row.id });
+        });
       }
     }
   }

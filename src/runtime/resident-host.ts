@@ -70,6 +70,7 @@ export class ResidentHost {
   private readonly pending = new Map<string, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
   private ready: ResidentInspect | undefined;
   private closed = false;
+  private disposed = false;
   private buffer = '';
   /** How many times this host started the underlying process (1 + recoveries + rebinds). */
   private spawns = 0;
@@ -84,8 +85,10 @@ export class ResidentHost {
 
   /** Start (or restart) the process. Idempotent while the process is alive. */
   async start(): Promise<ResidentInspect> {
+    if (this.disposed) throw new Error('resident host was disposed');
     if (this.alive()) return this.awaitReady();
     await writeFile(this.options.configPath, JSON.stringify(this.options.config), { mode: 0o600 });
+    if (this.disposed) throw new Error('resident host was disposed');
     this.closed = false; this.buffer = ''; this.ready = undefined;
     if (this.options.launch) {
       this.spawns += 1;
@@ -93,6 +96,7 @@ export class ResidentHost {
         message: value => this.onData(`${JSON.stringify(value)}\n`),
         exit: error => this.onExit(error),
       });
+      if (this.disposed) { launched.control.kill('SIGKILL'); await launched.exited; throw new Error('resident host was disposed'); }
       this.restricted = launched;
       this.originalPid = launched.control.pid;
       const ready = await this.awaitReady();
@@ -258,6 +262,9 @@ export class ResidentHost {
   spawnCount(): number {
     return this.spawns;
   }
+
+  /** End the service lifecycle; an in-flight startup may not resurrect it. */
+  async dispose(): Promise<void> { this.disposed = true; await this.stop(); }
 
   /** Stop the process. A later start() rebuilds it with the same identity. */
   async stop(): Promise<void> {

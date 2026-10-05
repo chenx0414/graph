@@ -60,13 +60,14 @@ export interface RunnableGraph {
 
 export class GraphLane {
   private readonly options: GraphLaneOptions;
+  private readonly shutdown = new AbortController();
 
   constructor(options: GraphLaneOptions) {
     this.options = options;
   }
 
   /** Release the resident processes and capability resources owned by this lane. */
-  async close(): Promise<void> { await this.options.close?.(); }
+  async close(): Promise<void> { this.shutdown.abort(); await this.options.close?.(); }
 
   /**
    * The v2 graphs that have work queued right now. A task is included only when it has a
@@ -74,6 +75,7 @@ export class GraphLane {
    * proposed again on every host tick.
    */
   runnable(): RunnableGraph[] {
+    if (this.shutdown.signal.aborted) return [];
     const kernel = this.options.kernel;
     const rows = kernel.db.prepare(`
       SELECT q.task_id FROM kernel_queue q LEFT JOIN kernel_node_state s ON s.task_id=q.task_id AND s.node_id=q.node_id
@@ -108,10 +110,14 @@ export class GraphLane {
     if (!revision) return { drained: true, executions: 0, blockedNodes: [] };
     const runner = new GraphRunner({
       kernel,
-      graphId,
+      graphId, signal: this.shutdown.signal,
       ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
         ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
-      hostFor: async (nodeId: string) => this.options.host(graphId, nodeId, await this.options.config(graphId, nodeId)),
+      hostFor: async (nodeId: string) => {
+        const config = await this.options.config(graphId, nodeId);
+        if (this.shutdown.signal.aborted) throw new Error('Graph runtime is closing');
+        return this.options.host(graphId, nodeId, config);
+      },
       // A node submits through its own `submit` tool, which the host executes over the real
       // execution (HB-262) - so by the time this runs, the kernel already holds whatever the
       // node submitted, and the refusal text already went back to the model. This never

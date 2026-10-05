@@ -56,6 +56,7 @@ export type TurnRunner = (
 
 export interface NodeExecutorOptions {
   maxItems?: number;
+  signal?: AbortSignal;
   kernel: KernelStore;
   graphId: string;
   /** The node's resident host. The host owns the worker config and the process, so the
@@ -111,7 +112,7 @@ export class NodeExecutor {
     for (;;) {
       // A node paused before its turn is never sent. The queued item stays, so resuming
       // runs it with nothing lost - this is a hold, not a cancellation.
-      if (this.kernel.nodeState(this.graphId, nodeId).paused) return last;
+      if (this.options.signal?.aborted || this.kernel.nodeState(this.graphId, nodeId).paused) return last;
       const task = this.kernel.store.task(this.graphId);
       if (task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) return last;
       if (occupiedSlots(this.kernel.store, 'agent') >= executionLimit('agent')) return last;
@@ -174,6 +175,15 @@ export class NodeExecutor {
         turnStarted = true;
         report = await run(executionId, attempt, injection, item);
       } catch (error) {
+        if (this.options.signal?.aborted) {
+          const reason = 'Runtime closing; input retained without consuming an automatic retry';
+          if (!turnStarted) releaseHold();
+          if (this.hasValidSubmission(executionId)) return this.fail(executionId, nodeId, seq, 'Runtime closed after submit; output retained and original input cannot replay');
+          this.kernel.finishExecution(executionId, 'blocked');
+          this.kernel.blockNode(this.graphId, nodeId, reason);
+          this.queue.complete(seq, { kind: 'blocked', reason });
+          return 'blocked';
+        }
         if (metering && turnStarted) {
           this.kernel.finishExecution(executionId, 'blocked');
           this.kernel.blockNode(this.graphId, nodeId, 'Interrupted turn usage is unknown; reconcile the held reservation before resuming');

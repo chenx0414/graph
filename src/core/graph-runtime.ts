@@ -1,3 +1,4 @@
+import { wakeMaster, wakeForTaskCompleted } from './wake-ledger.ts';
 import { randomUUID } from 'node:crypto';
 import { RuntimeError, type Json } from './types.ts';
 import type { KernelStore, QueueRow } from './kernel-store.ts';
@@ -81,6 +82,7 @@ export class GraphRuntime {
   /** §5, §8: patch requires a base revision; a conflict returns the current version and changes nothing. */
   patch(input: { baseRevision: number; changes: PatchChange }): { revision: number } {
     this.ensureTask();
+    if (['completed', 'stopping', 'stopped'].includes(this.state()!.phase)) throw new RuntimeError('invalid_graph', 'Ended graph cannot be patched');
     const latest = this.kernel.latestRevision(this.graphId);
     if (!latest) throw new RuntimeError('invalid_graph', `Graph ${this.graphId} has no revision to patch`);
     if (latest.version !== input.baseRevision) {
@@ -174,6 +176,7 @@ export class GraphRuntime {
     this.ensureTask();
     const phase = this.state()!.phase;
     if (phase === 'completed') return this.state()!;
+    if (phase === 'stopping' || phase === 'stopped') throw new RuntimeError('invalid_graph', 'Stopped graph cannot complete');
     this.kernel.db.prepare('INSERT INTO kernel_lifecycle(task_id,completion_requested) VALUES(?,1) ON CONFLICT(task_id) DO UPDATE SET completion_requested=1').run(this.graphId);
     this.setPhase('completing');
     return this.state()!;
@@ -182,7 +185,7 @@ export class GraphRuntime {
   /** §8: withdraw a completion request, restoring external input. */
   withdrawComplete(): GraphStateRow {
     this.ensureTask();
-    if (!this.completionRequested()) {
+    if (['completed', 'stopping', 'stopped'].includes(this.state()!.phase) || !this.completionRequested()) {
       throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not completing`);
     }
     this.kernel.db.prepare('UPDATE kernel_lifecycle SET completion_requested=0 WHERE task_id=?').run(this.graphId);
@@ -197,6 +200,7 @@ export class GraphRuntime {
    */
   settleCompletion(): 'completed' | 'blocked' | 'completing' {
     this.ensureTask();
+    if (this.state()!.phase === 'completed') return 'completed';
     if (!this.completionRequested()) throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not completing`);
 
     const queued = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.graphId) as { n: number };
@@ -210,14 +214,18 @@ export class GraphRuntime {
     const pendingModules = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_inbox WHERE task_id=? AND processed=0').get(this.graphId) as { n: number };
     const pendingOutputs = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0').get(this.graphId) as { n: number };
     if (queued.n > 0 || running.n > 0 || pendingModules.n > 0 || pendingOutputs.n > 0) return 'completing';
-    this.setPhase('completed');
+    this.kernel.moduleTransaction(() => {
+      this.setPhase('completed');
+      wakeForTaskCompleted(this.kernel.store, this.graphId, { phase: 'completed', integrationSha: this.kernel.store.task(this.graphId).integration_sha });
+      this.kernel.store.event(this.graphId, 'graph.completed', { revision: this.state()!.revision });
+    });
     return 'completed';
   }
 
   /** §8: stop cancels the queue and blocks new dispatch. */
   stop(): GraphStateRow {
     this.ensureTask();
-    if (this.state()!.phase === 'stopped') return this.state()!;
+    if (['completed', 'stopped'].includes(this.state()!.phase)) return this.state()!;
     this.setPhase('stopping');
     this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?').run(this.graphId);
     this.kernel.db.prepare('UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id IN (SELECT id FROM kernel_module_transitions WHERE task_id=?)').run(this.graphId);
@@ -230,12 +238,17 @@ export class GraphRuntime {
   /** §8: stop settles once queued work is cancelled and in-flight executions stop. */
   settleStop(): 'stopped' | 'stopping' {
     this.ensureTask();
+    if (this.state()!.phase === 'stopped') return 'stopped';
     if (this.state()!.phase !== 'stopping') throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not stopping`);
     this.kernel.db.prepare("UPDATE kernel_queue SET state='done',reason='cancelled by stop' WHERE task_id=? AND state='queued'").run(this.graphId);
     const queued = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.graphId) as { n: number };
     const running = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND state='running'").get(this.graphId) as { n: number };
     if (queued.n > 0 || running.n > 0) return 'stopping';
-    this.setPhase('stopped');
+    this.kernel.moduleTransaction(() => {
+      this.setPhase('stopped');
+      wakeMaster(this.kernel.store, { taskId: this.graphId, kind: 'task_stopped', dedupeKey: `${this.graphId}:stopped`, data: { graphId: this.graphId } });
+      this.kernel.store.event(this.graphId, 'graph.stopped', { revision: this.state()!.revision });
+    });
     return 'stopped';
   }
 

@@ -9,7 +9,7 @@ import type { TaskStore } from './store.ts';
  * finished, a queued turn to continue after an answer. The master is the only
  * actor holding the conversation's context, so it is the one that has to be told.
  */
-export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting' | 'human_check';
+export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting' | 'human_check' | 'graph_output' | 'peer_message' | 'task_stopped';
 
 export interface WakeIntent {
   taskId: string;
@@ -97,14 +97,14 @@ export function wakeMaster(store: TaskStore, intent: WakeIntent): boolean {
 }
 
 /** A node stopped and cannot continue until someone acts on why. */
-export function wakeForBlockedNode(store: TaskStore, taskId: string, block: { nodeId: string; reason: string }) {
+export function wakeForBlockedNode(store: TaskStore, taskId: string, block: { nodeId: string; reason: string; incidentId?: string }) {
   return wakeMaster(store, {
     taskId,
     kind: 'node_blocked',
     // The task, the node and the kind of block are all part of the fact: two tasks
     // in one conversation can both own a node called "build", and "waiting for a
     // permission" is a different thing to act on than "failed to execute".
-    dedupeKey: `${taskId}:${block.nodeId}:${block.reason}`,
+    dedupeKey: `${taskId}:${block.nodeId}:${block.incidentId ?? block.reason}`,
     data: block,
   });
 }
@@ -122,7 +122,8 @@ export function wakeForHumanCheck(store: TaskStore, taskId: string, data: { node
 
 /** A graph reached its end, so the conversation needs a summary and a handback. */
 export function wakeForTaskCompleted(store: TaskStore, taskId: string, data: Json) {
-  return wakeMaster(store, { taskId, kind: 'task_completed', dedupeKey: 'completed', data });
+  return wakeMaster(store, { taskId, kind: 'task_completed', dedupeKey: `${taskId}:completed`,
+    data: { ...(data && typeof data === 'object' && !Array.isArray(data) ? data : { outcome: data }), graphId: taskId } });
 }
 
 /** The user answered something the master has to act on so the graph can move. */
@@ -176,10 +177,17 @@ export function renderWakes(wakes: PendingWake[]): string {
   const lines = wakes.map(wake => {
     const data = wake.data ? JSON.parse(wake.data) as Record<string, Json> : {};
     if (wake.kind === 'task_completed') {
-      return `- A graph task in this conversation finished (phase ${String(data.phase ?? 'completed')}${data.integrationSha ? `, integration ${String(data.integrationSha).slice(0, 12)}` : ''}). Read its outcome and report it to the user; nothing else is waiting on it.`;
+      return `- Graph ${String(data.graphId ?? wake.dedupeKey)} finished (phase ${String(data.phase ?? 'completed')}${data.integrationSha ? `, integration ${String(data.integrationSha).slice(0, 12)}` : ''}). Read its outcome and report it to the user; nothing else is waiting on it.`;
     }
+    if (wake.kind === 'graph_output') {
+      return `- Graph ${String(data.graphId)} published output ${String(data.output)} (result ${String(data.resultId)}). Read graph_inspect results for its exact business value.`;
+    }
+    if (wake.kind === 'peer_message') {
+      return `- Agent ${String(data.nodeId)} in graph ${String(data.graphId)} sent you a message. Read the pending conversation message and reply if needed.`;
+    }
+    if (wake.kind === 'task_stopped') return `- Graph ${String(data.graphId)} stopped; its remaining work was cancelled.`;
     if (wake.kind === 'node_blocked') {
-      return `- Node ${String(data.nodeId ?? wake.dedupeKey)} stopped and only a person can unblock it (${String(data.reason ?? 'blocked')}). The user has it in their inbox; decide whether anything else in the graph must change while it waits.`;
+      return `- Node ${String(data.nodeId ?? wake.dedupeKey)} needs your intervention (${String(data.reason ?? 'blocked')}). Inspect its execution and decide whether to retry, skip, or change configuration; escalate only decisions that require the user.`;
     }
     if (wake.kind === 'answer') {
       return `- The user answered ${String(data.kind ?? 'a question')} on node ${String(data.nodeId ?? '?')}. Act on it so the graph can move on.`;

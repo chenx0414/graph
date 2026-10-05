@@ -111,6 +111,7 @@ export function modelFor(options: KernelGraphLaneOptions, recipe: string): Model
  * of the lane, so the same node keeps one resident process across the graph's turns (§7).
  */
 export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
+  let closing = false;
   const hosts = new Map<string, ResidentHost>();
   const sessions = new Map<string, NodeSessionRequest>();
   const sessionRevisions = new Map<string, string>();
@@ -129,6 +130,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   };
 
   const sessionFor = async (graphId: string, nodeId: string): Promise<NodeSessionRequest> => {
+    if (closing) throw new Error('Graph runtime is closing');
     const key = `${graphId}/${nodeId}`;
     const cached = sessions.get(key);
     const revision = options.kernel.latestRevision(graphId);
@@ -180,6 +182,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       instancesDir: options.instancesDir,
       ...(options.gateFor?.(graphId, nodeId) ? { gate: options.gateFor(graphId, nodeId)! } : {}),
     });
+    if (closing) { await session.close(); throw new Error('Graph runtime is closing'); }
     sessions.set(key, session);
     sessionRevisions.set(key, configuration);
     if (session.operation) recordCapabilityLoad(options.kernel.store, { taskId: graphId, nodeId, instanceId: session.binding.instanceId,
@@ -215,12 +218,13 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     closeGraph: async graphId => {
       for (const key of [...hosts.keys()]) {
         if (!key.startsWith(`${graphId}/`)) continue;
-        await hosts.get(key)!.stop(); hosts.delete(key); hostConfigs.delete(key);
+        await hosts.get(key)!.dispose(); hosts.delete(key); hostConfigs.delete(key);
         await sessions.get(key)?.close(); sessions.delete(key); sessionRevisions.delete(key);
       }
     },
     close: async () => {
-      await Promise.all([...hosts.values()].map(host => host.stop()));
+      closing = true;
+      await Promise.all([...hosts.values()].map(host => host.dispose()));
       hosts.clear();
       await Promise.all([...sessions.values()].map(session => session.close()));
       sessions.clear();
@@ -286,6 +290,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
       const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`);
       const session = await sessionFor(graphId, nodeId);
+      if (closing) throw new Error('Graph runtime is closing');
       if (!session.operation) throw new Error('Resident node has no resolved capability operation');
       const host = new ResidentHost({
         launch: residentLauncher({ config: config as never, configPath, workerEntry, operation: session.operation,

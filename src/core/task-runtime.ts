@@ -1,3 +1,4 @@
+import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
 import { kernelGraphView, kernelNodeRun, kernelNodePrompt } from './kernel-views.ts';
 import { sendNodeMessage, sendPeerMessage } from './node-messages.ts';
@@ -652,7 +653,11 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         onMainMessage: async (graphId, nodeId, text) => {
           const task = store.task(graphId);
           if (!task.conversation_id) throw new RuntimeError('invalid_input', 'Graph has no owning conversation');
-          return store.transaction(() => appendMessage(store, { conversationId: task.conversation_id!, role: 'user', kind: 'peer', text: `[${nodeId}](graph://${graphId}/agents/${encodeURIComponent(nodeId)}): ${text}`, state: 'pending' }));
+          return store.transaction(() => {
+            const message = appendMessage(store, { conversationId: task.conversation_id!, role: 'user', kind: 'peer', text: `[${nodeId}](graph://${graphId}/agents/${encodeURIComponent(nodeId)}): ${text}`, state: 'pending' });
+            wakeMaster(store, { taskId: graphId, kind: 'peer_message', dedupeKey: message.id, data: { graphId, nodeId, messageId: message.id } });
+            return message;
+          });
         },
         onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) => {
           if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
@@ -2615,7 +2620,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     close() {
       if (!closing) {
         closed = true;
-        closing = (async () => { await execution.drain(); await residentGraphLane?.close(); try { store.close(); } finally { releaseOwner(); } })();
+        closing = (async () => { await execution.drain(); await residentGraphLane?.close(); await execution.settleGraphShutdown(); try { store.close(); } finally { releaseOwner(); } })();
       }
       return closing;
     },
