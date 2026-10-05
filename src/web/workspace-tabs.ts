@@ -95,7 +95,7 @@ export function tabForPath(path: string): TabDescriptor | null {
   const conversation = /^\/conversations\/([^/]+)$/.exec(pathname);
   if (conversation) return { kind: 'conversation', key: conversation[1]!, title: '对话', hash: `#${pathname}` };
   const node = /^\/tasks\/([^/]+)\/nodes\/([^/]+)$/.exec(pathname);
-  if (node) return { kind: 'node', key: `${node[1]}/${node[2]}`, title: `节点 ${node[2]}`, hash: `#${pathname}` };
+  if (node) return { kind: 'node', key: `${node[1]}/${decodeURIComponent(node[2]!)}`, title: `节点 ${decodeURIComponent(node[2]!)}`, hash: `#${pathname}` };
   const artifact = /^\/tasks\/([^/]+)\/artifacts\/([^/]+)$/.exec(pathname);
   if (artifact) return { kind: 'artifact', key: `${artifact[1]}/${artifact[2]}`, title: '共享产物', hash: `#${path}` };
   // `/tasks/<id>` and `/tasks/<id>/graph` are the same window now; the graph address is canonical.

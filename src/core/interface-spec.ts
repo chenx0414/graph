@@ -1,3 +1,5 @@
+import { Ajv, type ValidateFunction } from 'ajv';
+import { expandSubgraph } from './subgraph.ts';
 import { RuntimeError } from './types.ts';
 import type { Json } from './types.ts';
 
@@ -77,6 +79,9 @@ export interface ModuleDefinition {
   outputs: Record<string, ProtocolRef>;
   /** once-modules must name the inputs a rule needs, so a missing field is never read as false (§4). */
   requiredInputs?: string[];
+  /** An explicit input which only clears the once latch; held values remain. */
+  control?: { reopen: string };
+  limits?: { timeoutMs?: number; memoryMb?: number; inputBytes?: number; outputBytes?: number; stateBytes?: number };
   rules?: ModuleRule[];
   /**
    * A command module's main-authored code (§9): an entry file exporting
@@ -126,6 +131,10 @@ export interface GraphDefinition {
   completion?: CompletionDeclaration;
   /** True when a subgraph was expanded: its public io is mapped in, never scheduled separately (§9). */
   subgraphs?: string[];
+  templates?: Record<string, { version: number; definition: GraphDefinition }>;
+  instances?: Record<string, { template: string; version: number }>;
+  subgraphInstances?: Record<string, { template: string; version: number; inputs: Record<string, GraphIo>; outputs: Record<string, GraphOutput> }>;
+
 }
 
 const invalid = (reason: string): never => { throw new RuntimeError('invalid_definition', reason); };
@@ -229,6 +238,13 @@ function validateModule(definition: GraphDefinition, id: string, module: ModuleD
   for (const input of module.requiredInputs ?? []) {
     if (!module.inputs?.[input]) invalid(`Module ${id} requiredInputs names undeclared input ${input}`);
   }
+  if (module.control && (!module.inputs[module.control.reopen] || module.requiredInputs?.includes(module.control.reopen))) {
+    invalid(`Module ${id} reopen control must name an input excluded from requiredInputs`);
+  }
+  for (const [name, limit] of Object.entries(module.limits ?? {})) {
+    if (!['timeoutMs', 'memoryMb', 'inputBytes', 'outputBytes', 'stateBytes'].includes(name) || !Number.isSafeInteger(limit) || limit < 1) invalid(`Module ${id} has invalid resource limit ${name}`);
+    if (name === 'memoryMb' && (limit < 64 || limit > 16384)) invalid(`Module ${id} memoryMb must be between 64 and 16384`);
+  }
   for (const [index, rule] of (module.rules ?? []).entries()) {
     if (typeof rule.when !== 'string' || !rule.when.trim()) invalid(`Module ${id} rule ${index} requires a when expression`);
     if (!isRecord(rule.emit)) invalid(`Module ${id} rule ${index} requires an emit map`);
@@ -239,7 +255,8 @@ function validateModule(definition: GraphDefinition, id: string, module: ModuleD
 }
 
 /** The single formal parse entry point. Whole-or-nothing. */
-export function parseGraphDefinition(input: unknown): GraphDefinition {
+export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition {
+  if (depth > 32) invalid('Subgraph expansion exceeds 32 levels or contains recursive definitions');
   if (!isRecord(input)) invalid('Definition must be a JSON object');
   const raw = input as Record<string, Json>;
   if (raw.schemaVersion !== INTERFACE_SCHEMA_VERSION) {
@@ -270,7 +287,61 @@ export function parseGraphDefinition(input: unknown): GraphDefinition {
     outputs,
     ...(isRecord(raw.completion) ? { completion: raw.completion as unknown as CompletionDeclaration } : {}),
     ...(Array.isArray(raw.subgraphs) ? { subgraphs: raw.subgraphs as string[] } : {}),
+    ...(isRecord(raw.subgraphInstances) ? { subgraphInstances: raw.subgraphInstances } : {}),
   } as unknown as GraphDefinition;
+
+  if (raw.instances !== undefined) {
+    if (!isRecord(raw.instances) || !isRecord(raw.templates)) invalid('Subgraph instances and templates must be maps');
+    // Expansion owns its maps; parsing must never mutate a supplied template or graph.
+    definition.nodes = { ...definition.nodes }; definition.modules = { ...definition.modules };
+    definition.edges = { ...definition.edges }; definition.protocols = { ...definition.protocols };
+    definition.inputs = structuredClone(definition.inputs); definition.outputs = structuredClone(definition.outputs);
+    definition.subgraphInstances = { ...definition.subgraphInstances };
+    for (const [id, value] of Object.entries(raw.instances as Record<string, Json>)) {
+      if (!id || /[./]/.test(id) || definition.nodes[id] || definition.modules[id]) invalid(`Invalid or conflicting subgraph instance ${id}`);
+      if (!isRecord(value) || typeof value.template !== 'string' || !Number.isSafeInteger(value.version) || Number(value.version) < 1) invalid(`Subgraph ${id} must pin a template and positive version`);
+      const instanceRef = value as { template: string; version: number };
+      const declaration = (raw.templates as Record<string, Json>)[instanceRef.template];
+      if (!isRecord(declaration) || declaration.version !== instanceRef.version) invalid(`Subgraph ${id} template version is unavailable`);
+      const template = parseGraphDefinition((declaration as Record<string, Json>).definition, depth + 1);
+      const expanded = expandSubgraph({ instance: id, template, templateVersion: instanceRef.version });
+      for (const [name, protocol] of Object.entries(template.protocols)) {
+        if (definition.protocols[name] && JSON.stringify(definition.protocols[name]) !== JSON.stringify(protocol)) invalid(`Subgraph ${id} conflicts with protocol ${name}`);
+        definition.protocols[name] = protocol;
+      }
+      for (const [name, node] of Object.entries(expanded.nodes)) {
+        if (definition.nodes[name] || definition.modules[name]) invalid(`Duplicate expanded node ${name}`);
+        definition.nodes[name] = node;
+      }
+      for (const [name, module] of Object.entries(expanded.modules)) {
+        if (definition.nodes[name] || definition.modules[name]) invalid(`Duplicate expanded module ${name}`);
+        definition.modules[name] = module;
+      }
+      for (const [name, edge] of Object.entries(expanded.edges)) {
+        const key = `${id}/${name}`;
+        if (definition.edges[key]) invalid(`Duplicate expanded edge ${key}`);
+        definition.edges[key] = edge;
+      }
+      definition.subgraphInstances[id] = { template: instanceRef.template, version: instanceRef.version, inputs: expanded.inputs, outputs: expanded.outputs };
+    }
+    const resolve = (reference: string, kind: 'input' | 'output'): string => {
+      const dot = reference.indexOf('.');
+      const instance = definition.subgraphInstances?.[reference.slice(0, dot)];
+      if (!instance) return reference;
+      const port = reference.slice(dot + 1);
+      const mapped = kind === 'input' ? instance.inputs[port]?.to : instance.outputs[port]?.from;
+      if (!mapped) invalid(`Unknown subgraph ${kind} ${reference}`);
+      return mapped!;
+    };
+    for (const [name, edge] of Object.entries(definition.edges)) definition.edges[name] = { ...edge, from: resolve(edge.from, 'output'), to: resolve(edge.to, 'input') };
+    for (const io of Object.values(definition.inputs)) io.to = resolve(io.to, 'input');
+    for (const io of Object.values(definition.outputs)) io.from = resolve(io.from, 'output');
+    definition.subgraphs = Object.keys(definition.subgraphInstances);
+  }
+
+  for (const [id, protocol] of Object.entries(definition.protocols)) {
+    try { protocolValidator(protocol); } catch (error) { invalid(`Protocol ${id} has an invalid schema: ${error instanceof Error ? error.message : String(error)}`); }
+  }
 
   for (const [id, node] of Object.entries(definition.nodes)) validateNode(definition, id, node);
   for (const [id, module] of Object.entries(definition.modules)) validateModule(definition, id, module);
@@ -315,47 +386,26 @@ export function protocolReferenced(definition: GraphDefinition, protocolId: stri
   return refs.some(ref => ref?.protocol === protocolId);
 }
 
-/**
- * §4: the target input's schema is the receiving authority — its protocol, not the
- * producer's, decides what a value must satisfy. Validation is deliberately small
- * and never `eval`s: `type`, `required`, `properties` and array `items` only.
- * A conforming value returns null; any defect returns a field-level message.
- */
+const protocolAjv = new Ajv({ strict: false, strictSchema: true, validateFormats: false, addUsedSchema: false });
+protocolAjv.addKeyword({ keyword: 'version', schemaType: 'number', valid: true });
+const protocolValidators = new Map<string, ValidateFunction>();
+function protocolValidator(spec: ProtocolSpec): ValidateFunction {
+  const signature = JSON.stringify(spec);
+  let validator = protocolValidators.get(signature);
+  if (!validator) {
+    validator = protocolAjv.compile(spec);
+    if (protocolValidators.size >= 1000) protocolValidators.delete(protocolValidators.keys().next().value!);
+    protocolValidators.set(signature, validator);
+  }
+  return validator;
+}
+
+/** The receiving protocol validates the actual value; validation never rewrites it. */
 export function validateProtocolValue(spec: ProtocolSpec, value: Json, path = ''): string | null {
-  const where = path || '(root)';
-  const typeOk = (): boolean => {
-    switch (spec.type) {
-      case 'object': return isRecord(value) && !Array.isArray(value);
-      case 'array': return Array.isArray(value);
-      case 'string': return typeof value === 'string';
-      case 'number': return typeof value === 'number' && Number.isFinite(value);
-      case 'integer': return typeof value === 'number' && Number.isSafeInteger(value);
-      case 'boolean': return typeof value === 'boolean';
-      case 'null': return value === null;
-      default: return true; // An open/unknown type asserts nothing.
-    }
-  };
-  if (!typeOk()) return `${where}: expected ${spec.type}`;
-  if (spec.type === 'object' && isRecord(value)) {
-    for (const key of spec.required ?? []) {
-      if (value[key] === undefined) return `${where}: missing required property ${key}`;
-    }
-    const properties = (spec.properties ?? {}) as Record<string, ProtocolSpec>;
-    for (const [key, child] of Object.entries(properties)) {
-      const item = value[key];
-      if (item === undefined) continue;
-      const defect = validateProtocolValue(child, item, path ? `${path}.${key}` : key);
-      if (defect) return defect;
-    }
-  }
-  if (spec.type === 'array' && Array.isArray(value)) {
-    const items = spec.items as ProtocolSpec | undefined;
-    if (items) {
-      for (const [index, item] of value.entries()) {
-        const defect = validateProtocolValue(items, item, `${path}[${index}]`);
-        if (defect) return defect;
-      }
-    }
-  }
-  return null;
+  try {
+    const validate = protocolValidator(spec);
+    if (validate(value)) return null;
+    const error = validate.errors?.[0];
+    return `${path || '(root)'}${error?.instancePath ?? ''}: ${error?.message ?? 'invalid value'}`;
+  } catch (error) { return `${path || '(root)'}: invalid protocol schema: ${error instanceof Error ? error.message : String(error)}`; }
 }

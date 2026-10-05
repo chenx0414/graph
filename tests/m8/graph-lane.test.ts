@@ -43,7 +43,7 @@ test('G1: the drive loop runs a v2 graph that has queued work and counts it', as
   const store = await fixture();
   const ran: string[] = [];
   const execution = new Execution(store, {}, {
-    graphs: () => [{ taskId: 'g-v2', run: async () => { ran.push('g-v2'); return { drained: true }; } }],
+    graphs: () => ran.length ? [] : [{ taskId: 'g-v2', run: async () => { ran.push('g-v2'); return { drained: true }; } }],
   });
   const result = await execution.drive();
   expect(ran).toEqual(['g-v2']);
@@ -62,7 +62,7 @@ test('G3: a graph that throws does not kill the drive loop, and the next graph s
   const store = await fixture();
   const ran: string[] = [];
   const execution = new Execution(store, {}, {
-    graphs: () => [
+    graphs: () => ran.length ? [] : [
       { taskId: 'g-v2', run: async () => { ran.push('boom'); throw new Error('graph exploded'); } },
       { taskId: 'g-other', run: async () => { ran.push('g-other'); return { drained: true }; } },
     ],
@@ -75,7 +75,7 @@ test('G4: a stopping executor stops dispatching v2 work', async () => {
   const store = await fixture();
   const ran: string[] = [];
   const execution = new Execution(store, {}, {
-    graphs: () => [{ taskId: 'g-v2', run: async () => { ran.push('g-v2'); return { drained: true }; } }],
+    graphs: () => ran.length ? [] : [{ taskId: 'g-v2', run: async () => { ran.push('g-v2'); return { drained: true }; } }],
   });
   await execution.drain();
   await execution.drive();
@@ -87,7 +87,7 @@ test('G5: a paused task is not runnable, so its graph is skipped', async () => {
   store.db.prepare("UPDATE tasks SET paused=1 WHERE id='g-v2'").run();
   const ran: string[] = [];
   const execution = new Execution(store, {}, {
-    graphs: () => [{ taskId: 'g-v2', run: async () => { ran.push('g-v2'); return { drained: true }; } }],
+    graphs: () => ran.length ? [] : [{ taskId: 'g-v2', run: async () => { ran.push('g-v2'); return { drained: true }; } }],
   });
   await execution.drive();
   expect(ran).toEqual([]);

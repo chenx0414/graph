@@ -80,6 +80,16 @@ function opened() {
 }
 
 describe('routeModuleOutputs — a module emit travels to its targets (§2, §6)', () => {
+  test('invalid emitted value leaves all deliveries and queues untouched', () => {
+    const { kernel, modules } = opened();
+    expect(() => routeModuleOutputs(kernel, modules, 'g1', 'gate', {
+      emitted: true, waiting: false, triggered: false, reasons: [],
+      outputs: { rework: { passed: false }, approved: { passed: 'wrong' } },
+    })).toThrow();
+    expect(kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_deliveries').get()).toEqual({ n: 0 });
+    expect(kernel.nextQueued('g1', 'worker')).toBeNull();
+  });
+
   test('R1: a rework emit queues the worker with the review value', () => {
     const { kernel, modules } = opened();
     const evaluation = modules.deliver('gate', 'review', { passed: false });
@@ -143,7 +153,7 @@ describe('routeModuleOutputs — a module emit travels to its targets (§2, §6)
     const rows = kernel.deliveriesForEdge('g1', 'rework');
     expect(rows.length).toBe(1);
     expect(rows[0]!.value).toEqual({ passed: false });
-    expect(rows[0]!.fromEndpoint).toBe('gate');
+    expect(rows[0]!.fromEndpoint).toBe('gate.rework');
     expect(rows[0]!.source).toBe('module');
   });
 });

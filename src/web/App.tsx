@@ -93,7 +93,7 @@ export type Settings_ = {
   agentCombinationFile?: string | null;
   agentCombinationError?: string | null;
 };
-type GraphPayload = {
+type GraphPayload = React.ComponentProps<typeof GraphCanvas>['graph'] & {
   nodes: NodeView[];
   messages?: { id: string; source: string; target: string; text: string; createdAt: number }[];
   handoffs?: { id: string; source: string; target: string; mode: string; text: string; createdAt: number }[];
@@ -448,7 +448,7 @@ function WorkspacePage({ path, active, settings, startup, tasks, conversations, 
               <NodeChatTab
                 key={`${nodeMatch[1]}:${nodeMatch[2]}`}
                 taskId={nodeMatch[1]!}
-                nodeId={nodeMatch[2]!}
+                nodeId={decodeURIComponent(nodeMatch[2]!)}
               />
             )}
             {taskMatch && <GraphPanel id={taskMatch[1]!} settings={settings} startup={startup} />}
@@ -791,7 +791,8 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
   // overview live, so the graph does not grow a second, thinner copy of them.
   const [selected, setSelected] = useState<string | null>(null);
   function openNode(nodeId: string) {
-    location.hash = `#/tasks/${id}/nodes/${nodeId}`;
+    if (graph?.nodes.find(node => node.id === nodeId)?.kind === 'module') { setSelected(nodeId); return; }
+    location.hash = `#/tasks/${id}/nodes/${encodeURIComponent(nodeId)}`;
   }
   const { data: view, reload: reloadView } = useAsync(() => api<TaskView>(`/api/tasks/${id}`), [id]);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -829,7 +830,9 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
 
       <Card title="任务图" icon="graph" subtitle={graph.nodes.length ? `${graph.nodes.length} 个节点` : undefined}>
         {!graph.nodes.length && <Empty icon="graph" title="任务图为空" hint={<span data-testid="graph-empty">尚未确认提案，任务图为空。</span>} />}
-        <GraphCanvas graph={graph} collapsed={collapsed} onSelect={openNode} selected={selected} />
+        <GraphCanvas graph={graph} collapsed={collapsed} onSelect={openNode} selected={selected} onReopen={moduleId => {
+          void api(`/api/tasks/${id}/graph/control`, { method: 'POST', body: JSON.stringify({ action: 'reopen', moduleId }) }).then(refreshAll).catch(reason => toast(String(reason), 'danger'));
+        }} />
       </Card>
 
 

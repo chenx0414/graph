@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { RuntimeError, type Json } from './types.ts';
 import type { KernelStore, QueueRow } from './kernel-store.ts';
 import { NodeQueue } from './node-queue.ts';
@@ -95,8 +96,31 @@ export class GraphRuntime {
         }
       }
     }
-    const revision = this.kernel.publishRevision(this.graphId, { definition: parsed, reason: input.changes.reason });
-    return { revision: revision.version };
+    return this.kernel.store.transaction(() => {
+      const removed = [...Object.keys(latest.definition.nodes), ...Object.keys(latest.definition.modules)]
+        .filter(id => !parsed.nodes[id] && !parsed.modules[id]);
+      for (const id of removed) {
+        if (!input.changes.retire?.includes(id)) throw new RuntimeError('invalid_graph', `Removing ${id} requires explicit retire`);
+        const pending = this.kernel.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND node_id=? AND state IN ('queued','claimed','failed') LIMIT 1").get(this.graphId, id);
+        const inbox = this.kernel.db.prepare('SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND module_id=? AND processed=0 LIMIT 1').get(this.graphId, id);
+        const running = this.kernel.db.prepare("SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' LIMIT 1").get(this.graphId, id);
+        const outbox = this.kernel.db.prepare('SELECT 1 FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND t.module_id=? AND o.routed=0 LIMIT 1').get(this.graphId, id);
+        if (pending || inbox || running || outbox) throw new RuntimeError('pending_work', `Cannot remove ${id}: settle or explicitly cancel its pending work first`);
+      }
+      const revision = this.kernel.insertRevision(this.graphId, parsed, input.changes.reason);
+      for (const [id, node] of Object.entries(parsed.nodes)) {
+        if (!latest.definition.nodes[id]) this.kernel.admitNode(this.graphId, revision.version, id, { instanceId: randomUUID() });
+        else this.kernel.db.prepare('UPDATE kernel_nodes SET revision_version=?,spec=? WHERE task_id=? AND node_id=?')
+          .run(revision.version, JSON.stringify(node), this.graphId, id);
+      }
+      for (const [id, module] of Object.entries(parsed.modules)) {
+        if (!latest.definition.modules[id]) this.kernel.admitModule(this.graphId, revision.version, id, { moduleType: module.type, trigger: module.trigger });
+        else this.kernel.db.prepare('UPDATE kernel_modules SET revision_version=?,module_type=?,trigger=? WHERE task_id=? AND module_id=?')
+          .run(revision.version, module.type, module.trigger, this.graphId, id);
+      }
+      for (const id of removed) this.kernel.db.prepare("UPDATE kernel_nodes SET status='retired' WHERE task_id=? AND node_id=?").run(this.graphId, id);
+      return { revision: revision.version };
+    });
   }
 
   state(): GraphStateRow | null {
@@ -110,27 +134,38 @@ export class GraphRuntime {
     this.kernel.store.db.prepare('UPDATE tasks SET phase=? WHERE id=?').run(phase, this.graphId);
   }
 
+  private completionRequested(): boolean {
+    const row = this.kernel.db.prepare('SELECT completion_requested AS requested FROM kernel_lifecycle WHERE task_id=?').get(this.graphId) as { requested: number } | undefined;
+    return row?.requested === 1;
+  }
+
   /** §5: an interface input from outside, refused once completion or stop has begun. */
   deliver(input: { nodeId: string; input: string; value: Json }): QueueRow {
+    if (!this.kernel.latestRevision(this.graphId)?.definition.nodes[input.nodeId]) throw new RuntimeError('invalid_input', `Unknown agent ${input.nodeId}`);
+    return this.deliverEndpoint(`${input.nodeId}.${input.input}`, input.value).queue!;
+  }
+
+  deliverEndpoint(endpoint: string, value: Json): ReturnType<KernelStore['deliverDirect']> {
     const phase = this.state()?.phase ?? 'running';
-    if (phase === 'completing' || phase === 'completed') {
+    if (this.completionRequested() || phase === 'completing' || phase === 'completed') {
       throw new RuntimeError('completing', `Graph ${this.graphId} is completing; external delivery is closed`);
     }
     if (phase === 'stopping' || phase === 'stopped') {
       throw new RuntimeError('stopping', `Graph ${this.graphId} is stopping; external delivery is closed`);
     }
-    return new NodeQueue(this.kernel, this.graphId).enqueue({ nodeId: input.nodeId, kind: 'delivery', input: input.input, value: input.value });
+    return this.kernel.deliverDirect(this.graphId, endpoint, value);
   }
 
   /** §5: chat that would trigger an execution is closed to the outside during completion. */
-  chat(input: { nodeId: string; text: string }): QueueRow {
+  chat(input: { nodeId: string; text: string }, internal = false): QueueRow {
     const phase = this.state()?.phase ?? 'running';
-    if (phase === 'completing' || phase === 'completed') {
+    if (phase === 'completed' || (!internal && (this.completionRequested() || phase === 'completing'))) {
       throw new RuntimeError('completing', `Graph ${this.graphId} is completing; execution-triggering chat is closed`);
     }
     if (phase === 'stopping' || phase === 'stopped') {
       throw new RuntimeError('stopping', `Graph ${this.graphId} is stopping; chat is closed`);
     }
+    if (!this.kernel.latestRevision(this.graphId)?.definition.nodes[input.nodeId]) throw new RuntimeError('invalid_input', `Unknown agent ${input.nodeId}`);
     return new NodeQueue(this.kernel, this.graphId).enqueue({ nodeId: input.nodeId, kind: 'chat', text: input.text });
   }
 
@@ -139,6 +174,7 @@ export class GraphRuntime {
     this.ensureTask();
     const phase = this.state()!.phase;
     if (phase === 'completed') return this.state()!;
+    this.kernel.db.prepare('INSERT INTO kernel_lifecycle(task_id,completion_requested) VALUES(?,1) ON CONFLICT(task_id) DO UPDATE SET completion_requested=1').run(this.graphId);
     this.setPhase('completing');
     return this.state()!;
   }
@@ -146,9 +182,10 @@ export class GraphRuntime {
   /** §8: withdraw a completion request, restoring external input. */
   withdrawComplete(): GraphStateRow {
     this.ensureTask();
-    if (this.state()!.phase !== 'completing') {
+    if (!this.completionRequested()) {
       throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not completing`);
     }
+    this.kernel.db.prepare('UPDATE kernel_lifecycle SET completion_requested=0 WHERE task_id=?').run(this.graphId);
     this.setPhase('running');
     return this.state()!;
   }
@@ -160,7 +197,7 @@ export class GraphRuntime {
    */
   settleCompletion(): 'completed' | 'blocked' | 'completing' {
     this.ensureTask();
-    if (this.state()!.phase !== 'completing') throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not completing`);
+    if (!this.completionRequested()) throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not completing`);
 
     const queued = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.graphId) as { n: number };
     const running = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND state='running'").get(this.graphId) as { n: number };
@@ -170,7 +207,9 @@ export class GraphRuntime {
       this.setPhase('blocked');
       return 'blocked';
     }
-    if (queued.n > 0 || running.n > 0) return 'completing';
+    const pendingModules = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_inbox WHERE task_id=? AND processed=0').get(this.graphId) as { n: number };
+    const pendingOutputs = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0').get(this.graphId) as { n: number };
+    if (queued.n > 0 || running.n > 0 || pendingModules.n > 0 || pendingOutputs.n > 0) return 'completing';
     this.setPhase('completed');
     return 'completed';
   }
@@ -180,8 +219,11 @@ export class GraphRuntime {
     this.ensureTask();
     if (this.state()!.phase === 'stopped') return this.state()!;
     this.setPhase('stopping');
+    this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?').run(this.graphId);
+    this.kernel.db.prepare('UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id IN (SELECT id FROM kernel_module_transitions WHERE task_id=?)').run(this.graphId);
     // Cancel every queued item; a claimed item keeps running until it settles.
     this.kernel.store.db.prepare("UPDATE kernel_queue SET state='failed' WHERE task_id=? AND state='queued'").run(this.graphId);
+    this.kernel.store.event(this.graphId, 'graph.stopping', {});
     return this.state()!;
   }
 
@@ -189,8 +231,10 @@ export class GraphRuntime {
   settleStop(): 'stopped' | 'stopping' {
     this.ensureTask();
     if (this.state()!.phase !== 'stopping') throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not stopping`);
+    this.kernel.db.prepare("UPDATE kernel_queue SET state='done',reason='cancelled by stop' WHERE task_id=? AND state='queued'").run(this.graphId);
     const queued = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.graphId) as { n: number };
-    if (queued.n > 0) return 'stopping';
+    const running = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND state='running'").get(this.graphId) as { n: number };
+    if (queued.n > 0 || running.n > 0) return 'stopping';
     this.setPhase('stopped');
     return 'stopped';
   }

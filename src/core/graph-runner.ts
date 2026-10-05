@@ -1,3 +1,5 @@
+import { occupiedSlots, executionLimit } from '../runtime/execution-slots.ts';
+import { evaluateModule } from '../runtime/module-evaluator.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { NodeExecutor, type ExecutorHost } from './node-executor.ts';
@@ -78,13 +80,8 @@ export class GraphRunner {
   }
 
   private nodeIds(): string[] {
-    return (this.options.kernel.db.prepare('SELECT node_id FROM kernel_nodes WHERE task_id=? ORDER BY node_id').all(this.options.graphId) as { node_id: string }[])
+    return (this.options.kernel.db.prepare("SELECT node_id FROM kernel_nodes WHERE task_id=? AND status!='retired' ORDER BY node_id").all(this.options.graphId) as { node_id: string }[])
       .map(row => row.node_id);
-  }
-
-  private moduleIds(): string[] {
-    return (this.options.kernel.db.prepare('SELECT module_id FROM kernel_modules WHERE task_id=? ORDER BY module_id').all(this.options.graphId) as { module_id: string }[])
-      .map(row => row.module_id);
   }
 
   private pausedNodes(): string[] {
@@ -94,7 +91,8 @@ export class GraphRunner {
 
   private queuedCount(): number {
     const row = this.options.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state='queued'").get(this.options.graphId) as { n: number };
-    return row.n;
+    const modules = this.options.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_inbox WHERE task_id=? AND processed=0').get(this.options.graphId) as { n: number };
+    return row.n + modules.n;
   }
 
   /**
@@ -106,24 +104,45 @@ export class GraphRunner {
     const kernel = this.options.kernel;
     const revision = kernel.latestRevision(this.options.graphId);
     if (!revision) return { drained: true, executions: 0, blockedNodes: [] };
-    const modules = this.options.modules ?? new ModuleRuntime(kernel, this.options.graphId, revision.version);
+
     const maxStuck = this.options.maxStuckPasses ?? 2;
-    let executions = 0;
+    const beforeExecutions = (kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=?').get(this.options.graphId) as { n: number }).n;
     let stuck = 0;
-
-    for (;;) {
-      const before = this.signature();
-      executions += await this.drainNodes(modules);
-      this.routeEmissions(modules);
-      await this.drainNodes(modules);
-
-      if (this.signature() === before) {
-        stuck += 1;
-        if (stuck >= maxStuck) break;
-      } else {
-        stuck = 0;
+    const active = new Map<string, Promise<void>>();
+    let wake: (() => void) | undefined;
+    const unsubscribe = kernel.store.onEvent(() => wake?.());
+    try {
+      for (;;) {
+        const notification = new Promise<void>(resolve => { wake = resolve; });
+        const task = kernel.store.task(this.options.graphId);
+        if (task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) {
+          await Promise.all(active.values());
+          break;
+        }
+        const modules = this.options.modules ?? new ModuleRuntime(kernel, this.options.graphId, kernel.latestRevision(this.options.graphId)!.version);
+        const before = this.signature();
+        for (const nodeId of this.nodeIds()) {
+          if (active.has(nodeId) || kernel.nodeState(this.options.graphId, nodeId).paused || kernel.nodeStatus(this.options.graphId, nodeId) === 'blocked') continue;
+          if (!kernel.nextQueued(this.options.graphId, nodeId)) continue;
+          if (occupiedSlots(kernel.store, 'agent') >= executionLimit('agent')) break;
+          const job = this.runNode(nodeId).catch(error => {
+            kernel.setNodeQueuePaused(this.options.graphId, nodeId, true);
+            kernel.blockNode(this.options.graphId, nodeId, error instanceof Error ? error.message : String(error));
+          }).finally(() => { active.delete(nodeId); wake?.(); });
+          active.set(nodeId, job);
+        }
+        await this.routeEmissions(modules);
+        if (active.size) {
+          await Promise.race([...active.values(), notification]);
+          stuck = 0;
+          continue;
+        }
+        if (this.signature() === before) {
+          if (++stuck >= maxStuck) break;
+        } else stuck = 0;
       }
-    }
+    } finally { unsubscribe(); }
+    const executions = (kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=?').get(this.options.graphId) as { n: number }).n - beforeExecutions;
 
     const blockedNodes = this.pausedNodes();
     return {
@@ -138,41 +157,34 @@ export class GraphRunner {
     const queue = this.options.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.options.graphId) as { n: number };
     const transitions = this.options.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_transitions WHERE task_id=?').get(this.options.graphId) as { n: number };
     const paused = this.options.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_node_state WHERE task_id=? AND paused=1').get(this.options.graphId) as { n: number };
-    return `${queue.n}:${transitions.n}:${paused.n}`;
+    const completed = this.options.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND state!='running'").get(this.options.graphId) as { n: number };
+    return `${queue.n}:${transitions.n}:${paused.n}:${completed.n}`;
   }
 
-  /** Drain every node that has queued work. Returns how many executions were opened. */
-  private async drainNodes(modules: ModuleRuntime): Promise<number> {
+  /** One pending execution. Independent nodes run concurrently; each node stays serial. */
+  private async runNode(nodeId: string): Promise<void> {
     const kernel = this.options.kernel;
-    let executions = 0;
-    for (const nodeId of this.nodeIds()) {
-      if (kernel.nodeState(this.options.graphId, nodeId).paused) continue;
-      if (!kernel.nextQueued(this.options.graphId, nodeId)) continue;
-
-      const nodeHost = await this.options.hostFor(nodeId);
+    const nodeHost = await this.options.hostFor(nodeId);
       const driver = new NodeTurnDriver({
         kernel, graphId: this.options.graphId, nodeId, host: nodeHost,
-        initialContext: () => this.options.initialContext ? this.options.initialContext(nodeId) : '',
+        ...(this.options.initialContext ? { initialContext: () => this.options.initialContext!(nodeId) } : {}),
         submit: (executionId) => {
           const execution = kernel.execution(executionId);
           const gap = execution ? this.options.submit(executionId) : undefined;
-          executions += 1;
           // A submit that landed on a module hands the judgment to the router, which
           // queues whatever the module emits.
-          if (execution) this.routeModuleDeliveries(modules);
+          // Accepted module inputs are drained by the graph pass in order.
           return gap;
         },
       });
       const executor = new NodeExecutor({
-        kernel, graphId: this.options.graphId, host: nodeHost,
+        maxItems: 1, kernel, graphId: this.options.graphId, host: nodeHost,
         ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
           ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
         ...(this.options.workspace ? { workspace: () => this.options.workspace!(nodeId) } : {}),
         ...(this.options.artifacts ? { artifacts: this.options.artifacts } : {}),
       });
-      await executor.runNode(nodeId, (executionId, attempt, injection) => driver.run(executionId, attempt, injection));
-    }
-    return executions;
+      await executor.runNode(nodeId, (executionId, attempt, injection, input) => driver.run(executionId, attempt, injection, input));
   }
 
   /**
@@ -180,19 +192,41 @@ export class GraphRunner {
    * judged when a delivery has arrived since its last judgment, which is what makes an
    * `each` router re-judge on every update (§2).
    */
-  private routeModuleDeliveries(modules: ModuleRuntime): void {
-    for (const moduleId of this.moduleIds()) {
-      const deliveredAt = (this.options.kernel.db.prepare('SELECT MAX(updated_at) AS t FROM kernel_module_inputs WHERE task_id=? AND module_id=?').get(this.options.graphId, moduleId) as { t: number | null }).t;
-      const judgedAt = (this.options.kernel.db.prepare('SELECT MAX(created_at) AS t FROM kernel_module_transitions WHERE task_id=? AND module_id=?').get(this.options.graphId, moduleId) as { t: number | null }).t;
-      if (deliveredAt === null) continue;
-      if (judgedAt !== null && deliveredAt <= judgedAt) continue;
-      const evaluation = modules.evaluate(moduleId);
-      routeModuleOutputs(this.options.kernel, modules, this.options.graphId, moduleId, evaluation);
+  private async routeModuleDeliveries(modules: ModuleRuntime): Promise<void> {
+    const kernel = this.options.kernel;
+    const graphId = this.options.graphId;
+    // Recover judgments committed before a host crash but not yet broadcast.
+    const pending = kernel.db.prepare(`SELECT t.id,t.module_id,t.outputs FROM kernel_transition_outbox o
+      JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0 ORDER BY t.rowid`).all(graphId) as { id: string; module_id: string; outputs: string }[];
+    for (const transition of pending) {
+      routeModuleOutputs(kernel, modules, graphId, transition.module_id, {
+        transitionId: transition.id, emitted: true, waiting: false, triggered: false,
+        outputs: JSON.parse(transition.outputs), reasons: [],
+      }, 0, true);
+    }
+    const rows = kernel.db.prepare(`SELECT d.id,d.to_endpoint,d.value,i.module_id FROM kernel_module_inbox i
+      JOIN kernel_deliveries d ON d.id=i.delivery_id WHERE i.task_id=? AND i.processed=0 ORDER BY d.seq`).all(graphId) as { id: string; to_endpoint: string; value: string; module_id: string }[];
+    for (const row of rows) {
+      if (kernel.nodeState(graphId, row.module_id).paused) continue;
+      const input = row.to_endpoint.slice(row.to_endpoint.indexOf('.') + 1);
+      try {
+        // Judgment and input consumption commit together; broadcasts recover via the outbox.
+        const definition = kernel.latestRevision(graphId)!.definition.modules[row.module_id]!;
+        const evaluation = definition.type === 'command'
+          ? await modules.deliverCustom(row.module_id, input, JSON.parse(row.value), evaluateModule, row.id)
+          : modules.consumeDelivery(row.module_id, input, JSON.parse(row.value), row.id);
+        routeModuleOutputs(kernel, modules, graphId, row.module_id, evaluation, 0, true);
+      } catch (error) {
+        kernel.setNodeQueuePaused(graphId, row.module_id, true);
+        kernel.store.transaction(() => kernel.store.event(graphId, 'graph.module.failed', {
+          moduleId: row.module_id, deliveryId: row.id, reason: error instanceof Error ? error.message : String(error),
+        }));
+      }
     }
   }
 
   /** Route anything the pass's judgments emitted, then let the loop settle. */
-  private routeEmissions(modules: ModuleRuntime): void {
-    this.routeModuleDeliveries(modules);
+  private async routeEmissions(modules: ModuleRuntime): Promise<void> {
+    await this.routeModuleDeliveries(modules);
   }
 }

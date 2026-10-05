@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { Socket } from 'node:net';
@@ -25,7 +26,7 @@ export interface ResidentTurnResult {
   turnId: string;
   inspect: ResidentInspect;
   /** What this turn cost, when the provider reported it (§9 metering). */
-  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | undefined;
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number; accounted?: boolean } | undefined;
 }
 
 export interface ResidentHostOptions {
@@ -45,6 +46,9 @@ export interface ResidentHostOptions {
    * returns the result the node sees. Returning `ok:false` is how a refusal reaches the
    * model as a correctable error rather than an exception (§5).
    */
+  onModelCall?: (context: unknown, signal: AbortSignal) => Promise<unknown>;
+  onEvent?: (event: unknown) => void;
+  onReady?: (inspect: ResidentInspect) => void;
   onToolCall?: (name: string, args: unknown) => { ok: boolean; text: string } | Promise<{ ok: boolean; text: string }>;
 }
 
@@ -56,12 +60,13 @@ export class ResidentHost {
   private channel: Socket | undefined;
   private stdin: NodeJS.WritableStream | undefined;
   private originalPid: number | undefined;
-  private readonly pending = new Map<string, (value: Record<string, unknown>) => void>();
+  private readonly pending = new Map<string, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
   private ready: ResidentInspect | undefined;
   private closed = false;
   private buffer = '';
   /** How many times this host started the underlying process (1 + recoveries + rebinds). */
   private spawns = 0;
+  private modelAborts = new Set<AbortController>();
   private readyResolvers: ((inspect: ResidentInspect) => void)[] = [];
 
   private readonly options: ResidentHostOptions;
@@ -89,9 +94,22 @@ export class ResidentHost {
     this.buffer = '';
     this.ready = undefined;
     this.channel.on('data', (chunk: Buffer) => this.onData(chunk.toString()));
-    child.on('exit', () => { this.closed = true; this.buffer = ''; });
+    child.on('error', error => {
+      for (const request of this.pending.values()) request.reject(error);
+      this.pending.clear();
+      this.closed = true;
+    });
+    child.on('exit', (code, signal) => {
+      this.closed = true; this.buffer = '';
+      for (const abort of this.modelAborts) abort.abort();
+      this.modelAborts.clear();
+      const error = new Error(`resident worker exited (code ${code ?? 'null'}, signal ${signal ?? 'none'})`);
+      for (const request of this.pending.values()) request.reject(error);
+      this.pending.clear();
+    });
     const ready = await this.awaitReady();
     this.ready = ready;
+    this.options.onReady?.(ready);
     return ready;
   }
 
@@ -102,9 +120,26 @@ export class ResidentHost {
       const line = this.buffer.slice(0, newline);
       this.buffer = this.buffer.slice(newline + 1);
       if (line.trim()) {
-        const message = JSON.parse(line) as { operation?: string; requestId?: string; inspect?: ResidentInspect; name?: string; args?: unknown };
+        let parsed: unknown;
+        try { parsed = JSON.parse(line); } catch {
+          const error = new Error('Resident worker emitted invalid channel JSON');
+          for (const request of this.pending.values()) request.reject(error);
+          this.pending.clear(); this.child?.kill('SIGKILL'); return;
+        }
+        const message = parsed as { operation?: string; requestId?: string; inspect?: ResidentInspect; name?: string; args?: unknown; event?: unknown; context?: unknown };
         // A node asking the host to run a tool (HB-262). The answer goes back on stdin,
         // the reverse direction of this channel, so the node's call resolves with it.
+        if (message.operation === 'model_call' && message.requestId) {
+          const requestId = message.requestId;
+          const abort = new AbortController();
+          this.modelAborts.add(abort);
+          void Promise.resolve(this.options.onModelCall?.(message.context, abort.signal) ?? Promise.reject(new Error('Host model transport unavailable')))
+            .then(value => { this.stdin?.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: true, value })}\n`); })
+            .catch(error => { this.stdin?.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: false, error: error instanceof Error ? error.message : String(error) })}\n`); })
+            .finally(() => this.modelAborts.delete(abort));
+          newline = this.buffer.indexOf('\n');
+          continue;
+        }
         if (message.operation === 'tool_call' && message.requestId) {
           const requestId = message.requestId;
           void Promise.resolve(this.options.onToolCall
@@ -112,21 +147,24 @@ export class ResidentHost {
             : { ok: false, text: `the host does not offer a tool named ${String(message.name)}` })
             .then(answer => { this.stdin?.write(`${JSON.stringify({ operation: 'tool_result', requestId, ...answer })}\n`); })
             .catch(error => { this.stdin?.write(`${JSON.stringify({ operation: 'tool_result', requestId, ok: false, text: error instanceof Error ? error.message : String(error) })}\n`); });
-          return;
+          newline = this.buffer.indexOf('\n');
+          continue;
         }
+        if (message.operation === 'event') this.options.onEvent?.(message.event);
         if (message.operation === 'ready' && message.inspect) this.resolveReady(message.inspect);
         const resolve = message.requestId ? this.pending.get(message.requestId) : undefined;
-        if (resolve) { this.pending.delete(message.requestId!); resolve(message); }
+        if (resolve) { this.pending.delete(message.requestId!); resolve.resolve(message); }
       }
       newline = this.buffer.indexOf('\n');
     }
   }
 
-  private resolveReady(inspect: ResidentInspect): void { for (const resolve of this.readyResolvers.splice(0)) resolve(inspect); }
+  private resolveReady(inspect: ResidentInspect): void { this.ready = inspect; for (const resolve of this.readyResolvers.splice(0)) resolve(inspect); }
   private awaitReady(): Promise<ResidentInspect> {
     // A `ready` notification and this promise can race, so the resolver list is
     // checked by resolveReady whenever the worker announces itself; the timeout
     // only guards a worker that never does.
+    if (this.ready) return Promise.resolve(this.ready);
     return new Promise<ResidentInspect>((resolve, reject) => {
       let settled = false;
       const finish = (action: () => void) => { if (settled) return; settled = true; clearTimeout(timer); action(); };
@@ -134,15 +172,16 @@ export class ResidentHost {
       this.readyResolvers.push(inspect => finish(() => resolve(inspect)));
       // A worker that dies before it is ready must fail now, not after the timeout: a
       // misconfigured node would otherwise hang the graph and hide the startup error.
+      this.child?.once('error', error => finish(() => reject(error)));
       this.child?.once('exit', (code, signal) => finish(() => reject(new Error(`resident worker exited before ready (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})`))));
     });
   }
 
   private send(message: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.stdin) return Promise.reject(new Error('resident worker has no channel'));
-    const requestId = String(this.pending.size) + ':' + Date.now().toString(36);
-    return new Promise(resolve => {
-      this.pending.set(requestId, resolve);
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      this.pending.set(requestId, { resolve, reject });
       this.stdin!.write(`${JSON.stringify({ ...message, requestId })}\n`);
     });
   }
@@ -182,6 +221,7 @@ export class ResidentHost {
 
   /** Stop the process. A later start() rebuilds it with the same identity. */
   async stop(): Promise<void> {
+    for (const abort of this.modelAborts) abort.abort();
     const child = this.child;
     if (!child) return;
     if (this.alive()) {

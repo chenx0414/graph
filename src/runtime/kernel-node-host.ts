@@ -1,3 +1,7 @@
+import type { CapabilityOperation } from './capability-bundle.ts';
+import { agentTools } from './agent-tools.ts';
+import { openWorkspaceCommandRunner } from './workspace-command.ts';
+import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { join } from 'node:path';
 import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
@@ -23,6 +27,8 @@ import { type SendGate } from './controlled-openai.ts';
  */
 
 export interface NodeSessionRequest {
+  operation?: CapabilityOperation;
+  close(): Promise<void>;
   /** The binding the resident worker persists its session against. */
   binding: { instanceId: string; nodeId: string; definitionVersion: string };
   /** The composed system prompt for this node's recipe. */
@@ -37,6 +43,9 @@ export interface NodeSessionRequest {
 }
 
 export interface NodeSessionOptions {
+  retainCapabilities?: boolean;
+  access?: ResolvedAccessPolicy;
+  bindings?: Pick<Parameters<typeof agentTools>[0], 'peers' | 'artifacts'>;
   kernel: KernelStore;
   catalog: Catalog;
   graphId: string;
@@ -84,27 +93,39 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
     ...(options.library ? { library: options.library } : {}),
   });
 
-  const scratchDir = join(options.instancesDir, instanceIdFor(graphId, nodeId), 'capability-scratch');
+  const admitted = kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined;
+  const instanceId = admitted?.instance_id ?? instanceIdFor(graphId, nodeId);
+  const scratchDir = join(options.instancesDir, instanceId, 'capability-scratch');
+  const gate = options.gate ?? { dispatch: <T>(_id: string, _reservation: number, send: () => T): T => send(), settle: () => {} };
+  const commands = await openWorkspaceCommandRunner({ workspace: options.workspace,
+    scratchDir: join(scratchDir, 'commands'), gate, ...(options.access ? { access: options.access } : {}) });
   const operation = await assembly.bundle.openOperation({
     workspace: options.workspace,
     scratchDir,
     action: 'work',
     // A node with no gate still counts tool calls; an absent gate send is a passthrough.
     gate: options.gate ?? { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
-    hostTools: () => [],
+    ...(options.access ? { access: options.access } : {}),
+    hostTools: ({ readRoots }) => agentTools({ workspace: options.workspace,
+      role: 'worker', readRoots: [...readRoots], catalog, ...options.bindings,
+      ...(options.access ? { access: options.access } : {}),
+      run: (command, args, signal) => commands.run(command, args, signal),
+    }).filter(tool => tool.name !== 'submit_result'),
   });
 
   const composed = assembly.forOperation(operation).composed;
   const request: NodeSessionRequest = {
-    binding: { instanceId: instanceIdFor(graphId, nodeId), nodeId, definitionVersion: recipe },
+    ...(options.retainCapabilities ? { operation } : {}),
+    close: async () => { await operation.close(); await commands.close(); },
+    binding: { instanceId, nodeId, definitionVersion: recipe },
     systemPrompt: composed.text,
     allowedToolNames: [...operation.allowedToolNames],
-    stateDir: join(options.instancesDir, instanceIdFor(graphId, nodeId)),
+    stateDir: join(options.instancesDir, instanceId),
     bundleDigest: operation.bundleDigest,
     toolPolicyDigest: operation.toolPolicyDigest,
     runtimePolicyDigest: operation.runtimePolicyDigest,
   };
-  await operation.close();
+  if (!options.retainCapabilities) await request.close();
   return request;
 }
 

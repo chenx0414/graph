@@ -1,3 +1,4 @@
+import { mediaBookmarksSource } from './clone.ts';
 import { mkdtemp, mkdir, copyFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +16,7 @@ test('B站 page requires login, shows live collect progress, and lets the user r
   await mkdir(join(root, 'src', 'web'), { recursive: true });
   await mkdir(join(root, 'output', 'bilibili-notes'), { recursive: true });
   await writeFile(join(root, 'package.json'), '{"type":"module"}');
-  await copyFile(join(process.cwd(), '..', '12-MediaBookmarks', 'src', 'config.js'), join(root, 'src', 'config.js'));
+  await copyFile(join(mediaBookmarksSource(), 'src', 'config.js'), join(root, 'src', 'config.js'));
   await copyFile(new URL('../fixtures/m7/web-server.js', import.meta.url), join(root, 'src', 'web-server.js'));
   await copyFile(new URL('../fixtures/m7/index.html', import.meta.url), join(root, 'src', 'web', 'index.html'));
   await writeFile(join(root, 'src', 'cli.js'), 'process.stdout.write("1/3\\n"); setTimeout(() => process.exit(0), 1200);');

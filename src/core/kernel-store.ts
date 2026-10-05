@@ -42,7 +42,7 @@ export interface DeliveryRow {
   seq: number;
   state: 'accepted';
   /** Where this delivery came from: a node's submission, or a module's judgment. */
-  source: 'submission' | 'module';
+  source: 'submission' | 'module' | 'direct';
   createdAt: number;
 }
 
@@ -52,6 +52,9 @@ export interface ExecutionRow {
   nodeId: string;
   revisionVersion: number;
   attempt: number;
+  retriesUsed: number;
+  resubmitsUsed: number;
+  pendingGap: string[];
   state: string;
   submissionId: string | null;
   missingRequired: boolean;
@@ -91,7 +94,7 @@ function deliveryRow(row: DeliveryRowDb): DeliveryRow {
     fromEndpoint: row.from_endpoint, toEndpoint: row.to_endpoint, value: json<Json>(row.value),
     protocol: row.protocol, revisionVersion: row.revision_version, seq: row.seq,
     state: 'accepted' as const,
-    source: row.source === 'module' ? 'module' as const : 'submission' as const,
+    source: row.source === 'direct' ? 'direct' as const : row.source === 'module' ? 'module' as const : 'submission' as const,
     createdAt: row.created_at,
   };
 }
@@ -102,6 +105,7 @@ export interface QueueRow {
   nodeId: string;
   kind: string;
   payload: Json;
+  generation?: number;
   state: 'queued' | 'claimed' | 'done' | 'failed';
   createdAt: number;
 }
@@ -206,6 +210,32 @@ export class KernelStore {
         input_name TEXT NOT NULL, input_value TEXT NOT NULL, state_before TEXT NOT NULL,
         state_after TEXT NOT NULL, verdict TEXT, outputs TEXT NOT NULL,
         rule_version INTEGER NOT NULL, reason TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS kernel_provider_calls(
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, node_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+        reserved INTEGER NOT NULL, state TEXT NOT NULL, usage TEXT, created_at INTEGER NOT NULL, settled_at INTEGER);
+      CREATE TABLE IF NOT EXISTS kernel_prompts(
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, node_id TEXT NOT NULL,
+        execution_id TEXT, system_prompt TEXT NOT NULL, tools TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS kernel_node_bindings(
+        task_id TEXT NOT NULL REFERENCES tasks(id), node_id TEXT NOT NULL, model_id TEXT,
+        system_prompt TEXT NOT NULL, tools TEXT NOT NULL, state_dir TEXT NOT NULL,
+        PRIMARY KEY(task_id,node_id));
+      CREATE TABLE IF NOT EXISTS kernel_create_requests(
+        owner_task_id TEXT NOT NULL, request_id TEXT NOT NULL, graph_id TEXT NOT NULL, content TEXT NOT NULL,
+        state TEXT NOT NULL, error TEXT, PRIMARY KEY(owner_task_id,request_id));
+      CREATE TABLE IF NOT EXISTS kernel_graph_owners(
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id), owner_task_id TEXT NOT NULL REFERENCES tasks(id));
+      CREATE TABLE IF NOT EXISTS kernel_lifecycle(
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id), completion_requested INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS kernel_graph_results(
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), output_name TEXT NOT NULL,
+        source_id TEXT NOT NULL, value TEXT NOT NULL, protocol TEXT NOT NULL, revision_version INTEGER NOT NULL,
+        created_at INTEGER NOT NULL, UNIQUE(task_id,output_name,source_id));
+      CREATE TABLE IF NOT EXISTS kernel_module_inbox(
+        delivery_id TEXT PRIMARY KEY REFERENCES kernel_deliveries(id), task_id TEXT NOT NULL,
+        module_id TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS kernel_transition_outbox(
+        transition_id TEXT PRIMARY KEY REFERENCES kernel_module_transitions(id), routed INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS kernel_queue(
         seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id),
         node_id TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
@@ -225,6 +255,10 @@ export class KernelStore {
     // §3: a Delivery carries an edge id OR a direct source. A module's emit is not a
     // submission, so the column becomes nullable and a `source` tells the two apart.
     // Existing databases are migrated in place rather than reset.
+    const executionColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_executions)').all() as { name: string }[]).map(row => row.name));
+    for (const [name, declaration] of [['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
+      if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
+    }
     const deliveryColumns = new Set(
       (this.store.db.prepare('PRAGMA table_info(kernel_deliveries)').all() as { name: string }[]).map(column => column.name),
     );
@@ -243,6 +277,7 @@ export class KernelStore {
     if (!queueColumns.has('reason')) {
       this.store.db.exec('ALTER TABLE kernel_queue ADD COLUMN reason TEXT');
     }
+    if (!queueColumns.has('generation')) this.db.exec('ALTER TABLE kernel_queue ADD COLUMN generation INTEGER NOT NULL DEFAULT 0');
     const budgetColumns = new Set(
       (this.store.db.prepare('PRAGMA table_info(kernel_node_state)').all() as { name: string }[]).map(column => column.name),
     );
@@ -292,6 +327,17 @@ export class KernelStore {
     return row ? this.revision(taskId, row.version) : null;
   }
 
+  private moduleTransactionActive = false;
+
+  /** A synchronous module judgment and inbox acknowledgement share one commit. */
+  moduleTransaction<T>(action: () => T): T {
+    if (this.moduleTransactionActive) return action();
+    return this.store.transaction(() => {
+      this.moduleTransactionActive = true;
+      try { return action(); } finally { this.moduleTransactionActive = false; }
+    });
+  }
+
   // ---- node / module admission ----------------------------------------------
 
   admitNode(taskId: string, revisionVersion: number, nodeId: string, input: { instanceId: string; kind?: string }): void {
@@ -315,8 +361,16 @@ export class KernelStore {
 
   startExecution(taskId: string, input: { executionId: string; nodeId: string; revisionVersion: number }): ExecutionRow {
     return this.store.transaction(() => {
+      const existing = this.execution(input.executionId);
+      if (existing) {
+        if (existing.taskId !== taskId || existing.nodeId !== input.nodeId || existing.submissionId || existing.state !== 'blocked') {
+          throw new RuntimeError('invalid_execution', 'Execution cannot be started again');
+        }
+        this.db.prepare("UPDATE kernel_executions SET state='running',ended_at=NULL WHERE id=?").run(input.executionId);
+        return this.execution(input.executionId)!;
+      }
       const startedAt = Date.now();
-      this.store.db.prepare('INSERT INTO kernel_executions(id,task_id,node_id,revision_version,attempt,state,started_at) VALUES(?,?,?,?,1,?,?)')
+      this.store.db.prepare('INSERT INTO kernel_executions(id,task_id,node_id,revision_version,attempt,state,started_at) VALUES(?,?,?,?,0,?,?)')
         .run(input.executionId, taskId, input.nodeId, input.revisionVersion, 'running', startedAt);
       return this.execution(input.executionId)!;
     });
@@ -325,7 +379,7 @@ export class KernelStore {
   /** Terminal execution state; the submission (if any) is already recorded. */
   /** Park a queued item without consuming it: the node can run again once unblocked. */
   blockQueued(taskId: string, seq: number): void {
-    this.store.db.prepare("UPDATE kernel_queue SET state='queued' WHERE task_id=? AND seq=? AND state='running'").run(taskId, seq);
+    this.store.db.prepare("UPDATE kernel_queue SET state='queued' WHERE task_id=? AND seq=? AND state='claimed'").run(taskId, seq);
   }
 
   finishExecution(executionId: string, state: 'completed' | 'failed' | 'blocked'): void {
@@ -334,13 +388,24 @@ export class KernelStore {
 
   execution(executionId: string): ExecutionRow | null {
     const row = this.store.db.prepare('SELECT * FROM kernel_executions WHERE id=?').get(executionId) as
-      { id: string; task_id: string; node_id: string; revision_version: number; attempt: number; state: string; submission_id: string | null; missing_required: number; started_at: number; ended_at: number | null } | undefined;
+      { id: string; task_id: string; node_id: string; revision_version: number; attempt: number; retries_used: number; resubmits_used: number; pending_gap: string; state: string; submission_id: string | null; missing_required: number; started_at: number; ended_at: number | null } | undefined;
     if (!row) return null;
     return {
       id: row.id, taskId: row.task_id, nodeId: row.node_id, revisionVersion: row.revision_version,
-      attempt: row.attempt, state: row.state, submissionId: row.submission_id,
+      attempt: row.attempt, retriesUsed: row.retries_used, resubmitsUsed: row.resubmits_used, pendingGap: json<string[]>(row.pending_gap), state: row.state, submissionId: row.submission_id,
       missingRequired: row.missing_required === 1, startedAt: row.started_at, endedAt: row.ended_at,
     };
+  }
+
+  /** Persist each continuation before sending it, so a restart cannot replenish its allowance. */
+  noteExecutionContinuation(executionId: string, kind: 'retry' | 'resubmit', missing: string[] = []): void {
+    const column = kind === 'retry' ? 'retries_used' : 'resubmits_used';
+    this.db.prepare(`UPDATE kernel_executions SET ${column}=${column}+1,pending_gap=? WHERE id=?`).run(JSON.stringify(missing), executionId);
+  }
+
+  noteExecutionAttempt(executionId: string): number {
+    this.db.prepare('UPDATE kernel_executions SET attempt=attempt+1 WHERE id=?').run(executionId);
+    return this.execution(executionId)!.attempt;
   }
 
   // ---- submit (§6) -----------------------------------------------------------
@@ -371,6 +436,7 @@ export class KernelStore {
       for (const [name, output] of Object.entries(request.outputs)) {
         const declared = node.outputs[name];
         if (!declared) throw new RuntimeError('invalid_submit', `Node ${execution.nodeId} has no output ${name}`);
+        if (!output || typeof output !== 'object' || typeof output.enable !== 'boolean') throw new RuntimeError('invalid_submit', `Output ${name} requires a boolean enable`);
         if (output.enable !== true) continue;
         const spec = revision.definition.protocols[declared.protocol] as ProtocolSpec | undefined;
         if (!spec) throw new RuntimeError('invalid_submit', `Output ${name} references undeclared protocol ${declared.protocol}`);
@@ -378,23 +444,28 @@ export class KernelStore {
         if (defect) throw new RuntimeError('invalid_submit', `Output ${name} does not satisfy ${declared.protocol}: ${defect}`);
       }
       // Required outputs must be enabled in this submission (§4).
-      const required = node.submission.required ?? [];
+      const queue = this.db.prepare("SELECT kind FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed' LIMIT 1").get(execution.taskId, execution.nodeId) as { kind: string } | undefined;
+      const required = queue?.kind === 'chat' ? [] : node.submission.required ?? [];
+      const anyOf = queue?.kind === 'chat' ? [] : node.submission.requiredAnyOf ?? [];
+      if (anyOf.length && !anyOf.some(name => request.outputs[name]?.enable)) throw new RuntimeError('invalid_submit', `Required output(s) not enabled: ${anyOf.join(', ')}`);
       const missing = required.filter(name => !request.outputs[name]?.enable);
       if (missing.length) throw new RuntimeError('invalid_submit', `Required output(s) not enabled: ${missing.join(', ')}`);
+
+      const connections = this.latestRevision(execution.taskId)!;
 
       // Collect every enabled connection from an enabled output, checking the
       // target's protocol (the receiving authority). One bad target refuses all.
       const targets: { edgeId: string; toEndpoint: string; value: Json; protocol: string }[] = [];
       for (const [name, output] of enabled) {
-        for (const [edgeId, edge] of Object.entries(revision.definition.edges)) {
+        for (const [edgeId, edge] of Object.entries(connections.definition.edges)) {
           if (edge.from !== `${execution.nodeId}.${name}` || edge.enabled !== true) continue;
           const owner = edge.to.slice(0, edge.to.indexOf('.'));
           const port = edge.to.slice(edge.to.indexOf('.') + 1);
-          const targetNode = revision.definition.nodes[owner];
-          const targetModule = revision.definition.modules[owner];
+          const targetNode = connections.definition.nodes[owner];
+          const targetModule = connections.definition.modules[owner];
           const targetRef = targetNode?.inputs[port] ?? targetModule?.inputs[port];
           if (!targetRef) throw new RuntimeError('invalid_submit', `Edge ${edgeId} targets unknown input ${edge.to}`);
-          const targetSpec = revision.definition.protocols[targetRef.protocol] as ProtocolSpec | undefined;
+          const targetSpec = connections.definition.protocols[targetRef.protocol] as ProtocolSpec | undefined;
           if (targetSpec) {
             const defect = validateProtocolValue(targetSpec, output.value ?? null, edge.to);
             if (defect) throw new RuntimeError('invalid_submit', `Delivery ${edgeId} to ${edge.to} does not satisfy ${targetRef.protocol}: ${defect}`);
@@ -403,6 +474,7 @@ export class KernelStore {
         }
       }
 
+      for (const [name, output] of enabled) this.publishGraphOutputs(execution.taskId, `${execution.nodeId}.${name}`, output.value ?? null, request.submissionId, connections);
       const contentDigest = canonicalJson({ outputs: request.outputs });
       const createdAt = Date.now();
       this.store.db.prepare('INSERT INTO kernel_submissions(id,task_id,execution_id,content_digest,outputs,created_at) VALUES(?,?,?,?,?,?)')
@@ -413,26 +485,26 @@ export class KernelStore {
         const id = randomUUID();
         const seq = nextSeq + index + 1;
         this.store.db.prepare('INSERT INTO kernel_deliveries(id,task_id,submission_id,edge_id,from_endpoint,to_endpoint,value,protocol,revision_version,seq,state,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(id, execution.taskId, request.submissionId, target.edgeId, `${execution.nodeId}`, target.toEndpoint, canonicalJson(target.value), target.protocol, revision.version, seq, 'accepted', createdAt);
+          .run(id, execution.taskId, request.submissionId, target.edgeId, connections.definition.edges[target.edgeId]!.from, target.toEndpoint, canonicalJson(target.value), target.protocol, connections.version, seq, 'accepted', createdAt);
         // A module input keeps the latest accepted delivery (§2), and a delivery
         // to a node is queued in acceptance order (§7).
         const toOwner = target.toEndpoint.slice(0, target.toEndpoint.indexOf('.'));
         const toPort = target.toEndpoint.slice(target.toEndpoint.indexOf('.') + 1);
-        if (revision.definition.modules[toOwner]) {
-          this.setModuleInputInTransaction(execution.taskId, toOwner, toPort, target.value, `delivery:${id}`);
+        if (connections.definition.modules[toOwner]) {
+          this.db.prepare('INSERT INTO kernel_module_inbox(delivery_id,task_id,module_id) VALUES(?,?,?)').run(id, execution.taskId, toOwner);
         } else {
           this.store.db.prepare('INSERT INTO kernel_queue(task_id,node_id,kind,payload,created_at) VALUES(?,?,?,?,?)')
             .run(execution.taskId, toOwner, 'delivery', canonicalJson({ deliveryId: id, input: toPort, value: target.value }), createdAt);
         }
         deliveries.push({
           id, taskId: execution.taskId, submissionId: request.submissionId, edgeId: target.edgeId,
-          fromEndpoint: execution.nodeId, toEndpoint: target.toEndpoint, value: target.value,
-          protocol: target.protocol, revisionVersion: revision.version, seq, state: 'accepted',
+          fromEndpoint: connections.definition.edges[target.edgeId]!.from, toEndpoint: target.toEndpoint, value: target.value,
+          protocol: target.protocol, revisionVersion: connections.version, seq, state: 'accepted',
           source: 'submission' as const, createdAt,
         });
       }
       this.store.db.prepare('UPDATE kernel_executions SET submission_id=?, missing_required=0 WHERE id=?').run(request.submissionId, executionId);
-      return { submissionId: request.submissionId, replayed: false, deliveries, noRecipients: deliveries.length === 0 };
+      return { submissionId: request.submissionId, replayed: false, deliveries, noRecipients: deliveries.length === 0 && !this.db.prepare('SELECT 1 FROM kernel_graph_results WHERE task_id=? AND source_id=? LIMIT 1').get(execution.taskId, request.submissionId) };
     });
   }
 
@@ -441,9 +513,39 @@ export class KernelStore {
     const digest = canonicalJson({ outputs: request.outputs });
     if (existing.id === request.submissionId && existing.content_digest === digest) {
       const deliveries = this.deliveriesFor(execution.id);
-      return { submissionId: request.submissionId, replayed: true, deliveries, noRecipients: deliveries.length === 0 };
+      return { submissionId: request.submissionId, replayed: true, deliveries, noRecipients: deliveries.length === 0 && !this.db.prepare('SELECT 1 FROM kernel_graph_results WHERE task_id=? AND source_id=? LIMIT 1').get(execution.taskId, request.submissionId) };
     }
     throw new RuntimeError('invalid_submit', `Execution ${execution.id} already submitted; only one valid submission per execution is allowed`);
+  }
+
+  /** Accept a main-agent input and its landing in one transaction. */
+  deliverDirect(taskId: string, endpoint: string, value: Json): { delivery: DeliveryRow; queue?: QueueRow } {
+    const revision = this.latestRevision(taskId);
+    if (!revision) throw new RuntimeError('invalid_graph', `Graph ${taskId} has no definition`);
+    const dot = endpoint.indexOf('.');
+    const owner = endpoint.slice(0, dot);
+    const port = endpoint.slice(dot + 1);
+    const ref = revision.definition.nodes[owner]?.inputs[port] ?? revision.definition.modules[owner]?.inputs[port];
+    if (dot < 1 || !ref) throw new RuntimeError('invalid_input', `Unknown input ${endpoint}`);
+    const defect = validateProtocolValue(revision.definition.protocols[ref.protocol]!, value, endpoint);
+    if (defect) throw new RuntimeError('invalid_input', defect);
+    return this.store.transaction(() => {
+      const id = randomUUID();
+      const createdAt = Date.now();
+      const seq = (this.db.prepare('SELECT COALESCE(MAX(seq),0) AS s FROM kernel_deliveries WHERE task_id=?').get(taskId) as { s: number }).s + 1;
+      this.db.prepare('INSERT INTO kernel_deliveries(id,task_id,submission_id,edge_id,from_endpoint,to_endpoint,value,protocol,revision_version,seq,state,created_at,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, taskId, null, null, 'main', endpoint, canonicalJson(value), ref.protocol, revision.version, seq, 'accepted', createdAt, 'direct');
+      const delivery: DeliveryRow = { id, taskId, submissionId: null, edgeId: null, fromEndpoint: 'main', toEndpoint: endpoint,
+        value, protocol: ref.protocol, revisionVersion: revision.version, seq, state: 'accepted', source: 'direct', createdAt };
+      if (revision.definition.modules[owner]) {
+        this.db.prepare('INSERT INTO kernel_module_inbox(delivery_id,task_id,module_id) VALUES(?,?,?)').run(id, taskId, owner);
+        this.store.event(taskId, 'graph.delivery.accepted', { deliveryId: id, endpoint });
+        return { delivery };
+      }
+      const queue = this.enqueueInCurrentTransaction(taskId, { nodeId: owner, kind: 'delivery',
+        payload: { deliveryId: id, input: port, value, protocol: ref.protocol, revisionVersion: revision.version } });
+      return { delivery, queue };
+    });
   }
 
   /** Every delivery accepted through one edge, newest first (§10 edge history). */
@@ -483,6 +585,69 @@ export class KernelStore {
         protocol: input.protocol, revisionVersion: input.revisionVersion, seq,
         state: 'accepted' as const, source: 'module' as const, createdAt,
       };
+    });
+  }
+
+  /** Public graph output is a durable business result, separate from runtime notices. */
+  private publishGraphOutputs(taskId: string, endpoint: string, value: Json, sourceId: string, revision: RevisionRow): void {
+    for (const [name, output] of Object.entries(revision.definition.outputs)) {
+      if (output.from !== endpoint) continue;
+      this.db.prepare('INSERT OR IGNORE INTO kernel_graph_results(id,task_id,output_name,source_id,value,protocol,revision_version,created_at) VALUES(?,?,?,?,?,?,?,?)')
+        .run(randomUUID(), taskId, name, sourceId, canonicalJson(value), output.protocol, revision.version, Date.now());
+      this.store.event(taskId, 'graph.output', { output: name, sourceId, value, revision: revision.version });
+      if (revision.definition.completion?.on === name) {
+        this.db.prepare('INSERT INTO kernel_lifecycle(task_id,completion_requested) VALUES(?,1) ON CONFLICT(task_id) DO UPDATE SET completion_requested=1').run(taskId);
+        this.db.prepare("UPDATE tasks SET phase='completing' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')").run(taskId);
+      }
+    }
+  }
+
+  /** Validate the whole module broadcast, then persist every landing together. */
+  broadcastModule(taskId: string, moduleId: string, outputs: Record<string, Json>, transitionId?: string): DeliveryRow[] {
+    return this.store.transaction(() => {
+      if (transitionId && (this.db.prepare('SELECT routed FROM kernel_transition_outbox WHERE transition_id=?').get(transitionId) as { routed: number } | undefined)?.routed === 1) return [];
+      const revision = this.latestRevision(taskId);
+      const module = revision?.definition.modules[moduleId];
+      if (!revision || !module) throw new RuntimeError('invalid_definition', `Unknown module ${moduleId}`);
+      const targets: { edgeId: string; endpoint: string; protocol: string; value: Json; owner: string; port: string; module: boolean }[] = [];
+      for (const [name, value] of Object.entries(outputs)) {
+        const output = module.outputs[name];
+        if (!output) throw new RuntimeError('invalid_output', `Unknown output ${moduleId}.${name}`);
+        const protocol = revision.definition.protocols[output.protocol];
+        if (!protocol) throw new RuntimeError('invalid_definition', `Unknown protocol ${output.protocol}`);
+        const defect = validateProtocolValue(protocol, value, `${moduleId}.${name}`);
+        if (defect) throw new RuntimeError('invalid_output', defect);
+        for (const [edgeId, edge] of Object.entries(revision.definition.edges)) {
+          if (edge.enabled === false || edge.from !== `${moduleId}.${name}`) continue;
+          const dot = edge.to.indexOf('.');
+          const owner = edge.to.slice(0, dot);
+          const port = edge.to.slice(dot + 1);
+          const targetModule = revision.definition.modules[owner];
+          const input = (targetModule ?? revision.definition.nodes[owner])?.inputs[port];
+          const targetProtocol = input && revision.definition.protocols[input.protocol];
+          if (!input || !targetProtocol) throw new RuntimeError('invalid_definition', `Unknown input ${edge.to}`);
+          const targetDefect = validateProtocolValue(targetProtocol, value, edge.to);
+          if (targetDefect) throw new RuntimeError('invalid_output', targetDefect);
+          targets.push({ edgeId, endpoint: edge.to, protocol: input.protocol, value, owner, port, module: !!targetModule });
+        }
+      }
+      for (const [name, value] of Object.entries(outputs)) this.publishGraphOutputs(taskId, `${moduleId}.${name}`, value, transitionId ?? randomUUID(), revision);
+      let seq = (this.db.prepare('SELECT COALESCE(MAX(seq),0) AS s FROM kernel_deliveries WHERE task_id=?').get(taskId) as { s: number }).s;
+      const deliveries = targets.map(target => {
+        const id = randomUUID();
+        const createdAt = Date.now();
+        seq += 1;
+        const edge = revision.definition.edges[target.edgeId]!;
+        this.db.prepare('INSERT INTO kernel_deliveries(id,task_id,submission_id,edge_id,from_endpoint,to_endpoint,value,protocol,revision_version,seq,state,created_at,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(id, taskId, null, target.edgeId, edge.from, target.endpoint, canonicalJson(target.value), target.protocol, revision.version, seq, 'accepted', createdAt, 'module');
+        if (target.module) this.db.prepare('INSERT INTO kernel_module_inbox(delivery_id,task_id,module_id) VALUES(?,?,?)').run(id, taskId, target.owner);
+        else this.enqueueDelivery(taskId, target.owner, { deliveryId: id, input: target.port, value: target.value });
+        return { id, taskId, submissionId: null, edgeId: target.edgeId, fromEndpoint: edge.from,
+          toEndpoint: target.endpoint, value: target.value, protocol: target.protocol,
+          revisionVersion: revision.version, seq, state: 'accepted' as const, source: 'module' as const, createdAt };
+      });
+      if (transitionId) this.db.prepare('UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id=?').run(transitionId);
+      return deliveries;
     });
   }
 
@@ -725,7 +890,7 @@ export class KernelStore {
   }
 
   setNodeQueuePaused(taskId: string, nodeId: string, paused: boolean): void {
-    this.store.transaction(() => {
+    this.moduleTransaction(() => {
       this.ensureNodeState(taskId, nodeId);
       this.store.db.prepare('UPDATE kernel_node_state SET paused=? WHERE task_id=? AND node_id=?').run(paused ? 1 : 0, taskId, nodeId);
     });
@@ -757,7 +922,7 @@ export class KernelStore {
 
   /** Record the latest accepted delivery for a module input (§2). */
   setModuleInput(taskId: string, moduleId: string, name: string, value: Json, source: string | null = null): void {
-    this.store.transaction(() => this.setModuleInputInTransaction(taskId, moduleId, name, value, source));
+    this.moduleTransaction(() => this.setModuleInputInTransaction(taskId, moduleId, name, value, source));
   }
 
   private setModuleInputInTransaction(taskId: string, moduleId: string, name: string, value: Json, source: string | null): void {
@@ -773,10 +938,11 @@ export class KernelStore {
   }): ModuleTransitionRow {
     const id = randomUUID();
     const createdAt = Date.now();
-    this.store.transaction(() => {
+    this.moduleTransaction(() => {
       this.store.db.prepare('INSERT INTO kernel_module_transitions(id,task_id,module_id,input_name,input_value,state_before,state_after,verdict,outputs,rule_version,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(id, taskId, input.moduleId, input.inputName, canonicalJson(input.inputValue), canonicalJson(input.stateBefore), canonicalJson(input.stateAfter), input.verdict, canonicalJson(input.outputs), input.ruleVersion, input.reason, createdAt);
-      this.store.db.prepare('UPDATE kernel_modules SET state=?, rule_version=?, triggered=? WHERE task_id=? AND module_id=?')
+      this.db.prepare('INSERT INTO kernel_transition_outbox(transition_id,routed) VALUES(?,?)').run(id, Object.keys(input.outputs).length ? 0 : 1);
+      this.store.db.prepare('UPDATE kernel_modules SET state=?, rule_version=?, triggered=CASE WHEN ?=1 THEN 1 ELSE triggered END WHERE task_id=? AND module_id=?')
         .run(canonicalJson(input.stateAfter), input.ruleVersion, input.verdict === null ? 0 : 1, taskId, input.moduleId);
     });
     return { id, ...input, createdAt };

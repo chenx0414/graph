@@ -1,3 +1,4 @@
+import type { GraphManagement } from '../core/graph-service.ts';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
@@ -67,7 +68,7 @@ import {
 export interface PiAdapterChannels {
   /** The conversation service, as far as tools over other conversations need it. */
   conversations?: { service: ConversationToolService };
-  supervisor: (taskId: string) => {
+  supervisor: (taskId: string) => Partial<GraphManagement> & {
     propose(proposal: Proposal, requestId: string): Promise<unknown>;
     withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
     revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string; taskId?: string }): Promise<unknown>;

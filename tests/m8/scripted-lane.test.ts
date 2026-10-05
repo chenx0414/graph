@@ -72,8 +72,9 @@ test('S1/S2/S3: a v2 graph drains through a scripted action with no model config
 
     // `pump()` is the production tick the host drives every 40ms.
     let dispatched = 0;
-    for (let i = 0; i < 5 && ran === 0; i += 1) dispatched = (await runtime.host.pump()).dispatched;
+    for (let i = 0; i < 5 && ran === 0; i += 1) dispatched += (await runtime.host.pump()).dispatched;
 
+    await runtime.host.drive();
     const { TaskStore } = await import('../../src/core/store.ts');
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
     const executions = store.db.prepare('SELECT node_id,state FROM kernel_executions WHERE task_id=?').all(taskId) as { node_id: string; state: string }[];

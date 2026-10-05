@@ -3,11 +3,12 @@ import { createInterface } from 'node:readline';
 import { Socket } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { ImageContent, Model, Api } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, type AssistantMessageFrame, type AssistantMessage, type ImageContent, type Model, type Api } from '@earendil-works/pi-ai';
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from './pi-instance.ts';
+import { replayAssistantStream } from './assistant-stream-frames.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import { sdkPromptOptions } from './prompt-options.ts';
 import { lastTurnUsage, type AgentSessionInspect } from './agent-session.ts';
@@ -75,6 +76,22 @@ export async function runResidentWorker(configPath: string): Promise<void> {
       notify({ operation: 'tool_call', requestId, name, args });
     });
 
+  const modelPending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  let turnUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+  let unknownUsage = false;
+  const hostStream: import('@earendil-works/pi-agent-core').StreamFn = async (_model, context) => {
+    const requestId = `model-${randomUUID()}`;
+    const reply = await new Promise<unknown>((resolve, reject) => {
+      modelPending.set(requestId, { resolve, reject });
+      notify({ operation: 'model_call', requestId, context });
+    }) as { frames: AssistantMessageFrame[]; settlement: AssistantMessage; usage?: typeof turnUsage };
+    if (!reply.usage) unknownUsage = true;
+    else for (const name of ['input', 'output', 'cacheRead', 'cacheWrite', 'total'] as const) turnUsage[name] += reply.usage[name];
+    const output = createAssistantMessageEventStream();
+    for (const event of replayAssistantStream(reply.frames, reply.settlement)) output.push(event);
+    return output;
+  };
+
   const credentials = new InMemoryCredentialStore();
   const modelRuntime = await ModelRuntime.create({
     credentials, modelsPath: null,
@@ -96,9 +113,11 @@ export async function runResidentWorker(configPath: string): Promise<void> {
   // The host owns the credential (§3): it writes the resolved transport into the config, so
   // the worker reaches the provider with the same key the host meters. Only when the config
   // carries none - a spike or a local test - does the worker fall back to a placeholder.
-  const stream = config.transport
-    ? controlledOpenAIStream(permissiveGate, config.transport.apiKey, undefined, config.transport.api)
-    : controlledOpenAIStream(permissiveGate, 'spike-credential', undefined, 'openai-completions');
+  const recording = { onSend: (prompt: { systemPrompt: string | null; toolDeclarations: string | null }) =>
+    notify({ operation: 'event', event: { type: 'graph_provider_prompt', systemPrompt: prompt.systemPrompt ?? '', tools: prompt.toolDeclarations ?? '[]' } }) };
+  const stream = config.hostModel ? hostStream : config.transport
+    ? controlledOpenAIStream(permissiveGate, config.transport.apiKey, undefined, config.transport.api, recording)
+    : controlledOpenAIStream(permissiveGate, 'spike-credential', undefined, 'openai-completions', recording);
 
   const session = await openPiInstance({
     binding: config.binding,
@@ -110,6 +129,11 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     thinkingLevel: config.thinkingLevel,
     tools: forwardingTools(config, (name, args) => callHost(name, args)),
     nativeTools: config.nativeTools ?? [],
+    skillPaths: config.skillPaths,
+    ...(config.skillFolder ? { skillFolder: config.skillFolder } : {}),
+    piExtensionPaths: config.piExtensionPaths,
+    piExtensionTools: config.piExtensionTools,
+    ...(config.mcpAdapterServers ? { mcpAdapterServers: config.mcpAdapterServers } : {}),
     // A forwarding tool makes no model call, so it reserves nothing from the send gate.
     // The gate exists to meter model traffic; the host meters whatever the call does.
     broker: { dispatch: <T>(_id: string, _reservation: number, send: () => T): T => send(), settle: (): void => undefined },
@@ -143,6 +167,15 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     const requestId = typeof command.requestId === 'string' ? command.requestId : undefined;
     const reply = (value: Record<string, unknown>) => notify({ ...value, ...(requestId ? { requestId } : {}) });
     // The host's answer to a tool call this node made (HB-262).
+    if (command.operation === 'model_result' && requestId) {
+      const pending = modelPending.get(requestId);
+      if (pending) {
+        modelPending.delete(requestId);
+        if (command.ok === true) pending.resolve(command.value);
+        else pending.reject(new Error(String(command.error ?? 'Host model request failed')));
+      }
+      continue;
+    }
     if (command.operation === 'tool_result' && requestId) {
       const resolve = toolPending.get(requestId);
       if (resolve) {
@@ -156,6 +189,8 @@ export async function runResidentWorker(configPath: string): Promise<void> {
       if (closed) { reply({ operation: 'turn_result', error: 'resident worker is closed' }); continue; }
       if (running) { reply({ operation: 'turn_result', error: 'resident worker already has a running turn' }); continue; }
       running = true;
+      turnUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+      unknownUsage = false;
       const text = String(command.text ?? '');
       const images = command.images as ImageContent[] | undefined;
       inFlight.push((async () => {
@@ -164,8 +199,8 @@ export async function runResidentWorker(configPath: string): Promise<void> {
           // The turn's usage travels back with it: §9 metering cannot charge a node whose
           // turns report nothing, and "unknown" must not be mistaken for "free".
           const snapshot = inspect();
-          const usage = lastTurnUsage(snapshot);
-          reply({ operation: 'turn_result', turn: { id: randomUUID(), text, inspect: snapshot, ...(usage ? { usage } : {}) } });
+          const usage = config.hostModel ? (unknownUsage ? undefined : turnUsage) : lastTurnUsage(snapshot);
+          reply({ operation: 'turn_result', turn: { turnId: randomUUID(), text, inspect: snapshot, ...(usage ? { usage: { ...usage, ...(config.hostModel ? { accounted: true } : {}) } } : {}) } });
         } catch (error) {
           reply({ operation: 'turn_result', error: error instanceof Error ? error.message : String(error) });
         } finally {

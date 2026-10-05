@@ -6,6 +6,7 @@ import { RuntimeError, type AttachmentInput } from '../core/types.ts';
 import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
 import { layoutGraph } from './layout.ts';
+const graphLayouts = new Map<string, Awaited<ReturnType<typeof layoutGraph>>>();
 
 import type { AppServices, StartupInfo } from './host.ts';
 import { sanitizeConfig, type ConfigStore } from './config-service.ts';
@@ -688,9 +689,37 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       limit: query.limit ? Number(query.limit) : 50,
     });
   });
+  app.post('/api/tasks/:taskId/graph/control', async request => {
+    const { taskId } = request.params as { taskId: string };
+    return runtime.controlGraph(taskId, request.body as { action: string; nodeId?: string; moduleId?: string; seq?: number });
+  });
   app.get('/api/tasks/:taskId/graph', async request => {
     const params = request.params as { taskId: string };
     const view = await runtime.user.task(params.taskId).view();
+    const native = runtime.kernelGraph(params.taskId);
+    if (native) {
+      const groups = Object.keys(native.definition.subgraphInstances ?? {});
+      const containerFor = (id: string) => groups.filter(group => id.startsWith(`${group}/`)).sort((a, b) => b.length - a.length)[0];
+      const containers = groups.map(id => ({ id, outputs: Object.values(native.definition.subgraphInstances![id]!.outputs).map(io => io.from.split('.')[0]!),
+        nodes: Object.keys(native.definition.nodes).filter(node => node.startsWith(`${id}/`)) }));
+      const nodes = [
+        ...Object.entries(native.definition.nodes).map(([id, node]) => ({ id, kind: 'agent', action: node.task,
+          container: containerFor(id), status: native.nodes.find(item => item.nodeId === id)?.status ?? 'idle', boundDefinition: node.recipe,
+          inputs: node.inputs, outputs: node.outputs, agent: graphAgentDetail(runtime, node.recipe) })),
+        ...native.modules.map(module => ({ id: module.moduleId, kind: 'module', action: module.trigger === 'once' ? 'join' : 'route',
+          container: containerFor(module.moduleId), status: module.triggered ? 'succeeded' : 'idle', inputs: module.definition!.inputs, outputs: module.definition!.outputs })),
+      ];
+      const edges = native.edges.map(edge => ({ id: edge.edgeId, source: edge.from.split('.')[0]!, target: edge.to.split('.')[0]! }));
+      const key = JSON.stringify({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind, action: node.kind === 'module' ? node.action : undefined, container: node.container })), edges, containers });
+      let layout = graphLayouts.get(key);
+      if (!layout) {
+        layout = await layoutGraph({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind === 'agent' ? 'agent' as const : 'program' as const, action: node.kind === 'agent' ? 'work' : node.action, ...(node.container ? { container: node.container } : {}) })), edges, containers });
+        if (graphLayouts.size >= 100) graphLayouts.delete(graphLayouts.keys().next().value!);
+        graphLayouts.set(key, layout);
+      }
+      return { nodes, containers, loops: [], revisions: [{ version: native.revision, reason: 'graph definition' }], layout, cost: view.cost,
+        interfaces: native.edges, modules: native.modules, messages: [], handoffs: [] };
+    }
     const layout = await layoutGraph({ nodes: view.nodes, containers: view.containers, loops: view.loops });
     return {
       nodes: view.nodes.map(node => ({

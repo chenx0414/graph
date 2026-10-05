@@ -1,3 +1,5 @@
+import { recoverKernelExecutions } from './kernel-recovery.ts';
+import { kernelGraphView, kernelNodeRun, kernelNodePrompt } from './kernel-views.ts';
 import { sendNodeMessage, sendPeerMessage } from './node-messages.ts';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -27,6 +29,8 @@ import { setBudget } from './budget-ledger.ts';
 import { awaitPauseContinuation, resumePauseContinuations } from './pause-continuation.ts';
 import { acquireOwner } from './owner.ts';
 import { materializeGraph } from './confirm-graph.ts';
+import { GraphRuntime } from './graph-runtime.ts';
+import { graphManagement } from './graph-service.ts';
 import { KernelStore } from './kernel-store.ts';
 import { parseGraphDefinition } from './interface-spec.ts';
 import { DEFAULT_V2_RESERVE_TOKENS, kernelGraphLane } from '../runtime/kernel-graph-lane.ts';
@@ -314,6 +318,7 @@ export async function openTaskRuntime(options: {
   catch (error) { releaseOwner(); throw error; }
   let closed = false;
   let execution: Execution;
+  let residentGraphLane: ReturnType<typeof kernelGraphLane> | undefined;
   let catalog: Catalog;
   let git: GitIntegration;
   let artifacts: ArtifactWorkspace;
@@ -352,6 +357,7 @@ export async function openTaskRuntime(options: {
   // runtime opens - the host loop queries them every tick, and an older database is
   // migrated here rather than by the first graph that happens to run.
   const kernel = new KernelStore(store);
+  recoverKernelExecutions(kernel);
   /**
    * The merge Agent's own credential binding, taken from the same live configuration the
    * dispatcher uses, so a merge turn never borrows a key from an unrelated model.
@@ -563,7 +569,8 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       // node cannot run - or when the caller supplied scripted actions, which stand in for
       // the node's process (see `scriptedTurn`). The scripted path still submits through
       // the real bridge and kernel, so it exercises settlement rather than faking it.
-      ...(options.models || options.live || options.actions ? { graphs: () => kernelGraphLane({
+      ...(options.models || options.live || options.actions ? { graphs: () => (residentGraphLane ??= kernelGraphLane({
+        access: () => resolvedAccessPolicy(),
         kernel,
         catalog,
         // §9: a v2 node is metered like any other. Without this the ledger from HB-284
@@ -574,6 +581,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         })(),
         directory: liveEntries,
         credentialFor: liveCredentialFor,
+        scheduler: modelScheduler,
         instancesDir: join(stateDir, 'instances'),
         stateDir,
         git,
@@ -641,6 +649,11 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             return { outputs: accepted ? { out: { enable: true, value } } : {}, missing: accepted ? [] : ['out'] };
           },
         } : {}),
+        onMainMessage: async (graphId, nodeId, text) => {
+          const task = store.task(graphId);
+          if (!task.conversation_id) throw new RuntimeError('invalid_input', 'Graph has no owning conversation');
+          return store.transaction(() => appendMessage(store, { conversationId: task.conversation_id!, role: 'user', kind: 'peer', text: `[${nodeId}](graph://${graphId}/agents/${encodeURIComponent(nodeId)}): ${text}`, state: 'pending' }));
+        },
         onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) => {
           if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
           const execution = store.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
@@ -652,7 +665,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             ? { ok: true, text: JSON.stringify({ accepted: true, deliveries: receipt.deliveries.length }) }
             : { ok: false, text: bridge.refusalMessage(receipt) };
         },
-      }).runnable() } : {}),
+      })).runnable() } : {}),
       scratchRoot: stateDir,
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
@@ -962,15 +975,20 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
               ...rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget,
               ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
               reserved: operationTotals.find(total => total.node_id === row.id)?.reserved ?? 0 })),
-              ...new KernelStore(store).listNodes(taskId).map(node => ({
-                ...({} as NodeSpec),
-                id: node.nodeId, kind: (node.kind === 'module' ? 'program' : 'agent') as NodeSpec['kind'],
-                action: node.nodeId, definitionVersion: '', model: '',
-                instanceId: node.instanceId, activationId: '', outputVersion: 0, stallCount: 0,
-                used: 0, unlimited: false, budget: null, reserved: 0,
-                optional: false, boundDefinition: '', selectedModel: '',
-                status: node.status, origin: 'v2' as const, revisionVersion: node.revisionVersion,
-              })),
+              ...kernel.listNodes(taskId).map(node => {
+                const spec = kernel.latestRevision(taskId)!.definition.nodes[node.nodeId]!;
+                const ledger = store.db.prepare('SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?').get(taskId, node.nodeId) as { used: number; reserved: number } | undefined;
+                const binding = store.db.prepare('SELECT model_id FROM kernel_node_bindings WHERE task_id=? AND node_id=?').get(taskId, node.nodeId) as { model_id: string | null } | undefined;
+                return {
+                  ...({} as NodeSpec), id: node.nodeId, kind: 'agent' as const, action: node.nodeId,
+                  definitionVersion: spec?.recipe ?? '', model: binding?.model_id ?? '',
+                  instanceId: node.instanceId, activationId: '', outputVersion: 0, stallCount: 0,
+                  used: ledger?.used ?? 0, reserved: ledger?.reserved ?? 0,
+                  unlimited: liveBudget() === null, budget: liveBudget(),
+                  optional: false, boundDefinition: spec?.recipe ?? '', selectedModel: binding?.model_id ?? '',
+                  status: node.status, origin: 'v2' as const, revisionVersion: node.revisionVersion,
+                };
+              }),
             ],
             evidence: evidence.map(row => ({ ...JSON.parse(row.data) as EvidenceInput, nodeId: row.node_id, operationId: row.operation_id, proposalVersion: row.proposal_version, requirementVersion: row.requirement_version, activationId: row.activation_id, valid: Boolean(row.valid), ...(row.commit_sha ? { commitSha: row.commit_sha } : {}) })),
             invocations, cost,
@@ -1585,7 +1603,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         } : {}),
       });
       const preview = await assembly.preview({
-        role: 'master', run: true, fetch: true, catalog: true,
+        role: 'master', run: true, fetch: true, catalog: true, graphManagement: true,
         // The real operation offers these whenever a master turn runs inside a conversation; the
         // preview must say the same thing, or the settings panel would show a smaller toolbox than
         // the one the next turn really gets.
@@ -1669,6 +1687,11 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     },
     async sendNodeMessage(taskId: string, nodeId: string, input: { text: string; requestId: string }) {
       ensureOpen();
+      if (kernel.latestRevision(taskId)) {
+        const queued = new GraphRuntime(kernel, taskId).chat({ nodeId, text: input.text });
+        if (options.autoWake) execution.kick();
+        return { queued: true, seq: queued.seq, taskId, nodeId };
+      }
       const receipt = await sendNodeMessage(store, execution, taskId, nodeId, input);
       if (options.autoWake) execution.kick();
       return receipt;
@@ -1712,9 +1735,17 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         }));
       });
     },
+    kernelGraph(taskId: string) { ensureOpen(); return kernelGraphView(kernel, taskId); },
+    async controlGraph(taskId: string, input: { action: string; nodeId?: string; moduleId?: string; seq?: number }) {
+      ensureOpen();
+      const result = await graphManagement(kernel, taskId).graphControl({ ...input, graphId: taskId });
+      if (options.autoWake) execution.kick();
+      return result;
+    },
     /** Read-only node detail: real session entries, operations and usage. */
     nodeRun(taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {
       ensureOpen();
+      if (kernel.latestRevision(taskId)) return kernelNodeRun(kernel, taskId, nodeId, query);
       try {
         return nodeRunView(store, taskId, nodeId, query);
       } catch (error) {
@@ -1753,7 +1784,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     /** What one node really sent: the recorded system prompt, its tools and its briefing. */
     nodePrompt(taskId: string, nodeId: string) {
       ensureOpen();
-      return nodePromptView(store, taskId, nodeId);
+      return kernel.latestRevision(taskId) ? kernelNodePrompt(kernel, taskId, nodeId) : nodePromptView(store, taskId, nodeId);
     },
     /** Read-only workspace identity for prompt preview and diagnostics. */
     agentWorkspace(taskId: string, nodeId: string) {
@@ -1840,7 +1871,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       },
       retire(input: { taskId: string; artifactId: string; version: number; reason: string; requestId: string }) {
         ensureOpen();
-        return artifacts.retire(input.taskId, input.artifactId, input.version, input.reason, input.requestId);
+        return artifacts.retire(input.taskId, input.artifactId, input.version, input.reason, input.requestId, 'main');
       },
       promote(input: { taskId: string; artifactId: string; version: number; requestId: string }) {
         ensureOpen();
@@ -1946,6 +1977,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       };
       // Give workers this scoped object, never the user or host runtime object.
       return {
+        ...graphManagement(kernel, taskId, (id, branch) => { git.prepareTask(id, branch); }),
         /** Task control asked for by the main Agent itself: every action carries its reason
          * and is recorded under the agent's own command scope, so the audit trail shows who
          * acted instead of borrowing the user's scope. */
@@ -2583,7 +2615,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     close() {
       if (!closing) {
         closed = true;
-        closing = (async () => { await execution.drain(); try { store.close(); } finally { releaseOwner(); } })();
+        closing = (async () => { await execution.drain(); await residentGraphLane?.close(); try { store.close(); } finally { releaseOwner(); } })();
       }
       return closing;
     },

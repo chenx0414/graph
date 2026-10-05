@@ -96,9 +96,9 @@ export async function spawnResident(options: {
     pidIsStable: () => child.pid === originalPid && !closed,
     async turn(text) {
       const result = await send({ operation: 'start-turn', text });
-      const turn = result.turn as { id: string; inspect: AgentSessionInspect & { processId: number } } | undefined;
+      const turn = result.turn as { turnId: string; inspect: AgentSessionInspect & { processId: number } } | undefined;
       if (!turn) throw new Error(String(result.error ?? 'resident turn produced no result'));
-      return { turnId: turn.id, inspect: turn.inspect };
+      return { turnId: turn.turnId, inspect: turn.inspect };
     },
     async inspect() {
       const result = await send({ operation: 'inspect' });

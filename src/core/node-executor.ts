@@ -1,4 +1,5 @@
-import type { KernelStore } from './kernel-store.ts';
+import { occupiedSlots, executionLimit } from '../runtime/execution-slots.ts';
+import type { KernelStore, QueueRow } from './kernel-store.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { NodeQueue } from './node-queue.ts';
 import { settleDeliverable } from './node-deliverable.ts';
@@ -33,14 +34,16 @@ export interface ExecutorHost {
    * and an absent figure must stay absent rather than become zero: "unknown" and "free"
    * are different facts to a budget.
    */
-  turn(text: string): Promise<{ turnId: string; inspect: unknown; usage?: { total: number } | undefined }>;
+  turn(text: string): Promise<{ turnId: string; inspect: unknown; usage?: { total: number; accounted?: boolean } | undefined }>;
 }
 
 /** What a turn reported back: a missing-required gap, or nothing when it submitted. */
 export interface TurnReport {
+  error?: string;
+  done?: boolean;
   missing?: string[];
   /** What this turn cost (§9), when the transport reported it. */
-  usage?: { total: number } | undefined;
+  usage?: { total: number; accounted?: boolean } | undefined;
 }
 
 /** Runs one attempt of a node's execution and reports any missing-required gap. */
@@ -48,9 +51,11 @@ export type TurnRunner = (
   executionId: string,
   attempt: number,
   injection: { missing: string[] } | undefined,
+  input?: QueueRow,
 ) => Promise<TurnReport | void>;
 
 export interface NodeExecutorOptions {
+  maxItems?: number;
   kernel: KernelStore;
   graphId: string;
   /** The node's resident host. The host owns the worker config and the process, so the
@@ -102,23 +107,31 @@ export class NodeExecutor {
    */
   async runNode(nodeId: string, run: TurnRunner): Promise<NodeOutcome> {
     let last: NodeOutcome = 'idle';
+    let consumed = 0;
     for (;;) {
       // A node paused before its turn is never sent. The queued item stays, so resuming
       // runs it with nothing lost - this is a hold, not a cancellation.
       if (this.kernel.nodeState(this.graphId, nodeId).paused) return last;
+      const task = this.kernel.store.task(this.graphId);
+      if (task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) return last;
+      if (occupiedSlots(this.kernel.store, 'agent') >= executionLimit('agent')) return last;
       const item = this.queue.claim(nodeId);
       if (!item) return last;
-      last = await this.runOne(nodeId, item.seq, run);
-      if (last === 'failed') return 'failed';
+      last = await this.runOne(nodeId, item, run);
+      consumed += 1;
+      if (last === 'failed' || last === 'blocked') return last;
+      if (consumed >= (this.options.maxItems ?? Infinity)) return last;
     }
   }
 
   /** One queued item: one execution, turned until submit, failure, or budget spent. */
-  private async runOne(nodeId: string, seq: number, run: TurnRunner): Promise<NodeOutcome> {
+  private async runOne(nodeId: string, item: QueueRow, run: TurnRunner): Promise<NodeOutcome> {
+    const seq = item.seq;
     const revision = this.kernel.latestRevision(this.graphId);
     if (!revision) throw new RuntimeError('invalid_graph', `Graph ${this.graphId} has no revision`);
 
-    const executionId = `exec-${this.graphId}-${nodeId}-${seq}`;
+    const generation = (this.kernel.db.prepare('SELECT generation FROM kernel_queue WHERE seq=?').get(seq) as { generation: number }).generation;
+    const executionId = `exec-${this.graphId}-${nodeId}-${seq}${generation ? `-${generation}` : ''}`;
     this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: revision.version });
 
     const budget = this.queue.retryBudget(nodeId);
@@ -127,36 +140,65 @@ export class NodeExecutor {
     const metering = this.options.tokenBudget && this.options.reserveTokens !== undefined
       ? { limit: this.options.tokenBudget, amount: this.options.reserveTokens }
       : undefined;
-    if (metering) {
-      try {
-        this.kernel.reserveNodeTokens(this.graphId, nodeId, metering.limit, metering.amount);
-      } catch (error) {
-        if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
-        this.kernel.finishExecution(executionId, 'blocked');
-        this.kernel.blockNode(this.graphId, nodeId, error.message);
-        this.queue.complete(seq, { kind: 'blocked', reason: error.message });
-        return 'blocked';
-      }
-    }
+    let held = false;
     const releaseHold = () => {
-      if (metering) this.kernel.releaseNodeTokens(this.graphId, nodeId, metering.amount);
+      if (metering && held) { this.kernel.releaseNodeTokens(this.graphId, nodeId, metering.amount); held = false; }
     };
-
-    let attempt = 0;
-    let injection: { missing: string[] } | undefined;
+    const recovered = this.kernel.execution(executionId)!;
+    let attempt = recovered.attempt;
+    let retriesUsed = recovered.retriesUsed;
+    let resubmitsUsed = recovered.resubmitsUsed;
+    let injection: { missing: string[] } | undefined = recovered.pendingGap.length ? { missing: recovered.pendingGap } : undefined;
 
     for (;;) {
-      attempt += 1;
+      if (metering) {
+        try {
+          this.kernel.reserveNodeTokens(this.graphId, nodeId, metering.limit, metering.amount);
+          held = true;
+        } catch (error) {
+          if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
+          this.kernel.finishExecution(executionId, 'blocked');
+          this.kernel.blockNode(this.graphId, nodeId, error.message);
+          this.queue.complete(seq, { kind: 'blocked', reason: error.message });
+          return 'blocked';
+        }
+      }
+      attempt = this.kernel.noteExecutionAttempt(executionId);
       this.queue.noteAttempt(nodeId);
       // A crash rebuild keeps the same execution; the turn resumes against the
       // rebuilt process rather than starting a fresh one.
-      if (!this.options.host.alive()) await this.options.host.start();
-
-      const report = await run(executionId, attempt, injection);
+      let report: TurnReport | void;
+      let turnStarted = false;
+      try {
+        if (!this.options.host.alive()) await this.options.host.start();
+        turnStarted = true;
+        report = await run(executionId, attempt, injection, item);
+      } catch (error) {
+        if (metering && turnStarted) {
+          this.kernel.finishExecution(executionId, 'blocked');
+          this.kernel.blockNode(this.graphId, nodeId, 'Interrupted turn usage is unknown; reconcile the held reservation before resuming');
+          this.queue.complete(seq, { kind: 'blocked', reason: 'usage unknown after interruption' });
+          return 'blocked';
+        }
+        // A landed submit is irreversible. Do not re-run its original work after a crash.
+        if (this.hasValidSubmission(executionId)) {
+          releaseHold();
+          return this.fail(executionId, nodeId, seq, `Execution failed after submit: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        if (retriesUsed >= budget.retriesAllowed) {
+          releaseHold();
+          return this.fail(executionId, nodeId, seq, error instanceof Error ? error.message : String(error));
+        }
+        releaseHold();
+        retriesUsed += 1;
+        this.kernel.noteExecutionContinuation(executionId, 'retry');
+        injection = undefined;
+        continue;
+      }
       // §9: charge what the turn actually cost. The reservation bounds the turn; this
       // settles it, so a node that under-runs keeps its remainder. An unreported figure is
       // left alone rather than assumed to be zero.
-      if (metering && report?.usage && Number.isSafeInteger(report.usage.total) && report.usage.total > 0) {
+      if (metering && !report?.usage?.accounted && report?.usage && Number.isSafeInteger(report.usage.total) && report.usage.total > 0) {
         this.kernel.commitNodeUsage(this.graphId, nodeId, this.kernel.budgetState(this.graphId, nodeId, metering.limit).used + report.usage.total);
       }
       // A metered turn that reported NO usage can be neither charged nor released: releasing
@@ -169,13 +211,25 @@ export class NodeExecutor {
         return 'blocked';
       }
 
+      releaseHold();
+
+      if (report?.error) {
+        if (this.hasValidSubmission(executionId) || /budget|permission|paused|credential unavailable/i.test(report.error) || retriesUsed >= budget.retriesAllowed) {
+          return this.fail(executionId, nodeId, seq, report.error);
+        }
+        retriesUsed += 1;
+        this.kernel.noteExecutionContinuation(executionId, 'retry');
+        injection = undefined;
+        continue;
+      }
+
       // A submit that landed in the kernel is the success signal, whatever the
       // turn reported: the node writes its outputs through the submission surface.
-      if (this.hasValidSubmission(executionId)) {
+      if (this.hasValidSubmission(executionId) || report?.done) {
         // A node's deliverable is a promise about a file, and the promise is settled with
         // the submission: a file that was never written, or that is empty, must fail the
         // node here rather than let it pass with the work missing.
-        const settled = await this.settleDeliverable(executionId, nodeId);
+        const settled = item.kind === 'chat' ? { ok: true as const } : await this.settleDeliverable(executionId, nodeId);
         if (!settled.ok) { releaseHold(); return this.fail(executionId, nodeId, seq, settled.reason); }
         this.kernel.finishExecution(executionId, 'completed');
         this.kernel.completeNode(this.graphId, nodeId);
@@ -187,9 +241,10 @@ export class NodeExecutor {
       // A reported missing-required gap is a RESUBMIT: inject it and re-turn the
       // SAME execution, because the node's own work up to now is still valid.
       if (report && report.missing && report.missing.length > 0) {
-        const used = this.kernel.nodeState(this.graphId, nodeId).resubmitsUsed;
-        if (used < budget.resubmitsAllowed) {
-          this.kernel.noteNodeResubmit(this.graphId, nodeId, budget.resubmitsAllowed);
+        if (resubmitsUsed < budget.resubmitsAllowed) {
+          resubmitsUsed += 1;
+          this.kernel.noteExecutionContinuation(executionId, 'resubmit', report.missing);
+          this.kernel.noteNodeResubmit(this.graphId, nodeId, Number.MAX_SAFE_INTEGER);
           this.kernel.db.prepare('UPDATE kernel_executions SET missing_required=1 WHERE id=?').run(executionId);
           injection = { missing: report.missing };
           continue;
@@ -200,9 +255,13 @@ export class NodeExecutor {
       }
 
       // No submission and no gap: a RETRY, up to the retry budget.
-      if (attempt - 1 >= budget.retriesAllowed) {
+      if (retriesUsed >= budget.retriesAllowed) {
+        releaseHold();
         return this.fail(executionId, nodeId, seq, `no valid submission after ${attempt} attempt(s)`);
       }
+      retriesUsed += 1;
+      this.kernel.noteExecutionContinuation(executionId, 'retry');
+      injection = undefined;
     }
   }
 

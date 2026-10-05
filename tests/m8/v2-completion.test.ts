@@ -58,16 +58,11 @@ async function run(limitNodes = 1) {
   // this run is about the completion decision itself, not about merging into a branch.
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });
   for (let i = 0; i < 5; i += 1) await runtime.host.drive();
+  const idle = await runtime.user.task(taskId).view();
+  expect(idle.phase).not.toBe('completed');
+  await runtime.controlGraph(taskId, { action: 'complete' });
+  await runtime.host.drive();
   const view = await runtime.user.task(taskId).view();
-  const { TaskStore } = await import('../../src/core/store.ts');
-  const { KernelStore } = await import('../../src/core/kernel-store.ts');
-  const st = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  console.error('DBG', JSON.stringify({
-    phase: st.db.prepare('SELECT phase,accepted_proposal,integration_branch FROM tasks WHERE id=?').get(taskId),
-    nodes: new KernelStore(st).listNodes(taskId),
-    q: st.db.prepare("SELECT node_id,state FROM kernel_queue WHERE task_id=?").all(taskId),
-  }));
-  st.db.close();
   const nodes = (view as unknown as { nodes: { id: string; status: string }[] }).nodes;
   await runtime.close();
   await rm(root, { recursive: true, force: true });

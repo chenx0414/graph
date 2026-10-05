@@ -135,7 +135,7 @@ export class NodeSubmitBridge {
       // Record the gap on the execution, so it survives a process restart and is the
       // durable record the driver reads back rather than a transient return value (§7).
       if (missingRequired.length > 0) {
-        this.kernel.db.prepare('UPDATE kernel_executions SET missing_required=1 WHERE id=?').run(this.executionId);
+        this.kernel.db.prepare('UPDATE kernel_executions SET missing_required=1,pending_gap=? WHERE id=?').run(JSON.stringify(missingRequired), this.executionId);
       }
       return {
         accepted: false,

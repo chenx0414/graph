@@ -104,14 +104,7 @@ export async function evaluate() {
   expect(result.diagnostics).toContain('READ_DENIED');
   expect(result.diagnostics).toContain('WRITE_DENIED');
   expect(result.diagnostics).toContain('ENV_CLEAN');
-  // MEASURED FINDING (§9 requires reporting an isolation limit rather than hiding it):
-  // the seatbelt profile denies file and env access but does NOT deny process-exec,
-  // so module code can still start another process. Measured: forcing
-  // (deny process-exec*) or (deny process-fork) also kills the `/bin/sh -c` wrapper
-  // that seatbelt launches the command through, so nothing runs. A real fix needs a
-  // launcher that execs node directly (or RLIMIT_NPROC on the child), not a profile
-  // line. Until then this is a declared limit, not an implementation detail.
-  expect(result.diagnostics).toContain('SPAWN_OK');
+  expect(result.diagnostics).toContain('SPAWN_DENIED');
 });
 
 test('spike 3 F5/F8: a runaway or throwing module is refused and inputs are kept', async () => {
@@ -134,7 +127,7 @@ test('spike 3 F5/F8: a runaway or throwing module is refused and inputs are kept
   expect(malformed.ok).toBe(false);
 });
 
-test('spike 3 F6: the JS heap cap does NOT bound the whole process — measured', async () => {
+test('spike 3 F6: native Buffer allocations hit the process memory hard limit', async () => {
   const dir = await scratch();
   // Allocate ~200 MB outside the JS heap: a heap cap alone cannot stop this.
   const alloc = await writeModuleEntry(dir, 'alloc', `
@@ -145,10 +138,18 @@ export function evaluate() {
 }
 `);
   const result = await evaluateModule({ entry: alloc, state: null, trigger: 'each', inputs: {} }, { memoryCapMb: 64 });
-  // The finding the spike must report honestly: with only a JS heap cap, a buffer
-  // allocation outside the heap is NOT stopped, so a real hard cap needs an OS
-  // limit (ulimit/RLIMIT_AS) on the child, not `--max-old-space-size`.
-  expect(result.measurement.ms).toBeLessThan(MODULE_TIMEOUT_MS + 2_000);
-  // Record whichever way the host behaved; the assertion is that the spike MEASURED it.
-  expect(result).toHaveProperty('ok');
+  expect(result.ok).toBe(false);
+  expect(result.error).toContain('64 MiB process memory limit');
+  expect(result.state).toBeNull();
+});
+
+test('module stdout and malformed output are bounded and refused', async () => {
+  const dir = await scratch();
+  const flood = await writeModuleEntry(dir, 'flood', `export function evaluate(){ for(let i=0;i<128;i++) process.stdout.write('x'.repeat(65536)); return {state:null,outputs:{},diagnostics:[]}; }`);
+  const overflow = await evaluateModule({ entry: flood, inputs: {}, state: { preserved: true }, trigger: 'each' });
+  expect(overflow.ok).toBe(false);
+  expect(overflow.error).toContain('output exceeded');
+  expect(overflow.state).toEqual({ preserved: true });
+  const bad = await writeModuleEntry(dir, 'bad-shape', `export function evaluate(){ return {state:null,outputs:[],diagnostics:42}; }`);
+  expect((await evaluateModule({ entry: bad, inputs: {}, state: null, trigger: 'each' })).ok).toBe(false);
 });

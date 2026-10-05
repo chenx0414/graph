@@ -125,6 +125,7 @@ export class Execution {
    * (rather than built here) because the kernel, the resident host and the node config all
    * live in the runtime that opens this executor.
    */
+  private readonly activeGraphs = new Map<string, Promise<unknown>>();
   private readonly graphs?: () => { taskId: string; run: () => Promise<{ drained: boolean }> }[];
   private readonly actions: Record<string, ActionAdapter>;
   private readonly fallback?: ActionAdapter;
@@ -184,7 +185,7 @@ export class Execution {
     // operation is already durable and is recovered on the next start, so the
     // daemon must not wait past its stop deadline for that worker.
     await Promise.race([
-      Promise.allSettled([...this.pending]),
+      Promise.allSettled([...this.pending, ...this.activeGraphs.values()]),
       new Promise<void>(resolve => setTimeout(resolve, 2_000)),
     ]);
   }
@@ -460,7 +461,7 @@ export class Execution {
           work.finally(() => running.delete(work));
         }
         dispatched += started.length;
-        if (running.size === 0) break;
+        if (running.size === 0 && this.activeGraphs.size === 0) break;
         if (started.length < ready.length) {
           // The execution cap was hit; some operations may now be parked waiting
           // for a credential slot. Re-scan shortly so a node on a free credential
@@ -468,7 +469,7 @@ export class Execution {
           await new Promise(resolve => setTimeout(resolve, 20));
           continue;
         }
-        await Promise.race([...running, new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
+        await Promise.race([...running, ...this.activeGraphs.values(), new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
       }
       return { dispatched };
     } finally {
@@ -513,20 +514,12 @@ export class Execution {
     for (const graph of pending) {
       if (this.stopping || this.dispatchAllowed?.() === false) break;
       if (this.store.task(graph.taskId).paused) continue;
+      if (this.activeGraphs.has(graph.taskId)) continue;
       dispatched += 1;
-      try {
-        const result = await graph.run();
-        // A drained graph is the moment completion is possible. The old path reached the
-        // delivery from its own node scheduler settling an operation; a v2 task has no
-        // operations, so nothing reached it and a task whose every node had succeeded sat
-        // at `running` forever - no failure, no completion, and a merge still owed.
-        if (result.drained) {
-          this.advance(graph.taskId);
-          if (this.store.task(graph.taskId).phase === 'running' && this.store.task(graph.taskId).integration_branch) {
-            this.deliver(graph.taskId);
-          }
-        }
-      } catch (error) { this.reportGraphFailure(graph.taskId, error); }
+      const work = Promise.resolve().then(() => graph.run())
+        .catch(error => this.reportGraphFailure(graph.taskId, error))
+        .finally(() => { this.activeGraphs.delete(graph.taskId); this.wakeDrive(); });
+      this.activeGraphs.set(graph.taskId, work);
     }
     return dispatched;
   }

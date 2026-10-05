@@ -1,3 +1,4 @@
+import type { GraphManagement } from '../core/graph-service.ts';
 import { realpathSync } from 'node:fs';
 import { extname, isAbsolute, sep } from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -20,7 +21,7 @@ export interface PeerChannel {
   send(input: { to: string; text: string; requestId: string }): Promise<unknown>;
 }
 
-type Supervisor = {
+type Supervisor = Partial<GraphManagement> & {
   propose(proposal: Proposal, requestId: string): Promise<unknown>;
   withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
   confirmDraft?(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }): Promise<unknown>;
@@ -209,6 +210,12 @@ export function agentTools(input: {
     return `exit ${result.code ?? 'signal'}\n${result.stdout}${result.stderr}`;
   };
   const handlers: Record<AgentToolName, ToolDefinition['execute']> = {
+
+    graph_create: async (id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphCreate!({ ...(params as Parameters<GraphManagement['graphCreate']>[0]), requestId: (params as { requestId?: string }).requestId ?? id }))),
+    graph_patch: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphPatch!(params as Parameters<GraphManagement['graphPatch']>[0]))),
+    graph_inspect: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphInspect!(params as Parameters<GraphManagement['graphInspect']>[0]))),
+    graph_control: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphControl!(params as Parameters<GraphManagement['graphControl']>[0]))),
+    graph_send: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphSend!(params as Parameters<GraphManagement['graphSend']>[0]))),
     read: async (_id, params) => {
       const requested = String(fields(params).path);
       const mimeType = imageMimeType(requested);
@@ -641,7 +648,9 @@ export function agentTools(input: {
       return text(JSON.stringify(combination));
     },
   };
+
   const descriptions = describeAgentTools({
+    graphManagement: Boolean(input.supervisor?.graphCreate),
     ...(input.role ? { role: input.role } : {}),
     readOnly: Boolean(input.readOnly),
     run: Boolean(input.run),

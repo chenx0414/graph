@@ -1,9 +1,12 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
 
+const runGit = promisify(execFile);
 export const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
 export const ARTIFACT_TASK_QUOTA_BYTES = 256 * 1024 * 1024;
 // 这是「版本号上限」，不是「存活版本数」：退役不释放，所以到顶之后该逻辑键就永远不能再发新版。
@@ -204,6 +207,7 @@ function contentMediaType(path: string, supplied?: string) {
     return value;
   }
   const extension = basename(path).split('.').at(-1)?.toLowerCase();
+  if (extension && ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'rs', 'go', 'c', 'cc', 'cpp', 'h', 'java', 'swift', 'sh'].includes(extension)) return 'text/plain';
   return ({
     json: 'application/json',
     jsonl: 'application/x-ndjson',
@@ -381,15 +385,55 @@ export class ArtifactWorkspace {
     return row ? mapArtifact(row) : undefined;
   }
 
+  private async stableCode(input: PublishArtifactInput, data: Buffer, metadata: Record<string, unknown>, actor: string | null): Promise<Record<string, unknown>> {
+    if (actor === null) return metadata;
+    const fileCode = input.sourcePath && /\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|c|cc|cpp|h|java|swift|sh)$/i.test(input.sourcePath);
+    if (!fileCode && metadata.kind !== 'code' && metadata.code === undefined) return metadata;
+    const supplied = metadata.code as { commit?: unknown; repository?: unknown; worktree?: unknown } | undefined;
+    if (supplied !== undefined && (!supplied || typeof supplied !== 'object' || Array.isArray(supplied))) throw new RuntimeError('invalid_code_ref', 'Code metadata requires {repository,commit,worktree?}');
+    const repository = typeof supplied?.repository === 'string' ? resolve(supplied.repository) : resolve(input.workspace);
+    if (repository !== resolve(input.workspace)) throw new RuntimeError('permission', 'Publish code from this execution workspace; another repository requires its own authorized execution');
+    try {
+      const commit = (await runGit('git', ['-C', repository, 'rev-parse', '--verify', `${typeof supplied?.commit === 'string' ? supplied.commit : 'HEAD'}^{commit}`], { maxBuffer: 4096 })).stdout.trim();
+      if (fileCode) {
+        const root = (await runGit('git', ['-C', repository, 'rev-parse', '--show-toplevel'], { maxBuffer: 4096 })).stdout.trim();
+        const source = resolve(input.workspace, input.sourcePath!);
+        const path = relative(root, source);
+        if (path.startsWith('..') || isAbsolute(path)) throw new Error('Code file is outside its repository');
+        const snapshot = await runGit('git', ['-C', repository, 'show', `${commit}:${path}`], { encoding: 'buffer', maxBuffer: ARTIFACT_MAX_BYTES });
+        if (!snapshot.stdout.equals(data)) throw new Error('File differs from its commit; commit the changes before publishing');
+      }
+      return { ...metadata, kind: 'code', code: { repository, commit, worktree: input.workspace } };
+    } catch (error) { throw new RuntimeError('invalid_code_ref', error instanceof Error ? error.message : 'Code artifact requires a stable commit'); }
+  }
+
+  private graphPublisher(taskId: string, producer: ArtifactProducer): string | null {
+    const exists = this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='kernel_revisions'").get();
+    if (!exists || !this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return null;
+    const execution = this.store.db.prepare('SELECT e.task_id,e.node_id,n.instance_id FROM kernel_executions e JOIN kernel_nodes n ON n.task_id=e.task_id AND n.node_id=e.node_id WHERE e.id=?').get(producer.operationId) as { task_id: string; node_id: string; instance_id: string } | undefined;
+    if (execution?.task_id === taskId && execution.node_id === producer.nodeId && execution.instance_id === producer.instanceId) return execution.node_id;
+    const main = this.store.db.prepare("SELECT 1 FROM operations o JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id JOIN kernel_graph_owners g ON g.owner_task_id=o.task_id WHERE g.task_id=? AND o.id=? AND json_extract(n.spec,'$.role')='master'").get(taskId, producer.operationId);
+    if (main) return 'main';
+    throw new RuntimeError('permission', 'Artifact publisher does not match a graph execution or its main owner');
+  }
+
+  private assertGraphAuthor(taskId: string, namespace: string, name: string, actor: string | null): void {
+    if (actor === null || actor === 'main') return;
+    const first = this.store.db.prepare("SELECT producer_node_id FROM artifacts WHERE owner_id=? AND scope='task' AND namespace=? AND name=? ORDER BY version LIMIT 1").get(taskId, namespace, name) as { producer_node_id: string } | undefined;
+    if (first && first.producer_node_id !== actor) throw new RuntimeError('permission', 'Only the original publisher may modify this artifact; publish a separate revision');
+  }
+
   async publish(input: PublishArtifactInput): Promise<ArtifactRecord> {
     this.store.task(input.taskId);
     const namespace = slug(input.namespace, 'namespace');
     const name = slug(input.name, 'name');
+    const actor = this.graphPublisher(input.taskId, input.producer);
+    this.assertGraphAuthor(input.taskId, namespace, name, actor);
     const schema = parseSchema(input.schema);
     const tags = normalizeTags(input.tags);
     const title = optionalText(input.title, 'title', 300);
     const summary = optionalText(input.summary, 'summary', 2_000);
-    const metadata = input.metadata ?? {};
+    let metadata = input.metadata ?? {};
     requiredText(input.requestId, 'requestId', 200);
     const commandScope = `artifact-publish:${input.taskId}`;
     const commandPayload = {
@@ -420,12 +464,15 @@ export class ArtifactWorkspace {
       throw new RuntimeError('artifact_quota', `An operation may publish at most ${ARTIFACT_MAX_PUBLISHES_PER_OPERATION} artifacts`);
     }
     const source = await this.source(input);
+    metadata = await this.stableCode(input, source.data, metadata, actor);
+    if (actor && actor !== 'main') metadata = { ...metadata, subgraphPath: actor.includes('/') ? actor.slice(0, actor.lastIndexOf('/')) : null };
     if (this.taskBytes(input.taskId) + source.data.length > ARTIFACT_TASK_QUOTA_BYTES) {
       throw new RuntimeError('artifact_quota', `Task artifact workspace exceeds ${ARTIFACT_TASK_QUOTA_BYTES} bytes`);
     }
     const root = await this.ensureRoot();
     const relative = await this.ensureObject(root, source.digest, source.data);
     const record = this.store.command<ArtifactRecord>(commandScope, input.requestId, commandPayload, () => {
+      this.assertGraphAuthor(input.taskId, namespace, name, actor);
       const fresh = this.current(input.taskId, namespace, name);
       const freshLatest = fresh?.version ?? 0;
       if (freshLatest !== expected) {
@@ -603,8 +650,15 @@ export class ArtifactWorkspace {
     };
   }
 
-  retire(taskId: string, artifactId: string, version: number, reason: string, requestId: string) {
+  retire(taskId: string, artifactId: string, version: number, reason: string, requestId: string, actor?: ArtifactProducer | 'main') {
     const record = this.get(taskId, artifactId, version);
+    const v2 = this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='kernel_revisions'").get()
+      && this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId);
+    if (v2) {
+      if (!actor) throw new RuntimeError('permission', 'Artifact retirement requires the publisher or main owner');
+      const publisher = actor === 'main' ? 'main' : this.graphPublisher(taskId, actor);
+      this.assertGraphAuthor(taskId, record.namespace, record.name, publisher);
+    }
     if (record.state === 'retired') return record;
     const commandScope = `artifact-retire:${taskId}`;
     const commandPayload = { artifactId, version, reason: requiredText(reason, 'reason', 1_000) };

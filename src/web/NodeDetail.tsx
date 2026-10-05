@@ -76,7 +76,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
     let cancelled = false;
     setLoading(true);
     setError('');
-    void api<NodeOverview>(`/api/tasks/${taskId}/nodes/${nodeId}/run`)
+    void api<NodeOverview>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/run`)
       .then(view => { if (!cancelled) setOverview(view); })
       .catch(() => { if (!cancelled) setOverview(null); });
     if (!agentName) {
@@ -87,7 +87,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
         })
         .catch(() => {});
     }
-    void api<NodePromptView>(`/api/tasks/${taskId}/nodes/${nodeId}/prompt`)
+    void api<NodePromptView>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/prompt`)
       .then(view => { if (!cancelled) setPrompt(view); })
       .catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (!cancelled) setLoading(false); });

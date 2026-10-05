@@ -20,6 +20,8 @@ const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
 
 type GraphPayload = {
+  interfaces?: { edgeId: string; from: string; to: string; enabled: boolean; protocol: string | null; latest: unknown; deliveries: { id: string; value: unknown; protocol: string; revisionVersion: number; createdAt: number }[] }[];
+  modules?: { moduleId: string; trigger: string; triggered: boolean; state: unknown; inputs: unknown[]; transitions: unknown[]; definition?: { rules?: unknown[] } }[];
   messages?: { id: string; source: string; target: string; text: string; createdAt: number }[];
   handoffs?: { id: string; source: string; target: string; mode: string; text: string; createdAt: number }[];
   nodes: {
@@ -164,11 +166,12 @@ function MessageEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style,
 
 const edgeTypes = { grid: GridEdge, gridLoop: GridLoopEdge, message: MessageEdge };
 
-export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
+export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: {
   graph: GraphPayload;
   collapsed: Record<string, boolean>;
   onSelect: (id: string) => void;
   selected?: string | null;
+  onReopen?: (id: string) => void;
 }) {
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const containerById = new Map(graph.containers.map(container => [container.id, container]));
@@ -230,7 +233,19 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       };
     }),
   ];
-  const edges = graph.layout.edges.filter(edge => !hidden.has(edge.source) && !hidden.has(edge.target))
+  const representative = (id: string): string => {
+    let current = nodeContainer.get(id) ?? containerById.get(id)?.parent;
+    let visible = id;
+    while (current) {
+      if (collapsed[current]) visible = current;
+      current = containerById.get(current)?.parent;
+    }
+    return visible;
+  };
+  const edges = graph.layout.edges.map(edge => {
+    const source = representative(edge.source), target = representative(edge.target);
+    return source === edge.source && target === edge.target ? edge : { ...edge, source, target, points: [] };
+  }).filter(edge => edge.source !== edge.target)
     // A branch edge says "runs when this case was chosen", which no dependency arrow can express.
     // It is drawn as its own kind, labelled with the case, so the picture shows what the runtime
     // actually branches on instead of only who waits for whom.
@@ -243,7 +258,9 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       const targetIsNode = graph.nodes.some(node => node.id === edge.target);
       const policy = edgePolicy.get(`${edge.source}:${edge.target}`);
       const resultHandoff = policy === 'result_handoff';
+      const connection = graph.interfaces?.find(item => item.edgeId === edge.id);
       const edgeData = {
+        ...(connection ? { edgeLabel: `${connection.from.split('.').slice(1).join('.')} → ${connection.to.split('.').slice(1).join('.')}${connection.enabled ? '' : '（禁用）'}` } : {}),
         ...(loop
           ? { leftX: loopChannelX[edge.id] ?? minNodeLeft - 64 }
           : edge.points?.length ? { points: edge.points } : {}),
@@ -289,6 +306,8 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
       data: { edgeLabel: `${messages.length} 条消息`, edgeLabelColor: '#6366f1' },
     });
   }
+  const selectedModule = graph.modules?.find(item => item.moduleId === selected);
+  const selectedInterface = graph.interfaces?.find(item => item.edgeId === selectedEdge);
   const currentEdge = edges.find(edge => edge.id === selectedEdge);
   const currentMessages = currentEdge?.id.startsWith('message:')
     ? messageGroups.get(`${currentEdge.source}\u0000${currentEdge.target}`) ?? [] : [];
@@ -328,10 +347,22 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected }: {
           }}
         />
       </ReactFlow>
+      {selectedModule && <aside className="graph-edge-inspector" data-testid="graph-module-inspector">
+        <strong>{selectedModule.moduleId} · {selectedModule.trigger === 'once' ? '一次汇合' : '每次判断'}</strong>
+        <p>{selectedModule.triggered ? '已触发，等待显式重开' : '等待输入与条件满足'}</p>
+        <h4>规则</h4><pre>{JSON.stringify(selectedModule.definition?.rules ?? [], null, 2)}</pre>
+        <h4>输入状态</h4><pre>{JSON.stringify(selectedModule.inputs, null, 2)}</pre>
+        <h4>持久状态</h4><pre>{JSON.stringify(selectedModule.state, null, 2)}</pre>
+        <h4>判断记录</h4><pre>{JSON.stringify(selectedModule.transitions, null, 2)}</pre>
+        {onReopen && <button type="button" onClick={() => onReopen(selectedModule.moduleId)}>重开</button>}
+      </aside>}
       {currentEdge && <aside className="graph-edge-inspector" data-testid="graph-edge-inspector">
         <button type="button" aria-label="关闭边详情" onClick={() => setSelectedEdge(null)}>×</button>
         <strong>{currentEdge.source} → {currentEdge.target}</strong>
-        {currentMessages.length ? <ol>{currentMessages.map(message => <li key={message.id}><time>{new Date(message.createdAt).toLocaleString()}</time><p>{message.text}</p></li>)}</ol>
+        {selectedInterface ? <>
+          <p>{selectedInterface.from} → {selectedInterface.to} · {selectedInterface.protocol} · {selectedInterface.enabled ? '启用' : '禁用'}</p>
+          {selectedInterface.deliveries.length ? <ol>{selectedInterface.deliveries.map(delivery => <li key={delivery.id}><time>{new Date(delivery.createdAt).toLocaleString()} · v{delivery.revisionVersion}</time><pre>{JSON.stringify(delivery.value, null, 2)}</pre></li>)}</ol> : <p>尚无投递</p>}
+        </> : currentMessages.length ? <ol>{currentMessages.map(message => <li key={message.id}><time>{new Date(message.createdAt).toLocaleString()}</time><p>{message.text}</p></li>)}</ol>
           : currentHandoffs.length ? <ol>{currentHandoffs.map(handoff => <li key={handoff.id}><time>{new Date(handoff.createdAt).toLocaleString()} · {handoff.mode === 'result_handoff' ? '结果交接' : '证据交接'}</time><pre>{handoff.text}</pre></li>)}</ol>
             : <p>{currentEdge.id.startsWith('message:') ? '尚无消息' : '目标节点尚未接收这条边的交接内容。'}</p>}
       </aside>}

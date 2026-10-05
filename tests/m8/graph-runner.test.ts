@@ -86,6 +86,61 @@ function fakeHost(): RunnerHost & { turns: string[] } {
 }
 
 describe('GraphRunner — driving a v2 graph to completion (§13.8)', () => {
+  test('a submit starts its downstream while the producer is still finishing its turn', async () => {
+    const { kernel } = opened();
+    new NodeQueue(kernel, 'g1').enqueue({ nodeId: 'a', kind: 'delivery', input: 'in', value: {} });
+    let releaseProducer!: () => void;
+    const consumerStarted = new Promise<void>(resolve => { releaseProducer = resolve; });
+    const hosts = {
+      a: { ...fakeHost(), turn: async () => {
+        const execution = kernel.db.prepare("SELECT id FROM kernel_executions WHERE node_id='a' AND state='running'").get() as { id: string };
+        kernel.submit(execution.id, { submissionId: 'sa', outputs: { out: { enable: true, value: { n: 7 } } } });
+        await consumerStarted;
+        return { turnId: 'a', inspect: {} };
+      } },
+      b: { ...fakeHost(), turn: async () => {
+        releaseProducer();
+        const execution = kernel.db.prepare("SELECT id FROM kernel_executions WHERE node_id='b' AND state='running'").get() as { id: string };
+        kernel.submit(execution.id, { submissionId: 'sb', outputs: { out: { enable: true, value: { n: 8 } } } });
+        return { turnId: 'b', inspect: {} };
+      } },
+    };
+    const result = await new GraphRunner({ kernel, graphId: 'g1', hostFor: id => hosts[id as 'a' | 'b'], submit: () => {} }).drain();
+    expect(result.drained).toBe(true);
+    expect(result.executions).toBe(2);
+  }, 2000);
+
+  test('queued chat reaches the host and completes without submit, then later chat uses only new input', async () => {
+    const { kernel } = opened();
+    const host = fakeHost();
+    const runtime = new GraphRuntime(kernel, 'g1');
+    runtime.chat({ nodeId: 'a', text: 'What did commit ABC change?' });
+    const runner = new GraphRunner({ kernel, graphId: 'g1', hostFor: () => host, submit: () => undefined });
+    expect((await runner.drain()).drained).toBe(true);
+    expect(host.turns).toHaveLength(1);
+    expect(host.turns[0]).toContain('What did commit ABC change?');
+    expect(host.turns[0]).toContain('GRAPH OVERVIEW');
+    runtime.chat({ nodeId: 'a', text: 'Explain the tests next.' });
+    expect((await runner.drain()).drained).toBe(true);
+    expect(host.turns).toHaveLength(2);
+    expect(host.turns[1]).toContain('Explain the tests next.');
+    expect(host.turns[1]).not.toContain('GRAPH OVERVIEW');
+    expect(kernel.nodeState('g1', 'a').paused).toBe(false);
+  });
+
+  test('interface delivery carries the actual value, protocol and task into the turn', async () => {
+    const { kernel } = opened();
+    const host = fakeHost();
+    new GraphRuntime(kernel, 'g1').deliver({ nodeId: 'b', input: 'in', value: { n: 42 } });
+    const runner = new GraphRunner({ kernel, graphId: 'g1', hostFor: () => host,
+      submit: executionId => { new NodeSubmitBridge(kernel, executionId).submit({ outputs: { out: { enable: true, value: { n: 43 } } }, submissionId: `s-${executionId}` }); },
+    });
+    expect((await runner.drain()).drained).toBe(true);
+    expect(host.turns[0]).toContain('42');
+    expect(host.turns[0]).toContain('ping');
+    expect(host.turns[0]).toContain('TASK: b');
+  });
+
   test('S1: a two-node chain runs to completion through real deliveries', async () => {
     const { kernel } = opened();
     // a is triggered first, exactly as an external input would.

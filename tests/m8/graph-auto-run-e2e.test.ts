@@ -107,11 +107,8 @@ describe('§13.8 E2E — a confirmed v2 graph runs to completion on the host loo
 
     // The loop: pump repeatedly until the graph is drained. `pump()` is the production tick
     // (host.ts drives it every 40ms), so this runs the same path the product does.
-    for (let i = 0; i < 60; i += 1) {
-      const r = await runtime.host.pump();
-      const queued = store.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state='queued'").get(confirmed.taskId) as { n: number };
-      if (queued.n === 0) break;
-    }
+    await runtime.host.pump();
+    await runtime.host.drive();
     const aExec = store.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND node_id='a'").get(confirmed.taskId) as { n: number };
     const bExec = store.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND node_id='b'").get(confirmed.taskId) as { n: number };
     expect(aExec.n).toBe(1);

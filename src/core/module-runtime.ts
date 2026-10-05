@@ -1,7 +1,7 @@
 import { RuntimeError, type Json } from './types.ts';
 import { parseRule, mergeRuleOutputs, parseEmit, RuleError, type RuleDeclaration } from './rule-engine.ts';
 import type { KernelStore } from './kernel-store.ts';
-import type { GraphDefinition } from './interface-spec.ts';
+import { validateProtocolValue, type GraphDefinition, type ModuleDefinition } from './interface-spec.ts';
 
 /**
  * A built-in router/command module, running its declared rules (Issue #1 §2, §4, §6, §9).
@@ -21,6 +21,7 @@ import type { GraphDefinition } from './interface-spec.ts';
  */
 
 export interface ModuleEvaluation {
+  transitionId?: string;
   emitted: boolean;
   /** True when the module has not received every input a rule needs. */
   waiting: boolean;
@@ -110,6 +111,15 @@ export class ModuleRuntime {
     return { inputs, state: stateRow ? JSON.parse(stateRow.state) as Json : null };
   }
 
+  private acceptControl(moduleId: string, inputName: string, value: Json): ModuleEvaluation | undefined {
+    const module = this.definition().modules[moduleId];
+    const ref = module?.inputs[inputName];
+    if (!ref) throw new RuntimeError('invalid_input', `Module ${moduleId} has no input ${inputName}`);
+    const defect = validateProtocolValue(this.definition().protocols[ref.protocol]!, value, `${moduleId}.${inputName}`);
+    if (defect) throw new RuntimeError('invalid_input', defect);
+    return module.control?.reopen === inputName ? this.reopen(moduleId) : undefined;
+  }
+
   /** Accept one input update and judge (§2): `each` every time, `once` until latched. */
   deliver(moduleId: string, inputName: string, value: Json): ModuleEvaluation {
     // §9: the latest value is stored FIRST and the module is paused on a defect,
@@ -120,11 +130,32 @@ export class ModuleRuntime {
     if (!Object.keys(module.inputs).includes(inputName)) {
       throw new RuntimeError('invalid_input', `Module ${moduleId} has no input ${inputName}`);
     }
+    const control = this.acceptControl(moduleId, inputName, value);
+    if (control) {
+      return control;
+    }
     this.kernel.setModuleInput(this.taskId, moduleId, inputName, value, 'deliver');
     try {
       this.compile(moduleId);
       return this.evaluate(moduleId);
     } catch (error) {
+      this.kernel.setNodeQueuePaused(this.taskId, moduleId, true);
+      throw error;
+    }
+  }
+
+  /** Consume an accepted delivery exactly once, including its persisted judgment. */
+  consumeDelivery(moduleId: string, inputName: string, value: Json, deliveryId: string): ModuleEvaluation {
+    try {
+      return this.kernel.moduleTransaction(() => {
+        const control = this.acceptControl(moduleId, inputName, value);
+        if (!control) this.kernel.setModuleInput(this.taskId, moduleId, inputName, value, `delivery:${deliveryId}`);
+        const evaluation = control ?? this.evaluate(moduleId);
+        this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);
+        return evaluation;
+      });
+    } catch (error) {
+      this.kernel.setModuleInput(this.taskId, moduleId, inputName, value, `delivery:${deliveryId}`);
       this.kernel.setNodeQueuePaused(this.taskId, moduleId, true);
       throw error;
     }
@@ -160,8 +191,9 @@ export class ModuleRuntime {
     }
 
     // A once-module that fired this time latches; nothing is judged again until reopened.
-    this.record(moduleId, environment, merged, compiled.trigger === 'once' && merged.emitted ? 'fired' : null);
+    const transitionId = this.record(moduleId, environment, merged, compiled.trigger === 'once' && merged.emitted ? 'fired' : null);
     return {
+      transitionId,
       emitted: merged.emitted,
       waiting: !merged.emitted && compiled.rules.some(rule => rule.when.referencedInputs.some(name => !(name in environment.inputs))),
       triggered: compiled.trigger === 'once' && merged.emitted ? true : triggered,
@@ -201,7 +233,8 @@ export class ModuleRuntime {
     moduleId: string,
     inputName: string,
     value: Json,
-    evaluate: (input: { entry: string; inputs: Record<string, Json>; state: Json; trigger: 'each' | 'once' }) => Promise<{ ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[]; error?: string }>,
+    evaluate: (input: { entry: string; inputs: Record<string, Json>; state: Json; trigger: 'each' | 'once'; limits?: ModuleDefinition['limits'] }) => Promise<{ ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[]; error?: string }>,
+    deliveryId?: string,
   ): Promise<ModuleEvaluation> {
     const definition = this.definition();
     const module = definition.modules[moduleId];
@@ -209,6 +242,11 @@ export class ModuleRuntime {
     if (!module.code) throw new RuntimeError('invalid_definition', `Command module ${moduleId} declares no code entry`);
     if (!Object.keys(module.inputs).includes(inputName)) {
       throw new RuntimeError('invalid_input', `Module ${moduleId} has no input ${inputName}`);
+    }
+    const control = this.acceptControl(moduleId, inputName, value);
+    if (control) {
+      if (deliveryId) this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);
+      return control;
     }
     // §9: the input is stored FIRST, so a defect keeps it rather than losing it.
     this.kernel.setModuleInput(this.taskId, moduleId, inputName, value, 'deliver');
@@ -219,13 +257,29 @@ export class ModuleRuntime {
     }
     const stateRow = this.kernel.db.prepare('SELECT state FROM kernel_modules WHERE task_id=? AND module_id=?').get(this.taskId, moduleId) as { state: string } | undefined;
     const state = stateRow ? JSON.parse(stateRow.state) as Json : null;
-    const result = await evaluate({ entry: module.code.entry, inputs, state, trigger: module.trigger });
+    const held = module.trigger === 'once' && this.latch(moduleId);
+    const missing = (module.requiredInputs ?? []).filter(name => !(name in inputs));
+    if (held || missing.length) {
+      this.kernel.moduleTransaction(() => {
+        this.kernel.recordModuleTransition(this.taskId, { moduleId, inputName, inputValue: inputs, stateBefore: state, stateAfter: state,
+          verdict: null, outputs: {}, ruleVersion: module.code!.version, reason: held ? 'once held' : `waiting for ${missing.join(', ')}` });
+        if (deliveryId) this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);
+      });
+      return { emitted: false, waiting: missing.length > 0, triggered: held, outputs: {}, reasons: [] };
+    }
+    const result = await evaluate({ entry: module.code.entry, inputs, state, trigger: module.trigger, ...(module.limits ? { limits: module.limits } : {}) });
     if (!result.ok) {
       this.kernel.setNodeQueuePaused(this.taskId, moduleId, true);
       throw new RuntimeError('module_defect', result.error ?? 'command module failed');
     }
+    for (const [name, value] of Object.entries(result.outputs)) {
+      const output = module.outputs[name];
+      const defect = output ? validateProtocolValue(definition.protocols[output.protocol]!, value, `${moduleId}.${name}`) : `Unknown output ${name}`;
+      if (defect) { this.kernel.setNodeQueuePaused(this.taskId, moduleId, true); throw new RuntimeError('module_defect', defect); }
+    }
     const emitted = Object.keys(result.outputs).length > 0;
-    this.kernel.recordModuleTransition(this.taskId, {
+    const transition = this.kernel.moduleTransaction(() => {
+      const recorded = this.kernel.recordModuleTransition(this.taskId, {
       moduleId,
       inputName,
       inputValue: inputs as Json,
@@ -234,10 +288,14 @@ export class ModuleRuntime {
       verdict: emitted ? Object.keys(result.outputs).join(',') : null,
       outputs: result.outputs,
       // §9: the transition records the CODE version, not a rule version.
-      ruleVersion: module.code.version,
+      ruleVersion: module.code!.version,
       reason: result.diagnostics.length ? result.diagnostics.join(' | ') : 'command module evaluate()',
+      });
+      if (deliveryId) this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);
+      return recorded;
     });
     return {
+      transitionId: transition.id,
       emitted,
       waiting: false,
       triggered: this.latch(moduleId),
@@ -251,8 +309,8 @@ export class ModuleRuntime {
     environment: { inputs: Record<string, Json>; state: Json },
     merged: { emitted: boolean; outputs: Record<string, Json>; reasons: string[] },
     latch: 'fired' | null,
-  ): void {
-    this.kernel.recordModuleTransition(this.taskId, {
+  ): string {
+    return this.kernel.recordModuleTransition(this.taskId, {
       moduleId,
       inputName: merged.reasons.length ? merged.reasons[merged.reasons.length - 1]! : '(no rule)',
       inputValue: environment.inputs as Json,
@@ -262,6 +320,6 @@ export class ModuleRuntime {
       outputs: merged.outputs,
       ruleVersion: this.ruleVersion(moduleId),
       reason: merged.reasons.length ? merged.reasons.join(' | ') : (latch === 'fired' ? 'once fired' : 'no rule matched'),
-    });
+    }).id;
   }
 }

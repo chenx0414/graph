@@ -53,9 +53,9 @@ export function expandSubgraph(input: ExpandInput): ExpandedSubgraph {
   if (!instance.trim()) throw new Error('A subgraph instance requires a name');
 
   const nodes: Record<string, NodeDefinition> = {};
-  for (const [id, node] of Object.entries(template.nodes)) nodes[`${instance}/${id}`] = node;
+  for (const [id, node] of Object.entries(template.nodes)) nodes[`${instance}/${id}`] = structuredClone(node);
   const modules: Record<string, ModuleDefinition> = {};
-  for (const [id, module] of Object.entries(template.modules)) modules[`${instance}/${id}`] = module;
+  for (const [id, module] of Object.entries(template.modules)) modules[`${instance}/${id}`] = structuredClone(module);
 
   // Internal edges are re-pointed, never duplicated: expansion adds no connection
   // the template did not declare.

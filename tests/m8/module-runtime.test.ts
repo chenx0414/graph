@@ -120,6 +120,8 @@ describe('ModuleRuntime — once fires at most once until reopened (§2, §6)', 
     expect(later.emitted).toBe(false);
     expect(later.triggered).toBe(true);
     expect(kernel.moduleInput('t1', 'fan-in', 'a')?.value).toEqual({ passed: false });
+    expect(runtime.deliver('fan-in', 'b', { passed: true }).emitted).toBe(false);
+    expect(runtime.deliver('fan-in', 'a', { passed: true }).emitted).toBe(false);
   });
 
   test('M3: reopen clears the latch only, keeps both inputs, and does not emit', async () => {
@@ -148,4 +150,21 @@ describe('ModuleRuntime — a defect keeps inputs and pauses the module (§9)', 
     expect(kernel.nodeState('t1', 'review-route').paused).toBe(true);
     expect(kernel.moduleInput('t1', 'review-route', 'review')?.value).toEqual({ passed: false });
   });
+});
+
+
+test('declared reopen input preserves approvals, acknowledges delivery and waits for next data', async () => {
+  const definition = onceDefinition();
+  definition.protocols.control = { type: 'object', required: ['reopen'], properties: { reopen: { type: 'boolean' } } };
+  definition.modules['fan-in']!.inputs.control = { protocol: 'control' };
+  definition.modules['fan-in']!.control = { reopen: 'control' };
+  const { kernel, runtime } = await kernelWith(definition, 'fan-in', 'once');
+  runtime.deliver('fan-in', 'a', { passed: true });
+  expect(runtime.deliver('fan-in', 'b', { passed: true }).emitted).toBe(true);
+  const accepted = kernel.deliverDirect('t1', 'fan-in.control', { reopen: true });
+  expect(runtime.consumeDelivery('fan-in', 'control', { reopen: true }, accepted.delivery.id).emitted).toBe(false);
+  expect(kernel.moduleInput('t1', 'fan-in', 'a')?.value).toEqual({ passed: true });
+  expect(kernel.moduleInput('t1', 'fan-in', 'control')?.delivered).not.toBe(true);
+  expect(kernel.db.prepare('SELECT processed FROM kernel_module_inbox WHERE delivery_id=?').get(accepted.delivery.id)).toEqual({ processed: 1 });
+  expect(runtime.deliver('fan-in', 'b', { passed: true }).emitted).toBe(true);
 });

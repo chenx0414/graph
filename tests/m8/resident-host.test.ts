@@ -119,3 +119,23 @@ test('H5: a turn after stop() is refused, not silently dropped', async () => {
   expect(host.alive()).toBe(false);
   await expect(host.turn('after stop')).rejects.toThrow(/not running/);
 });
+
+
+test('a process exit during a pending turn rejects promptly instead of leaving the node busy', async () => {
+  let requested!: () => void;
+  let release!: () => void;
+  const arrived = new Promise<void>(resolve => { requested = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const provider = await openaiServer([{ text: 'never delivered', beforeReply: async () => { requested(); await held; } }]);
+  cleanup.push(() => provider.close());
+  cleanup.push(() => release());
+  const { work, stateDir } = await workspace();
+  const host = new ResidentHost({ workerEntry, cwd: work, configPath: join(work, 'w.json'), config: configFor(work, stateDir, provider.model, 'crash') });
+  cleanup.push(() => host.stop());
+  await host.start();
+  const turn = host.turn('work');
+  const rejected = expect(turn).rejects.toThrow(/exited/);
+  await arrived;
+  process.kill(host.pid()!, 'SIGKILL');
+  await rejected;
+});

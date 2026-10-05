@@ -30,7 +30,7 @@ const elk: ElkEngine = new (ElkConstructor as unknown as { new(): ElkEngine })()
 const GRID = 16;
 const snap = (value: number) => Math.round(value / GRID) * GRID;
 
-export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: ContainerSpec[]; loops?: LoopSpec[] }) {
+export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: ContainerSpec[]; loops?: LoopSpec[]; edges?: { id: string; source: string; target: string }[] }) {
   const containers = input.containers ?? [];
   const nested = new Set(input.nodes.filter(node => node.container).map(node => node.id));
   const byParent = new Map<string | undefined, string[]>();
@@ -50,7 +50,7 @@ export async function layoutGraph(input: { nodes: NodeSpec[]; containers?: Conta
       ...nodeChildren(id),
     ],
   });
-  const dependencyEdges = input.nodes.flatMap(node => (node.dependsOn ?? []).map((source, index) => ({ id: `${source}->${node.id}:${index}`, sources: [source], targets: [node.id] })));
+  const dependencyEdges = input.edges?.map(edge => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })) ?? input.nodes.flatMap(node => (node.dependsOn ?? []).map((source, index) => ({ id: `${source}->${node.id}:${index}`, sources: [source], targets: [node.id] })));
   const loopEdges = (input.loops ?? []).map(loop => ({ id: `loop:${loop.from}->${loop.to}`, sources: [loop.from], targets: [loop.to] }));
   const edges = [
     ...dependencyEdges,

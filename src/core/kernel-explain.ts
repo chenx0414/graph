@@ -132,7 +132,7 @@ export function explainEdge(kernel: KernelStore, taskId: string, edgeId: string,
   const edge = revision?.definition.edges[edgeId];
   if (!edge) throw new Error(`Unknown edge ${taskId}/${edgeId}`);
 
-  const target = edge.to.includes('.') ? revision!.definition.nodes[edge.to.split('.')[0]!] : undefined;
+  const target = edge.to.includes('.') ? (revision!.definition.nodes[edge.to.split('.')[0]!] ?? revision!.definition.modules[edge.to.split('.')[0]!]) : undefined;
   const port = edge.to.includes('.') ? edge.to.split('.').slice(1).join('.') : '';
   const protocol = target?.inputs[port]?.protocol ?? null;
 

@@ -45,6 +45,7 @@ test('E1: a graph that throws leaves a task event naming the reason', async () =
     graphs: () => [{ taskId: 'g1', run: async () => { throw new Error('no credential bound for model local'); } }],
   });
   await execution.pump();
+  await expect.poll(() => failures(store).length).toBe(1);
   const seen = failures(store);
   expect(seen).toHaveLength(1);
   expect(seen[0]!.type).toBe('graph.failed');

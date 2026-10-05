@@ -40,11 +40,6 @@ function endpointOwner(reference: string): string {
   return dot < 0 ? reference : reference.slice(0, dot);
 }
 
-function endpointPort(reference: string): string {
-  const dot = reference.indexOf('.');
-  return dot < 0 ? '' : reference.slice(dot + 1);
-}
-
 /**
  * Take one module evaluation's outputs and land them on their targets. Returns what
  * landed, so a caller can log or assert the routing rather than infer it.
@@ -56,58 +51,25 @@ export function routeModuleOutputs(
   moduleId: string,
   evaluation: ModuleEvaluation,
   depth = 0,
+  queueOnly = false,
 ): Landing[] {
   if (!evaluation.emitted || Object.keys(evaluation.outputs).length === 0) return [];
 
-  const revision = kernel.latestRevision(graphId);
-  if (!revision) return [];
-  const definition = revision.definition;
   const landings: Landing[] = [];
-
-  for (const [port, value] of Object.entries(evaluation.outputs)) {
-    const fromPort = `${moduleId}.${port}`;
-    // Only edges that leave THIS module's port carry this output.
-    for (const [edgeId, edge] of Object.entries(definition.edges)) {
-      if (edge.from !== fromPort || edge.enabled === false) continue;
-
-      const targetOwner = endpointOwner(edge.to);
-      const targetPort = endpointPort(edge.to);
-      const protocol = resolveProtocol(definition, edge.to);
-      const targetModule = definition.modules[targetOwner];
-
-      const delivery = kernel.recordModuleDelivery(graphId, {
-        moduleId, edgeId, fromEndpoint: moduleId, toEndpoint: edge.to,
-        value, protocol, revisionVersion: revision.version,
-      });
-
-      if (targetModule) {
-        // A module target keeps the latest value and judges in turn (the cascade).
-        kernel.setModuleInput(graphId, targetOwner, targetPort, value, `delivery:${delivery.id}`);
-        landings.push({ edgeId, fromEndpoint: moduleId, toEndpoint: edge.to, kind: 'module', value });
-        if (depth + 1 < MAX_ROUTING_DEPTH) {
-          const next = modules.evaluate(targetOwner);
-          landings.push(...routeModuleOutputs(kernel, modules, graphId, targetOwner, next, depth + 1));
-        }
-        continue;
-      }
-
-      // A node target is queued in acceptance order (§7).
-      const node = definition.nodes[targetOwner];
-      if (!node) continue;
-      kernel.enqueueDelivery(graphId, targetOwner, { deliveryId: delivery.id, input: targetPort, value });
-      landings.push({ edgeId, fromEndpoint: moduleId, toEndpoint: edge.to, kind: 'node', value });
+  // No downstream work begins until every output and enabled target has passed validation.
+  const deliveries = kernel.broadcastModule(graphId, moduleId, evaluation.outputs, evaluation.transitionId);
+  const definition = kernel.latestRevision(graphId)!.definition;
+  for (const delivery of deliveries) {
+    const owner = endpointOwner(delivery.toEndpoint);
+    const isModule = !!definition.modules[owner];
+    landings.push({ edgeId: delivery.edgeId!, fromEndpoint: delivery.fromEndpoint,
+      toEndpoint: delivery.toEndpoint, kind: isModule ? 'module' : 'node', value: delivery.value });
+    if (isModule && !queueOnly && depth + 1 < MAX_ROUTING_DEPTH) {
+      const port = delivery.toEndpoint.slice(delivery.toEndpoint.indexOf('.') + 1);
+      const next = modules.deliver(owner, port, delivery.value);
+      kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(delivery.id);
+      landings.push(...routeModuleOutputs(kernel, modules, graphId, owner, next, depth + 1));
     }
   }
   return landings;
-}
-
-/** The protocol an endpoint accepts, read from the target's declaration (§4). */
-function resolveProtocol(definition: { nodes: Record<string, { inputs: Record<string, { protocol: string }> }>; modules: Record<string, { inputs: Record<string, { protocol: string }> }> }, endpoint: string): string {
-  const owner = endpointOwner(endpoint);
-  const port = endpointPort(endpoint);
-  const node = definition.nodes[owner];
-  if (node?.inputs[port]) return node.inputs[port]!.protocol;
-  const module = definition.modules[owner];
-  if (module?.inputs[port]) return module.inputs[port]!.protocol;
-  return '';
 }

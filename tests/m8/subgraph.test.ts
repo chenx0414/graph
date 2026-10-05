@@ -88,3 +88,24 @@ describe('expandSubgraph — public io maps into the parent (§9)', () => {
     expect(expanded.outputs.k!.from).toBe('inner/b.out');
   });
 });
+
+
+test('formal declaration compiles two pinned instances and parent connections without state aliasing', () => {
+  const inner = template();
+  inner.nodes.review = { ...structuredClone(inner.nodes.work!), inputs: { in: { protocol: 'done' } }, outputs: { out: { protocol: 'done' } } };
+  inner.edges.review = { from: 'work.out', to: 'review.in', enabled: true };
+  inner.outputs.result = { from: 'review.out', protocol: 'done' };
+  const parent = parseGraphDefinition({ schemaVersion: 2, name: 'parent', protocols: {}, nodes: {}, modules: {},
+    templates: { build: { version: 7, definition: inner } },
+    instances: { first: { template: 'build', version: 7 }, second: { template: 'build', version: 7 } },
+    edges: {}, inputs: { start: { to: 'first.job', protocol: 'job' } }, outputs: { end: { from: 'second.result', protocol: 'done' } } });
+  expect(Object.keys(parent.nodes)).toEqual(['first/work', 'first/review', 'second/work', 'second/review']);
+  expect(Object.keys(parent.edges)).toEqual(['first/review', 'second/review']);
+  expect(parent.inputs.start?.to).toBe('first/work.in');
+  expect(parent.outputs.end?.from).toBe('second/review.out');
+  parent.nodes['first/work']!.task = 'modified';
+  expect(parent.nodes['second/work']!.task).toBe('work');
+  expect(inner.nodes.work!.task).toBe('work');
+  expect(parseGraphDefinition(parent).subgraphInstances?.first?.version).toBe(7);
+  expect(() => parseGraphDefinition({ ...parent, templates: { build: { version: 8, definition: inner } }, instances: { third: { template: 'build', version: 7 } } })).toThrow(/version/);
+});

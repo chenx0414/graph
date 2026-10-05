@@ -1,9 +1,11 @@
+import { kernelGraphView, kernelNodePrompt, kernelNodeRun } from '../../src/core/kernel-views.ts';
 import { describe, expect, test } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskStore } from '../../src/core/store.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
+import { graphManagement } from '../../src/core/graph-service.ts';
 import { GraphRuntime } from '../../src/core/graph-runtime.ts';
 import { parseGraphDefinition, type GraphDefinition } from '../../src/core/interface-spec.ts';
 
@@ -30,20 +32,61 @@ function opened(): { store: TaskStore; kernel: KernelStore; dir: string } {
 const definition = (name = 'g'): GraphDefinition => parseGraphDefinition({
   schemaVersion: 2, name,
   protocols: { ping: { type: 'object', required: ['n'], properties: { n: { type: 'number' } } } },
-  nodes: { a: { recipe: 'a@1', task: 'a', inputs: {}, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } } },
+  nodes: { a: { recipe: 'a@1', task: 'a', inputs: { in: { protocol: 'ping' } }, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } } },
   modules: {}, edges: {},
 });
 
 const twoNode = (name = 'g'): GraphDefinition => parseGraphDefinition({
   ...definition(name),
   nodes: {
-    a: { recipe: 'a@1', task: 'a', inputs: {}, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } },
+    a: { recipe: 'a@1', task: 'a', inputs: { in: { protocol: 'ping' } }, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } },
     b: { recipe: 'b@1', task: 'b', inputs: { in: { protocol: 'ping' } }, outputs: {}, submission: {} },
   },
   edges: { e: { from: 'a.out', to: 'b.in', enabled: true } },
 });
 
 describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
+  test('completion intent stays closed and withdrawable when a node is blocked', () => {
+    const { kernel } = opened();
+    const runtime = new GraphRuntime(kernel, 't1');
+    runtime.create(twoNode());
+    kernel.admitNode('t1', 1, 'a', { instanceId: 'i-a' });
+    kernel.setNodeQueuePaused('t1', 'a', true);
+    runtime.complete();
+    expect(runtime.settleCompletion()).toBe('blocked');
+    expect(() => runtime.chat({ nodeId: 'a', text: 'new work' })).toThrow(/completing/);
+    runtime.withdrawComplete();
+    expect(runtime.state()?.phase).toBe('running');
+  });
+
+  test('disabling a connection during an execution affects its subsequent submit', () => {
+    const { kernel } = opened();
+    const runtime = new GraphRuntime(kernel, 't1');
+    runtime.create(twoNode());
+    kernel.admitNode('t1', 1, 'a', { instanceId: 'i-a' });
+    kernel.admitNode('t1', 1, 'b', { instanceId: 'i-b' });
+    kernel.startExecution('t1', { executionId: 'x', nodeId: 'a', revisionVersion: 1 });
+    runtime.patch({ baseRevision: 1, changes: { reason: 'disable edge', definition: parseGraphDefinition({ ...twoNode(), edges: { e: { from: 'a.out', to: 'b.in', enabled: false } } }) } });
+    const receipt = kernel.submit('x', { submissionId: 's', outputs: { out: { enable: true, value: { n: 1 } } } });
+    expect(receipt.deliveries).toHaveLength(0);
+    expect(kernel.nextQueued('t1', 'b')).toBeNull();
+  });
+
+  test('v2 views expose named connections and record absence without fabricating a sent prompt', async () => {
+    const { kernel } = opened();
+    const runtime = new GraphRuntime(kernel, 't1');
+    runtime.create(twoNode());
+    kernel.admitNode('t1', 1, 'a', { instanceId: 'ia' });
+    kernel.admitNode('t1', 1, 'b', { instanceId: 'ib' });
+    kernel.startExecution('t1', { executionId: 'x', nodeId: 'a', revisionVersion: 1 });
+    kernel.submit('x', { submissionId: 's', outputs: { out: { enable: true, value: { n: 42 } } } });
+    expect(kernelGraphView(kernel, 't1')?.edges[0]?.latest).toEqual({ n: 42 });
+    expect(kernelNodePrompt(kernel, 't1', 'a').recorded).toBeNull();
+    expect(kernelNodeRun(kernel, 't1', 'a', {}).timing.inProgress).toBe(true);
+    kernel.db.prepare('INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)').run('t1', 'a', 'x', 'actual provider text', '[]', 1);
+    expect(kernelNodePrompt(kernel, 't1', 'a').recorded?.text).toBe('actual provider text');
+  });
+
   test('G7: create is whole-or-nothing and returns the validated definition', () => {
     const { kernel } = opened();
     const runtime = new GraphRuntime(kernel, 't1');
@@ -159,4 +202,72 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     expect((runtime.inspect({ kind: 'nodes' }) as unknown[]).length).toBe(2);
     expect((runtime.inspect({ kind: 'deliveries', executionId: 'exec-1' }) as unknown[]).length).toBe(1);
   });
+});
+
+
+test('main management creates idle nodes, validates sends and publishes a completion result', async () => {
+  const { kernel } = opened();
+  new GraphRuntime(kernel, 'owner').create(definition());
+  const service = graphManagement(kernel, 'owner');
+  const created = await service.graphCreate({ definition: parseGraphDefinition({
+    ...definition(), outputs: { result: { from: 'a.out', protocol: 'ping' } }, completion: { on: 'result', drain: true },
+  }) }) as { graphId: string };
+  expect(kernel.nextQueued(created.graphId, 'a')).toBeNull();
+  await expect(service.graphSend({ graphId: created.graphId, nodeId: 'a', input: 'in', value: { n: 'bad' } })).rejects.toThrow(/number/);
+  await service.graphSend({ graphId: created.graphId, nodeId: 'a', input: 'in', value: { n: 7 } });
+  kernel.startExecution(created.graphId, { executionId: 'answer', nodeId: 'a', revisionVersion: 1 });
+  kernel.submit('answer', { submissionId: 'answer-submit', outputs: { out: { enable: true, value: { n: 8 } } } });
+  expect((await service.graphInspect({ graphId: created.graphId, query: 'results' }) as unknown[])).toHaveLength(1);
+  expect(new GraphRuntime(kernel, created.graphId).state()?.phase).toBe('completing');
+  await expect(service.graphSend({ graphId: created.graphId, nodeId: 'a', text: 'extra' })).rejects.toThrow(/completing/);
+});
+
+test('pending node removal is refused without changing the revision or queued input', () => {
+  const { kernel } = opened();
+  const runtime = new GraphRuntime(kernel, 't1');
+  runtime.create(twoNode());
+  kernel.admitNode('t1', 1, 'b', { instanceId: 'i-b' });
+  runtime.deliver({ nodeId: 'b', input: 'in', value: { n: 1 } });
+  expect(() => runtime.patch({ baseRevision: 1, changes: { reason: 'remove b', retire: ['b'], definition: definition() } })).toThrow(/pending work/);
+  expect(kernel.latestRevision('t1')?.version).toBe(1);
+  expect(kernel.nextQueued('t1', 'b')?.payload).toMatchObject({ value: { n: 1 } });
+});
+
+
+test('main public and module inputs create durable deliveries atomically and honor completion gate', async () => {
+  const { kernel } = opened();
+  const graph = new GraphRuntime(kernel, 't1');
+  const def = definition();
+  def.modules.route = { type: 'router', trigger: 'each', inputs: { in: { protocol: 'ping' } }, outputs: {}, rules: [] };
+  def.inputs.start = { to: 'route.in', protocol: 'ping' };
+  graph.create(def);
+  const management = graphManagement(kernel, 't1');
+  await expect(management.graphSend({ graphId: 't1', input: 'start', value: { n: 'bad' } })).rejects.toThrow();
+  expect(kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_deliveries').get()).toEqual({ n: 0 });
+  await management.graphSend({ graphId: 't1', input: 'start', value: { n: 7 } });
+  expect(kernel.db.prepare('SELECT source,edge_id,to_endpoint,value FROM kernel_deliveries').get()).toEqual({ source: 'direct', edge_id: null, to_endpoint: 'route.in', value: '{"n":7}' });
+  expect(kernel.db.prepare('SELECT processed FROM kernel_module_inbox').get()).toEqual({ processed: 0 });
+  graph.complete();
+  await expect(management.graphSend({ graphId: 't1', nodeId: 'route', input: 'in', value: { n: 8 } })).rejects.toThrow(/completing/);
+  expect(kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_deliveries').get()).toEqual({ n: 1 });
+});
+
+
+test('graph creation retries preparation with the same graph and refuses changed request content', async () => {
+  const { kernel } = opened();
+  new GraphRuntime(kernel, 't1').create(definition());
+  let prepares = 0;
+  const management = graphManagement(kernel, 't1', () => { prepares++; if (prepares === 1) throw new Error('git unavailable'); });
+  const input = { definition: definition('child'), targetBranch: 'main', requestId: 'create-once' };
+  const first = await management.graphCreate(input) as { graphId: string; state: string };
+  expect(first.state).toBe('blocked');
+  expect(kernel.store.task(first.graphId).paused).toBe(1);
+  const second = await management.graphCreate(input) as { graphId: string; replayed: boolean };
+  expect(second.graphId).toBe(first.graphId);
+  expect(second.replayed).toBe(true);
+  expect(kernel.store.task(first.graphId).paused).toBe(0);
+  await management.graphCreate(input);
+  expect(prepares).toBe(2);
+  await expect(management.graphCreate({ ...input, definition: definition('different') })).rejects.toThrow(/requestId/);
+  expect(kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_graph_owners').get()).toEqual({ n: 1 });
 });

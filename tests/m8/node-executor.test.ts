@@ -1,3 +1,5 @@
+import { recoverKernelExecutions } from '../../src/core/kernel-recovery.ts';
+import { kernelProviderGate, reconcileKernelUsage } from '../../src/runtime/kernel-provider-gate.ts';
 import { describe, expect, test } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -112,6 +114,32 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
     expect(outcome).toBe('failed'); // returned the gap but never filled it, budget spent
   });
 
+  test('restart preserves the automatic retry allowance for the same queued execution', async () => {
+    const { kernel, store, dir } = opened();
+    store.db.prepare('INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES(?,?,?,?,?)').run('restart', 'p1', 'r', 'running', 1);
+    const revision = kernel.publishRevision('restart', { definition: DEF, reason: 'create' });
+    kernel.admitNode('restart', revision.version, 'n1', { instanceId: 'instance' });
+    const item = new NodeQueue(kernel, 'restart').enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: null });
+    const id = `exec-restart-n1-${item.seq}`;
+    kernel.startExecution('restart', { executionId: id, nodeId: 'n1', revisionVersion: revision.version });
+    kernel.noteExecutionAttempt(id);
+    kernel.noteExecutionContinuation(id, 'retry');
+    kernel.noteExecutionAttempt(id);
+    kernel.noteExecutionContinuation(id, 'retry');
+    kernel.finishExecution(id, 'blocked');
+    store.close();
+    const reopened = new TaskStore(join(dir, 'state.db'));
+    try {
+      const recovered = new KernelStore(reopened);
+      let turns = 0;
+      const outcome = await new NodeExecutor({ kernel: recovered, graphId: 'restart', host: fakeHost() }).runNode('n1', async () => { turns += 1; });
+      expect(outcome).toBe('failed');
+      expect(turns).toBe(1);
+      expect(recovered.execution(id)?.attempt).toBe(3);
+      expect(recovered.execution(id)?.retriesUsed).toBe(2);
+    } finally { reopened.close(); }
+  });
+
   test('X6: runNode drains the node queue one execution at a time', async () => {
     const { kernel } = opened();
     const graphId = 'g6';
@@ -164,3 +192,52 @@ function executionIdOf(kernel: KernelStore, taskId: string): string {
   const row = kernel.db.prepare('SELECT id FROM kernel_executions WHERE task_id=? ORDER BY rowid DESC LIMIT 1').get(taskId) as { id: string } | undefined;
   return row?.id ?? '';
 }
+
+
+test('provider gate charges each send before a follow-up, refuses exhausted budget and retains unknown usage', () => {
+  const { kernel, store } = opened();
+  store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,created_seq) VALUES(?,?,?,?,?,?)').run('t1', 'p1', 'do', 1, 0, 1);
+  kernel.publishRevision('t1', { definition: DEF, reason: 'test' });
+  kernel.admitNode('t1', 1, 'n1', { instanceId: 'i' });
+  kernel.startExecution('t1', { executionId: 'x', nodeId: 'n1', revisionVersion: 1 });
+  kernel.reserveNodeTokens('t1', 'n1', { budget: 100, unlimited: false }, 100);
+  const gate = kernelProviderGate(kernel, 't1', 'n1', { budget: 100, unlimited: false });
+  let sends = 0;
+  gate.dispatch('first', 60, () => sends++);
+  gate.settle('first', { input: 30, output: 35, cacheRead: 0, cacheWrite: 0 });
+  expect(() => gate.dispatch('second', 40, () => sends++)).toThrow(/budget/);
+  expect(sends).toBe(1);
+  expect(kernel.budgetState('t1', 'n1', { budget: 100, unlimited: false }).used).toBe(65);
+  gate.dispatch('unknown', 10, () => sends++);
+  gate.settle('unknown', null);
+  expect(() => gate.dispatch('third', 1, () => sends++)).toThrow(/unknown/);
+  expect(sends).toBe(2);
+  expect(kernel.db.prepare('SELECT state FROM kernel_provider_calls WHERE id=?').get('unknown')).toEqual({ state: 'unknown' });
+  store.db.close();
+});
+
+
+test('runtime recovery retains input, attempt counters and unknown provider holds; reconciliation is explicit and idempotent', () => {
+  const { kernel, store } = opened();
+  store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,created_seq) VALUES(?,?,?,?,?,?)').run('t1', 'p1', 'do', 1, 0, 1);
+  kernel.publishRevision('t1', { definition: DEF, reason: 'test' });
+  kernel.admitNode('t1', 1, 'n1', { instanceId: 'i' });
+  const queued = kernel.enqueue('t1', { nodeId: 'n1', kind: 'chat', payload: { text: 'retained input' } });
+  kernel.claimQueued('t1', queued.seq);
+  kernel.startExecution('t1', { executionId: 'x', nodeId: 'n1', revisionVersion: 1 });
+  kernel.noteExecutionAttempt('x');
+  kernel.noteExecutionContinuation('x', 'retry');
+  kernel.reserveNodeTokens('t1', 'n1', { budget: 100, unlimited: false }, 100);
+  kernelProviderGate(kernel, 't1', 'n1', { budget: 100, unlimited: false }).dispatch('lost', 40, () => undefined);
+  expect(recoverKernelExecutions(kernel)).toBe(1);
+  expect(recoverKernelExecutions(kernel)).toBe(0);
+  expect(kernel.execution('x')).toMatchObject({ state: 'blocked', attempt: 1, retriesUsed: 1 });
+  expect(kernel.nextQueued('t1', 'n1')).toMatchObject({ payload: { text: 'retained input' } });
+  expect(kernel.nodeState('t1', 'n1').paused).toBe(true);
+  const usage = { input: 20, output: 10, cacheRead: 0, cacheWrite: 0 };
+  expect(reconcileKernelUsage(kernel, 't1', 'lost', usage).replayed).toBe(false);
+  expect(reconcileKernelUsage(kernel, 't1', 'lost', usage).replayed).toBe(true);
+  expect(kernel.budgetState('t1', 'n1', { budget: 100, unlimited: false })).toMatchObject({ used: 30, reserved: 0 });
+  expect(kernel.nodeState('t1', 'n1').paused).toBe(true);
+  store.db.close();
+});

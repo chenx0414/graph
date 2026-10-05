@@ -1,3 +1,5 @@
+import { occupiedSlots, executionLimit } from '../runtime/execution-slots.ts';
+import { GraphRuntime } from './graph-runtime.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { GraphRunner, type RunnerHost, type RunResult } from './graph-runner.ts';
@@ -17,6 +19,8 @@ import { GraphRunner, type RunnerHost, type RunResult } from './graph-runner.ts'
 
 export interface GraphLaneOptions {
   kernel: KernelStore;
+  close?: () => Promise<void>;
+  closeGraph?: (graphId: string) => Promise<void>;
   /**
    * §9: the token budget a node runs under, and what one turn is expected to cost.
    *
@@ -61,6 +65,9 @@ export class GraphLane {
     this.options = options;
   }
 
+  /** Release the resident processes and capability resources owned by this lane. */
+  async close(): Promise<void> { await this.options.close?.(); }
+
   /**
    * The v2 graphs that have work queued right now. A task is included only when it has a
    * published revision and its kernel holds a queued item, so a drained graph is not
@@ -68,13 +75,27 @@ export class GraphLane {
    */
   runnable(): RunnableGraph[] {
     const kernel = this.options.kernel;
-    const rows = kernel.db.prepare(`SELECT DISTINCT task_id FROM kernel_queue WHERE state='queued' ORDER BY task_id`).all() as { task_id: string }[];
+    const rows = kernel.db.prepare(`
+      SELECT q.task_id FROM kernel_queue q LEFT JOIN kernel_node_state s ON s.task_id=q.task_id AND s.node_id=q.node_id
+        WHERE q.state='queued' AND COALESCE(s.paused,0)=0 AND NOT EXISTS(SELECT 1 FROM kernel_nodes n WHERE n.task_id=q.task_id AND n.node_id=q.node_id AND n.status='blocked')
+      UNION SELECT i.task_id FROM kernel_module_inbox i LEFT JOIN kernel_node_state s ON s.task_id=i.task_id AND s.node_id=i.module_id
+        WHERE i.processed=0 AND COALESCE(s.paused,0)=0
+      UNION SELECT t.task_id FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id
+        LEFT JOIN kernel_node_state s ON s.task_id=t.task_id AND s.node_id=t.module_id WHERE o.routed=0 AND COALESCE(s.paused,0)=0
+      UNION SELECT id AS task_id FROM tasks WHERE phase IN ('completing','stopping')
+      ORDER BY task_id`).all() as { task_id: string }[];
     const graphs: RunnableGraph[] = [];
     for (const row of rows) {
       const task = this.options.kernel.db.prepare('SELECT phase, paused FROM tasks WHERE id=?').get(row.task_id) as { phase: string; paused: number } | undefined;
       // A terminal or paused task is not runnable: the loop leaves it for the operator.
-      if (!task || task.paused || (task.phase !== 'running' && task.phase !== 'completing')) continue;
+      if (!task || task.paused || !['running', 'idle', 'blocked', 'completing', 'stopping'].includes(task.phase)) continue;
       if (!kernel.latestRevision(row.task_id)) continue;
+      if (occupiedSlots(kernel.store, 'agent') >= executionLimit('agent')) {
+        const queued = kernel.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND state='queued' LIMIT 1").get(row.task_id);
+        const moduleWork = kernel.db.prepare('SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND processed=0 LIMIT 1').get(row.task_id)
+          ?? kernel.db.prepare('SELECT 1 FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0 LIMIT 1').get(row.task_id);
+        if (queued && !moduleWork && task.phase !== 'stopping') continue;
+      }
       graphs.push({ taskId: row.task_id, run: () => this.runGraph(row.task_id) });
     }
     return graphs;
@@ -102,6 +123,12 @@ export class GraphLane {
       ...(this.options.initialContext ? { initialContext: (nodeId: string) => this.options.initialContext!(graphId, nodeId) } : {}),
       ...(this.options.maxStuckPasses !== undefined ? { maxStuckPasses: this.options.maxStuckPasses } : {}),
     });
-    return runner.drain();
+    const result = await runner.drain();
+    const runtime = new GraphRuntime(kernel, graphId);
+    const intent = (kernel.db.prepare('SELECT completion_requested AS requested FROM kernel_lifecycle WHERE task_id=?').get(graphId) as { requested: number } | undefined)?.requested;
+    if (runtime.state()?.phase === 'stopping') runtime.settleStop();
+    else if (intent) runtime.settleCompletion();
+    if (['completed', 'stopped'].includes(runtime.state()!.phase)) await this.options.closeGraph?.(graphId);
+    return result;
   }
 }

@@ -62,7 +62,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     let after = startAfter;
     for (let page = 0; page < 60; page += 1) {
       const query = after === undefined ? 'limit=200' : `after=${after}&limit=200`;
-      const result = await api<NodeRun>(`/api/tasks/${taskId}/nodes/${nodeId}/run?${query}`);
+      const result = await api<NodeRun>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/run?${query}`);
       if (scopeRef.current !== scope || generation !== generationRef.current) return;
       setData(result);
       onRunUpdate?.(result);
@@ -135,7 +135,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     pendingSend.current = request;
     setSending(true); setError('');
     try {
-      await api(`/api/tasks/${taskId}/nodes/${nodeId}/messages`, { method: 'POST', body: JSON.stringify(request) });
+      await api(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/messages`, { method: 'POST', body: JSON.stringify(request) });
       setText(''); setAttachments([]); pendingSend.current = null;
       refresh(); transcriptFollow.scrollToLatest('auto');
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -161,7 +161,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     setOlderLoading(true);
     try {
       const generation = generationRef.current;
-      const page = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${nodeId}/run?before=${first}&limit=100`);
+      const page = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/run?before=${first}&limit=100`);
       if (generation !== generationRef.current) return;
       if (!page.entries.length) setOlderExhausted(true);
       else {

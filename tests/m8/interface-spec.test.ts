@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  parseGraphDefinition, protocolReferenced, INTERFACE_SCHEMA_VERSION,
+  parseGraphDefinition, protocolReferenced, validateProtocolValue, INTERFACE_SCHEMA_VERSION,
 } from '../../src/core/interface-spec.ts';
 import { RuntimeError } from '../../src/core/types.ts';
 
@@ -191,4 +191,17 @@ describe('parseGraphDefinition — invalid shapes are refused whole (§15.9)', (
       nodes: { worker: { ...pipeline.nodes.worker, submission: { required: ['ghost'] } } },
     }, 'ghost');
   });
+});
+
+
+test('protocols enforce enum, additionalProperties and nested constraints without modifying values', () => {
+  const schema = { type: 'object', additionalProperties: false, required: ['status', 'items'], properties: {
+    status: { type: 'string', enum: ['approved', 'rework'] }, items: { type: 'array', minItems: 1, items: { type: 'integer', minimum: 1 } },
+  } };
+  expect(validateProtocolValue(schema, { status: 'approved', items: [1] })).toBeNull();
+  expect(validateProtocolValue(schema, { status: 'made-up', items: [1] })).not.toBeNull();
+  expect(validateProtocolValue(schema, { status: 'approved', items: [] })).not.toBeNull();
+  expect(validateProtocolValue(schema, { status: 'approved', items: [0] })).not.toBeNull();
+  expect(validateProtocolValue(schema, { status: 'approved', items: [1], extra: true })).not.toBeNull();
+  expectInvalid({ ...pipeline, protocols: { ...pipeline.protocols, bad: { type: 'not-a-type' } } }, 'invalid schema');
 });

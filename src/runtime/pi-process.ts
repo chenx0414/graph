@@ -44,6 +44,7 @@ export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'on
    * meters traffic, so the worker must not invent a credential). When absent the worker falls
    * back to the spike credential, which only a local test provider accepts.
    */
+  hostModel?: boolean;
   transport?: {
     apiKey: string;
     api: 'openai-completions' | 'anthropic-messages';

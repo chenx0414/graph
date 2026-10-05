@@ -1,16 +1,26 @@
+import { waitForKernelExecutionSlot } from './execution-slots.ts';
+import type { ModelScheduler } from './model-scheduler.ts';
+import { randomUUID } from 'node:crypto';
+import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
+import { appendNodeEntry, recordCapabilityLoad, recordNodeSession } from '../core/node-run.ts';
+import { GraphRuntime } from '../core/graph-runtime.ts';
 import { GraphLane } from '../core/graph-lane.ts';
 import type { RunnerHost } from '../core/graph-runner.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { ResidentHost } from './resident-host.ts';
 import { nodeSessionRequest, type NodeSessionRequest } from './kernel-node-host.ts';
 import { toPiModel } from './pi-adapter.ts';
-import type { SendGate } from './controlled-openai.ts';
+import { kernelProviderGate } from './kernel-provider-gate.ts';
+import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
+import { encodeAssistantStream } from './assistant-stream-frames.ts';
+import { normalizeContext, type Context } from '@earendil-works/pi-ai';
+import { tokenUsageTotal, type TokenUsage } from './call-broker.ts';
 import type { GitIntegration } from '../git/integration.ts';
 
 /**
@@ -22,8 +32,8 @@ import type { GitIntegration } from '../git/integration.ts';
  * the one call `Execution` needs — `graphs()` — so a confirmed v2 graph runs in the running
  * product instead of only in tests.
  *
- * Credentials stay with the host (§3): the lane resolves a model and its credential for each
- * node here and hands the worker a concrete apiKey, so the worker never invents one.
+ * Credentials stay with the host (§3): the resident worker requests a model call over IPC;
+ * the host selects the model, admits each send and records its authoritative usage.
  */
 
 const workerEntry = fileURLToPath(new URL('./resident-worker-entry.ts', import.meta.url));
@@ -33,6 +43,7 @@ export const DEFAULT_V2_RESERVE_TOKENS = 200_000;
 
 export interface KernelGraphLaneOptions {
   kernel: KernelStore;
+  access?: () => ResolvedAccessPolicy;
   catalog: Catalog;
   /**
    * §9: the token budget a node runs under. Absent means unmetered - which is the right
@@ -44,7 +55,8 @@ export interface KernelGraphLaneOptions {
   /** The models the runtime is configured with. */
   directory: () => ModelEntry[];
   /** Resolve the credential for a model entry; undefined means the node cannot run. */
-  credentialFor: (entry: ModelEntry) => { apiKey: string } | undefined;
+  scheduler?: ModelScheduler;
+  credentialFor: (entry: ModelEntry) => { apiKey: string; credentialId?: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
   /** Where per-node session directories live. */
   instancesDir: string;
   /** The state root; worker configs are written beneath it. */
@@ -65,6 +77,7 @@ export interface KernelGraphLaneOptions {
    * Runs a node's tool call in the host (§5, HB-262): the kernel's `submit` reaches here,
    * where the execution identity lives, so the model can never forge it.
    */
+  onMainMessage?: (graphId: string, nodeId: string, text: string) => Promise<unknown>;
   onToolCall?: (graphId: string, nodeId: string, name: string, args: unknown) => { ok: boolean; text: string } | Promise<{ ok: boolean; text: string }>;
   /**
    * A scripted stand-in for a node's real Pi process.
@@ -99,6 +112,8 @@ export function modelFor(options: KernelGraphLaneOptions, recipe: string): Model
 export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const hosts = new Map<string, ResidentHost>();
   const sessions = new Map<string, NodeSessionRequest>();
+  const sessionRevisions = new Map<string, string>();
+  const hostConfigs = new Map<string, string>();
 
   /** The workspace a node works in: its own work copy when Git can provide one. */
   const nodeWorkspace = (graphId: string, nodeId: string): string | undefined => {
@@ -115,22 +130,63 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const sessionFor = async (graphId: string, nodeId: string): Promise<NodeSessionRequest> => {
     const key = `${graphId}/${nodeId}`;
     const cached = sessions.get(key);
-    if (cached) return cached;
     const revision = options.kernel.latestRevision(graphId);
     if (!revision) throw new Error(`graph ${graphId} has no revision to run`);
+    const configuration = JSON.stringify({ recipe: revision.definition.nodes[nodeId]?.recipe, access: options.access?.() });
+    if (cached && sessionRevisions.get(key) === configuration) return cached;
+    if (cached) { await hosts.get(key)?.stop(); hosts.delete(key); await cached.close(); }
     const workspace = nodeWorkspace(graphId, nodeId);
     if (!workspace) throw new Error(`graph ${graphId} node ${nodeId} has no workspace`);
     const session = await nodeSessionRequest({
+      retainCapabilities: true,
+      ...(options.access ? { access: options.access() } : {}),
       kernel: options.kernel,
       catalog: options.catalog,
       graphId,
       nodeId,
       revisionVersion: revision.version,
       workspace,
+      bindings: {
+        peers: {
+          list: async () => [...Object.keys(options.kernel.latestRevision(graphId)!.definition.nodes).map(id => ({ id, href: `graph://${graphId}/agents/${encodeURIComponent(id)}` })), { id: 'main', href: `graph://${graphId}/owner` }],
+          send: async message => {
+            if (message.to === 'main') {
+              if (!options.onMainMessage) throw new Error('Main agent message channel unavailable');
+              return options.onMainMessage(graphId, nodeId, message.text);
+            }
+            return new GraphRuntime(options.kernel, graphId).chat({ nodeId: message.to, text: `From ${nodeId}: ${message.text}` }, true);
+          },
+        },
+        ...(options.artifacts ? { artifacts: {
+          allowedNamespaces: ['plans', 'research', 'reviews', 'deliverables', 'summaries'], canPromote: false,
+          list: query => options.artifacts!.list({ taskId: graphId, ...query }),
+          get: (id, version) => options.artifacts!.get(graphId, id, version),
+          read: (id, version, maxBytes) => options.artifacts!.read(graphId, id, version, maxBytes),
+          retire: (id, version, reason, requestId) => {
+            const record = options.artifacts!.get(graphId, id, version);
+            if (record.producer?.nodeId !== nodeId) throw new Error('Only the publisher may modify this artifact');
+            const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+            if (!execution) throw new Error('No active execution');
+            const admitted = options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string };
+            return options.artifacts!.retire(graphId, id, version, reason, requestId, { nodeId, instanceId: admitted.instance_id, operationId: execution.id, activationId: execution.id });
+          },
+          publish: async input => {
+            const previous = options.artifacts!.list({ taskId: graphId, namespace: input.namespace, latestOnly: true }).artifacts.find(item => item.ownerId === graphId && item.name === input.name);
+            if (previous && previous.producer?.nodeId !== nodeId) throw new Error('Only the publisher may modify this artifact; publish a separate revision');
+            const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+            if (!execution) throw new Error('No active execution');
+            return options.artifacts!.publish({ ...input, taskId: graphId, workspace,
+              producer: { nodeId, instanceId: (options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string }).instance_id, operationId: execution.id, activationId: execution.id } });
+          },
+        } } : {}),
+      },
       instancesDir: options.instancesDir,
       ...(options.gateFor?.(graphId, nodeId) ? { gate: options.gateFor(graphId, nodeId)! } : {}),
     });
     sessions.set(key, session);
+    sessionRevisions.set(key, configuration);
+    if (session.operation) recordCapabilityLoad(options.kernel.store, { taskId: graphId, nodeId, instanceId: session.binding.instanceId,
+      readOnly: false, report: session.operation.report, digest: session.bundleDigest, toolPolicyDigest: session.toolPolicyDigest, runtimePolicyDigest: session.runtimePolicyDigest });
     return session;
   };
 
@@ -139,8 +195,9 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     start: async () => ({ processId: 0 }),
     alive: () => true,
     turn: async (text: string) => {
-      const turn = (turns.get(nodeId) ?? 0) + 1;
-      turns.set(nodeId, turn);
+      const key = `${graphId}/${nodeId}`;
+      const turn = (turns.get(key) ?? 0) + 1;
+      turns.set(key, turn);
       const scripted = await options.scriptedTurn!(graphId, nodeId, text, turn, nodeWorkspace(graphId, nodeId));
       // The submission travels the real path: onToolCall -> NodeSubmitBridge -> kernel.
       const result = options.onToolCall
@@ -158,6 +215,21 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   });
 
   return new GraphLane({
+    closeGraph: async graphId => {
+      for (const key of [...hosts.keys()]) {
+        if (!key.startsWith(`${graphId}/`)) continue;
+        await hosts.get(key)!.stop(); hosts.delete(key); hostConfigs.delete(key);
+        await sessions.get(key)?.close(); sessions.delete(key); sessionRevisions.delete(key);
+      }
+    },
+    close: async () => {
+      await Promise.all([...hosts.values()].map(host => host.stop()));
+      hosts.clear();
+      await Promise.all([...sessions.values()].map(session => session.close()));
+      sessions.clear();
+      sessionRevisions.clear();
+      hostConfigs.clear();
+    },
     kernel: options.kernel,
     ...(options.tokenBudget && options.reserveTokens !== undefined
       ? { tokenBudget: options.tokenBudget, reserveTokens: options.reserveTokens } : {}),
@@ -174,48 +246,144 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const credential = options.credentialFor(model);
       if (!credential) throw new Error(`no credential bound for model ${model.id}`);
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
+      options.kernel.db.prepare('INSERT INTO kernel_node_bindings(task_id,node_id,model_id,system_prompt,tools,state_dir) VALUES(?,?,?,?,?,?) ON CONFLICT(task_id,node_id) DO UPDATE SET model_id=excluded.model_id,system_prompt=excluded.system_prompt,tools=excluded.tools,state_dir=excluded.state_dir')
+        .run(graphId, nodeId, model.id, session.systemPrompt, JSON.stringify(session.allowedToolNames), session.stateDir);
       return {
         binding: session.binding,
         workspace,
         stateDir: session.stateDir,
         model: toPiModel(model),
         thinkingLevel: 'off',
-        // §5: a node's only kernel tool is `submit`. The host executes the call against the
+        // §5: the node's graph output tool is `submit`. The host executes the call against the
         // real execution (HB-262), so the model can never forge an executionId.
-        tools: [{
+        tools: [...(session.operation?.tools ?? []).map(tool => ({
+          name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters,
+        })), {
           name: 'submit', label: 'Submit',
           description: 'Submit this node required outputs through the graph kernel.',
           parameters: { type: 'object' } as never,
         }],
-        nativeTools: [],
-        skillPaths: [],
-        piExtensionPaths: [],
-        piExtensionTools: [],
+        nativeTools: [...(session.operation?.nativeTools ?? [])],
+        skillPaths: [...(session.operation?.skillPaths ?? [])],
+        ...(session.operation?.skillFolder ? { skillFolder: session.operation.skillFolder } : {}),
+        piExtensionPaths: [...(session.operation?.piExtensionPaths ?? [])],
+        piExtensionTools: [...(session.operation?.piExtensionTools ?? [])],
+        mcpAdapterServers: [...(session.operation?.mcpAdapterServers ?? [])],
         systemPrompt: session.systemPrompt,
         allowedToolNames: ['submit', ...session.allowedToolNames.filter(name => name !== 'submit')],
         bundleDigest: session.bundleDigest,
         toolPolicyDigest: session.toolPolicyDigest,
         runtimePolicyDigest: session.runtimePolicyDigest,
-        // The credential travels with the config so the worker reaches the provider (§3).
-        transport: { apiKey: credential.apiKey, api: model.api },
+        // Provider calls are executed by the host; credentials never enter this file.
+        hostModel: true,
       };
     },
     // One resident process per node, reused across turns.
     host: async (graphId: string, nodeId: string, config: unknown) => {
-      const cached = hosts.get(nodeId);
-      if (cached) return cached;
+      const key = `${graphId}/${nodeId}`;
+      const cached = hosts.get(key);
+      const signature = JSON.stringify(config);
+      if (cached && hostConfigs.get(key) === signature) return cached;
+      if (cached) await cached.stop();
       await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
       const host = new ResidentHost({
         workerEntry,
         cwd: workspace,
-        configPath: join(options.stateDir, 'kernel-worker', `${nodeId}.json`),
+        configPath: join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`),
         config: config as never,
+        onModelCall: async (raw, hostSignal) => {
+          const model = options.directory().find(entry => toPiModel(entry).id === (config as { model: { id: string } }).model.id);
+          if (!model) throw new Error('Bound model is no longer configured');
+          const credential = options.credentialFor(model);
+          if (!credential) throw new Error('Bound model credential unavailable');
+          const context = raw as Context;
+          if (!context || !Array.isArray(context.messages)) throw new Error('Invalid model context');
+          let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+          let unknown = false;
+          const gate = kernelProviderGate(options.kernel, graphId, nodeId, options.tokenBudget);
+          const observed: SendGate = {
+            dispatch: (id, reservation, send) => gate.dispatch(id, reservation, send),
+            settle: (id, cost) => { gate?.settle(id, cost); if (cost) {
+              for (const name of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) usage[name] += cost[name];
+            } else unknown = true; },
+          };
+          const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          if (!execution) throw new Error('No active execution');
+          const abort = new AbortController();
+          const cancel = () => abort.abort();
+          hostSignal.addEventListener('abort', cancel, { once: true });
+          const unsubscribe = options.kernel.store.onEvent(() => { if (options.kernel.store.task(graphId).phase === 'stopping') abort.abort(); });
+          const slot = options.scheduler && (credential.limit !== undefined || credential.groupLimit !== undefined) ? {
+            acquire: async (signal?: AbortSignal) => {
+              options.kernel.db.prepare('UPDATE kernel_executions SET waiting_slot=1 WHERE id=?').run(execution.id);
+              let release: (() => void) | undefined;
+              try {
+                const request = () => {
+                  const binding = options.credentialFor(model);
+                  if (!binding) throw new Error('Bound model credential unavailable');
+                  return { ...binding, credentialId: binding.credentialId ?? model.provider };
+                };
+                for (;;) {
+                  const before = request();
+                  release = await options.scheduler!.acquire({ ...before, refresh: request }, signal);
+                  const after = request();
+                  if (before.credentialId === after.credentialId && before.apiKey === after.apiKey) break;
+                  release(); release = undefined;
+                }
+                await waitForKernelExecutionSlot(options.kernel.store, execution.id, signal);
+                return release!;
+              } catch (error) {
+                release?.();
+                options.kernel.db.prepare('UPDATE kernel_executions SET waiting_slot=0 WHERE id=?').run(execution.id);
+                throw error;
+              }
+            },
+          } : undefined;
+          try {
+          const stream = await controlledOpenAIStream(observed, () => { const binding = options.credentialFor(model); if (!binding) throw new Error('Bound model credential unavailable'); return binding.apiKey; }, slot, model.api, {
+            onSend: prompt => options.kernel.db.prepare('INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)')
+              .run(graphId, nodeId, (options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined)?.id ?? null,
+                prompt.systemPrompt ?? '', prompt.toolDeclarations ?? '[]', Date.now()),
+          })(toPiModel(model), normalizeContext(context), { signal: abort.signal });
+          const frames = await encodeAssistantStream(stream);
+          const settlement = await stream.result();
+          return { frames, settlement, ...(!unknown ? { usage: { ...usage, total: tokenUsageTotal(usage), accounted: true } } : {}) };
+          } finally { unsubscribe(); hostSignal.removeEventListener('abort', cancel); }
+        },
+        onReady: inspect => recordNodeSession(options.kernel.store, (config as { binding: { instanceId: string } }).binding.instanceId, inspect.sessionId, inspect.sessionFile ?? null),
         // The node's `submit` runs in the host, over the real execution (HB-262): the lane
         // wires that through `onToolCall` when it builds the runner.
-        onToolCall: (name, args) => options.onToolCall?.(graphId, nodeId, name, args) ?? { ok: false, text: `the host does not offer a tool named ${name}` },
+        onEvent: event => {
+          const data = event as { type: string; message?: { role: string; content: unknown }; toolName?: string; toolCallId?: string; args?: unknown; result?: unknown; isError?: boolean; systemPrompt?: string; tools?: unknown };
+          const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          if (data.type === 'graph_provider_prompt') {
+            options.kernel.db.prepare('INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)')
+              .run(graphId, nodeId, execution?.id ?? null, data.systemPrompt ?? '', typeof data.tools === 'string' ? data.tools : JSON.stringify(data.tools ?? []), Date.now());
+          }
+          if (data.type === 'message_end' && data.message?.role === 'assistant') {
+            const content = data.message.content;
+            const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map(part => part.text ?? '').join('') : '';
+            if (text) appendNodeEntry(options.kernel.store, { taskId: graphId, nodeId, operationId: execution?.id ?? null, role: 'assistant', kind: 'message', text });
+          }
+          if (data.type === 'tool_execution_start' || data.type === 'tool_execution_end') {
+            const call = data.type === 'tool_execution_start';
+            appendNodeEntry(options.kernel.store, { taskId: graphId, nodeId, operationId: execution?.id ?? null, role: 'tool', kind: call ? 'call' : 'result',
+              text: JSON.stringify(call ? { name: data.toolName, args: data.args } : data.result),
+              data: { toolName: data.toolName ?? '', toolCallId: data.toolCallId ?? '', isError: data.isError ?? false } });
+          }
+        },
+        onToolCall: async (name, args) => {
+          const tool = sessions.get(key)?.operation?.tools.find(tool => tool.name === name);
+          if (!tool) return options.onToolCall?.(graphId, nodeId, name, args) ?? { ok: false, text: `the host does not offer a tool named ${name}` };
+          try {
+            const result = await tool.execute(randomUUID(), args as never, new AbortController().signal, undefined, undefined as never);
+            return { ok: !('isError' in result && result.isError), text: JSON.stringify(result) };
+          } catch (error) { return { ok: false, text: error instanceof Error ? error.message : String(error) }; }
+        },
       });
-      hosts.set(nodeId, host);
+      hosts.set(key, host);
+      hostConfigs.set(key, signature);
       return host;
     },
     // The scripted stand-ins go LAST so they win: `config` above resolves a real session
