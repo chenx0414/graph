@@ -13,6 +13,7 @@ import { GraphRuntime } from '../core/graph-runtime.ts';
 import { GraphLane } from '../core/graph-lane.ts';
 import type { RunnerHost } from '../core/graph-runner.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
+import { residentLauncher } from './resident-launcher.ts';
 import { ResidentHost } from './resident-host.ts';
 import { nodeSessionRequest, type NodeSessionRequest } from './kernel-node-host.ts';
 import { toPiModel } from './pi-adapter.ts';
@@ -163,16 +164,12 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           get: (id, version) => options.artifacts!.get(graphId, id, version),
           read: (id, version, maxBytes) => options.artifacts!.read(graphId, id, version, maxBytes),
           retire: (id, version, reason, requestId) => {
-            const record = options.artifacts!.get(graphId, id, version);
-            if (record.producer?.nodeId !== nodeId) throw new Error('Only the publisher may modify this artifact');
             const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
             if (!execution) throw new Error('No active execution');
             const admitted = options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string };
             return options.artifacts!.retire(graphId, id, version, reason, requestId, { nodeId, instanceId: admitted.instance_id, operationId: execution.id, activationId: execution.id });
           },
           publish: async input => {
-            const previous = options.artifacts!.list({ taskId: graphId, namespace: input.namespace, latestOnly: true }).artifacts.find(item => item.ownerId === graphId && item.name === input.name);
-            if (previous && previous.producer?.nodeId !== nodeId) throw new Error('Only the publisher may modify this artifact; publish a separate revision');
             const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
             if (!execution) throw new Error('No active execution');
             return options.artifacts!.publish({ ...input, taskId: graphId, workspace,
@@ -287,10 +284,15 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (cached) await cached.stop();
       await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
+      const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`);
+      const session = await sessionFor(graphId, nodeId);
+      if (!session.operation) throw new Error('Resident node has no resolved capability operation');
       const host = new ResidentHost({
+        launch: residentLauncher({ config: config as never, configPath, workerEntry, operation: session.operation,
+          ...(options.access ? { access: options.access() } : {}) }),
         workerEntry,
         cwd: workspace,
-        configPath: join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`),
+        configPath,
         config: config as never,
         onModelCall: async (raw, hostSignal) => {
           const model = options.directory().find(entry => toPiModel(entry).id === (config as { model: { id: string } }).model.id);

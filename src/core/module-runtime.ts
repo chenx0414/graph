@@ -243,10 +243,12 @@ export class ModuleRuntime {
     if (!Object.keys(module.inputs).includes(inputName)) {
       throw new RuntimeError('invalid_input', `Module ${moduleId} has no input ${inputName}`);
     }
-    const control = this.acceptControl(moduleId, inputName, value);
-    if (control) {
-      if (deliveryId) this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);
-      return control;
+    if (module.control?.reopen === inputName) {
+      return this.kernel.moduleTransaction(() => {
+        const control = this.acceptControl(moduleId, inputName, value)!;
+        if (deliveryId) this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?').run(deliveryId);
+        return control;
+      });
     }
     // §9: the input is stored FIRST, so a defect keeps it rather than losing it.
     this.kernel.setModuleInput(this.taskId, moduleId, inputName, value, 'deliver');

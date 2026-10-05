@@ -276,6 +276,8 @@ export interface RestrictedCommand {
   allowGitMetadataWritesAll?: boolean;
   timeoutMs?: number;
   onRequest?: (request: unknown) => Promise<unknown>;
+  /** Resident protocol notifications; replies travel over host-controlled stdin. */
+  onWorkerMessage?: (message: unknown) => void;
   /** Confirmed program checks may bind and reach loopback for local app/browser tests. */
   localNetwork?: boolean;
   /** MCP-only outbound allowlist for the restricted process. */
@@ -703,8 +705,8 @@ export async function openRestrictedExecutor() {
                 catch { /* already closed */ }
               },
               kill(signal = 'SIGTERM') {
-                try { return spawned.kill(signal); }
-                catch { return false; }
+                try { process.kill(-spawned.pid!, signal); return true; }
+                catch { try { return spawned.kill(signal); } catch { return false; } }
               },
             });
             if (command.localNetwork) {
@@ -842,6 +844,13 @@ export async function openRestrictedExecutor() {
                 : undefined;
               if (operation === 'cancel') {
                 command.onCancel?.(parsed);
+                continue;
+              }
+              if (command.onWorkerMessage) {
+                try { command.onWorkerMessage(parsed); } catch (error) {
+                  stderr += `Worker notification handling failed: ${String(error)}\n`;
+                  killTree(); return;
+                }
                 continue;
               }
               requests = requests.then(async () => {

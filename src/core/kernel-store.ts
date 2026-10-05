@@ -432,7 +432,9 @@ export class KernelStore {
       if (!node) throw new RuntimeError('invalid_submit', `Execution node ${execution.nodeId} is not in revision ${revision.version}`);
 
       // The output set is validated as a whole before anything is written.
-      const enabled = Object.entries(request.outputs).filter(([, output]) => output.enable === true);
+      if (!request.outputs || typeof request.outputs !== 'object' || Array.isArray(request.outputs)) {
+        throw new RuntimeError('invalid_submit', 'outputs must be a named object');
+      }
       for (const [name, output] of Object.entries(request.outputs)) {
         const declared = node.outputs[name];
         if (!declared) throw new RuntimeError('invalid_submit', `Node ${execution.nodeId} has no output ${name}`);
@@ -445,6 +447,7 @@ export class KernelStore {
       }
       // Required outputs must be enabled in this submission (§4).
       const queue = this.db.prepare("SELECT kind FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed' LIMIT 1").get(execution.taskId, execution.nodeId) as { kind: string } | undefined;
+      const enabled = Object.entries(request.outputs).filter(([, output]) => output.enable === true);
       const required = queue?.kind === 'chat' ? [] : node.submission.required ?? [];
       const anyOf = queue?.kind === 'chat' ? [] : node.submission.requiredAnyOf ?? [];
       if (anyOf.length && !anyOf.some(name => request.outputs[name]?.enable)) throw new RuntimeError('invalid_submit', `Required output(s) not enabled: ${anyOf.join(', ')}`);

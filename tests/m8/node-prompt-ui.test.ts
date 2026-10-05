@@ -162,10 +162,10 @@ test('native graph chats keep a session and expose the actual provider prompt in
   expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').recorded?.text).toBe(actual);
   const page = await launch();
   await page.goto(`${server.url}/#/tasks/${graph.graphId}/graph`);
-  await expect.poll(() => page.locator('.react-flow__edge').count()).toBe(1);
+  await expect.poll(() => page.locator('.react-flow__edge').count(), { timeout: 10_000 }).toBe(1);
   await page.getByTestId('container-build').click();
   await expect.poll(() => page.locator('[data-node-id="build/worker"]').count()).toBe(0);
-  await expect.poll(() => page.locator('.react-flow__edge').count()).toBe(1);
+  await expect.poll(() => page.locator('.react-flow__edge').count(), { timeout: 10_000 }).toBe(1);
   await page.getByTestId('container-build').click();
   await page.locator('[data-node-id="build/worker"]').click();
   await page.getByTestId('node-prompt').locator('summary').click();

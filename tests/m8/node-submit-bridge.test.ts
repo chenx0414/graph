@@ -81,6 +81,17 @@ describe('NodeSubmitBridge — a node submit lands in the kernel (HB-257)', () =
     expect(good.accepted).toBe(true);
   });
 
+  test('malformed output envelopes are correctable refusals and leave no partial submission', () => {
+    const { kernel, bridge } = opened();
+    for (const outputs of [null, { out: null }, { out: { enable: 'yes' } }]) {
+      const refused = bridge.submit({ outputs: outputs as never, submissionId: 'bad-envelope' });
+      expect(refused.accepted).toBe(false);
+      expect(refused.defects[0]?.expected).toBeTruthy();
+      expect(kernel.deliveriesFor('x1')).toHaveLength(0);
+    }
+    expect(bridge.submit({ outputs: { out: { enable: true, value: { n: 1 } } }, submissionId: 'corrected' }).accepted).toBe(true);
+  });
+
   test('B5: a missing required output is reported as missing-required', () => {
     const { bridge, kernel } = opened();
     const refused = bridge.submit({ outputs: { out: { enable: false } }, submissionId: 's1' });

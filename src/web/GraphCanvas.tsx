@@ -96,7 +96,15 @@ function GraphNode({ data, selected }: NodeProps) {
   );
 }
 
-const nodeTypes = { graphNode: GraphNode };
+function GraphContainer({ data }: NodeProps) {
+  return <>
+    <Handle id="target-top" type="target" position={Position.Top} style={handleStyle} />
+    <span>{String(data.label)}</span>
+    <Handle id="source-bottom" type="source" position={Position.Bottom} style={handleStyle} />
+  </>;
+}
+
+const nodeTypes = { graphNode: GraphNode, graphContainer: GraphContainer };
 
 /**
  * The label an edge carries, drawn at its midpoint.
@@ -209,11 +217,12 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
     graph.layout.positions,
   );
   const nodes = [
-    ...graph.containers.map(container => {
+    ...graph.containers.filter(container => !container.parent || !hiddenContainers.has(container.parent)).map(container => {
       const position = graph.layout.positions[container.id] ?? { x: 0, y: 0, width: 240, height: 120 };
       return {
-        id: container.id, type: 'default', position: relativePosition(container.id, position),
+        id: container.id, type: 'graphContainer', position: relativePosition(container.id, position),
         data: { label: `${container.id}` }, className: 'container-card',
+        measured: { width: position.width, height: position.height },
         style: { width: position.width, height: position.height, zIndex: -1 },
         ...(container.parent ? { parentId: container.parent } : {}),
       };
@@ -271,12 +280,12 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
         id: edge.id, source: edge.source, target: edge.target, type: loop ? 'gridLoop' : 'grid',
         ...(loop
           ? {
-              ...(sourceIsNode ? { sourceHandle: 'source-left' } : {}),
-              ...(targetIsNode ? { targetHandle: 'target-left' } : {}),
+              sourceHandle: sourceIsNode ? 'source-left' : 'source-bottom',
+              targetHandle: targetIsNode ? 'target-left' : 'target-top',
             }
           : {
-              ...(sourceIsNode ? { sourceHandle: 'source-bottom' } : {}),
-              ...(targetIsNode ? { targetHandle: 'target-top' } : {}),
+              sourceHandle: 'source-bottom',
+              targetHandle: 'target-top',
             }),
         className: loop ? 'grid-edge grid-loop-edge' : 'grid-edge',
         data: edgeData,

@@ -109,3 +109,18 @@ test('formal declaration compiles two pinned instances and parent connections wi
   expect(parseGraphDefinition(parent).subgraphInstances?.first?.version).toBe(7);
   expect(() => parseGraphDefinition({ ...parent, templates: { build: { version: 8, definition: inner } }, instances: { third: { template: 'build', version: 7 } } })).toThrow(/version/);
 });
+
+// Nested reusable definitions need the full instance hierarchy for ports and folding.
+test('nested instances preserve their public interfaces and independent container paths', () => {
+  const middle = { schemaVersion: 2, name: 'middle', protocols: {}, nodes: {}, modules: {}, edges: {},
+    templates: { leaf: { version: 3, definition: template() } }, instances: { inner: { template: 'leaf', version: 3 } },
+    inputs: { job: { to: 'inner.job', protocol: 'job' } }, outputs: { result: { from: 'inner.result', protocol: 'done' } } };
+  const outer = parseGraphDefinition({ schemaVersion: 2, name: 'outer', protocols: {}, nodes: {}, modules: {}, edges: {},
+    templates: { middle: { version: 2, definition: middle } }, instances: { first: { template: 'middle', version: 2 }, second: { template: 'middle', version: 2 } },
+    inputs: { job: { to: 'first.job', protocol: 'job' } }, outputs: { result: { from: 'second.result', protocol: 'done' } } });
+  expect(outer.subgraphInstances?.['first/inner']?.inputs.job?.to).toBe('first/inner/work.in');
+  expect(outer.subgraphInstances?.['second/inner']?.outputs.result?.from).toBe('second/inner/work.out');
+  expect(outer.inputs.job?.to).toBe('first/inner/work.in');
+  expect(outer.outputs.result?.from).toBe('second/inner/work.out');
+  expect(parseGraphDefinition(outer).subgraphs).toEqual(['first', 'first/inner', 'second', 'second/inner']);
+});

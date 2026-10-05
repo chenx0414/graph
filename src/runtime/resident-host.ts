@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import { Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import type { AgentSessionInspect } from './agent-session.ts';
+import type { RestrictedProcessControl } from './restricted-process.ts';
 import type { PiWorkerConfig } from './pi-process.ts';
 
 /**
@@ -40,6 +41,10 @@ export interface ResidentHostOptions {
   configPath: string;
   /** Optional node runtime spawner; the default uses node's child_process. */
   spawnImpl?: typeof spawn;
+  /** Production transport supplies the resolved OS sandbox and owns its process tree. */
+  launch?: (callbacks: { message(value: unknown): void; exit(error: Error): void }) => Promise<{
+    control: RestrictedProcessControl; exited: Promise<void>;
+  }>;
   /**
    * Answers a node's tool call (HB-262). A tool like `submit` must run in the host, where
    * the kernel and the execution identity live, so the node's call arrives here and this
@@ -57,6 +62,8 @@ const defaultWorkerEntry = fileURLToPath(new URL('./resident-worker-entry.ts', i
 /** One resident worker process for one node, addressable across turns. */
 export class ResidentHost {
   private child: ChildProcess | undefined;
+  private restricted: { control: RestrictedProcessControl; exited: Promise<void> } | undefined;
+  private startupReject: ((error: Error) => void) | undefined;
   private channel: Socket | undefined;
   private stdin: NodeJS.WritableStream | undefined;
   private originalPid: number | undefined;
@@ -77,8 +84,21 @@ export class ResidentHost {
 
   /** Start (or restart) the process. Idempotent while the process is alive. */
   async start(): Promise<ResidentInspect> {
-    if (this.child && this.alive()) return this.ready!;
+    if (this.alive()) return this.awaitReady();
     await writeFile(this.options.configPath, JSON.stringify(this.options.config), { mode: 0o600 });
+    this.closed = false; this.buffer = ''; this.ready = undefined;
+    if (this.options.launch) {
+      this.spawns += 1;
+      const launched = await this.options.launch({
+        message: value => this.onData(`${JSON.stringify(value)}\n`),
+        exit: error => this.onExit(error),
+      });
+      this.restricted = launched;
+      this.originalPid = launched.control.pid;
+      const ready = await this.awaitReady();
+      this.options.onReady?.(ready);
+      return ready;
+    }
     const spawnImpl = this.options.spawnImpl ?? spawn;
     const entry = this.options.workerEntry || defaultWorkerEntry;
     const child = spawnImpl(process.execPath, [entry, this.options.configPath], {
@@ -124,7 +144,11 @@ export class ResidentHost {
         try { parsed = JSON.parse(line); } catch {
           const error = new Error('Resident worker emitted invalid channel JSON');
           for (const request of this.pending.values()) request.reject(error);
-          this.pending.clear(); this.child?.kill('SIGKILL'); return;
+          this.onExit(error); this.restricted?.control.kill('SIGKILL'); this.child?.kill('SIGKILL'); return;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          this.onExit(new Error('Resident worker emitted invalid channel message'));
+          this.restricted?.control.kill('SIGKILL'); this.child?.kill('SIGKILL'); return;
         }
         const message = parsed as { operation?: string; requestId?: string; inspect?: ResidentInspect; name?: string; args?: unknown; event?: unknown; context?: unknown };
         // A node asking the host to run a tool (HB-262). The answer goes back on stdin,
@@ -134,8 +158,8 @@ export class ResidentHost {
           const abort = new AbortController();
           this.modelAborts.add(abort);
           void Promise.resolve(this.options.onModelCall?.(message.context, abort.signal) ?? Promise.reject(new Error('Host model transport unavailable')))
-            .then(value => { this.stdin?.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: true, value })}\n`); })
-            .catch(error => { this.stdin?.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: false, error: error instanceof Error ? error.message : String(error) })}\n`); })
+            .then(value => { this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: true, value })}\n`); })
+            .catch(error => { this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: false, error: error instanceof Error ? error.message : String(error) })}\n`); })
             .finally(() => this.modelAborts.delete(abort));
           newline = this.buffer.indexOf('\n');
           continue;
@@ -145,8 +169,8 @@ export class ResidentHost {
           void Promise.resolve(this.options.onToolCall
             ? this.options.onToolCall(String(message.name), message.args)
             : { ok: false, text: `the host does not offer a tool named ${String(message.name)}` })
-            .then(answer => { this.stdin?.write(`${JSON.stringify({ operation: 'tool_result', requestId, ...answer })}\n`); })
-            .catch(error => { this.stdin?.write(`${JSON.stringify({ operation: 'tool_result', requestId, ok: false, text: error instanceof Error ? error.message : String(error) })}\n`); });
+            .then(answer => { this.write(`${JSON.stringify({ operation: 'tool_result', requestId, ...answer })}\n`); })
+            .catch(error => { this.write(`${JSON.stringify({ operation: 'tool_result', requestId, ok: false, text: error instanceof Error ? error.message : String(error) })}\n`); });
           newline = this.buffer.indexOf('\n');
           continue;
         }
@@ -159,16 +183,32 @@ export class ResidentHost {
     }
   }
 
+  private write(line: string): void {
+    if (this.restricted) this.restricted.control.write(JSON.parse(line));
+    else this.stdin?.write(line);
+  }
+
+  private onExit(error: Error): void {
+    this.closed = true; this.buffer = '';
+    for (const abort of this.modelAborts) abort.abort();
+    this.modelAborts.clear();
+    this.startupReject?.(error); this.startupReject = undefined;
+    for (const request of this.pending.values()) request.reject(error);
+    this.pending.clear();
+  }
+
   private resolveReady(inspect: ResidentInspect): void { this.ready = inspect; for (const resolve of this.readyResolvers.splice(0)) resolve(inspect); }
   private awaitReady(): Promise<ResidentInspect> {
     // A `ready` notification and this promise can race, so the resolver list is
     // checked by resolveReady whenever the worker announces itself; the timeout
     // only guards a worker that never does.
+    if (this.closed) return Promise.reject(new Error('resident worker exited before ready'));
     if (this.ready) return Promise.resolve(this.ready);
     return new Promise<ResidentInspect>((resolve, reject) => {
       let settled = false;
-      const finish = (action: () => void) => { if (settled) return; settled = true; clearTimeout(timer); action(); };
+      const finish = (action: () => void) => { if (settled) return; settled = true; clearTimeout(timer); this.startupReject = undefined; action(); };
       const timer = setTimeout(() => finish(() => reject(new Error('resident worker did not become ready'))), 20_000);
+      this.startupReject = error => finish(() => reject(error));
       this.readyResolvers.push(inspect => finish(() => resolve(inspect)));
       // A worker that dies before it is ready must fail now, not after the timeout: a
       // misconfigured node would otherwise hang the graph and hide the startup error.
@@ -178,11 +218,11 @@ export class ResidentHost {
   }
 
   private send(message: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (!this.stdin) return Promise.reject(new Error('resident worker has no channel'));
+    if (!this.stdin && !this.restricted) return Promise.reject(new Error('resident worker has no channel'));
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject });
-      this.stdin!.write(`${JSON.stringify({ ...message, requestId })}\n`);
+      this.write(`${JSON.stringify({ ...message, requestId })}\n`);
     });
   }
 
@@ -202,16 +242,16 @@ export class ResidentHost {
   }
 
   alive(): boolean {
-    return this.child !== undefined && !this.closed && this.child.exitCode === null;
+    return !this.closed && (this.restricted !== undefined || (this.child !== undefined && this.child.exitCode === null));
   }
 
   /** The same OS process is still running as when it started. */
   pidIsStable(): boolean {
-    return this.alive() && this.child!.pid === this.originalPid;
+    return this.alive() && this.pid() === this.originalPid;
   }
 
   pid(): number | null {
-    return this.child?.pid ?? null;
+    return this.restricted?.control.pid ?? this.child?.pid ?? null;
   }
 
   /** How many processes this host has started for the node (1 + recoveries + rebinds). */
@@ -222,11 +262,22 @@ export class ResidentHost {
   /** Stop the process. A later start() rebuilds it with the same identity. */
   async stop(): Promise<void> {
     for (const abort of this.modelAborts) abort.abort();
+    if (this.restricted) {
+      const process = this.restricted;
+      if (this.alive()) {
+        process.control.write({ operation: 'close' });
+        await Promise.race([process.exited, new Promise<void>(resolve => setTimeout(resolve, 2_000))]);
+        if (!this.closed) process.control.kill('SIGKILL');
+      }
+      await process.exited;
+      this.restricted = undefined; this.closed = true;
+      return;
+    }
     const child = this.child;
     if (!child) return;
     if (this.alive()) {
       const exited = new Promise<void>(resolve => child.on('exit', () => resolve()));
-      this.stdin?.write(`${JSON.stringify({ operation: 'close' })}\n`);
+      this.write(`${JSON.stringify({ operation: 'close' })}\n`);
       await Promise.race([exited, new Promise<void>(resolve => setTimeout(resolve, 2_000))]);
       if (this.child!.exitCode === null) child.kill('SIGKILL');
       await exited.catch(() => undefined);

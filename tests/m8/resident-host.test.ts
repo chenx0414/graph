@@ -1,10 +1,11 @@
-import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import { afterEach, expect, test } from 'vitest';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import { residentLauncher } from '../../src/runtime/resident-launcher.ts';
 import { ResidentHost } from '../../src/runtime/resident-host.ts';
 
 /**
@@ -139,3 +140,40 @@ test('a process exit during a pending turn rejects promptly instead of leaving t
   process.kill(host.pid()!, 'SIGKILL');
   await rejected;
 });
+
+// This protects the resident transport's permission boundary, absent from direct-spawn H1:
+// a regression to unrestricted spawn lets an extension read outside its declared roots.
+test('resident Pi keeps its session while extension code obeys the OS grants', async () => {
+  const provider = await openaiServer([{ text: 'first' }, { text: 'second' }]);
+  cleanup.push(() => provider.close());
+  const { work, stateDir } = await workspace();
+  const outside = join(stateDir, '..', 'private.txt');
+  await writeFile(outside, 'outside-granted-roots');
+  const extension = join(work, 'permission-probe.ts');
+  await writeFile(extension, `import {readFileSync, writeFileSync} from 'node:fs';
+    export default function() {
+      let outside = 'allowed';
+      try { readFileSync(${JSON.stringify(outside)}, 'utf8'); } catch { outside = 'denied'; }
+      writeFileSync(${JSON.stringify(join(work, 'permission-result.json'))}, JSON.stringify({outside}));
+    }`);
+  const config = { ...configFor(work, stateDir, provider.model, 'sandboxed'),
+    piExtensionPaths: [extension], transport: { apiKey: 'local-fixture', api: 'openai-completions' as const } };
+  const configPath = join(stateDir, 'config.json');
+  const host = new ResidentHost({ workerEntry, cwd: work, configPath, config,
+    launch: residentLauncher({ config, configPath, workerEntry, operation: {
+      readRoots: [], writeRoots: [], unixSockets: [], env: {},
+      networkDomains: ['127.0.0.1'], allowUnrestrictedNetwork: false, allowLocalBinding: true,
+    } }),
+  });
+  cleanup.push(() => host.stop());
+  const ready = await host.start();
+  expect(JSON.parse(await readFile(join(work, 'permission-result.json'), 'utf8'))).toEqual({ outside: 'denied' });
+  const first = await host.turn('first turn');
+  const second = await host.turn('second turn');
+  expect(second.inspect.processId).toBe(ready.processId);
+  expect(second.inspect.sessionId).toBe(first.inspect.sessionId);
+  expect(provider.requests).toHaveLength(2);
+  await host.stop();
+  expect(host.alive()).toBe(false);
+  expect(await readFile(outside, 'utf8')).toBe('outside-granted-roots');
+}, 60_000);

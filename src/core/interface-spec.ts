@@ -323,6 +323,13 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
         definition.edges[key] = edge;
       }
       definition.subgraphInstances[id] = { template: instanceRef.template, version: instanceRef.version, inputs: expanded.inputs, outputs: expanded.outputs };
+      for (const [nestedId, nested] of Object.entries(template.subgraphInstances ?? {})) {
+        definition.subgraphInstances[`${id}/${nestedId}`] = {
+          template: nested.template, version: nested.version,
+          inputs: Object.fromEntries(Object.entries(nested.inputs).map(([port, io]) => [port, { ...io, to: `${id}/${io.to}` }])),
+          outputs: Object.fromEntries(Object.entries(nested.outputs).map(([port, io]) => [port, { ...io, from: `${id}/${io.from}` }])),
+        };
+      }
     }
     const resolve = (reference: string, kind: 'input' | 'output'): string => {
       const dot = reference.indexOf('.');
