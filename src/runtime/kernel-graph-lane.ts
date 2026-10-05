@@ -1,6 +1,7 @@
 import { executeModuleOperation } from './kernel-operation-broker.ts';
 import { waitForKernelExecutionSlot } from './execution-slots.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
+import { RuntimeError } from '../core/types.ts';
 import { randomUUID } from 'node:crypto';
 import type { AgentContextLibrary } from './agent-context.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
@@ -226,6 +227,20 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   });
 
   return new GraphLane({
+    settleWorkspace: async executionId => {
+      const execution = options.kernel.execution(executionId);
+      if (!execution || !options.git || !options.kernel.store.task(execution.taskId).integration_branch) return;
+      if (closing || ['stopping', 'stopped'].includes(options.kernel.store.task(execution.taskId).phase)) throw new RuntimeError('paused', 'Git integration is closed');
+      const node = options.kernel.revision(execution.taskId, execution.revisionVersion)!.definition.nodes[execution.nodeId]!;
+      const known = options.catalog.listDefinitions().some(recipe => `${recipe.id}@${recipe.version}` === node.recipe);
+      // Reviewer reports are shared artifacts; they must not become implementation changes.
+      if (known && options.catalog.definition(node.recipe!).review === true) return;
+      const admitted = options.kernel.listNodes(execution.taskId).find(candidate => candidate.nodeId === execution.nodeId)!;
+      const result = await options.git.exclusive(execution.taskId, () => options.git!.integrate({
+        id: execution.id, taskId: execution.taskId, nodeId: execution.nodeId, instanceId: admitted.instanceId, kind: 'agent',
+      }));
+      if (result && !result.ok) throw new RuntimeError('git_conflict', `Git integration refused: ${result.conflicts.join(', ')}. Inspect the worktree and integration tip before retrying.`);
+    },
     operation: async (graphId, request) => {
       const workspace = options.git?.workspace(graphId, null, request.moduleId, 'program', 'graph.command') ?? options.workspaceFor(graphId);
       if (!workspace) throw new Error('Operation module has no workspace');

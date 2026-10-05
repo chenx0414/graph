@@ -44,6 +44,7 @@ export interface ModuleOperationRequest {
 export interface GraphRunnerOptions {
   kernel: KernelStore;
   graphId: string;
+  settleWorkspace?: (executionId: string) => Promise<void>;
   signal?: AbortSignal;
   operation?: (request: ModuleOperationRequest) => Promise<{ ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[] }>;
   /**
@@ -177,6 +178,7 @@ export class GraphRunner {
     let driver: NodeTurnDriver;
     const executor = new NodeExecutor({
       maxItems: 1, kernel, graphId: this.options.graphId,
+      ...(this.options.settleWorkspace ? { settleWorkspace: this.options.settleWorkspace } : {}),
       // Claim the input and persist its revision before any asynchronous session assembly.
       host: async (_executionId, revisionVersion) => {
         const nodeHost = await this.options.hostFor(nodeId, revisionVersion);

@@ -19,6 +19,7 @@ import { GraphRunner, type RunnerHost, type RunResult, type ModuleOperationReque
 
 export interface GraphLaneOptions {
   kernel: KernelStore;
+  settleWorkspace?: (executionId: string) => Promise<void>;
   close?: () => Promise<void>;
   operation?: (graphId: string, request: ModuleOperationRequest) => ReturnType<NonNullable<GraphRunnerOptions['operation']>>;
   closeGraph?: (graphId: string) => Promise<void>;
@@ -112,6 +113,7 @@ export class GraphLane {
     const runner = new GraphRunner({
       kernel,
       graphId, signal: this.shutdown.signal,
+      ...(this.options.settleWorkspace ? { settleWorkspace: this.options.settleWorkspace } : {}),
       ...(this.options.operation ? { operation: (request: ModuleOperationRequest) => this.options.operation!(graphId, request) } : {}),
       ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
         ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),

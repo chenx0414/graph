@@ -384,7 +384,7 @@ export class GitIntegration {
     return { name, email: `${slug}@agents.graph.local` };
   }
 
-  integrate(operation: Operation) {
+  integrate(operation: Pick<Operation, 'id' | 'taskId' | 'nodeId' | 'instanceId' | 'kind'>) {
     if (!operation.instanceId || operation.kind !== 'agent') return;
     const task = this.store.task(operation.taskId);
     if (!task.integration_branch) return;
@@ -530,7 +530,7 @@ export class GitIntegration {
   }
 
   /** Put a lane's out-of-scope paths back to the integration tip before its branch is merged. */
-  private restoreOutOfScope(tree: { path: string; branch: string }, base: string | null, operation: Operation, identity: GitIdentity) {
+  private restoreOutOfScope(tree: { path: string; branch: string }, base: string | null, operation: Pick<Operation, 'id' | 'taskId' | 'nodeId'>, identity: GitIdentity) {
     if (!base) return;
     const scope = this.declaredScope(operation.taskId, operation.nodeId);
     if (!scope) return;

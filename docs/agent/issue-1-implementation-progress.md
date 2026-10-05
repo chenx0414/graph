@@ -107,3 +107,13 @@
 - 实际 Pi 两次聊天证明：修改节点运行指导后，第二次实际 provider 请求使用新文本，session ID 保留；配置缓存纳入相关可编辑提示，host 使用同次配置准备的能力会话，避免再读活动配置。
 - 配方角色回归修复前注入 WORKER POLICY 而没有 REVIEWER POLICY；真实提示更新回归修复前第二次仍使用 FIRST 而非 NEXT。各自在修复后通过，3 文件 12 用例定向验证通过；角色视图新增验证纳入本轮完整门禁。
 - 审查工作副本刷新、独立模型排除与不可变调用历史仍待接线；最终验收/Git 与正式旧内核退役仍是未完成事项。
+
+
+## Native 执行完成与 Git 集成
+
+- 第十轮完整门禁通过：272 文件、1804 用例，202.50 秒；证据未改写；配方身份与提示更新提交为 d1f4eb3。
+- task execution 完成前接入实际工作副本结算，复用 GitIntegration 的提交/合并与冲突处理；接口 submit 仍立即投递。聊天不执行 Git 集成，reviewer 的报告作为共享产物而不合入实现。
+- Git 接口改为只依赖实际 Git 工作身份（execution/task/node/instance/kind），不需要伪造完整旧 Operation 或插入旧 nodes/operations。集成异常留下本次失败输入及已投递的 submit，不能重发成功提交。
+- 新回归使用真实 Pi、HTTP fixture、临时 Git 和磁盘 SQLite：write_file 实际修改自己的 worktree，再 submit；集成文件及 SHA 更新，目标 main 保留原 SHA 和内容，旧 nodes/operations 都是零条。
+- 首版夹具误用了未开放的 write 工具，已纠正为 write_file。纠正后的回归在 d1f4eb3 上先证明 worker 文件已改，再因集成文件仍为 before 失败；修复后 3 文件 11 用例通过。
+- 这只是集成步骤，不是最终验收或目标分支交付：精确 commit 检查、独立模型历史、human acceptance、formal scope/config、Git 恢复仍需接线。特别需要补齐提交前发布代码稳定 commit 的宿主能力，不能依赖执行结束后自动提交来证明提前投递的代码版本。

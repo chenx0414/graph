@@ -56,6 +56,8 @@ export type TurnRunner = (
 
 export interface NodeExecutorOptions {
   maxItems?: number;
+  /** Commit and integrate a completed task workspace before marking its execution complete. */
+  settleWorkspace?: (executionId: string) => Promise<void>;
   signal?: AbortSignal;
   kernel: KernelStore;
   graphId: string;
@@ -243,6 +245,10 @@ export class NodeExecutor {
         // node here rather than let it pass with the work missing.
         const settled = item.kind === 'chat' ? { ok: true as const } : await this.settleDeliverable(executionId, nodeId);
         if (!settled.ok) { releaseHold(); return this.fail(executionId, nodeId, seq, settled.reason); }
+        if (item.kind !== 'chat' && this.options.settleWorkspace) {
+          try { await this.options.settleWorkspace(executionId); }
+          catch (error) { return this.fail(executionId, nodeId, seq, error instanceof Error ? error.message : String(error)); }
+        }
         this.kernel.finishExecution(executionId, 'completed');
         this.kernel.completeNode(this.graphId, nodeId);
         this.queue.complete(seq, { kind: 'submitted' });
