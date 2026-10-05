@@ -20,7 +20,7 @@ export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: stri
   const row = kernel.listNodes(graphId).find(node => node.nodeId === nodeId);
   const definition = kernel.latestRevision(graphId)?.definition.nodes[nodeId];
   if (!row || !definition) throw new RuntimeError('not_found', `Unknown node ${nodeId}`);
-  const binding = kernel.db.prepare('SELECT model_id FROM kernel_node_bindings WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { model_id: string } | undefined;
+  const binding = kernel.db.prepare('SELECT model_id,role FROM kernel_node_bindings WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { model_id: string; role: string | null } | undefined;
   const state = kernel.db.prepare('SELECT used FROM kernel_node_state WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { used: number } | undefined;
   const session = kernel.db.prepare('SELECT session_id,session_file FROM node_sessions WHERE instance_id=?').get(row.instanceId) as { session_id: string; session_file: string | null } | undefined;
   const executions = kernel.db.prepare('SELECT id,attempt,state,submission_id,started_at,ended_at,retries_used,resubmits_used FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid').all(graphId, nodeId) as { id: string; attempt: number; state: string; submission_id: string | null; started_at: number; ended_at: number | null; retries_used: number; resubmits_used: number }[];
@@ -29,7 +29,7 @@ export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: stri
   const settled = executions.filter(item => item.ended_at !== null);
   return {
     taskId: graphId, nodeId, context: null,
-    node: { id: nodeId, kind: 'agent', action: definition.task, role: 'worker', status: row.status, definitionVersion: definition.recipe },
+    node: { id: nodeId, kind: 'agent', action: definition.task, role: binding?.role ?? null, status: row.status, definitionVersion: definition.recipe },
     instance: { id: row.instanceId, model: binding?.model_id ?? null, definitionVersion: definition.recipe ?? null,
       used: state?.used ?? 0, budget: null, unlimited: false, modelsUsed: binding?.model_id ? [binding.model_id] : [] },
     session: session ? { sessionId: session.session_id, sessionFile: session.session_file } : null,
@@ -50,9 +50,9 @@ export function kernelNodePrompt(kernel: KernelStore, graphId: string, nodeId: s
   const record = kernel.db.prepare('SELECT execution_id,system_prompt,tools,created_at FROM kernel_prompts WHERE task_id=? AND node_id=? ORDER BY seq DESC LIMIT 1').get(graphId, nodeId) as { execution_id: string; system_prompt: string; tools: string; created_at: number } | undefined;
   const first = kernel.db.prepare("SELECT text FROM node_entries WHERE task_id=? AND node_id=? AND role='user' ORDER BY seq LIMIT 1").get(graphId, nodeId) as { text: string } | undefined;
   const session = kernel.db.prepare('SELECT session_file FROM node_sessions WHERE instance_id=?').get(node.instanceId) as { session_file: string | null } | undefined;
-  const binding = kernel.db.prepare('SELECT model_id FROM kernel_node_bindings WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { model_id: string } | undefined;
+  const binding = kernel.db.prepare('SELECT model_id,role FROM kernel_node_bindings WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { model_id: string; role: string | null } | undefined;
   return {
-    taskId: graphId, nodeId, kind: 'agent', action: definition.task, role: 'worker', definitionVersion: definition.recipe ?? null,
+    taskId: graphId, nodeId, kind: 'agent', action: definition.task, role: binding?.role ?? null, definitionVersion: definition.recipe ?? null,
     model: binding?.model_id ?? null, status: node.status,
     recorded: record ? { operationId: record.execution_id, at: record.created_at, text: record.system_prompt, tools: record.tools } : null,
     briefing: first ? { text: first.text, sessionFile: session?.session_file ?? '' } : null,

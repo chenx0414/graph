@@ -76,3 +76,9 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 结果包含 passed、code、commit、operationId、record、stdout/stderr 摘要和耗时；record 指向完整命令记录。非零退出码产生 passed:false。commit 记录命令开始前的 HEAD，本身不证明执行期间文件未变化，也不替代最终版本验收。sandbox 默认启用；sandbox:false 仅允许 full access。
 
 `graph_inspect({graphId,query:"operations"})` 查看持久操作记录。已保存结果在恢复时用于继续投递，不重新执行命令；派发后中断且没有可靠结果的操作标记 uncertain，暂停模块等待 main 检查。停止会终止命令进程组。
+
+## 节点身份与可编辑提示
+
+recipe 的 review 标记决定审查身份及规则；节点名称和任务文字不参与身份推断。节点运行指导使用可编辑的 runtime/node.md，描述实际 submit、具名输出、聊天和稳定产物引用，不注入旧 submit_result 指令。
+
+身份、通用规则、相应角色规则/工具指导及节点运行指导修改后，从下一次执行生效；受控重绑保留原会话历史。节点视图显示实际绑定角色，尚未绑定时保持未知。

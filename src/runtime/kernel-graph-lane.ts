@@ -2,6 +2,7 @@ import { executeModuleOperation } from './kernel-operation-broker.ts';
 import { waitForKernelExecutionSlot } from './execution-slots.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { randomUUID } from 'node:crypto';
+import type { AgentContextLibrary } from './agent-context.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
@@ -47,6 +48,7 @@ export interface KernelGraphLaneOptions {
   kernel: KernelStore;
   access?: () => ResolvedAccessPolicy;
   catalog: Catalog;
+  library?: AgentContextLibrary;
   /**
    * §9: the token budget a node runs under. Absent means unmetered - which is the right
    * default for a program node, but NOT for an agent that can spend real tokens, so the
@@ -136,7 +138,14 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     const cached = sessions.get(key);
     const revision = options.kernel.revision(graphId, revisionVersion);
     if (!revision) throw new Error(`graph ${graphId} has no revision to run`);
-    const configuration = JSON.stringify({ recipe: revision.definition.nodes[nodeId]?.recipe, access: options.access?.() });
+    const recipe = revision.definition.nodes[nodeId]?.recipe;
+    const role = recipe && options.catalog.definition(recipe).review === true ? 'reviewer' : 'worker';
+    const prompts = options.library ? await Promise.all([
+      options.library.prompt('rules/common.md'), options.library.prompt(`rules/${role}.md`),
+      options.library.prompt(`tools/${role}.md`), options.library.prompt('runtime/node.md'),
+      options.library.agentPrompt(recipe?.split('@')[0] ?? nodeId, null),
+    ]) : null;
+    const configuration = JSON.stringify({ recipe, prompts, access: options.access?.() });
     if (cached && sessionRevisions.get(key) === configuration) return cached;
     if (cached) { await hosts.get(key)?.stop(); hosts.delete(key); await cached.close(); }
     const workspace = nodeWorkspace(graphId, nodeId);
@@ -146,6 +155,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       ...(options.access ? { access: options.access() } : {}),
       kernel: options.kernel,
       catalog: options.catalog,
+      ...(options.library ? { library: options.library } : {}),
       graphId,
       nodeId,
       revisionVersion: revision.version,
@@ -254,8 +264,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const credential = options.credentialFor(model);
       if (!credential) throw new Error(`no credential bound for model ${model.id}`);
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
-      options.kernel.db.prepare('INSERT INTO kernel_node_bindings(task_id,node_id,model_id,system_prompt,tools,state_dir) VALUES(?,?,?,?,?,?) ON CONFLICT(task_id,node_id) DO UPDATE SET model_id=excluded.model_id,system_prompt=excluded.system_prompt,tools=excluded.tools,state_dir=excluded.state_dir')
-        .run(graphId, nodeId, model.id, session.systemPrompt, JSON.stringify(session.allowedToolNames), session.stateDir);
+      options.kernel.db.prepare('INSERT INTO kernel_node_bindings(task_id,node_id,model_id,system_prompt,tools,state_dir,role) VALUES(?,?,?,?,?,?,?) ON CONFLICT(task_id,node_id) DO UPDATE SET model_id=excluded.model_id,system_prompt=excluded.system_prompt,tools=excluded.tools,state_dir=excluded.state_dir,role=excluded.role')
+        .run(graphId, nodeId, model.id, session.systemPrompt, JSON.stringify(session.allowedToolNames), session.stateDir, session.role);
       return {
         binding: session.binding,
         workspace,
@@ -287,7 +297,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       };
     },
     // One resident process per node, reused across turns.
-    host: async (graphId: string, nodeId: string, config: unknown, revisionVersion: number) => {
+    host: async (graphId: string, nodeId: string, config: unknown) => {
       const key = `${graphId}/${nodeId}`;
       const cached = hosts.get(key);
       const signature = JSON.stringify(config);
@@ -296,7 +306,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
       const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`);
-      const session = await sessionFor(graphId, nodeId, revisionVersion);
+      const session = sessions.get(key);
+      if (!session) throw new Error('Resident host has no prepared session');
       if (closing) throw new Error('Graph runtime is closing');
       if (!session.operation) throw new Error('Resident node has no resolved capability operation');
       const host = new ResidentHost({

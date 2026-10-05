@@ -146,7 +146,7 @@ function capabilityView(record: CapabilityRecord) {
 /** Workspace, result, supervisor, and granted retrieval tools for a production Pi instance. */
 export function agentTools(input: {
   workspace: string;
-  role?: NodeSpec['role'];
+  role?: NodeSpec['role'] | 'reviewer';
   readRoots?: string[];
   access?: ResolvedAccessPolicy;
   /** Discussion turns investigate without writing business files or running commands. */

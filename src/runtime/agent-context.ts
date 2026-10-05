@@ -7,6 +7,14 @@ export const DEFAULT_MAIN_APPROVAL_PROMPT = 'To add or update a capability, firs
 
 export const DEFAULT_WORKER_PROMPT = 'Use the native Pi tools to read, search, edit and run commands in the assigned worktree. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Submit structured output with submit_result when required. Start writing implementation files early and keep each turn short instead of exploring or reasoning at length; the task graph lists the exact check inputs that must exist. Native bash is sandboxed by the workspace and host access policy.{{retrievalNote}}';
 
+export const DEFAULT_NODE_PROMPT = [
+  'Work within the assigned node task, acceptance criteria, workspace and bound capabilities.',
+  'Use submit to send the named graph outputs when the task requires them. One execution permits one valid submit; omitted outputs are disabled.',
+  'A direct chat can be answered without submit. Peer chat and interface delivery are separate channels.',
+  'Read published artifacts by their exact ID and version. Code and review references must identify the exact commit.',
+  'Respect the recipe rules and host permissions; a review task does not grant permission to implement changes.',
+].join(' ');
+
 export const DEFAULT_PROMPT_SUGGESTION_PROMPT = [
   'Write exactly one concise next message the user may want to send.',
   'Use the same language as the user message.',
@@ -121,6 +129,7 @@ export type AgentStaticPromptKey =
   | 'rules/worker.md'
   | 'rules/reviewer.md'
   | 'runtime/worker.md'
+  | 'runtime/node.md'
   | 'runtime/prompt-suggestion.md'
   | 'runtime/sediment.md';
 
@@ -136,6 +145,7 @@ export interface AgentContextDefaults {
   workerTools?: string;
   reviewerTools?: string;
   worker?: string;
+  node?: string;
   promptSuggestion?: string;
   sediment?: string;
 }
@@ -168,6 +178,7 @@ interface ResolvedAgentContextDefaults {
   workerTools: string;
   reviewerTools: string;
   worker: string;
+  node: string;
   promptSuggestion: string;
   sediment: string;
 }
@@ -188,6 +199,7 @@ const STATIC_PROMPTS: readonly {
   { key: 'rules/worker.md', title: 'Worker 规则', description: '实现 Agent 的任务范围与工作副本规则。', group: 'rules', fallback: 'workerRules' },
   { key: 'rules/reviewer.md', title: 'Reviewer 规则', description: '独立审查的证据隔离和只读规则。', group: 'rules', fallback: 'reviewerRules' },
   { key: 'runtime/worker.md', title: 'Worker 运行规则', description: '普通实现、审查和验证 Agent 每次 operation 注入 system prompt 的 runtime rules。', group: 'runtime', fallback: 'worker' },
+  { key: 'runtime/node.md', title: 'Graph 节点运行规则', description: '接口投递内核中实现和审查节点使用的运行规则；任务和输出要求由节点声明。', group: 'runtime', fallback: 'node' },
   { key: 'runtime/prompt-suggestion.md', title: '输入建议生成', description: '仅主 Agent 回复后生成下一条输入建议的独立模型请求使用。', group: 'runtime', fallback: 'promptSuggestion' },
   { key: 'runtime/sediment.md', title: '技能沉淀自省', description: '仅在开关开启时，操作收尾后为沉淀技能而发起的独立模型请求使用。', group: 'runtime', fallback: 'sediment' },
 ];
@@ -343,6 +355,7 @@ export class AgentContextLibrary {
       workerTools: defaults.workerTools?.trim() || DEFAULT_WORKER_TOOL_GUIDANCE,
       reviewerTools: defaults.reviewerTools?.trim() || DEFAULT_REVIEWER_TOOL_GUIDANCE,
       worker: defaults.worker?.trim() || DEFAULT_WORKER_PROMPT,
+      node: defaults.node?.trim() || DEFAULT_NODE_PROMPT,
       promptSuggestion: defaults.promptSuggestion?.trim() || DEFAULT_PROMPT_SUGGESTION_PROMPT,
       sediment: defaults.sediment?.trim() || DEFAULT_SEDIMENT_PROMPT,
     };

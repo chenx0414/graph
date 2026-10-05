@@ -264,6 +264,8 @@ export class KernelStore {
     for (const [name, declaration] of [['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
       if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
     }
+    const bindingColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_node_bindings)').all() as { name: string }[]).map(row => row.name));
+    if (!bindingColumns.has('role')) this.db.exec('ALTER TABLE kernel_node_bindings ADD COLUMN role TEXT');
     const deliveryColumns = new Set(
       (this.store.db.prepare('PRAGMA table_info(kernel_deliveries)').all() as { name: string }[]).map(column => column.name),
     );

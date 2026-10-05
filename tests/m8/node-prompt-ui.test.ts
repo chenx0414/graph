@@ -1,3 +1,4 @@
+import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { mkdir, mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
@@ -130,13 +131,15 @@ test('native graph chats keep a session and expose the actual provider prompt in
   await mkdir(capabilityRoot);
   const provider = await openaiServer([{ text: 'native first reply' }, { text: 'native second reply' }]);
   cleanup.push(() => provider.close());
-  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
+  const library = openAgentContextLibrary(join(root, 'prompts')); await library.ensure();
+  await library.savePrompt('runtime/node.md', 'NODE RUNTIME FIRST: use the declared graph outputs.');
+  const server = await openGraphServer({ agentContext: library, stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
     catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') }, actions: {},
     limits: { defaultBudgetTokens: 20_000_000 },
     models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-test-key', modelRuntime: provider.runtime },
   });
   cleanup.push(() => server.close());
-  await server.runtime.catalog.saveAgentCombination({ id: 'native', name: 'Native', description: 'native worker', recommendedGrade: 'medium', review: false, tags: [], resources: [], systemPrompt: 'Native identity.' });
+  await server.runtime.catalog.saveAgentCombination({ id: 'native', name: 'Native', description: 'native reviewer', recommendedGrade: 'medium', review: true, tags: [], resources: [], systemPrompt: 'Native identity.' });
   const parent = await server.runtime.user.begin({ projectId: 'p', request: 'native graph', requestId: 'native-parent' });
   const main = server.runtime.supervisor(parent.taskId);
   const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'native', protocols: { ping: { type: 'object' } },
@@ -150,10 +153,15 @@ test('native graph chats keep a session and expose the actual provider prompt in
   await server.runtime.host.drive();
   const first = server.runtime.nodeRun(graph.graphId, 'build/worker');
   expect(first.session?.sessionId).toBeTruthy();
+  expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').recorded?.text).toContain('NODE RUNTIME FIRST');
+  await library.savePrompt('runtime/node.md', 'NODE RUNTIME NEXT: inspect the new task instructions.');
   await main.graphSend({ graphId: graph.graphId, nodeId: 'build/worker', text: 'second distinct input' });
   await server.runtime.host.drive();
   const second = server.runtime.nodeRun(graph.graphId, 'build/worker');
   expect(second.session?.sessionId).toBe(first.session?.sessionId);
+  expect(second.node.role).toBe('reviewer');
+  expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').role).toBe('reviewer');
+  expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').recorded?.text).toContain('NODE RUNTIME NEXT');
   const configs = await readdir(join(root, 'state', 'kernel-worker'));
   for (const config of configs) expect(await readFile(join(root, 'state', 'kernel-worker', config), 'utf8')).not.toContain('local-test-key');
   expect(second.instance?.used).toBe(100);

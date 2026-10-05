@@ -7,6 +7,7 @@ import { Catalog } from '../../src/catalog/catalog.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { nodeSessionRequest } from '../../src/runtime/kernel-node-host.ts';
 
 /**
@@ -52,7 +53,7 @@ async function fixture() {
   await catalog.refresh();
   // Two recipes with different inline prompts: the recipe is the session identity.
   await catalog.saveAgentCombination({ id: 'alpha', name: 'Alpha', description: 'a', recommendedGrade: 'medium', review: false, tags: [], resources: [], systemPrompt: 'You are ALPHA.' });
-  await catalog.saveAgentCombination({ id: 'beta', name: 'Beta', description: 'b', recommendedGrade: 'medium', review: false, tags: [], resources: [], systemPrompt: 'You are BETA.' });
+  await catalog.saveAgentCombination({ id: 'beta', name: 'Beta', description: 'b', recommendedGrade: 'medium', review: true, tags: [], resources: [], systemPrompt: 'You are BETA.' });
 
   const kernel = new KernelStore(store);
   store.db.exec(`INSERT INTO projects(id,root,grants) VALUES('p','${root}','[]');`);
@@ -86,9 +87,17 @@ describe('nodeSessionRequest — the v2-native session for one graph node (§13.
 
   test('N2: two nodes with different recipes get different prompts — the recipe is the identity', async () => {
     const { root, catalog, kernel, revisionVersion } = await fixture();
-    const a = await nodeSessionRequest({ kernel, catalog, graphId: 'g1', nodeId: 'a', revisionVersion, workspace: root, instancesDir: join(root, 'instances') });
-    const b = await nodeSessionRequest({ kernel, catalog, graphId: 'g1', nodeId: 'b', revisionVersion, workspace: root, instancesDir: join(root, 'instances') });
+    const library = openAgentContextLibrary(join(root, 'prompts')); await library.ensure();
+    await writeFile(join(library.root, 'rules/worker.md'), 'WORKER POLICY: implement assigned work.');
+    await writeFile(join(library.root, 'rules/reviewer.md'), 'REVIEWER POLICY: independently inspect the exact supplied version.');
+    const a = await nodeSessionRequest({ kernel, catalog, graphId: 'g1', nodeId: 'a', revisionVersion, workspace: root, instancesDir: join(root, 'instances'), library });
+    const b = await nodeSessionRequest({ kernel, catalog, graphId: 'g1', nodeId: 'b', revisionVersion, workspace: root, instancesDir: join(root, 'instances'), library });
 
+    expect(a.systemPrompt).toContain('WORKER POLICY');
+    expect(b.systemPrompt).toContain('REVIEWER POLICY');
+    expect(b.systemPrompt).not.toContain('WORKER POLICY');
+    expect(b.systemPrompt).not.toContain('Start writing implementation files');
+    expect(b.systemPrompt).not.toContain('submit_result');
     expect(a.systemPrompt).toContain('ALPHA');
     expect(a.systemPrompt).not.toContain('BETA');
     expect(b.systemPrompt).toContain('BETA');

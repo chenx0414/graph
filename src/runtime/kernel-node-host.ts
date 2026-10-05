@@ -27,6 +27,7 @@ import { type SendGate } from './controlled-openai.ts';
  */
 
 export interface NodeSessionRequest {
+  role: 'worker' | 'reviewer';
   operation?: CapabilityOperation;
   close(): Promise<void>;
   /** The binding the resident worker persists its session against. */
@@ -83,12 +84,12 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
   const known = catalog.listDefinitions().some(item => `${item.id}@${item.version}` === recipe);
   if (!known) throw new Error(`node ${nodeId} names recipe ${recipe}, which the catalog does not hold`);
 
+  const action = catalog.definition(recipe).review === true ? 'review' : 'work';
   const assembly = await openAgentContextAssembly({
     catalog,
     definitionVersion: recipe,
-    // A v2 node has no action/role; the definition carries the identity, and the registry
-    // resolves the worker shape from `action`. "work" is the plain worker action.
-    action: 'work',
+    // Review is a recipe responsibility, independent of node names or task prose.
+    action, runtime: 'node',
     workspace: options.workspace,
     ...(options.library ? { library: options.library } : {}),
   });
@@ -102,12 +103,12 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
   const operation = await assembly.bundle.openOperation({
     workspace: options.workspace,
     scratchDir,
-    action: 'work',
+    action,
     // A node with no gate still counts tool calls; an absent gate send is a passthrough.
     gate: options.gate ?? { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
     ...(options.access ? { access: options.access } : {}),
     hostTools: ({ readRoots }) => agentTools({ workspace: options.workspace,
-      role: 'worker', readRoots: [...readRoots], catalog, ...options.bindings,
+      role: action === 'review' ? 'reviewer' : 'worker', readRoots: [...readRoots], catalog, ...options.bindings,
       ...(options.access ? { access: options.access } : {}),
       run: (command, args, signal) => commands.run(command, args, signal),
     }).filter(tool => tool.name !== 'submit_result'),
@@ -115,6 +116,7 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
 
   const composed = assembly.forOperation(operation).composed;
   const request: NodeSessionRequest = {
+    role: action === 'review' ? 'reviewer' : 'worker',
     ...(options.retainCapabilities ? { operation } : {}),
     close: async () => { await operation.close(); await commands.close(); },
     binding: { instanceId, nodeId, definitionVersion: recipe },

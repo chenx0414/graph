@@ -574,6 +574,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         access: () => resolvedAccessPolicy(),
         kernel,
         catalog,
+        ...(options.agentContext ? { library: options.agentContext } : {}),
         // §9: a v2 node is metered like any other. Without this the ledger from HB-284
         // was never consulted, because nothing told the lane what a turn might cost.
         ...(() => {

@@ -5,7 +5,7 @@ import { describeAgentTools, type AgentToolFeatures } from './agent-tool-definit
 import {
   DEFAULT_COMMON_RULES, DEFAULT_MAIN_FULL_ACCESS_IDENTITY, DEFAULT_MAIN_RULES,
   DEFAULT_MAIN_RSI_IDENTITY, DEFAULT_MAIN_TOOL_GUIDANCE, DEFAULT_REVIEWER_RULES, DEFAULT_REVIEWER_TOOL_GUIDANCE,
-  DEFAULT_WORKER_RULES, DEFAULT_WORKER_TOOL_GUIDANCE, DEFAULT_WORKER_PROMPT,
+  DEFAULT_WORKER_RULES, DEFAULT_WORKER_TOOL_GUIDANCE, DEFAULT_WORKER_PROMPT, DEFAULT_NODE_PROMPT,
   renderAgentPrompt, type AgentContextLibrary,
 } from './agent-context.ts';
 import { graphDocumentationPaths } from './agent-docs.ts';
@@ -27,6 +27,7 @@ export interface AgentContextTool extends Omit<AgentToolPromptEntry, 'version'> 
 /** Local context is read once; opening it never starts an MCP or Pi process. */
 export interface AgentContextAssemblyOptions extends CapabilityBundleOptions {
   action: string;
+  runtime?: 'node' | 'worker';
   role?: string;
   workspace: string | null;
   library?: AgentContextLibrary;
@@ -154,7 +155,9 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
     input.library?.prompt(`rules/${role}.md`) ?? (role === 'main' ? DEFAULT_MAIN_RULES : role === 'reviewer' ? DEFAULT_REVIEWER_RULES : DEFAULT_WORKER_RULES),
     input.library?.prompt(`tools/${role}.md`) ?? input.bootstrap?.tool
       ?? (role === 'main' ? DEFAULT_MAIN_TOOL_GUIDANCE : role === 'reviewer' ? DEFAULT_REVIEWER_TOOL_GUIDANCE : DEFAULT_WORKER_TOOL_GUIDANCE),
-    role === 'main' ? undefined : input.library?.prompt('runtime/worker.md', { retrievalNote }) ?? renderAgentPrompt(DEFAULT_WORKER_PROMPT, { retrievalNote }),
+    role === 'main' ? undefined : input.runtime === 'node'
+      ? input.library?.prompt('runtime/node.md') ?? DEFAULT_NODE_PROMPT
+      : input.library?.prompt('runtime/worker.md', { retrievalNote }) ?? renderAgentPrompt(DEFAULT_WORKER_PROMPT, { retrievalNote }),
     projectInstructions(workspace),
     role === 'main' && input.library ? input.library.disabledTools() : [],
   ]);
