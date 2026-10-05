@@ -217,3 +217,27 @@ test('stopping a running command keeps uncertain side effects inspectable and ca
     await drive;
   }
 }, 30000);
+
+
+test('main reopen during an asynchronous judgment is applied after that judgment and does not lose the reopen', async () => {
+  const definition = commandDefinition('main-authored.mjs');
+  definition.modules['custom-route']!.trigger = 'once';
+  const { kernel, runtime } = await kernelWith(definition, 'custom-route');
+  let entered!: () => void; let release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const judgment = runtime.deliverCustom('custom-route', 'review', { passed: true }, async () => {
+    entered(); await held;
+    return { ok: true, state: null, outputs: { decision: { passed: true } }, diagnostics: [] };
+  });
+  await started;
+  const reopening = graphManagement(kernel, 't1').graphControl({ graphId: 't1', action: 'reopen', moduleId: 'custom-route' });
+  release(); await judgment; await reopening;
+  expect(kernel.db.prepare("SELECT triggered FROM kernel_modules WHERE module_id='custom-route'").get()).toEqual({ triggered: 0 });
+  expect(kernel.moduleInput('t1', 'custom-route', 'review')?.value).toEqual({ passed: true });
+  const next = await runtime.deliverCustom('custom-route', 'review', { passed: false }, async ({ inputs }) => ({
+    ok: true, state: null, outputs: { decision: inputs.review! }, diagnostics: [],
+  }));
+  expect(next.emitted).toBe(true);
+  expect(next.outputs.decision).toEqual({ passed: false });
+});

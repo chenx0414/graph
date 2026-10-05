@@ -61,7 +61,7 @@ export interface NodeExecutorOptions {
   graphId: string;
   /** The node's resident host. The host owns the worker config and the process, so the
    * executor does not carry them: spawning is not its business (Issue #1 §7). */
-  host: ExecutorHost;
+  host: ExecutorHost | ((executionId: string, revisionVersion: number) => Promise<ExecutorHost>);
   /** The node's workspace, where a declared deliverable must exist. */
   workspace?: () => string | undefined;
   /** The artifact store a declared deliverable is published to. */
@@ -141,6 +141,7 @@ export class NodeExecutor {
     const metering = this.options.tokenBudget && this.options.reserveTokens !== undefined
       ? { limit: this.options.tokenBudget, amount: this.options.reserveTokens }
       : undefined;
+    let host: ExecutorHost | undefined;
     let held = false;
     const releaseHold = () => {
       if (metering && held) { this.kernel.releaseNodeTokens(this.graphId, nodeId, metering.amount); held = false; }
@@ -171,7 +172,8 @@ export class NodeExecutor {
       let report: TurnReport | void;
       let turnStarted = false;
       try {
-        if (!this.options.host.alive()) await this.options.host.start();
+        host ??= typeof this.options.host === 'function' ? await this.options.host(executionId, revision.version) : this.options.host;
+        if (!host.alive()) await host.start();
         turnStarted = true;
         report = await run(executionId, attempt, injection, item);
       } catch (error) {

@@ -127,3 +127,37 @@ describe('GraphLane — the host loop runs a v2 graph (§13.8)', () => {
     store.close();
   });
 });
+
+
+test('a patch during asynchronous host preparation takes effect only on the next execution', async () => {
+  const { kernel, store } = opened();
+  const graph = new GraphRuntime(kernel, 'g1');
+  graph.chat({ nodeId: 'a', text: 'first question' });
+  let entered!: () => void;
+  let release!: () => void;
+  const preparing = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const prepared: number[] = [];
+  const lane = new GraphLane({ kernel,
+    config: async (_graph, _node, revisionVersion) => {
+      prepared.push(revisionVersion);
+      if (prepared.length === 1) { entered(); await held; }
+      return { revisionVersion };
+    },
+    host: () => fakeHost(),
+  });
+  const first = lane.runnable()[0]!.run();
+  try {
+    await preparing;
+    graph.patch({ baseRevision: 1, changes: { reason: 'change next task', definition: parseGraphDefinition({ ...DEFINITION,
+      nodes: { ...DEFINITION.nodes, a: { ...DEFINITION.nodes.a!, task: 'changed assignment', recipe: 'updated@1' } },
+    }) } });
+  } finally { release(); }
+  await first;
+  expect(kernel.db.prepare('SELECT revision_version FROM kernel_executions ORDER BY rowid').all()).toEqual([{ revision_version: 1 }]);
+  graph.chat({ nodeId: 'a', text: 'next question' });
+  await lane.runnable()[0]!.run();
+  expect(prepared).toEqual([1, 2]);
+  expect(kernel.db.prepare('SELECT revision_version FROM kernel_executions ORDER BY rowid').all()).toEqual([{ revision_version: 1 }, { revision_version: 2 }]);
+  await lane.close(); store.close();
+});

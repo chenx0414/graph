@@ -58,7 +58,7 @@ export interface GraphRunnerOptions {
    * carries a node's identity and session lineage, and two nodes sharing one would share
    * the wrong session.
    */
-  hostFor: (nodeId: string) => RunnerHost | Promise<RunnerHost>;
+  hostFor: (nodeId: string, revisionVersion: number) => RunnerHost | Promise<RunnerHost>;
   /** The node's own workspace (its work copy), where a declared deliverable must exist. */
   workspace?: (nodeId: string) => string | undefined;
   /** The artifact store a declared deliverable is published to. */
@@ -174,28 +174,26 @@ export class GraphRunner {
   /** One pending execution. Independent nodes run concurrently; each node stays serial. */
   private async runNode(nodeId: string): Promise<void> {
     const kernel = this.options.kernel;
-    const nodeHost = await this.options.hostFor(nodeId);
-      const driver = new NodeTurnDriver({
-        kernel, graphId: this.options.graphId, nodeId, host: nodeHost,
-        ...(this.options.initialContext ? { initialContext: () => this.options.initialContext!(nodeId) } : {}),
-        submit: (executionId) => {
-          const execution = kernel.execution(executionId);
-          const gap = execution ? this.options.submit(executionId) : undefined;
-          // A submit that landed on a module hands the judgment to the router, which
-          // queues whatever the module emits.
-          // Accepted module inputs are drained by the graph pass in order.
-          return gap;
-        },
-      });
-      const executor = new NodeExecutor({
-        maxItems: 1, kernel, graphId: this.options.graphId, host: nodeHost,
-        ...(this.options.signal ? { signal: this.options.signal } : {}),
-        ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
-          ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
-        ...(this.options.workspace ? { workspace: () => this.options.workspace!(nodeId) } : {}),
-        ...(this.options.artifacts ? { artifacts: this.options.artifacts } : {}),
-      });
-      await executor.runNode(nodeId, (executionId, attempt, injection, input) => driver.run(executionId, attempt, injection, input));
+    let driver: NodeTurnDriver;
+    const executor = new NodeExecutor({
+      maxItems: 1, kernel, graphId: this.options.graphId,
+      // Claim the input and persist its revision before any asynchronous session assembly.
+      host: async (_executionId, revisionVersion) => {
+        const nodeHost = await this.options.hostFor(nodeId, revisionVersion);
+        driver = new NodeTurnDriver({
+          kernel, graphId: this.options.graphId, nodeId, host: nodeHost,
+          ...(this.options.initialContext ? { initialContext: () => this.options.initialContext!(nodeId) } : {}),
+          submit: executionId => this.options.submit(executionId),
+        });
+        return nodeHost;
+      },
+      ...(this.options.signal ? { signal: this.options.signal } : {}),
+      ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
+        ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
+      ...(this.options.workspace ? { workspace: () => this.options.workspace!(nodeId) } : {}),
+      ...(this.options.artifacts ? { artifacts: this.options.artifacts } : {}),
+    });
+    await executor.runNode(nodeId, (executionId, attempt, injection, input) => driver.run(executionId, attempt, injection, input));
   }
 
   /**

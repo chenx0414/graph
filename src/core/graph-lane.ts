@@ -36,9 +36,9 @@ export interface GraphLaneOptions {
    * session lineage, and sharing one across nodes would share the wrong session. Assembling
    * a real session (its prompt, tools and credential) is asynchronous, so this is awaited.
    */
-  host: (graphId: string, nodeId: string, config: unknown) => Promise<RunnerHost> | RunnerHost;
+  host: (graphId: string, nodeId: string, config: unknown, revisionVersion: number) => Promise<RunnerHost> | RunnerHost;
   /** The serialized worker config, resolved per node. */
-  config: (graphId: string, nodeId: string) => Promise<unknown> | unknown;
+  config: (graphId: string, nodeId: string, revisionVersion: number) => Promise<unknown> | unknown;
   /** The first-turn briefing text for a node. */
   initialContext?: (graphId: string, nodeId: string) => string;
   /**
@@ -115,10 +115,10 @@ export class GraphLane {
       ...(this.options.operation ? { operation: (request: ModuleOperationRequest) => this.options.operation!(graphId, request) } : {}),
       ...(this.options.tokenBudget && this.options.reserveTokens !== undefined
         ? { tokenBudget: this.options.tokenBudget, reserveTokens: this.options.reserveTokens } : {}),
-      hostFor: async (nodeId: string) => {
-        const config = await this.options.config(graphId, nodeId);
+      hostFor: async (nodeId: string, revisionVersion: number) => {
+        const config = await this.options.config(graphId, nodeId, revisionVersion);
         if (this.shutdown.signal.aborted) throw new Error('Graph runtime is closing');
-        return this.options.host(graphId, nodeId, config);
+        return this.options.host(graphId, nodeId, config, revisionVersion);
       },
       // A node submits through its own `submit` tool, which the host executes over the real
       // execution (HB-262) - so by the time this runs, the kernel already holds whatever the

@@ -25,7 +25,7 @@
 - pause/resume：有 nodeId 时控制该节点队列，否则控制整个 graph 的派发。
 - retry/skip/cancel：指定 seq 处理待执行队列项。仍在运行的项不能被这些操作重新领取；已成功提交的原输入不能重发。
 - cancel_operation：指定 operationId，取消 uncertain/failed 操作的原输入；不撤销已产生的副作用，也不生成成功结果。dispatched 操作必须先停止。取消可以重放；恢复后如需重做，由 main 显式重新投递。
-- reopen：指定 moduleId 清除一次汇合的触发锁存，保留输入，等待下一次投递再判断。
+- reopen：指定 moduleId，等待已经开始的模块判断结束后清除一次汇合的触发锁存，保留输入，等待下一次投递再判断。
 - complete：关闭外部新输入，等待内部工作清空后完成；空闲不等于完成。
 - withdraw_complete：撤销完成请求，恢复外部输入。
 - stop：关闭派发并取消待处理工作，等待运行中的工作收尾。

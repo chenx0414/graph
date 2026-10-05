@@ -30,6 +30,22 @@ export interface ModuleEvaluation {
   reasons: string[];
 }
 
+// Runtime instances share one module's queue even when main creates a fresh controller.
+const pendingModules = new WeakMap<KernelStore['store'], Map<string, Promise<void>>>();
+
+async function serializeModule<T>(kernel: KernelStore, taskId: string, moduleId: string, action: () => T | Promise<T>): Promise<T> {
+  let pending = pendingModules.get(kernel.store);
+  if (!pending) { pending = new Map(); pendingModules.set(kernel.store, pending); }
+  const key = JSON.stringify([taskId, moduleId]);
+  const previous = pending.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  pending.set(key, current);
+  await previous;
+  try { return await action(); }
+  finally { release(); if (pending.get(key) === current) pending.delete(key); }
+}
+
 type EvaluationEnvironment = { inputs: Record<string, Json>; state: Json; trigger: 'each' | 'once'; limits?: ModuleDefinition['limits'] };
 type EvaluationResult = { ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[]; error?: string };
 
@@ -209,6 +225,11 @@ export class ModuleRuntime {
    * Clear the latch only (§2, §6): inputs are kept, nothing is emitted, and the
    * next delivery is what judges. Reopen is an explicit control action.
    */
+  /** Main controls join the module's serial queue, after a judgment already in progress. */
+  reopenAfterPending(moduleId: string): Promise<ModuleEvaluation> {
+    return serializeModule(this.kernel, this.taskId, moduleId, () => this.kernel.moduleTransaction(() => this.reopen(moduleId)));
+  }
+
   reopen(moduleId: string): ModuleEvaluation {
     const compiled = this.compile(moduleId);
     this.kernel.db.prepare('UPDATE kernel_modules SET triggered=0 WHERE task_id=? AND module_id=?').run(this.taskId, moduleId);
@@ -250,7 +271,15 @@ export class ModuleRuntime {
     return this.deliverEvaluated(moduleId, inputName, value, evaluate, operation.version, deliveryId);
   }
 
-  private async deliverEvaluated(
+  private deliverEvaluated(
+    moduleId: string, inputName: string, value: Json,
+    evaluate: (input: EvaluationEnvironment) => Promise<EvaluationResult>, implementationVersion: number, deliveryId?: string,
+  ): Promise<ModuleEvaluation> {
+    return serializeModule(this.kernel, this.taskId, moduleId, () =>
+      this.deliverEvaluatedUnlocked(moduleId, inputName, value, evaluate, implementationVersion, deliveryId));
+  }
+
+  private async deliverEvaluatedUnlocked(
     moduleId: string, inputName: string, value: Json,
     evaluate: (input: EvaluationEnvironment) => Promise<EvaluationResult>, implementationVersion: number, deliveryId?: string,
   ): Promise<ModuleEvaluation> {

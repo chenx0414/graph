@@ -130,11 +130,11 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     return options.workspaceFor(graphId);
   };
 
-  const sessionFor = async (graphId: string, nodeId: string): Promise<NodeSessionRequest> => {
+  const sessionFor = async (graphId: string, nodeId: string, revisionVersion: number): Promise<NodeSessionRequest> => {
     if (closing) throw new Error('Graph runtime is closing');
     const key = `${graphId}/${nodeId}`;
     const cached = sessions.get(key);
-    const revision = options.kernel.latestRevision(graphId);
+    const revision = options.kernel.revision(graphId, revisionVersion);
     if (!revision) throw new Error(`graph ${graphId} has no revision to run`);
     const configuration = JSON.stringify({ recipe: revision.definition.nodes[nodeId]?.recipe, access: options.access?.() });
     if (cached && sessionRevisions.get(key) === configuration) return cached;
@@ -246,8 +246,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     workspace: nodeWorkspace,
     ...(options.artifacts ? { artifacts: () => options.artifacts } : {}),
     // The worker config: the node's own session plus the credential the host resolved.
-    config: async (graphId, nodeId) => {
-      const session = await sessionFor(graphId, nodeId);
+    config: async (graphId, nodeId, revisionVersion) => {
+      const session = await sessionFor(graphId, nodeId, revisionVersion);
       const recipe = session.binding.definitionVersion;
       const model = modelFor(options, recipe);
       if (!model) throw new Error(`no configured model for recipe ${recipe}`);
@@ -287,7 +287,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       };
     },
     // One resident process per node, reused across turns.
-    host: async (graphId: string, nodeId: string, config: unknown) => {
+    host: async (graphId: string, nodeId: string, config: unknown, revisionVersion: number) => {
       const key = `${graphId}/${nodeId}`;
       const cached = hosts.get(key);
       const signature = JSON.stringify(config);
@@ -296,7 +296,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
       const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
       const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`);
-      const session = await sessionFor(graphId, nodeId);
+      const session = await sessionFor(graphId, nodeId, revisionVersion);
       if (closing) throw new Error('Graph runtime is closing');
       if (!session.operation) throw new Error('Resident node has no resolved capability operation');
       const host = new ResidentHost({
