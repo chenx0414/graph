@@ -172,14 +172,18 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     expect(runtime.state()!.phase).toBe('completed');
   });
 
-  test('G5: stop cancels queued items and blocks new dispatch', () => {
+  test('G5: stop cancels queued items and blocks new dispatch even while paused', async () => {
     const { kernel } = opened();
     const runtime = new GraphRuntime(kernel, 't1');
     runtime.create(definition());
     kernel.admitNode('t1', 1, 'a', { instanceId: 'i-a' });
     runtime.deliver({ nodeId: 'a', input: 'in', value: { n: 1 } });
 
+    const main = graphManagement(kernel, 't1');
+    await main.graphControl({ graphId: 't1', action: 'pause' });
+    expect(runtime.state()?.phase).toBe('paused');
     runtime.stop();
+    expect(kernel.store.task('t1').paused).toBe(0);
     expect(runtime.state()!.phase).toBe('stopping');
     expect(() => runtime.deliver({ nodeId: 'a', input: 'in', value: { n: 2 } })).toThrow(/stopping/);
     // The queued item was cancelled, so stop settles immediately.
@@ -273,10 +277,18 @@ test('graph creation retries preparation with the same graph and refuses changed
 });
 
 
-test.each(['completed', 'stopped'])('terminal %s graph cannot reopen through completion controls or patch', phase => {
+test.each(['completed', 'stopped'])('terminal %s graph cannot reopen through completion controls or patch', async phase => {
   const { kernel } = opened();
   const runtime = new GraphRuntime(kernel, 't1');
-  runtime.create(definition());
+  const declared = definition();
+  declared.modules.gate = { type: 'router', trigger: 'once', inputs: {}, outputs: {}, rules: [] };
+  runtime.create(declared);
+  kernel.admitNode('t1', 1, 'a', { instanceId: 'ia' });
+  kernel.admitModule('t1', 1, 'gate', { moduleType: 'router', trigger: 'once' });
+  kernel.db.prepare("UPDATE kernel_modules SET triggered=1 WHERE task_id='t1' AND module_id='gate'").run();
+  const main = graphManagement(kernel, 't1');
+  const queued = runtime.chat({ nodeId: 'a', text: 'cancel this input' });
+  await main.graphControl({ graphId: 't1', action: 'cancel', seq: queued.seq });
   runtime.complete();
   if (phase === 'completed') runtime.settleCompletion();
   else { runtime.stop(); runtime.settleStop(); }
@@ -287,6 +299,15 @@ test.each(['completed', 'stopped'])('terminal %s graph cannot reopen through com
   expect(runtime.stop().phase).toBe(phase);
   expect(runtime.state()?.phase).toBe(phase);
   expect(kernel.latestRevision('t1')?.version).toBe(1);
+  for (const control of [
+    { action: 'pause' }, { action: 'resume' }, { action: 'pause', nodeId: 'a' }, { action: 'resume', nodeId: 'a' },
+    { action: 'reopen', moduleId: 'gate' }, { action: 'retry', seq: queued.seq }, { action: 'skip', seq: queued.seq }, { action: 'cancel', seq: queued.seq },
+  ]) await expect(main.graphControl({ graphId: 't1', ...control })).rejects.toThrow(/Ended graph/);
+  expect(kernel.store.task('t1').paused).toBe(0);
+  expect(kernel.nodeState('t1', 'a').paused).toBe(false);
+  expect(kernel.db.prepare('SELECT state,generation FROM kernel_queue WHERE seq=?').get(queued.seq)).toEqual({ state: 'done', generation: 0 });
+  expect(kernel.db.prepare("SELECT triggered FROM kernel_modules WHERE task_id='t1' AND module_id='gate'").get()).toEqual({ triggered: 1 });
+  expect(runtime.state()?.phase).toBe(phase);
 });
 
 

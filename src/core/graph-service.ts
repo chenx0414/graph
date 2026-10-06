@@ -82,6 +82,10 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
     },
     async graphControl(input) {
       const graph = runtime(input.graphId);
+      if (['pause', 'resume', 'reopen', 'retry', 'skip', 'cancel'].includes(input.action)
+        && ['completed', 'stopping', 'stopped'].includes(graph.state()!.phase)) {
+        throw new RuntimeError('invalid_graph', 'Ended graph cannot change its execution controls');
+      }
       if (input.action === 'cancel_operation') {
         const operation = kernel.db.prepare('SELECT delivery_id,module_id,state FROM kernel_module_operations WHERE task_id=? AND id=?').get(input.graphId, input.operationId ?? '') as { delivery_id: string; module_id: string; state: string } | undefined;
         if (!operation || !['uncertain', 'failed', 'cancelled'].includes(operation.state)) throw new RuntimeError('invalid_operation', 'Only an interrupted or failed operation can be cancelled; stop active work first');

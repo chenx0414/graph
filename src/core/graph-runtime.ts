@@ -154,10 +154,11 @@ export class GraphRuntime {
   }
 
   state(): GraphStateRow | null {
-    const row = this.kernel.db.prepare('SELECT phase FROM tasks WHERE id=?').get(this.graphId) as { phase: string } | undefined;
+    const row = this.kernel.db.prepare('SELECT phase,paused FROM tasks WHERE id=?').get(this.graphId) as { phase: string; paused: number } | undefined;
     if (!row) return null;
     const latest = this.kernel.latestRevision(this.graphId);
-    return { graphId: this.graphId, phase: row.phase as GraphPhase, revision: latest?.version ?? 0 };
+    const phase = row.paused && !['completed', 'stopping', 'stopped'].includes(row.phase) ? 'paused' : row.phase as GraphPhase;
+    return { graphId: this.graphId, phase, revision: latest?.version ?? 0 };
   }
 
   private setPhase(phase: GraphPhase): void {
@@ -255,7 +256,7 @@ export class GraphRuntime {
   stop(): GraphStateRow {
     this.ensureTask();
     if (['completed', 'stopped'].includes(this.state()!.phase)) return this.state()!;
-    this.setPhase('stopping');
+    this.kernel.db.prepare("UPDATE tasks SET phase='stopping',paused=0 WHERE id=?").run(this.graphId);
     this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?').run(this.graphId);
     this.kernel.db.prepare('UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id IN (SELECT id FROM kernel_module_transitions WHERE task_id=?)').run(this.graphId);
     // Cancel every queued item; a claimed item keeps running until it settles.
