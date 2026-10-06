@@ -85,6 +85,14 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 
 `graph_inspect({graphId,query:"operations"})` 查看持久操作记录。已保存结果在恢复时用于继续投递，不重新执行命令；派发后中断且没有可靠结果的操作标记 uncertain，暂停模块等待 main 检查。停止会终止命令进程组。
 
+## 节点按需读取图定义
+
+节点首轮只接收有限概览：最多 20 个节点、20 个模块、40 条边，任务描述预览为 240 字符；本节点任务、验收、接口及自身协议保留完整内容。未在预览出现不代表对象不存在。
+
+内部 agent 可调用只读 `read_graph({section,id?,after?,limit?})`，section 为 nodes、modules、edges、protocols、acceptance、inputs 或 outputs。id 获取完整具名对象；省略 id 时按当前定义的稳定对象顺序分页，after 默认 0，limit 默认 20、最大 50。返回 revision、total、items 和 nextAfter；nextAfter 为 null 表示本节读完。该工具只读取本 graph，不能修改或启动工作。
+
+查询始终使用当前执行冻结的 revision；运行中 patch 不改变本次读取结果。下一次执行采用新 revision，沿用常驻 Pi 与聊天历史，不因普通任务修改重启会话。
+
 ## 节点身份与可编辑提示
 
 recipe 的 review 标记决定审查身份及规则；节点名称和任务文字不参与身份推断。节点运行指导使用可编辑的 runtime/node.md，描述实际 submit、具名输出、聊天和稳定产物引用，不注入旧 submit_result 指令。

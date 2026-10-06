@@ -5,6 +5,7 @@ import { rsiChangeShapeHint } from './rsi.ts';
 /** Facts about the host bindings, without executors or filesystem access. */
 export interface AgentToolFeatures {
   graphManagement?: boolean;
+  graphRead?: boolean;
   workspaceCommit?: boolean;
   role?: string;
   readOnly?: boolean;
@@ -65,6 +66,7 @@ function declarations(features: AgentToolFeatures) {
   const main = features.role === 'master';
   const rsiArguments = prepareToolArguments('apply_rsi_change');
   return {
+    read_graph: { name: 'read_graph', label: 'Read graph definition', description: 'Read this graph definition at the immutable revision used by your current execution. Select nodes, modules, edges, protocols, acceptance, inputs or outputs; id reads one named object, otherwise after/limit page through the section. Read-only: cannot change the graph or access another graph. The initial graph overview is a bounded preview; use this tool for full details.', parameters: Type.Object({ section: Type.Union(['nodes', 'modules', 'edges', 'protocols', 'acceptance', 'inputs', 'outputs'].map(value => Type.Literal(value))), id: Type.Optional(Type.String()), after: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })) }), available: Boolean(features.graphRead), externallyGated: false },
     graph_create: { name: 'graph_create', label: 'Create graph', description: 'Create an independently owned graph from a complete JSON definition. Nodes wait for input; read graph-v2.md under the Graph documentation directory for the schema.', parameters: Type.Object({ definition: Type.Any(), targetBranch: Type.Optional(Type.String()), requestId: Type.Optional(Type.String()) }), available: main && Boolean(features.graphManagement), externallyGated: false },
     graph_patch: { name: 'graph_patch', label: 'Patch graph', description: 'Publish a full definition or local JSON merge patch with baseRevision concurrency control. Named objects merge; null removes a field. Current work keeps its config; connections apply at subsequent submit.', parameters: Type.Object({ graphId: Type.String(), baseRevision: Type.Number(), changes: Type.Any() }), available: main && Boolean(features.graphManagement), externallyGated: false },
     graph_inspect: { name: 'graph_inspect', label: 'Inspect graph', description: 'Read graph summary, revision, nodes, paged queue/executions for recovery, results, edge delivery history, module judgment state, final acceptance evidence, host operation records or provider_calls (actual model sends and unknown usage holds).', parameters: Type.Object({ graphId: Type.String(), query: Type.Optional(Type.String()), id: Type.Optional(Type.String()), after: Type.Optional(Type.Number()), limit: Type.Optional(Type.Number()) }), available: main && Boolean(features.graphManagement), externallyGated: false },

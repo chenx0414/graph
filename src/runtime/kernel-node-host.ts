@@ -3,6 +3,7 @@ import { agentTools } from './agent-tools.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { join } from 'node:path';
+import { RuntimeError } from '../core/types.ts';
 import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import { openAgentContextAssembly } from './agent-context-assembly.ts';
@@ -109,6 +110,24 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
     ...(options.access ? { access: options.access } : {}),
     hostTools: ({ readRoots }) => agentTools({ workspace: options.workspace,
       role: action === 'review' ? 'reviewer' : 'worker', readRoots: [...readRoots], catalog, ...options.bindings,
+      readGraph: input => {
+        // The capability operation is cached across turns. Resolve the active
+        // execution's frozen revision, rather than the session's first revision.
+        const execution = kernel.db.prepare("SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { revision_version: number } | undefined;
+        if (!execution) throw new RuntimeError('invalid_execution', 'Graph definition reads require an active execution');
+        const definition = kernel.revision(graphId, execution.revision_version)!.definition;
+        if (!['nodes', 'modules', 'edges', 'protocols', 'acceptance', 'inputs', 'outputs'].includes(input.section)) throw new RuntimeError('invalid_query', 'Unknown graph definition section');
+        const after = input.after ?? 0, limit = input.limit ?? 20;
+        if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new RuntimeError('invalid_query', 'after must be nonnegative; limit must be 1–50');
+        const entries = input.section === 'acceptance'
+          ? (definition.acceptance ?? []).map(value => [value.id, value] as const)
+          : Object.entries(definition[input.section as 'nodes' | 'modules' | 'edges' | 'protocols' | 'inputs' | 'outputs'] ?? {});
+        const selected = input.id === undefined ? entries.slice(after, after + limit) : entries.filter(([id]) => id === input.id);
+        if (input.id !== undefined && !selected.length) throw new RuntimeError('not_found', `No ${input.section} object named ${input.id}`);
+        return { graphId, revision: execution.revision_version, section: input.section, total: entries.length,
+          items: selected.map(([id, value]) => ({ id, value })),
+          nextAfter: input.id === undefined && after + selected.length < entries.length ? after + selected.length : null };
+      },
       ...(options.access ? { access: options.access } : {}),
       run: (command, args, signal) => commands.run(command, args, signal),
     }).filter(tool => tool.name !== 'submit_result'),

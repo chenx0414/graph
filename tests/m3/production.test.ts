@@ -265,14 +265,32 @@ test('a native production worker receives the graph check command and acceptance
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-graph-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'README.md'), 'project\n');
-  const provider = await openaiServer([{ text: 'Inspected the checks.' }]);
+  const detail = 'DETAIL-OF-LAST-NODE-' + 'x'.repeat(1500);
+  let patchDuringExecution: (() => Promise<void>) | undefined;
+  let patched = false;
+  const provider = await openaiServer([
+    { beforeReply: () => patchDuringExecution?.(), tools: [
+      { id: 'read-graph', name: 'read_graph', arguments: JSON.stringify({ section: 'nodes', id: 'side-59' }) },
+      { id: 'page-graph', name: 'read_graph', arguments: JSON.stringify({ section: 'nodes', after: 50, limit: 7 }) },
+    ] },
+    { text: 'Inspected the checks and the requested node.' },
+    { tools: [{ id: 'read-next-graph', name: 'read_graph', arguments: JSON.stringify({ section: 'nodes', id: 'side-59' }) }] },
+    { text: 'Read the next execution configuration.' },
+  ]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime } });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
-  await runNativeWorker(runtime, parseGraphDefinition({ schemaVersion: 2, name: 'Work', protocols: { data: { type: 'object' } },
-    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', acceptance: ['Read assigned checks'], inputs: {}, outputs: {}, submission: {} } },
+  patchDuringExecution = async () => {
+    const graphs = await runtime.user.list();
+    const graphId = graphs.find(graph => graph.request === 'Work')!.id;
+    const ownerId = graphs.find(graph => graph.request === 'Implement')!.id;
+    await runtime.supervisor(ownerId).graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Next execution configuration', patch: { nodes: { 'side-59': { task: 'NEXT EXECUTION CONFIGURATION' } } } } });
+    patched = true;
+  };
+  const { main, graphId } = await runNativeWorker(runtime, parseGraphDefinition({ schemaVersion: 2, name: 'Work', protocols: { data: { type: 'object' }, unrelated: { type: 'string', description: 'UNRELATED-PROTOCOL-' + 'x'.repeat(20000) } },
+    nodes: { ...Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`side-${i}`, { recipe: 'coder@1', task: i === 59 ? detail : 'Other task ' + 'x'.repeat(1500), inputs: {}, outputs: {}, submission: {} }])), work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', acceptance: ['Read assigned checks'], inputs: {}, outputs: {}, submission: {} } },
     modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
       operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--test', 'test/specific.test.js'], output: 'result' } } },
     edges: {}, acceptance: [{ id: 'ok', description: 'Specific command is successful', kind: 'check', module: 'check' }],
@@ -281,6 +299,20 @@ test('a native production worker receives the graph check command and acceptance
   expect.soft(prompt).toContain('test/specific.test.js');
   expect(prompt).toContain('Specific command is successful');
   expect(prompt).toContain('Read assigned checks');
+  expect.soft(prompt).not.toContain('UNRELATED-PROTOCOL-');
+  expect.soft(prompt).not.toContain(detail);
+  expect.soft(prompt.length).toBeLessThan(32000);
+  const request = provider.requests[1] as { messages: { role: string; tool_call_id?: string; content: string }[] };
+  expect(patched).toBe(true);
+  const result = (id: string) => JSON.parse(JSON.parse(request.messages.find(message => message.role === 'tool' && message.tool_call_id === id)!.content).content[0].text);
+  expect(result('read-graph')).toMatchObject({ revision: 1, section: 'nodes', items: [{ id: 'side-59', value: { task: detail } }] });
+  expect(result('page-graph')).toMatchObject({ revision: 1, total: 61, nextAfter: 57 });
+  expect(result('page-graph').items.map((item: { id: string }) => item.id)).toEqual(['side-54', 'side-55', 'side-56', 'side-57', 'side-58', 'side-59', 'side-6']);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Inspect the updated definition' });
+  await runtime.host.drive();
+  const nextRequest = provider.requests[3] as { messages: { role: string; tool_call_id?: string; content: string }[] };
+  const next = JSON.parse(JSON.parse(nextRequest.messages.find(message => message.role === 'tool' && message.tool_call_id === 'read-next-graph')!.content).content[0].text);
+  expect(next).toMatchObject({ revision: 2, items: [{ id: 'side-59', value: { task: 'NEXT EXECUTION CONFIGURATION' } }] });
 });
 
 test('a production reviewer receives the independent review report schema', async () => {

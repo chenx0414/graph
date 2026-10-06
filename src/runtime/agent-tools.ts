@@ -155,6 +155,8 @@ export function agentTools(input: {
   run?: (command: string, args: string[], signal?: AbortSignal) => Promise<{ code: number | null; stdout: string; stderr: string }>;
   fetch?: (url: string, signal?: AbortSignal) => Promise<{ url: string; status: number; contentType: string; text: string; truncated: boolean }>;
   supervisor?: Supervisor;
+  /** Read-only definition snapshot for a native node's current execution. */
+  readGraph?: (input: { section: string; id?: string; after?: number; limit?: number }) => unknown;
   /** How ask_user hands a question to the session that can durably record it. */
   onAskUser?: (question: { prompt: string; why: string; options: string[]; multiple: boolean }) => void;
   catalog?: Catalog;
@@ -214,6 +216,7 @@ export function agentTools(input: {
 
     graph_create: async (id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphCreate!({ ...(params as Parameters<GraphManagement['graphCreate']>[0]), requestId: (params as { requestId?: string }).requestId ?? id }))),
     graph_patch: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphPatch!(params as Parameters<GraphManagement['graphPatch']>[0]))),
+    read_graph: async (_id: string, params: unknown) => text(JSON.stringify(await input.readGraph!(params as Parameters<NonNullable<typeof input.readGraph>>[0]))),
     graph_inspect: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphInspect!(params as Parameters<GraphManagement['graphInspect']>[0]))),
     graph_control: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphControl!(params as Parameters<GraphManagement['graphControl']>[0]))),
     graph_send: async (_id: string, params: unknown) => text(JSON.stringify(await input.supervisor!.graphSend!(params as Parameters<GraphManagement['graphSend']>[0]))),
@@ -662,6 +665,7 @@ export function agentTools(input: {
 
   const descriptions = describeAgentTools({
     graphManagement: Boolean(input.supervisor?.graphCreate),
+    graphRead: Boolean(input.readGraph),
     workspaceCommit: Boolean(input.commitWorkspace),
     ...(input.role ? { role: input.role } : {}),
     readOnly: Boolean(input.readOnly),

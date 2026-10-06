@@ -89,26 +89,32 @@ export class NodeTurnDriver {
       const finalReview = definition.acceptance?.filter(item => item.kind === 'review' && item.node === this.options.nodeId) ?? [];
       const reviewDelivery = finalReview.length ? `FINAL REVIEW REQUIREMENTS: ${JSON.stringify(finalReview)}. Publish immutable application/json with schema graph.review@1 and {commit,passed,reason}. commit must identify the version actually reviewed (null for a non-code result); reason must explain the verdict. Publication is separate from submit. If DELIVERABLE declares graph.review@1, write that JSON file; it is published automatically when execution finishes.` : '';
       const updated = previous && previous.revision_version !== execution.revisionVersion ? [`CURRENT NODE CONFIGURATION: ${JSON.stringify(node)}`, reviewDelivery].filter(Boolean).join('\n') : '';
+      const preview = (value: string) => value.length > 240 ? value.slice(0, 240) + '…' : value;
+      const interfaces = (value: NonNullable<typeof node>['inputs']) => Object.fromEntries(Object.entries(value).slice(0, 20).map(([id, port]) => [id, { protocol: port.protocol, version: port.version }]));
+      const ownProtocols = new Set(node ? [...Object.values(node.inputs), ...Object.values(node.outputs)].map(port => port.protocol) : []);
       const context = this.options.initialContext?.() ?? (prior.n === 0 && node ? [
         `GRAPH OVERVIEW: ${definition.name}`,
         JSON.stringify({
-          nodes: Object.fromEntries(Object.entries(definition.nodes).map(([id, spec]) => [id, {
-            recipe: spec.recipe, task: spec.task, inputs: spec.inputs, outputs: spec.outputs,
+          counts: { nodes: Object.keys(definition.nodes).length, modules: Object.keys(definition.modules).length, edges: Object.keys(definition.edges).length },
+          nodes: Object.fromEntries(Object.entries(definition.nodes).slice(0, 20).map(([id, spec]) => [id, {
+            recipe: spec.recipe, task: preview(spec.task), inputs: interfaces(spec.inputs), outputs: interfaces(spec.outputs),
           }])),
-          modules: Object.fromEntries(Object.entries(definition.modules).map(([id, spec]) => [id, {
-            type: spec.type, inputs: spec.inputs, outputs: spec.outputs,
-            ...(spec.type === 'operation' ? { operation: spec.operation } : {}),
+          modules: Object.fromEntries(Object.entries(definition.modules).slice(0, 20).map(([id, spec]) => [id, {
+            type: spec.type, inputs: interfaces(spec.inputs), outputs: interfaces(spec.outputs),
+            ...(spec.type === 'operation' ? { operation: { action: spec.operation!.action, command: preview(spec.operation!.command), args: spec.operation!.args?.slice(0, 20).map(preview) } } : {}),
           }])),
-          edges: definition.edges, inputs: definition.inputs, outputs: definition.outputs,
+          edges: Object.fromEntries(Object.entries(definition.edges).slice(0, 40)),
+          inputs: Object.fromEntries(Object.entries(definition.inputs ?? {}).slice(0, 20)), outputs: Object.fromEntries(Object.entries(definition.outputs ?? {}).slice(0, 20)),
         }),
-        `GRAPH ACCEPTANCE: ${JSON.stringify(definition.acceptance ?? [])}`,
+        `GRAPH ACCEPTANCE: ${JSON.stringify((definition.acceptance ?? []).slice(0, 20).map(item => ({ ...item, description: preview(item.description) })))}`,
+        'Overview previews at most 20 objects per section and 40 edges; long descriptions are abbreviated. Use read_graph for complete named objects or paged sections at this execution revision.',
         `TASK: ${node.task}`,
         `ACCEPTANCE: ${JSON.stringify(node.acceptance ?? [])}`,
         ...(node.deliverable ? [`DELIVERABLE: ${JSON.stringify(node.deliverable)}`] : []),
         ...(reviewDelivery ? [reviewDelivery] : []),
         `INPUT INTERFACES: ${JSON.stringify(node.inputs)}`,
         `OUTPUT INTERFACES: ${JSON.stringify(node.outputs)}`,
-        `PROTOCOLS: ${JSON.stringify(definition.protocols)}`,
+        `PROTOCOLS: ${JSON.stringify(Object.fromEntries(Object.entries(definition.protocols).filter(([id]) => ownProtocols.has(id))))}`,
         `SUBMIT: ${JSON.stringify(node.submission)}. At most one valid submit per execution. Chat may reply without submit.`,
       ].join('\n') : '');
       return [context, updated, input ? `NEW ${input.kind.toUpperCase()}: ${JSON.stringify(input.payload)}` : this.options.turnText?.(undefined) ?? ''].filter(Boolean).join('\n\n');
