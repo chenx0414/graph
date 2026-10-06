@@ -163,6 +163,7 @@ export class NodeExecutor {
           if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
           this.kernel.finishExecution(executionId, 'blocked');
           this.kernel.blockNode(this.graphId, nodeId, error.message);
+          this.kernel.setNodeQueuePaused(this.graphId, nodeId, true);
           this.queue.complete(seq, { kind: 'blocked', reason: error.message });
           return 'blocked';
         }
@@ -188,16 +189,24 @@ export class NodeExecutor {
           this.queue.complete(seq, { kind: 'blocked', reason });
           return 'blocked';
         }
+        // A budget interruption after submit cannot make the original input runnable.
+        if (this.hasValidSubmission(executionId)) {
+          if (!metering || !turnStarted) releaseHold();
+          return this.fail(executionId, nodeId, seq, `Execution failed after submit: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        if (!turnStarted && error instanceof RuntimeError && error.code === 'model_selection') {
+          releaseHold();
+          this.kernel.finishExecution(executionId, 'blocked');
+          this.kernel.blockNode(this.graphId, nodeId, error.message);
+          this.kernel.setNodeQueuePaused(this.graphId, nodeId, true);
+          this.queue.complete(seq, { kind: 'blocked', reason: error.message });
+          return 'blocked';
+        }
         if (metering && turnStarted) {
           this.kernel.finishExecution(executionId, 'blocked');
           this.kernel.blockNode(this.graphId, nodeId, 'Interrupted turn usage is unknown; reconcile the held reservation before resuming');
           this.queue.complete(seq, { kind: 'blocked', reason: 'usage unknown after interruption' });
           return 'blocked';
-        }
-        // A landed submit is irreversible. Do not re-run its original work after a crash.
-        if (this.hasValidSubmission(executionId)) {
-          releaseHold();
-          return this.fail(executionId, nodeId, seq, `Execution failed after submit: ${error instanceof Error ? error.message : String(error)}`);
         }
         if (retriesUsed >= budget.retriesAllowed) {
           releaseHold();
@@ -219,6 +228,7 @@ export class NodeExecutor {
       // would hand back a hold for tokens that may already have been spent, and a node could
       // then run past its budget by never reporting. The hold stays and the node parks.
       if (metering && !report?.usage) {
+        if (this.hasValidSubmission(executionId)) return this.fail(executionId, nodeId, seq, 'Execution ended after submit with unknown usage; output retained and original input cannot replay');
         this.kernel.finishExecution(executionId, 'blocked');
         this.kernel.blockNode(this.graphId, nodeId, 'turn reported no usage; its reservation is held until reconciled');
         this.queue.complete(seq, { kind: 'blocked', reason: 'usage unknown' });

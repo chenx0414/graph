@@ -10,7 +10,7 @@ import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
-import type { ModelEntry } from '../catalog/models.ts';
+import { modelIdentity, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordCapabilityLoad, recordNodeSession } from '../core/node-run.ts';
 import { GraphRuntime } from '../core/graph-runtime.ts';
 import { GraphLane } from '../core/graph-lane.ts';
@@ -102,11 +102,41 @@ export interface KernelGraphLaneOptions {
     { outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] } | Promise<{ outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] }>;
 }
 
-/** The first configured model of the grade a definition recommends. */
-export function modelFor(options: KernelGraphLaneOptions, recipe: string): ModelEntry | undefined {
+/** Select against immutable implementer history, including aliases and routing cycles. */
+export function modelFor(options: KernelGraphLaneOptions, recipe: string,
+  context?: { graphId: string; nodeId: string; revisionVersion: number }): ModelEntry | undefined {
   const entry = options.catalog.definition(recipe);
-  const directory = options.directory();
-  if (!entry) return undefined;
+  const excluded = new Set<string>();
+  if (entry.review && context) {
+    const { graphId, nodeId, revisionVersion } = context;
+    const definition = options.kernel.revision(graphId, revisionVersion)!.definition;
+    const predecessors = new Map<string, Set<string>>();
+    const connect = (from: string, to: string) => {
+      const source = from.split('.')[0]!; const target = to.split('.')[0]!;
+      const upstream = predecessors.get(target) ?? new Set<string>();
+      upstream.add(source); predecessors.set(target, upstream);
+    };
+    // Disabling an edge cannot erase the identity of work already received over it.
+    for (const edge of Object.values(definition.edges)) connect(edge.from, edge.to);
+    const deliveries = options.kernel.db.prepare('SELECT from_endpoint,to_endpoint FROM kernel_deliveries WHERE task_id=?').all(graphId) as { from_endpoint: string; to_endpoint: string }[];
+    for (const delivery of deliveries) connect(delivery.from_endpoint, delivery.to_endpoint);
+    const visited = new Set<string>();
+    const visit = (id: string) => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      for (const call of options.kernel.providerCalls(graphId, id)) {
+        const execution = options.kernel.execution(call.executionId);
+        const producer = execution && options.kernel.revision(graphId, execution.revisionVersion)?.definition.nodes[id];
+        if (!producer?.recipe) throw new RuntimeError('model_selection', `Implementer recipe history is unavailable for ${id}`);
+        if (options.catalog.definition(producer.recipe).review) continue;
+        if (!call.model) throw new RuntimeError('model_selection', `Implementer model history is unavailable for ${id}`);
+        excluded.add(call.model.id); excluded.add(call.model.identity);
+      }
+      for (const upstream of predecessors.get(id) ?? []) visit(upstream);
+    };
+    visit(nodeId);
+  }
+  const directory = options.directory().filter(model => !excluded.has(model.id) && !excluded.has(modelIdentity(model)));
   return directory.find(model => model.grade === entry.recommendedGrade) ?? directory[0];
 }
 
@@ -287,8 +317,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     config: async (graphId, nodeId, revisionVersion) => {
       const session = await sessionFor(graphId, nodeId, revisionVersion);
       const recipe = session.binding.definitionVersion;
-      const model = modelFor(options, recipe);
-      if (!model) throw new Error(`no configured model for recipe ${recipe}`);
+      const model = modelFor(options, recipe, { graphId, nodeId, revisionVersion });
+      if (!model) throw new RuntimeError('model_selection', `No eligible configured model for recipe ${recipe}; review excludes recorded implementer models`);
       boundModels.set(`${graphId}/${nodeId}`, structuredClone(model));
       const credential = options.credentialFor(model);
       if (!credential) throw new Error(`no credential bound for model ${model.id}`);

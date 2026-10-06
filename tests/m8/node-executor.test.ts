@@ -1,3 +1,4 @@
+import { RuntimeError } from '../../src/core/types.ts';
 import { recoverKernelExecutions } from '../../src/core/kernel-recovery.ts';
 import { kernelProviderGate, reconcileKernelUsage } from '../../src/runtime/kernel-provider-gate.ts';
 import { describe, expect, test } from 'vitest';
@@ -240,4 +241,56 @@ test('runtime recovery retains input, attempt counters and unknown provider hold
   expect(kernel.budgetState('t1', 'n1', { budget: 100, unlimited: false })).toMatchObject({ used: 30, reserved: 0 });
   expect(kernel.nodeState('t1', 'n1').paused).toBe(true);
   store.db.close();
+});
+
+
+test('a missing review model parks the input without consuming automatic retries or token holds', async () => {
+  const { kernel, store } = opened();
+  try {
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('model-block','p1','review','running',1)").run();
+    kernel.publishRevision('model-block', { definition: DEF, reason: 'review' });
+    kernel.admitNode('model-block', 1, 'n1', { instanceId: 'reviewer' });
+    const item = kernel.enqueue('model-block', { nodeId: 'n1', kind: 'delivery', payload: { input: 'in', value: null } });
+    let turns = 0;
+    const outcome = await new NodeExecutor({ kernel, graphId: 'model-block',
+      tokenBudget: { budget: 1000, unlimited: false }, reserveTokens: 100,
+      host: async () => { throw new RuntimeError('model_selection', 'No independent review model'); },
+    }).runNode('n1', async () => { turns += 1; });
+    expect(outcome).toBe('blocked');
+    expect(turns).toBe(0);
+    expect(kernel.nextQueued('model-block', 'n1')?.seq).toBe(item.seq);
+    expect(kernel.execution(executionIdOf(kernel, 'model-block'))?.retriesUsed).toBe(0);
+    expect(kernel.budgetState('model-block', 'n1', { budget: 1000, unlimited: false }).reserved).toBe(0);
+    expect(kernel.nodeState('model-block', 'n1').paused).toBe(true);
+  } finally { store.close(); }
+});
+
+test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknown usage cannot replay its original input', async mode => {
+  const { kernel, store } = opened();
+  try {
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('submitted','p1','work','running',1)").run();
+    kernel.publishRevision('submitted', { definition: DEF, reason: 'work' });
+    kernel.admitNode('submitted', 1, 'n1', { instanceId: 'worker' });
+    const queue = new NodeQueue(kernel, 'submitted');
+    const item = queue.enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: null });
+    const executor = new NodeExecutor({ kernel, graphId: 'submitted', host: fakeHost(),
+      tokenBudget: { budget: 1000, unlimited: false }, reserveTokens: 100 });
+    let turns = 0;
+    const outcome = await executor.runNode('n1', async executionId => {
+      turns += 1;
+      kernel.submit(executionId, { outputs: { out: { enable: true, value: { ok: true } } }, submissionId: 'landed' });
+      const gate = kernelProviderGate(kernel, 'submitted', 'n1');
+      gate.dispatch('unknown-after-submit', 50, () => undefined);
+      gate.settle('unknown-after-submit', null);
+      if (mode === 'throw') throw new Error('process exited after sending output');
+    });
+    expect(outcome).toBe('failed');
+    expect(kernel.execution(executionIdOf(kernel, 'submitted'))).toMatchObject({ state: 'failed', submissionId: 'landed', retriesUsed: 0 });
+    expect(kernel.db.prepare('SELECT state FROM kernel_queue WHERE seq=?').get(item.seq)).toEqual({ state: 'failed' });
+    queue.resume('n1');
+    expect(await executor.runNode('n1', async () => { turns += 1; })).toBe('idle');
+    expect(turns).toBe(1);
+    expect(kernel.providerCalls('submitted')[0]?.state).toBe('unknown');
+    expect(kernel.budgetState('submitted', 'n1', { budget: 1000, unlimited: false }).reserved).toBe(100);
+  } finally { store.close(); }
 });

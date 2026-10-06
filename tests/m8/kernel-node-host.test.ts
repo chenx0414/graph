@@ -1,3 +1,6 @@
+import { modelFor } from '../../src/runtime/kernel-graph-lane.ts';
+import { kernelProviderGate } from '../../src/runtime/kernel-provider-gate.ts';
+import type { ModelEntry } from '../../src/catalog/models.ts';
 import { describe, expect, test } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -135,4 +138,34 @@ describe('nodeSessionRequest — the v2-native session for one graph node (§13.
     expect(request.runtimePolicyDigest).toBeTruthy();
     expect(Array.isArray(request.allowedToolNames)).toBe(true);
   });
+});
+
+
+test('review model selection excludes recorded implementer identities through routing and rework cycles', async () => {
+  const { root, catalog, kernel } = await fixture();
+  const definition = kernel.latestRevision('g1')!.definition;
+  definition.nodes.a!.inputs = { back: { protocol: 'ping' } };
+  definition.nodes.b!.inputs = { review: { protocol: 'ping' } };
+  definition.modules.route = { type: 'router', trigger: 'each', inputs: { in: { protocol: 'ping' } },
+    outputs: { out: { protocol: 'ping' } }, rules: [{ when: 'true', emit: {} }] };
+  definition.edges = { work: { from: 'a.out', to: 'route.in', enabled: true },
+    review: { from: 'route.out', to: 'b.review', enabled: true }, rework: { from: 'b.out', to: 'a.back', enabled: true } };
+  const revision = kernel.publishRevision('g1', { definition, reason: 'review' });
+  kernel.admitNode('g1', revision.version, 'a', { instanceId: 'implementer' });
+  kernel.startExecution('g1', { executionId: 'work', nodeId: 'a', revisionVersion: revision.version });
+  const model = (id: string, modelId: string): ModelEntry => ({ id, modelId, provider: 'fixture',
+    grade: 'medium', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1', contextWindow: 32000, maxTokens: 256 });
+  const entries = [model('implementation', 'same-upstream'), model('alias', 'same-upstream'), model('independent', 'different-upstream')];
+  kernel.budgetState('g1', 'a', { budget: 0, unlimited: true });
+  const gate = kernelProviderGate(kernel, 'g1', 'a', undefined, entries[0]);
+  gate.dispatch('actual-send', 100, () => undefined);
+  gate.settle('actual-send', { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 });
+  // Editing the current catalog cannot erase the identity which did the work.
+  entries[0]!.modelId = 'edited-upstream';
+  const options = { kernel, catalog, directory: () => entries, credentialFor: () => undefined,
+    instancesDir: join(root, 'instances'), stateDir: root, workspaceFor: () => root };
+  const context = { graphId: 'g1', nodeId: 'b', revisionVersion: revision.version };
+  expect(modelFor(options, 'beta@1', context)?.id).toBe('independent');
+  entries.pop();
+  expect(modelFor(options, 'beta@1', context)).toBeUndefined();
 });
