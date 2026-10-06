@@ -315,3 +315,41 @@ test.each(['retry', 'skip'])('failed input requires explicit %s before completio
     expect(graph.settleCompletion()).toBe('completed');
   }
 });
+
+
+test('main can patch named objects while preserving accepted work and enforcing atomic revisions and retirement', async () => {
+  const { kernel, store } = opened();
+  try {
+    new GraphRuntime(kernel, 'owner').create(definition());
+    const main = graphManagement(kernel, 'owner');
+    const { graphId } = await main.graphCreate({ definition: twoNode() }) as { graphId: string };
+    const before = kernel.listNodes(graphId).find(node => node.nodeId === 'b')!;
+    await main.graphSend({ graphId, nodeId: 'b', input: 'in', value: { n: 7 } });
+    const queued = kernel.nextQueued(graphId, 'b')!;
+    await main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'adjust running work',
+      patch: { nodes: { a: { task: 'updated task' } }, edges: { e: { enabled: false } } },
+    } });
+    const updated = kernel.latestRevision(graphId)!;
+    expect(updated.version).toBe(2);
+    expect(updated.definition.nodes.a).toMatchObject({ task: 'updated task', recipe: 'a@1', outputs: { out: { protocol: 'ping' } } });
+    expect(updated.definition.edges.e).toEqual({ from: 'a.out', to: 'b.in', enabled: false });
+    expect(kernel.listNodes(graphId).find(node => node.nodeId === 'b')!.instanceId).toBe(before.instanceId);
+    expect(kernel.nextQueued(graphId, 'b')).toEqual(queued);
+    await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'stale', patch: { name: 'stale' } } })).rejects.toMatchObject({ code: 'stale_revision' });
+    await expect(main.graphPatch({ graphId, baseRevision: 2, changes: { reason: 'invalid',
+      patch: { nodes: { b: { inputs: { in: { protocol: 'missing' } } } } },
+    } })).rejects.toMatchObject({ code: 'invalid_definition' });
+    await expect(main.graphPatch({ graphId, baseRevision: 2, changes: { reason: 'ambiguous', definition: twoNode(), patch: {} } })).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(main.graphPatch({ graphId, baseRevision: 2, changes: { reason: 'not an object', patch: [] } })).rejects.toMatchObject({ code: 'invalid_input' });
+    const retirement = { reason: 'remove b', patch: { nodes: { b: null }, edges: { e: null } }, retire: ['b'] };
+    await expect(main.graphPatch({ graphId, baseRevision: 2, changes: retirement })).rejects.toMatchObject({ code: 'pending_work' });
+    expect(kernel.latestRevision(graphId)?.version).toBe(2);
+    await main.graphControl({ graphId, action: 'cancel', seq: queued.seq });
+    await main.graphPatch({ graphId, baseRevision: 2, changes: retirement });
+    expect(kernel.latestRevision(graphId)?.version).toBe(3);
+    expect(kernel.latestRevision(graphId)?.definition.nodes.b).toBeUndefined();
+    expect(kernel.latestRevision(graphId)?.definition.edges.e).toBeUndefined();
+    expect(kernel.revision(graphId, 1)?.definition.nodes.a?.task).toBe('a');
+    expect(kernel.revision(graphId, 1)?.definition.edges.e?.enabled).toBe(true);
+  } finally { store.close(); }
+});

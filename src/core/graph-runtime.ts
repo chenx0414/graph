@@ -35,7 +35,9 @@ export interface GraphStateRow {
 
 export interface PatchChange {
   reason: string;
-  definition: GraphDefinition;
+  definition?: GraphDefinition;
+  /** JSON merge patch: named objects merge, arrays replace, null removes a field. */
+  patch?: Json;
   /** Node ids to retire explicitly; every omitted node must be named here (§8). */
   retire?: string[];
 }
@@ -44,6 +46,29 @@ export interface CreatedGraph {
   graphId: string;
   definition: GraphDefinition;
   revision: { version: number };
+}
+
+/** Apply a JSON merge patch to a copy; keys never mutate object prototypes. */
+function patchedDefinition(definition: GraphDefinition, input: Json): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new RuntimeError('invalid_input', 'Graph patch must be a JSON object');
+  let patch: Record<string, Json>;
+  try { patch = JSON.parse(JSON.stringify(input)) as Record<string, Json>; }
+  catch { throw new RuntimeError('invalid_input', 'Graph patch must contain serializable JSON'); }
+  const result = structuredClone(definition) as unknown as Record<string, Json>;
+  const pending = [{ target: result, patch }];
+  while (pending.length) {
+    const { target, patch } = pending.pop()!;
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) { delete target[key]; continue; }
+      if (typeof value === 'object' && !Array.isArray(value)) {
+        const current = Object.hasOwn(target, key) ? target[key] : undefined;
+        const nested = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+        Object.defineProperty(target, key, { value: nested, enumerable: true, writable: true, configurable: true });
+        pending.push({ target: nested, patch: value });
+      } else Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+    }
+  }
+  return result;
 }
 
 export class GraphRuntime {
@@ -89,8 +114,11 @@ export class GraphRuntime {
       // Zero partial change: the caller is told the current version and must retry.
       throw new RuntimeError('stale_revision', `Patch is based on revision ${input.baseRevision} but the current revision is ${latest.version}`);
     }
-    // The definition is validated whole before a revision is written.
-    const parsed = parseGraphDefinition(input.changes.definition);
+    if (typeof input.changes.reason !== 'string' || !input.changes.reason.trim()) throw new RuntimeError('invalid_input', 'Graph change requires a reason');
+    if ((input.changes.definition !== undefined) === (input.changes.patch !== undefined)) throw new RuntimeError('invalid_input', 'Supply exactly one full definition or local patch');
+    // Both update forms produce the same formal definition and validate before writing.
+    const parsed = parseGraphDefinition(input.changes.patch === undefined ? input.changes.definition
+      : patchedDefinition(latest.definition, input.changes.patch));
     if (input.changes.retire?.length) {
       for (const id of input.changes.retire) {
         if (!latest.definition.nodes[id] && !latest.definition.modules[id]) {

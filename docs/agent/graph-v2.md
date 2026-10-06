@@ -16,6 +16,8 @@
 
 `graph_patch({graphId,baseRevision,changes:{definition,reason,retire?}})` 发布新 revision。baseRevision 过期时不写入。删除节点必须明确列在 retire 中；存在运行、排队或失败待处理工作时，先处理工作。当前执行保留原配置，后续 submit 使用届时的连接。
 
+局部修改使用 `changes:{reason,patch,retire?}`，与 definition 二选一。例如 `patch:{nodes:{work:{task:"处理新增边界"}},edges:{review:{enabled:false}}}`。对象字段递归合并，数组整体替换，null 删除字段；未指定内容保留。结果仍按同一正式 graph 定义整体验证，不增加第二套 graph 格式。删除节点仍要显式 retire 并先处理待办工作；有连接时同时在 patch 中删除对应边。
+
 `graph_inspect({graphId,query,id?})` 支持 summary（默认）、revision、nodes、results、edge、module、operations、provider_calls。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
 
 ## 控制
