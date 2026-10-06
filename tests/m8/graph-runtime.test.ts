@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { TaskStore } from '../../src/core/store.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
 import { graphManagement } from '../../src/core/graph-service.ts';
+import { NodeQueue } from '../../src/core/node-queue.ts';
 import { GraphRuntime } from '../../src/core/graph-runtime.ts';
 import { OperationLifecycle } from '../../src/core/operation-lifecycle.ts';
 import { approveHumanCheck, insertQuestion } from '../../src/core/question-routing.ts';
@@ -436,4 +437,32 @@ test('main can patch named objects while preserving accepted work and enforcing 
     expect(kernel.revision(graphId, 1)?.definition.nodes.a?.task).toBe('a');
     expect(kernel.revision(graphId, 1)?.definition.edges.e?.enabled).toBe(true);
   } finally { store.close(); }
+});
+
+test.each(['plain', 'bracket[1]', 'star*', 'question?'])('retry recognizes submitted generations for literal node id %s', async nodeId => {
+  const { kernel } = opened();
+  const runtime = new GraphRuntime(kernel, 't1');
+  const graph = definition();
+  graph.nodes = { [nodeId]: graph.nodes.a! };
+  runtime.create(graph);
+  kernel.admitNode('t1', 1, nodeId, { instanceId: 'worker' });
+  const queue = new NodeQueue(kernel, 't1');
+  const main = graphManagement(kernel, 't1');
+  const item = runtime.deliver({ nodeId, input: 'in', value: { n: 1 } });
+  const base = `exec-t1-${nodeId}-${item.seq}`;
+  queue.claim(nodeId);
+  kernel.startExecution('t1', { executionId: base, nodeId, revisionVersion: 1 });
+  kernel.finishExecution(base, 'failed');
+  queue.complete(item.seq, { kind: 'failed', reason: 'before submit' });
+  // The first explicit retry is allowed because this input has not submitted yet.
+  await main.graphControl({ graphId: 't1', action: 'retry', seq: item.seq });
+  queue.claim(nodeId);
+  kernel.startExecution('t1', { executionId: `${base}-1`, nodeId, revisionVersion: 1 });
+  kernel.submit(`${base}-1`, { submissionId: 'landed', outputs: { out: { enable: true, value: { n: 2 } } } });
+  kernel.finishExecution(`${base}-1`, 'failed');
+  queue.complete(item.seq, { kind: 'failed', reason: 'after submit' });
+  await expect(main.graphControl({ graphId: 't1', action: 'retry', seq: item.seq })).rejects.toThrow(/Submitted work/);
+  const history = await main.graphInspect({ graphId: 't1', query: 'queue' }) as { items: { state: string; generation: number }[] };
+  expect(history.items[0]).toMatchObject({ state: 'failed', generation: 1 });
+  expect(kernel.execution(`${base}-1`)?.submissionId).toBe('landed');
 });

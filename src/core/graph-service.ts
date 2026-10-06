@@ -130,7 +130,9 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
         const seq = input.seq;
         const row = kernel.db.prepare('SELECT node_id,state FROM kernel_queue WHERE task_id=? AND seq=?').get(input.graphId, seq) as { node_id: string; state: string } | undefined;
         if (!row || row.state === 'claimed') throw new RuntimeError('invalid_queue', 'Queue item is absent or still executing');
-        const submitted = kernel.db.prepare('SELECT submission_id FROM kernel_executions WHERE task_id=? AND node_id=? AND submission_id IS NOT NULL AND (id=? OR id GLOB ?)').get(input.graphId, row.node_id, `exec-${input.graphId}-${row.node_id}-${input.seq}`, `exec-${input.graphId}-${row.node_id}-${input.seq}-[0-9]*`);
+        // Stable node ids are literal text, never a wildcard expression.
+        const base = `exec-${input.graphId}-${row.node_id}-${input.seq}`;
+        const submitted = kernel.db.prepare('SELECT submission_id FROM kernel_executions WHERE task_id=? AND node_id=? AND submission_id IS NOT NULL AND (id=? OR instr(id,?)=1)').get(input.graphId, row.node_id, base, `${base}-`);
         if (input.action === 'retry' && submitted) throw new RuntimeError('invalid_queue', 'Submitted work cannot be sent again');
         kernel.store.transaction(() => {
           kernel.db.prepare('UPDATE kernel_queue SET state=?,reason=?,generation=generation+? WHERE task_id=? AND seq=?')
