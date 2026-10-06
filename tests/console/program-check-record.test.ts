@@ -1,14 +1,14 @@
 // A failed check must point at the record that holds its whole run.
 //
-// Failure mode this file exists for: a `graph.command` check wrote everything it saw - command, args,
+// Failure mode this file exists for: a `workspace.command` check wrote everything it saw - command, args,
 // exit code, stdout, stderr, and whether it ran inside the sandbox - to
 // `<scratch>/checks/<nodeId>.json`, and then reported a failure as `{code, stderr: last 4000
 // characters}`. The record was on disk and nothing said where it was; stdout, which is where a suite
 // names the case that failed, was dropped entirely. Reading a failure meant searching the filesystem
 // for a file the harness had already written and already knew the path of.
 //
-// The record path is the one a passing run registers as its acceptance evidence, so naming it on
-// failure keeps both ends of a check pointing at the same file.
+// Native operations keep the same record contract on pass and failure. The public output carries
+// its reference to main; the digest belongs to operation audit metadata, not the business protocol.
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -16,14 +16,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { TaskStore } from '../../src/core/store.ts';
-import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec , Proposal } from '../../src/core/types.ts';
+import { runWorkspaceCheck, workspaceCheckOutput } from '../fixtures/workspace-check.ts';
 import { git as runGit } from '../../src/git/git.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
 
 function git(cwd: string, args: string[]) {
   const result = runGit(cwd, args);
@@ -44,73 +41,51 @@ async function repo() {
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   git(root, ['init', '-b', 'main']);
   await writeFile(join(root, 'README.md'), 'project\n');
+  await writeFile(join(root, '.gitignore'), 'state/\n');
   git(root, ['add', '.']);
   git(root, ['commit', '-m', 'init']);
   return root;
 }
 
-const work: ActionAdapter = {
-  kind: 'agent', reserveTokens: 100,
-  prepare: async operation => async () => {
-    await mkdir(join(operation.workspace!, 'scripts'), { recursive: true });
-    await writeFile(join(operation.workspace!, 'scripts', 'fail.mjs'), FAILING);
-    return { outcome: 'completed', output: null, usage };
-  },
-};
-
-const nodes: NodeSpec[] = [
-  { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-  { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['scripts/fail.mjs'] } },
-];
-
 async function failingRun() {
   const root = await repo();
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: { work } });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Run the check',
-    acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }],
-    nodes,
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-  const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  cleanup.push(async () => store.close());
-  const row = store.db.prepare('SELECT result FROM operations WHERE node_id=? AND result IS NOT NULL ORDER BY dispatched_at DESC LIMIT 1')
-    .get('check') as { result: string };
-  const question = store.db.prepare('SELECT kind,data FROM questions WHERE node_id=? ORDER BY rowid DESC LIMIT 1')
-    .get('check') as { kind: string; data: string } | undefined;
-  return {
-    output: (JSON.parse(row.result) as { output: {
-      code: number; stderr: string; stdoutTail?: string; record?: { path: string; digest: string };
-    } }).output,
-    question: question && { kind: question.kind, data: JSON.parse(question.data) as { output?: { record?: { path: string } } } },
-    root,
-  };
+  await mkdir(join(root, 'scripts'), { recursive: true });
+  await writeFile(join(root, 'scripts', 'fail.mjs'), FAILING);
+  git(root, ['add', 'scripts']);
+  git(root, ['commit', '-m', 'check fixture']);
+  const briefings: string[] = [];
+  const checked = await runWorkspaceCheck({ workspace: root, command: { command: 'node', args: ['scripts/fail.mjs'] },
+    mainAction: { kind: 'agent', reserveTokens: 1, prepare: async operation => async () => {
+      briefings.push(operation.context.briefing ?? '');
+      return { outcome: 'completed', output: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+    } },
+  });
+  cleanup.push(() => checked.runtime.close());
+  const output = await workspaceCheckOutput(checked);
+  const operations = await checked.main.graphInspect({ graphId: checked.graphId, query: 'operations' }) as { record_digest?: string | null }[];
+  return { checked, output, digest: operations[0]!.record_digest, briefings };
 }
 
-test('a failed check names the record that holds its whole run', async () => {
-  const { output } = await failingRun();
+test('a failed check names and fingerprints the record that holds its whole run', async () => {
+  const { output, digest } = await failingRun();
+  expect(output.passed).toBe(false);
   expect(output.code).toBe(3);
   expect(output.stderr).toContain('1 test failed');
-  // Where the whole run lives, named by the failure itself.
-  expect(output.record?.path, 'a failure must say where its record is').toBeTruthy();
-  expect(existsSync(output.record!.path), `${output.record!.path} should exist`).toBe(true);
-  // And the digest identifies that file, so a reader can tell the summary from the whole thing.
-  const body = await readFile(output.record!.path, 'utf8');
-  expect(createHash('sha256').update(body).digest('hex')).toBe(output.record!.digest);
+  expect(existsSync(output.record)).toBe(true);
+  const body = await readFile(output.record, 'utf8');
+  expect(digest).toMatch(/^[a-f0-9]{64}$/);
+  expect(createHash('sha256').update(body).digest('hex')).toBe(digest);
   const recorded = JSON.parse(body) as { code: number; stdout: string; stderr: string };
   expect(recorded.code).toBe(3);
   expect(recorded.stderr).toContain('1 test failed');
-  // stdout is where the failing case is named; the summary kept it, so the hunt is not needed.
   expect(recorded.stdout).toContain('widget renders a caret');
-  expect(output.stdoutTail).toContain('widget renders a caret');
+  expect(output.stdout).toContain('widget renders a caret');
 });
 
-test('the failure main is woken for carries the record path too', async () => {
-  const { question, output } = await failingRun();
-  expect(question?.kind).toBe('execution_failed');
-  // The question is what main reads; a path that only exists in an operation row is not reachable.
-  expect(question!.data.output?.record?.path).toBe(output.record?.path);
+test('main receives the failed business result with its actual record reference', async () => {
+  const { checked, output, briefings } = await failingRun();
+  const results = await checked.main.graphInspect({ graphId: checked.graphId, query: 'results' }) as { id: string; value: { passed: boolean; record: string } }[];
+  expect(results).toHaveLength(1);
+  expect(results[0]!.value).toMatchObject({ passed: false, record: output.record });
+  expect(briefings.some(text => text.includes(`result ${results[0]!.id}`))).toBe(true);
 });

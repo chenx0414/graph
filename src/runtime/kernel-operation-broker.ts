@@ -1,6 +1,6 @@
 import { waitForKernelProgramExecutionSlot } from './execution-slots.ts';
-import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { canonicalJson } from '../core/store.ts';
 import type { KernelStore } from '../core/kernel-store.ts';
@@ -28,7 +28,7 @@ export async function executeModuleOperation(options: {
   const created = Date.now();
   const request = canonicalJson({ operation, inputs: options.inputs, workspace });
   kernel.db.prepare(`INSERT INTO kernel_module_operations(id,task_id,module_id,delivery_id,revision_version,request,state,created_at)
-    VALUES(?,?,?,?,?,?,'prepared',?) ON CONFLICT(delivery_id) DO UPDATE SET request=excluded.request,revision_version=excluded.revision_version,state='prepared',error=NULL,resource_receipt=NULL`)
+    VALUES(?,?,?,?,?,?,'prepared',?) ON CONFLICT(delivery_id) DO UPDATE SET request=excluded.request,revision_version=excluded.revision_version,state='prepared',error=NULL,resource_receipt=NULL,record_digest=NULL`)
     .run(id, graphId, moduleId, deliveryId, options.revisionVersion, request, created);
   let commit: string | null = null;
   let cleanBefore = false;
@@ -66,6 +66,8 @@ export async function executeModuleOperation(options: {
       result = await running;
     } else {
       runner = await openWorkspaceCommandRunner({ workspace, scratchDir,
+        // Sandboxed checks share authority, not temporary files, even under full access.
+        env: { TMPDIR: await realpath(scratchDir) },
         gate: { dispatch: (_id, _reservation, send) => { admit(); const started = send(); dispatched(); return started; }, settle: () => {} },
         ...(options.access ? { access: options.access } : {}), timeoutMs: operation.timeoutMs ?? 120_000 });
       result = await runner.run(operation.command, operation.args, cancellation.signal);
@@ -77,11 +79,13 @@ export async function executeModuleOperation(options: {
     const record = { operationId: id, command: operation.command, args: operation.args, ...result, commit, commitAfter, cleanBefore, cleanAfter, verifiedCommit,
       sandboxed: operation.sandbox !== false, elapsedMs: Date.now() - created };
     const recordPath = join(scratchDir, 'result.json');
-    await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+    const recordBytes = `${JSON.stringify(record, null, 2)}\n`;
+    await writeFile(recordPath, recordBytes, { mode: 0o600 });
+    const recordDigest = createHash('sha256').update(recordBytes).digest('hex');
     const output = { passed: result.code === 0, code: result.code, commit, verifiedCommit, record: recordPath, operationId: id,
       stdout: result.stdout.slice(-32_768), stderr: result.stderr.slice(-32_768), elapsedMs: record.elapsedMs };
     const evaluated = { ok: true, state: options.state, outputs: { [operation.output]: output }, diagnostics: [`workspace.command ${id}`] };
-    kernel.db.prepare("UPDATE kernel_module_operations SET state='settled',result=?,ended_at=? WHERE id=?").run(canonicalJson(evaluated), Date.now(), id);
+    kernel.db.prepare("UPDATE kernel_module_operations SET state='settled',result=?,record_digest=?,ended_at=? WHERE id=?").run(canonicalJson(evaluated), recordDigest, Date.now(), id);
     kernel.store.event(graphId, 'graph.operation.settled', { moduleId, operationId: id, passed: output.passed, commit, verifiedCommit, record: recordPath });
     return evaluated;
   } catch (error) {

@@ -270,6 +270,7 @@ export class KernelStore {
       if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
     }
     const moduleOperationColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_module_operations)').all() as { name: string }[]).map(row => row.name));
+    if (!moduleOperationColumns.has('record_digest')) this.db.exec('ALTER TABLE kernel_module_operations ADD COLUMN record_digest TEXT');
     if (!moduleOperationColumns.has('resource_receipt')) this.db.exec('ALTER TABLE kernel_module_operations ADD COLUMN resource_receipt TEXT');
     if (!moduleOperationColumns.has('worker_active')) this.db.exec('ALTER TABLE kernel_module_operations ADD COLUMN worker_active INTEGER NOT NULL DEFAULT 0');
     const providerColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_provider_calls)').all() as { name: string }[]).map(row => row.name));

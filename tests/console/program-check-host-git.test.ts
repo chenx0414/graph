@@ -17,14 +17,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { fullAccessPolicy } from '../../src/core/access-policy.ts';
-import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec , Proposal } from '../../src/core/types.ts';
+import { runWorkspaceCheck, workspaceCheckOutput } from '../fixtures/workspace-check.ts';
 import { git as runGit } from '../../src/git/git.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
 
 function git(cwd: string, args: string[]) {
   const result = runGit(cwd, args);
@@ -58,46 +55,18 @@ const MAKEREPO = [
   '',
 ].join('\n');
 
-const nodes: NodeSpec[] = [
-  { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-  { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'] },
-];
-
-const work: ActionAdapter = {
-  kind: 'agent', reserveTokens: 100,
-  prepare: async operation => async () => {
-    await mkdir(join(operation.workspace!, 'scripts'), { recursive: true });
-    await writeFile(join(operation.workspace!, 'scripts', 'mkrepo.mjs'), MAKEREPO);
-    return { outcome: 'completed', output: null, usage };
-  },
-};
-
 test('a full-access check creates a repository with the git its own PATH resolves to', async () => {
   const root = await repo();
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: { work },
-    access: () => fullAccessPolicy(),
-  });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Run the check',
-    acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }],
-    nodes: nodes.map(node => node.id === 'check' ? { ...node, input: { command: 'node', args: ['scripts/mkrepo.mjs'] } } : node),
-  }, 'proposal');
-  const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-  const view = await task.view();
-  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
-  expect(evidence).toMatchObject({ valid: true, nodeId: 'check' });
-  const body = JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { code: number; stdout: string; stderr: string };
+  await mkdir(join(root, 'scripts'), { recursive: true });
+  await writeFile(join(root, 'scripts', 'mkrepo.mjs'), MAKEREPO);
+  const checked = await runWorkspaceCheck({ workspace: root, command: { command: 'node', args: ['scripts/mkrepo.mjs'] }, fullAccess: true });
+  cleanup.push(() => checked.runtime.close());
+  const output = await workspaceCheckOutput(checked);
+  const body = JSON.parse(await readFile(output.record, 'utf8')) as { code: number; stdout: string; stderr: string };
   expect(body.code).toBe(0);
   expect(body.stderr).not.toContain('Operation not permitted');
   const report = JSON.parse(body.stdout.trim()) as { git: string; dir: string; status: number };
   expect(report.status).toBe(0);
-  // The check reached the platform shim - the case that was suspected of being denied - and the
-  // repository landed in the harness's own scratch directory.
   expect(report.git).toBe('/usr/bin/git');
-  expect(report.dir).toContain('checks');
+  expect(await readFile(join(report.dir, '.git', 'HEAD'), 'utf8')).toContain('refs/heads/');
 });
