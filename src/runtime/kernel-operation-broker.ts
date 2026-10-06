@@ -28,7 +28,7 @@ export async function executeModuleOperation(options: {
   const created = Date.now();
   const request = canonicalJson({ operation, inputs: options.inputs, workspace });
   kernel.db.prepare(`INSERT INTO kernel_module_operations(id,task_id,module_id,delivery_id,revision_version,request,state,created_at)
-    VALUES(?,?,?,?,?,?,'prepared',?) ON CONFLICT(delivery_id) DO UPDATE SET request=excluded.request,revision_version=excluded.revision_version,state='prepared',error=NULL`)
+    VALUES(?,?,?,?,?,?,'prepared',?) ON CONFLICT(delivery_id) DO UPDATE SET request=excluded.request,revision_version=excluded.revision_version,state='prepared',error=NULL,resource_receipt=NULL`)
     .run(id, graphId, moduleId, deliveryId, options.revisionVersion, request, created);
   let commit: string | null = null;
   let cleanBefore = false;
@@ -56,11 +56,14 @@ export async function executeModuleOperation(options: {
     let result;
     if (operation.sandbox === false) {
       const command = resolveUnsandboxedCommand(operation.command, operation.args);
-      admit();
+      const nonce = randomUUID();
+      const quiescence = { path: join(scratchDir, `quiescence-${nonce}.json`), nonce };
+      kernel.db.prepare('UPDATE kernel_module_operations SET resource_receipt=? WHERE id=?').run(canonicalJson(quiescence), id);
       const running = runHostCommand({ cwd: workspace, executable: command.executable, args: command.args,
         env: checkEnvironment({ executable: command.executable, host: process.env, ...(command.env ? { declared: command.env } : {}) }),
-        timeoutMs: operation.timeoutMs ?? 120_000, signal: cancellation.signal });
-      dispatched(); result = await running;
+        timeoutMs: operation.timeoutMs ?? 120_000, signal: cancellation.signal, quiescence,
+        beforeStart: () => { admit(); dispatched(); } });
+      result = await running;
     } else {
       runner = await openWorkspaceCommandRunner({ workspace, scratchDir,
         gate: { dispatch: (_id, _reservation, send) => { admit(); const started = send(); dispatched(); return started; }, settle: () => {} },

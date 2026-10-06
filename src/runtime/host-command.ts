@@ -1,3 +1,4 @@
+import type { ProcessQuiescenceReceipt } from '../core/process-quiescence.ts';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
@@ -83,19 +84,29 @@ export interface HostCommandInput {
   /** How long the command may run. No limit when omitted. */
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Durable dispatch admission, after the supervisor is ready and before the command starts. */
+  beforeStart?: () => void;
+  /** Written by the supervisor only after the command has closed. */
+  quiescence?: ProcessQuiescenceReceipt;
 }
 
 export async function runHostCommand(input: HostCommandInput): Promise<HostCommandResult> {
-  return new Promise<HostCommandResult>(resolve => {
+  return new Promise<HostCommandResult>((resolve, reject) => {
     if (input.signal?.aborted) { resolve({ code: null, stdout: '', stderr: '' }); return; }
     const runtime = graphNodeRuntime();
     const child = spawn(runtime.execPath, [fileURLToPath(new URL('./host-command-worker.mjs', import.meta.url))], {
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       env: runtime.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {},
     });
+    let admissionError: unknown;
     let result: { code: number | null; error?: string } | undefined;
     child.on('message', message => {
       const value = message as { kind?: string; code?: unknown; error?: unknown };
+      if (value.kind === 'ready') {
+        if (input.signal?.aborted || timedOut) { killTree(); return; }
+        try { input.beforeStart?.(); child.send({ kind: 'start' }, () => {}); }
+        catch (error) { admissionError = error; killTree(); }
+      }
       if (value.kind === 'result' && (value.code === null || typeof value.code === 'number')) {
         result = { code: value.code, ...(typeof value.error === 'string' ? { error: value.error } : {}) };
       }
@@ -137,6 +148,7 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
       input.signal?.removeEventListener('abort', abort);
       const reason = timedOut ? `Process terminated by SIGKILL: it exceeded the ${input.timeoutMs}ms timeout\n` : '';
       const tail = truncated ? `Output truncated at ${MAX_OUTPUT_BYTES} bytes\n` : '';
+      if (admissionError !== undefined) { reject(admissionError); return; }
       resolve({
         code: timedOut ? null : code,
         stdout: Buffer.concat(stdout).toString('utf8'),
@@ -146,7 +158,7 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
 
     child.on('error', error => finish(null, `${(error as Error).message}\n`));
     child.on('close', () => finish(result?.code ?? null, result?.error ?? (result ? '' : 'Command supervisor exited without a result\n')));
-    child.send({ kind: 'start', cwd: input.cwd, executable: input.executable, args: input.args, env: input.env ?? {} }, error => {
+    child.send({ kind: 'prepare', quiescence: input.quiescence, cwd: input.cwd, executable: input.executable, args: input.args, env: input.env ?? {} }, error => {
       if (error) finish(null, `${error.message}\n`);
     });
   });

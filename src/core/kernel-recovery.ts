@@ -1,9 +1,11 @@
+import { reconcileOperationResources } from './kernel-operation-resources.ts';
 import { wakeForBlockedNode } from './wake-ledger.ts';
 import type { KernelStore } from './kernel-store.ts';
 
 /** Called once, after acquiring the runtime owner lock; never during a live tick. */
 export function recoverKernelExecutions(kernel: KernelStore): number {
   return kernel.moduleTransaction(() => {
+    reconcileOperationResources(kernel);
     // A prepared operation never crossed its send boundary; only its unused lease is safe to release.
     kernel.db.prepare("UPDATE kernel_module_operations SET worker_active=0 WHERE state='prepared'").run();
     kernel.db.prepare("UPDATE kernel_provider_calls SET state='unknown' WHERE state='inflight'").run();

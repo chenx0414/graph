@@ -1,3 +1,4 @@
+import { reconcileOperationResources } from './kernel-operation-resources.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { graphAcceptance } from './graph-acceptance.ts';
 import { reconcileKernelUsage } from '../runtime/kernel-provider-gate.ts';
@@ -94,6 +95,8 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
         throw new RuntimeError('invalid_graph', 'Ended graph cannot change its execution controls');
       }
       if (input.action === 'cancel_operation') {
+        const owned = kernel.db.prepare('SELECT id FROM kernel_module_operations WHERE task_id=? AND id=?').get(input.graphId, input.operationId ?? '');
+        if (owned) reconcileOperationResources(kernel, input.operationId);
         const operation = kernel.db.prepare('SELECT delivery_id,module_id,state,worker_active FROM kernel_module_operations WHERE task_id=? AND id=?').get(input.graphId, input.operationId ?? '') as { delivery_id: string; module_id: string; state: string; worker_active: number } | undefined;
         if (!operation || !['uncertain', 'failed', 'cancelled'].includes(operation.state)) throw new RuntimeError('invalid_operation', 'Only an interrupted or failed operation can be cancelled; stop active work first');
         if (operation.worker_active) throw new RuntimeError('invalid_operation', 'Operation still holds execution resources; verify termination before cancelling');

@@ -1,5 +1,9 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createInterface } from 'node:readline';
+import type { Readable } from 'node:stream';
 import { describe, expect, test } from 'vitest';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,3 +93,35 @@ describe('resident worker transport (§7)', () => {
     expect(result.turnId).toBeTruthy();
   }, 60_000);
 });
+
+
+test.each(['idle', 'model_call', 'tool_call'])('a resident Pi closes when its owner control stream closes during %s', async operation => {
+  const provider = await openaiServer([{ tools: [{ id: 'probe-1', name: 'probe', arguments: '{}' }] }]);
+  cleanup.push(() => provider.close());
+  const { workspace, stateDir } = await fixture();
+  const configPath = join(workspace, 'owner-eof.json');
+  await writeFile(configPath, JSON.stringify({ ...baseConfig(workspace, stateDir, provider.model),
+    hostModel: operation === 'model_call',
+    tools: [{ name: 'probe', label: 'Probe', description: 'Ask the host.', parameters: { type: 'object', properties: {} } }],
+    allowedToolNames: ['probe'],
+  }));
+  const worker = spawn(process.execPath, [workerEntry, configPath], { cwd: workspace, stdio: ['pipe', 'ignore', 'pipe', 'pipe'] });
+  const closed = once(worker, 'close');
+  const messages: { operation?: string }[] = [];
+  const channel = createInterface({ input: worker.stdio[3] as Readable });
+  channel.on('line', line => { messages.push(JSON.parse(line) as { operation?: string }); });
+  cleanup.push(async () => {
+    if (worker.exitCode === null && worker.signalCode === null) worker.kill('SIGKILL');
+    await closed; channel.close();
+  });
+  await expect.poll(() => messages.some(message => message.operation === 'ready'), { timeout: 10000 }).toBe(true);
+  if (operation !== 'idle') {
+    worker.stdin!.write(`${JSON.stringify({ operation: 'start-turn', requestId: 'turn-1', text: 'Ask the host.' })}\n`);
+    await expect.poll(() => messages.some(message => message.operation === operation), { timeout: 10000 }).toBe(true);
+  }
+  const requestsBefore = provider.requests.length;
+  worker.stdin!.end();
+  await expect.poll(() => worker.exitCode, { timeout: 5000 }).toBe(0);
+  await closed;
+  expect(provider.requests).toHaveLength(requestsBefore);
+}, 20000);

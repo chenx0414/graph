@@ -44,9 +44,12 @@ import type { PiWorkerConfig } from './pi-process.ts';
 export async function runResidentWorker(configPath: string): Promise<void> {
   const config = JSON.parse(await readFile(configPath, 'utf8')) as PiWorkerConfig;
   const channel = new Socket({ fd: 3, readable: true, writable: true });
+  let closed = false;
+  let ownerDisconnected = false;
   const outbox: unknown[] = [];
   let flushScheduled = false;
   const notify = (value: Record<string, unknown>) => {
+    if (ownerDisconnected || channel.destroyed) return;
     outbox.push(value);
     if (flushScheduled) return;
     flushScheduled = true;
@@ -71,6 +74,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
   const toolPending = new Map<string, (reply: { ok: boolean; text: string }) => void>();
   const callHost = (name: string, args: unknown): Promise<{ ok: boolean; text: string }> =>
     new Promise(resolve => {
+      if (ownerDisconnected) { resolve({ ok: false, text: 'Resident owner disconnected' }); return; }
       const requestId = `tool-${randomUUID()}`;
       toolPending.set(requestId, resolve);
       notify({ operation: 'tool_call', requestId, name, args });
@@ -80,6 +84,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
   let turnUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
   let unknownUsage = false;
   const hostStream: import('@earendil-works/pi-agent-core').StreamFn = async (_model, context) => {
+    if (ownerDisconnected) throw new Error('Resident owner disconnected');
     const requestId = `model-${randomUUID()}`;
     const reply = await new Promise<unknown>((resolve, reject) => {
       modelPending.set(requestId, { resolve, reject });
@@ -151,74 +156,97 @@ export async function runResidentWorker(configPath: string): Promise<void> {
   const inspect = () => ({ ...session.inspect(), processId: process.pid }) as AgentSessionInspect & { processId: number };
 
   let running = false;
-  let closed = false;
   notify({ operation: 'ready', inspect: inspect() });
 
-  const commands = createInterface({ input: process.stdin })[Symbol.asyncIterator]();
+  const controls = createInterface({ input: process.stdin });
+  const commands = controls[Symbol.asyncIterator]();
+  let interrupting: Promise<void> | undefined;
+  const ownerLost = () => {
+    closed = true;
+    ownerDisconnected = true;
+    outbox.length = 0;
+    for (const pending of modelPending.values()) pending.reject(new Error('Resident owner disconnected'));
+    modelPending.clear();
+    for (const resolve of toolPending.values()) resolve({ ok: false, text: 'Resident owner disconnected' });
+    toolPending.clear();
+    interrupting ??= session.interrupt().catch(() => undefined);
+  };
+  controls.once('close', ownerLost);
+  channel.on('error', () => controls.close());
+  channel.on('end', () => controls.close());
   // The reader must stay responsive WHILE a turn runs: a tool the node calls is answered
   // by the host on this same stdin, so blocking the reader to await the turn would
   // deadlock — the turn waits for the tool result, and the tool result waits for the
   // reader (HB-262). Each command is therefore handled without holding the loop.
   const inFlight: Promise<void>[] = [];
-  for await (const line of commands) {
-    if (!line.trim()) continue;
-    let command: Record<string, unknown>;
-    try { command = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
-    const requestId = typeof command.requestId === 'string' ? command.requestId : undefined;
-    const reply = (value: Record<string, unknown>) => notify({ ...value, ...(requestId ? { requestId } : {}) });
-    // The host's answer to a tool call this node made (HB-262).
-    if (command.operation === 'model_result' && requestId) {
-      const pending = modelPending.get(requestId);
-      if (pending) {
-        modelPending.delete(requestId);
-        if (command.ok === true) pending.resolve(command.value);
-        else pending.reject(new Error(String(command.error ?? 'Host model request failed')));
-      }
-      continue;
-    }
-    if (command.operation === 'tool_result' && requestId) {
-      const resolve = toolPending.get(requestId);
-      if (resolve) {
-        toolPending.delete(requestId);
-        resolve({ ok: command.ok === true, text: String(command.text ?? '') });
-      }
-      continue;
-    }
-    if (command.operation === 'inspect') { reply({ operation: 'inspect_result', inspect: inspect() }); continue; }
-    if (command.operation === 'start-turn') {
-      if (closed) { reply({ operation: 'turn_result', error: 'resident worker is closed' }); continue; }
-      if (running) { reply({ operation: 'turn_result', error: 'resident worker already has a running turn' }); continue; }
-      running = true;
-      turnUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
-      unknownUsage = false;
-      const text = String(command.text ?? '');
-      const images = command.images as ImageContent[] | undefined;
-      inFlight.push((async () => {
-        try {
-          await session.prompt(text, sdkPromptOptions(images));
-          // The turn's usage travels back with it: §9 metering cannot charge a node whose
-          // turns report nothing, and "unknown" must not be mistaken for "free".
-          const snapshot = inspect();
-          const usage = config.hostModel ? (unknownUsage ? undefined : turnUsage) : lastTurnUsage(snapshot);
-          reply({ operation: 'turn_result', turn: { turnId: randomUUID(), text, inspect: snapshot, ...(usage ? { usage: { ...usage, ...(config.hostModel ? { accounted: true } : {}) } } : {}) } });
-        } catch (error) {
-          reply({ operation: 'turn_result', error: error instanceof Error ? error.message : String(error) });
-        } finally {
-          running = false;
+  try {
+    for await (const line of commands) {
+      if (!line.trim()) continue;
+      let command: Record<string, unknown>;
+      try { command = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+      const requestId = typeof command.requestId === 'string' ? command.requestId : undefined;
+      const reply = (value: Record<string, unknown>) => notify({ ...value, ...(requestId ? { requestId } : {}) });
+      // The host's answer to a tool call this node made (HB-262).
+      if (command.operation === 'model_result' && requestId) {
+        const pending = modelPending.get(requestId);
+        if (pending) {
+          modelPending.delete(requestId);
+          if (command.ok === true) pending.resolve(command.value);
+          else pending.reject(new Error(String(command.error ?? 'Host model request failed')));
         }
-      })());
-      continue;
+        continue;
+      }
+      if (command.operation === 'tool_result' && requestId) {
+        const resolve = toolPending.get(requestId);
+        if (resolve) {
+          toolPending.delete(requestId);
+          resolve({ ok: command.ok === true, text: String(command.text ?? '') });
+        }
+        continue;
+      }
+      if (command.operation === 'inspect') { reply({ operation: 'inspect_result', inspect: inspect() }); continue; }
+      if (command.operation === 'start-turn') {
+        if (closed) { reply({ operation: 'turn_result', error: 'resident worker is closed' }); continue; }
+        if (running) { reply({ operation: 'turn_result', error: 'resident worker already has a running turn' }); continue; }
+        running = true;
+        turnUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+        unknownUsage = false;
+        const text = String(command.text ?? '');
+        const images = command.images as ImageContent[] | undefined;
+        inFlight.push((async () => {
+          try {
+            await session.prompt(text, sdkPromptOptions(images));
+            // The turn's usage travels back with it: §9 metering cannot charge a node whose
+            // turns report nothing, and "unknown" must not be mistaken for "free".
+            const snapshot = inspect();
+            const usage = config.hostModel ? (unknownUsage ? undefined : turnUsage) : lastTurnUsage(snapshot);
+            reply({ operation: 'turn_result', turn: { turnId: randomUUID(), text, inspect: snapshot, ...(usage ? { usage: { ...usage, ...(config.hostModel ? { accounted: true } : {}) } } : {}) } });
+          } catch (error) {
+            reply({ operation: 'turn_result', error: error instanceof Error ? error.message : String(error) });
+          } finally {
+            running = false;
+          }
+        })());
+        continue;
+      }
+      if (command.operation === 'close') {
+        closed = true;
+        // Let any turn already running finish before the session goes away, so a node is
+        // never killed mid-submission.
+        await Promise.allSettled(inFlight);
+        await session.close();
+        await writeAll(process.stdout, `${JSON.stringify({ operation: 'closed', ...(requestId ? { requestId } : {}) })}\n`);
+        process.exit(0);
+      }
     }
-    if (command.operation === 'close') {
-      closed = true;
-      // Let any turn already running finish before the session goes away, so a node is
-      // never killed mid-submission.
-      await Promise.allSettled(inFlight);
-      await session.close();
-      await writeAll(process.stdout, `${JSON.stringify({ operation: 'closed', ...(requestId ? { requestId } : {}) })}\n`);
-      process.exit(0);
-    }
+  } finally {
+    ownerLost();
+    await interrupting;
+    await Promise.allSettled(inFlight);
+    await session.close();
+    channel.destroy();
   }
+  process.exit(0);
 }
 
 /**

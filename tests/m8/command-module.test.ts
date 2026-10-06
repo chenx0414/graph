@@ -1,4 +1,6 @@
-import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { revParse } from '../../src/git/git.ts';
 import { mkdtemp, rm, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -324,3 +326,70 @@ test('five native graphs share four program slots and hand capacity to the waiti
     await drive;
   }
 }, 30000);
+
+
+test('hard owner death releases proven-quiescent command capacity while retaining uncertain side effects', async () => {
+  const commandName = `hold-${randomUUID()}.cjs`;
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'owner recovery', protocols: { value: { type: 'object' } }, nodes: {},
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'value' } }, outputs: { result: { protocol: 'value' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: [commandName], sandbox: false, output: 'result' } } },
+    edges: {}, outputs: { result: { from: 'check.result', protocol: 'value' } } });
+  const { kernel, dir } = await kernelWith(definition, 'check');
+  kernel.db.prepare("UPDATE tasks SET phase='running' WHERE id='t1'").run();
+  const workspace = join(dir, 'project'); await mkdir(workspace);
+  const command = join(workspace, commandName);
+  await writeFile(command, "require('fs').writeFileSync('command.pid',String(process.pid));setInterval(()=>{},1000);");
+  new GraphRuntime(kernel, 't1').deliverEndpoint('check.start', {});
+  const entry = join(dir, 'owner.mjs');
+  const source = (path: string) => new URL(`../../src/${path}`, import.meta.url).href;
+  await writeFile(entry, `import {TaskStore} from ${JSON.stringify(source('core/store.ts'))};
+    import {KernelStore} from ${JSON.stringify(source('core/kernel-store.ts'))};
+    import {GraphRunner} from ${JSON.stringify(source('core/graph-runner.ts'))};
+    import {executeModuleOperation} from ${JSON.stringify(source('runtime/kernel-operation-broker.ts'))};
+    import {fullAccessPolicy} from ${JSON.stringify(source('core/access-policy.ts'))};
+    const kernel=new KernelStore(new TaskStore(${JSON.stringify(join(dir, 'state.db'))}));
+    await new GraphRunner({kernel,graphId:'t1',hostFor:()=>{throw Error('no agent')},submit:()=>{},
+      operation:request=>executeModuleOperation({...request,kernel,graphId:'t1',workspace:${JSON.stringify(workspace)},scratchRoot:${JSON.stringify(dir)},access:fullAccessPolicy()})}).drain();`);
+  const parent = spawn(process.execPath, [entry], { stdio: 'ignore', env: {} });
+  const closed = once(parent, 'close');
+  let pid: number | undefined;
+  const alive = (processId: number) => { try { process.kill(processId, 0); return true; } catch { return false; } };
+  try {
+    await expect.poll(async () => readFile(join(workspace, 'command.pid'), 'utf8').catch(() => ''), { timeout: 10000 }).toMatch(/^\d+$/);
+    pid = Number(await readFile(join(workspace, 'command.pid'), 'utf8'));
+    const operation = kernel.db.prepare('SELECT id,state,worker_active FROM kernel_module_operations').get() as { id: string; state: string; worker_active: number };
+    expect(operation).toMatchObject({ state: 'dispatched', worker_active: 1 });
+    parent.kill('SIGKILL'); await closed;
+    await expect.poll(() => alive(pid!), { timeout: 5000 }).toBe(false);
+    const receipt = JSON.parse((kernel.db.prepare('SELECT resource_receipt FROM kernel_module_operations WHERE id=?').get(operation.id) as { resource_receipt: string }).resource_receipt) as { path: string; nonce: string };
+    await expect.poll(async () => readFile(receipt.path, 'utf8').catch(() => ''), { timeout: 5000 }).toContain(receipt.nonce);
+    const proof = await readFile(receipt.path, 'utf8');
+    const main = graphManagement(kernel, 't1');
+    for (const invalid of [undefined, '', JSON.stringify({ nonce: 'another-operation', quiescent: true }), JSON.stringify({ nonce: receipt.nonce, quiescent: false })]) {
+      if (invalid === undefined) await rm(receipt.path);
+      else await writeFile(receipt.path, invalid);
+      recoverKernelExecutions(kernel);
+      await expect(main.graphControl({ graphId: 't1', action: 'cancel_operation', operationId: operation.id })).rejects.toThrow(/holds execution resources/);
+      expect(kernel.db.prepare('SELECT worker_active FROM kernel_module_operations WHERE id=?').get(operation.id)).toEqual({ worker_active: 1 });
+    }
+    await writeFile(receipt.path, proof);
+    await expect.poll(() => {
+      recoverKernelExecutions(kernel);
+      return kernel.db.prepare('SELECT state,worker_active,result FROM kernel_module_operations WHERE id=?').get(operation.id);
+    }, { timeout: 5000 }).toEqual({ state: 'uncertain', worker_active: 0, result: null });
+    expect(kernel.nodeState('t1', 'check').paused).toBe(true);
+    expect(await main.graphInspect({ graphId: 't1', query: 'results' })).toEqual([]);
+    await main.graphControl({ graphId: 't1', action: 'cancel_operation', operationId: operation.id });
+    expect(kernel.db.prepare('SELECT state,worker_active FROM kernel_module_operations WHERE id=?').get(operation.id)).toEqual({ state: 'cancelled', worker_active: 0 });
+    expect(await main.graphInspect({ graphId: 't1', query: 'results' })).toEqual([]);
+  } finally {
+    if (parent.exitCode === null && parent.signalCode === null) parent.kill('SIGKILL');
+    await closed;
+    if (pid && alive(pid)) {
+      try {
+        const args = execFileSync('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf8' });
+        if (args.includes(commandName)) process.kill(-pid, 'SIGKILL');
+      } catch { /* already exited */ }
+    }
+  }
+}, 20000);
