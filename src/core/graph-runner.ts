@@ -5,7 +5,7 @@ import type { ModuleDefinition } from './interface-spec.ts';
 import type { Json } from './types.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
-import { NodeExecutor, type ExecutorHost } from './node-executor.ts';
+import { NodeExecutor, type ExecutorHost, type NodeExecutorOptions } from './node-executor.ts';
 import { NodeTurnDriver } from './node-turn-driver.ts';
 import { ModuleRuntime } from './module-runtime.ts';
 import { routeModuleOutputs } from './module-router.ts';
@@ -51,7 +51,7 @@ export interface GraphRunnerOptions {
    * §9 metering, passed through to each node's executor. Absent means unmetered, which is
    * right for a program node and for a runtime configured without limits.
    */
-  tokenBudget?: { budget: number; unlimited: boolean };
+  tokenBudget?: NodeExecutorOptions['tokenBudget'];
   reserveTokens?: number;
   /**
    * The resident host for one node. §7 gives each node its own long-lived Pi process, so

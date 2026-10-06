@@ -577,10 +577,8 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         ...(options.agentContext ? { library: options.agentContext } : {}),
         // §9: a v2 node is metered like any other. Without this the ledger from HB-284
         // was never consulted, because nothing told the lane what a turn might cost.
-        ...(() => {
-          const budget = liveBudget();
-          return budget === null ? {} : { tokenBudget: { budget, unlimited: false }, reserveTokens: DEFAULT_V2_RESERVE_TOKENS };
-        })(),
+        tokenBudget: () => { const budget = liveBudget(); return { budget: budget ?? 0, unlimited: budget === null }; },
+        reserveTokens: DEFAULT_V2_RESERVE_TOKENS,
         directory: liveEntries,
         credentialFor: liveCredentialFor,
         scheduler: modelScheduler,

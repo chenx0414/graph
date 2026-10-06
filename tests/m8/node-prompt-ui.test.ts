@@ -147,8 +147,8 @@ test('native graph chats keep a session and expose the actual provider prompt in
   await server.runtime.catalog.saveAgentCombination({ id: 'native', name: 'Native', description: 'native reviewer', recommendedGrade: 'medium', review: true, tags: [], resources: [], systemPrompt: 'Native identity.' });
   const parent = await server.runtime.user.begin({ projectId: 'p', request: 'native graph', requestId: 'native-parent' });
   const main = server.runtime.supervisor(parent.taskId);
-  const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'native', protocols: { ping: { type: 'object' } },
-    templates: { native: { version: 1, definition: { schemaVersion: 2, name: 'inner', protocols: { ping: { type: 'object' } },
+  const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'native', defaults: { budget: { tokens: 2000000 } }, protocols: { ping: { type: 'object' } },
+    templates: { native: { version: 1, definition: { schemaVersion: 2, name: 'inner', defaults: { budget: { tokens: 1000000 } }, protocols: { ping: { type: 'object' } },
       nodes: { worker: { recipe: 'native@1', task: 'reply to chat', inputs: {}, outputs: { out: { protocol: 'ping' } }, submission: {} } },
       modules: {}, edges: {}, inputs: {}, outputs: { result: { from: 'worker.out', protocol: 'ping' } } } } },
     instances: { build: { template: 'native', version: 1 } },
@@ -160,8 +160,10 @@ test('native graph chats keep a session and expose the actual provider prompt in
   expect(provider.requests).toHaveLength(1);
   const first = server.runtime.nodeRun(graph.graphId, 'build/worker');
   expect(first.session?.sessionId).toBeTruthy();
+  expect(first.instance?.budget).toBe(1000000);
   expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').recorded?.text).toContain('NODE RUNTIME FIRST');
   await library.savePrompt('runtime/node.md', 'NODE RUNTIME NEXT: inspect the new task instructions.');
+  await main.graphPatch({ graphId: graph.graphId, baseRevision: 1, changes: { reason: 'next execution quota', patch: { nodes: { 'build/worker': { budget: { tokens: 1500000 } } } } } });
   await main.graphSend({ graphId: graph.graphId, nodeId: 'build/worker', text: 'second distinct input' });
   await server.runtime.host.drive();
   const second = server.runtime.nodeRun(graph.graphId, 'build/worker');
@@ -172,6 +174,8 @@ test('native graph chats keep a session and expose the actual provider prompt in
   const configs = await readdir(join(root, 'state', 'kernel-worker'));
   for (const config of configs) expect(await readFile(join(root, 'state', 'kernel-worker', config), 'utf8')).not.toContain('local-test-key');
   expect(second.instance?.used).toBe(100);
+  expect(second.instance?.budget).toBe(1500000);
+  expect((second.operations as { tokenBudget: { budget: number } }[]).map(item => item.tokenBudget.budget)).toEqual([1000000, 1500000]);
   const calls = await main.graphInspect({ graphId: graph.graphId, query: 'provider_calls' }) as { id: string; model: { id: string; identity: string; baseUrl: string }; state: string; usage: { input: number; output: number } }[];
   expect(calls).toHaveLength(2);
   expect(new Set(calls.map(call => call.id)).size).toBe(2);
@@ -197,6 +201,7 @@ test('native graph chats keep a session and expose the actual provider prompt in
   await page.getByTestId('node-prompt').locator('summary').click();
   await expect.poll(() => page.getByTestId('node-prompt-sent-text').textContent()).toBe(actual);
   expect(await page.getByTestId('node-chat-tab').textContent()).toContain('native second reply');
+  await expect.poll(() => page.getByTestId('node-overview').textContent()).toContain('预算 1,500,000');
   await main.graphControl({ graphId: graph.graphId, action: 'complete' });
   await server.runtime.host.drive();
   expect((await main.graphInspect({ graphId: graph.graphId })) as object).toBeTruthy();

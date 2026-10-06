@@ -29,7 +29,7 @@ export interface GraphLaneOptions {
    * Absent means unmetered. The executor reserves before a turn and charges what it
    * actually spent, parking a node it cannot afford rather than running it unbudgeted.
    */
-  tokenBudget?: { budget: number; unlimited: boolean };
+  tokenBudget?: GraphRunnerOptions['tokenBudget'];
   reserveTokens?: number;
   /**
    * Build the resident host for one NODE. §7 gives each node its own long-lived process, so

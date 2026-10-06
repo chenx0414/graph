@@ -77,7 +77,7 @@ export interface NodeExecutorOptions {
    *
    * Absent means unmetered - a program node, or a runtime that was never given limits.
    */
-  tokenBudget?: { budget: number; unlimited: boolean };
+  tokenBudget?: { budget: number; unlimited: boolean } | (() => { budget: number; unlimited: boolean });
   reserveTokens?: number;
 }
 
@@ -135,16 +135,32 @@ export class NodeExecutor {
 
     const generation = (this.kernel.db.prepare('SELECT generation FROM kernel_queue WHERE seq=?').get(seq) as { generation: number }).generation;
     const executionId = `exec-${this.graphId}-${nodeId}-${seq}${generation ? `-${generation}` : ''}`;
-    const execution = this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: latest.version, tokenBudget: this.options.tokenBudget ?? { budget: 0, unlimited: true } });
+    const previous = this.kernel.execution(executionId);
+    let tokenBudget = previous?.tokenBudget ?? (typeof this.options.tokenBudget === 'function' ? this.options.tokenBudget() : this.options.tokenBudget) ?? { budget: 0, unlimited: true };
+    let refused: string | undefined = previous && !previous.tokenBudget ? 'Execution budget history is unavailable; explicitly retry with a new execution identity before spending more tokens' : undefined;
+    const requested = latest.definition.nodes[nodeId]?.budget ?? latest.definition.defaults?.budget;
+    if (!previous && requested) {
+      const tokens = requested.tokens;
+      if (!tokenBudget.unlimited && (tokens === null || tokens > tokenBudget.budget)) refused = 'Declared node budget exceeds the user-authorized quota; change the declaration or request a user quota change, then explicitly retry';
+      else tokenBudget = { budget: tokens ?? 0, unlimited: tokens === null };
+    }
+    const execution = this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: latest.version, ...(refused ? {} : { tokenBudget }) });
+    if (refused) {
+      this.kernel.finishExecution(executionId, 'blocked');
+      this.kernel.blockNode(this.graphId, nodeId, refused);
+      this.kernel.setNodeQueuePaused(this.graphId, nodeId, true);
+      this.queue.complete(seq, { kind: 'blocked', reason: refused });
+      return 'blocked';
+    }
     const revision = this.kernel.revision(this.graphId, execution.revisionVersion)!;
 
     const defaults = this.queue.retryBudget(nodeId);
     const retry = revision.definition.nodes[nodeId]?.retry;
-    const budget = { ...defaults, retriesAllowed: retry?.automatic ?? defaults.retriesAllowed,
-      resubmitsAllowed: retry?.resubmit ?? defaults.resubmitsAllowed };
+    const budget = { ...defaults, retriesAllowed: retry?.automatic ?? revision.definition.defaults?.retry?.automatic ?? defaults.retriesAllowed,
+      resubmitsAllowed: retry?.resubmit ?? revision.definition.defaults?.retry?.resubmit ?? defaults.resubmitsAllowed };
     // §9: hold what this turn may cost before spending any of it. A node that cannot
     // afford the hold is parked rather than run unbudgeted.
-    const metering = execution.tokenBudget && this.options.reserveTokens !== undefined
+    const metering = execution.tokenBudget && !execution.tokenBudget.unlimited && this.options.reserveTokens !== undefined
       ? { limit: execution.tokenBudget, amount: this.options.reserveTokens }
       : undefined;
     let host: ExecutorHost | undefined;

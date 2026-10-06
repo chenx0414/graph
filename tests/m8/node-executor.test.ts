@@ -116,14 +116,14 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
     expect(outcome).toBe('failed'); // returned the gap but never filled it, budget spent
   });
 
-  test('restart preserves the automatic retry allowance for the same queued execution', async () => {
+  test.each([true, false])('restart preserves the automatic retry allowance with budget snapshot %s', async withBudget => {
     const { kernel, store, dir } = opened();
     store.db.prepare('INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES(?,?,?,?,?)').run('restart', 'p1', 'r', 'running', 1);
     const revision = kernel.publishRevision('restart', { definition: DEF, reason: 'create' });
     kernel.admitNode('restart', revision.version, 'n1', { instanceId: 'instance' });
     const item = new NodeQueue(kernel, 'restart').enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: null });
     const id = `exec-restart-n1-${item.seq}`;
-    kernel.startExecution('restart', { executionId: id, nodeId: 'n1', revisionVersion: revision.version, tokenBudget: { budget: 1000, unlimited: false } });
+    kernel.startExecution('restart', { executionId: id, nodeId: 'n1', revisionVersion: revision.version, ...(withBudget ? { tokenBudget: { budget: 1000, unlimited: false } } : {}) });
     kernel.noteExecutionAttempt(id);
     kernel.noteExecutionContinuation(id, 'retry');
     kernel.noteExecutionAttempt(id);
@@ -141,6 +141,15 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
       const outcome = await new NodeExecutor({ kernel: recovered, graphId: 'restart', tokenBudget: { budget: 10000, unlimited: false }, reserveTokens: 100,
         host: async (_executionId, revisionVersion) => { prepared.push(revisionVersion); return fakeHost(); },
       }).runNode('n1', async () => { turns += 1; return { usage: { total: 1 } }; });
+      if (!withBudget) {
+        expect(outcome).toBe('blocked');
+        expect(prepared).toEqual([]);
+        expect(turns).toBe(0);
+        expect(recovered.execution(id)).toMatchObject({ tokenBudget: null, attempt: 2, retriesUsed: 2 });
+        expect(recovered.nextQueued('restart', 'n1')?.seq).toBe(item.seq);
+        expect(recovered.nodeState('restart', 'n1').paused).toBe(true);
+        return;
+      }
       expect(recovered.execution(id)?.tokenBudget).toEqual({ budget: 1000, unlimited: false });
       expect(prepared).toEqual([1]);
       expect(outcome).toBe('failed');
@@ -316,12 +325,13 @@ test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknow
 });
 
 
-test.each(['error', 'missing'])('declared %s retry limits stay frozen for current work and change on the next execution', async mode => {
+test.each(['error', 'missing'].flatMap(mode => ['node', 'graph'].map(scope => ({ mode, scope }))))('declared $scope $mode retry limits stay frozen for current work and change on the next execution', async ({ mode, scope }) => {
   const { kernel, store } = opened();
   try {
     store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('retry-config','p1','work','running',1)").run();
     const first = structuredClone(DEF);
-    first.nodes.n1!.retry = { automatic: 1, resubmit: 1 };
+    if (scope === 'node') first.nodes.n1!.retry = { automatic: 1, resubmit: 1 };
+    else first.defaults = { retry: { automatic: 1, resubmit: 1 } };
     kernel.publishRevision('retry-config', { definition: first, reason: 'configured' });
     kernel.admitNode('retry-config', 1, 'n1', { instanceId: 'worker' });
     const queue = new NodeQueue(kernel, 'retry-config');
@@ -331,7 +341,9 @@ test.each(['error', 'missing'])('declared %s retry limits stay frozen for curren
     const fail = async () => {
       turns += 1;
       if (turns === 1) {
-        const next = structuredClone(first); next.nodes.n1!.retry = { automatic: 0, resubmit: 0 };
+        const next = structuredClone(first);
+        if (scope === 'node') next.nodes.n1!.retry = { automatic: 0, resubmit: 0 };
+        else next.defaults = { retry: { automatic: 0, resubmit: 0 } };
         kernel.publishRevision('retry-config', { definition: next, reason: 'next execution' });
       }
       if (mode === 'error') throw new Error('execution failed');
@@ -350,5 +362,61 @@ test.each(['error', 'missing'])('declared %s retry limits stay frozen for curren
     expect(next.revisionVersion).toBe(2);
     expect(next.retriesUsed).toBe(0);
     expect(next.resubmitsUsed).toBe(0);
+  } finally { store.close(); }
+});
+
+
+test.each([
+  { name: 'graph default', defaults: { budget: { tokens: 500 } }, node: {}, expected: 500 },
+  { name: 'node override', defaults: { budget: { tokens: 500 } }, node: { budget: { tokens: 300 } }, expected: 300 },
+  { name: 'no quota', defaults: {}, node: { budget: { tokens: 0 } }, expected: 0, blocked: true },
+  { name: 'unauthorized increase', defaults: {}, node: { budget: { tokens: 3000 } }, blocked: true },
+  { name: 'unauthorized unlimited', defaults: {}, node: { budget: { tokens: null } }, blocked: true },
+  { name: 'authorized unlimited', defaults: {}, node: { budget: { tokens: null } }, unlimited: true, expected: null },
+  { name: 'finite quota under authorized unlimited', defaults: {}, node: { budget: { tokens: 3000 } }, unlimited: true, expected: 3000 },
+])('declarative budget admission: $name', async ({ defaults, node, expected, blocked, unlimited }) => {
+  const { kernel, store } = opened();
+  try {
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('budget-config','p1','work','running',1)").run();
+    const definition = parseGraphDefinition({ ...DEF, defaults, nodes: { n1: { ...DEF.nodes.n1, ...node } } });
+    kernel.publishRevision('budget-config', { definition, reason: 'configured' });
+    kernel.admitNode('budget-config', 1, 'n1', { instanceId: 'worker' });
+    const item = new NodeQueue(kernel, 'budget-config').enqueue({ nodeId: 'n1', kind: 'chat', text: 'one message' });
+    let turns = 0;
+    const outcome = await new NodeExecutor({ kernel, graphId: 'budget-config', host: fakeHost(),
+      tokenBudget: { budget: 2000, unlimited: unlimited ?? false }, reserveTokens: 100,
+    }).runNode('n1', async () => { turns++; return { done: true, usage: { total: 1 } }; });
+    expect(outcome).toBe(blocked ? 'blocked' : 'done');
+    expect(turns).toBe(blocked ? 0 : 1);
+    const execution = kernel.execution(executionIdOf(kernel, 'budget-config'))!;
+    if (expected !== undefined) expect(execution.tokenBudget).toEqual({ budget: expected ?? 0, unlimited: expected === null });
+    expect(execution.retriesUsed).toBe(0);
+    expect(kernel.nodeState('budget-config', 'n1').paused).toBe(Boolean(blocked));
+    if (blocked) expect(kernel.nextQueued('budget-config', 'n1')?.seq).toBe(item.seq);
+  } finally { store.close(); }
+});
+
+test('live user default budgets are read for new work without changing the active execution', async () => {
+  const { kernel, store } = opened();
+  try {
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('live-budget','p1','work','running',1)").run();
+    kernel.publishRevision('live-budget', { definition: DEF, reason: 'created' });
+    kernel.admitNode('live-budget', 1, 'n1', { instanceId: 'worker' });
+    const queue = new NodeQueue(kernel, 'live-budget');
+    queue.enqueue({ nodeId: 'n1', kind: 'chat', text: 'first' });
+    queue.enqueue({ nodeId: 'n1', kind: 'chat', text: 'second' });
+    let ceiling = 1000;
+    const snapshots: number[] = [];
+    const outcome = await new NodeExecutor({ kernel, graphId: 'live-budget', host: fakeHost(),
+      tokenBudget: () => ({ budget: ceiling, unlimited: false }), reserveTokens: 100,
+    }).runNode('n1', async executionId => {
+      snapshots.push(kernel.execution(executionId)!.tokenBudget!.budget);
+      ceiling = 500;
+      expect(kernel.execution(executionId)!.tokenBudget!.budget).toBe(snapshots.at(-1));
+      return { done: true, usage: { total: 1 } };
+    });
+    expect(outcome).toBe('done');
+    expect(snapshots).toEqual([1000, 500]);
+    expect(kernel.budgetState('live-budget', 'n1', { budget: 500, unlimited: false }).used).toBe(2);
   } finally { store.close(); }
 });

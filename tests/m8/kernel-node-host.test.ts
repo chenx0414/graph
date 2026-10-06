@@ -172,6 +172,10 @@ test('review model selection excludes recorded implementer identities through ro
   const updated = kernel.publishRevision('g1', { definition: requested, reason: 'request a model' });
   expect(modelFor(options, 'beta@1', { ...context, revisionVersion: updated.version })?.id).toBe('preferred');
   expect(modelFor(options, 'beta@1', context)?.id).toBe('independent');
+  delete requested.nodes.b!.model;
+  requested.defaults = { model: 'preferred' };
+  const defaults = kernel.publishRevision('g1', { definition: requested, reason: 'graph model default' });
+  expect(modelFor(options, 'beta@1', { ...context, revisionVersion: defaults.version })?.id).toBe('preferred');
   requested.nodes.b!.model = 'alias';
   const disallowed = kernel.publishRevision('g1', { definition: requested, reason: 'request cannot bypass independence' });
   expect(modelFor(options, 'beta@1', { ...context, revisionVersion: disallowed.version })?.id).toBe('independent');

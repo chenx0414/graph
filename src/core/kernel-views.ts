@@ -39,7 +39,7 @@ export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: stri
     session: session ? { sessionId: session.session_id, sessionFile: session.session_file } : null,
     capabilities: loaded?.facts ?? [], capabilityDigest: loaded?.digest ?? null, capabilityUsage: [],
     operations: executions.map(item => ({ ...item, activationId: item.id, workerActive: item.state === 'running', waitingSlot: item.waiting_slot === 1,
-      reserved: item.token_reservation, waitingMs: null, runMs: null, elapsedMs: item.ended_at === null ? null : item.ended_at - item.started_at,
+      reserved: item.token_reservation, tokenBudget: item.token_budget ? JSON.parse(item.token_budget) as { budget: number; unlimited: boolean } : null, waitingMs: null, runMs: null, elapsedMs: item.ended_at === null ? null : item.ended_at - item.started_at,
       dispatchedAt: item.started_at, settledAt: item.ended_at, result: null, usage: null })), invocations: calls.map(call => ({ id: call.id, operationId: call.executionId, model: call.model?.id ?? null,
       modelIdentity: call.model?.identity ?? null, provider: call.model?.provider ?? null, state: call.state,
       reserved: ['inflight', 'unknown'].includes(call.state) ? call.reserved : 0,

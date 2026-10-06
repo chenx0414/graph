@@ -40,7 +40,16 @@ export interface NodeInterface {
   outputs: Record<string, ProtocolRef>;
 }
 
-export interface NodeDefinition extends NodeInterface {
+export interface ExecutionSettings {
+  /** Configured model connection; selection still enforces review independence. */
+  model?: string;
+  /** Per-execution limits; omitted fields inherit graph defaults, then 2/1. */
+  retry?: { automatic?: number; resubmit?: number };
+  /** Cumulative node quota; null requests unlimited within the user's authorization. */
+  budget?: { tokens: number | null };
+}
+
+export interface NodeDefinition extends NodeInterface, ExecutionSettings {
   /**
    * Either a recipe (an Agent node) or a command (a deterministic one).
    *
@@ -54,10 +63,6 @@ export interface NodeDefinition extends NodeInterface {
   command?: { run: string; args?: string[]; timeoutMs?: number };
   task: string;
   acceptance?: string[];
-  /** Configured model connection; selection still enforces review independence. */
-  model?: string;
-  /** Per-execution limits, frozen from its revision; omitted fields use defaults. */
-  retry?: { automatic?: number; resubmit?: number };
   /** Required outputs a submission must enable:true (§4). */
   submission: { required?: string[]; requiredAnyOf?: string[] };
   /**
@@ -137,6 +142,7 @@ export interface GraphDefinition {
   inputs: Record<string, GraphIo>;
   outputs: Record<string, GraphOutput>;
   completion?: CompletionDeclaration;
+  defaults?: ExecutionSettings;
   /** True when a subgraph was expanded: its public io is mapped in, never scheduled separately (§9). */
   subgraphs?: string[];
   templates?: Record<string, { version: number; definition: GraphDefinition }>;
@@ -198,6 +204,20 @@ function assertUniqueKeys(record: Record<string, unknown>, what: string): void {
   }
 }
 
+function validateExecutionSettings(scope: string, settings: ExecutionSettings): void {
+  if (settings.model !== undefined && (typeof settings.model !== 'string' || !settings.model.trim())) invalid(`${scope} model must name a configured connection`);
+  if (settings.retry !== undefined) {
+    if (!isRecord(settings.retry)) invalid(`${scope} retry must be an object`);
+    for (const [key, count] of Object.entries(settings.retry)) {
+      if (!['automatic', 'resubmit'].includes(key) || !Number.isSafeInteger(count) || (count as number) < 0) invalid(`${scope} retry.${key} must be a non-negative integer limit`);
+    }
+  }
+  if (settings.budget !== undefined) {
+    if (!isRecord(settings.budget) || Object.keys(settings.budget).some(key => key !== 'tokens')
+      || (settings.budget.tokens !== null && (!Number.isSafeInteger(settings.budget.tokens) || settings.budget.tokens < 0))) invalid(`${scope} budget.tokens must be a non-negative integer or null`);
+  }
+}
+
 function validateNode(definition: GraphDefinition, id: string, node: NodeDefinition): void {
   if (!node || typeof node !== 'object') invalid(`Node ${id} must be an object`);
   const hasRecipe = typeof node.recipe === 'string' && node.recipe.trim().length > 0;
@@ -207,13 +227,7 @@ function validateNode(definition: GraphDefinition, id: string, node: NodeDefinit
   if (hasRecipe === hasCommand) invalid(`Node ${id} must declare exactly one of recipe or command`);
   if (hasCommand && node.command!.args !== undefined && !Array.isArray(node.command!.args)) invalid(`Node ${id} command args must be a list`);
   if (typeof node.task !== 'string' || !node.task.trim()) invalid(`Node ${id} requires a task`);
-  if (node.model !== undefined && (typeof node.model !== 'string' || !node.model.trim())) invalid(`Node ${id} model must name a configured connection`);
-  if (node.retry !== undefined) {
-    if (!isRecord(node.retry)) invalid(`Node ${id} retry must be an object`);
-    for (const [key, count] of Object.entries(node.retry)) {
-      if (!['automatic', 'resubmit'].includes(key) || !Number.isSafeInteger(count) || (count as number) < 0) invalid(`Node ${id} retry.${key} must be a non-negative integer limit`);
-    }
-  }
+  validateExecutionSettings(`Node ${id}`, node);
   for (const [port, ref] of Object.entries(node.inputs ?? {})) {
     assertDeclaredProtocol(definition, ref, `Node ${id} input ${port}`);
   }
@@ -300,7 +314,12 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
   assertUniqueKeys(nodes as Record<string, unknown>, 'Node');
   assertUniqueKeys(modules as Record<string, unknown>, 'Module');
   assertUniqueKeys(edges as Record<string, unknown>, 'Edge');
+  if (raw.defaults !== undefined) {
+    if (!isRecord(raw.defaults) || Object.keys(raw.defaults).some(key => !['model', 'retry', 'budget'].includes(key))) invalid('Graph defaults must contain model, retry or budget settings');
+    validateExecutionSettings('Graph defaults', raw.defaults as ExecutionSettings);
+  }
   const definition = {
+    ...(raw.defaults === undefined ? {} : { defaults: raw.defaults }),
     schemaVersion: INTERFACE_SCHEMA_VERSION,
     name: raw.name,
     protocols,

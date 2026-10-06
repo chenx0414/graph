@@ -211,3 +211,11 @@ test.each([{ model: '' }, { model: 7 }, { retry: { automatic: -1 } }, { retry: {
   { retry: [] }, { retry: { unknown: 1 } }])('node configuration rejects invalid model or retry declaration: %j', configuration => {
   expect(() => parseGraphDefinition({ ...pipeline, nodes: { worker: { ...pipeline.nodes.worker, ...configuration } } })).toThrow(RuntimeError);
 });
+
+
+test.each([
+  { budget: { tokens: -1 } }, { budget: { tokens: 1.5 } }, { budget: {} },
+  { budget: { tokens: 1, other: 2 } }, { budget: [] }, { retry: { automatic: -1 } }, { model: '' },
+])('invalid graph execution defaults are rejected atomically: %j', defaults => {
+  expect(() => parseGraphDefinition({ ...pipeline, defaults })).toThrow(/defaults/);
+});

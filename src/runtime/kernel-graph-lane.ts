@@ -13,7 +13,7 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { modelIdentity, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordCapabilityLoad, recordNodeSession } from '../core/node-run.ts';
 import { GraphRuntime } from '../core/graph-runtime.ts';
-import { GraphLane } from '../core/graph-lane.ts';
+import { GraphLane, type GraphLaneOptions } from '../core/graph-lane.ts';
 import type { RunnerHost } from '../core/graph-runner.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { residentLauncher } from './resident-launcher.ts';
@@ -55,7 +55,7 @@ export interface KernelGraphLaneOptions {
    * default for a program node, but NOT for an agent that can spend real tokens, so the
    * runtime supplies one whenever limits are configured.
    */
-  tokenBudget?: { budget: number; unlimited: boolean };
+  tokenBudget?: GraphLaneOptions['tokenBudget'];
   reserveTokens?: number;
   /** The models the runtime is configured with. */
   directory: () => ModelEntry[];
@@ -137,7 +137,8 @@ export function modelFor(options: KernelGraphLaneOptions, recipe: string,
     visit(nodeId);
   }
   const directory = options.directory().filter(model => !excluded.has(model.id) && !excluded.has(modelIdentity(model)));
-  const requested = context && options.kernel.revision(context.graphId, context.revisionVersion)?.definition.nodes[context.nodeId]?.model?.trim();
+  const definition = context && options.kernel.revision(context.graphId, context.revisionVersion)?.definition;
+  const requested = context && definition ? (definition.nodes[context.nodeId]?.model ?? definition.defaults?.model)?.trim() : undefined;
   return directory.find(model => model.id === requested) ?? directory.find(model => model.grade === entry.recommendedGrade) ?? directory[0];
 }
 
@@ -390,7 +391,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           if (!context || !Array.isArray(context.messages)) throw new Error('Invalid model context');
           let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
           let unknown = false;
-          const gate = kernelProviderGate(options.kernel, graphId, nodeId, options.tokenBudget, model);
+          const gate = kernelProviderGate(options.kernel, graphId, nodeId, undefined, model);
           const observed: SendGate = {
             dispatch: (id, reservation, send) => gate.dispatch(id, reservation, send),
             settle: (id, cost) => { gate?.settle(id, cost); if (cost) {
