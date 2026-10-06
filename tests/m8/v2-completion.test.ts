@@ -5,24 +5,7 @@ import { expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { ActionAdapter } from '../../src/core/types.ts';
 
-/**
- * Issue #1 HB-292: a v2 task finishes.
- *
- * Completion was decided entirely by the old kernel: `readyToComplete` read
- * `loadGraph(...)` and the `evidence` table, and a v2 task has rows in neither, so it could
- * never be completed. A graph could run every node to success and the task would sit at
- * `running` forever - which is also why eleven test files failed with the same signature.
- *
- * Two halves were missing:
- *   1. `kernel_nodes.status` was only ever written as `idle` or `blocked`, so a node that
- *      had succeeded still read as idle in the view.
- *   2. `readyToComplete` had no v2 branch.
- *
- * Failure modes first (R24):
- *   C1  a node that submits reads `succeeded`, not `idle`
- *   C2  a v2 task whose nodes all succeed reaches phase `completed`
- *   C3  a task with a node still unfinished does NOT complete
- */
+/** Native public lifecycle: successful node status, explicit completion and confirmed evidence stay distinct. */
 
 const definition = {
   schemaVersion: 2, name: 'finishes',
@@ -63,10 +46,11 @@ async function run(limitNodes = 1) {
   await runtime.controlGraph(taskId, { action: 'complete' });
   await runtime.host.drive();
   const view = await runtime.user.task(taskId).view();
+  const acceptance = await runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'acceptance' }) as { items: { id: string; status: string }[] };
   const nodes = (view as unknown as { nodes: { id: string; status: string }[] }).nodes;
   await runtime.close();
   await rm(root, { recursive: true, force: true });
-  return { phase: view.phase, statuses: Object.fromEntries(nodes.filter(n => n.id !== 'master').map(n => [n.id, n.status])) };
+  return { phase: view.phase, acceptance, statuses: Object.fromEntries(nodes.filter(n => n.id !== 'master').map(n => [n.id, n.status])) };
 }
 
 test('C1: a v2 node that submits reads succeeded', async () => {
@@ -74,14 +58,14 @@ test('C1: a v2 node that submits reads succeeded', async () => {
   expect(statuses).toEqual({ work: 'succeeded' });
 }, 30_000);
 
-test('C2: a v2 task whose nodes all succeeded reaches completed', async () => {
-  // No Git is configured here, so there is no integration branch and no merge to wait for.
-  // This pins the completion DECISION for a v2 graph, which is what was missing.
-  const { phase } = await run(1);
-  expect(phase).toBe('completed');
+test('C2: successful node status cannot replace confirmed final evidence', async () => {
+  const { phase, statuses, acceptance } = await run(1);
+  expect(statuses).toEqual({ work: 'succeeded' });
+  expect(phase).toBe('blocked');
+  expect(acceptance.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'ok', status: 'missing' })]));
 }, 30_000);
 
-test('C3: a task with an unfinished node does not complete', async () => {
-  const { phase } = await run(2);
-  expect(phase).not.toBe('completed');
+test('C3: a node that cannot supply its required output stays visible as failed', async () => {
+  const { statuses } = await run(2);
+  expect(statuses.other).toBe('failed');
 }, 30_000);

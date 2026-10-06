@@ -23,6 +23,8 @@ export interface GraphLaneOptions {
   close?: () => Promise<void>;
   operation?: (graphId: string, request: ModuleOperationRequest) => ReturnType<NonNullable<GraphRunnerOptions['operation']>>;
   closeGraph?: (graphId: string) => Promise<void>;
+  /** Evaluate final evidence and deliver the verified Git version before completion. */
+  finalize?: (graphId: string) => Promise<void>;
   /**
    * §9: the token budget a node runs under, and what one turn is expected to cost.
    *
@@ -134,10 +136,13 @@ export class GraphLane {
       ...(this.options.maxStuckPasses !== undefined ? { maxStuckPasses: this.options.maxStuckPasses } : {}),
     });
     const result = await runner.drain();
-    const runtime = new GraphRuntime(kernel, graphId);
+    const runtime = new GraphRuntime(kernel, graphId, this.options.artifacts?.(graphId));
     const intent = (kernel.db.prepare('SELECT completion_requested AS requested FROM kernel_lifecycle WHERE task_id=?').get(graphId) as { requested: number } | undefined)?.requested;
     if (runtime.state()?.phase === 'stopping') runtime.settleStop();
-    else if (intent && !['completed', 'stopped'].includes(runtime.state()!.phase)) runtime.settleCompletion();
+    else if (intent && !['completed', 'stopped'].includes(runtime.state()!.phase)) {
+      await this.options.finalize?.(graphId);
+      if (!['stopping', 'stopped'].includes(runtime.state()!.phase)) runtime.settleCompletion();
+    }
     if (['completed', 'stopped'].includes(runtime.state()!.phase)) await this.options.closeGraph?.(graphId);
     return result;
   }

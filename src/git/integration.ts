@@ -434,7 +434,7 @@ export class GitIntegration {
     return merged;
   }
 
-  tryDeliver(taskId: string): { status: 'skip' | 'merged' | 'blocked' | 'recheck'; data?: Json } {
+  tryDeliver(taskId: string, expectedCommit?: string): { status: 'skip' | 'merged' | 'blocked' | 'recheck'; data?: Json } {
     const task = this.store.task(taskId);
     if (!task.integration_branch || !task.target_branch) return { status: 'skip' };
     const repo = this.repoRoot(taskId);
@@ -444,6 +444,9 @@ export class GitIntegration {
     const integrationSha = revParse(integration.path, 'HEAD');
     const targetSha = revParse(repo, task.target_branch);
     if (!integrationSha || !targetSha) return { status: 'blocked', data: { reason: 'Missing git refs' } };
+    if (expectedCommit !== undefined && (integrationSha !== expectedCommit || !isClean(integration.path))) {
+      return { status: 'blocked', data: { kind: 'stale_acceptance', reason: 'Integration no longer matches the verified clean commit', expectedCommit, integrationSha } };
+    }
     if (targetSha === integrationSha) {
       this.store.db.prepare('UPDATE tasks SET target_sha=? WHERE id=?').run(integrationSha, taskId);
       return { status: 'merged' };

@@ -219,3 +219,16 @@ test.each([
 ])('invalid graph execution defaults are rejected atomically: %j', defaults => {
   expect(() => parseGraphDefinition({ ...pipeline, defaults })).toThrow(/defaults/);
 });
+
+
+test.each([
+  {},
+  [{ id: 'a', description: 'inspect', kind: 'human' }, { id: 'a', description: 'again', kind: 'human' }],
+  [{ id: 'a', kind: 'human' }],
+  [{ id: 'a', description: 'inspect', kind: 'anything' }],
+  [{ id: 'a', description: 'test', kind: 'check', module: 'missing' }],
+  [{ id: 'a', description: 'review', kind: 'review', node: 'missing' }],
+  [{ id: 'a', description: 'inspect', kind: 'human', passed: true }],
+])('invalid final acceptance is refused as a whole: %j', acceptance => {
+  expect(() => parseGraphDefinition({ ...pipeline, acceptance })).toThrow(RuntimeError);
+});

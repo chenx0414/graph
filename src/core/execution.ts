@@ -1273,7 +1273,7 @@ export class Execution {
   private readyToComplete(taskId: string) {
     const task = this.store.task(taskId);
     if (task.phase !== 'running' || !task.accepted_proposal) return false;
-    if (this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return this.v2ReadyToComplete(taskId);
+    if (this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return false; // Native completion belongs to GraphRuntime's explicit intent and evidence gate.
     const graph = loadGraph(this.store, taskId);
     if ([...graph.plan.nodes.keys()].some(id => !['succeeded', 'skipped'].includes(graph.status(id)))) return false;
     if (this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId)) return false;
@@ -1289,30 +1289,6 @@ export class Execution {
       if (!task.integration_sha || task.integration_sha !== task.target_sha) return false;
     }
     return true;
-  }
-
-  /**
-   * §13.8: completion for a task running on the v2 kernel.
-   *
-   * The v2 equivalents of the checks above: every admitted node must have succeeded, an
-   * acceptance item is satisfied when the node it names succeeded (the node declares the
-   * acceptance it carries), and an open question still holds the task. A v2 task has no
-   * rows in `nodes` or `evidence`, so the old path could never complete one - a graph ran
-   * every node to success and the task stayed `running` forever.
-   */
-  private v2ReadyToComplete(taskId: string): boolean {
-    const task = this.store.task(taskId);
-    if (this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId)) return false;
-    const kernel = new KernelStore(this.store);
-    const nodes = kernel.listNodes(taskId);
-    if (nodes.length === 0) return false;
-    // A blocked node is unfinished work, not a finished one: parking it must not let the
-    // task claim completion.
-    if (nodes.some(node => node.status !== 'succeeded')) return false;
-    if (this.store.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND state='queued' LIMIT 1").get(taskId)) return false;
-    const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
-    const succeeded = new Set(nodes.filter(node => node.status === 'succeeded').map(node => node.nodeId));
-    return proposal.acceptance.every(item => succeeded.has(item.checkNode));
   }
 
   private completeTask(taskId: string) {

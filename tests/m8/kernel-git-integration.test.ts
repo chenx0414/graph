@@ -71,4 +71,8 @@ test('native worker output is integrated from its own worktree and leaves the ta
   await runtime.host.drive();
   expect(await readFile(join(worker.path, 'feature.txt'), 'utf8')).toBe('later working version\n');
   expect((await runtime.artifacts.read(graph.graphId, published[0]!.artifactId, published[0]!.version)).text).toBe('implemented\n');
+  await main.graphControl({ graphId: graph.graphId, action: 'complete' });
+  await runtime.host.drive();
+  expect(disk.task(graph.graphId).phase).toBe('blocked');
+  expect(git(project, ['rev-parse', 'HEAD']).stdout.trim()).toBe(original);
 }, 30000);

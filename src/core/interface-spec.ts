@@ -132,6 +132,11 @@ export interface CompletionDeclaration {
   drain?: boolean;
 }
 
+/** Final evidence is independent of routing state and node task descriptions. */
+export type AcceptanceCriterion = { id: string; description: string } & (
+  { kind: 'check'; module: string } | { kind: 'review'; node: string } | { kind: 'human' }
+);
+
 export interface GraphDefinition {
   schemaVersion: number;
   name: string;
@@ -142,6 +147,7 @@ export interface GraphDefinition {
   inputs: Record<string, GraphIo>;
   outputs: Record<string, GraphOutput>;
   completion?: CompletionDeclaration;
+  acceptance?: AcceptanceCriterion[];
   defaults?: ExecutionSettings;
   /** True when a subgraph was expanded: its public io is mapped in, never scheduled separately (§9). */
   subgraphs?: string[];
@@ -320,6 +326,7 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
   }
   const definition = {
     ...(raw.defaults === undefined ? {} : { defaults: raw.defaults }),
+    ...(raw.acceptance === undefined ? {} : { acceptance: structuredClone(raw.acceptance) }),
     schemaVersion: INTERFACE_SCHEMA_VERSION,
     name: raw.name,
     protocols,
@@ -387,6 +394,23 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
     for (const io of Object.values(definition.inputs)) io.to = resolve(io.to, 'input');
     for (const io of Object.values(definition.outputs)) io.from = resolve(io.from, 'output');
     definition.subgraphs = Object.keys(definition.subgraphInstances);
+  }
+
+  if (definition.acceptance !== undefined) {
+    if (!Array.isArray(definition.acceptance) || definition.acceptance.length > 100) invalid('Graph acceptance must be a list of at most 100 criteria');
+    const ids = new Set<string>();
+    for (const item of definition.acceptance) {
+      if (!isRecord(item) || typeof item.id !== 'string' || !item.id.trim() || ids.has(item.id)
+        || typeof item.description !== 'string' || !item.description.trim()) invalid('Acceptance criteria require unique ids and descriptions');
+      ids.add(item.id);
+      if (item.kind === 'check') {
+        if (typeof item.module !== 'string' || definition.modules[item.module]?.type !== 'operation') invalid(`Acceptance ${item.id} must name a host operation module`);
+      } else if (item.kind === 'review') {
+        if (typeof item.node !== 'string' || !definition.nodes[item.node]?.recipe) invalid(`Acceptance ${item.id} must name an agent reviewer`);
+      } else if (item.kind !== 'human') invalid('Acceptance has unknown kind');
+      const allowed = ['id', 'description', 'kind', ...(item.kind === 'check' ? ['module'] : item.kind === 'review' ? ['node'] : [])];
+      if (Object.keys(item).some(key => !allowed.includes(key))) invalid(`Acceptance ${item.id} has unknown fields`);
+    }
   }
 
   for (const [id, protocol] of Object.entries(definition.protocols)) {

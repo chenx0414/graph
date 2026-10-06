@@ -1981,7 +1981,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       };
       // Give workers this scoped object, never the user or host runtime object.
       return {
-        ...graphManagement(kernel, taskId, (id, branch) => { git.prepareTask(id, branch); }),
+        ...graphManagement(kernel, taskId, (id, branch) => { git.prepareTask(id, branch); }, artifacts),
         /** Task control asked for by the main Agent itself: every action carries its reason
          * and is recorded under the agent's own command scope, so the audit trail shows who
          * acted instead of borrowing the user's scope. */

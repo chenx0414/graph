@@ -134,3 +134,25 @@ budget.tokens 是该节点累计额度，非每次运行的新余额；省略继
 `query:"executions"` 使用同样的分页与节点过滤，返回实际执行身份、冻结 revision/预算、尝试/补交计数和 submissionId。根据队列的 seq 选择 retry/skip/cancel 前，先确认是否已经成功提交；成功提交的原输入不可重发。无效 query 或分页参数会明确报错。
 
 局部 JSON merge patch 的 null 表示删除字段；需要设置字面值 `budget.tokens:null` 时使用完整 definition。
+
+## 最终版本验收与 Git 交付
+
+顶层 definition.acceptance 声明最终证据，与节点任务中的 acceptance 文本及路由 passed 状态分开：
+
+```json
+[
+  {"id":"tests","description":"约定检查通过","kind":"check","module":"checks"},
+  {"id":"review","description":"独立审查当前提交","kind":"review","node":"reviewer"},
+  {"id":"human","description":"检查最终产物","kind":"human"}
+]
+```
+
+check 引用 operation 模块，采用最新的真实宿主操作记录；成功退出但没有 verifiedCommit 的结果不能证明当前代码版本。操作配置改变后，旧记录不再证明新配置。Git graph 必须声明宿主检查，有代码变更还必须声明独立审查。
+
+review 引用 agent 节点。该节点发布 schema 为 graph.review@1 的不可变 application/json 报告，内容为 {commit,passed,reason}；commit 是实际审查的完整提交，非代码图使用 null。验收读取完成执行发布的最新报告，核验实际文件 digest，并核对精确提交、实际调用的配方身份和模型独立性。不采信产物的 trust 标签或可改写的 metadata。首次 briefing 会给相关 reviewer 说明报告要求。
+
+旧 through/pass 状态保留不影响此规则；旧 commit 的报告显示 stale，不悄悄改成新 commit 的审查。缺失实际调用身份的历史保持未知，不能补造独立性证明。
+
+human 在其他证据齐备后形成用户验收问题，绑定 acceptanceId 和 commitSha。main 预审不代替用户回答；拒绝保留返工问题。验收项一旦声明，普通 graph_patch 不能删除或改变它们；已有确认需求也不能通过改成另一种证据来绕过。
+
+query:"acceptance" 返回各验收项的实际状态、原因和来源，以及持久 Git 交付 commit；ready 表示证据与待处理工作已满足，Git 交付仍是独立步骤。complete 先请求完成，再由宿主检查证据并交付相同的干净 commit。目标工作树脏、集成版本偏移或 Git 竞争均保留 blocked 和完成意图，main 检查时间线后可以处理问题并再次 complete；需要新增输入时先 withdraw_complete。图不会因节点均成功而隐式完成。

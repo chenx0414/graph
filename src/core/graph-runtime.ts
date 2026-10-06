@@ -1,5 +1,9 @@
 import { wakeMaster, wakeForTaskCompleted } from './wake-ledger.ts';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import type { ArtifactWorkspace } from './artifact-workspace.ts';
+import { canonicalJson } from './store.ts';
+import { graphAcceptance } from './graph-acceptance.ts';
+import { insertQuestion } from './question-routing.ts';
 import { RuntimeError, type Json } from './types.ts';
 import type { KernelStore, QueueRow } from './kernel-store.ts';
 import { NodeQueue } from './node-queue.ts';
@@ -74,10 +78,12 @@ function patchedDefinition(definition: GraphDefinition, input: Json): unknown {
 export class GraphRuntime {
   private readonly kernel: KernelStore;
   private readonly graphId: string;
+  private readonly artifacts: ArtifactWorkspace | undefined;
 
-  constructor(kernel: KernelStore, graphId: string) {
+  constructor(kernel: KernelStore, graphId: string, artifacts?: ArtifactWorkspace) {
     this.kernel = kernel;
     this.graphId = graphId;
+    this.artifacts = artifacts;
   }
 
   private taskRow(): { id: string } | undefined {
@@ -119,6 +125,9 @@ export class GraphRuntime {
     // Both update forms produce the same formal definition and validate before writing.
     const parsed = parseGraphDefinition(input.changes.patch === undefined ? input.changes.definition
       : patchedDefinition(latest.definition, input.changes.patch));
+    if (latest.definition.acceptance?.length && canonicalJson(parsed.acceptance ?? []) !== canonicalJson(latest.definition.acceptance)) {
+      throw new RuntimeError('invalid_input', 'Patch cannot change declared final acceptance');
+    }
     if (input.changes.retire?.length) {
       for (const id of input.changes.retire) {
         if (!latest.definition.nodes[id] && !latest.definition.modules[id]) {
@@ -246,6 +255,27 @@ export class GraphRuntime {
     const pendingModules = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_inbox WHERE task_id=? AND processed=0').get(this.graphId) as { n: number };
     const pendingOutputs = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0').get(this.graphId) as { n: number };
     if (queued.n > 0 || running.n > 0 || pendingModules.n > 0 || pendingOutputs.n > 0) return 'completing';
+    const acceptance = graphAcceptance(this.kernel, this.graphId, this.artifacts);
+    const delivery = this.kernel.db.prepare('SELECT commit_sha FROM kernel_completion_delivery WHERE task_id=?').get(this.graphId) as { commit_sha: string } | undefined;
+    if (!acceptance.ready || (this.kernel.store.task(this.graphId).integration_branch
+      && (this.kernel.store.task(this.graphId).target_sha !== acceptance.commit || delivery?.commit_sha !== acceptance.commit))) {
+      this.kernel.moduleTransaction(() => {
+        if (acceptance.items.every(item => item.status === 'passed' || item.kind === 'human')) {
+          for (const criterion of acceptance.human) insertQuestion(this.kernel.store, {
+            taskId: this.graphId, nodeId: `@acceptance/${criterion.id}`, kind: 'human_check',
+            data: { prompt: criterion.description, acceptanceId: criterion.id, commitSha: acceptance.commit },
+          });
+        }
+        if (this.state()!.phase !== 'blocked') {
+          const data = { graphId: this.graphId, commit: acceptance.commit, items: acceptance.items, deliveryPending: acceptance.ready };
+          this.kernel.store.event(this.graphId, 'graph.acceptance.blocked', data as unknown as Json);
+          wakeMaster(this.kernel.store, { taskId: this.graphId, kind: 'acceptance_blocked',
+            dedupeKey: `${this.graphId}:acceptance:${createHash('sha256').update(canonicalJson(data)).digest('hex')}`, data: data as unknown as Json });
+        }
+        this.setPhase('blocked');
+      });
+      return 'blocked';
+    }
     this.kernel.moduleTransaction(() => {
       this.setPhase('completed');
       wakeForTaskCompleted(this.kernel.store, this.graphId, { phase: 'completed', integrationSha: this.kernel.store.task(this.graphId).integration_sha });

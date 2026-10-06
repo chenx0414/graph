@@ -86,12 +86,15 @@ export class NodeTurnDriver {
       const node = definition.nodes[this.options.nodeId];
       const prior = this.options.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND node_id=? AND id<>?').get(execution.taskId, execution.nodeId, executionId) as { n: number };
       const previous = this.options.kernel.db.prepare('SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND id<>? ORDER BY rowid DESC LIMIT 1').get(execution.taskId, execution.nodeId, executionId) as { revision_version: number } | undefined;
-      const updated = previous && previous.revision_version !== execution.revisionVersion ? `CURRENT NODE CONFIGURATION: ${JSON.stringify(node)}` : '';
+      const finalReview = definition.acceptance?.filter(item => item.kind === 'review' && item.node === this.options.nodeId) ?? [];
+      const reviewDelivery = finalReview.length ? `FINAL REVIEW REQUIREMENTS: ${JSON.stringify(finalReview)}. Publish immutable application/json with schema graph.review@1 and {commit,passed,reason}. commit must identify the version actually reviewed (null for a non-code result); reason must explain the verdict. Publication is separate from submit.` : '';
+      const updated = previous && previous.revision_version !== execution.revisionVersion ? [`CURRENT NODE CONFIGURATION: ${JSON.stringify(node)}`, reviewDelivery].filter(Boolean).join('\n') : '';
       const context = this.options.initialContext?.() ?? (prior.n === 0 && node ? [
         `GRAPH OVERVIEW: ${definition.name}`,
         JSON.stringify({ nodes: Object.keys(definition.nodes), modules: Object.keys(definition.modules), edges: definition.edges }),
         `TASK: ${node.task}`,
         `ACCEPTANCE: ${JSON.stringify(node.acceptance ?? [])}`,
+        ...(reviewDelivery ? [reviewDelivery] : []),
         `INPUT INTERFACES: ${JSON.stringify(node.inputs)}`,
         `OUTPUT INTERFACES: ${JSON.stringify(node.outputs)}`,
         `PROTOCOLS: ${JSON.stringify(definition.protocols)}`,

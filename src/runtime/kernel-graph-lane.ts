@@ -12,6 +12,7 @@ import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import { modelIdentity, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordCapabilityLoad, recordNodeSession } from '../core/node-run.ts';
+import { graphAcceptance } from '../core/graph-acceptance.ts';
 import { GraphRuntime } from '../core/graph-runtime.ts';
 import { GraphLane, type GraphLaneOptions } from '../core/graph-lane.ts';
 import type { RunnerHost } from '../core/graph-runner.ts';
@@ -271,6 +272,20 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   });
 
   return new GraphLane({
+    finalize: async graphId => {
+      if (!options.git || !options.kernel.store.task(graphId).integration_branch) return;
+      await options.git.exclusive(graphId, () => {
+        if (closing || ['stopping', 'stopped', 'completed'].includes(options.kernel.store.task(graphId).phase)) return;
+        const acceptance = graphAcceptance(options.kernel, graphId, options.artifacts);
+        if (!acceptance.ready || !acceptance.commit) return;
+        const result = options.git!.tryDeliver(graphId, acceptance.commit);
+        if (result.status === 'merged') options.kernel.db.prepare('INSERT INTO kernel_completion_delivery(task_id,commit_sha,created_at) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET commit_sha=excluded.commit_sha,created_at=excluded.created_at')
+          .run(graphId, acceptance.commit, Date.now());
+        else options.kernel.store.event(graphId, 'graph.delivery.pending', {
+          status: result.status, commit: acceptance.commit, detail: result.data ?? null,
+        });
+      });
+    },
     settleWorkspace: async executionId => {
       const execution = options.kernel.execution(executionId);
       if (!execution || !options.git || !options.kernel.store.task(execution.taskId).integration_branch) return;
@@ -391,7 +406,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           if (!context || !Array.isArray(context.messages)) throw new Error('Invalid model context');
           let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
           let unknown = false;
-          const gate = kernelProviderGate(options.kernel, graphId, nodeId, undefined, model);
+          const gate = kernelProviderGate(options.kernel, graphId, nodeId, undefined, model,
+            { definition: session.binding.definitionVersion, review: session.role === 'reviewer' });
           const observed: SendGate = {
             dispatch: (id, reservation, send) => gate.dispatch(id, reservation, send),
             settle: (id, cost) => { gate?.settle(id, cost); if (cost) {

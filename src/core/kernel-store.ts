@@ -235,6 +235,8 @@ export class KernelStore {
         task_id TEXT PRIMARY KEY REFERENCES tasks(id), owner_task_id TEXT NOT NULL REFERENCES tasks(id));
       CREATE TABLE IF NOT EXISTS kernel_lifecycle(
         task_id TEXT PRIMARY KEY REFERENCES tasks(id), completion_requested INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS kernel_completion_delivery(
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id), commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kernel_graph_results(
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), output_name TEXT NOT NULL,
         source_id TEXT NOT NULL, value TEXT NOT NULL, protocol TEXT NOT NULL, revision_version INTEGER NOT NULL,
@@ -832,7 +834,7 @@ export class KernelStore {
       }[];
     return rows.map(row => ({ id: row.id, nodeId: row.node_id, executionId: row.execution_id,
       reserved: row.reserved, state: row.state, usage: row.usage ? JSON.parse(row.usage) as TokenUsage : null,
-      model: row.model ? JSON.parse(row.model) as { id: string; identity: string; provider: string; api: string; baseUrl: string } : null,
+      model: row.model ? JSON.parse(row.model) as { id: string; identity: string; provider: string; api: string; baseUrl: string; recipe?: { definition: string; review: boolean } } : null,
       createdAt: row.created_at, settledAt: row.settled_at }));
   }
 

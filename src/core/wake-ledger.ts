@@ -9,7 +9,7 @@ import type { TaskStore } from './store.ts';
  * finished, a queued turn to continue after an answer. The master is the only
  * actor holding the conversation's context, so it is the one that has to be told.
  */
-export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting' | 'human_check' | 'graph_output' | 'peer_message' | 'task_stopped';
+export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting' | 'human_check' | 'graph_output' | 'peer_message' | 'task_stopped' | 'acceptance_blocked';
 
 export interface WakeIntent {
   taskId: string;
@@ -182,6 +182,7 @@ export function renderWakes(wakes: PendingWake[]): string {
     if (wake.kind === 'graph_output') {
       return `- Graph ${String(data.graphId)} published output ${String(data.output)} (result ${String(data.resultId)}). Read graph_inspect results for its exact business value.`;
     }
+    if (wake.kind === 'acceptance_blocked') return `- Graph ${String(data.graphId)} is waiting for final evidence or Git delivery. Read graph_inspect acceptance and the delivery timeline; preserve the confirmed criteria and exact reviewed commit.`;
     if (wake.kind === 'peer_message') {
       return `- Agent ${String(data.nodeId)} in graph ${String(data.graphId)} sent you a message. Read the pending conversation message and reply if needed.`;
     }

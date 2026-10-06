@@ -1,3 +1,5 @@
+import type { ArtifactWorkspace } from './artifact-workspace.ts';
+import { graphAcceptance } from './graph-acceptance.ts';
 import { reconcileKernelUsage } from '../runtime/kernel-provider-gate.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
 import { canonicalJson } from './store.ts';
@@ -18,7 +20,7 @@ export interface GraphManagement {
   graphSend(input: { graphId: string; nodeId?: string; input?: string; value?: Json; text?: string }): Promise<unknown>;
 }
 
-export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepare?: (graphId: string, branch: string) => void): GraphManagement {
+export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepare?: (graphId: string, branch: string) => void, artifacts?: ArtifactWorkspace): GraphManagement {
   const owner = () => kernel.store.task(ownerTaskId);
   const runtime = (graphId: string) => {
     const target = kernel.store.task(graphId);
@@ -27,7 +29,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
       throw new RuntimeError('permission', 'Graph belongs to another conversation');
     }
     if (!kernel.latestRevision(graphId)) throw new RuntimeError('invalid_graph', 'Target has no graph definition');
-    return new GraphRuntime(kernel, graphId);
+    return new GraphRuntime(kernel, graphId, artifacts);
   };
   return {
     async graphCreate(input) {
@@ -76,6 +78,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
       const historyQuery = { ...(input.id ? { nodeId: input.id } : {}), ...(input.after === undefined ? {} : { after: input.after }), ...(input.limit === undefined ? {} : { limit: input.limit }) };
       if (input.query === 'queue') return kernel.queueHistory(input.graphId, historyQuery);
       if (input.query === 'executions') return kernel.executionHistory(input.graphId, historyQuery);
+      if (input.query === 'acceptance') return graphAcceptance(kernel, input.graphId, artifacts);
       if (input.query === 'provider_calls') return kernel.providerCalls(input.graphId, input.id);
       if (input.query === 'operations') return (kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,request,state,result,error,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId) as { request: string; result: string | null }[]).map(row => ({ ...row, request: JSON.parse(row.request), result: row.result ? JSON.parse(row.result) : null }));
       if (input.query === 'edge') return explainEdge(kernel, input.graphId, input.id!);

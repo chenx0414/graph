@@ -101,6 +101,16 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     expect(kernel.latestRevision('t1')!.version).toBe(1);
   });
 
+  test('main cannot weaken final acceptance through a local patch', () => {
+    const { kernel } = opened();
+    const runtime = new GraphRuntime(kernel, 't1');
+    const declared = parseGraphDefinition({ ...definition(), acceptance: [{ id: 'human', description: 'Inspect the result', kind: 'human' }] });
+    runtime.create(declared);
+    expect(() => runtime.patch({ baseRevision: 1, changes: { reason: 'skip user review', patch: { acceptance: [] } } })).toThrow(/final acceptance/);
+    expect(kernel.latestRevision('t1')?.version).toBe(1);
+    expect(kernel.latestRevision('t1')?.definition.acceptance).toEqual(declared.acceptance);
+  });
+
   test('G1: a stale baseRevision is refused with the current version, zero changes', () => {
     const { kernel } = opened();
     const runtime = new GraphRuntime(kernel, 't1');

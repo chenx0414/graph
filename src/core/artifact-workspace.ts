@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
@@ -617,6 +618,30 @@ export class ArtifactWorkspace {
       : this.store.db.prepare(`SELECT * FROM artifacts WHERE artifact_id=? AND version=?${scoped} ORDER BY CASE scope WHEN 'task' THEN 0 ELSE 1 END LIMIT 1`).get(...(scope ? [artifactId, version, scope] : [artifactId, version]) as never[]);
     if (!row) throw new RuntimeError('not_found', 'Artifact not found');
     return this.assertScope(mapArtifact(row as Record<string, unknown>), taskId);
+  }
+
+  /** A bounded, complete snapshot for final evidence; preview truncation cannot prove a report. */
+  readVerifiedContent(taskId: string, artifactId: string, version: number, maxBytes = 1_048_576): Buffer {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 4 * 1024 * 1024) throw new RuntimeError('invalid_artifact', 'Evidence limit must be between 1 byte and 4 MiB');
+    const record = this.get(taskId, artifactId, version);
+    const root = realpathSync(this.root);
+    const path = resolve(root, record.objectPath);
+    if (!within(root, path) || !within(root, realpathSync(path))) throw new RuntimeError('artifact_integrity', 'Artifact object path escaped the workspace root');
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const info = fstatSync(fd);
+      if (!info.isFile() || info.size > maxBytes || info.size !== record.size) throw new RuntimeError('artifact_integrity', 'Evidence bytes are unavailable within the limit');
+      const buffer = Buffer.alloc(maxBytes + 1);
+      let size = 0;
+      while (size < buffer.length) {
+        const count = readSync(fd, buffer, size, buffer.length - size, null);
+        if (!count) break;
+        size += count;
+      }
+      const data = buffer.subarray(0, size);
+      if (size !== record.size || size > maxBytes || createHash('sha256').update(data).digest('hex') !== record.digest) throw new RuntimeError('artifact_integrity', 'Evidence no longer matches its published version');
+      return data;
+    } finally { closeSync(fd); }
   }
 
   async read(taskId: string, artifactId: string, version: number, maxBytes = 262_144, scope?: 'task' | 'project') {
