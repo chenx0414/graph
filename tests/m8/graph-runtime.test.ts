@@ -7,6 +7,8 @@ import { TaskStore } from '../../src/core/store.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
 import { graphManagement } from '../../src/core/graph-service.ts';
 import { GraphRuntime } from '../../src/core/graph-runtime.ts';
+import { OperationLifecycle } from '../../src/core/operation-lifecycle.ts';
+import { approveHumanCheck, insertQuestion } from '../../src/core/question-routing.ts';
 import { parseGraphDefinition, type GraphDefinition } from '../../src/core/interface-spec.ts';
 
 /**
@@ -161,6 +163,24 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     kernel.setNodeQueuePaused('t1', 'a', true);
     expect(runtime.settleCompletion()).toBe('blocked');
     expect(runtime.state()!.phase).toBe('blocked');
+  });
+
+  test.each(['acknowledge', 'reject'] as const)('native completion waits for the user, and %s settles without legacy node rows', answer => {
+    const { kernel, store } = opened();
+    const runtime = new GraphRuntime(kernel, 't1');
+    runtime.create(definition());
+    const question = insertQuestion(store, { taskId: 't1', nodeId: 'a', kind: 'human_check', data: { prompt: 'Inspect the delivered result' } });
+    expect(approveHumanCheck(store, question.id, 'main reviewed it')).toBe(true);
+    runtime.complete();
+    expect.soft(runtime.settleCompletion()).toBe('blocked');
+    expect.soft(() => runtime.chat({ nodeId: 'a', text: 'new work' })).toThrow(/completing/);
+    const lifecycle = new OperationLifecycle(store, { advance: () => undefined });
+    expect.soft(() => lifecycle.answer('t1', question.id, { type: answer })).not.toThrow();
+    expect(store.db.prepare('SELECT status FROM questions WHERE id=?').get(question.id)).toEqual({ status: 'resolved' });
+    expect(runtime.state()?.phase).toBe(answer === 'acknowledge' ? 'completing' : 'blocked');
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM nodes WHERE task_id=?').get('t1')).toEqual({ n: 0 });
+    expect(runtime.settleCompletion()).toBe(answer === 'acknowledge' ? 'completed' : 'blocked');
+    if (answer === 'reject') expect(store.db.prepare("SELECT kind FROM questions WHERE task_id=? AND status='open'").get('t1')).toEqual({ kind: 'rework' });
   });
 
   test('G4b: a drained graph with no failure settles as completed', () => {

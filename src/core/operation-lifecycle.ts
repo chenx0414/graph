@@ -725,6 +725,16 @@ export class OperationLifecycle {
       wakeForAnswer(this.store, taskId, {
         questionId, nodeId: question.node_id, kind: question.kind, answer: answer as unknown as Json,
       });
+      // Native graphs preserve the same human answer and wake records, but have no
+      // legacy nodes/activations to resume. Their accepted queues stay under main control.
+      if (this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_revisions'").get()
+        && this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) {
+        const open = this.store.db.prepare("SELECT 1 FROM questions WHERE task_id=? AND status='open' LIMIT 1").get(taskId);
+        if (!open) this.store.db.prepare(`UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked'
+          AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)`).run(taskId, taskId);
+        this.hooks.advance(taskId);
+        return;
+      }
       if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, question.node_id)) {
         const current = this.store.db.prepare(`SELECT o.state,o.result
           FROM operations o JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id

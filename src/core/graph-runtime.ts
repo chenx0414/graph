@@ -238,7 +238,8 @@ export class GraphRuntime {
     const pausedOrFailed = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_node_state WHERE task_id=? AND paused=1').get(this.graphId) as { n: number };
     const failedInputs = this.kernel.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND state='failed' LIMIT 1").get(this.graphId);
     // Failed deliveries need an explicit retry/skip even if the node's later queue was resumed.
-    if (pausedOrFailed.n > 0 || failedInputs) {
+    const openQuestion = this.kernel.db.prepare("SELECT 1 FROM questions WHERE task_id=? AND status='open' LIMIT 1").get(this.graphId);
+    if (pausedOrFailed.n > 0 || failedInputs || openQuestion) {
       this.setPhase('blocked');
       return 'blocked';
     }
