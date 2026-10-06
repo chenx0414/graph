@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { graphNodeRuntime } from './workspace-command.ts';
 
 /**
  * Run one command as the host would run it: a direct process, no seatbelt.
@@ -11,8 +13,8 @@ import { dirname } from 'node:path';
  * the sandbox and 224 failed / 49 passed inside it, mostly the suite's own timeouts. A gate that
  * fails for reasons unrelated to the work is not evidence of anything.
  *
- * It is deliberately the plainest possible runner: it starts the child in its own process group so a
- * timeout can kill the whole tree, and it bounds what it keeps. What it does NOT do is decide
+ * A supervisor starts the command in its own process group and kills it on timeout, cancellation
+ * or owner IPC disconnect. The owner bounds the output it keeps. What it does NOT do is decide
  * anything - not whether it was allowed to run (that is `graph.command`'s `sandbox` declaration,
  * honoured only under full access) and not what the command may see (that is `checkEnvironment`).
  */
@@ -85,11 +87,18 @@ export interface HostCommandInput {
 
 export async function runHostCommand(input: HostCommandInput): Promise<HostCommandResult> {
   return new Promise<HostCommandResult>(resolve => {
-    const child = spawn(input.executable, input.args, {
-      cwd: input.cwd,
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...(input.env ?? {}) },
+    if (input.signal?.aborted) { resolve({ code: null, stdout: '', stderr: '' }); return; }
+    const runtime = graphNodeRuntime();
+    const child = spawn(runtime.execPath, [fileURLToPath(new URL('./host-command-worker.mjs', import.meta.url))], {
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      env: runtime.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {},
+    });
+    let result: { code: number | null; error?: string } | undefined;
+    child.on('message', message => {
+      const value = message as { kind?: string; code?: unknown; error?: unknown };
+      if (value.kind === 'result' && (value.code === null || typeof value.code === 'number')) {
+        result = { code: value.code, ...(typeof value.error === 'string' ? { error: value.error } : {}) };
+      }
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -114,7 +123,7 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
     // because the difference between "the command said no" and "the harness cut it" is the whole
     // reason a reader can trust the failure at all.
     const killTree = () => {
-      try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
+      if (child.connected) child.send({ kind: 'cancel' }, () => { /* disconnect also cancels */ });
     };
     const abort = () => killTree();
     if (input.signal?.aborted) abort();
@@ -136,6 +145,9 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
     };
 
     child.on('error', error => finish(null, `${(error as Error).message}\n`));
-    child.on('close', code => finish(code));
+    child.on('close', () => finish(result?.code ?? null, result?.error ?? (result ? '' : 'Command supervisor exited without a result\n')));
+    child.send({ kind: 'start', cwd: input.cwd, executable: input.executable, args: input.args, env: input.env ?? {} }, error => {
+      if (error) finish(null, `${error.message}\n`);
+    });
   });
 }
