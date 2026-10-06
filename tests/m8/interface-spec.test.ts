@@ -74,6 +74,14 @@ describe('parseGraphDefinition — pipeline shape', () => {
     expect(protocolReferenced(definition, 'missing-protocol')).toBe(false);
   });
 
+  test.each([
+    { recipe: undefined, command: { run: 'node', args: ['--version'] } },
+    { recipe: 'worker@1', command: { run: '' } },
+    { recipe: 'worker@1', command: null },
+  ])('nodes reject command declarations; host commands belong to modules (%j)', fields => {
+    expectInvalid({ ...pipeline, nodes: { worker: { ...pipeline.nodes.worker, ...fields } } }, 'operation module');
+  });
+
   test('unknown named node input is refused with the exact path', () => {
     expectInvalid({
       ...pipeline,

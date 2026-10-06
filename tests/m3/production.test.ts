@@ -30,6 +30,17 @@ const proposal = (requirementVersion: number) => ({
   }),
 });
 
+/** Real native worker and resident Pi; replies need no workflow submission. */
+async function runNativeWorker(runtime: Awaited<ReturnType<typeof openTaskRuntime>>) {
+  const owner = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
+  const main = runtime.supervisor(owner.taskId);
+  const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Provider accounting', protocols: {},
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }) }) as { graphId: string };
+  await main.graphSend({ graphId: graph.graphId, nodeId: 'work', text: 'Implement the request' });
+  await runtime.host.drive();
+  return { main, graphId: graph.graphId, run: runtime.nodeRun(graph.graphId, 'work') };
+}
+
 test('a production master receives tools, proposes a graph, and wakes on a later user message', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-master-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -116,35 +127,25 @@ test('a production Pi session may exceed a single-call reservation without block
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-reserve-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer([
-    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }], usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
+    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }], usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
     { text: 'Wrote the feature.', usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
   ]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async () => async () => ({
-      outcome: 'completed', output: null,
-      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
-    }) } },
+    limits: { defaultBudgetTokens: 20_000_000 },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.questions.map(question => question.kind)).not.toContain('reservation_exceeded');
-  expect(view.nodes.find(node => node.id === 'work')?.status).toBe('succeeded');
+  const { main, graphId, run } = await runNativeWorker(runtime);
+  expect(provider.requests).toHaveLength(2);
+  expect(run.node.status).toBe('succeeded');
+  expect(run.instance?.used).toBe(120_010);
+  expect(run.invocations).toHaveLength(2);
+  const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { state: string }[];
+  expect(calls.every(call => call.state === 'settled')).toBe(true);
+  expect(await readFile(join(root, 'feature.txt'), 'utf8')).toBe('done');
 });
 
 test('unknown usage on a production request blocks the next provider call', async () => {
@@ -155,29 +156,24 @@ test('unknown usage on a production request blocks the next provider call', asyn
     { text: 'Implementation done.' },
   ]);
   cleanup.push(() => provider.close());
+  await writeFile(join(root, 'package.json'), '{}\n');
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) } },
     limits: { defaultBudgetTokens: 20_000_000 },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.runReady();
-  const view = await runtime.user.task(taskId).view();
+  const { main, graphId, run } = await runNativeWorker(runtime);
   expect(provider.requests).toHaveLength(1);
-  expect(view.questions.map(question => question.kind)).toContain('unknown_usage');
-  expect(view.nodes.find(node => node.id === 'work')?.status).toBe('blocked');
+  expect(run.node.status).toBe('blocked');
+  const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { state: string; usage: unknown; reserved: number }[];
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ state: 'unknown', usage: null });
+  expect(calls[0]!.reserved).toBeGreaterThan(0);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'This queued follow-up must wait for usage reconciliation' });
+  await runtime.host.drive();
+  expect(provider.requests).toHaveLength(1);
 });
 
 test('reconciling unknown usage accumulates the known calls and applies the result once', async () => {
@@ -229,25 +225,21 @@ test('a production request that exceeds the budget cannot send a follow-up call'
     { text: 'Implementation done.' },
   ]);
   cleanup.push(() => provider.close());
+  await writeFile(join(root, 'package.json'), '{}\n');
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) } },
+
     limits: { defaultBudgetTokens: 20_000_000 },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.runReady();
+  const { main, graphId, run } = await runNativeWorker(runtime);
+  expect(provider.requests).toHaveLength(1);
+  expect(run.instance?.used).toBe(20_000_001);
+  expect(run.invocations).toHaveLength(1);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'This queued follow-up must wait for a budget change' });
+  await runtime.host.drive();
   expect(provider.requests).toHaveLength(1);
 });
 

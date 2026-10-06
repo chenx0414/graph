@@ -50,17 +50,8 @@ export interface ExecutionSettings {
 }
 
 export interface NodeDefinition extends NodeInterface, ExecutionSettings {
-  /**
-   * Either a recipe (an Agent node) or a command (a deterministic one).
-   *
-   * A graph needs both: some nodes think, and some run the same command every time. Before
-   * this, a deterministic node had to be spelled as an Agent with a recipe, which made it
-   * look like work that needed a model and a session — and lifted old graphs ran their
-   * checks as if they were agents.
-   */
-  recipe?: string;
-  /** A deterministic node: the command to run, and its arguments. */
-  command?: { run: string; args?: string[]; timeoutMs?: number };
+  /** Every node is an agent bound to a versioned recipe; host commands are operation modules. */
+  recipe: string;
   task: string;
   acceptance?: string[];
   /** Required outputs a submission must enable:true (§4). */
@@ -228,12 +219,9 @@ function validateExecutionSettings(scope: string, settings: ExecutionSettings): 
 
 function validateNode(definition: GraphDefinition, id: string, node: NodeDefinition): void {
   if (!node || typeof node !== 'object') invalid(`Node ${id} must be an object`);
+  if (Object.hasOwn(node, 'command')) invalid(`Node ${id} is an agent; declare host commands in an operation module`);
   const hasRecipe = typeof node.recipe === 'string' && node.recipe.trim().length > 0;
-  const hasCommand = Boolean(node.command && typeof node.command.run === 'string' && node.command.run.trim());
-  // Exactly one: a node is either something that thinks or a command that runs. Accepting
-  // both would let a node silently behave like one of them.
-  if (hasRecipe === hasCommand) invalid(`Node ${id} must declare exactly one of recipe or command`);
-  if (hasCommand && node.command!.args !== undefined && !Array.isArray(node.command!.args)) invalid(`Node ${id} command args must be a list`);
+  if (!hasRecipe) invalid(`Node ${id} requires an agent recipe`);
   if (typeof node.task !== 'string' || !node.task.trim()) invalid(`Node ${id} requires a task`);
   validateExecutionSettings(`Node ${id}`, node);
   for (const [port, ref] of Object.entries(node.inputs ?? {})) {
