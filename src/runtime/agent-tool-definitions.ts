@@ -227,7 +227,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     get_task_status: {
-      name: 'get_task_status', label: 'Get task status', description: 'Read a compact status of one task: phase, graph version, per-node status with the model that actually runs it, open user questions, open internal problems and which acceptance evidence is currently valid. Much smaller than get_graph_state, so prefer it while polling. Pass nodeId to also get that node full input (useful before revising it), and waitForNode plus timeoutMs to block until that node settles or something needs you instead of polling yourself.',
+      name: 'get_task_status', label: 'Get task status', description: 'Read a compact status of one task: phase, graph version, per-node status with the model that actually runs it, open user questions, open internal problems and which acceptance evidence is currently valid. Much smaller than get_graph_state, so prefer it while polling. Pass nodeId to read a native node declared configuration for its next execution; graph_inspect queue/executions reports received work. Use waitForNode plus timeoutMs to wait until the node has no running or queued work, or reports a blocked/failed state.',
       parameters: Type.Object({
         taskId: Type.Optional(Type.String()),
         nodeId: Type.Optional(Type.String()),

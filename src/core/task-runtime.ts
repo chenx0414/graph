@@ -177,9 +177,17 @@ function revisionTarget(store: TaskStore, supervisorTaskId: string, requested: s
 // A compact projection of one task: which node runs what, what still runs, what needs the user and
 // which acceptance evidence is currently valid. `graphState` carries the same information at roughly
 // ten times the size, so this is the read to poll with.
-function taskStatusView(store: TaskStore, taskId: string, nodeId?: string) {
+function taskStatusView(store: TaskStore, kernel: KernelStore, taskId: string, nodeId?: string) {
   const task = store.task(taskId);
-  const nodes = store.db.prepare(`SELECT n.id,n.spec,n.status,n.stall_count,i.model,i.definition_version
+  const native = kernel.latestRevision(taskId);
+  const nodes = native ? kernel.listNodes(taskId).map(node => {
+    const configured = native.definition.nodes[node.nodeId]!;
+    const execution = store.db.prepare('SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1').get(taskId, node.nodeId) as { revision_version: number } | undefined;
+    const actual = execution ? kernel.revision(taskId, execution.revision_version)!.definition.nodes[node.nodeId]! : configured;
+    const binding = store.db.prepare('SELECT model_id FROM kernel_node_bindings WHERE task_id=? AND node_id=?').get(taskId, node.nodeId) as { model_id: string | null } | undefined;
+    return { id: node.nodeId, spec: JSON.stringify({ kind: 'agent', action: actual.task }), status: node.status,
+      stall_count: 0, model: binding?.model_id ?? null, definition_version: actual.recipe };
+  }) : store.db.prepare(`SELECT n.id,n.spec,n.status,n.stall_count,i.model,i.definition_version
     FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid`).all(taskId) as {
       id: string; spec: string; status: string; stall_count: number; model: string | null; definition_version: string | null;
     }[];
@@ -204,7 +212,7 @@ function taskStatusView(store: TaskStore, taskId: string, nodeId?: string) {
     taskId,
     phase: task.phase,
     status: task.paused ? 'paused' : userQuestions.length ? 'blocked' : task.phase,
-    graphVersion: task.graph_version,
+    graphVersion: native?.version ?? task.graph_version,
     proposalVersion: task.latest_proposal,
     acceptedProposalVersion: task.accepted_proposal,
     targetBranch: task.target_branch,
@@ -219,7 +227,7 @@ function taskStatusView(store: TaskStore, taskId: string, nodeId?: string) {
         ...(model ? { model } : {}),
         ...(row.definition_version ? { definition: row.definition_version } : {}),
         ...(row.stall_count ? { stallCount: row.stall_count } : {}),
-        ...(nodeId === undefined ? {} : { input: spec.input }),
+        ...(nodeId === undefined ? {} : native ? { configuration: native.definition.nodes[row.id] } : { input: spec.input }),
       };
     }),
     questions: userQuestions.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind })),
@@ -2300,9 +2308,11 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         },
         async taskStatus(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }) {
           ensureOpen();
-          const target = conversationTarget(store, taskId, input.taskId, 'A status query');
+          const owned = input.taskId === undefined ? undefined
+            : store.db.prepare('SELECT owner_task_id FROM kernel_graph_owners WHERE task_id=?').get(input.taskId) as { owner_task_id: string } | undefined;
+          const target = owned?.owner_task_id === taskId ? input.taskId! : conversationTarget(store, taskId, input.taskId, 'A status query');
           const nodeId = input.nodeId === undefined ? undefined : String(input.nodeId);
-          const first = taskStatusView(store, target, nodeId);
+          const first = taskStatusView(store, kernel, target, nodeId);
           const waiting = input.waitForNode === undefined ? undefined : String(input.waitForNode);
           if (!waiting) return first;
           const timeout = Math.max(0, Math.min(600_000, Math.trunc(input.timeoutMs ?? 120_000)));
@@ -2314,10 +2324,12 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             const node = current.nodes.find(entry => entry.id === waiting);
             if (!node) throw new RuntimeError('not_found', `Task ${target} has no node ${waiting}`);
             if ([...current.questions, ...current.problems].some(entry => !known.has(entry.id))) { reason = 'needs_you'; break; }
-            if (node.status !== 'pending' && node.status !== 'running') { reason = 'settled'; break; }
+            const nativeQueued = kernel.latestRevision(target) && !['blocked', 'failed'].includes(node.status)
+              && store.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND node_id=? AND state IN ('queued','claimed') LIMIT 1").get(target, waiting);
+            if (node.status !== 'pending' && node.status !== 'running' && !nativeQueued) { reason = 'settled'; break; }
             if (Date.now() - started >= timeout) { reason = 'timeout'; break; }
             await new Promise(resolve => setTimeout(resolve, 1_000));
-            current = taskStatusView(store, target, nodeId);
+            current = taskStatusView(store, kernel, target, nodeId);
           }
           return { ...current, waitedMs: Date.now() - started, reason };
         },

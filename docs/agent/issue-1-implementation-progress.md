@@ -398,3 +398,12 @@
 - 5 文件、33 用例及 TypeScript 通过，含串行初始/复跑 prompt、真实最终验收与独立发布审查。第四十一轮完整门禁待执行。production 仍有旧 graph.verify report schema 和 proof-only 未知用量豁免用例；旧 M7 入口、默认切换及完整旧内核退役继续实施。
 
 - 第四十一轮完整门禁通过：276 文件、1874 用例，173.95 秒；验收证据未改写。原生首轮概览、真实工作副本写入及精确 prompt 窗口均通过最终全量验证。
+
+## main 紧凑状态读取接通原生 graph
+
+- 原生 worker 概览及窗口已提交为 4e89859。继续核对默认推荐的 get_task_status：真实新建/修改后的原生图在旧查询里显示版本 0、空节点；按节点查询报 not_found。无 conversation 的 main 拥有者查询其 graph 也被旧 conversation-only 边界拒绝。三项均有实际公开 API 的修复前失败记录。
+- 紧凑查询读取原生修订与节点、实际绑定模型和执行时的配方/任务版本；按节点展开返回当前声明配置供下次执行，避免将旧 NodeSpec.input 当作原生投递。拥有者关系来自实际 kernel_graph_owners；同 conversation 的既有范围继续适用，其他拥有者仍不能读取该图。未改旧 revise 的权限或执行路径。
+- 另实测已排队但尚未开始的原生聊天被 waitForNode 提前报告 settled。等待查询现读取 queued/claimed 状态；只有没有待运行工作或明确 blocked/failed 时才返回结束状态。实际零等待期限回归返回 timeout，不伪装已完成。初次扩展配置断言误将完整配置对象按只有 task/recipe 的对象比较，已改为正确的部分匹配；此夹具错误不算产品缺陷。
+- 3 文件、48 用例及 TypeScript 通过，包含 native graph owner/非 owner、图修订、blocked/idle、按需配置、排队等待与既有 conversation 版本/越界合同。第四十二轮完整门禁待执行；旧 M7 示例仍依赖特殊 program/graph.verify、旧提交与自动交付，核对其独立合同后再替换，未直接删除或机械提升。
+
+- 第四十二轮完整门禁通过：276 文件、1874 用例，173.26 秒；验收证据未改写。原生紧凑状态、拥有者读取及排队等待合同均通过最终全量验证。

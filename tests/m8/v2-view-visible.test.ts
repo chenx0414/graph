@@ -37,5 +37,16 @@ test('native task and main views retain blocked nodes and follow graph revisions
     await expect(runtime.supervisor(graph.graphId).graphState()).resolves.toMatchObject({
       graphVersion: 2, graph: { schemaVersion: 2 }, nodes: expect.arrayContaining([expect.objectContaining({ id: 'work', status: 'blocked' })]),
     });
+    await expect.soft(runtime.supervisor(graph.graphId).taskStatus({})).resolves.toMatchObject({
+      graphVersion: 2, nodes: expect.arrayContaining([expect.objectContaining({ id: 'work', status: 'blocked', definition: 'worker@1' })]),
+    });
+    await expect.soft(runtime.supervisor(graph.graphId).taskStatus({ nodeId: 'audit' })).resolves.toMatchObject({
+      nodes: [expect.objectContaining({ id: 'audit', status: 'idle', configuration: expect.objectContaining({ task: 'audit', recipe: 'worker@1' }) })],
+    });
+    await expect(main.taskStatus({ taskId: graph.graphId })).resolves.toMatchObject({ graphVersion: 2 });
+    const outsider = await runtime.user.begin({ projectId: 'p', request: 'Separate owner', requestId: 'outsider' });
+    await expect(runtime.supervisor(outsider.taskId).taskStatus({ taskId: graph.graphId })).rejects.toMatchObject({ code: 'invalid_input' });
+    await main.graphSend({ graphId: graph.graphId, nodeId: 'audit', text: 'This accepted chat has not executed yet' });
+    await expect(main.taskStatus({ taskId: graph.graphId, waitForNode: 'audit', timeoutMs: 0 })).resolves.toMatchObject({ reason: 'timeout' });
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 }, 30_000);
