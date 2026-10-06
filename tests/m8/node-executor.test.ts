@@ -132,8 +132,15 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
     const reopened = new TaskStore(join(dir, 'state.db'));
     try {
       const recovered = new KernelStore(reopened);
+      const changed = structuredClone(DEF); changed.nodes.n1!.task = 'new task for later executions';
+      changed.nodes.n1!.retry = { automatic: 0, resubmit: 0 };
+      recovered.publishRevision('restart', { definition: changed, reason: 'changed while interrupted' });
       let turns = 0;
-      const outcome = await new NodeExecutor({ kernel: recovered, graphId: 'restart', host: fakeHost() }).runNode('n1', async () => { turns += 1; });
+      const prepared: number[] = [];
+      const outcome = await new NodeExecutor({ kernel: recovered, graphId: 'restart',
+        host: async (_executionId, revisionVersion) => { prepared.push(revisionVersion); return fakeHost(); },
+      }).runNode('n1', async () => { turns += 1; });
+      expect(prepared).toEqual([1]);
       expect(outcome).toBe('failed');
       expect(turns).toBe(1);
       expect(recovered.execution(id)?.attempt).toBe(3);
@@ -292,5 +299,43 @@ test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknow
     expect(turns).toBe(1);
     expect(kernel.providerCalls('submitted')[0]?.state).toBe('unknown');
     expect(kernel.budgetState('submitted', 'n1', { budget: 1000, unlimited: false }).reserved).toBe(100);
+  } finally { store.close(); }
+});
+
+
+test.each(['error', 'missing'])('declared %s retry limits stay frozen for current work and change on the next execution', async mode => {
+  const { kernel, store } = opened();
+  try {
+    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('retry-config','p1','work','running',1)").run();
+    const first = structuredClone(DEF);
+    first.nodes.n1!.retry = { automatic: 1, resubmit: 1 };
+    kernel.publishRevision('retry-config', { definition: first, reason: 'configured' });
+    kernel.admitNode('retry-config', 1, 'n1', { instanceId: 'worker' });
+    const queue = new NodeQueue(kernel, 'retry-config');
+    queue.enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: null });
+    const executor = new NodeExecutor({ kernel, graphId: 'retry-config', host: fakeHost() });
+    let turns = 0;
+    const fail = async () => {
+      turns += 1;
+      if (turns === 1) {
+        const next = structuredClone(first); next.nodes.n1!.retry = { automatic: 0, resubmit: 0 };
+        kernel.publishRevision('retry-config', { definition: next, reason: 'next execution' });
+      }
+      if (mode === 'error') throw new Error('execution failed');
+      return { missing: ['out'] };
+    };
+    expect(await executor.runNode('n1', fail)).toBe('failed');
+    expect(turns).toBe(2);
+    const original = kernel.execution(executionIdOf(kernel, 'retry-config'))!;
+    expect(original.revisionVersion).toBe(1);
+    expect(mode === 'error' ? original.retriesUsed : original.resubmitsUsed).toBe(1);
+    queue.resume('n1');
+    queue.enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: null });
+    expect(await executor.runNode('n1', fail)).toBe('failed');
+    expect(turns).toBe(3);
+    const next = kernel.execution(executionIdOf(kernel, 'retry-config'))!;
+    expect(next.revisionVersion).toBe(2);
+    expect(next.retriesUsed).toBe(0);
+    expect(next.resubmitsUsed).toBe(0);
   } finally { store.close(); }
 });

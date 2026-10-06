@@ -205,3 +205,9 @@ test('protocols enforce enum, additionalProperties and nested constraints withou
   expect(validateProtocolValue(schema, { status: 'approved', items: [1], extra: true })).not.toBeNull();
   expectInvalid({ ...pipeline, protocols: { ...pipeline.protocols, bad: { type: 'not-a-type' } } }, 'invalid schema');
 });
+
+
+test.each([{ model: '' }, { model: 7 }, { retry: { automatic: -1 } }, { retry: { resubmit: 0.5 } },
+  { retry: [] }, { retry: { unknown: 1 } }])('node configuration rejects invalid model or retry declaration: %j', configuration => {
+  expect(() => parseGraphDefinition({ ...pipeline, nodes: { worker: { ...pipeline.nodes.worker, ...configuration } } })).toThrow(RuntimeError);
+});

@@ -137,7 +137,8 @@ export function modelFor(options: KernelGraphLaneOptions, recipe: string,
     visit(nodeId);
   }
   const directory = options.directory().filter(model => !excluded.has(model.id) && !excluded.has(modelIdentity(model)));
-  return directory.find(model => model.grade === entry.recommendedGrade) ?? directory[0];
+  const requested = context && options.kernel.revision(context.graphId, context.revisionVersion)?.definition.nodes[context.nodeId]?.model?.trim();
+  return directory.find(model => model.id === requested) ?? directory.find(model => model.grade === entry.recommendedGrade) ?? directory[0];
 }
 
 /**

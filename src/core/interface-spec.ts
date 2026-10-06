@@ -54,6 +54,10 @@ export interface NodeDefinition extends NodeInterface {
   command?: { run: string; args?: string[]; timeoutMs?: number };
   task: string;
   acceptance?: string[];
+  /** Configured model connection; selection still enforces review independence. */
+  model?: string;
+  /** Per-execution limits, frozen from its revision; omitted fields use defaults. */
+  retry?: { automatic?: number; resubmit?: number };
   /** Required outputs a submission must enable:true (§4). */
   submission: { required?: string[]; requiredAnyOf?: string[] };
   /**
@@ -203,6 +207,13 @@ function validateNode(definition: GraphDefinition, id: string, node: NodeDefinit
   if (hasRecipe === hasCommand) invalid(`Node ${id} must declare exactly one of recipe or command`);
   if (hasCommand && node.command!.args !== undefined && !Array.isArray(node.command!.args)) invalid(`Node ${id} command args must be a list`);
   if (typeof node.task !== 'string' || !node.task.trim()) invalid(`Node ${id} requires a task`);
+  if (node.model !== undefined && (typeof node.model !== 'string' || !node.model.trim())) invalid(`Node ${id} model must name a configured connection`);
+  if (node.retry !== undefined) {
+    if (!isRecord(node.retry)) invalid(`Node ${id} retry must be an object`);
+    for (const [key, count] of Object.entries(node.retry)) {
+      if (!['automatic', 'resubmit'].includes(key) || !Number.isSafeInteger(count) || (count as number) < 0) invalid(`Node ${id} retry.${key} must be a non-negative integer limit`);
+    }
+  }
   for (const [port, ref] of Object.entries(node.inputs ?? {})) {
     assertDeclaredProtocol(definition, ref, `Node ${id} input ${port}`);
   }

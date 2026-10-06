@@ -166,6 +166,16 @@ test('review model selection excludes recorded implementer identities through ro
     instancesDir: join(root, 'instances'), stateDir: root, workspaceFor: () => root };
   const context = { graphId: 'g1', nodeId: 'b', revisionVersion: revision.version };
   expect(modelFor(options, 'beta@1', context)?.id).toBe('independent');
+  entries.push(model('preferred', 'unused-upstream'));
+  const requested = kernel.latestRevision('g1')!.definition;
+  requested.nodes.b!.model = 'preferred';
+  const updated = kernel.publishRevision('g1', { definition: requested, reason: 'request a model' });
+  expect(modelFor(options, 'beta@1', { ...context, revisionVersion: updated.version })?.id).toBe('preferred');
+  expect(modelFor(options, 'beta@1', context)?.id).toBe('independent');
+  requested.nodes.b!.model = 'alias';
+  const disallowed = kernel.publishRevision('g1', { definition: requested, reason: 'request cannot bypass independence' });
+  expect(modelFor(options, 'beta@1', { ...context, revisionVersion: disallowed.version })?.id).toBe('independent');
+  entries.pop();
   entries.pop();
   expect(modelFor(options, 'beta@1', context)).toBeUndefined();
 });

@@ -130,14 +130,18 @@ export class NodeExecutor {
   /** One queued item: one execution, turned until submit, failure, or budget spent. */
   private async runOne(nodeId: string, item: QueueRow, run: TurnRunner): Promise<NodeOutcome> {
     const seq = item.seq;
-    const revision = this.kernel.latestRevision(this.graphId);
-    if (!revision) throw new RuntimeError('invalid_graph', `Graph ${this.graphId} has no revision`);
+    const latest = this.kernel.latestRevision(this.graphId);
+    if (!latest) throw new RuntimeError('invalid_graph', `Graph ${this.graphId} has no revision`);
 
     const generation = (this.kernel.db.prepare('SELECT generation FROM kernel_queue WHERE seq=?').get(seq) as { generation: number }).generation;
     const executionId = `exec-${this.graphId}-${nodeId}-${seq}${generation ? `-${generation}` : ''}`;
-    this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: revision.version });
+    const execution = this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: latest.version });
+    const revision = this.kernel.revision(this.graphId, execution.revisionVersion)!;
 
-    const budget = this.queue.retryBudget(nodeId);
+    const defaults = this.queue.retryBudget(nodeId);
+    const retry = revision.definition.nodes[nodeId]?.retry;
+    const budget = { ...defaults, retriesAllowed: retry?.automatic ?? defaults.retriesAllowed,
+      resubmitsAllowed: retry?.resubmit ?? defaults.resubmitsAllowed };
     // §9: hold what this turn may cost before spending any of it. A node that cannot
     // afford the hold is parked rather than run unbudgeted.
     const metering = this.options.tokenBudget && this.options.reserveTokens !== undefined
