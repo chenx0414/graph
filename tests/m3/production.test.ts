@@ -143,6 +143,9 @@ test('a production Pi session may exceed a single-call reservation without block
   expect(run.node.status).toBe('succeeded');
   expect(run.instance?.used).toBe(120_010);
   expect(run.invocations).toHaveLength(2);
+  const view = await runtime.user.task(graphId).view();
+  expect.soft(view.invocations).toHaveLength(2);
+  expect(view.cost).toEqual({ unknown: true });
   const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { state: string }[];
   expect(calls.every(call => call.state === 'settled')).toBe(true);
   expect(await readFile(join(root, 'feature.txt'), 'utf8')).toBe('done');

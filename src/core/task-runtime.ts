@@ -57,6 +57,7 @@ import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.t
 import { effectiveThinkingLevel, thinkingOptionsFor } from '../runtime/thinking.ts';
 import { GitIntegration } from '../git/integration.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
+import { usageSourceOf } from '../runtime/call-broker.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
 import type { AgentContextLibrary } from '../runtime/agent-context.ts';
 import { openAgentContextAssembly } from '../runtime/agent-context-assembly.ts';
@@ -734,6 +735,16 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
   }
   let closing: Promise<void> | undefined;
 
+  const taskInvocations = (id: string) => {
+    const nodes = new Map(kernel.listNodes(id).map(node => [node.nodeId, node.instanceId]));
+    return [...invocationRows(store, id), ...kernel.providerCalls(id).map(call => ({
+      id: call.id, operationId: call.executionId, instanceId: nodes.get(call.nodeId) ?? '',
+      model: call.model?.id ?? 'unknown', usage: call.usage, usageSource: usageSourceOf(call.usage),
+      // Native sends have no frozen monetary price receipt yet. Missing prices cannot mean free.
+      cost: { unknown: true } as Json,
+    }))];
+  };
+
   const user = {
     async begin(input: { projectId: string; request: string; requestId: string }): Promise<Receipt> {
       ensureOpen();
@@ -903,8 +914,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         async view() {
           ensureOpen();
           const task = store.task(taskId);
+          const nativeRevision = kernel.latestRevision(taskId);
           const rows = store.db.prepare('SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(taskId) as { id: string; spec: string; instance_id: string | null; status: string; used: number | null; budget: number | null; unlimited: number | null; activation_id: string; output_version: number; stall_count: number; model: string | null; definition_version: string | null }[];
-          const invocations = invocationRows(store, taskId);
+          const invocations = taskInvocations(taskId);
           const unknownCost = invocations.some(item => item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && item.cost.unknown === true);
           const cost = unknownCost ? { unknown: true as const } : { amount: invocations.reduce((sum, item) => {
             const value = item.cost && typeof item.cost === 'object' && !Array.isArray(item.cost) && typeof item.cost.amount === 'number' ? item.cost.amount : 0;
@@ -932,20 +944,19 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           return {
             id: task.id, conversationId: task.conversation_id, projectId: task.project_id, request: task.request, requirementVersion: task.requirement_version,
             proposalVersion: task.latest_proposal, acceptedProposalVersion: task.accepted_proposal,
-            graphVersion: task.graph_version,
+            graphVersion: nativeRevision?.version ?? task.graph_version,
             proposal: proposal ? JSON.parse(proposal.spec) as Proposal : null, messages,
             ...(() => {
-              // A task accepted on the v2 kernel has an accepted proposal but no old-shaped
-              // rows at all, so loadGraph would throw on it. It genuinely has no containers
-              // and no loops - those are old-kernel concepts - so report them empty rather
-              // than failing the whole view.
+              // Native subgraphs are declared in the definition, not legacy containers or loops.
               let graph: ReturnType<typeof loadGraph> | undefined;
-              if (task.accepted_proposal) {
+              if (task.accepted_proposal && !nativeRevision) {
                 try { graph = loadGraph(store, taskId); } catch { graph = undefined; }
               }
               return { containers: graph ? graph.containers() : [], loops: graph ? graph.plan.loops : [] };
             })(),
-            revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
+            revisions: (store.db.prepare(nativeRevision
+              ? 'SELECT version,reason,version-1 AS base_version FROM kernel_revisions WHERE task_id=? ORDER BY version'
+              : 'SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused), queuedBehind,
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
             status: task.paused ? (operationTotals.some(row => row.active) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
@@ -966,7 +977,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
               ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
               reserved: operationTotals.find(total => total.node_id === row.id)?.reserved ?? 0 })),
               ...kernel.listNodes(taskId).map(node => {
-                const spec = kernel.latestRevision(taskId)!.definition.nodes[node.nodeId]!;
+                const spec = nativeRevision!.definition.nodes[node.nodeId]!;
                 const ledger = store.db.prepare('SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?').get(taskId, node.nodeId) as { used: number; reserved: number } | undefined;
                 const binding = store.db.prepare('SELECT model_id FROM kernel_node_bindings WHERE task_id=? AND node_id=?').get(taskId, node.nodeId) as { model_id: string | null } | undefined;
                 return {
@@ -1045,7 +1056,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     },
   };
 
-  const taskCost = (id: string) => sumCosts(invocationRows(store, id).map(item => item.cost));
+  const taskCost = (id: string) => sumCosts(taskInvocations(id).map(item => item.cost));
 
   /** The anchor plus every feature task created from this conversation. */
   const conversationTaskIds = (store: TaskStore, conversationId: string) => {
@@ -2196,6 +2207,13 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
                 };
               }))
             : [];
+          const native = kernelGraphView(kernel, taskId);
+          if (native) {
+            const view = await user.task(taskId).view();
+            return { ...view, taskId, graph: native.definition,
+              revisions: view.revisions.map(row => ({ version: row.version, reason: row.reason, baseVersion: row.base_version })),
+              modules: native.modules, interfaces: native.edges, relatedTasks };
+          }
           const nodes = store.db.prepare(`SELECT n.id,n.spec,n.instance_id,n.status,n.activation_id,n.output_version,n.stall_count,
               i.used,i.budget,i.unlimited,i.model,i.definition_version
             FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id

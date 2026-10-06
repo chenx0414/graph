@@ -159,6 +159,10 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     expect(running.nodes.every((node: { status: string }) => node.status === 'idle')).toBe(true);
     expect(running.layout).toEqual(draft.layout);
     expect(running.interfaces).toMatchObject([{ edgeId: 'ab', from: 'a.out', to: 'b.in', protocol: 'ping', latest: null, deliveries: [] }]);
+    await expect(runtime.supervisor(confirmed.taskId).graphState()).resolves.toMatchObject({
+      taskId: confirmed.taskId, graphVersion: 1, graph: { schemaVersion: 2 },
+      nodes: expect.arrayContaining([expect.objectContaining({ id: 'a', status: 'idle', origin: 'v2' })]),
+    });
 
     await runtime.host.drive();
     expect(briefings.join('\n')).toContain(`Graph ${confirmed.taskId} is ready`);
