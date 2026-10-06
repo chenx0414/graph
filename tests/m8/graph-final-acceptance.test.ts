@@ -32,8 +32,8 @@ test('native final acceptance binds real checks, independent published review an
       content: JSON.stringify({ commit: baseline, passed: true, reason: 'Earlier commit passed' }), requestId: 'old-review' }) }] },
     { text: 'earlier review published' },
     { tools: [{ id: 'read-current', name: 'artifact_read', arguments: () => JSON.stringify({ artifactId: code().artifact_id, version: code().version }) }] },
-    { tools: [{ id: 'current-report', name: 'artifact_publish', arguments: () => JSON.stringify({ namespace: 'reviews', name: 'review', schema: 'graph.review@1', mediaType: 'application/json',
-      content: JSON.stringify({ commit: disk!.task(graphId).integration_sha, passed: true, reason: 'Published feature matches the requirement' }), expectedVersion: 1, requestId: 'current-review' }) }] },
+    { tools: [{ id: 'current-report', name: 'write_file', arguments: () => JSON.stringify({ path: 'review.json',
+      content: JSON.stringify({ commit: disk!.task(graphId).integration_sha, passed: true, reason: 'Published feature matches the requirement' }) }) }] },
     { text: 'current review published' },
   ]);
   let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
@@ -75,6 +75,9 @@ test('native final acceptance binds real checks, independent published review an
     expect(disk.task(graphId).phase).toBe('blocked');
     expect(disk.db.prepare("SELECT id FROM questions WHERE task_id=? AND kind='human_check'").get(graphId)).toBeUndefined();
     await main.graphControl({ graphId, action: 'withdraw_complete' });
+    await main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Publish the declared review file', patch: { nodes: { review: { deliverable: {
+      path: 'review.json', namespace: 'reviews', name: 'review', schema: 'graph.review@1',
+    } } } } } });
     await main.graphSend({ graphId, nodeId: 'review', input: 'job', value: {} }); await runtime.host.drive();
     const assessment = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; status: string }[] };
     expect(assessment.items.map(item => [item.id, item.status])).toEqual([['behavior', 'passed'], ['review', 'passed'], ['human', 'missing']]);

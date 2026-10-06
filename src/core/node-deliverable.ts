@@ -18,7 +18,7 @@ import type { ArtifactWorkspace } from './artifact-workspace.ts';
  *     a tool call to hand its work over;
  *   - a file that was never written, or that is empty, FAILS the node — a promise that is
  *     never kept is a failure, not a quiet pass;
- *   - identical bytes publish nothing new, because a new version would claim work that did
+ *   - identical bytes and schema publish nothing new, because a new version would claim work that did
  *     not change.
  */
 
@@ -56,9 +56,9 @@ export async function settleDeliverable(input: SettleDeliverableInput): Promise<
   const digest = createHash('sha256').update(body).digest('hex');
   const logicalKey = `${deliverable.namespace}/${deliverable.name}`;
   const head = input.artifacts.head(graphId, logicalKey);
-  // The same bytes whoever wrote them: nothing changed, so a new version would say
-  // something false about the work.
-  if (head && head.digest === digest) return { ok: true, published: false, artifactId: head.artifactId, version: head.version };
+  const headSchema = head?.schemaKind ? `${head.schemaKind}@${head.schemaVersion}` : undefined;
+  // Schema changes produce a new interpretation without changing the immutable old version.
+  if (head && head.digest === digest && headSchema === deliverable.schema) return { ok: true, published: false, artifactId: head.artifactId, version: head.version };
 
   const record = await input.artifacts.publish({
     taskId: graphId,
@@ -66,6 +66,7 @@ export async function settleDeliverable(input: SettleDeliverableInput): Promise<
     namespace: deliverable.namespace,
     name: deliverable.name,
     sourcePath: path,
+    ...(deliverable.schema ? { schema: deliverable.schema } : {}),
     ...(deliverable.title ? { title: deliverable.title } : {}),
     ...(deliverable.summary ? { summary: deliverable.summary } : {}),
     // A v2 execution IS the operation (§3 replaces the operation model), so the kernel's

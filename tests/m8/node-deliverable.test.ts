@@ -129,6 +129,26 @@ describe('settleDeliverable — a v2 node promise is kept or the node fails (§1
     expect(artifacts.list({ taskId: 'g1', namespace: 'deliverables', prefix: 'note', latestOnly: false }).artifacts).toHaveLength(2);
   });
 
+  test('a declared schema publishes a new typed snapshot even when file bytes are unchanged', async () => {
+    const { workspace, kernel, store, executionId } = await fixture('note.json');
+    const artifacts = new ArtifactWorkspace(store, join(workspace, '.artifacts'));
+    await writeFile(join(workspace, 'note.json'), JSON.stringify({ commit: null, passed: true, reason: 'Reviewed' }));
+    await settleDeliverable({ kernel, artifacts, graphId: 'g1', nodeId: 'a', revisionVersion: 1, executionId, workspace });
+    const original = artifacts.head('g1', 'deliverables/note')!;
+    expect(original.schemaKind).toBeNull();
+    const current = kernel.latestRevision('g1')!.definition;
+    const revision = kernel.publishRevision('g1', { reason: 'declare typed review', definition: parseGraphDefinition({ ...current,
+      nodes: { ...current.nodes, a: { ...current.nodes.a, deliverable: { ...current.nodes.a!.deliverable, schema: 'graph.review@1' } } },
+    }) });
+    kernel.startExecution('g1', { executionId: 'e2', nodeId: 'a', revisionVersion: revision.version });
+    const result = await settleDeliverable({ kernel, artifacts, graphId: 'g1', nodeId: 'a', revisionVersion: revision.version, executionId: 'e2', workspace });
+    expect(result).toMatchObject({ ok: true, published: true, version: 2 });
+    const typed = artifacts.head('g1', 'deliverables/note')!;
+    expect(typed).toMatchObject({ schemaKind: 'graph.review', schemaVersion: 1, digest: original.digest, producer: { operationId: 'e2' } });
+    expect(artifacts.get('g1', original.artifactId, 1).schemaKind).toBeNull();
+    expect(await settleDeliverable({ kernel, artifacts, graphId: 'g1', nodeId: 'a', revisionVersion: revision.version, executionId: 'e2', workspace })).toMatchObject({ ok: true, published: false, version: 2 });
+  });
+
   test('D5: a node with no deliverable settles without touching the artifact store', async () => {
     const { workspace, kernel, store, executionId } = await fixture(null);
     const artifacts = new ArtifactWorkspace(store, join(workspace, '.artifacts'));

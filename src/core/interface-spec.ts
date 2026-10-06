@@ -78,6 +78,8 @@ export interface NodeDefinition extends NodeInterface, ExecutionSettings {
     name: string;
     title?: string;
     summary?: string;
+    /** Published content interpretation, for example graph.review@1. */
+    schema?: string;
   };
 }
 
@@ -261,6 +263,7 @@ function validateNode(definition: GraphDefinition, id: string, node: NodeDefinit
     if (!['plans', 'research', 'reviews', 'deliverables', 'summaries'].includes(d.namespace)) {
       invalid(`Node ${id} deliverable namespace must be plans, research, reviews, deliverables or summaries`);
     }
+    if (d.schema !== undefined && (typeof d.schema !== 'string' || !/^([a-z][a-z0-9._-]*)@([1-9]\d*)$/.test(d.schema))) invalid(`Node ${id} deliverable schema must be kind@version`);
     if (typeof d.name !== 'string' || !slug.test(d.name.toLowerCase())) invalid(`Node ${id} deliverable name must be a lowercase slug`);
   }
 }
