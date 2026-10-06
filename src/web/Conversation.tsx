@@ -6,6 +6,7 @@ import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { type AgentContextView } from './AgentContext.tsx';
 import { api } from './api.ts';
 import type { ArtifactRecord } from '../core/artifact-workspace.ts';
+import type { GraphDefinition, ProtocolRef } from '../core/interface-spec.ts';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
 import { attachmentPayload, attachmentImageSource } from './attachments.ts';
 import {
@@ -108,7 +109,10 @@ export type DraftGraph = {
     } | null;
     contextMode?: 'fresh' | 'fork' | null;
     agent?: GraphAgentDetail | null;
+    inputs?: Record<string, ProtocolRef>;
+    outputs?: Record<string, ProtocolRef>;
   }[];
+  interfaces?: { edgeId: string; from: string; to: string; enabled: boolean; protocol: string | null; latest: unknown; deliveries: { id: string; value: unknown; protocol: string; revisionVersion: number; createdAt: number }[] }[];
   containers: { id: string; parent?: string }[];
   loops: { from: string; to: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[]; branches?: { id: string; source: string; target: string; case: string }[] };
@@ -120,6 +124,7 @@ export type ProposalDetail = {
   decisions: string | null;
   spec: {
     summary: string;
+    definition?: GraphDefinition;
     acceptance: { id: string; description: string; checkNode: string }[];
     nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[]; container?: string; input?: unknown }[];
     loops?: { from: string; to: string }[];
@@ -279,7 +284,7 @@ export function ConversationGraphBoard({
           <h2 data-testid="conversation-graph-title">{proposal.spec.summary}</h2>
           <div className="conversation-graph-meta">
             <span>v{proposal.version}</span>
-            <span>{proposal.spec.nodes.length} 个节点</span>
+            <span>{graph?.nodes.length ?? (proposal.spec.definition ? Object.keys(proposal.spec.definition.nodes).length + Object.keys(proposal.spec.definition.modules).length : proposal.spec.nodes.length)} 个节点</span>
             <span>{proposal.spec.acceptance.length} 个验收项</span>
             {proposal.stale && <Pill tone="warn">需求已变化</Pill>}
           </div>
@@ -304,7 +309,7 @@ export function ConversationGraphBoard({
         {!graphLoading && graph && graph.nodes.length > 0 && (
           <div className="conversation-graph-canvas" data-testid="draft-graph-detail">
             <GraphCanvas
-              graph={{ nodes: graph.nodes, containers: graph.containers, layout: graph.layout }}
+              graph={{ nodes: graph.nodes, containers: graph.containers, layout: graph.layout, ...(graph.interfaces ? { interfaces: graph.interfaces } : {}) }}
               collapsed={{}}
               selected={selectedNodeId}
               onSelect={id => onSelectNode(id === selectedNodeId ? null : id)}
@@ -322,7 +327,7 @@ export function ConversationGraphBoard({
           <aside className="graph-node-inspector" data-testid="conversation-node-detail">
             <div className="graph-node-inspector-head">
               <div className="grow">
-                <div className="drawer-eyebrow">{selectedNode.kind === 'agent' ? 'Agent 节点' : '程序节点'}</div>
+                <div className="drawer-eyebrow">{selectedNode.kind === 'agent' ? 'Agent 节点' : selectedNode.kind === 'module' ? '功能模块' : '程序节点'}</div>
                 <h3>{selectedNode.id}</h3>
               </div>
               {selectedNode.kind === 'agent' && selectedNode.agent && (
@@ -343,6 +348,8 @@ export function ConversationGraphBoard({
               <StatusDot tone={NODE_TONE[selectedNode?.status ?? ''] ?? 'neutral'} />
               <span>{NODE_LABEL[selectedNode?.status ?? ''] ?? selectedNode?.status ?? '草稿'}</span>
             </div>
+            {selectedNode.inputs && <section><h4>传入接口</h4><pre>{JSON.stringify(selectedNode.inputs, null, 2)}</pre></section>}
+            {selectedNode.outputs && <section><h4>传出接口</h4><pre>{JSON.stringify(selectedNode.outputs, null, 2)}</pre></section>}
             {selectedNode.kind === 'agent' && selectedNode.agent ? (
               <>
                 <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>

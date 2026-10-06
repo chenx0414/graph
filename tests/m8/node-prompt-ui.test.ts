@@ -46,6 +46,37 @@ async function waitFor(check: () => boolean, timeoutMs: number) {
   throw new Error('timed out waiting');
 }
 
+test('native draft preview renders modules, named interfaces and the actual graph count', async () => {
+  const root = await temp('native-draft');
+  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
+    actions: { master: { kind: 'agent', reserveTokens: 1, prepare: async () => async () => ({ outcome: 'completed', output: null,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }) } },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'scripted' },
+  });
+  cleanup.push(() => server.close());
+  const conversation = await server.runtime.conversations.create({ text: 'Preview the native graph', requestId: 'create' });
+  const anchor = (await server.runtime.conversations.view(conversation.conversationId)).anchorTaskId;
+  await server.runtime.supervisor(anchor).propose({ requirementVersion: 1, summary: 'Native draft preview', nodes: [],
+    acceptance: [{ id: 'reviewed', description: 'Review the result', checkNode: 'gate' }],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'native-draft', protocols: { result: { type: 'object' } },
+      nodes: { worker: { recipe: 'worker@1', task: 'Write the result', inputs: { job: { protocol: 'result' } }, outputs: { result: { protocol: 'result' } }, submission: {} } },
+      modules: { gate: { type: 'router', trigger: 'once', inputs: { review: { protocol: 'result' } }, outputs: { accepted: { protocol: 'result' } }, rules: [] } },
+      edges: { review: { from: 'worker.result', to: 'gate.review', enabled: true } } }),
+  }, 'draft');
+  const page = await launch();
+  await page.goto(`${server.url}/#/conversations/${conversation.conversationId}/graph?v=1`);
+  await expect.poll(() => page.locator('[data-node-id]').count()).toBe(2);
+  await expect.poll(() => page.locator('.conversation-graph-meta').textContent()).toContain('2 个节点');
+  await page.locator('[data-node-id="gate"]').click();
+  await expect.poll(() => page.getByTestId('conversation-node-detail').textContent()).toContain('功能模块');
+  expect(await page.getByTestId('conversation-node-detail').textContent()).toContain('review');
+  expect(await page.getByTestId('conversation-node-detail').textContent()).toContain('accepted');
+  await page.locator('.react-flow__edge').click();
+  await expect.poll(() => page.getByTestId('graph-edge-inspector').textContent()).toContain('worker.result');
+  expect(await page.getByTestId('graph-edge-inspector').textContent()).toContain('gate.review');
+  expect(await page.getByTestId('graph-edge-inspector').textContent()).toContain('尚无投递');
+}, 30_000);
+
 /**
  * The page shows a subagent's own prompt, and what it shows is the send itself.
  *

@@ -6,6 +6,7 @@ import { RuntimeError, type AttachmentInput } from '../core/types.ts';
 import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
 import { layoutGraph } from './layout.ts';
+import { parseGraphDefinition, type GraphDefinition } from '../core/interface-spec.ts';
 const graphLayouts = new Map<string, Awaited<ReturnType<typeof layoutGraph>>>();
 
 import type { AppServices, StartupInfo } from './host.ts';
@@ -32,6 +33,41 @@ import { searchPiPackages } from '../runtime/pi-package-search.ts';
 import type { AgentContextLibrary, AgentPromptKey } from '../runtime/agent-context.ts';
 
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
+/** Drafts and running graphs share topology; execution state never determines layout. */
+async function nativeGraphStructure(runtime: Runtime, definition: GraphDefinition, state?: {
+  nodes: { nodeId: string; status: string }[];
+  modules: { moduleId: string; triggered: boolean }[];
+}) {
+  const groups = Object.keys(definition.subgraphInstances ?? {});
+  const containerFor = (id: string) => groups.filter(group => id.startsWith(`${group}/`)).sort((a, b) => b.length - a.length)[0];
+  const containers = groups.map(id => ({ id,
+    outputs: Object.values(definition.subgraphInstances![id]!.outputs).map(io => io.from.split('.')[0]!),
+    nodes: Object.keys(definition.nodes).filter(node => node.startsWith(`${id}/`)),
+  }));
+  const nodes = [
+    ...Object.entries(definition.nodes).map(([id, node]) => ({ id, kind: 'agent', action: node.task,
+      ...(containerFor(id) ? { container: containerFor(id)! } : {}),
+      status: state ? state.nodes.find(item => item.nodeId === id)?.status ?? 'idle' : 'draft',
+      ...(node.recipe ? { boundDefinition: node.recipe, definitionVersion: node.recipe } : {}),
+      ...(node.model ? { model: node.model } : {}),
+      inputs: node.inputs, outputs: node.outputs, agent: graphAgentDetail(runtime, node.recipe) })),
+    ...Object.entries(definition.modules).map(([id, module]) => ({ id, kind: 'module', action: module.trigger === 'once' ? 'join' : 'route',
+      ...(containerFor(id) ? { container: containerFor(id)! } : {}),
+      status: state ? state.modules.find(item => item.moduleId === id)?.triggered ? 'succeeded' : 'idle' : 'draft',
+      inputs: module.inputs, outputs: module.outputs })),
+  ];
+  const edges = Object.entries(definition.edges).map(([id, edge]) => ({ id, source: edge.from.split('.')[0]!, target: edge.to.split('.')[0]! }));
+  const key = JSON.stringify({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind, action: node.kind === 'module' ? node.action : undefined, container: node.container })), edges, containers });
+  let layout = graphLayouts.get(key);
+  if (!layout) {
+    layout = await layoutGraph({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind === 'agent' ? 'agent' as const : 'program' as const,
+      action: node.kind === 'agent' ? 'work' : node.action, ...(node.container ? { container: node.container } : {}) })), edges, containers });
+    if (graphLayouts.size >= 100) graphLayouts.delete(graphLayouts.keys().next().value!);
+    graphLayouts.set(key, layout);
+  }
+  return { nodes, containers, loops: [], layout };
+}
+
 function graphAgentDetail(runtime: Runtime, definitionVersion: string | null | undefined) {
   if (!definitionVersion) return null;
   const match = /^(.*)@(\d+)$/.exec(definitionVersion);
@@ -480,6 +516,16 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       : await runtime.conversations.proposal(params.conversationId, requested);
     const spec = proposal?.spec;
     if (!spec) return { nodes: [], containers: [], loops: [], layout: { positions: {}, edges: [] } };
+    if (spec.definition) {
+      const definition = parseGraphDefinition(spec.definition);
+      const structure = await nativeGraphStructure(runtime, definition);
+      const interfaces = Object.entries(definition.edges).map(([edgeId, edge]) => {
+        const [id, port] = edge.to.split('.');
+        const target = definition.nodes[id!] ?? definition.modules[id!];
+        return { edgeId, ...edge, protocol: target?.inputs[port!]?.protocol ?? null, latest: null, deliveries: [] };
+      });
+      return { ...structure, interfaces };
+    }
     const layout = await layoutGraph({ nodes: spec.nodes, containers: spec.containers ?? [], loops: spec.loops ?? [] });
     return {
       nodes: spec.nodes.map(node => {
@@ -698,26 +744,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const view = await runtime.user.task(params.taskId).view();
     const native = runtime.kernelGraph(params.taskId);
     if (native) {
-      const groups = Object.keys(native.definition.subgraphInstances ?? {});
-      const containerFor = (id: string) => groups.filter(group => id.startsWith(`${group}/`)).sort((a, b) => b.length - a.length)[0];
-      const containers = groups.map(id => ({ id, outputs: Object.values(native.definition.subgraphInstances![id]!.outputs).map(io => io.from.split('.')[0]!),
-        nodes: Object.keys(native.definition.nodes).filter(node => node.startsWith(`${id}/`)) }));
-      const nodes = [
-        ...Object.entries(native.definition.nodes).map(([id, node]) => ({ id, kind: 'agent', action: node.task,
-          container: containerFor(id), status: native.nodes.find(item => item.nodeId === id)?.status ?? 'idle', boundDefinition: node.recipe,
-          inputs: node.inputs, outputs: node.outputs, agent: graphAgentDetail(runtime, node.recipe) })),
-        ...native.modules.map(module => ({ id: module.moduleId, kind: 'module', action: module.trigger === 'once' ? 'join' : 'route',
-          container: containerFor(module.moduleId), status: module.triggered ? 'succeeded' : 'idle', inputs: module.definition!.inputs, outputs: module.definition!.outputs })),
-      ];
-      const edges = native.edges.map(edge => ({ id: edge.edgeId, source: edge.from.split('.')[0]!, target: edge.to.split('.')[0]! }));
-      const key = JSON.stringify({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind, action: node.kind === 'module' ? node.action : undefined, container: node.container })), edges, containers });
-      let layout = graphLayouts.get(key);
-      if (!layout) {
-        layout = await layoutGraph({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind === 'agent' ? 'agent' as const : 'program' as const, action: node.kind === 'agent' ? 'work' : node.action, ...(node.container ? { container: node.container } : {}) })), edges, containers });
-        if (graphLayouts.size >= 100) graphLayouts.delete(graphLayouts.keys().next().value!);
-        graphLayouts.set(key, layout);
-      }
-      return { nodes, containers, loops: [], revisions: [{ version: native.revision, reason: 'graph definition' }], layout, cost: view.cost,
+      return { ...await nativeGraphStructure(runtime, native.definition, native), revisions: [{ version: native.revision, reason: 'graph definition' }], cost: view.cost,
         interfaces: native.edges, modules: native.modules, messages: [], handoffs: [] };
     }
     const layout = await layoutGraph({ nodes: view.nodes, containers: view.containers, loops: view.loops });

@@ -10,6 +10,7 @@ import { GraphRuntime } from '../../src/core/graph-runtime.ts';
 import { materializeGraph } from '../../src/core/confirm-graph.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { createApp } from '../../src/server/app.ts';
 import type { ActionAdapter, Operation, OperationResult , Proposal } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -137,7 +138,27 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
       definition: DEFINITION,
     }, 'proposal-v2');
 
+    const app = await createApp(runtime, { origin: 'http://127.0.0.1:1' });
+    cleanup.push(() => app.close());
+    const home = await app.inject({ method: 'GET', url: '/' });
+    const headers = { cookie: String(home.headers['set-cookie'] ?? '') };
+    const draftResponse = await app.inject({ method: 'GET', url: `/api/conversations/${created.conversationId}/draft-graph`, headers });
+    expect(draftResponse.statusCode).toBe(200);
+    const draft = draftResponse.json();
+    expect(draft.nodes.map((node: { id: string }) => node.id)).toEqual(['a', 'b', 'gate']);
+    expect(draft.nodes.find((node: { id: string }) => node.id === 'gate')).toMatchObject({ kind: 'module', status: 'draft', action: 'route' });
+    expect(draft.layout.edges).toMatchObject([{ id: 'ab', source: 'a', target: 'b' }]);
+    expect(draft.interfaces).toMatchObject([{ edgeId: 'ab', from: 'a.out', to: 'b.in', protocol: 'ping', latest: null, deliveries: [] }]);
+
     const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+
+    const runningResponse = await app.inject({ method: 'GET', url: `/api/tasks/${confirmed.taskId}/graph`, headers });
+    expect(runningResponse.statusCode).toBe(200);
+    const running = runningResponse.json();
+    expect(running.nodes.map((node: { id: string }) => node.id)).toEqual(['a', 'b', 'gate']);
+    expect(running.nodes.every((node: { status: string }) => node.status === 'idle')).toBe(true);
+    expect(running.layout).toEqual(draft.layout);
+    expect(running.interfaces).toMatchObject([{ edgeId: 'ab', from: 'a.out', to: 'b.in', protocol: 'ping', latest: null, deliveries: [] }]);
 
     await runtime.host.drive();
     expect(briefings.join('\n')).toContain(`Graph ${confirmed.taskId} is ready`);
