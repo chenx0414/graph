@@ -5,7 +5,8 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { createApp } from '../../src/server/app.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { parseGraphDefinition, type GraphDefinition } from '../../src/core/interface-spec.ts';
+import { git } from '../../src/git/git.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -31,11 +32,11 @@ const proposal = (requirementVersion: number) => ({
 });
 
 /** Real native worker and resident Pi; replies need no workflow submission. */
-async function runNativeWorker(runtime: Awaited<ReturnType<typeof openTaskRuntime>>) {
+async function runNativeWorker(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, definition: GraphDefinition = parseGraphDefinition({ schemaVersion: 2, name: 'Provider accounting', protocols: {},
+  nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }), targetBranch?: string) {
   const owner = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
   const main = runtime.supervisor(owner.taskId);
-  const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Provider accounting', protocols: {},
-    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }) }) as { graphId: string };
+  const graph = await main.graphCreate({ definition, ...(targetBranch ? { targetBranch } : {}) }) as { graphId: string };
   await main.graphSend({ graphId: graph.graphId, nodeId: 'work', text: 'Implement the request' });
   await runtime.host.drive();
   return { main, graphId: graph.graphId, run: runtime.nodeRun(graph.graphId, 'work') };
@@ -246,36 +247,26 @@ test('a production request that exceeds the budget cannot send a follow-up call'
   expect(provider.requests).toHaveLength(1);
 });
 
-test('a production worker receives the task graph with the check commands', async () => {
+test('a native production worker receives the graph check command and acceptance', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-graph-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'README.md'), 'project\n');
   const provider = await openaiServer([{ text: 'Inspected the checks.' }]);
   cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async () => async () => ({
-      outcome: 'completed', output: null,
-      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
-    }) } },
-  });
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime } });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--test', 'test/specific.test.js'] } },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
+  await runNativeWorker(runtime, parseGraphDefinition({ schemaVersion: 2, name: 'Work', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', acceptance: ['Read assigned checks'], inputs: {}, outputs: {}, submission: {} } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--test', 'test/specific.test.js'], output: 'result' } } },
+    edges: {}, acceptance: [{ id: 'ok', description: 'Specific command is successful', kind: 'check', module: 'check' }],
+  }));
   const prompt = JSON.stringify(provider.requests[0]);
-  expect(prompt).toContain('test/specific.test.js');
-  expect(prompt).toContain('ok (check check)');
+  expect.soft(prompt).toContain('test/specific.test.js');
+  expect(prompt).toContain('Specific command is successful');
+  expect(prompt).toContain('Read assigned checks');
 });
 
 test('a production reviewer receives the independent review report schema', async () => {
@@ -319,43 +310,30 @@ test('a production reviewer receives the independent review report schema', asyn
   expect(reviewRequest).toContain('sha256');
 });
 
-test('a production worker writes the workspace through tools', async () => {
+test('a native production worker writes only its own isolated work copy through host tools', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-write-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'README.md'), 'project\n');
+  for (const args of [['init', '-q', '-b', 'main'], ['add', 'README.md'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@local', 'commit', '-qm', 'baseline']]) {
+    const result = git(root, args); if (result.code !== 0) throw new Error(result.stderr);
+  }
   const provider = await openaiServer([
-    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }] },
+    { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }] },
     { text: 'Wrote feature.txt' },
   ]);
   cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async operation => async () => {
-      const path = join(operation.workspace ?? root, 'feature.txt');
-      const body = await readFile(path, 'utf8');
-      return { outcome: 'completed', output: { body }, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path, digest: 'a'.repeat(64) } }] };
-    } } },
-  });
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime } });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Write the feature', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-  const view = await runtime.user.task(taskId).view();
+  const { graphId } = await runNativeWorker(runtime, undefined, 'main');
+  const view = await runtime.user.task(graphId).view();
   expect(view.questions).toEqual([]);
   expect(view.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'succeeded' });
-  // The Pi worker wrote through its tools into the isolated work copy.
   const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(workerTree).not.toBe(root);
   expect(await readFile(join(workerTree, 'feature.txt'), 'utf8')).toBe('done');
+  await expect(readFile(join(root, 'feature.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
 test('HTTP production master can discuss then propose through the adapter', async () => {

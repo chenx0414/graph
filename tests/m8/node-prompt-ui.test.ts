@@ -96,28 +96,15 @@ test('the node detail shows the system prompt and briefing the subagent really r
       apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
       credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key' }),
     },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed', output: { passed: true },
-          evidence: [{ acceptanceId: 'works', summary: '检查通过', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
   });
   cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const begun = await server.runtime.user.begin({ projectId: 'p', request: '看 subagent 的提示词', requestId: 'begin' });
-  await server.runtime.supervisor(begun.taskId).propose({
-    requirementVersion: 1, summary: '节点的提示词',
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', input: { files: ['src/a.ts'], focus: '写下结果' } },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await server.runtime.user.task(begun.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const main = server.runtime.supervisor(begun.taskId);
+  const graph = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: '节点的提示词', protocols: { job: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: '写下结果', acceptance: ['Respond to the assigned focus'],
+      inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } }, modules: {}, edges: {} }) }) as { graphId: string };
+  await main.graphSend({ graphId: graph.graphId, nodeId: 'work', input: 'job', value: { files: ['src/a.ts'], focus: '写下结果' } });
   await server.runtime.host.drive();
   await waitFor(() => provider.requests.length >= 1, 30_000);
   const body = provider.requests[0] as { messages?: { role?: string; content?: unknown }[] };
@@ -125,7 +112,7 @@ test('the node detail shows the system prompt and briefing the subagent really r
   expect(typeof sent).toBe('string');
 
   const page = await launch();
-  await page.goto(`${server.url}/#/tasks/${begun.taskId}/graph`);
+  await page.goto(`${server.url}/#/tasks/${graph.graphId}/graph`);
   await page.getByTestId('graph').waitFor();
   // A node opens as its own chat tab; its prompt is reached from the top-right toolbar.
   await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
@@ -147,7 +134,7 @@ test('the node detail shows the system prompt and briefing the subagent really r
   expect(tools.length).toBeGreaterThan(0);
   // The other half of what a subagent reads: the briefing of its own session.
   const briefing = await page.getByTestId('node-briefing-text').evaluate(element => element.textContent ?? '');
-  expect(briefing).toContain('Your node: work (agent work)');
+  expect(briefing).toContain('TASK: 写下结果');
   expect(briefing).toContain('写下结果');
 
   // A stable artifact: the temp root is deleted on cleanup, a repeatable screenshot is not.

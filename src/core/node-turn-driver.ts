@@ -91,7 +91,17 @@ export class NodeTurnDriver {
       const updated = previous && previous.revision_version !== execution.revisionVersion ? [`CURRENT NODE CONFIGURATION: ${JSON.stringify(node)}`, reviewDelivery].filter(Boolean).join('\n') : '';
       const context = this.options.initialContext?.() ?? (prior.n === 0 && node ? [
         `GRAPH OVERVIEW: ${definition.name}`,
-        JSON.stringify({ nodes: Object.keys(definition.nodes), modules: Object.keys(definition.modules), edges: definition.edges }),
+        JSON.stringify({
+          nodes: Object.fromEntries(Object.entries(definition.nodes).map(([id, spec]) => [id, {
+            recipe: spec.recipe, task: spec.task, inputs: spec.inputs, outputs: spec.outputs,
+          }])),
+          modules: Object.fromEntries(Object.entries(definition.modules).map(([id, spec]) => [id, {
+            type: spec.type, inputs: spec.inputs, outputs: spec.outputs,
+            ...(spec.type === 'operation' ? { operation: spec.operation } : {}),
+          }])),
+          edges: definition.edges, inputs: definition.inputs, outputs: definition.outputs,
+        }),
+        `GRAPH ACCEPTANCE: ${JSON.stringify(definition.acceptance ?? [])}`,
         `TASK: ${node.task}`,
         `ACCEPTANCE: ${JSON.stringify(node.acceptance ?? [])}`,
         ...(node.deliverable ? [`DELIVERABLE: ${JSON.stringify(node.deliverable)}`] : []),
