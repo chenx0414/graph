@@ -173,7 +173,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
             <Stat
               label="用量"
               value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
-              hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算不限' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
+              hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算尚无记录' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
             />
             <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
           </div>

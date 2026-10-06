@@ -57,6 +57,7 @@ export interface ExecutionRow {
   retriesUsed: number;
   resubmitsUsed: number;
   pendingGap: string[];
+  tokenBudget: { budget: number; unlimited: boolean } | null;
   state: string;
   submissionId: string | null;
   missingRequired: boolean;
@@ -262,7 +263,7 @@ export class KernelStore {
     // submission, so the column becomes nullable and a `source` tells the two apart.
     // Existing databases are migrated in place rather than reset.
     const executionColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_executions)').all() as { name: string }[]).map(row => row.name));
-    for (const [name, declaration] of [['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
+    for (const [name, declaration] of [['token_budget', 'TEXT'], ['token_reservation', 'INTEGER NOT NULL DEFAULT 0'], ['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
       if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
     }
     const providerColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_provider_calls)').all() as { name: string }[]).map(row => row.name));
@@ -369,7 +370,7 @@ export class KernelStore {
 
   // ---- executions ------------------------------------------------------------
 
-  startExecution(taskId: string, input: { executionId: string; nodeId: string; revisionVersion: number }): ExecutionRow {
+  startExecution(taskId: string, input: { executionId: string; nodeId: string; revisionVersion: number; tokenBudget?: { budget: number; unlimited: boolean } }): ExecutionRow {
     return this.store.transaction(() => {
       const existing = this.execution(input.executionId);
       if (existing) {
@@ -380,8 +381,8 @@ export class KernelStore {
         return this.execution(input.executionId)!;
       }
       const startedAt = Date.now();
-      this.store.db.prepare('INSERT INTO kernel_executions(id,task_id,node_id,revision_version,attempt,state,started_at) VALUES(?,?,?,?,0,?,?)')
-        .run(input.executionId, taskId, input.nodeId, input.revisionVersion, 'running', startedAt);
+      this.store.db.prepare('INSERT INTO kernel_executions(id,task_id,node_id,revision_version,attempt,state,started_at,token_budget) VALUES(?,?,?,?,0,?,?,?)')
+        .run(input.executionId, taskId, input.nodeId, input.revisionVersion, 'running', startedAt, input.tokenBudget ? JSON.stringify(input.tokenBudget) : null);
       return this.execution(input.executionId)!;
     });
   }
@@ -398,11 +399,11 @@ export class KernelStore {
 
   execution(executionId: string): ExecutionRow | null {
     const row = this.store.db.prepare('SELECT * FROM kernel_executions WHERE id=?').get(executionId) as
-      { id: string; task_id: string; node_id: string; revision_version: number; attempt: number; retries_used: number; resubmits_used: number; pending_gap: string; state: string; submission_id: string | null; missing_required: number; started_at: number; ended_at: number | null } | undefined;
+      { id: string; task_id: string; node_id: string; revision_version: number; attempt: number; retries_used: number; resubmits_used: number; pending_gap: string; token_budget: string | null; state: string; submission_id: string | null; missing_required: number; started_at: number; ended_at: number | null } | undefined;
     if (!row) return null;
     return {
       id: row.id, taskId: row.task_id, nodeId: row.node_id, revisionVersion: row.revision_version,
-      attempt: row.attempt, retriesUsed: row.retries_used, resubmitsUsed: row.resubmits_used, pendingGap: json<string[]>(row.pending_gap), state: row.state, submissionId: row.submission_id,
+      attempt: row.attempt, retriesUsed: row.retries_used, resubmitsUsed: row.resubmits_used, pendingGap: json<string[]>(row.pending_gap), tokenBudget: row.token_budget ? json<{ budget: number; unlimited: boolean }>(row.token_budget) : null, state: row.state, submissionId: row.submission_id,
       missingRequired: row.missing_required === 1, startedAt: row.started_at, endedAt: row.ended_at,
     };
   }
@@ -754,7 +755,7 @@ export class KernelStore {
    * The check and the write are one transaction: a refusal must not leave a partial hold,
    * because a node that silently reserved nothing would run unbudgeted.
    */
-  reserveNodeTokens(taskId: string, nodeId: string, budget: { budget: number; unlimited: boolean }, amount: number): void {
+  reserveNodeTokens(taskId: string, nodeId: string, budget: { budget: number; unlimited: boolean }, amount: number, executionId?: string): void {
     if (!Number.isSafeInteger(amount) || amount < 0) throw new RuntimeError('invalid_adapter', 'A bounded token reservation is required');
     this.store.transaction(() => {
       this.ensureNodeState(taskId, nodeId);
@@ -764,13 +765,17 @@ export class KernelStore {
         throw new RuntimeError('budget', `Token budget exhausted for node ${nodeId}`);
       }
       this.store.db.prepare('UPDATE kernel_node_state SET reserved=reserved+? WHERE task_id=? AND node_id=?').run(amount, taskId, nodeId);
+      if (executionId) this.db.prepare('UPDATE kernel_executions SET token_reservation=? WHERE id=?').run(amount, executionId);
     });
   }
 
-  releaseNodeTokens(taskId: string, nodeId: string, amount: number): void {
+  releaseNodeTokens(taskId: string, nodeId: string, amount: number, executionId?: string): void {
     if (!Number.isSafeInteger(amount) || amount < 0) return;
-    this.ensureNodeState(taskId, nodeId);
-    this.store.db.prepare('UPDATE kernel_node_state SET reserved=MAX(0,reserved-?) WHERE task_id=? AND node_id=?').run(amount, taskId, nodeId);
+    this.store.transaction(() => {
+      this.ensureNodeState(taskId, nodeId);
+      this.store.db.prepare('UPDATE kernel_node_state SET reserved=MAX(0,reserved-?) WHERE task_id=? AND node_id=?').run(amount, taskId, nodeId);
+      if (executionId) this.db.prepare('UPDATE kernel_executions SET token_reservation=0 WHERE id=?').run(executionId);
+    });
   }
 
   /**

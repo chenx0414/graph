@@ -1,3 +1,4 @@
+import { kernelNodeRun } from '../../src/core/kernel-views.ts';
 import { RuntimeError } from '../../src/core/types.ts';
 import { recoverKernelExecutions } from '../../src/core/kernel-recovery.ts';
 import { kernelProviderGate, reconcileKernelUsage } from '../../src/runtime/kernel-provider-gate.ts';
@@ -122,7 +123,7 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
     kernel.admitNode('restart', revision.version, 'n1', { instanceId: 'instance' });
     const item = new NodeQueue(kernel, 'restart').enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: null });
     const id = `exec-restart-n1-${item.seq}`;
-    kernel.startExecution('restart', { executionId: id, nodeId: 'n1', revisionVersion: revision.version });
+    kernel.startExecution('restart', { executionId: id, nodeId: 'n1', revisionVersion: revision.version, tokenBudget: { budget: 1000, unlimited: false } });
     kernel.noteExecutionAttempt(id);
     kernel.noteExecutionContinuation(id, 'retry');
     kernel.noteExecutionAttempt(id);
@@ -137,9 +138,10 @@ describe('NodeExecutor — turn → submit → retry/resubmit (HB-252)', () => {
       recovered.publishRevision('restart', { definition: changed, reason: 'changed while interrupted' });
       let turns = 0;
       const prepared: number[] = [];
-      const outcome = await new NodeExecutor({ kernel: recovered, graphId: 'restart',
+      const outcome = await new NodeExecutor({ kernel: recovered, graphId: 'restart', tokenBudget: { budget: 10000, unlimited: false }, reserveTokens: 100,
         host: async (_executionId, revisionVersion) => { prepared.push(revisionVersion); return fakeHost(); },
-      }).runNode('n1', async () => { turns += 1; });
+      }).runNode('n1', async () => { turns += 1; return { usage: { total: 1 } }; });
+      expect(recovered.execution(id)?.tokenBudget).toEqual({ budget: 1000, unlimited: false });
       expect(prepared).toEqual([1]);
       expect(outcome).toBe('failed');
       expect(turns).toBe(1);
@@ -283,10 +285,14 @@ test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknow
     const executor = new NodeExecutor({ kernel, graphId: 'submitted', host: fakeHost(),
       tokenBudget: { budget: 1000, unlimited: false }, reserveTokens: 100 });
     let turns = 0;
+    let forbiddenSends = 0;
+    let budgetError: string | undefined;
     const outcome = await executor.runNode('n1', async executionId => {
       turns += 1;
       kernel.submit(executionId, { outputs: { out: { enable: true, value: { ok: true } } }, submissionId: 'landed' });
-      const gate = kernelProviderGate(kernel, 'submitted', 'n1');
+      const gate = kernelProviderGate(kernel, 'submitted', 'n1', { budget: 10000, unlimited: false });
+      try { gate.dispatch('over-frozen-budget', 1100, () => forbiddenSends++); }
+      catch (error) { budgetError = String(error); }
       gate.dispatch('unknown-after-submit', 50, () => undefined);
       gate.settle('unknown-after-submit', null);
       if (mode === 'throw') throw new Error('process exited after sending output');
@@ -297,8 +303,15 @@ test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknow
     queue.resume('n1');
     expect(await executor.runNode('n1', async () => { turns += 1; })).toBe('idle');
     expect(turns).toBe(1);
+    expect(budgetError).toMatch(/budget/);
+    expect(forbiddenSends).toBe(0);
     expect(kernel.providerCalls('submitted')[0]?.state).toBe('unknown');
     expect(kernel.budgetState('submitted', 'n1', { budget: 1000, unlimited: false }).reserved).toBe(100);
+    const overview = kernelNodeRun(kernel, 'submitted', 'n1', {});
+    expect(overview.instance).toMatchObject({ budget: 1000, unlimited: false, reserved: 100 });
+    expect(overview.operations[0]).toMatchObject({ reserved: 100, waitingMs: null, runMs: null });
+    expect(overview.invocations[0]).toMatchObject({ reserved: 50, state: 'unknown' });
+    expect(kernel.execution(executionIdOf(kernel, 'submitted'))).toMatchObject({ tokenBudget: { budget: 1000, unlimited: false } });
   } finally { store.close(); }
 });
 

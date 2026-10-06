@@ -135,7 +135,7 @@ export class NodeExecutor {
 
     const generation = (this.kernel.db.prepare('SELECT generation FROM kernel_queue WHERE seq=?').get(seq) as { generation: number }).generation;
     const executionId = `exec-${this.graphId}-${nodeId}-${seq}${generation ? `-${generation}` : ''}`;
-    const execution = this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: latest.version });
+    const execution = this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: latest.version, tokenBudget: this.options.tokenBudget ?? { budget: 0, unlimited: true } });
     const revision = this.kernel.revision(this.graphId, execution.revisionVersion)!;
 
     const defaults = this.queue.retryBudget(nodeId);
@@ -144,13 +144,13 @@ export class NodeExecutor {
       resubmitsAllowed: retry?.resubmit ?? defaults.resubmitsAllowed };
     // §9: hold what this turn may cost before spending any of it. A node that cannot
     // afford the hold is parked rather than run unbudgeted.
-    const metering = this.options.tokenBudget && this.options.reserveTokens !== undefined
-      ? { limit: this.options.tokenBudget, amount: this.options.reserveTokens }
+    const metering = execution.tokenBudget && this.options.reserveTokens !== undefined
+      ? { limit: execution.tokenBudget, amount: this.options.reserveTokens }
       : undefined;
     let host: ExecutorHost | undefined;
     let held = false;
     const releaseHold = () => {
-      if (metering && held) { this.kernel.releaseNodeTokens(this.graphId, nodeId, metering.amount); held = false; }
+      if (metering && held) { this.kernel.releaseNodeTokens(this.graphId, nodeId, metering.amount, executionId); held = false; }
     };
     const recovered = this.kernel.execution(executionId)!;
     let attempt = recovered.attempt;
@@ -161,7 +161,7 @@ export class NodeExecutor {
     for (;;) {
       if (metering) {
         try {
-          this.kernel.reserveNodeTokens(this.graphId, nodeId, metering.limit, metering.amount);
+          this.kernel.reserveNodeTokens(this.graphId, nodeId, metering.limit, metering.amount, executionId);
           held = true;
         } catch (error) {
           if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
