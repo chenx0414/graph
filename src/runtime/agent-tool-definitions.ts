@@ -191,13 +191,13 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: true,
     },
     propose_graph: {
-      name: 'propose_graph', label: 'Propose graph', description: 'Submit a task graph for user confirmation. Prefer the proposal object directly (no escaped JSON string): { requirementVersion, summary, nodes: [{id,kind,action,dependsOn?,definitionVersion?,model?}], acceptance: [{id,description,checkNode}], containers?, loops?, decisions? }. Node order is not execution order: dependsOn names the preceding nodes. Agent nodes require definitionVersion and model. Every acceptance checkNode must be a mandatory program node. proposalJson remains accepted for older clients.',
+      name: 'propose_graph', label: 'Propose graph', description: 'Submit a native graph draft for user confirmation: proposal {requirementVersion, summary, definition: {schemaVersion:2, name, protocols, nodes, modules, edges, inputs, outputs, acceptance?}, acceptance:[{id,description,checkNode}], decisions?}. Read graph-v2.md in the Graph documentation directory for the complete JSON format. Nodes are named agent objects with recipe, task and interfaces; commands belong to operation modules. Keep main outside the definition. The outer acceptance items name existing nodes or modules and must match declared definition acceptance when present. Confirmation creates structure; graph_send explicitly starts work. Prefer the proposal object; proposalJson is a historical transport alias.',
       parameters: Type.Object({ proposal: Type.Optional(Type.Any()), proposalJson: Type.Optional(Type.String()), requestId: Type.String() }),
       available: main && Boolean(features.supervisor),
       externallyGated: false,
     },
     confirm_draft: {
-      name: 'confirm_draft', label: 'Confirm draft', description: 'Confirm the current conversation draft on the user behalf and start the feature task, exactly like the confirmation card. Call it only when the user explicitly asked you to confirm, and pass their words verbatim as instruction. targetBranch is required and must be the branch the user named.',
+      name: 'confirm_draft', label: 'Confirm draft', description: 'Confirm the current conversation draft on the user behalf, exactly like the confirmation card. A native graph is created awaiting explicit graph_send input; main receives its graph_ready notification. Call it only when the user explicitly asked you to confirm, and pass their words verbatim as instruction. targetBranch is required and must be the branch the user named.',
       parameters: Type.Object({ proposalVersion: Type.Number(), targetBranch: Type.String(), instruction: Type.String(), requestId: Type.String() }),
       available: main && Boolean(features.supervisor?.confirmDraft),
       externallyGated: false,

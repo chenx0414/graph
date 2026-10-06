@@ -1030,10 +1030,11 @@ export class Execution {
             && graph.plan.nodes.has(spec.id)
             ? buildPredecessorHandoffs(this.store, graph, spec)
             : { policies: [], projections: [] };
-          const resultHandoffRequired = proposal ? requiresResultHandoff(proposal, node.id) : false;
+          const legacyNodeProposal = spec.role !== 'master' && !proposal?.definition ? proposal : undefined;
+          const resultHandoffRequired = legacyNodeProposal ? requiresResultHandoff(legacyNodeProposal, node.id) : false;
           const outputSchema = reviewNode
             ? { kind: 'independent_review', version: 1 } as const
-            : proposal ? outputSchemaForNode(proposal, node.id) : { kind: 'agent_result', version: 1 } as const;
+            : legacyNodeProposal ? outputSchemaForNode(legacyNodeProposal, node.id) : { kind: 'agent_result', version: 1 } as const;
           intent.context.outputSchema = outputSchema;
           const schemaInstruction = resultHandoffRequired
             ? [

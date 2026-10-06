@@ -5,8 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { createApp } from '../../src/server/app.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -15,15 +14,20 @@ function entry(baseUrl: string, id = 'local') {
   return { id, provider: 'graph-openai' as const, grade: 'high' as const, api: 'openai-completions' as const, baseUrl, contextWindow: 32_000, maxTokens: 256 };
 }
 
-const proposal = (requirementVersion: number): Proposal => withLiftedDefinition({
+// The external main submits native JSON directly; no legacy node array or converter.
+const proposal = (requirementVersion: number) => ({
   requirementVersion,
   summary: 'Case-insensitive title search',
   acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-  nodes: [
-    { id: 'master', kind: 'agent', action: 'master', role: 'master', definitionVersion: 'master@1', model: 'local' },
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['master'] },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ],
+  definition: parseGraphDefinition({ schemaVersion: 2, name: 'Title search', protocols: { result: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement case-insensitive title search',
+      inputs: { job: { protocol: 'result' } }, outputs: { done: { protocol: 'result' } }, submission: { required: ['done'] } } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'result' } }, outputs: { result: { protocol: 'result' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+    edges: { checked: { from: 'work.done', to: 'check.start', enabled: true } },
+    inputs: { job: { to: 'work.job', protocol: 'result' } }, outputs: { result: { from: 'check.result', protocol: 'result' } },
+    acceptance: [{ id: 'ok', description: 'Works', kind: 'check', module: 'check' }],
+  }),
 });
 
 test('a production master receives tools, proposes a graph, and wakes on a later user message', async () => {
@@ -31,7 +35,7 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const plan = proposal(1);
   const provider = await openaiServer([
-    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(plan), requestId: 'plan-1' }) }] },
+    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposal: plan, requestId: 'plan-1' }) }] },
     { text: 'I proposed a case-insensitive title search graph.' },
     { text: 'Noted, matching will ignore case.' },
   ]);
@@ -49,7 +53,11 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   const proposed = await runtime.user.task(taskId).view();
   expect(proposed.proposalVersion).toBe(1);
   expect(proposed.proposal?.summary).toMatch(/title search/i);
+  expect(proposed.proposal?.definition).toMatchObject({ schemaVersion: 2, nodes: { work: { recipe: 'coder@1' } }, modules: { check: { type: 'operation' } } });
+  expect(Object.keys(proposed.proposal!.definition!.nodes)).toEqual(['work']);
   expect((provider.requests[0] as { tools?: unknown[] }).tools?.length).toBeGreaterThan(0);
+  const tools = (provider.requests[0] as { tools: { function: { name: string; description: string } }[] }).tools;
+  expect(tools.find(tool => tool.function.name === 'propose_graph')?.function.description).toContain('schemaVersion:2');
   await runtime.user.task(taskId).say('Yes, please use case-insensitive matching.', 'say');
   expect((await runtime.user.task(taskId).view()).nodes.find(node => node.id === 'master')?.status).toBe('pending');
   await runtime.host.runReady();
@@ -360,7 +368,7 @@ test('HTTP production master can discuss then propose through the adapter', asyn
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const plan = proposal(1);
   const provider = await openaiServer([
-    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(plan), requestId: 'plan-http' }) }] },
+    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposal: plan, requestId: 'plan-http' }) }] },
     { text: 'Proposed.' },
   ]);
   cleanup.push(() => provider.close());
@@ -380,5 +388,6 @@ test('HTTP production master can discuss then propose through the adapter', asyn
   await runtime.host.runReady();
   const view = await runtime.user.task(taskId).view();
   expect(view.proposalVersion).toBe(1);
+  expect(view.proposal?.definition).toMatchObject({ schemaVersion: 2, modules: { check: { type: 'operation' } } });
   expect(provider.requests).toHaveLength(2);
 });
