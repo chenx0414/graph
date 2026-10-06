@@ -137,7 +137,7 @@ export class GraphLane {
     const runtime = new GraphRuntime(kernel, graphId);
     const intent = (kernel.db.prepare('SELECT completion_requested AS requested FROM kernel_lifecycle WHERE task_id=?').get(graphId) as { requested: number } | undefined)?.requested;
     if (runtime.state()?.phase === 'stopping') runtime.settleStop();
-    else if (intent) runtime.settleCompletion();
+    else if (intent && !['completed', 'stopped'].includes(runtime.state()!.phase)) runtime.settleCompletion();
     if (['completed', 'stopped'].includes(runtime.state()!.phase)) await this.options.closeGraph?.(graphId);
     return result;
   }

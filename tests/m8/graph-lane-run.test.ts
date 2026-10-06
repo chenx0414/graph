@@ -161,3 +161,21 @@ test('a patch during asynchronous host preparation takes effect only on the next
   expect(kernel.db.prepare('SELECT revision_version FROM kernel_executions ORDER BY rowid').all()).toEqual([{ revision_version: 1 }, { revision_version: 2 }]);
   await lane.close(); store.close();
 });
+
+
+test('a runnable completion captured before stop cannot complete the stopped graph', async () => {
+  const { kernel, store } = opened();
+  try {
+    const graph = new GraphRuntime(kernel, 'g1');
+    const host = fakeHost();
+    const lane = laneFor(kernel, host);
+    graph.complete();
+    const pending = lane.runnable()[0]!;
+    graph.stop(); graph.settleStop();
+    expect(graph.state()?.phase).toBe('stopped');
+    await expect(pending.run()).resolves.toMatchObject({ executions: 0 });
+    expect(graph.state()?.phase).toBe('stopped');
+    expect(host.turns).toEqual([]);
+    expect(lane.runnable()).toEqual([]);
+  } finally { store.close(); }
+});

@@ -177,7 +177,7 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     const runtime = new GraphRuntime(kernel, 't1');
     runtime.create(definition());
     kernel.admitNode('t1', 1, 'a', { instanceId: 'i-a' });
-    runtime.deliver({ nodeId: 'a', input: 'in', value: { n: 1 } });
+    const accepted = runtime.deliver({ nodeId: 'a', input: 'in', value: { n: 1 } });
 
     const main = graphManagement(kernel, 't1');
     await main.graphControl({ graphId: 't1', action: 'pause' });
@@ -189,6 +189,8 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     // The queued item was cancelled, so stop settles immediately.
     expect(runtime.settleStop()).toBe('stopped');
     expect(runtime.state()!.phase).toBe('stopped');
+    const queue = await main.graphInspect({ graphId: 't1', query: 'queue' }) as { items: { seq: number; state: string; reason: string }[] };
+    expect(queue.items[0]).toMatchObject({ seq: accepted.seq, state: 'done', reason: 'cancelled by stop' });
   });
 
   test('inspect: summary, nodes, revision and deliveries are all readable', () => {
@@ -294,7 +296,10 @@ test.each(['completed', 'stopped'])('terminal %s graph cannot reopen through com
   else { runtime.stop(); runtime.settleStop(); }
   expect(() => runtime.withdrawComplete()).toThrow(/not completing/);
   expect(() => runtime.patch({ baseRevision: 1, changes: { reason: 'reopen', definition: definition('new') } })).toThrow(/Ended graph/);
-  if (phase === 'stopped') expect(() => runtime.complete()).toThrow(/Stopped graph/);
+  if (phase === 'stopped') {
+    expect(() => runtime.complete()).toThrow(/Stopped graph/);
+    expect(() => runtime.settleCompletion()).toThrow(/Stopped graph/);
+  }
   else expect(runtime.complete().phase).toBe('completed');
   expect(runtime.stop().phase).toBe(phase);
   expect(runtime.state()?.phase).toBe(phase);

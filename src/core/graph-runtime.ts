@@ -230,6 +230,7 @@ export class GraphRuntime {
   settleCompletion(): 'completed' | 'blocked' | 'completing' {
     this.ensureTask();
     if (this.state()!.phase === 'completed') return 'completed';
+    if (['stopping', 'stopped'].includes(this.state()!.phase)) throw new RuntimeError('invalid_graph', 'Stopped graph cannot complete');
     if (!this.completionRequested()) throw new RuntimeError('invalid_graph', `Graph ${this.graphId} is not completing`);
 
     const queued = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.graphId) as { n: number };
@@ -260,7 +261,7 @@ export class GraphRuntime {
     this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?').run(this.graphId);
     this.kernel.db.prepare('UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id IN (SELECT id FROM kernel_module_transitions WHERE task_id=?)').run(this.graphId);
     // Cancel every queued item; a claimed item keeps running until it settles.
-    this.kernel.store.db.prepare("UPDATE kernel_queue SET state='failed' WHERE task_id=? AND state='queued'").run(this.graphId);
+    this.kernel.store.db.prepare("UPDATE kernel_queue SET state='done',reason='cancelled by stop' WHERE task_id=? AND state='queued'").run(this.graphId);
     this.kernel.store.event(this.graphId, 'graph.stopping', {});
     return this.state()!;
   }
