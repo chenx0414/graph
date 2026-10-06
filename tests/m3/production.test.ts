@@ -46,8 +46,11 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-master-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const plan = proposal(1);
+  let inspectBeforeDraft: (() => Promise<void>) | undefined;
   const provider = await openaiServer([
-    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposal: plan, requestId: 'plan-1' }) }] },
+    { tools: [{ id: 'v-invalid', name: 'validate_proposal', arguments: JSON.stringify({ proposal: { ...plan, summary: '' } }) }] },
+    { tools: [{ id: 'v-valid', name: 'validate_proposal', arguments: JSON.stringify({ proposal: plan }) }] },
+    { beforeReply: () => inspectBeforeDraft?.(), tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposal: plan, requestId: 'plan-1' }) }] },
     { text: 'I proposed a case-insensitive title search graph.' },
     { text: 'Noted, matching will ignore case.' },
   ]);
@@ -61,7 +64,18 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'def');
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Read the source and implement title search.', requestId: 'begin' });
+  inspectBeforeDraft = async () => {
+    const before = await runtime.user.task(taskId).view();
+    expect(before.proposalVersion).toBe(0);
+    expect(before.nodes.map(node => node.id)).toEqual(['master']);
+  };
   await runtime.host.runReady();
+  const requests = provider.requests as { messages: { role: string; tool_call_id?: string; content: string }[] }[];
+  const toolContent = (id: string) => requests.flatMap(request => request.messages).find(message => message.role === 'tool' && message.tool_call_id === id)!.content;
+  expect(toolContent('v-valid')).toContain('"valid":true');
+  const toolResult = (id: string) => JSON.parse(toolContent(id));
+  expect(toolResult('v-invalid')).toMatchObject({ valid: false, error: { code: 'invalid_proposal' } });
+  expect(toolResult('v-valid')).toEqual({ valid: true, requirementVersion: 1 });
   const proposed = await runtime.user.task(taskId).view();
   expect(proposed.proposalVersion).toBe(1);
   expect(proposed.proposal?.summary).toMatch(/title search/i);

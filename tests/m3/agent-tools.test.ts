@@ -352,7 +352,7 @@ test('only the master receives read-only resource and system inventory tools', a
   const detail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer' })).content[0]!.text!) as { grantsNoPermission: boolean };
   expect(detail.grantsNoPermission).toBe(true);
   const invalidProposal = JSON.parse((await execute('validate_proposal')('probe', {
-    proposalJson: JSON.stringify({ requirementVersion: 1, summary: '', acceptance: [], nodes: [] }),
+    proposal: { requirementVersion: 1, summary: '', acceptance: [], definition: {} },
   })).content[0]!.text!) as { valid: boolean; error: { code: string } };
   expect(invalidProposal).toMatchObject({ valid: false, error: { code: 'invalid_proposal' } });
   const versionedDetail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer@1.0.0' })).content[0]!.text!) as { id: string; version: string };

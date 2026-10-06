@@ -414,8 +414,11 @@ export function agentTools(input: {
     },
     validate_proposal: async (_id: string, params: unknown) => {
       try {
-        const proposal = JSON.parse(String(fields(params).proposalJson)) as Proposal;
-        return text(JSON.stringify(await input.supervisor!.validateProposal!(proposal)));
+        const proposal = fields(params).proposal;
+        if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal) || !('definition' in proposal)) {
+          throw new RuntimeError('invalid_proposal', 'Expected a native proposal object with definition; use schemaVersion:2 graph JSON');
+        }
+        return text(JSON.stringify(await input.supervisor!.validateProposal!(proposal as Proposal)));
       } catch (error) {
         const failure = error as Error & { code?: string };
         return text(JSON.stringify({

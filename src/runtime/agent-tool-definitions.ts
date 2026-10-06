@@ -215,8 +215,8 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     validate_proposal: {
-      name: 'validate_proposal', label: 'Validate graph proposal', description: 'Validate a task graph proposal against the current requirement version and Graph structural rules, without creating a draft or dispatching work.',
-      parameters: Type.Object({ proposalJson: Type.String() }),
+      name: 'validate_proposal', label: 'Validate graph proposal', description: 'Validate the same native proposal object accepted by propose_graph: {requirementVersion, summary, definition:{schemaVersion:2,...}, acceptance:[{id,description,checkNode}], decisions?}. Check the current requirement version and graph structural rules without creating a draft or dispatching work. Returns valid:true or valid:false with a concise error. Read graph-v2.md for the complete format.',
+      parameters: Type.Object({ proposal: Type.Object({ requirementVersion: Type.Integer({ minimum: 1 }), summary: Type.String(), definition: Type.Any(), acceptance: Type.Array(Type.Object({ id: Type.String(), description: Type.String(), checkNode: Type.String() })), decisions: Type.Optional(Type.Array(Type.String())) }) }),
       available: main && Boolean(features.supervisor?.validateProposal),
       externallyGated: false,
     },
