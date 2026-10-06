@@ -15,7 +15,7 @@ import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
  * Every piece was proven on its own: confirmation creates a v2 graph, the lane drains one,
  * and a v2 node's session comes from its recipe. §13.8 is only honestly done when the
  * RUNNING runtime does the whole thing without a test calling the graph step by step: a
- * confirmed draft becomes a v2 graph, the host loop notices it has work, and the graph runs
+ * confirmed draft becomes a v2 graph, main sends the first input, the host loop notices it has work, and the graph runs
  * to completion through real per-node processes and a real on-disk kernel.
  *
  * Failure modes first (R24):
@@ -34,7 +34,7 @@ const DEFINITION = parseGraphDefinition({
   schemaVersion: 2, name: 'auto-completion',
   protocols: { ping: { type: 'object', required: ['n'], properties: { n: { type: 'number' } } } },
   nodes: {
-    a: { recipe: 'worker@1', task: 'produce a number', inputs: {}, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } },
+    a: { recipe: 'worker@1', task: 'produce a number', inputs: { job: { protocol: 'ping' } }, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } },
     b: { recipe: 'worker@1', task: 'receive the number', inputs: { in: { protocol: 'ping' } }, outputs: { done: { protocol: 'ping' } }, submission: { required: ['done'] } },
   },
   modules: {},
@@ -101,9 +101,7 @@ describe('§13.8 E2E — a confirmed v2 graph runs to completion on the host loo
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
     cleanup.push(() => store.close());
     const kernel = new KernelStore(store);
-    // No manual enqueue: materialisation now queues the graph's entry nodes itself. A
-    // graph with no incoming edge has nothing else to start it, so this is product
-    // behaviour, not a test convenience - adding a delivery here would run node `a` twice.
+    await runtime.supervisor(anchorTaskId).graphSend({ graphId: confirmed.taskId, nodeId: 'a', input: 'job', value: { n: 0 } });
 
     // The loop: pump repeatedly until the graph is drained. `pump()` is the production tick
     // (host.ts drives it every 40ms), so this runs the same path the product does.
@@ -115,8 +113,9 @@ describe('§13.8 E2E — a confirmed v2 graph runs to completion on the host loo
     expect(bExec.n).toBe(1);
 
     // 2. The delivery from a to b is on disk — the reason b ran at all.
-    const delivery = store.db.prepare('SELECT to_endpoint FROM kernel_deliveries WHERE task_id=?').get(confirmed.taskId) as { to_endpoint: string } | undefined;
-    expect(delivery?.to_endpoint).toBe('b.in');
+    const deliveries = kernel.deliveriesForEdge(confirmed.taskId, 'e');
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]?.toEndpoint).toBe('b.in');
 
     // 3. The graph is drained: nothing left queued.
     const queued = store.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state='queued'").get(confirmed.taskId) as { n: number };

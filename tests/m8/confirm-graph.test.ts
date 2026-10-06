@@ -26,10 +26,9 @@ const scripted = (handler: (operation: Operation) => Promise<OperationResult> | 
  * Issue #1 §13.8 — the first half of the switchover: a confirmed draft that carries a
  * v2 graph definition must create a v2 graph, not the old-shaped proposal rows.
  *
- * The switchover is the moment the product starts running the new kernel. It cannot be
- * done by deleting the old path first (the product would break mid-flight), so it is
- * done additively: a draft that carries a v2 definition takes the v2 path, and a draft
- * that does not keeps the old path unchanged. This module is the v2 half of that fork.
+ * Confirmation establishes structure, not work. The main agent explicitly delivers
+ * the first input through the same validated queue used for subsequent executions.
+ * Legacy confirmation remains a separate path until final retirement.
  *
  * Failure modes first (R24):
  *   W1  a v2 definition materialises as revision 1, with every node and module admitted
@@ -42,7 +41,7 @@ const DEFINITION = parseGraphDefinition({
   schemaVersion: 2, name: 'chain',
   protocols: { ping: { type: 'object', required: ['n'], properties: { n: { type: 'number' } } } },
   nodes: {
-    a: { recipe: 'a@1', task: 'a', inputs: {}, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } },
+    a: { recipe: 'a@1', task: 'a', inputs: { in: { protocol: 'ping' } }, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } },
     b: { recipe: 'b@1', task: 'b', inputs: { in: { protocol: 'ping' } }, outputs: { out: { protocol: 'ping' } }, submission: { required: ['out'] } },
   },
   modules: {
@@ -72,20 +71,14 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     expect(modules.map(m => m.module_id)).toEqual(['gate']);
   });
 
-  test('W2: the created graph is runnable — nodes carry instance ids the executor needs', () => {
+  test('W2: admitted nodes retain instance identities while awaiting input', () => {
     const s = store();
     const kernel = new KernelStore(s);
     materializeGraph(kernel, 't1', DEFINITION, 'w2');
     // A display-only row would have no instance id and the executor could not run it.
     const a = s.db.prepare("SELECT instance_id FROM kernel_nodes WHERE task_id='t1' AND node_id='a'").get() as { instance_id: string | null };
     expect(a.instance_id).toBeTruthy();
-    // The entry node is queued at materialisation. This used to assert the opposite -
-    // "the queue is empty but the node is live" - on the belief that GraphRunner would
-    // enqueue it. Nothing did: GraphLane.runnable() only names graphs holding a queued
-    // item, so a confirmed graph with no incoming edge sat forever with every node idle.
-    const queued = kernel.nextQueued('t1', 'a');
-    expect(queued).not.toBeNull();
-    expect(queued!.kind).toBe('start');
+    expect(kernel.nextQueued('t1', 'a')).toBeNull();
     expect(kernel.nodeState('t1', 'a').paused).toBe(false);
   });
 
@@ -121,10 +114,11 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const project = join(root, 'project');
     await mkdir(project, { recursive: true });
+    const briefings: string[] = [];
     const runtime = await openTaskRuntime({
       stateDir: join(root, 'state'),
       projects: [{ id: 'p', root: project }],
-      actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'draft ready' }, usage })) },
+      actions: { master: scripted(operation => { briefings.push(operation.context.briefing ?? ''); return { outcome: 'completed', output: { text: 'draft ready' }, usage }; }) },
       master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
     });
     cleanup.push(() => runtime.close());
@@ -144,6 +138,15 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     }, 'proposal-v2');
 
     const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+
+    await runtime.host.drive();
+    expect(briefings.join('\n')).toContain(`Graph ${confirmed.taskId} is ready`);
+    expect(briefings.join('\n')).toContain('graph_send');
+    // Replaying confirmation must not wake main twice.
+    const count = briefings.length;
+    await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    await runtime.host.drive();
+    expect(briefings).toHaveLength(count);
 
     // The feature task is a real v2 graph: revision 1, both nodes and the module admitted.
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
@@ -201,57 +204,23 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
   });
 });
 
-/**
- * Issue #1 HB-290: a graph's entry nodes are the ones nothing points at.
- *
- * The original rule counted BOTH endpoints of every edge as "targeted", so in any
- * connected graph every node looked targeted, the root set was always empty, and the
- * cycle fallback picked an arbitrary node. For a chain that is the far end: the queue
- * held the check node and the chain had nothing to start it, so every node stayed idle.
- *
- * E1 a chain starts at its head, not its tail
- * E2 a graph with no edges queues every node
- * E3 a genuine cycle still starts somewhere, rather than silently never running
- */
-describe('HB-290: entry nodes are the ones nothing points at', () => {
-  const chain = (ids: string[]) => ({
-    schemaVersion: 2, name: 'chain',
-    protocols: { out: { type: 'object', required: ['v'], properties: { v: { type: 'string' } } } },
-    nodes: Object.fromEntries(ids.map((id, index) => [id, {
-      recipe: 'worker@1', task: id,
-      inputs: { in: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } },
-      submission: { required: ['out'] },
-    }])),
-    modules: {},
-    edges: Object.fromEntries(ids.slice(1).map((id, index) => [`${ids[index]}->${id}`, { from: `${ids[index]}.out`, to: `${id}.in`, enabled: true }])),
-    inputs: {}, outputs: {},
-  });
-
-  const materialize = (definition: unknown) => {
-    const store = new TaskStore(join(tmpdir(), `h290-${Math.random().toString(36).slice(2)}.sqlite`));
-    store.db.prepare("INSERT INTO projects(id,root,grants) VALUES('p','/tmp/p','{}')").run();
-    store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('t','p','w','running',1)").run();
-    const kernel = new KernelStore(store);
-    materializeGraph(kernel, 't', definition as never, 'e');
-    const queued = (store.db.prepare("SELECT node_id FROM kernel_queue WHERE task_id='t' AND kind='start' ORDER BY node_id").all() as { node_id: string }[]).map(r => r.node_id);
-    store.db.close();
-    return queued;
-  };
-
-  test('E1: a chain starts at its head, not its tail', () => {
-    // Node ids sort so that the LAST node comes first alphabetically - the case that hid
-    // the bug, because the arbitrary fallback then chose the tail.
-    expect(materialize(chain(['n0', 'n1', 'check']))).toEqual(['n0']);
-  });
-
-  test('E2: a graph with no edges queues every node', () => {
-    expect(materialize(chain(['only']))).toEqual(['only']);
-  });
-
-  test('E3: a genuine cycle still starts somewhere rather than silently never running', () => {
-    const cyclic = chain(['a', 'b']);
-    const definition = cyclic as unknown as { edges: Record<string, { from: string; to: string; enabled: boolean }> };
-    definition.edges['b->a'] = { from: 'b.out', to: 'a.in', enabled: true };
-    expect(materialize(cyclic).length).toBe(1);
+/** Confirmation creates structure; every first execution requires an explicit valid input. */
+describe('confirmed graphs await explicit input', () => {
+  test.each(['chain', 'disconnected', 'cycle'])('%s does not invent an entry task', shape => {
+    const s = store();
+    const kernel = new KernelStore(s);
+    const graph = structuredClone(DEFINITION);
+    if (shape === 'disconnected') graph.edges = {};
+    if (shape === 'cycle') graph.edges.ba = { from: 'b.out', to: 'a.in', enabled: true };
+    materializeGraph(kernel, 't1', graph, 'confirm');
+    const runtime = new GraphRuntime(kernel, 't1');
+    expect(kernel.nextQueued('t1', 'a')).toBeNull();
+    expect(kernel.nextQueued('t1', 'b')).toBeNull();
+    expect(() => runtime.deliver({ nodeId: 'a', input: 'in', value: {} })).toThrow(/n/);
+    expect(kernel.nextQueued('t1', 'a')).toBeNull();
+    runtime.deliver({ nodeId: 'a', input: 'in', value: { n: 1 } });
+    expect(kernel.nextQueued('t1', 'a')).toMatchObject({ kind: 'delivery' });
+    expect(kernel.nextQueued('t1', 'b')).toBeNull();
+    s.close();
   });
 });

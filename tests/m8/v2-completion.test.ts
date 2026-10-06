@@ -11,7 +11,7 @@ const definition = {
   schemaVersion: 2, name: 'finishes',
   protocols: { out: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } } },
   nodes: {
-    work: { recipe: 'worker@1', task: 'work', acceptance: ['ok'], inputs: {}, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } },
+    work: { recipe: 'worker@1', task: 'work', acceptance: ['ok'], inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } },
   },
   modules: {}, edges: {}, inputs: {}, outputs: {},
 };
@@ -34,12 +34,15 @@ async function run(limitNodes = 1) {
     nodes: [],
     definition: limitNodes === 1 ? definition : {
       ...definition,
-      nodes: { ...definition.nodes, other: { recipe: 'worker@1', task: 'other', inputs: {}, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } },
+      nodes: { ...definition.nodes, other: { recipe: 'worker@1', task: 'other', inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } },
     },
   } as never, 'draft');
   // No Git is configured, so there is no integration branch and no delivery to wait for:
   // this run is about the completion decision itself, not about merging into a branch.
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });
+  const main = runtime.supervisor(taskId);
+  await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { text: 'go' } });
+  if (limitNodes > 1) await main.graphSend({ graphId: taskId, nodeId: 'other', input: 'job', value: { text: 'go' } });
   for (let i = 0; i < 5; i += 1) await runtime.host.drive();
   const idle = await runtime.user.task(taskId).view();
   expect(idle.phase).not.toBe('completed');

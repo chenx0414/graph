@@ -9,7 +9,7 @@ import type { TaskStore } from './store.ts';
  * finished, a queued turn to continue after an answer. The master is the only
  * actor holding the conversation's context, so it is the one that has to be told.
  */
-export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting' | 'human_check' | 'graph_output' | 'peer_message' | 'task_stopped' | 'acceptance_blocked';
+export type WakeKind = 'node_blocked' | 'task_completed' | 'answer' | 'waiting' | 'human_check' | 'graph_output' | 'peer_message' | 'task_stopped' | 'acceptance_blocked' | 'graph_ready';
 
 export interface WakeIntent {
   taskId: string;
@@ -179,6 +179,7 @@ export function renderWakes(wakes: PendingWake[]): string {
     if (wake.kind === 'task_completed') {
       return `- Graph ${String(data.graphId ?? wake.dedupeKey)} finished (phase ${String(data.phase ?? 'completed')}${data.integrationSha ? `, integration ${String(data.integrationSha).slice(0, 12)}` : ''}). Read its outcome and report it to the user; nothing else is waiting on it.`;
     }
+    if (wake.kind === 'graph_ready') return `- Graph ${String(data.graphId)} is ready and awaits explicit input. Read graph_inspect revision, select the intended named input and use graph_send with a value satisfying its protocol. Confirmation did not enqueue any task.`;
     if (wake.kind === 'graph_output') {
       return `- Graph ${String(data.graphId)} published output ${String(data.output)} (result ${String(data.resultId)}). Read graph_inspect results for its exact business value.`;
     }

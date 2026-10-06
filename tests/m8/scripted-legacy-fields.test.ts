@@ -59,6 +59,7 @@ test('G1/G2/G3: legacy node fields survive the lift into the adapter', async () 
     const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'go', requestId: 'b' });
     const proposed = await runtime.supervisor(taskId).propose(proposal, 'draft');
     await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });
+    for (const nodeId of ['work', 'plain']) await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId, input: 'in', value: {} });
     for (let i = 0; i < 4 && seen.length < 2; i += 1) await runtime.host.pump();
 
     const withFields = seen.find(s => s.context !== undefined);

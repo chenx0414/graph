@@ -61,7 +61,7 @@ test('S1/S2/S3: a v2 graph drains through a scripted action with no model config
         nodes: {
           work: {
             recipe: 'worker@1', task: 'do the work',
-            inputs: {}, outputs: { out: { protocol: 'out' } },
+            inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } },
             submission: { required: ['out'] },
           },
         },
@@ -69,6 +69,7 @@ test('S1/S2/S3: a v2 graph drains through a scripted action with no model config
       },
     } as never, 'draft');
     await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });
+    await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { text: 'go' } });
 
     // `pump()` is the production tick the host drives every 40ms.
     let dispatched = 0;

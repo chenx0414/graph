@@ -912,6 +912,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             return { taskId, cursor: store.event(taskId, 'task.accepted', { proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
           });
           git.prepareTask(taskId, input.targetBranch);
+          if (new KernelStore(store).latestRevision(taskId)) wakeMaster(store, {
+            taskId, kind: 'graph_ready', dedupeKey: `${taskId}:ready`, data: { graphId: taskId },
+          });
           return receipt;
         },
         async view() {
@@ -1467,11 +1470,14 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         // bumps it, and old drafts become unconfirmable immediately.
         store.db.prepare('UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?').run(anchor.id);
         store.db.prepare('INSERT INTO conversation_acceptances VALUES(?,?,?,?,?)').run(conversationId, input.proposalVersion, taskId, input.targetBranch, Date.now());
-        appendMessage(store, { conversationId, role: 'system', kind: 'confirmed', text: `已确认草稿 v${input.proposalVersion}，创建功能任务并${phase === 'running' ? '开始执行' : '排队'}（目标分支 ${input.targetBranch}）`, data: { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch } });
+        appendMessage(store, { conversationId, role: 'system', kind: 'confirmed', text: `已确认草稿 v${input.proposalVersion}，创建功能任务，${proposal.definition ? '等待 main 投递输入' : phase === 'running' ? '开始执行' : '排队'}（目标分支 ${input.targetBranch}）`, data: { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch } });
         store.event(taskId, 'task.created', { request: proposal.summary, conversationId, configRevision: options.live?.revision() ?? options.config?.revision() ?? null });
         return { conversationId, taskId, targetBranch: input.targetBranch, cursor: store.event(anchor.id, 'conversation.confirmed', { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
       });
       git.prepareTask(receipt.taskId, input.targetBranch);
+      if (new KernelStore(store).latestRevision(receipt.taskId)) wakeMaster(store, {
+        taskId: receipt.taskId, kind: 'graph_ready', dedupeKey: `${receipt.taskId}:ready`, data: { graphId: receipt.taskId },
+      });
       return receipt;
     },
     pause(conversationId: string, requestId: string) {

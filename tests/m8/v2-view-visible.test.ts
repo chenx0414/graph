@@ -40,11 +40,12 @@ test('V1/V2/V3: a v2 task view lists its graph, and a parked node reads blocked'
       definition: {
         schemaVersion: 2, name: 'one',
         protocols: { out: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } } },
-        nodes: { work: { recipe: 'worker@1', task: 'work', inputs: {}, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } },
+        nodes: { work: { recipe: 'worker@1', task: 'work', inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } },
         modules: {}, edges: {}, inputs: {}, outputs: {},
       },
     } as never, 'draft');
     await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });
+    await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { text: 'go' } });
     for (let i = 0; i < 3; i += 1) await runtime.host.pump();
 
     const view = await runtime.user.task(taskId).view();

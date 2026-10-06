@@ -158,3 +158,5 @@ human 在其他证据齐备后形成用户验收问题，绑定 acceptanceId 和
 query:"acceptance" 返回各验收项的实际状态、原因和来源，以及持久 Git 交付 commit；ready 表示证据与待处理工作已满足，Git 交付仍是独立步骤。complete 先请求完成，再由宿主检查证据并交付相同的干净 commit。目标工作树脏、集成版本偏移或 Git 竞争均保留 blocked 和完成意图，main 检查时间线后可以处理问题并再次 complete；需要新增输入时先 withdraw_complete。图不会因节点均成功而隐式完成。
 
 节点也可声明 deliverable: {path,namespace,name,schema}。例如审查文件使用 schema: "graph.review@1"；执行结束后自动发布，缺失或空文件使执行失败。相同内容且相同 schema 复用已发布版本；schema 改变即使字节相同也产生新版本，旧版本保持不变。初始任务说明包含交付路径和 schema，运行中修改在下一次执行生效。
+
+确认带有正式 definition 的草稿，只建立节点、模块和连接，不推断入口、不向 root 或循环图的首节点发送空对象。Git 准备完成后，系统以 graph_ready 通知 main；main 查看声明并通过 graph_send 发送首个合法输入。重复确认重放原 receipt，不产生第二次通知。没有工作时保持空闲，不能据此推断图已完成。
