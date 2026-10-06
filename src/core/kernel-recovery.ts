@@ -4,6 +4,8 @@ import type { KernelStore } from './kernel-store.ts';
 /** Called once, after acquiring the runtime owner lock; never during a live tick. */
 export function recoverKernelExecutions(kernel: KernelStore): number {
   return kernel.moduleTransaction(() => {
+    // A prepared operation never crossed its send boundary; only its unused lease is safe to release.
+    kernel.db.prepare("UPDATE kernel_module_operations SET worker_active=0 WHERE state='prepared'").run();
     kernel.db.prepare("UPDATE kernel_provider_calls SET state='unknown' WHERE state='inflight'").run();
     const interruptedOperations = kernel.db.prepare("SELECT id,task_id,module_id,delivery_id FROM kernel_module_operations WHERE state='dispatched'").all() as { id: string; task_id: string; module_id: string; delivery_id: string }[];
     for (const operation of interruptedOperations) {

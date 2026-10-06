@@ -80,7 +80,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
       if (input.query === 'executions') return kernel.executionHistory(input.graphId, historyQuery);
       if (input.query === 'acceptance') return graphAcceptance(kernel, input.graphId, artifacts);
       if (input.query === 'provider_calls') return kernel.providerCalls(input.graphId, input.id);
-      if (input.query === 'operations') return (kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,request,state,result,error,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId) as { request: string; result: string | null }[]).map(row => ({ ...row, request: JSON.parse(row.request), result: row.result ? JSON.parse(row.result) : null }));
+      if (input.query === 'operations') return (kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,request,state,result,error,worker_active,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId) as { request: string; result: string | null }[]).map(row => ({ ...row, request: JSON.parse(row.request), result: row.result ? JSON.parse(row.result) : null }));
       if (input.query === 'edge') return explainEdge(kernel, input.graphId, input.id!);
       if (input.query === 'module') return explainModule(kernel, input.graphId, input.id!);
       if (input.query === 'results') return (kernel.db.prepare('SELECT * FROM kernel_graph_results WHERE task_id=? ORDER BY rowid').all(input.graphId) as { value: string }[]).map(row => ({ ...row, value: JSON.parse(row.value) }));
@@ -94,8 +94,9 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
         throw new RuntimeError('invalid_graph', 'Ended graph cannot change its execution controls');
       }
       if (input.action === 'cancel_operation') {
-        const operation = kernel.db.prepare('SELECT delivery_id,module_id,state FROM kernel_module_operations WHERE task_id=? AND id=?').get(input.graphId, input.operationId ?? '') as { delivery_id: string; module_id: string; state: string } | undefined;
+        const operation = kernel.db.prepare('SELECT delivery_id,module_id,state,worker_active FROM kernel_module_operations WHERE task_id=? AND id=?').get(input.graphId, input.operationId ?? '') as { delivery_id: string; module_id: string; state: string; worker_active: number } | undefined;
         if (!operation || !['uncertain', 'failed', 'cancelled'].includes(operation.state)) throw new RuntimeError('invalid_operation', 'Only an interrupted or failed operation can be cancelled; stop active work first');
+        if (operation.worker_active) throw new RuntimeError('invalid_operation', 'Operation still holds execution resources; verify termination before cancelling');
         if (operation.state === 'cancelled') return graph.state();
         kernel.moduleTransaction(() => {
           kernel.db.prepare("UPDATE kernel_module_operations SET state='cancelled' WHERE id=?").run(input.operationId!);

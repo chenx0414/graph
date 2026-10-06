@@ -269,6 +269,8 @@ export class KernelStore {
     for (const [name, declaration] of [['token_budget', 'TEXT'], ['token_reservation', 'INTEGER NOT NULL DEFAULT 0'], ['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
       if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
     }
+    const moduleOperationColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_module_operations)').all() as { name: string }[]).map(row => row.name));
+    if (!moduleOperationColumns.has('worker_active')) this.db.exec('ALTER TABLE kernel_module_operations ADD COLUMN worker_active INTEGER NOT NULL DEFAULT 0');
     const providerColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_provider_calls)').all() as { name: string }[]).map(row => row.name));
     if (!providerColumns.has('model')) this.db.exec('ALTER TABLE kernel_provider_calls ADD COLUMN model TEXT');
     const bindingColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_node_bindings)').all() as { name: string }[]).map(row => row.name));

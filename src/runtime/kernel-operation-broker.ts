@@ -1,3 +1,4 @@
+import { waitForKernelProgramExecutionSlot } from './execution-slots.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -51,6 +52,7 @@ export async function executeModuleOperation(options: {
   const dispatched = () => kernel.store.event(graphId, 'graph.operation.dispatched', { moduleId, operationId: id, deliveryId });
   let runner: Awaited<ReturnType<typeof openWorkspaceCommandRunner>> | undefined;
   try {
+    await waitForKernelProgramExecutionSlot(kernel.store, id, cancellation.signal);
     let result;
     if (operation.sandbox === false) {
       const command = resolveUnsandboxedCommand(operation.command, operation.args);
@@ -84,5 +86,9 @@ export async function executeModuleOperation(options: {
     const reason = error instanceof Error ? error.message : String(error);
     kernel.db.prepare("UPDATE kernel_module_operations SET state=CASE WHEN state='dispatched' THEN 'uncertain' ELSE 'failed' END,error=?,ended_at=? WHERE id=? AND state!='settled'").run(reason, Date.now(), id);
     throw error;
-  } finally { unsubscribe(); options.signal?.removeEventListener('abort', abort); await runner?.close(); }
+  } finally {
+    unsubscribe(); options.signal?.removeEventListener('abort', abort);
+    try { await runner?.close(); }
+    finally { kernel.db.prepare('UPDATE kernel_module_operations SET worker_active=0 WHERE id=?').run(id); }
+  }
 }

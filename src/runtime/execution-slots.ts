@@ -17,7 +17,8 @@ export function occupiedSlots(store: TaskStore, kind: 'agent' | 'program') {
     WHERE (state='intent' OR (worker_active=1 AND waiting_slot=0)) AND (instance_id IS NOT NULL)=?`).get(Number(kind === 'agent')) as { occupied: number };
   const hasKernel = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_executions'").get();
   const kernel = kind === 'agent' && hasKernel
-    ? (store.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE state='running' AND waiting_slot=0").get() as { n: number }).n : 0;
+    ? (store.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE state='running' AND waiting_slot=0").get() as { n: number }).n
+    : kind === 'program' && hasKernel ? (store.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_operations WHERE worker_active=1').get() as { n: number }).n : 0;
   return occupied + kernel;
 }
 
@@ -50,6 +51,25 @@ export async function waitForKernelExecutionSlot(store: TaskStore, executionId: 
       if (!row || row.state !== 'running' || ['stopping', 'stopped', 'completed'].includes(row.phase)) throw aborted();
       if (occupiedSlots(store, 'agent') >= AGENT_EXECUTION_LIMIT) return false;
       store.db.prepare('UPDATE kernel_executions SET waiting_slot=0 WHERE id=?').run(executionId);
+      return true;
+    });
+    if (admitted) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
+
+/** Reserve program capacity before a native operation crosses its send boundary. */
+export async function waitForKernelProgramExecutionSlot(store: TaskStore, operationId: string, signal?: AbortSignal) {
+  for (;;) {
+    if (signal?.aborted) throw aborted();
+    const admitted = store.transaction(() => {
+      const row = store.db.prepare('SELECT o.state,o.task_id,o.module_id,t.phase,t.paused FROM kernel_module_operations o JOIN tasks t ON t.id=o.task_id WHERE o.id=?').get(operationId) as
+        { state: string; task_id: string; module_id: string; phase: string; paused: number } | undefined;
+      if (!row || row.state !== 'prepared' || ['stopping', 'stopped', 'completed'].includes(row.phase)) throw aborted();
+      const paused = store.db.prepare('SELECT paused FROM kernel_node_state WHERE task_id=? AND node_id=?').get(row.task_id, row.module_id) as { paused: number } | undefined;
+      if (row.paused || paused?.paused || occupiedSlots(store, 'program') >= PROGRAM_EXECUTION_LIMIT) return false;
+      store.db.prepare('UPDATE kernel_module_operations SET worker_active=1 WHERE id=?').run(operationId);
       return true;
     });
     if (admitted) return;

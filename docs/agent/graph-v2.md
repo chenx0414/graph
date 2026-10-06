@@ -162,3 +162,5 @@ query:"acceptance" 返回各验收项的实际状态、原因和来源，以及�
 确认带有正式 definition 的草稿，只建立节点、模块和连接，不推断入口、不向 root 或循环图的首节点发送空对象。Git 准备完成后，系统以 graph_ready 通知 main；main 查看声明并通过 graph_send 发送首个合法输入。重复确认重放原 receipt，不产生第二次通知。没有工作时保持空闲，不能据此推断图已完成。
 
 stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍返回原 receipt，不撤回旧投递、不重复发送。complete 请求期间仍允许内部输出流动并清空工作。
+
+宿主 operation 与其他程序执行共用全局 4 个程序名额。等待名额的 operation 保持 prepared；名额取得后才允许跨越 dispatched 边界，实际 runner 结束后释放。operations 检查中的 worker_active 表示资源占位，不能据此声称 PID 存活或副作用已完成。等待期间 stop 不派发命令、不留下占位。恢复只自动释放未派发 prepared 的占位；已派发且不确定的占位保留，未核实终止前拒绝 cancel_operation。硬崩溃后的进程身份核查与安全释放仍待接通。

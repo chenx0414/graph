@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { revParse } from '../../src/git/git.ts';
-import { mkdtemp, rm, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -279,3 +279,48 @@ test.each(['clean', 'dirty-before', 'dirty-after', 'changed-head', 'failed'])('h
   expect(receipt.verifiedCommit).toBe(result.verifiedCommit);
   expect(kernel.db.prepare("SELECT state FROM kernel_module_operations").get()).toEqual({ state: 'settled' });
 }, 30_000);
+
+
+test('five native graphs share four program slots and hand capacity to the waiting command', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'native-program-capacity-')); dirs.push(dir);
+  const workspace = join(dir, 'project'); await mkdir(workspace);
+  await writeFile(join(workspace, 'hold.cjs'), "const fs=require('fs');const id=process.argv[2];fs.writeFileSync(id+'.started','yes');setInterval(()=>{if(fs.existsSync(id+'.release'))process.exit(0)},10);");
+  const runtime = await openTaskRuntime({ stateDir: join(dir, 'state'), projects: [{ id: 'p', root: workspace }], access: () => fullAccessPolicy() }); runtimes.push(runtime);
+  const parent = await runtime.user.begin({ projectId: 'p', request: 'check concurrently', requestId: 'parent' });
+  const main = runtime.supervisor(parent.taskId);
+  const createGraph = async (index: number) => {
+    const created = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: `check-${index}`,
+      protocols: { data: { type: 'object' } }, nodes: {}, modules: { check: { type: 'operation', trigger: 'each',
+        inputs: { start: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['hold.cjs', String(index)], output: 'result', sandbox: false } } }, edges: {} }) }) as { graphId: string };
+    await main.graphSend({ graphId: created.graphId, nodeId: 'check', input: 'start', value: {} });
+    return created.graphId;
+  };
+  for (let index = 0; index < 5; index++) await createGraph(index);
+  const disk = new TaskStore(join(dir, 'state', 'tasks.sqlite')); stores.push(disk);
+  const started = async () => (await readdir(workspace)).filter(name => name.endsWith('.started'));
+  const drive = runtime.host.drive();
+  try {
+    await expect.poll(() => disk.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_operations').get(), { timeout: 10000 }).toEqual({ n: 5 });
+    await expect.poll(async () => (await started()).length >= 4, { timeout: 10000 }).toBe(true);
+    expect(disk.db.prepare("SELECT COUNT(*) AS n FROM kernel_module_operations WHERE state='dispatched'").get()).toEqual({ n: 4 });
+    expect(disk.db.prepare("SELECT COUNT(*) AS n FROM kernel_module_operations WHERE state='prepared'").get()).toEqual({ n: 1 });
+    const first = (await started())[0]!.replace('.started', '');
+    await writeFile(join(workspace, `${first}.release`), 'release');
+    await expect.poll(async () => (await started()).length, { timeout: 10000 }).toBe(5);
+    expect(disk.db.prepare("SELECT COUNT(*) AS n FROM kernel_module_operations WHERE state='dispatched'").get()).toEqual({ n: 4 });
+    const cancelled = await createGraph(5);
+    await runtime.host.pump();
+    await expect.poll(() => disk.db.prepare("SELECT state FROM kernel_module_operations WHERE task_id=?").get(cancelled), { timeout: 10000 }).toEqual({ state: 'prepared' });
+    await main.graphControl({ graphId: cancelled, action: 'stop' });
+    await expect.poll(() => disk.db.prepare("SELECT state,worker_active FROM kernel_module_operations WHERE task_id=?").get(cancelled), { timeout: 10000 }).toEqual({ state: 'failed', worker_active: 0 });
+    expect(await started()).not.toContain('5.started');
+    for (let index = 0; index < 5; index++) await writeFile(join(workspace, `${index}.release`), 'release');
+    await drive;
+    expect(disk.db.prepare("SELECT COUNT(*) AS n FROM kernel_module_operations WHERE state='settled'").get()).toEqual({ n: 5 });
+    expect(disk.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_operations WHERE worker_active=1').get()).toEqual({ n: 0 });
+  } finally {
+    for (let index = 0; index < 5; index++) await writeFile(join(workspace, `${index}.release`), 'release');
+    await drive;
+  }
+}, 30000);
