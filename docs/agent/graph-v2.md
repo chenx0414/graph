@@ -160,3 +160,5 @@ query:"acceptance" 返回各验收项的实际状态、原因和来源，以及�
 节点也可声明 deliverable: {path,namespace,name,schema}。例如审查文件使用 schema: "graph.review@1"；执行结束后自动发布，缺失或空文件使执行失败。相同内容且相同 schema 复用已发布版本；schema 改变即使字节相同也产生新版本，旧版本保持不变。初始任务说明包含交付路径和 schema，运行中修改在下一次执行生效。
 
 确认带有正式 definition 的草稿，只建立节点、模块和连接，不推断入口、不向 root 或循环图的首节点发送空对象。Git 准备完成后，系统以 graph_ready 通知 main；main 查看声明并通过 graph_send 发送首个合法输入。重复确认重放原 receipt，不产生第二次通知。没有工作时保持空闲，不能据此推断图已完成。
+
+stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍返回原 receipt，不撤回旧投递、不重复发送。complete 请求期间仍允许内部输出流动并清空工作。

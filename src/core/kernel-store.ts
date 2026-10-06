@@ -429,6 +429,13 @@ export class KernelStore {
    * every enabled target's protocol, freezes the connection revision, then writes
    * the Submission and all Deliveries. A bad target refuses the whole broadcast.
    */
+  private assertOutputsOpen(taskId: string): void {
+    const phase = this.store.task(taskId).phase;
+    if (['stopping', 'stopped', 'completed'].includes(phase)) {
+      throw new RuntimeError('invalid_graph', `Graph ${taskId} is ${phase}; new outputs are closed`);
+    }
+  }
+
   submit(executionId: string, request: SubmitRequest): SubmitReceipt {
     return this.store.transaction(() => {
       const execution = this.execution(executionId);
@@ -441,6 +448,7 @@ export class KernelStore {
       if (execution.state !== 'running') {
         throw new RuntimeError('invalid_submit', `Execution ${execution.id} is ${execution.state} and has no submission to replay`);
       }
+      this.assertOutputsOpen(execution.taskId);
       const revision = this.revision(execution.taskId, execution.revisionVersion)!;
       const node = revision.definition.nodes[execution.nodeId];
       if (!node) throw new RuntimeError('invalid_submit', `Execution node ${execution.nodeId} is not in revision ${revision.version}`);
@@ -627,6 +635,7 @@ export class KernelStore {
   broadcastModule(taskId: string, moduleId: string, outputs: Record<string, Json>, transitionId?: string): DeliveryRow[] {
     return this.store.transaction(() => {
       if (transitionId && (this.db.prepare('SELECT routed FROM kernel_transition_outbox WHERE transition_id=?').get(transitionId) as { routed: number } | undefined)?.routed === 1) return [];
+      this.assertOutputsOpen(taskId);
       const revision = this.latestRevision(taskId);
       const module = revision?.definition.modules[moduleId];
       if (!revision || !module) throw new RuntimeError('invalid_definition', `Unknown module ${moduleId}`);

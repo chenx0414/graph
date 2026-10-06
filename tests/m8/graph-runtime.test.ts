@@ -223,6 +223,34 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     expect(queue.items[0]).toMatchObject({ seq: accepted.seq, state: 'done', reason: 'cancelled by stop' });
   });
 
+  test.each(['agent', 'module'])('stop refuses a fresh late %s output but preserves an accepted receipt', mode => {
+    const { kernel } = opened();
+    const runtime = new GraphRuntime(kernel, 't1');
+    const graph = twoNode();
+    graph.modules.gate = { type: 'router', trigger: 'each', inputs: {}, outputs: { out: { protocol: 'ping' } }, rules: [] };
+    graph.edges.gb = { from: 'gate.out', to: 'b.in', enabled: true };
+    runtime.create(graph);
+    kernel.admitNode('t1', 1, 'a', { instanceId: 'i-a' });
+    kernel.admitNode('t1', 1, 'b', { instanceId: 'i-b' });
+    kernel.admitModule('t1', 1, 'gate', { moduleType: 'router', trigger: 'each' });
+    kernel.startExecution('t1', { executionId: 'accepted', nodeId: 'a', revisionVersion: 1 });
+    const request = { submissionId: 's1', outputs: { out: { enable: true, value: { n: 1 } } } };
+    const receipt = kernel.submit('accepted', request);
+    kernel.finishExecution('accepted', 'completed');
+    kernel.startExecution('t1', { executionId: 'late', nodeId: 'a', revisionVersion: 1 });
+    runtime.stop();
+    expect(kernel.submit('accepted', request)).toMatchObject({ replayed: true, submissionId: receipt.submissionId });
+    expect(() => mode === 'agent'
+      ? kernel.submit('late', { submissionId: 'late-s', outputs: { out: { enable: true, value: { n: 2 } } } })
+      : kernel.broadcastModule('t1', 'gate', { out: { n: 2 } })).toThrow(/stopping/);
+    expect(kernel.deliveriesForEdge('t1', 'e')).toHaveLength(1);
+    expect(kernel.deliveriesForEdge('t1', 'gb')).toHaveLength(0);
+    expect(kernel.execution('late')?.submissionId).toBeNull();
+    expect(kernel.nextQueued('t1', 'b')).toBeNull();
+    kernel.finishExecution('late', 'failed');
+    expect(runtime.settleStop()).toBe('stopped');
+  });
+
   test('inspect: summary, nodes, revision and deliveries are all readable', () => {
     const { kernel } = opened();
     const runtime = new GraphRuntime(kernel, 't1');
