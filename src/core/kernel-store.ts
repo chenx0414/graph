@@ -109,6 +109,7 @@ export interface QueueRow {
   kind: string;
   payload: Json;
   generation?: number;
+  reason?: string | null;
   state: 'queued' | 'claimed' | 'done' | 'failed';
   createdAt: number;
 }
@@ -123,12 +124,12 @@ export interface NodeStateRow {
 }
 
 interface QueueRowDb {
-  seq: number; task_id: string; node_id: string; kind: string; payload: string; state: string; created_at: number;
+  seq: number; task_id: string; node_id: string; kind: string; payload: string; state: string; created_at: number; generation?: number; reason?: string | null;
 }
 
 const queueRow = (row: QueueRowDb): QueueRow => ({
   seq: row.seq, taskId: row.task_id, nodeId: row.node_id, kind: row.kind,
-  payload: json<Json>(row.payload), state: row.state as QueueRow['state'], createdAt: row.created_at,
+  payload: json<Json>(row.payload), generation: row.generation ?? 0, reason: row.reason ?? null, state: row.state as QueueRow['state'], createdAt: row.created_at,
 });
 
 export interface ModuleInputRow {
@@ -697,6 +698,30 @@ export class KernelStore {
       const seq = Number(result.lastInsertRowid);
       return { seq, taskId, nodeId: input.nodeId, kind: input.kind, payload: input.payload, state: 'queued' as const, createdAt };
     });
+  }
+
+  /** Main's recovery view: acceptance order and a cursor, including failed inputs. */
+  queueHistory(taskId: string, query: { nodeId?: string; after?: number; limit?: number } = {}) {
+    const { after, limit } = this.historyWindow(query);
+    const rows = this.db.prepare('SELECT * FROM kernel_queue WHERE task_id=? AND seq>? AND (? IS NULL OR node_id=?) ORDER BY seq LIMIT ?')
+      .all(taskId, after, query.nodeId ?? null, query.nodeId ?? null, limit + 1) as unknown as QueueRowDb[];
+    const items = rows.slice(0, limit).map(queueRow);
+    return { items, next: rows.length > limit ? items.at(-1)!.seq : null };
+  }
+
+  /** Frozen execution facts remain separate from queue generations. */
+  executionHistory(taskId: string, query: { nodeId?: string; after?: number; limit?: number } = {}) {
+    const { after, limit } = this.historyWindow(query);
+    const rows = this.db.prepare('SELECT rowid AS cursor,id FROM kernel_executions WHERE task_id=? AND rowid>? AND (? IS NULL OR node_id=?) ORDER BY rowid LIMIT ?')
+      .all(taskId, after, query.nodeId ?? null, query.nodeId ?? null, limit + 1) as { cursor: number; id: string }[];
+    const items = rows.slice(0, limit).map(row => ({ cursor: row.cursor, ...this.execution(row.id)! }));
+    return { items, next: rows.length > limit ? items.at(-1)!.cursor : null };
+  }
+
+  private historyWindow(query: { after?: number; limit?: number }) {
+    const after = query.after ?? 0; const limit = query.limit ?? 100;
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new RuntimeError('invalid_query', 'History requires a non-negative after cursor and a limit from 1 to 200');
+    return { after, limit };
   }
 
   /** The oldest queued item for a node, or null when the node has nothing queued. */

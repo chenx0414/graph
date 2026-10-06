@@ -1,3 +1,4 @@
+import { graphManagement } from '../../src/core/graph-service.ts';
 import { kernelNodeRun } from '../../src/core/kernel-views.ts';
 import { RuntimeError } from '../../src/core/types.ts';
 import { recoverKernelExecutions } from '../../src/core/kernel-recovery.ts';
@@ -287,7 +288,8 @@ test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknow
   const { kernel, store } = opened();
   try {
     store.db.prepare("INSERT INTO tasks(id,project_id,request,phase,created_seq) VALUES('submitted','p1','work','running',1)").run();
-    kernel.publishRevision('submitted', { definition: DEF, reason: 'work' });
+    kernel.publishRevision('submitted', { definition: { ...DEF, nodes: { ...DEF.nodes, other: { ...DEF.nodes.n1! } } }, reason: 'work' });
+    kernel.admitNode('submitted', 1, 'other', { instanceId: 'other' });
     kernel.admitNode('submitted', 1, 'n1', { instanceId: 'worker' });
     const queue = new NodeQueue(kernel, 'submitted');
     const item = queue.enqueue({ nodeId: 'n1', kind: 'delivery', input: 'in', value: null });
@@ -321,6 +323,27 @@ test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknow
     expect(overview.operations[0]).toMatchObject({ reserved: 100, waitingMs: null, runMs: null });
     expect(overview.invocations[0]).toMatchObject({ reserved: 50, state: 'unknown' });
     expect(kernel.execution(executionIdOf(kernel, 'submitted'))).toMatchObject({ tokenBudget: { budget: 1000, unlimited: false } });
+    const main = graphManagement(kernel, 'submitted');
+    const failed = await main.graphInspect({ graphId: 'submitted', query: 'queue', id: 'n1', limit: 1 }) as { items: { seq: number; state: string; generation: number; reason: string; payload: unknown }[]; next: number | null };
+    expect(failed.items).toHaveLength(1);
+    expect(failed.items[0]).toMatchObject({ seq: item.seq, state: 'failed', generation: 0, payload: { input: 'in', value: null } });
+    expect(failed.items[0]?.reason).toMatch(/after submit/);
+    expect(failed.next).toBeNull();
+    const history = await main.graphInspect({ graphId: 'submitted', query: 'executions', id: 'n1', limit: 1 }) as { items: { id: string; submissionId: string; state: string; tokenBudget: unknown }[] };
+    expect(history.items[0]).toMatchObject({ id: executionIdOf(kernel, 'submitted'), state: 'failed', submissionId: 'landed', tokenBudget: { budget: 1000, unlimited: false } });
+    await expect(main.graphInspect({ graphId: 'submitted', query: 'invented-query' })).rejects.toThrow(/Unknown graph query/);
+    await main.graphSend({ graphId: 'submitted', nodeId: 'other', text: 'another node input' });
+    const later = await main.graphSend({ graphId: 'submitted', nodeId: 'n1', text: 'later input' }) as { seq: number };
+    const firstPage = await main.graphInspect({ graphId: 'submitted', query: 'queue', id: 'n1', limit: 1 }) as { next: number };
+    expect(firstPage.next).toBe(item.seq);
+    const nextPage = await main.graphInspect({ graphId: 'submitted', query: 'queue', id: 'n1', after: firstPage.next, limit: 1 }) as { items: { seq: number; payload: unknown }[]; next: number | null };
+    expect(nextPage.items).toHaveLength(1);
+    expect(nextPage.items[0]).toMatchObject({ seq: later.seq, payload: { text: 'later input' } });
+    expect(nextPage.next).toBeNull();
+    await expect(main.graphInspect({ graphId: 'submitted', query: 'queue', after: -1 })).rejects.toThrow(/cursor/);
+    await expect(main.graphInspect({ graphId: 'submitted', query: 'executions', limit: 201 })).rejects.toThrow(/limit/);
+
+
   } finally { store.close(); }
 });
 

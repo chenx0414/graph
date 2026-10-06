@@ -13,7 +13,7 @@ import { RuntimeError, type Json } from './types.ts';
 export interface GraphManagement {
   graphCreate(input: { definition: GraphDefinition; targetBranch?: string; requestId?: string }): Promise<unknown>;
   graphPatch(input: { graphId: string; baseRevision: number; changes: PatchChange }): Promise<unknown>;
-  graphInspect(input: { graphId: string; query?: string; id?: string }): Promise<unknown>;
+  graphInspect(input: { graphId: string; query?: string; id?: string; after?: number; limit?: number }): Promise<unknown>;
   graphControl(input: { graphId: string; action: string; nodeId?: string; moduleId?: string; seq?: number; operationId?: string; callId?: string; usage?: TokenUsage }): Promise<unknown>;
   graphSend(input: { graphId: string; nodeId?: string; input?: string; value?: Json; text?: string }): Promise<unknown>;
 }
@@ -73,11 +73,15 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
     async graphPatch(input) { return runtime(input.graphId).patch(input); },
     async graphInspect(input) {
       const graph = runtime(input.graphId);
+      const historyQuery = { ...(input.id ? { nodeId: input.id } : {}), ...(input.after === undefined ? {} : { after: input.after }), ...(input.limit === undefined ? {} : { limit: input.limit }) };
+      if (input.query === 'queue') return kernel.queueHistory(input.graphId, historyQuery);
+      if (input.query === 'executions') return kernel.executionHistory(input.graphId, historyQuery);
       if (input.query === 'provider_calls') return kernel.providerCalls(input.graphId, input.id);
       if (input.query === 'operations') return (kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,request,state,result,error,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId) as { request: string; result: string | null }[]).map(row => ({ ...row, request: JSON.parse(row.request), result: row.result ? JSON.parse(row.result) : null }));
       if (input.query === 'edge') return explainEdge(kernel, input.graphId, input.id!);
       if (input.query === 'module') return explainModule(kernel, input.graphId, input.id!);
       if (input.query === 'results') return (kernel.db.prepare('SELECT * FROM kernel_graph_results WHERE task_id=? ORDER BY rowid').all(input.graphId) as { value: string }[]).map(row => ({ ...row, value: JSON.parse(row.value) }));
+      if (input.query && !['summary', 'revision', 'nodes'].includes(input.query)) throw new RuntimeError('invalid_query', `Unknown graph query ${input.query}`);
       return graph.inspect({ kind: input.query === 'revision' ? 'revision' : input.query === 'nodes' ? 'nodes' : 'summary' });
     },
     async graphControl(input) {

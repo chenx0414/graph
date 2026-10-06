@@ -125,3 +125,12 @@ budget.tokens 是该节点累计额度，非每次运行的新余额；省略继
 
 
 已完成、停止中、已停止的 graph 不接受执行控制修改；创建新 graph 才开始新的服务生命周期。活动 graph 暂停时显示 paused；stop 会清除 graph 暂停标记并继续取消、停稳，不需要先 resume。
+
+
+## 检查待处理输入与执行历史
+
+`graph_inspect({graphId,query:"queue",id:"worker",limit:100,after:0})` 按受理顺序读取队列，包含 seq、状态、原 payload、generation 和失败/取消原因。id 可省略以查看整张 graph。返回 items 和 next；next 非 null 时用它作为 after 读取下一页，limit 为 1–200。
+
+`query:"executions"` 使用同样的分页与节点过滤，返回实际执行身份、冻结 revision/预算、尝试/补交计数和 submissionId。根据队列的 seq 选择 retry/skip/cancel 前，先确认是否已经成功提交；成功提交的原输入不可重发。无效 query 或分页参数会明确报错。
+
+局部 JSON merge patch 的 null 表示删除字段；需要设置字面值 `budget.tokens:null` 时使用完整 definition。
