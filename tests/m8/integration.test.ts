@@ -34,12 +34,11 @@ function waitForServer(child: ReturnType<typeof spawn>, deadlineMs = 30_000) {
   });
 }
 
-/** One controlled provider for the whole flow: the master gets a
- * propose_graph tool call, every other request is a delayed answer without
- * authoritative usage. */
+/** Real Pi transport: native draft, explicit graph_ready inputs, worker submissions and usage. */
 async function controlledProvider(proposal: unknown) {
   const { createServer } = await import('node:http');
   const requests: { master: boolean }[] = [];
+  let started = false;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -55,50 +54,33 @@ async function controlledProvider(proposal: unknown) {
     requests.push({ master });
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     if (master && !proposed) {
-      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-propose', type: 'function', function: { name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'master-proposal' }) } }] }, finish_reason: null }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-propose', type: 'function', function: { name: 'propose_graph', arguments: JSON.stringify({ proposal, requestId: 'master-proposal' }) } }] }, finish_reason: null }] })}\n\n`);
       response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } })}\n\n`);
       response.end('data: [DONE]\n\n');
       return;
     }
-    const problemList = (body.messages ?? [])
-      .filter(message => message.role === 'tool' && typeof message.content === 'string')
-      .map(message => message.content as string)
-      .find(content => content.startsWith('[{') && content.includes('allowedActions'));
-    const problemsHandled = (body.messages ?? []).some(message =>
-      message.role === 'tool' && typeof message.content === 'string' && message.content.includes('"resolved":true'));
-    if (master && problemList && !problemsHandled) {
-      const problems = JSON.parse(problemList) as { id: string; allowedActions?: string[] }[];
-      const calls = problems
-        .filter(problem => problem.allowedActions?.includes('reconcile_usage'))
-        .map((problem, index) => ({
-          index,
-          id: `resolve-${index}`,
-          type: 'function',
-          function: {
-            name: 'resolve_problem',
-            arguments: JSON.stringify({
-              questionId: problem.id,
-              action: 'reconcile_usage',
-              proof: '受控供应商不返回逐请求 usage，主 Agent 保留未知计量并继续',
-              requestId: `resolve-${problem.id}`,
-            }),
-          },
-        }));
+    const lastUser = [...(body.messages ?? [])].reverse().find(message => message.role === 'user');
+    const ready = /Graph ([a-f0-9-]+) is ready and awaits explicit input/.exec(JSON.stringify(lastUser?.content));
+    if (master && ready && !started) {
+      started = true;
+      const calls = ['work1', 'work2'].map((nodeId, index) => ({ index, id: `start-${nodeId}`, type: 'function',
+        function: { name: 'graph_send', arguments: JSON.stringify({ graphId: ready[1], nodeId, input: 'job', value: { text: 'Run the assigned work' } }) } }));
       response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: calls }, finish_reason: null }] })}\n\n`);
-      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
       response.end('data: [DONE]\n\n');
       return;
     }
-    if (master && JSON.stringify(body.messages ?? []).includes('Problems awaiting main Agent')) {
-      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-list-problems', type: 'function', function: { name: 'list_problems', arguments: '{}' } }] }, finish_reason: null }] })}\n\n`);
-      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } })}\n\n`);
+    if (!master && !(body.messages ?? []).some(message => message.tool_calls?.some(call => call.function?.name === 'submit'))) {
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'finish-work', type: 'function',
+        function: { name: 'submit', arguments: JSON.stringify({ outputs: { done: { enable: true, value: { text: 'Worker finished' } } } }) } }] }, finish_reason: null }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
       response.end('data: [DONE]\n\n');
       return;
     }
     response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: master ? 'proposal submitted' : 'controllable work output' }, finish_reason: null }] })}\n\n`);
     if (!master) await new Promise(resolveDelay => setTimeout(resolveDelay, 2_000));
-    // Only worker answers lack authoritative usage; the master continuation is billed normally.
-    response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: master ? { prompt_tokens: 5, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } : null })}\n\n`);
+    // Both main and resident workers provide actual per-request usage.
+    response.write(`data: ${JSON.stringify({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } })}\n\n`);
     response.end('data: [DONE]\n\n');
   });
   await new Promise<void>(resolveListen => server.listen(0, '127.0.0.1', resolveListen));
@@ -123,11 +105,15 @@ test('the full productized flow runs from the formal start entry with a controll
     requirementVersion: 1,
     summary: '集成验收流程',
     acceptance: [{ id: 'works', description: '检查脚本通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work1', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'work2', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work1', 'work2'], input: { command: 'node', args: ['test/check.js'] } },
-    ],
+    definition: { schemaVersion: 2, name: '集成验收流程', protocols: { result: { type: 'object' } },
+      nodes: Object.fromEntries(['work1', 'work2'].map(id => [id, { recipe: 'coder@1', model: 'local', task: 'Run assigned work',
+        inputs: { job: { protocol: 'result' } }, outputs: { done: { protocol: 'result' } }, submission: { required: ['done'] } }])),
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'result' } }, outputs: { result: { protocol: 'result' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['test/check.js'], output: 'result' } } },
+      edges: { first: { from: 'work1.done', to: 'check.start', enabled: true }, second: { from: 'work2.done', to: 'check.start', enabled: true } },
+      outputs: { result: { from: 'check.result', protocol: 'result' } },
+      acceptance: [{ id: 'works', description: '检查脚本通过', kind: 'check', module: 'check' }],
+    },
   };
   const provider = await controlledProvider(proposal);
   const configPath = join(workspace, 'graph.config.json');
@@ -243,6 +229,16 @@ test('the full productized flow runs from the formal start entry with a controll
     return cards.length > 0 && cards.every(card => ['succeeded', 'skipped', 'failed'].includes(card.getAttribute('data-status') ?? ''));
   }, undefined, { timeout: 120_000 });
   console.log('[integration] task-graph-settled');
+  const state = await page.evaluate(async id => ({
+    task: await (await fetch(`/api/tasks/${id}`)).json(),
+    graph: await (await fetch(`/api/tasks/${id}/graph`)).json(),
+  }), taskId);
+  expect(state.task.nodes.map((node: { id: string }) => node.id).sort()).toEqual(['work1', 'work2']);
+  expect(state.task.nodes.every((node: { status: string; used: number }) => node.status === 'succeeded' && node.used === 25)).toBe(true);
+  expect(state.graph.interfaces).toEqual(expect.arrayContaining([
+    expect.objectContaining({ edgeId: 'first', latest: { text: 'Worker finished' } }),
+    expect.objectContaining({ edgeId: 'second', latest: { text: 'Worker finished' } }),
+  ]));
   await page.screenshot({ path: join(evidenceDir, 't08-delivery.png') });
 
   await page.goto(`${url}/#/inbox`);
@@ -253,8 +249,7 @@ test('the full productized flow runs from the formal start entry with a controll
   await page.getByTestId('catalog').waitFor();
   expect(pageErrors).toEqual([]);
   const masterRequests = provider.requests.filter(entry => entry.master).length;
-  // Proposal plus the normal final turn. Full access no longer needs the
-  // list_problems/resolve_problem recovery round trip.
+  // Proposal, graph_ready and explicit input are handled by the external main.
   expect(masterRequests).toBeGreaterThanOrEqual(2);
 
   // Stop through the formal signal path and assert the exit outside cleanup.

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { stripAttachmentData } from './attachments.ts';
+import { KernelStore } from './kernel-store.ts';
 import { RuntimeError, type Json, type NodeSpec, type Operation, type OperationResult } from './types.ts';
 
 /**
@@ -455,7 +456,10 @@ function questionSummary(kind: string, data: Json) {
   return `执行问题：${kind}`;
 }
 
-function nodeSummary(store: TaskStore, taskId: string) {
+function nodeSummary(store: TaskStore, kernel: KernelStore, taskId: string) {
+  if (kernel.latestRevision(taskId)) {
+    return kernel.listNodes(taskId).map(node => `${node.nodeId}:${node.status}`).join(', ');
+  }
   const rows = store.db.prepare('SELECT id,spec,status FROM nodes WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; spec: string; status: string }[];
   return rows.map(row => `${row.id}:${row.status}`).join(', ');
 }
@@ -466,6 +470,7 @@ function nodeSummary(store: TaskStore, taskId: string) {
  * phases, commits and node states come straight from the ledger.
  */
 export function conversationDigest(store: TaskStore, conversationId: string) {
+  const kernel = new KernelStore(store);
   const conversation = conversationRow(store, conversationId);
   const anchor = store.task(conversation.anchor_task_id);
   const master = store.db.prepare("SELECT n.id,n.status,n.output,i.used,i.budget,i.model FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(anchor.id) as { status: string; used: number | null; budget: number | null; model: string | null } | undefined;
@@ -494,8 +499,12 @@ export function conversationDigest(store: TaskStore, conversationId: string) {
   if (!tasks.length) lines.push('Feature tasks: none (nothing has been dispatched)');
   for (const task of tasks) {
     const questions = store.db.prepare("SELECT id,kind,node_id,owner,data FROM questions WHERE task_id=? AND status='open' ORDER BY rowid").all(task.id) as { id: string; kind: string; node_id: string; owner: string; data: string }[];
-    const usage = store.db.prepare('SELECT COALESCE(SUM(i.used),0) AS used, COALESCE(SUM(i.budget),0) AS budget FROM instances i JOIN nodes n ON n.instance_id=i.id WHERE n.task_id=?').get(task.id) as { used: number; budget: number };
-    lines.push(`Feature task ${task.id.slice(0, 8)} (${task.phase}${task.paused ? ', paused' : ''}): request "${task.request.slice(0, 120)}"; commit ${task.integration_sha?.slice(0, 10) ?? 'none'}; tokens ${usage.used}/${usage.budget}; nodes: ${nodeSummary(store, task.id) || 'none'}`);
+    const native = kernel.latestRevision(task.id);
+    const usage = native
+      ? store.db.prepare('SELECT COALESCE(SUM(used),0) AS used, COALESCE(SUM(reserved),0) AS reserved FROM kernel_node_state WHERE task_id=?').get(task.id) as { used: number; reserved: number }
+      : store.db.prepare('SELECT COALESCE(SUM(i.used),0) AS used, COALESCE(SUM(i.budget),0) AS budget FROM instances i JOIN nodes n ON n.instance_id=i.id WHERE n.task_id=?').get(task.id) as { used: number; budget: number };
+    const tokens = 'reserved' in usage ? `${usage.used}; reserved ${usage.reserved}` : `${usage.used}/${usage.budget}`;
+    lines.push(`Feature task ${task.id.slice(0, 8)} (${task.phase}${task.paused ? ', paused' : ''}): request "${task.request.slice(0, 120)}"; commit ${task.integration_sha?.slice(0, 10) ?? 'none'}; tokens ${tokens}; nodes: ${nodeSummary(store, kernel, task.id) || 'none'}`);
     const userQuestions = questions.filter(question => question.owner === 'user');
     const internalQuestions = questions.filter(question => question.owner === 'main');
     if (userQuestions.length) lines.push(`  questions awaiting user: ${userQuestions.map(question => `${question.kind}@${question.node_id}`).join(', ')}`);

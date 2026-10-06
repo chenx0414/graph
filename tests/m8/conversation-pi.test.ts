@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, expect, test } from 'vitest';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { piNativeToolNamesForPlatform } from '../../src/runtime/pi-native-tools.ts';
@@ -29,10 +30,13 @@ async function temp(name: string) {
 const proposal = {
   requirementVersion: 1, summary: '最小可用版',
   acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-  nodes: [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-    { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-  ],
+  definition: parseGraphDefinition({ schemaVersion: 2, name: '最小可用版', protocols: { job: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'job' } }, outputs: { result: { protocol: 'job' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
+    edges: {}, inputs: { job: { to: 'work.job', protocol: 'job' } },
+    acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }],
+  }),
 };
 
 /** Deterministic local provider: a master that investigates once, drafts once,
@@ -79,7 +83,7 @@ async function conversationProvider() {
     }
     if (!drafted) {
       drafted = true;
-      chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'call-propose', type: 'function', function: { name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'master-draft' }) } }] }, null);
+      chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'call-propose', type: 'function', function: { name: 'propose_graph', arguments: JSON.stringify({ proposal, requestId: 'master-draft' }) } }] }, null);
       end('tool_calls');
       return;
     }
@@ -214,13 +218,22 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   const statusPrompt = JSON.stringify(statusRequest!.messages);
   expect(statusPrompt).toContain('Feature task');
   expect(statusPrompt).toContain(confirmed.taskId.slice(0, 8));
-  expect(statusPrompt).toContain('work:pending');
+  expect(statusPrompt).toContain('work:idle');
+  expect(provider.requests.filter(request => request.tools.includes('submit'))).toHaveLength(0);
+  await runtime.supervisor(confirmed.taskId).graphSend({ graphId: confirmed.taskId, nodeId: 'work', input: 'job', value: { text: 'Implement' } });
+  await runtime.host.drive();
+  expect((await runtime.user.task(confirmed.taskId).view()).nodes.find(node => node.id === 'work')?.status).toBe('succeeded');
   // Workers keep their write tools.
-  const workerRequests = provider.requests.filter(request => request.tools.includes('submit_result') && !request.tools.includes('propose_graph'));
+  const workerRequests = provider.requests.filter(request => request.tools.includes('submit') && !request.tools.includes('propose_graph'));
   expect(workerRequests.length).toBeGreaterThan(0);
   for (const request of workerRequests) {
-    expect(request.tools).toEqual(expect.arrayContaining([...piNativeToolNamesForPlatform()]));
+    expect(request.tools).toEqual(expect.arrayContaining(['read', 'write_file', 'run_command', 'submit']));
   }
+  await runtime.conversations.chat(created.conversationId, { text: '节点执行结果呢？', requestId: 'result' });
+  await runtime.host.runReady();
+  const resultRequest = provider.requests.find(request => JSON.stringify(request.messages).includes('节点执行结果呢？'));
+  expect(JSON.stringify(resultRequest?.messages)).toContain('work:succeeded');
+  expect(JSON.stringify(resultRequest?.messages)).toContain('tokens 16; reserved 0');
 
   // Streaming and tool activity are on the conversation stream; the durable
   // messages stay the authoritative record.

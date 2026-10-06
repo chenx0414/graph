@@ -48,10 +48,13 @@ async function browserProvider() {
     const draft = (summary: string) => ({
       requirementVersion, summary,
       acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-      nodes: [
-        { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-        { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-      ],
+      definition: { schemaVersion: 2, name: summary, protocols: { job: { type: 'object' } },
+        nodes: { work: { recipe: 'coder@1', model: 'local', task: summary, inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } },
+        modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'job' } }, outputs: { result: { protocol: 'job' } },
+          operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
+        edges: {}, inputs: { job: { to: 'work.job', protocol: 'job' } },
+        acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }],
+      },
     });
     const usage = { prompt_tokens: 12, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 0 } };
     response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -75,15 +78,15 @@ async function browserProvider() {
       end('tool_calls');
     };
     if (prompt.includes('先不要')) {
-      toolCall('call-draft-2', 'propose_graph', { proposalJson: JSON.stringify(draft('先验证性能瓶颈：只做基准与瓶颈定位')), requestId: 'ui-draft-2' });
+      toolCall('call-draft-2', 'propose_graph', { proposal: draft('先验证性能瓶颈：只做基准与瓶颈定位'), requestId: 'ui-draft-2' });
       return;
     }
     if (prompt.includes('最小可用版')) {
-      toolCall('call-draft-1', 'propose_graph', { proposalJson: JSON.stringify(draft('最小可用版：先打通登录调整之外的核心流程')), requestId: 'ui-draft-1' });
+      toolCall('call-draft-1', 'propose_graph', { proposal: draft('最小可用版：先打通登录调整之外的核心流程'), requestId: 'ui-draft-1' });
       return;
     }
     if (prompt.includes('卡在哪里')) {
-      chunk({ role: 'assistant', content: '执行记录显示：work 进行中，check 等待 work；当前没有未处理问题。' }, null);
+      chunk({ role: 'assistant', content: '执行记录显示：work 等待输入，check 尚未收到投递；当前没有未处理问题。' }, null);
       end('stop');
       return;
     }
@@ -259,7 +262,7 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('proposal-draft').waitFor();
   expect(await page.getByTestId('proposal-draft').innerText()).toContain('先验证性能瓶颈');
 
-  // 4. Confirm the current draft: a feature task appears and starts.
+  // 4. Confirmation creates a feature graph, awaiting an explicit input.
   await page.getByTestId('accept-branch').fill('main');
   await page.getByTestId('confirm-draft').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
@@ -274,8 +277,11 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 
-  // 5. Keep asking while the task executes; the answer comes from the ledger.
+  // 5. Keep discussing after confirmation while the feature graph is idle.
   await page.getByTestId('chat-input').fill('现在卡在哪里？');
+  // Confirmation wakes main with graph_ready. During that turn the same button pauses;
+  // wait for its observable send mode before clicking it to send this question.
+  await expect.poll(() => page.getByTestId('chat-send').getAttribute('data-mode'), { timeout: 30_000 }).toBe('send');
   await page.getByTestId('chat-send').click();
   await includes(page, '执行记录显示');
   await page.getByTestId('drawer-entry').click();
