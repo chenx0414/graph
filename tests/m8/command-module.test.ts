@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { revParse } from '../../src/git/git.ts';
 import { mkdtemp, rm, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +10,7 @@ import { GraphRunner, type ModuleOperationRequest } from '../../src/core/graph-r
 import { recoverKernelExecutions } from '../../src/core/kernel-recovery.ts';
 import { executeModuleOperation } from '../../src/runtime/kernel-operation-broker.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { standardAccessPolicy } from '../../src/core/access-policy.ts';
+import { standardAccessPolicy, fullAccessPolicy, resolveAccessPolicy } from '../../src/core/access-policy.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
@@ -241,3 +243,39 @@ test('main reopen during an asynchronous judgment is applied after that judgment
   expect(next.emitted).toBe(true);
   expect(next.outputs.decision).toEqual({ passed: false });
 });
+
+
+test.each(['clean', 'dirty-before', 'dirty-after', 'changed-head', 'failed'])('host checks attest the exact commit only for an unchanged clean tree: %s', async mode => {
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'verified-check', protocols: { value: { type: 'object' } }, nodes: {},
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'value' } }, outputs: { result: { protocol: 'value' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.mjs'], output: 'result', sandbox: false } } },
+    edges: {}, outputs: { result: { from: 'check.result', protocol: 'value' } } });
+  const { kernel, dir } = await kernelWith(definition, 'check');
+  const workspace = join(dir, 'project'); await mkdir(workspace);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: workspace, encoding: 'utf8', stdio: 'pipe' });
+  git('init', '-q'); git('config', 'user.name', 'Check fixture'); git('config', 'user.email', 'check@example.test');
+  git('config', 'commit.gpgsign', 'false'); git('config', 'core.hooksPath', join(dir, 'empty-hooks'));
+  await writeFile(join(workspace, 'target.txt'), 'original');
+  const script = mode === 'dirty-after' ? "import{writeFileSync}from'node:fs';writeFileSync('target.txt','changed');"
+    : mode === 'changed-head' ? "import{execFileSync}from'node:child_process';execFileSync('git',['commit','--allow-empty','--no-verify','-m','another commit']);" : mode === 'failed' ? "process.exit(1);" : "console.log('passed');";
+  await writeFile(join(workspace, 'check.mjs'), script);
+  git('add', '.'); git('commit', '-qm', 'base');
+  const commit = revParse(workspace, 'HEAD')!;
+  if (mode === 'dirty-before') await writeFile(join(workspace, 'target.txt'), 'already dirty');
+  new GraphRuntime(kernel, 't1').deliverEndpoint('check.start', {});
+  const run = () => new GraphRunner({ kernel, graphId: 't1', hostFor: () => { throw new Error('No agent'); }, submit: () => {},
+    operation: request => executeModuleOperation({ ...request, kernel, graphId: 't1', workspace, scratchRoot: dir, access: resolveAccessPolicy(fullAccessPolicy(), { stateDir: dir }) }),
+  }).drain();
+  expect((await run()).drained).toBe(true);
+  const results = kernel.db.prepare('SELECT value FROM kernel_graph_results').all() as { value: string }[];
+  const result = JSON.parse(results[0]!.value);
+  expect(result.passed).toBe(mode !== 'failed');
+  expect(result.commit).toBe(commit);
+  expect(result.verifiedCommit).toBe(mode === 'clean' ? commit : null);
+  const receipt = JSON.parse(await readFile(result.record, 'utf8'));
+  expect(receipt.commitAfter).toBe(revParse(workspace, 'HEAD'));
+  expect(receipt.cleanBefore).toBe(mode !== 'dirty-before');
+  expect(receipt.cleanAfter).toBe(!['dirty-before', 'dirty-after'].includes(mode));
+  expect(receipt.verifiedCommit).toBe(result.verifiedCommit);
+  expect(kernel.db.prepare("SELECT state FROM kernel_module_operations").get()).toEqual({ state: 'settled' });
+}, 30_000);

@@ -6,7 +6,7 @@ import type { KernelStore } from '../core/kernel-store.ts';
 import type { ModuleDefinition } from '../core/interface-spec.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
-import { revParse } from '../git/git.ts';
+import { git, revParse } from '../git/git.ts';
 import { openWorkspaceCommandRunner, resolveUnsandboxedCommand } from './workspace-command.ts';
 import { checkEnvironment, runHostCommand } from './host-command.ts';
 
@@ -29,11 +29,15 @@ export async function executeModuleOperation(options: {
   kernel.db.prepare(`INSERT INTO kernel_module_operations(id,task_id,module_id,delivery_id,revision_version,request,state,created_at)
     VALUES(?,?,?,?,?,?,'prepared',?) ON CONFLICT(delivery_id) DO UPDATE SET request=excluded.request,revision_version=excluded.revision_version,state='prepared',error=NULL`)
     .run(id, graphId, moduleId, deliveryId, options.revisionVersion, request, created);
-  const commit = revParse(workspace, 'HEAD') ?? null;
+  let commit: string | null = null;
+  let cleanBefore = false;
+  const cleanTree = () => { const status = git(workspace, ['status', '--porcelain', '-u']); return status.code === 0 && status.stdout.trim() === ''; };
   const admit = () => {
     const task = kernel.store.task(graphId);
     if (task.paused || options.signal?.aborted || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Graph operation dispatch is closed');
     if (kernel.nodeState(graphId, moduleId).paused) throw new RuntimeError('paused', 'Module is paused');
+    commit = revParse(workspace, 'HEAD') ?? null;
+    cleanBefore = commit !== null && cleanTree();
     const changed = kernel.db.prepare("UPDATE kernel_module_operations SET state='dispatched',started_at=? WHERE id=? AND state='prepared'").run(Date.now(), id);
     if (changed.changes !== 1) throw new RuntimeError('invalid_operation', 'Operation is no longer dispatchable');
   };
@@ -62,15 +66,18 @@ export async function executeModuleOperation(options: {
       result = await runner.run(operation.command, operation.args, cancellation.signal);
     }
     if (cancellation.signal.aborted) throw new RuntimeError('uncertain_operation', 'Operation interrupted after dispatch; inspect its side effects before continuing');
-    const record = { operationId: id, command: operation.command, args: operation.args, ...result, commit,
+    const commitAfter = revParse(workspace, 'HEAD') ?? null;
+    const cleanAfter = commitAfter !== null && cleanTree();
+    const verifiedCommit = result.code === 0 && commit && commit === commitAfter && cleanBefore && cleanAfter ? commit : null;
+    const record = { operationId: id, command: operation.command, args: operation.args, ...result, commit, commitAfter, cleanBefore, cleanAfter, verifiedCommit,
       sandboxed: operation.sandbox !== false, elapsedMs: Date.now() - created };
     const recordPath = join(scratchDir, 'result.json');
     await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-    const output = { passed: result.code === 0, code: result.code, commit, record: recordPath, operationId: id,
+    const output = { passed: result.code === 0, code: result.code, commit, verifiedCommit, record: recordPath, operationId: id,
       stdout: result.stdout.slice(-32_768), stderr: result.stderr.slice(-32_768), elapsedMs: record.elapsedMs };
     const evaluated = { ok: true, state: options.state, outputs: { [operation.output]: output }, diagnostics: [`workspace.command ${id}`] };
     kernel.db.prepare("UPDATE kernel_module_operations SET state='settled',result=?,ended_at=? WHERE id=?").run(canonicalJson(evaluated), Date.now(), id);
-    kernel.store.event(graphId, 'graph.operation.settled', { moduleId, operationId: id, passed: output.passed, commit, record: recordPath });
+    kernel.store.event(graphId, 'graph.operation.settled', { moduleId, operationId: id, passed: output.passed, commit, verifiedCommit, record: recordPath });
     return evaluated;
   } catch (error) {
     cancellation.abort();

@@ -285,10 +285,14 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (result && !result.ok) throw new RuntimeError('git_conflict', `Git integration refused: ${result.conflicts.join(', ')}. Inspect the worktree and integration tip before retrying.`);
     },
     operation: async (graphId, request) => {
-      const workspace = options.git?.workspace(graphId, null, request.moduleId, 'program', 'graph.command') ?? options.workspaceFor(graphId);
-      if (!workspace) throw new Error('Operation module has no workspace');
-      return executeModuleOperation({ ...request, graphId, kernel: options.kernel, workspace, scratchRoot: options.stateDir,
-        ...(options.access ? { access: options.access() } : {}) });
+      const execute = () => {
+        const workspace = options.git?.workspace(graphId, null, request.moduleId, 'program', 'graph.command') ?? options.workspaceFor(graphId);
+        if (!workspace) throw new Error('Operation module has no workspace');
+        return executeModuleOperation({ ...request, graphId, kernel: options.kernel, workspace, scratchRoot: options.stateDir,
+          ...(options.access ? { access: options.access() } : {}) });
+      };
+      // A check observes one integration tip; managed merges cannot race its receipt.
+      return options.git ? options.git.exclusive(graphId, execute) : execute();
     },
     closeGraph: async graphId => {
       for (const key of [...hosts.keys()]) {

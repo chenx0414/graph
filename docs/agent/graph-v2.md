@@ -77,7 +77,7 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 }
 ```
 
-结果包含 passed、code、commit、operationId、record、stdout/stderr 摘要和耗时；record 指向完整命令记录。非零退出码产生 passed:false。commit 记录命令开始前的 HEAD，本身不证明执行期间文件未变化，也不替代最终版本验收。sandbox 默认启用；sandbox:false 仅允许 full access。
+结果包含 passed、code、commit、operationId、record、stdout/stderr 摘要和耗时；record 指向完整命令记录。非零退出码产生 passed:false。commit 记录实际派发前的 HEAD。verifiedCommit 只在退出码为零、派发前与结束后工作树均干净且 HEAD 相同时记录；完整结果文件包含 commitAfter、cleanBefore、cleanAfter。宿主检查与受管理的 Git 集成共用排他锁。该记录不替代审查、human acceptance 或最终交付条件，也不声称任意外部程序的副作用恰好一次。sandbox 默认启用；sandbox:false 仅允许 full access。
 
 `graph_inspect({graphId,query:"operations"})` 查看持久操作记录。已保存结果在恢复时用于继续投递，不重新执行命令；派发后中断且没有可靠结果的操作标记 uncertain，暂停模块等待 main 检查。停止会终止命令进程组。
 
