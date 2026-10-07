@@ -107,6 +107,13 @@ function image(data: Buffer, mimeType: string) {
   return { content: [{ type: 'image' as const, data: data.toString('base64'), mimeType }], details: {} };
 }
 
+function nativeProposal(value: unknown): Proposal {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('definition' in value)) {
+    throw new RuntimeError('invalid_proposal', 'Expected a native proposal object with definition; use schemaVersion:2 graph JSON');
+  }
+  return value as Proposal;
+}
+
 function fields(params: unknown) {
   return params as Record<string, unknown>;
 }
@@ -377,7 +384,7 @@ export function agentTools(input: {
     fetch: async (_id, params, signal) => text(JSON.stringify(await input.fetch!(String(fields(params).url), signal))),
     propose_graph: async (_id: string, params: unknown) => {
       const body = fields(params);
-      const proposal = body.proposal !== undefined ? body.proposal as Proposal : JSON.parse(String(body.proposalJson)) as Proposal;
+      const proposal = nativeProposal(body.proposal);
       const receipt = await input.supervisor!.propose(proposal, String(body.requestId));
       return text(JSON.stringify(receipt));
     },
@@ -405,23 +412,9 @@ export function agentTools(input: {
       });
       return text(JSON.stringify(receipt));
     },
-    revise_graph: async (_id, params) => {
-      const body = fields(params);
-      const receipt = await input.supervisor!.revise({
-        baseVersion: Number(body.baseVersion), reason: String(body.reason),
-        nodes: JSON.parse(String(body.nodesJson)) as NodeSpec[], requestId: String(body.requestId),
-        ...(Array.isArray(body.retire) ? { retire: body.retire.map(String) } : {}),
-        ...(typeof body.taskId === 'string' && body.taskId.trim() ? { taskId: body.taskId.trim() } : {}),
-      });
-      return text(JSON.stringify(receipt));
-    },
     validate_proposal: async (_id: string, params: unknown) => {
       try {
-        const proposal = fields(params).proposal;
-        if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal) || !('definition' in proposal)) {
-          throw new RuntimeError('invalid_proposal', 'Expected a native proposal object with definition; use schemaVersion:2 graph JSON');
-        }
-        return text(JSON.stringify(await input.supervisor!.validateProposal!(proposal as Proposal)));
+        return text(JSON.stringify(await input.supervisor!.validateProposal!(nativeProposal(fields(params).proposal))));
       } catch (error) {
         const failure = error as Error & { code?: string };
         return text(JSON.stringify({

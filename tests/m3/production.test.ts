@@ -50,6 +50,7 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   const provider = await openaiServer([
     { tools: [{ id: 'v-invalid', name: 'validate_proposal', arguments: JSON.stringify({ proposal: { ...plan, summary: '' } }) }] },
     { tools: [{ id: 'v-valid', name: 'validate_proposal', arguments: JSON.stringify({ proposal: plan }) }] },
+    { tools: [{ id: 'obsolete', name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(plan), requestId: 'obsolete-plan' }) }] },
     { beforeReply: () => inspectBeforeDraft?.(), tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposal: plan, requestId: 'plan-1' }) }] },
     { text: 'I proposed a case-insensitive title search graph.' },
     { text: 'Noted, matching will ignore case.' },
@@ -72,6 +73,7 @@ test('a production master receives tools, proposes a graph, and wakes on a later
   await runtime.host.runReady();
   const requests = provider.requests as { messages: { role: string; tool_call_id?: string; content: string }[] }[];
   const toolContent = (id: string) => requests.flatMap(request => request.messages).find(message => message.role === 'tool' && message.tool_call_id === id)!.content;
+  expect(toolContent('obsolete')).toContain('proposal');
   expect(toolContent('v-valid')).toContain('"valid":true');
   const toolResult = (id: string) => JSON.parse(toolContent(id));
   expect(toolResult('v-invalid')).toMatchObject({ valid: false, error: { code: 'invalid_proposal' } });

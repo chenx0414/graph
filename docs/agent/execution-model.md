@@ -13,7 +13,7 @@
 - 主管-工人等待与唤醒；
 - 回到原节点和原 instance 的返工回环。
 
-图修订使用新版本，不原地覆盖历史。已确认的 acceptance 和关键程序检查输入不能在修订通道中静默改变。修订可以显式带上目标任务（`revise_graph` 的 `taskId`）：不带时修订本会话自己的任务，带上时可以修订本会话创建的功能任务（即确认草稿后真正在执行的那个），但跨会话的任务一律拒绝。
+原生图修订使用 graph_patch 的 graphId 与 baseRevision，发布新版本，不覆盖历史；当前执行继续使用已冻结配置。已确认的 acceptance 不能在修订通道中静默改变。主 agent 的旧 revise_graph 工具已移除；原生图的正式构建、投递和恢复说明见 [graph-v2.md](graph-v2.md)。下文旧 DAG 车道与证据合同仍是尚未退役代码的背景，不能作为原生图的调用方式。
 
 ## Agent Instance
 
@@ -100,8 +100,8 @@ find "<stateDir>/instances" -path '*tool-results*' -name '*.txt' -exec stat -f '
 
 ## 修订、阻塞与证据
 
-- `revise_graph` 交回的是**完整**节点表：任何 spec 文本有差异的节点都会被重做；漏掉的节点必须在 `retire` 里点名，否则整次修订被拒并列出缺少的 id。原样拷回未改动的节点，只改承载修复的最小字段。
-- review-gate 的 blocker 是粘滞的：输入不变时重跑验证器返回同一个 blocker digest，所以单靠 `resolve_problem(retry)` 无法让车道返工。先在集成代码里自己核对该 blocker 是否成立，再用 `revise_graph` 改那个节点的 spec（其余节点原样，跨任务时带 `taskId`）来触发真正的返工。
+- 原生图修改使用 graph_patch；删除节点必须显式 retire，且先处理该节点运行、排队和失败待处理工作。修改不会自动触发复跑，需要 graph_send 投递。
+- review-gate 的 blocker 是粘滞的：输入不变时重跑验证器返回同一个 blocker digest，所以单靠 `resolve_problem(retry)` 无法让车道返工。先在集成代码里自己核对该 blocker 是否成立，原生图则修正 graph_patch 配置并明确 graph_send；旧 DAG 的依赖推断不适用。
 - `stalled` 与 `rework` 可以答 `retry` / `respond` / `escalate`（escalate 会把决定连同你的说明交给用户）。blocker 真实存在时不要只 retry，要改节点 spec。
 - 证据的 `valid` 按**集成 sha** 计算（`src/core/execution.ts` 的完成判定要求 `evidence.commit_sha` 等于集成 sha）。因此不要在任务的集成分支上手工提交：那会让已有证据全部失效却不会触发重跑。修复放应用线，并在报告里说明证据对应哪个 sha。
 - 同一节点连续三轮无进展就是本地 stall（不是整任务失败）：按 R14 停止循环并由你接手收口——修产品缺陷、修 harness 根因、过完整门禁、合入应用线、推送、激活重载、现场自验，再交人工验收。

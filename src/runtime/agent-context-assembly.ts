@@ -64,7 +64,7 @@ function permission(name: string) {
   if (name === 'run_command') return 'host-gated command policy';
   if (name === 'fetch') return 'declared network domains';
   if (name.startsWith('artifact_')) return 'task artifact workspace';
-  if (name === 'propose_graph' || name === 'revise_graph') return 'task graph control';
+  if (name === 'propose_graph' || name === 'graph_patch') return 'task graph control';
   if (name === 'validate_proposal' || name === 'get_graph_state' || name === 'get_task_status') return 'current conversation graph';
   if (name === 'list_projects' || name === 'bind_project') return 'configured project binding';
   if (name.startsWith('git_')) return 'read-only work copy Git';

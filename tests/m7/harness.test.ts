@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
+import { TaskStore } from '../../src/core/store.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -42,58 +43,42 @@ async function fixtureRepo(parent: string) {
   return source;
 }
 
-const reviewBody = '# Independent review\n\nThe Bilibili web passes the frozen checks.\n';
-const reviewDigest = createHash('sha256').update(reviewBody).digest('hex');
-
 const proposal = {
-  requirementVersion: 1,
-  summary: '本机 Web 复用 CLI：登录态、采集进度与失败原因、收藏与笔记、Markdown 导出。',
+  requirementVersion: 1, summary: 'Confirm code checks, review and isolated login',
   acceptance: [
     { id: 'tests', description: 'The web tests pass', checkNode: 'check' },
-    { id: 'human-login', description: 'User confirmed login in the isolated profile', checkNode: 'login' },
+    { id: 'review', description: 'Independent review', checkNode: 'review' },
+    { id: 'human-login', description: 'User confirmed login in the isolated profile', checkNode: 'review' },
   ],
-  nodes: [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-    { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--test', 'test/web.test.js'] } },
-    { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'reader', dependsOn: ['check'] },
-    { id: 'review-gate', kind: 'program', action: 'graph.verify', dependsOn: ['review'], verifier: { kind: 'independent', reportNodes: ['review'] } },
-    { id: 'login', kind: 'program', action: 'graph.human_check', dependsOn: ['review-gate'] },
-  ],
+  definition: parseGraphDefinition({ schemaVersion: 2, name: 'M7 native', protocols: { data: { type: 'object' } },
+    nodes: {
+      work: { recipe: 'coder@1', model: 'worker', task: 'Implement the file', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} },
+      review: { recipe: 'reviewer@1', model: 'reader', task: 'Review the current commit', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {},
+        deliverable: { path: 'review.json', namespace: 'reviews', name: 'review', schema: 'graph.review@1' } },
+    }, modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.cjs'], output: 'result' } } },
+    edges: { checked: { from: 'check.result', to: 'review.job', enabled: true } },
+    acceptance: [
+      { id: 'tests', description: 'The web tests pass', kind: 'check', module: 'check' },
+      { id: 'review', description: 'Independent review', kind: 'review', node: 'review' },
+      { id: 'human-login', description: 'User confirmed login in the isolated profile', kind: 'human' },
+    ],
+  }),
 };
-
-function plans() {
-  const webTest = "import { test } from 'node:test';\nimport assert from 'node:assert';\ntest('web works', () => assert.equal(1, 1));\n";
-  const reviewDecision = JSON.stringify({
-    schemaVersion: 1,
-    body: { kind: 'independent', verdict: 'pass', reason: 'Independent review of the Bilibili web', evidence: [{ path: '/tmp/graph-m7-review.md', digest: reviewDigest }] },
-  });
-  const reviewTools = { tools: [
-    { id: 'r1', name: 'write', arguments: JSON.stringify({ path: 'docs/review.md', content: reviewBody }) },
-    { id: 'r2', name: 'submit_result', arguments: JSON.stringify({ outputJson: reviewDecision }) },
-  ] };
-  return [
-    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'm7-plan' }) }] },
-    { text: 'Proposed the Bilibili web graph.' },
-    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'test/web.test.js', content: webTest }) }] },
-    { text: 'Wrote the web tests.' },
-    reviewTools,
-    { text: 'Review submitted.' },
-    { tools: [{ id: 'w2', name: 'write', arguments: JSON.stringify({ path: 'revision-marker.txt', content: 'moved\n' }) }] },
-    { text: 'Moved the target after the login check.' },
-    reviewTools,
-    { text: 'Review submitted again.' },
-  ];
-}
 
 interface Summary {
   step: string;
   taskId: string;
+  graphId: string | null;
+  mainTaskId: string;
+  conversationId: string;
+  mainQuestions: Summary['questions'];
   taskCount: number;
   phase: string;
   proposalVersion: number;
   acceptedProposalVersion: number | null;
   integrationSha: string | null;
-  acceptance: { id: string; valid: boolean; commitSha?: string | null }[];
+  acceptance: { id: string; status: string; source?: { commit?: string | null } }[];
   questions: { id: string; nodeId: string; kind: string; status: string; data: { activationId?: string; commitSha?: string | null } }[];
   cost: unknown;
   costSource: string;
@@ -106,108 +91,103 @@ async function summary(workDir: string) {
   return JSON.parse(await readFile(join(workDir, 'acceptance-report.json'), 'utf8')).summary as Summary;
 }
 
-test('the acceptance harness reuses one task, refuses stale confirmations, and completes after a target move', async () => {
+test('the native harness resumes one conversation and graph, rejects stale confirmation and binds human acceptance to the new commit', async () => {
   const parent = await mkdtemp(join(tmpdir(), 'graph-m7-harness-'));
   cleanup.push(() => rm(parent, { recursive: true, force: true }));
   const source = await fixtureRepo(parent);
-  const workDir = join(parent, 'run');
-  const project = join(workDir, 'project');
-  const provider = await openaiServer(plans());
-  cleanup.push(() => provider.close());
-  const env = {
-    GRAPH_M7_MODEL_BASE_URL: provider.model.baseUrl,
-    GRAPH_M7_MODEL_API_KEY: 'scripted-local-key',
-    GRAPH_M7_MODEL_ID: 'local',
-    GRAPH_M7_REVIEW_MODEL_ID: 'reader',
-    GRAPH_M7_WORKDIR: workDir,
-    GRAPH_MEDIABOOKMARKS_ROOT: source,
+  await writeFile(join(source, 'check.cjs'), "if(require('fs').readFileSync('feature.txt','utf8')!=='implemented')process.exit(1)");
+  git(source, ['add', '.']); git(source, ['commit', '-m', 'check']);
+  const workDir = join(parent, 'run'), project = join(workDir, 'project');
+  const mainProvider = await openaiServer([
+    { tools: [{ id: 'proposal', name: 'propose_graph', arguments: JSON.stringify({ proposal, requestId: 'm7-plan' }) }] },
+    { text: 'Native draft ready.' },
+    ...Array.from({ length: 20 }, () => ({ text: 'The graph is waiting for explicit work or user acceptance.' })),
+  ]);
+  cleanup.push(() => mainProvider.close());
+  const report = () => {
+    const state = JSON.parse(requireState());
+    const store = new TaskStore(join(workDir, 'state', 'tasks.sqlite'));
+    try { return JSON.stringify({ commit: store.task(state.graphId).integration_sha, passed: true, reason: 'Current implementation reviewed independently' }); }
+    finally { store.close(); }
   };
-
-  // 1. Stops before confirmation and shows the full proposal.
-  const first = await runHarness(env);
-  expect(first.code).toBe(1);
+  // Provider scripts produce real files; the host publishes and verifies their bytes.
+  const nodes = await openaiServer([
+    { tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'implemented' }) }] }, { text: 'Implemented.' },
+    { tools: [{ id: 'review', name: 'write_file', arguments: () => JSON.stringify({ path: 'review.json', content: report() }) }] }, { text: 'Reviewed.' },
+    { tools: [{ id: 'write-next', name: 'write_file', arguments: JSON.stringify({ path: 'revision-marker.txt', content: 'moved\n' }) }] }, { text: 'Updated.' },
+    { tools: [{ id: 'review-next', name: 'write_file', arguments: () => JSON.stringify({ path: 'review.json', content: report() }) }] }, { text: 'Reviewed again.' },
+  ]);
+  cleanup.push(() => nodes.close());
+  nodes.runtime.registerProvider('graph-openai', { baseUrl: nodes.model.baseUrl, api: 'openai-completions', apiKey: 'scripted-local-key', models: [nodes.model, { ...nodes.model, id: 'worker' }, { ...nodes.model, id: 'reader' }] });
+  nodes.runtime.registerProvider('graph-m7', { baseUrl: mainProvider.model.baseUrl, api: 'openai-completions', apiKey: 'scripted-local-key', models: [mainProvider.model] });
+  const env = { GRAPH_M7_MODEL_BASE_URL: mainProvider.model.baseUrl, GRAPH_M7_MODEL_API_KEY: 'scripted-local-key',
+    GRAPH_M7_MODEL_ID: 'local', GRAPH_M7_REVIEW_MODEL_ID: 'reader', GRAPH_M7_WORKDIR: workDir, GRAPH_MEDIABOOKMARKS_ROOT: source };
+  expect((await runHarness(env)).code).toBe(1);
+  expect(JSON.stringify(mainProvider.requests[0])).toContain('work 使用 local，review 使用 reader');
   const proposed = await summary(workDir);
-  expect(proposed.step).toBe('awaiting-confirmation');
-  expect(proposed.taskCount).toBe(1);
-  expect(proposed.acceptedProposalVersion).toBeNull();
-  expect(proposed.proposalVersion).toBe(1);
-  expect(proposed.resume).toContain('GRAPH_M7_ACCEPT=1');
-  const state = JSON.parse(await readFile(join(workDir, 'run.json'), 'utf8')) as { taskId: string; acceptedProposalVersion: number | null };
-  expect(state.taskId).toBe(proposed.taskId);
-
-  // 2. A stale or wrong confirmation value never confirms the current proposal.
-  const wrong = await runHarness({ ...env, GRAPH_M7_ACCEPT: '99' });
-  expect(wrong.code).toBe(1);
-  expect((await summary(workDir)).step).toBe('awaiting-confirmation');
+  expect(proposed).toMatchObject({ step: 'awaiting-confirmation', graphId: null, taskCount: 0, proposalVersion: 1 });
+  expect((await runHarness({ ...env, GRAPH_M7_ACCEPT: '99' })).code).toBe(1);
   expect((await summary(workDir)).acceptedProposalVersion).toBeNull();
-
-  // 3. The exact proposal version confirms and the run stops at the human login check.
-  const accepted = await runHarness({ ...env, GRAPH_M7_ACCEPT: String(proposed.proposalVersion) });
-  expect(accepted.code).toBe(1);
+  expect((await runHarness({ ...env, GRAPH_M7_ACCEPT: '1' })).code).toBe(1);
+  const accepted = await summary(workDir);
+  expect(accepted).toMatchObject({ step: 'awaiting-work', taskCount: 1, acceptedProposalVersion: 1 });
+  expect(accepted.taskId).not.toBe(accepted.mainTaskId);
+  const acceptedIds = { graphId: accepted.graphId, mainTaskId: accepted.mainTaskId, conversationId: accepted.conversationId };
+  const sentBeforeRecovery = mainProvider.requests.length;
+  await rm(join(workDir, 'run.json'));
+  expect((await runHarness(env)).code).toBe(1);
+  expect(await summary(workDir)).toMatchObject({ ...acceptedIds, taskCount: 1, acceptedProposalVersion: 1 });
+  expect(mainProvider.requests.length).toBe(sentBeforeRecovery);
+  let stateText = await readFile(join(workDir, 'run.json'), 'utf8');
+  function requireState() { return stateText; }
+  const state = JSON.parse(stateText) as { graphId: string; taskId: string; conversationId: string };
+  const runRound = async (second: boolean) => {
+    const runtime = await openTaskRuntime({ stateDir: join(workDir, 'state'), projects: [{ id: 'media-bookmarks', root: project }],
+      models: { apiKey: 'scripted-local-key', modelRuntime: nodes.runtime, entries: [
+        { id: 'local', provider: 'graph-m7', grade: 'high', api: 'openai-completions', baseUrl: mainProvider.model.baseUrl, contextWindow: 32000, maxTokens: 256 },
+        ...['worker', 'reader'].map(id => ({ id, provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: nodes.model.baseUrl, contextWindow: 32000, maxTokens: 256 })),
+      ] } });
+    try {
+      const main = runtime.supervisor(state.taskId);
+      if (second) await main.graphControl({ graphId: state.graphId, action: 'withdraw_complete' });
+      await main.graphSend({ graphId: state.graphId, nodeId: 'work', input: 'job', value: {} }); await runtime.host.drive();
+      await main.graphSend({ graphId: state.graphId, nodeId: 'check', input: 'job', value: {} }); await runtime.host.drive();
+      await main.graphControl({ graphId: state.graphId, action: 'complete' }); await runtime.host.drive();
+    } finally { await runtime.close(); }
+  };
+  await runRound(false);
+  expect((await runHarness(env)).code).toBe(1);
   const waiting = await summary(workDir);
   expect(waiting.step).toBe('awaiting-human-check');
-  expect(waiting.phase).toBe('running');
-  const firstQuestions = waiting.questions.filter(question => question.status === 'open' && question.kind === 'human_check');
-  expect(firstQuestions).toHaveLength(1);
-  const firstQuestion = firstQuestions[0]!;
-  const firstSha = waiting.integrationSha;
-  expect(firstQuestion.data.commitSha).toBe(firstSha);
-  expect(provider.requests.length).toBe(6);
-
-  // 4. The target moves after the check was raised, without touching the confirmed check input.
-  const runtime = await openTaskRuntime({ stateDir: join(workDir, 'state'), projects: [{ id: 'media-bookmarks', root: project }] });
-  try {
-    const view = await runtime.user.task(state.taskId).view();
-    await runtime.supervisor(state.taskId).revise({
-      baseVersion: view.graphVersion,
-      reason: 'Move the target after the login check was raised',
-      nodes: view.proposal!.nodes.map(node => node.id === 'work' ? { ...node, input: { revision: 2 } } : node),
-      requestId: 'move-target',
-    });
-  } finally { await runtime.close(); }
-
-  // 5. The old question id is superseded cleanup, never a confirmation of the moved target.
-  const stale = await runHarness({ ...env, GRAPH_M7_LOGIN_CONFIRMED: firstQuestion.id });
-  expect(stale.code).toBe(1);
+  const firstQuestion = waiting.questions.find(q => q.kind === 'human_check' && q.status === 'open')!;
+  expect(firstQuestion.data.commitSha).toBe(waiting.integrationSha);
+  await runRound(true);
+  stateText = await readFile(join(workDir, 'run.json'), 'utf8');
+  expect((await runHarness({ ...env, GRAPH_M7_LOGIN_CONFIRMED: firstQuestion.id })).code).toBe(1);
   const recheck = await summary(workDir);
-  expect(recheck.step).toBe('awaiting-human-check');
-  expect(recheck.integrationSha).not.toBe(firstSha);
-  const current = recheck.questions.filter(question => question.status === 'open' && question.kind === 'human_check');
-  expect(current).toHaveLength(1);
-  const currentQuestion = current[0]!;
-  expect(currentQuestion.id).not.toBe(firstQuestion.id);
-  expect(currentQuestion.data.commitSha).toBe(recheck.integrationSha);
-  // The revision retired the activation that asked, so the stale question is superseded instead of
-  // staying answerable: the harness confirmed nothing, and only the new question can pass.
+  expect(recheck.integrationSha).not.toBe(waiting.integrationSha);
   expect(recheck.answeredChecks).toEqual([]);
-  expect(recheck.questions.filter(question => question.id === firstQuestion.id && question.status === 'open')).toHaveLength(0);
-  expect(provider.requests.length).toBe(10);
-
-  // 6. Confirming the current question completes the task with bound evidence.
-  const done = await runHarness({ ...env, GRAPH_M7_LOGIN_CONFIRMED: currentQuestion.id });
-  expect(done.code).toBe(0);
+  const current = recheck.questions.filter(q => q.kind === 'human_check' && q.status === 'open');
+  expect(current).toHaveLength(1);
+  expect(current[0]!.id).not.toBe(firstQuestion.id);
+  expect(current[0]!.data.commitSha).toBe(recheck.integrationSha);
+  expect((await runHarness({ ...env, GRAPH_M7_LOGIN_CONFIRMED: current[0]!.id })).code).toBe(0);
   const completed = await summary(workDir);
-  expect(completed.step).toBe('result');
-  expect(completed.phase).toBe('completed');
-  expect(completed.taskCount).toBe(1);
-  expect(completed.acceptance).toEqual([
-    { id: 'tests', description: 'The web tests pass', checkNode: 'check', valid: true, summary: expect.any(String), commitSha: completed.integrationSha },
-    { id: 'human-login', description: 'User confirmed login in the isolated profile', checkNode: 'login', valid: true, summary: expect.any(String), commitSha: completed.integrationSha },
+  expect(completed).toMatchObject({ step: 'result', phase: 'completed', taskCount: 1 });
+  expect(completed.acceptance.map(item => [item.id, item.status, item.source?.commit])).toEqual([
+    ['tests', 'passed', completed.integrationSha], ['review', 'passed', completed.integrationSha], ['human-login', 'passed', completed.integrationSha],
   ]);
-  expect(completed.cost).toEqual({ unknown: true });
-  expect(completed.costSource).toBe('model-rates-not-configured');
-  expect((await readFile(join(project, 'test/web.test.js'), 'utf8'))).toContain('web works');
-  expect((await readFile(join(project, 'revision-marker.txt'), 'utf8'))).toBe('moved\n');
-
-  // 7. A repeated run is a no-op: same task, no new confirmations, no new model calls.
-  const repeat = await runHarness({ ...env, GRAPH_M7_LOGIN_CONFIRMED: currentQuestion.id });
-  expect(repeat.code).toBe(0);
-  const repeated = await summary(workDir);
-  expect(repeated.step).toBe('completed');
-  expect(repeated.taskCount).toBe(1);
-  expect(provider.requests.length).toBe(10);
-  expect(JSON.stringify(repeated.answeredChecks)).toBe(JSON.stringify(completed.answeredChecks));
-}, 240_000);
+  expect(await readFile(join(project, 'revision-marker.txt'), 'utf8')).toBe('moved\n');
+  const sent = mainProvider.requests.length + nodes.requests.length;
+  expect((await runHarness(env)).code).toBe(0);
+  expect(mainProvider.requests.length + nodes.requests.length).toBe(sent);
+  expect((await summary(workDir)).conversationId).toBe(state.conversationId);
+  await writeFile(join(workDir, 'run.json'), JSON.stringify({ version: 1, taskId: state.taskId }));
+  const legacy = await runHarness(env);
+  expect(legacy.code).toBe(2);
+  expect(legacy.stderr).toContain('Unsupported legacy run state');
+  expect(mainProvider.requests.length + nodes.requests.length).toBe(sent);
+}, 240000);
 
 test('the harness can acknowledge a recorded reservation overrun without re-planning', async () => {
   const parent = await mkdtemp(join(tmpdir(), 'graph-m7-overrun-'));
@@ -215,8 +195,9 @@ test('the harness can acknowledge a recorded reservation overrun without re-plan
   const source = await fixtureRepo(parent);
   const workDir = join(parent, 'run');
   const provider = await openaiServer([
-    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposalJson: JSON.stringify(proposal), requestId: 'm7-plan' }) }], usage: { prompt_tokens: 2_100_000, completion_tokens: 5 } },
+    { tools: [{ id: 'p1', name: 'propose_graph', arguments: JSON.stringify({ proposal, requestId: 'm7-plan' }) }], usage: { prompt_tokens: 2_100_000, completion_tokens: 5 } },
     { text: 'Proposed the Bilibili web graph.', usage: { prompt_tokens: 1_000, completion_tokens: 5 } },
+    { text: '请确认当前提案。' }, // Conversation composer suggestion, not another main execution.
   ]);
   cleanup.push(() => provider.close());
   const env = {
@@ -231,13 +212,15 @@ test('the harness can acknowledge a recorded reservation overrun without re-plan
   expect(first.code).toBe(1);
   const proposed = await summary(workDir);
   expect(proposed.step).toBe('awaiting-confirmation');
-  expect(proposed.questions.some(question => question.kind === 'reservation_exceeded' && question.status === 'open')).toBe(true);
+  expect(proposed.mainQuestions.some(question => question.kind === 'reservation_exceeded' && question.status === 'open')).toBe(true);
 
+  const requestsBeforeAcknowledgement = provider.requests.length;
   const acknowledged = await runHarness({ ...env, GRAPH_M7_ACKNOWLEDGE_OVERRUN: '1' });
   expect(acknowledged.code).toBe(1);
   const after = await summary(workDir);
   expect(after.step).toBe('awaiting-confirmation');
-  expect(after.questions.some(question => question.kind === 'reservation_exceeded' && question.status === 'open')).toBe(false);
+  expect(after.mainQuestions.some(question => question.kind === 'reservation_exceeded' && question.status === 'open')).toBe(false);
   expect(after.acceptedProposalVersion).toBeNull();
-  expect(provider.requests.length).toBe(2);
+  expect(after.proposalVersion).toBe(1);
+  expect(provider.requests.length).toBe(requestsBeforeAcknowledgement);
 }, 120_000);

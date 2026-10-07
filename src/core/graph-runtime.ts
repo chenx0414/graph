@@ -247,6 +247,19 @@ export class GraphRuntime {
     const pausedOrFailed = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_node_state WHERE task_id=? AND paused=1').get(this.graphId) as { n: number };
     const failedInputs = this.kernel.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND state='failed' LIMIT 1").get(this.graphId);
     // Failed deliveries need an explicit retry/skip even if the node's later queue was resumed.
+    // A human approval applies to the exact integration version it was raised for.
+    // Retiring an obsolete question is system cleanup, never a user's approval.
+    const currentCommit = this.kernel.store.task(this.graphId).integration_sha ?? null;
+    const humanQuestions = this.kernel.db.prepare("SELECT id,data FROM questions WHERE task_id=? AND kind='human_check' AND status='open'").all(this.graphId) as { id: string; data: string }[];
+    this.kernel.moduleTransaction(() => {
+      for (const question of humanQuestions) {
+        const data = JSON.parse(question.data) as { acceptanceId?: string; commitSha?: string | null };
+        if (!data.acceptanceId || (data.commitSha ?? null) === currentCommit) continue;
+        this.kernel.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=? AND status='open'")
+          .run(canonicalJson({ type: 'superseded', reason: 'Integration commit changed', commitSha: currentCommit }), question.id);
+        this.kernel.store.event(this.graphId, 'graph.acceptance.superseded', { questionId: question.id, acceptanceId: data.acceptanceId, previousCommit: data.commitSha ?? null, commit: currentCommit });
+      }
+    });
     const openQuestion = this.kernel.db.prepare("SELECT 1 FROM questions WHERE task_id=? AND status='open' LIMIT 1").get(this.graphId);
     if (pausedOrFailed.n > 0 || failedInputs || openQuestion) {
       this.setPhase('blocked');

@@ -4,7 +4,7 @@
 
 ## 创建与启动
 
-需要用户确认的草稿使用 `propose_graph({proposal:{requirementVersion,summary,definition,acceptance,decisions?},requestId})`。definition 使用本文同一 JSON 格式；无需旧 nodes 数组。外层 acceptance 暂用 `{id,description,checkNode}`，指向定义中的实际节点或模块；定义同时声明正式 acceptance 时，两者需一致。main 位于定义外部。确认后收到 graph_ready 通知，再显式 graph_send，不自动运行根节点。旧提案入口的完整退役仍在实施，不能把原生语法已可用理解为旧路径已关闭。
+需要用户确认的草稿使用 `propose_graph({proposal:{requirementVersion,summary,definition,acceptance,decisions?},requestId})`。definition 使用本文同一 JSON 格式；无需旧 nodes 数组。外层 acceptance 暂用 `{id,description,checkNode}`，指向定义中的实际节点或模块；定义同时声明正式 acceptance 时，两者需一致。main 位于定义外部。确认后收到 graph_ready 通知，再显式 graph_send，不自动运行根节点。主 agent 的 propose_graph 只接收此结构化对象，已关闭旧 proposalJson 字符串别名；运行中修改使用 graph_patch，旧 revise_graph 工具已移除。SDK 与旧内核的完整退役仍在实施，尚未完成默认切换。
 
 提交草稿前可调用 `validate_proposal({proposal})`，传入与 `propose_graph` 完全相同的原生对象；返回 `valid:true` 或 `valid:false` 与错误，不创建草稿、不启动节点。预检不接收旧 `proposalJson` 字符串。
 
@@ -165,7 +165,7 @@ review 引用 agent 节点。该节点发布 schema 为 graph.review@1 的不可
 
 旧 through/pass 状态保留不影响此规则；旧 commit 的报告显示 stale，不悄悄改成新 commit 的审查。缺失实际调用身份的历史保持未知，不能补造独立性证明。
 
-human 在其他证据齐备后形成用户验收问题，绑定 acceptanceId 和 commitSha。main 预审不代替用户回答；拒绝保留返工问题。验收项一旦声明，普通 graph_patch 不能删除或改变它们；已有确认需求也不能通过改成另一种证据来绕过。
+human 在其他证据齐备后形成用户验收问题，绑定 acceptanceId 和 commitSha。main 预审不代替用户回答；拒绝保留返工问题。集成 commit 改变后，旧的开放验收问题保留在历史中并标记 superseded，不记为用户批准；新 commit 的其他证据齐备后建立新问题。验收项一旦声明，普通 graph_patch 不能删除或改变它们；已有确认需求也不能通过改成另一种证据来绕过。
 
 query:"acceptance" 返回各验收项的实际状态、原因和来源，以及持久 Git 交付 commit；ready 表示证据与待处理工作已满足，Git 交付仍是独立步骤。complete 先请求完成，再由宿主检查证据并交付相同的干净 commit。目标工作树脏、集成版本偏移或 Git 竞争均保留 blocked 和完成意图，main 检查时间线后可以处理问题并再次 complete；需要新增输入时先 withdraw_complete。图不会因节点均成功而隐式完成。
 

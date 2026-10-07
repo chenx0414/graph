@@ -62,6 +62,12 @@ export function prepareToolArguments(name: string): ((args: unknown) => unknown)
 
 type Declaration = AgentToolDeclaration;
 
+const nativeProposal = Type.Object({
+  requirementVersion: Type.Integer({ minimum: 1 }), summary: Type.String(), definition: Type.Any(),
+  acceptance: Type.Array(Type.Object({ id: Type.String(), description: Type.String(), checkNode: Type.String() })),
+  decisions: Type.Optional(Type.Array(Type.String())),
+});
+
 function declarations(features: AgentToolFeatures) {
   const main = features.role === 'master';
   const rsiArguments = prepareToolArguments('apply_rsi_change');
@@ -193,8 +199,8 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: true,
     },
     propose_graph: {
-      name: 'propose_graph', label: 'Propose graph', description: 'Submit a native graph draft for user confirmation: proposal {requirementVersion, summary, definition: {schemaVersion:2, name, protocols, nodes, modules, edges, inputs, outputs, acceptance?}, acceptance:[{id,description,checkNode}], decisions?}. Read graph-v2.md in the Graph documentation directory for the complete JSON format. Nodes are named agent objects with recipe, task and interfaces; commands belong to operation modules. Keep main outside the definition. The outer acceptance items name existing nodes or modules and must match declared definition acceptance when present. Confirmation creates structure; graph_send explicitly starts work. Prefer the proposal object; proposalJson is a historical transport alias.',
-      parameters: Type.Object({ proposal: Type.Optional(Type.Any()), proposalJson: Type.Optional(Type.String()), requestId: Type.String() }),
+      name: 'propose_graph', label: 'Propose graph', description: 'Submit a native graph draft for user confirmation: proposal {requirementVersion, summary, definition: {schemaVersion:2, name, protocols, nodes, modules, edges, inputs, outputs, acceptance?}, acceptance:[{id,description,checkNode}], decisions?}. Read graph-v2.md in the Graph documentation directory for the complete JSON format. Nodes are named agent objects with recipe, task and interfaces; commands belong to operation modules. Keep main outside the definition. The outer acceptance items name existing nodes or modules and must match declared definition acceptance when present. Confirmation creates structure; graph_send explicitly starts work. Pass the structured proposal object.',
+      parameters: Type.Object({ proposal: nativeProposal, requestId: Type.String() }),
       available: main && Boolean(features.supervisor),
       externallyGated: false,
     },
@@ -210,15 +216,9 @@ function declarations(features: AgentToolFeatures) {
       available: main && Boolean(features.supervisor?.withdrawDraft),
       externallyGated: false,
     },
-    revise_graph: {
-      name: 'revise_graph', label: 'Revise graph', description: 'Revise the confirmed task graph without changing acceptance items. nodesJson is a JSON array of NodeSpec objects using id, kind, action, dependsOn, input, definitionVersion, model, context and verifier fields as applicable. Supply every surviving node verbatim: any node whose spec differs from the current version is reworked, so copy unchanged nodes back exactly or you will restart work you did not mean to touch. Every node you leave out must also be named in retire, otherwise the revision is refused with the ids it is missing: dropping a node is a deliberate act, never a side effect of an incomplete list. Pass taskId to revise a feature task this conversation created instead of this conversation own task; the task must belong to the same conversation.',
-      parameters: Type.Object({ baseVersion: Type.Number(), reason: Type.String(), nodesJson: Type.String(), retire: Type.Optional(Type.Array(Type.String())), requestId: Type.String(), taskId: Type.Optional(Type.String()) }),
-      available: main && Boolean(features.supervisor),
-      externallyGated: false,
-    },
     validate_proposal: {
       name: 'validate_proposal', label: 'Validate graph proposal', description: 'Validate the same native proposal object accepted by propose_graph: {requirementVersion, summary, definition:{schemaVersion:2,...}, acceptance:[{id,description,checkNode}], decisions?}. Check the current requirement version and graph structural rules without creating a draft or dispatching work. Returns valid:true or valid:false with a concise error. Read graph-v2.md for the complete format.',
-      parameters: Type.Object({ proposal: Type.Object({ requirementVersion: Type.Integer({ minimum: 1 }), summary: Type.String(), definition: Type.Any(), acceptance: Type.Array(Type.Object({ id: Type.String(), description: Type.String(), checkNode: Type.String() })), decisions: Type.Optional(Type.Array(Type.String())) }) }),
+      parameters: Type.Object({ proposal: nativeProposal }),
       available: main && Boolean(features.supervisor?.validateProposal),
       externallyGated: false,
     },

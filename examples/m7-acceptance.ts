@@ -5,62 +5,33 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../src/core/task-runtime.ts';
 import type { ModelCost, ModelEntry } from '../src/catalog/models.ts';
-import type { Proposal } from '../src/core/types.ts';
+import type { GraphAcceptance } from '../src/core/graph-acceptance.ts';
 import { git } from '../src/git/git.ts';
 
 /**
- * Real-model M7 acceptance harness (G17/G18).
+ * Native real-model M7 acceptance harness. Requires user-configured providers;
+ * automated tests supply local HTTP providers and disposable Git repositories.
  *
- * This is the run that A13 needs: a configured model proposes the graph from
- * the frozen requirement, implements the Bilibili web, runs the checks, gets an
- * independent review, and merges to the target branch. It is intentionally not
- * part of the automated suite because it requires a user-configured model and,
- * for the login acceptance item, a real Bilibili login.
+ * GRAPH_M7_WORKDIR contains the clone, runtime state and run.json (version 2).
+ * One long-lived conversation owns one separately confirmed native graph.
+ * Reruns recover confirmation from SQLite if saving run.json was interrupted.
+ * Legacy version-1 runs are rejected; use a fresh directory for the new kernel.
  *
- * Runtime directory and state:
- *   - The default work directory is fixed (`../graph-m7-acceptance`), so a
- *     rerun resumes the same clone, state, and task. `GRAPH_M7_WORKDIR` (or the
- *     first positional argument) overrides it.
- *   - `<workdir>/run.json` persists the task id and every confirmation already
- *     recorded. `runtime.user.begin` is idempotent on the same directory, so a
- *     lost run.json still resumes the same task instead of creating a new one.
- *   - `GRAPH_M7_ACCEPT=<proposalVersion>` confirms exactly the proposal version
- *     printed by this run; a different version (including a stale `1`) is
- *     refused and the current version is printed again.
- *   - `GRAPH_M7_LOGIN_CONFIRMED=<questionId>` answers exactly one currently open
- *     human check. Checks raised for an older activation are resolved as
- *     superseded cleanup and are never accepted as confirmation. When the
- *     integration commit moved after a check was raised, confirming it only
- *     re-runs the check and a fresh question is printed.
+ * Required: GRAPH_M7_MODEL_ID, GRAPH_M7_MODEL_BASE_URL, GRAPH_M7_MODEL_API_KEY,
+ * GRAPH_M7_REVIEW_MODEL_ID (a different model). GRAPH_M7_ACCEPT confirms exactly
+ * the printed draft version. Main receives graph_ready and explicitly delivers
+ * named inputs, observes results and requests graph completion.
+ * GRAPH_M7_LOGIN_CONFIRMED answers exactly one current human question for the
+ * current integration commit. Superseded questions never count as approval.
  *
- * Required environment (one OpenAI-compatible endpoint, two distinct model ids
- * so the independent review never reuses the implementation model):
- *   GRAPH_M7_MODEL_ID / GRAPH_M7_MODEL_BASE_URL / GRAPH_M7_MODEL_API_KEY
- *   GRAPH_M7_REVIEW_MODEL_ID
- * Optional:
- *   GRAPH_M7_WORKDIR, GRAPH_M7_ACCEPT, GRAPH_M7_LOGIN_CONFIRMED
- *   GRAPH_M7_REPORT (default: <workdir>/acceptance-report.json)
- *   GRAPH_M7_MODEL_CONTEXT_WINDOW, GRAPH_M7_MODEL_MAX_TOKENS
- *   GRAPH_M7_MODEL_INPUT_COST, GRAPH_M7_MODEL_OUTPUT_COST,
- *   GRAPH_M7_MODEL_CACHE_READ_COST, GRAPH_M7_MODEL_CACHE_WRITE_COST
- *   (USD per million tokens; without them the report keeps `cost: unknown`)
- *   GRAPH_M7_RETRIEVAL_DOMAINS, GRAPH_M7_MCP_DOMAINS (comma-separated;
- *   without them no retrieval tool or remote MCP host is granted)
- *   GRAPH_M7_PROGRAM_READ_PATHS (colon-separated), GRAPH_M7_PROGRAM_NODE_MODULES,
- *   GRAPH_M7_PROGRAM_ENV (JSON map): host-selected read grants, dependency link
- *   and environment for confirmed graph.command checks (for example a
- *   Playwright browser test); never taken from a worker or the proposal.
- *   GRAPH_M7_ACKNOWLEDGE_OVERRUN=1 records an explicit acknowledgement for
- *   every open reservation_exceeded question; the overrun stays in the report.
- *   GRAPH_M7_ACKNOWLEDGE_UNKNOWN_USAGE=1 lets the host reconcile an open
- *   unknown_usage question when the provider exposes no usage for the failed
- *   call: the invocation stays recorded as unknown with unknown cost, the
- *   submitted result proceeds, and the gap remains visible in the report.
- *
- * Exit codes: 0 completed/no-op, 1 waiting for the next user confirmation or
- * host answer, 2 invalid configuration or unexpected failure.
+ * Optional: GRAPH_M7_REPORT, GRAPH_M7_MODEL_CONTEXT_WINDOW,
+ * GRAPH_M7_MODEL_MAX_TOKENS, GRAPH_M7_MODEL_{INPUT,OUTPUT,CACHE_READ,CACHE_WRITE}_COST,
+ * GRAPH_M7_RETRIEVAL_DOMAINS, GRAPH_M7_MCP_DOMAINS, GRAPH_M7_ACKNOWLEDGE_OVERRUN.
+ * Native unknown provider usage must be reconciled with actual counts through
+ * graph_control; there is no proof-only unknown-usage acknowledgement flag.
+ * Exit: 0 completed/no-op, 1 waiting for input or main intervention, 2 failure.
  */
-const request = '在现有本机 B站 Web 应用中修复导出失败反馈，并重跑既有验收检查：导出接口返回非 2xx（含 HTTP 500 与网络拒绝）时，页面调用的 API 必须保留并传播服务端错误原因，导出区域显示失败原因并允许重试，不得显示空成功汇总；补充真实页面的 HTTP 500 与网络拒绝端到端回归 test/e2e/bilibili-web-export-error.e2e.test.js；重新绑定登录确认、采集进度与失败原因、收藏与笔记浏览、导出 Markdown 的测试证据。模型分配：work 使用 deepseek/deepseek-v4-flash，review 使用 deepseek/deepseek-v4-pro。';
+const requirement = '在现有本机 B站 Web 应用中修复导出失败反馈，并重跑既有验收检查：导出接口返回非 2xx（含 HTTP 500 与网络拒绝）时，页面调用的 API 必须保留并传播服务端错误原因，导出区域显示失败原因并允许重试，不得显示空成功汇总；补充真实页面的 HTTP 500 与网络拒绝端到端回归 test/e2e/bilibili-web-export-error.e2e.test.js；重新绑定登录确认、采集进度与失败原因、收藏与笔记浏览、导出 Markdown 的测试证据。';
 const targetBranch = 'main';
 const projectId = 'media-bookmarks';
 
@@ -70,9 +41,11 @@ type View = Awaited<ReturnType<Task['view']>>;
 type Question = View['questions'][number];
 
 interface RunState {
-  version: 1;
+  version: 2;
   request: string;
+  conversationId: string;
   taskId: string;
+  graphId: string | null;
   requirementVersion: number;
   acceptedProposalVersion: number | null;
   targetBranch: string | null;
@@ -132,7 +105,7 @@ function model(id: string, baseUrl: string, contextWindow: number, maxTokens: nu
 async function loadState(path: string): Promise<RunState | undefined> {
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as RunState;
-    if (parsed.version !== 1 || !parsed.taskId) throw new Error(`Unsupported run state in ${path}`);
+    if (parsed.version !== 2 || !parsed.taskId || !parsed.conversationId) throw new Error(`Unsupported legacy run state in ${path}; use a fresh GRAPH_M7_WORKDIR for the native graph kernel`);
     return parsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
@@ -149,182 +122,77 @@ function questionData(question: Question) {
   return question.data as { activationId?: string; commitSha?: string | null; prompt?: string };
 }
 
-async function runSession(runtime: Runtime, task: Task, state: RunState, paths: HarnessPaths) {
-  const evidence = (view: View) => view.proposal?.acceptance.map(item => {
-    const matched = view.evidence.find(row => row.acceptanceId === item.id && row.valid);
-    return {
-      id: item.id, description: item.description, checkNode: item.checkNode, valid: Boolean(matched),
-      ...(matched ? { summary: matched.summary, commitSha: matched.commitSha ?? null } : {}),
-    };
-  }) ?? [];
-  const finish = async (view: View, detail: { step: string; proposal?: Proposal | null; note?: string; resume?: string }, code: number) => {
-    const summary = {
-      step: detail.step,
-      taskId: view.id,
-      workDir: paths.workDir,
-      runFile: paths.runFile,
-      reportPath: paths.reportPath,
-      taskCount: (await runtime.user.list()).length,
-      phase: view.phase,
-      requirementVersion: view.requirementVersion,
-      proposalVersion: view.proposalVersion,
-      acceptedProposalVersion: view.acceptedProposalVersion,
-      targetBranch: view.targetBranch,
-      integrationSha: view.integrationSha,
-      acceptance: evidence(view),
-      proposal: detail.proposal ?? null,
-      questions: view.questions,
-      answeredChecks: state.answeredChecks,
-      invocationCount: view.invocations.length,
-      cost: view.cost,
-      costSource: paths.rates ? 'configured-rates' : 'model-rates-not-configured',
-      costRates: paths.rates ?? null,
-      network: paths.network ?? null,
-      ...(detail.note ? { note: detail.note } : {}),
-      ...(detail.resume ? { resume: detail.resume } : {}),
-    };
-    await writeFile(paths.reportPath, `${JSON.stringify({ summary, view }, null, 2)}\n`);
-    console.log(JSON.stringify(summary, null, 2));
-    if (!paths.rates && view.cost && typeof view.cost === 'object' && !Array.isArray(view.cost) && (view.cost as { unknown?: boolean }).unknown) {
-      console.log('Cost: unknown. Set GRAPH_M7_MODEL_INPUT_COST/GRAPH_M7_MODEL_OUTPUT_COST (plus cache rates) to estimate it.');
-    } else if (paths.rates && view.cost && typeof view.cost === 'object' && !Array.isArray(view.cost) && (view.cost as { unknown?: boolean }).unknown) {
-      console.log('Cost: unknown for at least one invocation; some provider responses lacked usage.');
+async function runSession(runtime: Runtime, state: RunState, paths: HarnessPaths) {
+  const owner = runtime.supervisor(state.taskId);
+  const anchor = runtime.user.task(state.taskId);
+  const acknowledgeOverruns = async () => {
+    if (process.env.GRAPH_M7_ACKNOWLEDGE_OVERRUN !== '1') return;
+    for (const question of (await anchor.view()).questions.filter(item => item.status === 'open' && item.kind === 'reservation_exceeded')) {
+      await anchor.answer(question.id, { type: 'acknowledge' }, `m7-overrun-${question.id}`);
     }
+  };
+  await acknowledgeOverruns();
+  const finish = async (step: string, code: number, note?: string) => {
+    const conversation = await runtime.conversations.view(state.conversationId);
+    const view = await runtime.user.task(state.graphId ?? state.taskId).view();
+    const assessment = state.graphId ? await owner.graphInspect({ graphId: state.graphId, query: 'acceptance' }) as GraphAcceptance : null;
+    const summary = {
+      step, conversationId: state.conversationId, mainTaskId: state.taskId, taskId: state.graphId ?? state.taskId, graphId: state.graphId,
+      workDir: paths.workDir, runFile: paths.runFile, reportPath: paths.reportPath,
+      taskCount: conversation.tasks.length, phase: view.phase, requirementVersion: state.requirementVersion,
+      proposalVersion: state.acceptedProposalVersion ?? conversation.proposal?.version ?? 0,
+      acceptedProposalVersion: state.acceptedProposalVersion, targetBranch: state.targetBranch,
+      integrationSha: view.integrationSha, acceptance: assessment?.items ?? [], proposal: conversation.proposal?.spec ?? null,
+      questions: view.questions, mainQuestions: (await anchor.view()).questions, answeredChecks: state.answeredChecks,
+      invocationCount: view.invocations.length, cost: conversation.cost,
+      costSource: paths.rates ? 'configured-rates-with-unpriced-native-calls' : 'model-rates-not-configured',
+      costRates: paths.rates ?? null, network: paths.network ?? null,
+      ...(note ? { note } : {}),
+      resume: step === 'awaiting-confirmation' ? `GRAPH_M7_ACCEPT=${conversation.proposal?.version} npm run accept:m7`
+        : step === 'awaiting-human-check' ? view.questions.filter(q => q.status === 'open' && q.kind === 'human_check').map(q => `GRAPH_M7_LOGIN_CONFIRMED=${q.id}`).join(' | ') : 'npm run accept:m7',
+    };
+    await writeFile(paths.reportPath, `${JSON.stringify({ summary, view, conversation, assessment }, null, 2)}\n`);
+    console.log(JSON.stringify(summary, null, 2));
     return code;
   };
-
-  let view = await task.view();
-  const reconcileUnknownUsage = async (current: View) => {
-    if (process.env.GRAPH_M7_ACKNOWLEDGE_UNKNOWN_USAGE !== '1') return current;
-    const unknown = current.questions.filter(question => question.status === 'open' && question.kind === 'unknown_usage');
-    if (!unknown.length) return current;
-    for (const question of unknown) {
-      console.log(`Reconciling unaccounted usage on ${question.nodeId} (${question.id}); the invocation stays unknown.`);
-      await task.answer(question.id, {
-        type: 'reconcile_usage',
-        proof: 'Provider exposes no per-request usage for the failed call; host reviewed the record and accepts the unaccounted invocation without recording it as zero.',
-      }, `m7-unknown-usage-${question.id}`);
-    }
-    return task.view();
-  };
-  const acknowledgeOverruns = async (current: View) => {
-    if (process.env.GRAPH_M7_ACKNOWLEDGE_OVERRUN !== '1') return current;
-    const overruns = current.questions.filter(question => question.status === 'open' && question.kind === 'reservation_exceeded');
-    if (!overruns.length) return current;
-    for (const question of overruns) {
-      console.log(`Acknowledging recorded overrun on ${question.nodeId} (${question.id}).`);
-      await task.answer(question.id, { type: 'acknowledge' }, `m7-overrun-${question.id}`);
-    }
-    return task.view();
-  };
-  view = await reconcileUnknownUsage(await acknowledgeOverruns(view));
-  if (view.phase === 'completed') return finish(view, { step: 'completed', resume: 'This run is already complete; nothing was rebuilt or reconfirmed.' }, 0);
-
-  if (view.acceptedProposalVersion !== null && state.acceptedProposalVersion === null) {
-    // A previous process may have crashed after confirmation but before saving.
-    state.acceptedProposalVersion = view.acceptedProposalVersion;
-    state.targetBranch = view.targetBranch;
-    state.requirementVersion = view.requirementVersion;
+  // Confirmation is authoritative in SQLite; recover a receipt saved before run.json.
+  let conversation = await runtime.conversations.view(state.conversationId);
+  const accepted = conversation.accepted;
+  if (accepted.length > 1) return finish('state-mismatch', 1, 'This harness owns one confirmed graph; inspect additional confirmations separately.');
+  if (accepted.length) {
+    const receipt = accepted[0]!;
+    if (state.graphId && state.graphId !== receipt.taskId) return finish('state-mismatch', 1, 'run.json and the confirmed graph disagree.');
+    state.graphId = receipt.taskId; state.acceptedProposalVersion = receipt.proposalVersion; state.targetBranch = receipt.targetBranch;
     await saveState(paths.runFile, state);
   }
-  if ((view.acceptedProposalVersion ?? null) !== (state.acceptedProposalVersion ?? null)) {
-    return finish(view, { step: 'state-mismatch', note: 'The task and run.json disagree about the confirmed proposal; start a fresh GRAPH_M7_WORKDIR.' }, 1);
-  }
-  if (view.requirementVersion !== state.requirementVersion) {
-    return finish(view, { step: 'requirement-changed', note: 'The requirement changed after confirmation; a new proposal and confirmation are required.' }, 1);
-  }
-
-  if (view.proposal === null) {
-    await runtime.host.drive();
-    view = await task.view();
-  }
-  if (view.proposal === null) {
-    return finish(view, { step: 'awaiting-proposal', note: 'The master did not submit a proposal; inspect the open questions.', resume: `npm run accept:m7` }, 1);
-  }
-
-  if (view.acceptedProposalVersion === null) {
-    console.log(`Proposal version ${view.proposalVersion} (requirement version ${view.requirementVersion}) needs explicit confirmation.`);
-    console.log(`Review it, then rerun with: GRAPH_M7_ACCEPT=${view.proposalVersion}`);
-    if (process.env.GRAPH_M7_ACCEPT?.trim() !== String(view.proposalVersion)) {
-      return finish(view, {
-        step: 'awaiting-confirmation', proposal: view.proposal,
-        note: 'GRAPH_M7_ACCEPT must name this exact proposal version; a different version is never confirmed.',
-        resume: `GRAPH_M7_ACCEPT=${view.proposalVersion} npm run accept:m7`,
-      }, 1);
-    }
-    await task.accept({ proposalVersion: view.proposalVersion, targetBranch, requestId: `m7-accept-${view.proposalVersion}` });
-    state.acceptedProposalVersion = view.proposalVersion;
-    state.targetBranch = targetBranch;
-    state.requirementVersion = view.requirementVersion;
+  if (state.graphId && (await runtime.user.task(state.graphId).view()).phase === 'completed') return finish('completed', 0);
+  if (!state.graphId) {
+    if (!conversation.proposal) { await runtime.host.drive(); conversation = await runtime.conversations.view(state.conversationId); }
+    const draft = conversation.proposal;
+    if (!draft) return finish('awaiting-proposal', 1, 'Main has not submitted a draft.');
+    if (!draft.spec.definition) return finish('invalid-draft', 1, 'M7 requires a native schemaVersion:2 definition.');
+    if (process.env.GRAPH_M7_ACCEPT?.trim() !== String(draft.version)) return finish('awaiting-confirmation', 1, 'Only the exact current proposal version can be confirmed.');
+    const receipt = await runtime.conversations.confirm(state.conversationId, { proposalVersion: draft.version, targetBranch, requestId: `m7-accept-${draft.version}` });
+    state.graphId = receipt.taskId; state.acceptedProposalVersion = draft.version; state.targetBranch = targetBranch; state.requirementVersion = draft.requirementVersion;
     await saveState(paths.runFile, state);
-    console.log(`Confirmed proposal version ${view.proposalVersion} on target branch ${targetBranch}.`);
   }
-
+  // Main receives graph_ready and starts named inputs; the harness never guesses roots.
   await runtime.host.drive();
-  view = await task.view();
-
-  for (let round = 0; round < 20; round++) {
-    const open = view.questions.filter(question => question.status === 'open');
-    if (!open.length) break;
-    const human = open.filter(question => question.kind === 'human_check');
-    const others = open.filter(question => question.kind !== 'human_check');
-    const activations = new Map(view.nodes.map(node => [node.id, node.activationId]));
-    const superseded = human.filter(question => questionData(question).activationId !== activations.get(question.nodeId));
-    for (const question of superseded) {
-      // A check from an older activation cannot satisfy the current one; resolving
-      // it is cleanup, not a confirmation of the current target.
-      console.log(`Check ${question.nodeId} (${question.id}) was superseded by a later activation; clearing the stale record.`);
-      await task.answer(question.id, { type: 'acknowledge' }, `m7-supersede-${question.id}`);
-      state.answeredChecks.push({ questionId: question.id, nodeId: question.nodeId, activationId: questionData(question).activationId ?? null, commitSha: questionData(question).commitSha ?? null });
-    }
-    if (superseded.length) {
-      await saveState(paths.runFile, state);
-      await runtime.host.drive();
-      view = await task.view();
-      continue;
-    }
-    if (others.length) {
-      const answered = await reconcileUnknownUsage(await acknowledgeOverruns(view));
-      if (answered !== view) {
-        view = answered;
-        await runtime.host.drive();
-        view = await task.view();
-        continue;
-      }
-      return finish(view, { step: 'questions', note: 'Non-human questions need an explicit host or user answer before this harness can continue.' }, 1);
-    }
-    const confirmed = process.env.GRAPH_M7_LOGIN_CONFIRMED?.trim();
-    const target = human.find(question => question.id === confirmed);
-    if (!target) {
-      for (const question of human) {
-        const data = questionData(question);
-        console.log(`Check ${question.nodeId} needs the user: ${data.prompt ?? 'human check required'}`);
-        console.log(`After performing it, rerun with: GRAPH_M7_LOGIN_CONFIRMED=${question.id}`);
-      }
-      return finish(view, {
-        step: 'awaiting-human-check',
-        note: 'Only the named open question is answered; an old id is never reused for a new check.',
-        resume: human.map(question => `GRAPH_M7_LOGIN_CONFIRMED=${question.id}`).join(' | '),
-      }, 1);
-    }
-    const data = questionData(target);
-    if ((data.commitSha ?? null) !== (view.integrationSha ?? null)) {
-      console.log(`Check ${target.id} was raised for ${data.commitSha ?? 'no commit'}, but the integration commit is now ${view.integrationSha ?? 'none'}.`);
-      console.log('Confirming it only re-runs the check; a fresh question will be printed for the current target.');
-    }
-    console.log(`Answering check ${target.id} on ${target.nodeId}.`);
-    await task.answer(target.id, { type: 'acknowledge' }, `m7-check-${target.id}`);
-    state.answeredChecks.push({ questionId: target.id, nodeId: target.nodeId, activationId: data.activationId ?? null, commitSha: data.commitSha ?? null });
+  const task = runtime.user.task(state.graphId);
+  let view = await task.view();
+  if (view.phase === 'completed') return finish('result', 0);
+  const human = view.questions.filter(q => q.status === 'open' && q.kind === 'human_check');
+  const selected = human.find(q => q.id === process.env.GRAPH_M7_LOGIN_CONFIRMED?.trim());
+  if (selected && (questionData(selected).commitSha ?? null) === (view.integrationSha ?? null)) {
+    await task.answer(selected.id, { type: 'acknowledge' }, `m7-check-${selected.id}`);
+    state.answeredChecks.push({ questionId: selected.id, nodeId: selected.nodeId, activationId: null, commitSha: questionData(selected).commitSha ?? null });
     await saveState(paths.runFile, state);
-    await runtime.host.drive();
-    view = await task.view();
+    await runtime.host.drive(); view = await task.view();
+    if (view.phase === 'completed') return finish('result', 0);
   }
-
-  const open = view.questions.filter(question => question.status === 'open');
-  return finish(view, {
-    step: 'result',
-    ...(open.length ? { note: 'Questions are still open after the confirmation budget.' } : {}),
-  }, view.phase === 'completed' && !open.length ? 0 : 1);
+  if (view.questions.some(q => q.status === 'open' && q.kind === 'human_check')) return finish('awaiting-human-check', 1, 'Confirm only the current question for the current commit.');
+  if (view.questions.some(q => q.status === 'open')) return finish('questions', 1, 'Main must resolve runtime issues; unknown usage requires actual call usage, never a proof-only waiver.');
+  return finish('awaiting-work', 1, 'The graph is idle or blocked; main must explicitly deliver input or request completion.');
 }
 
 async function main() {
@@ -332,6 +200,7 @@ async function main() {
   const apiKey = required('GRAPH_M7_MODEL_API_KEY');
   const implementationId = required('GRAPH_M7_MODEL_ID');
   const reviewId = required('GRAPH_M7_REVIEW_MODEL_ID');
+  const request = `${requirement}模型分配：work 使用 ${implementationId}，review 使用 ${reviewId}。`;
   if (reviewId === implementationId) throw new Error('GRAPH_M7_REVIEW_MODEL_ID must differ from GRAPH_M7_MODEL_ID so the review is independent');
   const rates = costRates();
   const contextWindow = Number(process.env.GRAPH_M7_MODEL_CONTEXT_WINDOW ?? 200_000);
@@ -344,18 +213,6 @@ async function main() {
   const network = {
     ...(retrievalDomains.length ? { retrievalDomains } : {}),
     ...(mcpDomains.length ? { mcpDomains } : {}),
-  };
-  // Program checks may resolve dependencies and run a local browser test from
-  // host-selected paths; none of this comes from a worker or the proposal.
-  const programReadPaths = (process.env.GRAPH_M7_PROGRAM_READ_PATHS ?? '').split(':').map(value => value.trim()).filter(Boolean);
-  const programNodeModules = process.env.GRAPH_M7_PROGRAM_NODE_MODULES?.trim();
-  const programEnv = process.env.GRAPH_M7_PROGRAM_ENV?.trim()
-    ? JSON.parse(process.env.GRAPH_M7_PROGRAM_ENV) as Record<string, string>
-    : undefined;
-  const program = {
-    ...(programReadPaths.length ? { readPaths: programReadPaths } : {}),
-    ...(programNodeModules ? { nodeModulesPath: programNodeModules } : {}),
-    ...(programEnv ? { env: programEnv } : {}),
   };
   const paths: HarnessPaths = {
     workDir,
@@ -388,7 +245,6 @@ async function main() {
     models: { entries, apiKey, modelRuntime },
     master: { action: 'master', definitionVersion: 'master@1', model: implementationId },
     ...(retrievalDomains.length || mcpDomains.length ? { network } : {}),
-    ...(Object.keys(program).length ? { program } : {}),
   });
   try {
     runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
@@ -396,15 +252,12 @@ async function main() {
     runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
     const previous = await loadState(paths.runFile);
     if (previous && previous.request !== request) throw new Error(`run.json in ${workDir} belongs to a different requirement; use a fresh GRAPH_M7_WORKDIR`);
-    const { taskId } = await runtime.user.begin({ projectId, request, requestId: 'm7-begin' });
-    if (previous && previous.taskId !== taskId) throw new Error(`run.json references task ${previous.taskId} but this state directory belongs to ${taskId}; use a fresh GRAPH_M7_WORKDIR`);
-    const state: RunState = previous ?? {
-      version: 1, request, taskId, requirementVersion: 1,
-      acceptedProposalVersion: null, targetBranch: null, answeredChecks: [],
-    };
-    console.log(`Task: ${taskId}${previous ? ' (resumed)' : ''}`);
+    const { conversationId, taskId } = await runtime.conversations.create({ projectId, text: request, requestId: 'm7-conversation' });
+    if (previous && (previous.taskId !== taskId || previous.conversationId !== conversationId)) throw new Error('run.json references another conversation; use a fresh GRAPH_M7_WORKDIR');
+    const state: RunState = previous ?? { version: 2, request, conversationId, taskId, graphId: null,
+      requirementVersion: 1, acceptedProposalVersion: null, targetBranch: null, answeredChecks: [] };
     if (!previous) await saveState(paths.runFile, state);
-    return await runSession(runtime, runtime.user.task(taskId), state, paths);
+    return await runSession(runtime, state, paths);
   } finally {
     await runtime.close();
   }
