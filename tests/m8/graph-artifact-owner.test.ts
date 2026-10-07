@@ -90,6 +90,9 @@ test.each(['confirmed', 'managed'] as const)('main revises %s graph artifacts wi
       await expect(artifacts.publish({ taskId: graphId, workspace: project, namespace: 'plans', name: 'plan', content: 'Forged producer',
         producer: { ...second.producer!, ...identity }, requestId: `forged-${Object.keys(identity)[0]}` })).rejects.toMatchObject({ code: 'permission' });
     }
+    expect(() => artifacts.retire(created.taskId, first.artifactId, 2, 'Unauthorized withdrawal', 'missing-actor')).toThrow('Artifact retirement requires');
+    expect(() => artifacts.retire(created.taskId, first.artifactId, 2, 'Forged withdrawal', 'forged-retire',
+      { ...second.producer!, nodeId: 'other' })).toThrow('Artifact publisher does not match');
     await main.graphSend({ graphId, nodeId: 'author', input: 'job', value: {} }); await runtime.host.drive();
     expect(runtime.artifacts.get(graphId, first.artifactId)).toMatchObject({ version: 3, producer: { nodeId: 'author' } });
     await main.graphSend({ graphId, nodeId: 'other', input: 'job', value: {} }); await runtime.host.drive();
@@ -99,6 +102,17 @@ test.each(['confirmed', 'managed'] as const)('main revises %s graph artifacts wi
     const attempted = JSON.stringify(workerProvider.requests.at(-1));
     expect(attempted).toContain('Only the original publisher');
     expect(attempted).toContain('Only main can select an artifact graph');
+    const retire: ResponsePlan = { tools: [{ id: 'retire', name: 'artifact_retire', arguments: JSON.stringify({
+      artifactId: first.artifactId, version: 2, reason: 'Correction superseded by author', requestId: 'retire-v2',
+    }) }] };
+    mainPlans.push(retire, retire, { text: 'Superseded version withdrawn.' });
+    await runtime.conversations.chat(created.conversationId, { text: 'Withdraw the superseded correction', requestId: 'withdraw' });
+    await runtime.host.runReady();
+    expect(runtime.artifacts.get(graphId, first.artifactId, 2).state).toBe('retired');
+    expect((await runtime.artifacts.read(graphId, first.artifactId, 2)).text).toBe('Main correction');
+    expect(runtime.artifacts.get(graphId, first.artifactId)).toMatchObject({ version: 3, state: 'published' });
+    const withdrawals = disk.db.prepare("SELECT task_id FROM events WHERE type='artifact.retired'").all();
+    expect(withdrawals).toEqual([{ task_id: graphId }]);
   } finally {
     await runtime?.close(); disk?.close(); await workerProvider.close(); await mainProvider.close(); await suggestionProvider.close();
     await rm(root, { recursive: true, force: true });

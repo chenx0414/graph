@@ -158,7 +158,7 @@ function declarations(features: AgentToolFeatures) {
     artifact_retire: {
       name: 'artifact_retire',
       label: 'Retire shared artifact version',
-      description: 'Retire one published artifact version without deleting its immutable bytes; only when a version is superseded or withdrawn.',
+      description: 'Retire one superseded or withdrawn artifact version in an owned graph or main task, using its exact artifactId and version. Immutable bytes remain readable; ownership is checked by the host.',
       parameters: Type.Object({ artifactId: Type.String(), version: Type.Number(), reason: Type.String(), requestId: Type.String() }),
       available: Boolean(features.artifacts?.canPromote),
       externallyGated: false,

@@ -212,3 +212,5 @@ main 所属会话的任务卡片包含原生 agent 节点，不再依赖旧 node
 
 
 main 使用 artifact_publish 的可选 graphId，在自己拥有的原生 graph 中发布或修改产物；修改时保持 namespace/name，并用 expectedVersion 指定已读的版本。省略 graphId 仍发布到 main 自己的任务。内部 agent 的工具不声明该参数，指定它会被拒绝。权限由实际 main operation、节点、实例、activation 和 graph 所有权共同核对；确认产生的 graph 与直接创建的 graph 使用同样的规则。main 的新版记录 main 为修改者，原作者仍以最早发布版本确定；旧版本字节和引用不会改变。
+
+main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被替代或取消的精确版本；不需要再指定 graphId。宿主根据已发布产物的实际 graph 归属和本次 main 执行身份校验所有权，外部会话的读取权限不等于修改权限。撤回事件归属该 graph；重复调用不重复写事件，旧版本字节仍可按精确引用读取，其他版本不受影响。

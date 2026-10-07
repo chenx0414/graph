@@ -400,7 +400,8 @@ export function createPiAdapter(options: {
               producer: { nodeId: operation.nodeId, instanceId: operation.instanceId!, operationId: operation.id, activationId: operation.activationId },
             });
           },
-          retire: (artifactId: string, version: number, reason: string, requestId: string) => options.artifacts!.retire(operation.taskId, artifactId, version, reason, requestId),
+          retire: (artifactId: string, version: number, reason: string, requestId: string) => options.artifacts!.retire(operation.taskId, artifactId, version, reason, requestId,
+            { nodeId: operation.nodeId, instanceId: operation.instanceId!, operationId: operation.id, activationId: operation.activationId }),
           promote: (input: Parameters<ArtifactWorkspace['promote']>[0]) => options.artifacts!.promote({
             ...input,
             taskId: operation.taskId,

@@ -684,15 +684,17 @@ export class ArtifactWorkspace {
 
   retire(taskId: string, artifactId: string, version: number, reason: string, requestId: string, actor?: ArtifactProducer | 'main') {
     const record = this.get(taskId, artifactId, version);
+    const ownerTaskId = record.scope === 'task' ? record.ownerId : taskId;
     const v2 = this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='kernel_revisions'").get()
-      && this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId);
+      && this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(ownerTaskId);
+    const targetTaskId = v2 ? ownerTaskId : taskId;
     if (v2) {
       if (!actor) throw new RuntimeError('permission', 'Artifact retirement requires the publisher or main owner');
-      const publisher = actor === 'main' ? 'main' : this.graphPublisher(taskId, actor);
-      this.assertGraphAuthor(taskId, record.namespace, record.name, publisher);
+      const publisher = actor === 'main' ? 'main' : this.graphPublisher(targetTaskId, actor);
+      this.assertGraphAuthor(targetTaskId, record.namespace, record.name, publisher);
     }
     if (record.state === 'retired') return record;
-    const commandScope = `artifact-retire:${taskId}`;
+    const commandScope = `artifact-retire:${targetTaskId}`;
     const commandPayload = { artifactId, version, reason: requiredText(reason, 'reason', 1_000) };
     const replay = this.replay<ArtifactRecord>(commandScope, requiredText(requestId, 'requestId', 200), commandPayload);
     if (replay) return replay;
@@ -700,10 +702,10 @@ export class ArtifactWorkspace {
     const retired = this.store.command<ArtifactRecord>(commandScope, requestId, commandPayload, () => {
       this.store.db.prepare('UPDATE artifacts SET state=\'retired\',retired_at=? WHERE artifact_id=? AND version=?')
         .run(retiredAt, artifactId, version);
-      this.artifactEvent(taskId, record, 'artifact.retired', commandPayload);
+      this.artifactEvent(targetTaskId, record, 'artifact.retired', commandPayload);
       return { ...record, state: 'retired' as const, retiredAt };
     });
-    this.store.event(taskId, 'artifact.retired', commandPayload);
+    this.store.event(targetTaskId, 'artifact.retired', commandPayload);
     return retired;
   }
 
